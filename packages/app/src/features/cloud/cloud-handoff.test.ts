@@ -13,7 +13,9 @@ import {
   publishRan,
   requestComposerPrompt,
   securityFixPrompt,
+  supabaseLogsPrompt,
   uncommittedNote,
+  vercelLogsPrompt,
   type ComposerPrompt,
 } from "./cloud-handoff"
 
@@ -290,5 +292,31 @@ describe("securityFixPrompt", () => {
     expect(prompt).toContain("create_migration")
     expect(prompt).toContain("security_check again")
     expect(prompt).toContain("never print its value")
+  })
+})
+
+describe("log diagnosis prompts", () => {
+  test("point the agent at the logs the user read, by the arguments its log actions take", () => {
+    const vercel = vercelLogsPrompt({ deploymentId: "dpl_live", source: "runtime", label: "serving production, ready" })
+    expect(vercel).toContain("runtime logs of the Vercel deployment dpl_live (serving production, ready)")
+    expect(vercel).toContain("vector_cloud logs (deploymentId dpl_live, source runtime)")
+    expect(vercel).toContain("Do not publish to production unless I ask")
+    expect(vercel).toContain("never ask me to paste its value")
+
+    const supabase = supabaseLogsPrompt({
+      project: "shop-db",
+      service: "postgres",
+      label: "Postgres",
+      minutes: 360,
+      search: "permission denied",
+    })
+    expect(supabase).toContain(
+      'Postgres logs of the Supabase project shop-db from the last 360 minutes, filtered to "permission denied"',
+    )
+    expect(supabase).toContain('vector_cloud supabase_logs (service postgres, minutes 360, search "permission denied")')
+    expect(supabase).toContain("create_migration")
+    expect(supabaseLogsPrompt({ project: "shop-db", service: "api", label: "API", minutes: 60 })).not.toContain(
+      "search",
+    )
   })
 })

@@ -1439,6 +1439,7 @@ export function CloudConsole(props: {
                   projectPath={props.projectPath}
                   notice={setNotice}
                   onOpenConnections={() => setSection("connections")}
+                  onDiagnose={props.onRepair}
                 />
               </Show>
             </Show>
@@ -1824,7 +1825,7 @@ export function CloudConsole(props: {
                   <p>Recent logs from the API gateway, Postgres, Auth, Storage and Edge Functions.</p>
                 </div>
               </div>
-              <SupabaseLogs {...supabasePanel} icon={sectionIcon("logs")} />
+              <SupabaseLogs {...supabasePanel} icon={sectionIcon("logs")} onDiagnose={props.onRepair} />
             </Show>
 
             <Show when={section() === "security"}>

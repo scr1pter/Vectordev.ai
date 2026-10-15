@@ -1,5 +1,5 @@
 import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js"
-import { securityFixPrompt } from "../cloud-handoff"
+import { securityFixPrompt, supabaseLogsPrompt } from "../cloud-handoff"
 import type { LogService, SecurityReport } from "./supabase-api"
 import { failed, formatWhen, NotLinked, PanelHead, type SupabasePanelProps } from "./supabase-ui"
 import "./supabase.css"
@@ -23,29 +23,44 @@ const WINDOWS = [
   { minutes: 1440, label: "24 hours" },
 ]
 
-export function SupabaseLogs(props: SupabasePanelProps & { icon: JSX.Element }) {
+export function SupabaseLogs(props: SupabasePanelProps & { icon: JSX.Element; onDiagnose?: (prompt: string) => void }) {
   const [service, setService] = createSignal<LogService>("api")
   const [minutes, setMinutes] = createSignal(60)
   const [search, setSearch] = createSignal("")
   const [busy, setBusy] = createSignal(false)
   const [entries, setEntries] = createSignal<{ at: string; message: string }[]>()
   const [truncated, setTruncated] = createSignal(false)
+  // The query the shown lines answer, which the controls can move away from
+  // before the agent is started on them.
+  const [shown, setShown] = createSignal<{ service: LogService; minutes: number; search?: string }>()
 
   const load = async () => {
     if (!props.linked || busy()) return
     setBusy(true)
     try {
-      const report = await props.client.logs({
-        service: service(),
-        minutes: minutes(),
-        search: search().trim() || undefined,
-      })
+      const query = { service: service(), minutes: minutes(), search: search().trim() || undefined }
+      const report = await props.client.logs(query)
       if (failed(props.notice, report)) return
       setEntries(report.entries ?? [])
       setTruncated(report.truncated === true)
+      setShown(query)
     } finally {
       setBusy(false)
     }
+  }
+
+  const diagnose = () => {
+    const query = shown()
+    if (!query) return
+    props.onDiagnose?.(
+      supabaseLogsPrompt({
+        project: props.projectName ?? "this project",
+        service: query.service,
+        label: SERVICES.find((item) => item.id === query.service)?.label ?? query.service,
+        minutes: query.minutes,
+        search: query.search,
+      }),
+    )
   }
 
   createEffect(
@@ -112,6 +127,13 @@ export function SupabaseLogs(props: SupabasePanelProps & { icon: JSX.Element }) 
                 <p class="cloud-muted mt-2 text-[12px]">
                   Older lines in this window are not shown; narrow it or filter.
                 </p>
+              </Show>
+              <Show when={props.onDiagnose && lines().length}>
+                <div class="sb-actions mt-3">
+                  <button class="cloud-button" type="button" onClick={diagnose}>
+                    Diagnose with agent
+                  </button>
+                </div>
               </Show>
             </>
           )}
