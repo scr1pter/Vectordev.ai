@@ -2088,6 +2088,12 @@ const layer = Layer.effect(
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
           const fetchFn = customFetch ?? fetch
           const opts = { ...init }
+          const body = ProviderTransform.reasoningContextBody(
+            model,
+            runtimeFlags.experimentalReasoningContext,
+            init?.body,
+          )
+          if (body !== undefined) opts.body = body
           if (consent) {
             requirePluginDestination(consent, input instanceof Request ? input.url : String(input))
             const current = await runtimeBridge.promise(auth.get(model.providerID).pipe(Effect.orDie))

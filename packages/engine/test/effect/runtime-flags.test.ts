@@ -57,6 +57,18 @@ describe("RuntimeFlags", () => {
     }),
   )
 
+  it.effect("reasoning context is unset unless a documented value is given", () =>
+    Effect.gen(function* () {
+      expect((yield* readFlags.pipe(Effect.provide(fromConfig({})))).experimentalReasoningContext).toBeUndefined()
+      for (const value of ["auto", "current_turn", "all_turns"]) {
+        const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_EXPERIMENTAL_REASONING_CONTEXT: value })))
+        expect(flags.experimentalReasoningContext).toBe(value)
+      }
+      const other = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_EXPERIMENTAL_REASONING_CONTEXT: "every" })))
+      expect(other.experimentalReasoningContext).toBeUndefined()
+    }),
+  )
+
   it.effect("background subagents are on by default and have a variable to turn them off", () =>
     Effect.gen(function* () {
       const read = (input: Record<string, unknown>) =>

@@ -54,6 +54,11 @@ const openAIConfig = (model: ModelCatalog.Provider["models"][string], baseURL: s
 }
 
 const it = testEffect(AppNodeBuilder.build(LayerNode.group([LLM.node, Provider.node])))
+const itReasoningContext = testEffect(
+  AppNodeBuilder.build(LayerNode.group([LLM.node, Provider.node]), [
+    [RuntimeFlags.node, RuntimeFlags.layer({ experimentalReasoningContext: "all_turns" })],
+  ]),
+)
 
 // LLM.stream returns a Stream, not an Effect, so we can't use the serviceUse proxy.
 const drain = (input: LLM.StreamInput) => LLM.Service.use((svc) => svc.stream(input).pipe(Stream.runDrain))
@@ -1043,7 +1048,7 @@ describe("session.llm.stream", () => {
           const capture = yield* Effect.promise(() => request)
           expect(capture.body.text).toMatchObject({ verbosity: verbosity ?? "low" })
           expect(capture.body.prompt_cache_key).toBe(sessionID)
-          expect(capture.body.reasoning).toMatchObject({ effort: "medium" })
+          expect(capture.body.reasoning).toEqual({ effort: "medium", summary: "auto" })
         }),
       {
         trusted: true,
@@ -1055,6 +1060,63 @@ describe("session.llm.stream", () => {
       },
     )
   }
+
+  itReasoningContext.instance(
+    "sends reasoning.context through the real SDK only when the experimental flag sets it",
+    () =>
+      Effect.gen(function* () {
+        const request = waitRequest(
+          "/responses",
+          createEventResponse([
+            {
+              type: "response.created",
+              response: { id: "resp-context", created_at: 1, model: "gpt-6.1-sol", service_tier: null },
+            },
+            {
+              type: "response.completed",
+              response: {
+                incomplete_details: null,
+                service_tier: null,
+                usage: { input_tokens: 10, output_tokens: 1 },
+              },
+            },
+          ]),
+        )
+        const resolved = yield* Provider.use.getModel(ProviderV2.ID.openai, ModelV2.ID.make("gpt-6.1-sol"))
+        const sessionID = SessionID.make("session-reasoning-context")
+        const agent = { name: "test", mode: "primary", options: {}, permission: [] } satisfies Agent.Info
+        yield* LLM.Service.use((svc) =>
+          svc
+            .stream({
+              user: {
+                id: MessageID.make("msg_reasoning-context"),
+                sessionID,
+                role: "user",
+                time: { created: 1 },
+                agent: agent.name,
+                model: { providerID: ProviderV2.ID.openai, modelID: resolved.id },
+              },
+              sessionID,
+              model: resolved,
+              agent,
+              system: ["Test"],
+              messages: [{ role: "user", content: "Hello" }],
+              tools: {},
+            })
+            .pipe(Stream.runDrain),
+        )
+        const capture = yield* Effect.promise(() => request)
+        expect(capture.body.reasoning).toEqual({ effort: "medium", summary: "auto", context: "all_turns" })
+      }),
+    {
+      trusted: true,
+      config: () =>
+        openAIConfig(
+          { ...loadFixture("openai", "gpt-5.2").model, id: "gpt-6.1-sol" },
+          `${state.server!.url.origin}/v1`,
+        ),
+    },
+  )
 
   const vivgridFixture = { providerID: "vivgrid", modelID: "gemini-3.1-pro-preview" }
   it.instance(

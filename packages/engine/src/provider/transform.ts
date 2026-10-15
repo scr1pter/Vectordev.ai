@@ -3,7 +3,12 @@ import { mergeDeep, unique } from "remeda"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import type * as Provider from "./provider"
 import type { ModelCatalog } from "@vectordevai/core/model-catalog"
+import { Option, Schema } from "effect"
+import type { RuntimeFlags } from "@/effect/runtime-flags"
 import { iife } from "@/util/iife"
+import { isRecord } from "@/util/record"
+
+const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 
 type Modality = NonNullable<ModelCatalog.Model["modalities"]>["input"][number]
 
@@ -1265,6 +1270,32 @@ export function options(input: {
   }
 
   return result
+}
+
+/**
+ * The request body with `reasoning.context` set, or undefined to send the body unchanged. The Responses API documents
+ * the field ("auto", "current_turn" or "all_turns") for the GPT-5.6 generation onward and the Codex CLI sends
+ * "all_turns" for GPT-6, but the bundled SDK has no option for it, so the opt-in
+ * VECTOR_EXPERIMENTAL_REASONING_CONTEXT flag sets it on the serialized body, HTTP and WebSocket alike, until a
+ * measured comparison shows whether it should be the default.
+ */
+export function reasoningContextBody(
+  model: Provider.Model,
+  context: RuntimeFlags.Info["experimentalReasoningContext"],
+  body: unknown,
+) {
+  if (!context || model.api.npm !== "@ai-sdk/openai" || !persistsReasoning(model.api.id)) return
+  if (typeof body !== "string") return
+  const parsed = Option.getOrUndefined(decodeJson(body))
+  // Only a reasoning request carries the object; one without it is not a request the field applies to.
+  if (!isRecord(parsed) || !isRecord(parsed.reasoning)) return
+  return JSON.stringify({ ...parsed, reasoning: { ...parsed.reasoning, context } })
+}
+
+function persistsReasoning(apiId: string) {
+  const version = /(?:^|\/)gpt-(\d+)(?:\.(\d+))?/.exec(apiId)
+  if (!version) return false
+  return Number(version[1]) > 5 || (Number(version[1]) === 5 && Number(version[2] ?? 0) >= 6)
 }
 
 export function smallOptions(model: Provider.Model) {

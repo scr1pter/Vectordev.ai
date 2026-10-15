@@ -58,6 +58,12 @@ export class Service extends ConfigService.Service<Service>()("@vector/RuntimeFl
   experimentalNativeLlm: bool("VECTOR_EXPERIMENTAL_NATIVE_LLM"),
   experimentalWebSockets: bool("VECTOR_EXPERIMENTAL_WEBSOCKETS"),
   disableWebSockets: bool("VECTOR_DISABLE_WEBSOCKETS"),
+  // Sets `reasoning.context` on OpenAI Responses requests to GPT-5.6 and later, for a measured comparison. Unset, or
+  // any value other than the three the Responses API documents, sends no such field.
+  experimentalReasoningContext: Config.string("VECTOR_EXPERIMENTAL_REASONING_CONTEXT").pipe(
+    Config.map((value) => (value === "auto" || value === "current_turn" || value === "all_turns" ? value : undefined)),
+    Config.orElse(() => Config.succeed(undefined)),
+  ),
   client: Config.string("VECTOR_CLIENT").pipe(Config.withDefault("cli")),
 }) {}
 

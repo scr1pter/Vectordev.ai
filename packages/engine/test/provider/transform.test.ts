@@ -124,6 +124,37 @@ describe("ProviderTransform.options - setCacheKey", () => {
   })
 })
 
+describe("ProviderTransform.reasoningContextBody", () => {
+  const openai = (id: string, npm = "@ai-sdk/openai") =>
+    ({ id, providerID: "openai", api: { id, url: "https://api.openai.com", npm } }) as any
+  const body = JSON.stringify({ model: "gpt-6.1-sol", input: [], reasoning: { effort: "medium", summary: "auto" } })
+
+  test("sets the documented field on a reasoning request to GPT-5.6 and later", () => {
+    for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-5.6", "gpt-5.6-codex"]) {
+      const sent = ProviderTransform.reasoningContextBody(openai(id), "all_turns", body)
+      expect(JSON.parse(sent!)).toEqual({
+        model: "gpt-6.1-sol",
+        input: [],
+        reasoning: { effort: "medium", summary: "auto", context: "all_turns" },
+      })
+    }
+  })
+
+  test("leaves the body alone without the flag, before GPT-5.6, off the Responses SDK or without reasoning", () => {
+    expect(ProviderTransform.reasoningContextBody(openai("gpt-6.1-sol"), undefined, body)).toBeUndefined()
+    expect(ProviderTransform.reasoningContextBody(openai("gpt-5.5"), "all_turns", body)).toBeUndefined()
+    expect(ProviderTransform.reasoningContextBody(openai("gpt-4o"), "all_turns", body)).toBeUndefined()
+    expect(
+      ProviderTransform.reasoningContextBody(openai("gpt-6.1-sol", "@ai-sdk/azure"), "all_turns", body),
+    ).toBeUndefined()
+    expect(
+      ProviderTransform.reasoningContextBody(openai("gpt-6.1-sol"), "all_turns", JSON.stringify({ input: [] })),
+    ).toBeUndefined()
+    expect(ProviderTransform.reasoningContextBody(openai("gpt-6.1-sol"), "all_turns", "not json")).toBeUndefined()
+    expect(ProviderTransform.reasoningContextBody(openai("gpt-6.1-sol"), "all_turns", undefined)).toBeUndefined()
+  })
+})
+
 describe("ProviderTransform.options - zai/zhipuai thinking", () => {
   const sessionID = "test-session-123"
 
