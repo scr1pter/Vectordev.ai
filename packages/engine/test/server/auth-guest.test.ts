@@ -613,6 +613,105 @@ test("guests cannot run host commands or answer permission requests", async () =
   }
 }, 30_000)
 
+test("guests cannot allow tools in their own sessions", async () => {
+  await using outside = await tmpdir()
+  const secret = path.join(outside.path, "host-secret.bin")
+  await fs.writeFile(secret, "HOST-ONLY-SECRET-VALUE")
+  await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
+  const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
+  const call = (url: URL, init: RequestInit = {}) => fetch(url, { ...init, keepalive: false })
+  const at = (route: string) => new URL(`${route}?directory=${encodeURIComponent(tmp.path)}`, listener.url)
+  const send = (route: string, method: string, headers: Record<string, string>, body: unknown) =>
+    call(at(route), { method, headers, body: JSON.stringify(body) })
+  const model = { providerID: "probe", modelID: "probe" }
+  // An allow would skip the external_directory approval that this attachment otherwise waits on.
+  const allow = [{ permission: "*", pattern: "*", action: "allow" }]
+  const ask = [{ permission: "external_directory", pattern: "*", action: "ask" }]
+  const deny = [{ permission: "bash", pattern: "*", action: "deny" }]
+  const file = { type: "file", mime: "application/octet-stream", filename: "x.bin", url: `file://${secret}` }
+  try {
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+    for (const permission of [allow, ask])
+      expect((await send("/session", "POST", guest, { permission })).status).toBe(403)
+    const created = await send("/session", "POST", guest, { permission: deny })
+    expect(created.status).toBe(200)
+    const session = (await created.json()) as { id: string }
+
+    for (const permission of [allow, ask])
+      expect((await send(`/session/${session.id}`, "PATCH", guest, { permission })).status).toBe(403)
+    for (const route of ["prompt_async", "message"])
+      expect(
+        (
+          await send(`/session/${session.id}/${route}`, "POST", guest, {
+            noReply: true,
+            model,
+            tools: { "*": true },
+            parts: [{ type: "text", text: "hi" }],
+          })
+        ).status,
+      ).toBe(403)
+    // The init command can be the owner's own template, so it is as powerful as a slash command.
+    expect(
+      (await send(`/session/${session.id}/init`, "POST", guest, { ...model, messageID: "msg_probe" })).status,
+    ).toBe(403)
+
+    // Taking tools away is still the guest's call, and the outside file still waits for the owner.
+    expect(
+      (
+        await send(`/session/${session.id}/prompt_async`, "POST", guest, {
+          noReply: true,
+          model,
+          tools: { bash: false },
+          parts: [file],
+        })
+      ).status,
+    ).toBe(204)
+    const deadline = Date.now() + 15_000
+    const pending = async () =>
+      ((await (await call(at("/permission"), { headers: owner })).json()) as Array<{ sessionID: string }>).filter(
+        (item) => item.sessionID === session.id,
+      )
+    while ((await pending()).length === 0 && Date.now() < deadline) await Bun.sleep(50)
+    expect(await pending()).toHaveLength(1)
+    const messages = await (await call(at(`/session/${session.id}/message`), { headers: guest })).text()
+    expect(messages).not.toContain(Buffer.from("HOST-ONLY-SECRET-VALUE").toString("base64"))
+
+    // The owner still sets any rules.
+    expect((await send(`/session/${session.id}`, "PATCH", owner, { permission: allow })).status).toBe(200)
+    expect((await send("/session", "POST", owner, { permission: allow })).status).toBe(200)
+  } finally {
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 30_000)
+
 test("guests cannot reach owner-only routes by spelling the path another way", async () => {
   await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
   const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID

@@ -33,6 +33,7 @@ describe("server authentication", () => {
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/api/pty")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/session/:sessionID/shell")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/session/:sessionID/command")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/session/:sessionID/init")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/permission/:requestID/reply")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/session/:sessionID/permissions/:permissionID")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/api/session/:sessionID/permission/:requestID/reply")).toBe(true)

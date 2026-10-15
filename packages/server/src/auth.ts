@@ -170,8 +170,9 @@ export function isOwnerOnlyRoute(method: string, route: string) {
   if (route === "/api/session/import" || /\/session\/[^/]+\/share(?:\/|$)/.test(route)) return true
   if (route.startsWith("/api/pty") || route.startsWith("/pty")) return true
   // The session shell route runs its command on the host with no permission prompt, and a slash
-  // command can run its template's shell snippets, so both are as powerful as a terminal.
-  if (/\/session\/[^/]+\/(?:shell|command)(?:\/|$)/.test(route)) return true
+  // command can run its template's shell snippets, so both are as powerful as a terminal. init runs the
+  // init command, which the owner's config can replace with a template of its own.
+  if (/\/session\/[^/]+\/(?:shell|command|init)(?:\/|$)/.test(route)) return true
   // Approving a permission request is how a session crosses the workspace boundary (an outside
   // directory, a guarded file), so only the owner may answer one, even for a guest's own session.
   if (/\/permission\/[^/]+\/reply(?:\/|$)/.test(route) || /\/session\/[^/]+\/permissions\//.test(route)) return true
