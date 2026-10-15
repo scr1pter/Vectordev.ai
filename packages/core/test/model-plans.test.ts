@@ -369,7 +369,8 @@ test("short model capacity is retried as temporary and never asks for a purchase
   if (!(failure instanceof LLMError)) throw failure
   expect(failure.reason).toMatchObject({
     _tag: "RateLimit",
-    message: "Vector Codium is short of model capacity for a moment. Vector will try again shortly.",
+    message:
+      "Vector Codium could not run this request: model capacity may be short for a moment, or your credits may have reached their limit. Vector will try again shortly; if it keeps failing, check your balance.",
   })
   expect(failure.reason.message).not.toContain("Buy credits")
   expect(codiumError(failure)).toBeUndefined()
@@ -397,7 +398,7 @@ test("gateway answers map to the action that fixes them", () => {
       kind: "credits",
       message: `Server message. Buy credits at ${ModelPlans.PURCHASE_URL}`,
     })
-  // Vector's provider account running short is not the person's balance.
+  // The provider refusing for want of credit: Vector's capacity, or the account key's own limit.
   expect(ModelPlans.gatewayFailure(402, body("MODEL_PLAN_CAPACITY"))).toMatchObject({ kind: "capacity" })
   expect(ModelPlans.gatewayFailure(402, "not json")).toBeUndefined()
   expect(ModelPlans.gatewayFailure(402, body("SOMETHING_NEW"))).toBeUndefined()
@@ -524,6 +525,26 @@ test("a subscriber whose monthly credits are spent is told so, even though the p
   expect(ModelPlanStatus.fromRemote({ ...spent, purchased: { bought: false, left: 0.5 } }).purchased).toEqual({
     bought: false,
   })
+})
+
+test("someone signed out learns whether Codium is on sale from the public configuration", async () => {
+  const seen: { url: string; authorization: string | null }[] = []
+  const answer =
+    (body: unknown, status = 200) =>
+    async (url: string, init: RequestInit) => {
+      seen.push({ url, authorization: new Headers(init.headers).get("authorization") })
+      return Response.json(body, { status })
+    }
+  expect(await ModelPlanStatus.salesOpen(answer({ enabled: false, plans: [] }))).toBe(false)
+  expect(await ModelPlanStatus.salesOpen(answer({ enabled: true, plans: [] }))).toBe(true)
+  // It cannot tell: neither the purchase link nor "not available yet".
+  expect(await ModelPlanStatus.salesOpen(answer({ error: "unavailable" }, 503))).toBeUndefined()
+  expect(await ModelPlanStatus.salesOpen(answer({ plans: [] }))).toBeUndefined()
+  expect(await ModelPlanStatus.salesOpen(() => Promise.reject(new Error("offline")))).toBeUndefined()
+  // The public configuration needs no sign-in, and none is sent.
+  expect(seen.every((item) => item.url === "https://vectordev.ai/api/model-plans/config" && !item.authorization)).toBe(
+    true,
+  )
 })
 
 test("status keeps no amount, even from a server that still sends one", async () => {

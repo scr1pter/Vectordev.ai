@@ -5,6 +5,7 @@ import { Option, Schema } from "effect"
 export const SITE = "https://vectordev.ai"
 export const API_URL = `${SITE}/api/model-plans`
 export const STATUS_URL = `${API_URL}/status`
+export const CONFIG_URL = `${API_URL}/config`
 export const PURCHASE_URL = `${SITE}/codium`
 export const MANAGE_URL = `${SITE}/account`
 // The stable internal ID stays "vector-plan"; people see the provider as Vector Codium.
@@ -89,6 +90,24 @@ export async function fetchStatus(
   if (Option.isNone(decoded))
     return { ...EMPTY, signedIn: true, error: "Vector could not load your Codium balance. Try again shortly." }
   return fromRemote(decoded.value)
+}
+
+/**
+ * Whether vectordev.ai sells Codium now, from its public configuration, for someone who is not signed in; undefined
+ * when it cannot tell. Nothing should point at the purchase page while it only says Codium is coming soon.
+ */
+export async function salesOpen(request: (url: string, init: RequestInit) => Promise<Response> = fetch) {
+  const response = await request(CONFIG_URL, {
+    headers: { accept: "application/json" },
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => undefined)
+  const decoded = response?.ok
+    ? Schema.decodeUnknownOption(Schema.Struct({ enabled: Schema.Boolean }))(
+        await response.json().catch(() => undefined),
+      )
+    : Option.none()
+  return Option.isSome(decoded) ? decoded.value.enabled : undefined
 }
 
 /** The shares and flags the server worked out, as Vector's screens read them. */

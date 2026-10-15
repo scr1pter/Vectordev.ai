@@ -278,7 +278,8 @@ export type Failure = {
   code: string
   /**
    * credits: buy credits or a plan. sign-in: sign in to Vector again. unavailable: choose another model.
-   * capacity: Vector's model capacity is short for a moment; the turn is retried and nothing asks for a purchase.
+   * capacity: the provider refused the request for want of credit, which is Vector's capacity or the account key's
+   * limit; the turn is retried and nothing asks for a purchase.
    */
   kind: ModelPlanStatus.Action | "capacity"
   message: string
@@ -302,7 +303,7 @@ const UNAVAILABLE: Record<string, string> = {
 
 /**
  * Account, billing and availability answers from the Codium gateway, or the same answers given locally before a
- * request. Only capacity improves on a retry; none may move the conversation to another paid provider.
+ * request. Only capacity may improve on a retry; none may move the conversation to another paid provider.
  */
 export function gatewayFailure(status: number | undefined, body: string | undefined): Failure | undefined {
   const parsed = body
@@ -315,7 +316,8 @@ export function gatewayFailure(status: number | undefined, body: string | undefi
     return {
       code,
       kind: "capacity",
-      message: "Vector Codium is short of model capacity for a moment. Vector will try again shortly.",
+      message:
+        "Vector Codium could not run this request: model capacity may be short for a moment, or your credits may have reached their limit. Vector will try again shortly; if it keeps failing, check your balance.",
     }
   if (status === 402 && parsed && CREDIT_CODES.includes(code))
     return { code, kind: "credits", message: `${parsed.error.message} Buy credits at ${PURCHASE_URL}` }

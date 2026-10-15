@@ -270,7 +270,8 @@ it.instance("short Codium capacity is retried like a busy provider, with no purc
     const parsed = ProviderError.parseAPICallError({ providerID: id, error })
     expect(parsed).toMatchObject({
       type: "api_error",
-      message: "Vector Codium is short of model capacity for a moment. Vector will try again shortly.",
+      message:
+        "Vector Codium could not run this request: model capacity may be short for a moment, or your credits may have reached their limit. Vector will try again shortly; if it keeps failing, check your balance.",
       isRetryable: true,
     })
     if (parsed.type !== "api_error") throw new Error("Expected an API error")
