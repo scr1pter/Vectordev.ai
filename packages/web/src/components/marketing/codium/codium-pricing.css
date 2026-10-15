@@ -5,7 +5,7 @@
   --cx-soft: rgb(205, 205, 205);
   --cx-quiet: rgba(255, 255, 255, 0.6);
   --cx-accent: #aa8cff;
-  /* Section and card headings, fluid from 24px on a 375px phone to 30px at 1440px. */
+  /* Section and card headings, 30px at every width as the reference measures. */
   --cx-heading-size: 30px;
   --cx-heading-line: 39.6px;
 }
@@ -241,6 +241,11 @@ html[data-codium-mode="topup"] .cx-toggle button[data-mode="topup"] svg {
   color: var(--cx-soft);
   font-size: 14px;
   line-height: 17.5px;
+  text-wrap: pretty;
+}
+
+.cx-fine a {
+  white-space: nowrap;
 }
 
 /* Usage estimates */
@@ -308,7 +313,7 @@ html[data-codium-mode="topup"] .cx-toggle button[data-mode="topup"] svg {
   margin-top: 128px;
 }
 
-/* One faint rule above the list and none between questions. */
+/* Faint hairlines above the list and under each question. */
 .cx-faq-list {
   max-width: 535px;
   margin: 40px auto 0;
@@ -436,10 +441,14 @@ html[data-codium-mode="topup"] .cx-toggle button[data-mode="topup"] svg {
   }
 }
 
-.cx-card-head p,
 .cx-card-list li,
 .cx-faq-answer {
   text-wrap: pretty;
+}
+
+/* A card's one-line pitch breaks into two even lines rather than leaving a word behind. */
+.cx-card-head p {
+  text-wrap: balance;
 }
 
 .cx-faq-item {
