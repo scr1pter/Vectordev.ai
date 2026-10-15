@@ -112,6 +112,8 @@ For staging, register separate provider apps whose callbacks use the staging ori
 
 ## 5. Verify in the desktop
 
+Before using real accounts, `bun --no-env-file test ./src/main/cloud-signin.test.ts` in `packages/desktop` runs both sign-ins against the broker code and local fakes. It proves Vector's side only, not your registrations.
+
 Use disposable Vercel and Supabase projects and an installed desktop build. Record the build version and the results with the release evidence.
 
 - **Sign-in:** in Connections, **Connect Vercel**. On Vercel's screen, choose a test team. Vector must return as signed in, and the team picker must show only that team. Then **Connect Supabase**. A canceled sign-in must leave the earlier connection working.

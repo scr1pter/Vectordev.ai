@@ -224,5 +224,8 @@ Before claiming live OAuth or release acceptance:
    user deletes it.
 
 Local automated tests cover callback security, readiness, environment writes,
-public-key selection and project scoping. They do not register provider apps,
-complete live consent or publish desktop artifacts.
+public-key selection and project scoping. `packages/desktop/src/main/cloud-signin.test.ts`
+runs both one-click sign-ins end to end: the broker's route code on 127.0.0.1
+with placeholder registrations, the desktop's Connect flow and deep-link
+handling, and fake Vercel and Supabase APIs. They do not register provider
+apps, complete live consent or publish desktop artifacts.
