@@ -20,6 +20,46 @@ export const spendRows = [
   ],
 ]
 
+// The Run Guard ships in the next release; keep these in step with the Tokenomics page.
+export const runGuardRows = [
+  [
+    "Where caps come from",
+    "Settings → Spend limits in the desktop app for chats and the parallel agents you start, the project's budget.run for chats, the terminal UI and vector run, or vector run --max-cost and --max-steps for one run. Automations use the Left alone limits: $5 a run and $25 a day unless you change them.",
+  ],
+  [
+    "A stop before the step that would cross",
+    "After a step, Vector estimates the next one from catalog prices and the context it carries, shows the estimate as a range, and stops before starting a step that would go over the cap. One step can still cost more than its estimate, so Vector stops within one step of the cap.",
+  ],
+  [
+    "Subagents and helpers share the cap",
+    "Spend from subagents, and from Vector's own helpers such as a Vectorscope review started during the run, counts against the same cap as the task that launched them. A helper you start after the run has ended runs under its own limits.",
+  ],
+  [
+    "Automations hold while they run",
+    "An automation gets the headroom left in your limits as its live cap, and automations that run at the same time share that headroom instead of each spending all of it.",
+  ],
+  [
+    "Unpriced is not free",
+    "With a dollar cap set, a model with no catalog price stops after 40 unpriced steps, because its spend cannot be counted. A step whose provider reported what it charged, such as Vector Codium, counts at that amount. Free models are labelled free and are held by step and loop limits instead.",
+  ],
+  [
+    "Loops pause themselves",
+    "In chats, the terminal UI and vector run, an agent that repeats the same tool call three times with no file change in between, or hits the same error three times in a row, is paused. Auto-approve and --yolo cannot click through it. Set budget.loop.enabled to false to turn this off.",
+  ],
+  [
+    "Outages end",
+    "In chats, the terminal UI and vector run, a provider outage ends the run after 10 retries or 15 minutes instead of retrying forever.",
+  ],
+  [
+    "A way to continue",
+    "The stop card says why the run stopped and what it spent. Continue starts a new run with a new cap of the same size, or with a new step limit, and the stopped turn stays in the history so the agent picks up where it was.",
+  ],
+  [
+    "Made for scripts",
+    "vector run exits with code 3 when a spend cap, step limit or loop pause stops it, so CI can tell a budget stop from a failure.",
+  ],
+]
+
 // The engine's eight subagent specialists (packages/engine/src/agent/agent.ts)
 // and the display identities painted over them. `general` is not listed: it is
 // the general-purpose Subagent described in `subagentKinds` below. Roles restate

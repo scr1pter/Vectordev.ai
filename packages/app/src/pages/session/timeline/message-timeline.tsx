@@ -1,5 +1,6 @@
 import { FreeModelsLimit } from "@/components/free-models-limit"
 import { CodiumError } from "@/components/codium-error"
+import { BudgetStop } from "@/components/budget-stop"
 import { publicShareError } from "@vectordevai/schema/public-share"
 import {
   createEffect,
@@ -7,10 +8,12 @@ import {
   createSignal,
   For,
   Index,
+  Match,
   on,
   onCleanup,
   onMount,
   Show,
+  Switch,
   type Accessor,
   type JSX,
 } from "solid-js"
@@ -1331,8 +1334,7 @@ export function MessageTimeline(props: {
         return (
           <TimelineRowFrame row={errorRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
-              <Show
-                when={errorRow().freeLimit && sessionID()}
+              <Switch
                 fallback={
                   <Show
                     when={errorRow().codium}
@@ -1346,8 +1348,13 @@ export function MessageTimeline(props: {
                   </Show>
                 }
               >
-                <FreeModelsLimit sessionID={sessionID()!} limit={errorRow().freeLimit!} />
-              </Show>
+                <Match when={errorRow().freeLimit && sessionID()}>
+                  <FreeModelsLimit sessionID={sessionID()!} limit={errorRow().freeLimit!} />
+                </Match>
+                <Match when={errorRow().budgetStop && sessionID()}>
+                  <BudgetStop sessionID={sessionID()!} stop={errorRow().budgetStop!} />
+                </Match>
+              </Switch>
             </div>
           </TimelineRowFrame>
         )

@@ -711,6 +711,12 @@ export type SessionsPromptInput = {
     }
     readonly delivery?: "steer" | "queue" | null
     readonly resume?: boolean | null
+    readonly budget?: {
+      readonly usd?: number
+      readonly steps?: number
+      readonly warnAt?: number
+      readonly unpricedSteps?: number
+    } | null
   }["id"]
   readonly prompt: {
     readonly id?: string | null
@@ -729,6 +735,12 @@ export type SessionsPromptInput = {
     }
     readonly delivery?: "steer" | "queue" | null
     readonly resume?: boolean | null
+    readonly budget?: {
+      readonly usd?: number
+      readonly steps?: number
+      readonly warnAt?: number
+      readonly unpricedSteps?: number
+    } | null
   }["prompt"]
   readonly delivery?: {
     readonly id?: string | null
@@ -747,6 +759,12 @@ export type SessionsPromptInput = {
     }
     readonly delivery?: "steer" | "queue" | null
     readonly resume?: boolean | null
+    readonly budget?: {
+      readonly usd?: number
+      readonly steps?: number
+      readonly warnAt?: number
+      readonly unpricedSteps?: number
+    } | null
   }["delivery"]
   readonly resume?: {
     readonly id?: string | null
@@ -765,7 +783,37 @@ export type SessionsPromptInput = {
     }
     readonly delivery?: "steer" | "queue" | null
     readonly resume?: boolean | null
+    readonly budget?: {
+      readonly usd?: number
+      readonly steps?: number
+      readonly warnAt?: number
+      readonly unpricedSteps?: number
+    } | null
   }["resume"]
+  readonly budget?: {
+    readonly id?: string | null
+    readonly prompt: {
+      readonly text: string
+      readonly files?: ReadonlyArray<{
+        readonly uri: string
+        readonly name?: string
+        readonly description?: string
+        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+      }>
+      readonly agents?: ReadonlyArray<{
+        readonly name: string
+        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+      }>
+    }
+    readonly delivery?: "steer" | "queue" | null
+    readonly resume?: boolean | null
+    readonly budget?: {
+      readonly usd?: number
+      readonly steps?: number
+      readonly warnAt?: number
+      readonly unpricedSteps?: number
+    } | null
+  }["budget"]
 }
 
 export type SessionsPromptOutput = {
@@ -791,6 +839,27 @@ export type SessionsPromptOutput = {
     readonly timeCreated: number
     readonly promotedSeq?: number
   }
+}["data"]
+
+export type SessionsSpendInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsSpendOutput = {
+  readonly data?: {
+    readonly sessionID: string
+    readonly state: "ok" | "warn" | "stopped"
+    readonly reason?: "cap" | "predicted" | "unpriced" | "steps" | "loop"
+    readonly message?: string
+    readonly budget: {
+      readonly usd?: number
+      readonly steps?: number
+      readonly warnAt?: number
+      readonly unpricedSteps?: number
+    }
+    readonly spentUsd: number
+    readonly steps: number
+    readonly unpricedSteps: number
+    readonly costKind?: "free" | "priced" | "plan" | "unknown"
+  } | null
 }["data"]
 
 export type SessionsCompactInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }

@@ -4,7 +4,8 @@ import { SessionV1 } from "@vectordevai/core/v1/session"
 import type { NamedError } from "@vectordevai/core/util/error"
 import { APICallError } from "ai"
 import { setTimeout as sleep } from "node:timers/promises"
-import { Effect, Schedule, Schema } from "effect"
+import { Duration, Effect, Exit, Pull, Schedule, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { SessionRetry } from "../../src/session/retry"
 import { MessageV2 } from "../../src/session/message-v2"
@@ -113,6 +114,68 @@ describe("session.retry.delay", () => {
         attempt: 2,
         message: "boom",
       })
+    }),
+  )
+
+  it.effect("policy stops retrying a 5xx error at attempt 11", () =>
+    Effect.gen(function* () {
+      const error = Schema.decodeUnknownSync(SessionV1.APIError.Schema)(
+        new SessionV1.APIError({
+          message: "Service Unavailable",
+          statusCode: 503,
+          isRetryable: false,
+          responseHeaders: { "retry-after-ms": "0" },
+        }).toObject(),
+      )
+      const attempts: number[] = []
+      const step = yield* Schedule.toStepWithMetadata(
+        SessionRetry.policy({
+          provider: retryProvider,
+          parse: Schema.decodeUnknownSync(SessionV1.APIError.Schema),
+          set: (info) => Effect.sync(() => attempts.push(info.attempt)),
+        }),
+      )
+      const exits = yield* Effect.forEach(Array.from({ length: SessionRetry.RETRY_MAX_ATTEMPTS + 1 }), () =>
+        Effect.exit(step(error)),
+      )
+
+      expect(attempts).toStrictEqual(Array.from({ length: SessionRetry.RETRY_MAX_ATTEMPTS }, (_, index) => index + 1))
+      expect(exits.slice(0, SessionRetry.RETRY_MAX_ATTEMPTS).every(Exit.isSuccess)).toBe(true)
+      const last = exits[SessionRetry.RETRY_MAX_ATTEMPTS]
+      expect(Exit.isFailure(last) && Pull.isDoneCause(last.cause)).toBe(true)
+    }),
+  )
+
+  it.effect("policy stops when the next wait would pass 15 minutes", () =>
+    Effect.gen(function* () {
+      const step = yield* Schedule.toStepWithMetadata(
+        SessionRetry.policy({
+          provider: retryProvider,
+          parse: Schema.decodeUnknownSync(SessionV1.APIError.Schema),
+          set: () => Effect.void,
+        }),
+      )
+      const first = yield* Effect.exit(step(apiError({ "retry-after-ms": "0" })))
+      yield* TestClock.adjust(Duration.minutes(14))
+      const late = yield* Effect.exit(step(apiError({ "retry-after-ms": String(2 * 60_000) })))
+
+      expect(Exit.isSuccess(first)).toBe(true)
+      expect(Exit.isFailure(late) && Pull.isDoneCause(late.cause)).toBe(true)
+    }),
+  )
+
+  it.effect("policy stops when a single retry-after hint passes 15 minutes", () =>
+    Effect.gen(function* () {
+      const step = yield* Schedule.toStepWithMetadata(
+        SessionRetry.policy({
+          provider: retryProvider,
+          parse: Schema.decodeUnknownSync(SessionV1.APIError.Schema),
+          set: () => Effect.void,
+        }),
+      )
+      const exit = yield* Effect.exit(step(apiError({ "retry-after-ms": String(SessionRetry.RETRY_MAX_MS + 1) })))
+
+      expect(Exit.isFailure(exit) && Pull.isDoneCause(exit.cause)).toBe(true)
     }),
   )
 })

@@ -10,6 +10,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Config } from "@/config/config"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { Session } from "@/session/session"
 import type { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
@@ -56,6 +57,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       RuntimeFlags.node,
       Ripgrep.node,
       Provider.node,
+      SpendGuard.node,
     ]),
     [[RuntimeFlags.node, RuntimeFlags.layer(flags)]],
   )
@@ -560,6 +562,9 @@ describe("tool.task", () => {
       expect(result.output).toContain(`<task id="${child.id}" state="completed">`)
       expect(seen?.sessionID).toBe(child.id)
       expect(seen?.variant).toBe("xhigh")
+      // The stubbed prompt never runs the loop, so only the task tool itself links the resumed child to its root.
+      const guard = yield* SpendGuard.Service
+      expect(yield* guard.rootOf(child.id)).toBe(chat.id)
       expect((yield* sessions.get(child.id)).metadata?.subagent).toMatchObject({
         status: "completed",
         agent: "general",

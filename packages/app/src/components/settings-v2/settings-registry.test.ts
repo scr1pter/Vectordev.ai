@@ -3,10 +3,11 @@ import { filterSettingsGroups, isSettingsTab, settingsGroups, settingsItemCount 
 
 describe("settings registry", () => {
   test("keeps every settings page reachable", () => {
-    expect(settingsItemCount(settingsGroups)).toBe(15)
+    expect(settingsItemCount(settingsGroups)).toBe(16)
     expect(settingsGroups.flatMap((group) => group.items.map((item) => item.value))).toEqual([
       "general",
       "usage",
+      "spend",
       "appearance",
       "voice",
       "personalization",
@@ -32,6 +33,11 @@ describe("settings registry", () => {
       "general",
       "personalization",
     ])
+  })
+
+  test("finds spend limits by budget vocabulary", () => {
+    expect(filterSettingsGroups("budget").flatMap((group) => group.items.map((item) => item.value))).toEqual(["spend"])
+    expect(isSettingsTab("spend")).toBe(true)
   })
 
   test("returns the complete registry for whitespace", () => {

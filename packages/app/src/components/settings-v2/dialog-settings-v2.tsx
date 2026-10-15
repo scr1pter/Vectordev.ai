@@ -14,6 +14,8 @@ import { SettingsVoiceV2 } from "./voice"
 import { SettingsPersonalizationV2 } from "./personalization"
 import { SettingsRulesV2 } from "./rules"
 import { SettingsSubagentsV2 } from "./subagents"
+import { SettingsSpendLimitsV2 } from "./spend-limits"
+import { spendLimitsApi } from "@/features/economics/spend-limits-api"
 import {
   filterSettingsGroups,
   isSettingsTab,
@@ -42,12 +44,20 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
   let searchInput: HTMLInputElement | undefined
   const [query, setQuery] = createSignal("")
   const [section, setSection] = createSignal<SettingsTab>(props.section ?? "general")
-  const groups = createMemo(() => filterSettingsGroups(query()))
+  // Spend limits live in the desktop ledger, which the web build does not have.
+  const available = (item: SettingsTab) => item !== "spend" || !!spendLimitsApi()
+  const groups = createMemo(() =>
+    filterSettingsGroups(query()).map((group) => ({
+      ...group,
+      items: group.items.filter((item) => available(item.value)),
+    })),
+  )
   const resultCount = createMemo(() => settingsItemCount(groups()))
   const visibleItems = createMemo(() => new Set(groups().flatMap((group) => group.items.map((item) => item.value))))
 
   const panel = (item: SettingsTab) => {
     if (item === "usage") return <SettingsUsageV2 />
+    if (item === "spend") return <SettingsSpendLimitsV2 repositoryPath={props.repositoryPath} />
     if (item === "about") return <SettingsAboutV2 />
     if (item === "voice") return <SettingsVoiceV2 />
     if (item === "personalization") return <SettingsPersonalizationV2 />
@@ -129,7 +139,10 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
                         {(item) => (
                           <TabsV2.Trigger
                             value={item.value}
-                            classList={{ "settings-v2-nav-item--hidden": !!query().trim() && !visibleItems().has(item.value) }}
+                            classList={{
+                              "settings-v2-nav-item--hidden":
+                                !available(item.value) || (!!query().trim() && !visibleItems().has(item.value)),
+                            }}
                           >
                             <Icon name={item.icon} />
                             {item.label}

@@ -8579,6 +8579,9 @@
                     "type": "string",
                     "enum": ["normal", "fast"]
                   },
+                  "budget": {
+                    "$ref": "#/components/schemas/RunBudget"
+                  },
                   "parts": {
                     "type": "array",
                     "items": {
@@ -9888,6 +9891,9 @@
                   "executionMode": {
                     "type": "string",
                     "enum": ["normal", "fast"]
+                  },
+                  "budget": {
+                    "$ref": "#/components/schemas/RunBudget"
                   },
                   "parts": {
                     "type": "array",
@@ -14271,6 +14277,9 @@
                   },
                   "resume": {
                     "type": "boolean"
+                  },
+                  "budget": {
+                    "$ref": "#/components/schemas/RunBudget"
                   }
                 },
                 "required": ["prompt"],
@@ -14284,6 +14293,97 @@
           {
             "lang": "js",
             "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.v2.session.prompt({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/api/session/{sessionID}/spend": {
+      "get": {
+        "tags": ["sessions"],
+        "operationId": "v2.session.spend",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SpendSnapshot"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SessionNotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SessionNotFoundError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionNotFoundError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Retrieve what the run of the session's root has spent against its budget, or what its last finished run spent. Empty when no run has been guarded in this Vector process.",
+        "summary": "Get session spend",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.v2.session.spend({\n  ...\n})"
           }
         ]
       }
@@ -19685,6 +19785,9 @@
             "$ref": "#/components/schemas/EventSessionIdle"
           },
           {
+            "$ref": "#/components/schemas/EventSessionSpend"
+          },
+          {
             "$ref": "#/components/schemas/EventQuestionAsked"
           },
           {
@@ -20492,6 +20595,57 @@
         "required": ["name", "data"],
         "additionalProperties": false
       },
+      "RunBudgetStopReason": {
+        "type": "string",
+        "enum": ["cap", "predicted", "unpriced", "steps", "loop"]
+      },
+      "BudgetStopError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["BudgetStopError"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "$ref": "#/components/schemas/RunBudgetStopReason"
+              },
+              "message": {
+                "type": "string"
+              },
+              "spentUsd": {
+                "type": "number"
+              },
+              "capUsd": {
+                "type": "number"
+              },
+              "unpricedSteps": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "estimate": {
+                "type": "object",
+                "properties": {
+                  "lowUsd": {
+                    "type": "number"
+                  },
+                  "highUsd": {
+                    "type": "number"
+                  }
+                },
+                "required": ["lowUsd", "highUsd"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["reason", "message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
+        "additionalProperties": false
+      },
       "APIError": {
         "type": "object",
         "properties": {
@@ -20619,6 +20773,9 @@
               },
               {
                 "$ref": "#/components/schemas/ContentFilterError"
+              },
+              {
+                "$ref": "#/components/schemas/BudgetStopError"
               },
               {
                 "$ref": "#/components/schemas/APIError"
@@ -21709,6 +21866,10 @@
             "additionalProperties": false
           }
         ]
+      },
+      "CostKind": {
+        "type": "string",
+        "enum": ["free", "priced", "plan", "unknown"]
       },
       "QuestionOption": {
         "type": "object",
@@ -23822,6 +23983,9 @@
                             "$ref": "#/components/schemas/ContentFilterError"
                           },
                           {
+                            "$ref": "#/components/schemas/BudgetStopError"
+                          },
+                          {
                             "$ref": "#/components/schemas/APIError"
                           },
                           {
@@ -24784,6 +24948,72 @@
                       }
                     },
                     "required": ["sessionID"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["session.spend"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "sessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": ["ok", "warn", "stopped"]
+                      },
+                      "reason": {
+                        "$ref": "#/components/schemas/RunBudgetStopReason"
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "spentUsd": {
+                        "type": "number"
+                      },
+                      "capUsd": {
+                        "type": "number"
+                      },
+                      "steps": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "unpricedSteps": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "costKind": {
+                        "$ref": "#/components/schemas/CostKind"
+                      },
+                      "estimate": {
+                        "type": "object",
+                        "properties": {
+                          "lowUsd": {
+                            "type": "number"
+                          },
+                          "highUsd": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["lowUsd", "highUsd"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": ["sessionID", "state", "spentUsd", "steps", "unpricedSteps", "costKind"],
                     "additionalProperties": false
                   }
                 },
@@ -25809,6 +26039,29 @@
         },
         "additionalProperties": false
       },
+      "RunBudget": {
+        "type": "object",
+        "properties": {
+          "usd": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "steps": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "warnAt": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "unpricedSteps": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "Config": {
         "type": "object",
         "properties": {
@@ -26227,6 +26480,24 @@
               },
               "clear": {
                 "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "budget": {
+            "type": "object",
+            "properties": {
+              "run": {
+                "$ref": "#/components/schemas/RunBudget"
+              },
+              "loop": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -30671,6 +30942,44 @@
         "required": ["text"],
         "additionalProperties": false
       },
+      "SpendSnapshot": {
+        "type": "object",
+        "properties": {
+          "sessionID": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["ok", "warn", "stopped"]
+          },
+          "reason": {
+            "$ref": "#/components/schemas/RunBudgetStopReason"
+          },
+          "message": {
+            "type": "string"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/RunBudget"
+          },
+          "spentUsd": {
+            "type": "number"
+          },
+          "steps": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "costKind": {
+            "$ref": "#/components/schemas/CostKind"
+          }
+        },
+        "required": ["sessionID", "state", "budget", "spentUsd", "steps", "unpricedSteps"],
+        "additionalProperties": false
+      },
       "ServiceUnavailableError": {
         "type": "object",
         "properties": {
@@ -31317,6 +31626,9 @@
           },
           {
             "$ref": "#/components/schemas/SessionIdle"
+          },
+          {
+            "$ref": "#/components/schemas/SessionSpend"
           },
           {
             "$ref": "#/components/schemas/QuestionAsked"
@@ -39901,6 +40213,9 @@
                     "$ref": "#/components/schemas/ContentFilterError"
                   },
                   {
+                    "$ref": "#/components/schemas/BudgetStopError"
+                  },
+                  {
                     "$ref": "#/components/schemas/APIError"
                   },
                   {
@@ -41472,6 +41787,94 @@
               }
             },
             "required": ["sessionID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
+      "SessionSpend": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.spend"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["ok", "warn", "stopped"]
+              },
+              "reason": {
+                "$ref": "#/components/schemas/RunBudgetStopReason"
+              },
+              "message": {
+                "type": "string"
+              },
+              "spentUsd": {
+                "type": "number"
+              },
+              "capUsd": {
+                "type": "number"
+              },
+              "steps": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unpricedSteps": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "costKind": {
+                "$ref": "#/components/schemas/CostKind"
+              },
+              "estimate": {
+                "type": "object",
+                "properties": {
+                  "lowUsd": {
+                    "type": "number"
+                  },
+                  "highUsd": {
+                    "type": "number"
+                  }
+                },
+                "required": ["lowUsd", "highUsd"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["sessionID", "state", "spentUsd", "steps", "unpricedSteps", "costKind"],
             "additionalProperties": false
           }
         },
@@ -44110,6 +44513,9 @@
                     "$ref": "#/components/schemas/ContentFilterError"
                   },
                   {
+                    "$ref": "#/components/schemas/BudgetStopError"
+                  },
+                  {
                     "$ref": "#/components/schemas/APIError"
                   },
                   {
@@ -44935,6 +45341,72 @@
               }
             },
             "required": ["sessionID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventSessionSpend": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.spend"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["ok", "warn", "stopped"]
+              },
+              "reason": {
+                "$ref": "#/components/schemas/RunBudgetStopReason"
+              },
+              "message": {
+                "type": "string"
+              },
+              "spentUsd": {
+                "type": "number"
+              },
+              "capUsd": {
+                "type": "number"
+              },
+              "steps": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unpricedSteps": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "costKind": {
+                "$ref": "#/components/schemas/CostKind"
+              },
+              "estimate": {
+                "type": "object",
+                "properties": {
+                  "lowUsd": {
+                    "type": "number"
+                  },
+                  "highUsd": {
+                    "type": "number"
+                  }
+                },
+                "required": ["lowUsd", "highUsd"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["sessionID", "state", "spentUsd", "steps", "unpricedSteps", "costKind"],
             "additionalProperties": false
           }
         },

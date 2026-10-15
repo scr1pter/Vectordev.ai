@@ -29,6 +29,8 @@ import type {
   SessionsResumeFreeModelsOutput,
   SessionsPromptInput,
   SessionsPromptOutput,
+  SessionsSpendInput,
+  SessionsSpendOutput,
   SessionsCompactInput,
   SessionsCompactOutput,
   SessionsWaitInput,
@@ -547,9 +549,31 @@ export function make(options: ClientOptions) {
                 throw new Error(`Refusing cross-origin endpoint path: ${path}`)
               return path
             })(),
-            body: { id: input["id"], prompt: input["prompt"], delivery: input["delivery"], resume: input["resume"] },
+            body: {
+              id: input["id"],
+              prompt: input["prompt"],
+              delivery: input["delivery"],
+              resume: input["resume"],
+              budget: input["budget"],
+            },
             successStatus: 200,
             declaredStatuses: [400, 401, 403, 404, 409],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      spend: (input: SessionsSpendInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsSpendOutput }>(
+          {
+            method: "GET",
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/spend`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
+            successStatus: 200,
+            declaredStatuses: [400, 401, 403, 404],
             empty: false,
           },
           requestOptions,

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto"
 import { getStore } from "./store"
 import { nextRun, type Recurrence } from "@vectordevai/app/schedule"
 import type { SpendLedger } from "./spend-limits"
+import { measuredCost, newSpend, readSpend, tokenTotal, usageDelta, type EngineSessionResponse } from "./run-usage"
 
 const STORE_NAME = "scheduled-agents"
 const STORE_KEY = "records"
@@ -213,19 +214,6 @@ type EngineMessageResponse = {
   data?: EngineMessage[]
 }
 
-type EngineSessionResponse = {
-  data?: {
-    cost?: number
-    tokens?: {
-      input?: number
-      output?: number
-      reasoning?: number
-      cache?: { read?: number; write?: number }
-    }
-    model?: { id?: string; providerID?: string }
-  }
-}
-
 function activeSessionMap(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object") return {}
   const record = value as Record<string, unknown>
@@ -272,7 +260,7 @@ export function createScheduledAgents(
     now?: () => Date
     request?: ScheduledAgentRequest
     delay?: (milliseconds: number) => Promise<void>
-    spend?: () => Promise<Pick<SpendLedger, "checkAllowance" | "recordRunCost">>
+    spend?: () => Promise<Pick<SpendLedger, "checkAllowance" | "recordRunCost" | "release">>
   } = {},
 ) {
   // Resolved per call rather than captured, because electron-store cannot be
@@ -467,6 +455,7 @@ export function createScheduledAgents(
     model: ScheduledAgentRecord["model"],
     ledger: Pick<SpendLedger, "recordRunCost">,
     runId: string,
+    budgetUsd: number | undefined,
   ) {
     // An existing session is continued, not duplicated: that is what lets a
     // recurring task keep appending to one established thread.
@@ -485,33 +474,60 @@ export function createScheduledAgents(
       engine,
       `/api/session/${encodeURIComponent(sessionId)}`,
     ).catch(() => undefined)
-    const execution = request<{ data?: { id?: string } } | undefined>(
+    // A continued session answers the spend route with its last run, which may
+    // be an earlier recurrence or the user's own turn. Reading it first is what
+    // tells this run's reading apart from that one.
+    const earlier = await readSpend((path) => request(engine, path), sessionId)
+    // Settled rather than thrown, so a failed turn is still measured below.
+    const admission = await request<{ data?: { id?: string } } | undefined>(
       engine,
       `/api/session/${encodeURIComponent(sessionId)}/prompt`,
       {
         method: "POST",
-        body: { prompt: { text: prompt }, resume: true },
+        // The ledger headroom is this run's live budget: the engine stops the
+        // run within one step of it instead of the ledger noticing afterwards.
+        body: {
+          prompt: { text: prompt },
+          resume: true,
+          budget: budgetUsd === undefined ? undefined : { usd: budgetUsd },
+        },
       },
-    ).then((admitted) => waitForSessionCompletion(engine, id, sessionId, admitted?.data?.id))
-    return execution.finally(async () => {
-      const after = await request<EngineSessionResponse | undefined>(
-        engine,
-        `/api/session/${encodeURIComponent(sessionId)}`,
-      ).catch(() => undefined)
-      const cost = usageDelta(before?.data?.cost, after?.data?.cost)
-      const tokens = usageDelta(tokenTotal(before?.data?.tokens), tokenTotal(after?.data?.tokens))
-      await ledger
-        .recordRunCost({
-          projectPath: target.directory,
-          runId,
-          provider: after?.data?.model?.providerID ?? before?.data?.model?.providerID ?? "Current Vector provider",
-          model: after?.data?.model?.id ?? before?.data?.model?.id ?? "Current selected model",
-          source: "scheduled",
-          totalCostUsd: cost,
-          totalTokens: tokens,
-        })
-        .catch(() => undefined)
-    })
+    ).then(
+      (admitted) => ({ admitted }),
+      (error: unknown) => ({ error }),
+    )
+    const execution =
+      "error" in admission
+        ? admission
+        : await waitForSessionCompletion(engine, id, sessionId, admission.admitted?.data?.id).then(
+            (status) => ({ status }),
+            (error: unknown) => ({ error }),
+          )
+    const after = await request<EngineSessionResponse | undefined>(
+      engine,
+      `/api/session/${encodeURIComponent(sessionId)}`,
+    ).catch(() => undefined)
+    // A prompt the engine never admitted started no run, so any reading is an
+    // earlier run's, and so is one that has not moved since before the prompt.
+    const snapshot =
+      "error" in admission ? undefined : newSpend(earlier, await readSpend((path) => request(engine, path), sessionId))
+    await ledger
+      .recordRunCost({
+        projectPath: target.directory,
+        runId,
+        provider: after?.data?.model?.providerID ?? before?.data?.model?.providerID ?? "Current Vector provider",
+        model: after?.data?.model?.id ?? before?.data?.model?.id ?? "Current selected model",
+        source: "scheduled",
+        totalCostUsd: measuredCost(snapshot, before?.data?.cost, after?.data?.cost),
+        totalTokens: usageDelta(tokenTotal(before?.data?.tokens), tokenTotal(after?.data?.tokens)),
+      })
+      .catch(() => undefined)
+    if ("status" in execution && execution.status === "canceled") return execution.status
+    // A guard stop fails this target even when the turn itself settled cleanly,
+    // and its message says exactly why the run ended.
+    if (snapshot?.state === "stopped") throw new Error(snapshot.message ?? "Vector's spend guard stopped this run.")
+    if ("error" in execution) throw execution.error
+    return execution.status
   }
 
   async function openSession(
@@ -545,9 +561,16 @@ export function createScheduledAgents(
         projectPath: target.directory,
         runId,
         source: "scheduled",
+        // Every target of this launch is checked at once, so the hold has to
+        // be taken inside the check, not after it.
+        reserve: true,
       })
       if (!allowance.allowed) throw new Error(allowance.reason || "A spend limit blocked this scheduled run.")
-      return promptTarget(engine, id, index, target, prompt, record?.model, ledger, runId)
+      // recordRunCost releases the reservation on the normal path. This covers a
+      // run that failed before it reached the engine.
+      return promptTarget(engine, id, index, target, prompt, record?.model, ledger, runId, allowance.budgetUsd).finally(
+        () => ledger.release(runId),
+      )
     })
     const outcome = await execution.then(
       (status) => ({ status }),
@@ -836,21 +859,6 @@ function normalizeModel(model: CreateScheduledAgentInput["model"]) {
   const id = model.id?.trim()
   if (!providerID || !id) throw new Error("Choose a model for this automation to use.")
   return { providerID, id, variant: model.variant?.trim() || undefined }
-}
-
-function tokenTotal(tokens: NonNullable<EngineSessionResponse["data"]>["tokens"]) {
-  if (!tokens) return undefined
-  const values = [tokens.input, tokens.output, tokens.reasoning, tokens.cache?.read, tokens.cache?.write]
-  if (!values.some((value) => typeof value === "number" && Number.isFinite(value))) return undefined
-  return values.reduce<number>(
-    (sum, value) => sum + (typeof value === "number" && Number.isFinite(value) ? value : 0),
-    0,
-  )
-}
-
-function usageDelta(before: number | undefined, after: number | undefined) {
-  if (!Number.isFinite(before) || !Number.isFinite(after)) return undefined
-  return Math.max((after ?? 0) - (before ?? 0), 0)
 }
 
 function normalizeTargets(input: Pick<CreateScheduledAgentInput, "directory" | "targets">) {

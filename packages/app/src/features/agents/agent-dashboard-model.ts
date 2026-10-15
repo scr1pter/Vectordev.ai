@@ -2,6 +2,8 @@
 // workspace records the desktop main process already keeps. Pure so the
 // grouping, health, and conflict rules can be tested without a renderer.
 
+import { formatUsd } from "@/features/economics/format-spend"
+
 export type DashboardAgentStatus =
   | "queued"
   | "planning"
@@ -228,9 +230,32 @@ export function agentCardDetails(agent: DashboardAgentInput): AgentCardDetails {
   return {
     activity: agent.error || agent.lastAction || agent.status,
     changes: changedFiles === 1 ? "1 file changed" : `${changedFiles} files changed`,
-    cost: agent.actualCost || agent.estimatedCost || undefined,
+    cost: agentCostLabel({ ...agent, running: isRunning(agent.status) }),
     runtime: [agent.runtime, agent.model].filter(Boolean).join(" · "),
   }
+}
+
+// A Vector-runtime agent's cost is measured by the engine, so it shows that
+// figure or says plainly that there is none yet. The prompt-length band is an
+// estimate for external runtimes only, which report their own cost later.
+export function agentCostLabel(agent: {
+  runtime: string
+  actualCost?: string
+  estimatedCost: string
+  running: boolean
+}) {
+  if (agent.actualCost) return measuredCost(agent.actualCost)
+  if (agent.runtime !== "vector") return agent.estimatedCost || undefined
+  return agent.running ? "measuring…" : "unmeasured"
+}
+
+// The desktop records measured cost to four decimals ("$0.4213"). Cards print
+// money the way the rest of the app does; anything that is not a plain amount
+// is shown as the desktop wrote it.
+function measuredCost(text: string) {
+  const usd = Number(text.replace(/[$,\s]/g, ""))
+  if (!text.trim() || !Number.isFinite(usd)) return text
+  return formatUsd(usd)
 }
 
 // The board mirrors what a reviewer actually does with a run: watch it, act on

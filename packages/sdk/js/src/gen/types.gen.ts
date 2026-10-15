@@ -87,6 +87,7 @@ export type Event =
   | EventProjectUpdated
   | EventSessionStatus
   | EventSessionIdle
+  | EventSessionSpend
   | EventQuestionAsked
   | EventQuestionReplied
   | EventQuestionRejected
@@ -356,6 +357,23 @@ export type ContentFilterError = {
   }
 }
 
+export type RunBudgetStopReason = "cap" | "predicted" | "unpriced" | "steps" | "loop"
+
+export type BudgetStopError = {
+  name: "BudgetStopError"
+  data: {
+    reason: RunBudgetStopReason
+    message: string
+    spentUsd?: number
+    capUsd?: number
+    unpricedSteps?: number
+    estimate?: {
+      lowUsd: number
+      highUsd: number
+    }
+  }
+}
+
 export type ApiError = {
   name: "APIError"
   data: {
@@ -398,6 +416,7 @@ export type AssistantMessage = {
     | StructuredOutputError
     | ContextOverflowError
     | ContentFilterError
+    | BudgetStopError
     | ApiError
     | FreeModelsLimitError
   parentID: string
@@ -755,6 +774,8 @@ export type SessionStatus =
   | {
       type: "busy"
     }
+
+export type CostKind = "free" | "priced" | "plan" | "unknown"
 
 export type QuestionOption = {
   /**
@@ -1378,6 +1399,7 @@ export type GlobalEvent = {
             | StructuredOutputError
             | ContextOverflowError
             | ContentFilterError
+            | BudgetStopError
             | ApiError
             | FreeModelsLimitError
         }
@@ -1662,6 +1684,25 @@ export type GlobalEvent = {
         type: "session.idle"
         properties: {
           sessionID: string
+        }
+      }
+    | {
+        id: string
+        type: "session.spend"
+        properties: {
+          sessionID: string
+          state: "ok" | "warn" | "stopped"
+          reason?: RunBudgetStopReason
+          message?: string
+          spentUsd: number
+          capUsd?: number
+          steps: number
+          unpricedSteps: number
+          costKind: CostKind
+          estimate?: {
+            lowUsd: number
+            highUsd: number
+          }
         }
       }
     | {
@@ -2043,6 +2084,13 @@ export type AttachmentConfig = {
   image?: ImageAttachmentConfig
 }
 
+export type RunBudget = {
+  usd?: number
+  steps?: number
+  warnAt?: number
+  unpricedSteps?: number
+}
+
 export type Config = {
   $schema?: string
   shell?: string
@@ -2180,6 +2228,12 @@ export type Config = {
     reserved?: number
     max_context?: number
     clear?: boolean
+  }
+  budget?: {
+    run?: RunBudget
+    loop?: {
+      enabled?: boolean
+    }
   }
   experimental?: {
     disable_paste_summary?: boolean
@@ -3617,6 +3671,18 @@ export type PromptInput = {
   agents?: Array<PromptAgentAttachment>
 }
 
+export type SpendSnapshot = {
+  sessionID: string
+  state: "ok" | "warn" | "stopped"
+  reason?: RunBudgetStopReason
+  message?: string
+  budget: RunBudget
+  spentUsd: number
+  steps: number
+  unpricedSteps: number
+  costKind?: CostKind
+}
+
 export type ServiceUnavailableError = {
   _tag: "ServiceUnavailableError"
   message: string
@@ -3834,6 +3900,7 @@ export type V2Event =
   | ProjectUpdated
   | SessionStatus2
   | SessionIdle
+  | SessionSpend
   | QuestionAsked
   | QuestionReplied2
   | QuestionRejected2
@@ -6630,6 +6697,7 @@ export type SessionError = {
       | StructuredOutputError
       | ContextOverflowError
       | ContentFilterError
+      | BudgetStopError
       | ApiError
       | FreeModelsLimitError
   }
@@ -7196,6 +7264,35 @@ export type SessionIdle = {
   location?: LocationRef
   data: {
     sessionID: string
+  }
+}
+
+export type SessionSpend = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.spend"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    state: "ok" | "warn" | "stopped"
+    reason?: RunBudgetStopReason
+    message?: string
+    spentUsd: number
+    capUsd?: number
+    steps: number
+    unpricedSteps: number
+    costKind: CostKind
+    estimate?: {
+      lowUsd: number
+      highUsd: number
+    }
   }
 }
 
@@ -8056,6 +8153,7 @@ export type EventSessionError = {
       | StructuredOutputError
       | ContextOverflowError
       | ContentFilterError
+      | BudgetStopError
       | ApiError
       | FreeModelsLimitError
   }
@@ -8316,6 +8414,26 @@ export type EventSessionIdle = {
   type: "session.idle"
   properties: {
     sessionID: string
+  }
+}
+
+export type EventSessionSpend = {
+  id: string
+  type: "session.spend"
+  properties: {
+    sessionID: string
+    state: "ok" | "warn" | "stopped"
+    reason?: RunBudgetStopReason
+    message?: string
+    spentUsd: number
+    capUsd?: number
+    steps: number
+    unpricedSteps: number
+    costKind: CostKind
+    estimate?: {
+      lowUsd: number
+      highUsd: number
+    }
   }
 }
 
@@ -12090,6 +12208,7 @@ export type SessionPromptData = {
     system?: string
     variant?: string
     executionMode?: "normal" | "fast"
+    budget?: RunBudget
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -12599,6 +12718,7 @@ export type SessionPromptAsyncData = {
     system?: string
     variant?: string
     executionMode?: "normal" | "fast"
+    budget?: RunBudget
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -14420,6 +14540,7 @@ export type V2SessionPromptData = {
     prompt: PromptInput
     delivery?: "steer" | "queue"
     resume?: boolean
+    budget?: RunBudget
   }
   path: {
     sessionID: string
@@ -14463,6 +14584,47 @@ export type V2SessionPromptResponses = {
 }
 
 export type V2SessionPromptResponse = V2SessionPromptResponses[keyof V2SessionPromptResponses]
+
+export type V2SessionSpendData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/spend"
+}
+
+export type V2SessionSpendErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+}
+
+export type V2SessionSpendError = V2SessionSpendErrors[keyof V2SessionSpendErrors]
+
+export type V2SessionSpendResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data?: SpendSnapshot
+  }
+}
+
+export type V2SessionSpendResponse = V2SessionSpendResponses[keyof V2SessionSpendResponses]
 
 export type V2SessionCompactData = {
   body?: never

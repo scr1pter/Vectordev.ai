@@ -55,6 +55,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { AppNodeBuilderV1 } from "./app-node-builder-v1"
 import { SessionProjector } from "@vectordevai/core/session/projector"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -88,6 +89,7 @@ export const AppLayer = AppNodeBuilderV1.build(
     SessionRevert.node,
     SessionSummary.node,
     SessionPrompt.node,
+    SpendGuard.node,
     Instruction.node,
     LLM.node,
     LSP.node,

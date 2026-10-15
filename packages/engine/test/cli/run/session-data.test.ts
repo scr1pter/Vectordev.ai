@@ -629,4 +629,28 @@ describe("run session data", () => {
       }),
     ])
   })
+
+  test("shows a spend guard stop as a Stopped warning on the session error and the assistant message", () => {
+    const error = {
+      name: "BudgetStopError",
+      data: {
+        reason: "steps",
+        message: "Step limit reached: 60 of 60 steps used for this run.",
+      },
+    }
+    const data = createSessionData()
+    const session = reduce(data, {
+      type: "session.error",
+      properties: { sessionID: "session-1", error },
+    })
+    const message = reduce(session.data, assistant("msg-1", { error }))
+    const stopped = {
+      kind: "error",
+      text: "Stopped: Step limit reached: 60 of 60 steps used for this run.",
+      stopped: true,
+    }
+
+    expect(session.commits).toEqual([expect.objectContaining(stopped)])
+    expect(message.commits).toEqual([expect.objectContaining({ ...stopped, messageID: "msg-1" })])
+  })
 })

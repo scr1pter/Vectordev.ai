@@ -6,6 +6,10 @@ export const SPEND_LEDGER_FILE = "vector-spend-ledger.json"
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_WARN_AT = 0.8
+// The share of the headroom one run holds when no per-run limit bounds it.
+// Holding all of it would block the second agent of a swarm the moment the
+// first one started.
+const UNCAPPED_RUN_SHARE = 0.5
 // The longest window any limit is evaluated over is the calendar month, so a
 // raw event stops being needed once it is two months old. Folding it into a
 // per-day, per-project total loses nothing a limit reads: a local calendar day
@@ -48,7 +52,8 @@ export type SpendDayTotal = {
 }
 
 export type SpendLimit = {
-  // The hard stop. Reaching it blocks new runs and stops running ones.
+  // The hard stop. Reaching it blocks new runs; a running Vector run gets the
+  // remaining headroom as its engine budget and stops within one step of it.
   usd: number
   // Fraction of `usd` where the state turns to "warn", 0.8 unless set.
   warnAt?: number
@@ -76,6 +81,11 @@ export type SpendAllowanceInput = {
   runId: string
   source: SpendSource
   at?: Date
+  // Holds `budgetUsd` for this run in the same step as the check. A run that
+  // starts on an allowance must ask for this rather than reserve afterwards:
+  // runs launched together would otherwise all be checked before any of them
+  // reserved, and each would be handed the same headroom.
+  reserve?: boolean
 }
 
 export type SpendAllowance = {
@@ -84,6 +94,10 @@ export type SpendAllowance = {
   reason?: string
   // Distance to the nearest configured limit. Absent when nothing is capped.
   remainingUsd?: number
+  // What the run may spend: its live engine budget, and what `reserve` holds.
+  // The whole of `remainingUsd` under a per-run limit; without one, a share of
+  // it, so a run launched beside this one can still start.
+  budgetUsd?: number
   // Runs inside the evaluated windows that reported no usage at all. Their real
   // cost is unknown, so it is in no total above and can never block anything.
   unmeasuredRuns: number
@@ -138,14 +152,30 @@ export function createSpendLedger(input: { userDataPath: string }) {
   const file = join(input.userDataPath, SPEND_LEDGER_FILE)
   let cached: Promise<SpendLedgerState> | undefined
   let queue: Promise<unknown> = Promise.resolve()
+  // Headroom handed to runs that are still going, by runId. Each one is that
+  // run's live engine budget, so concurrent launches must not both be handed
+  // the same dollars. In memory only: a reservation dies with the process, and
+  // so does the run that holds it.
+  const reservations = new Map<string, { usd: number; projectPath: string }>()
 
   const load = () => (cached ??= readLedger(file))
 
-  // Every mutation runs through one chain. Any number of parallel agents record
-  // spend concurrently, and interleaved read-modify-write would drop events —
-  // precisely the events a cap exists to count.
-  const update = (change: (state: SpendLedgerState) => SpendLedgerState) => {
-    const result = queue.then(async () => {
+  // Every mutation and every check runs through one chain. Any number of
+  // parallel agents record spend concurrently, and interleaved
+  // read-modify-write would drop events — precisely the events a cap exists to
+  // count. A check in the chain also always reads a run's recorded spend and
+  // its released reservation together, never one without the other.
+  const serial = <T>(task: () => Promise<T>) => {
+    const result = queue.then(task)
+    queue = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
+  }
+
+  const update = (change: (state: SpendLedgerState) => SpendLedgerState) =>
+    serial(async () => {
       const next = change(await load())
       cached = Promise.resolve(next)
       // A failed write must not fail the run that recorded the spend. The
@@ -153,12 +183,6 @@ export function createSpendLedger(input: { userDataPath: string }) {
       await writeLedger(file, next).catch(() => undefined)
       return next
     })
-    queue = result.then(
-      () => undefined,
-      () => undefined,
-    )
-    return result
-  }
 
   const append = (event: SpendEvent, at: Date) =>
     update((state) => prune({ ...state, events: [...state.events, event] }, at))
@@ -217,6 +241,9 @@ export function createSpendLedger(input: { userDataPath: string }) {
     // total and each append the whole of it.
     let appended: SpendEvent | undefined
     await update((state) => {
+      // The run is over, so what it holds is replaced by what it spent, in the
+      // same step that makes the spend visible to a check.
+      reservations.delete(spend.runId)
       const recorded = state.events.filter((event) => event.runId === spend.runId)
       if (total === undefined && recorded.length) return state
       const costUsd =
@@ -242,7 +269,9 @@ export function createSpendLedger(input: { userDataPath: string }) {
     return appended
   }
 
-  const checkAllowance = async (allowance: SpendAllowanceInput): Promise<SpendAllowance> => {
+  const checkAllowance = (allowance: SpendAllowanceInput) => serial(() => evaluate(allowance))
+
+  const evaluate = async (allowance: SpendAllowanceInput): Promise<SpendAllowance> => {
     const state = await load()
     const at = allowance.at ?? new Date()
     // A scheduled run is the unattended case; a session or parallel agent was
@@ -251,21 +280,38 @@ export function createSpendLedger(input: { userDataPath: string }) {
     const day = localDayKey(at)
     const month = localMonthKey(at)
     const monthTotal = windowTotal(state, { month })
+    // Other runs in flight may still spend what they hold, so their headroom is
+    // counted as spent in every shared window. A run's own reservation is not:
+    // re-checking a run must not block it against itself. Holds count under
+    // both policies, just as spend does: the day and month windows are
+    // account-wide, so a scheduled run's hold is money an interactive cap
+    // cannot hand out either.
+    const held = [...reservations].filter((entry) => entry[0] !== allowance.runId).map((entry) => entry[1])
+    const heldAll = sum(held.map((reservation) => reservation.usd))
+    const heldProject = sum(
+      held
+        .filter((reservation) => reservation.projectPath === allowance.projectPath)
+        .map((reservation) => reservation.usd),
+    )
 
     const checks = [
       {
         limit: limits.perRun,
         where: "on this run",
         spent: sum(state.events.filter((event) => event.runId === allowance.runId).map((event) => event.costUsd ?? 0)),
+        held: 0,
       },
-      { limit: limits.perDay, where: "today", spent: windowTotal(state, { day }).costUsd },
-      { limit: limits.perMonth, where: "this month", spent: monthTotal.costUsd },
+      { limit: limits.perDay, where: "today", spent: windowTotal(state, { day }).costUsd + heldAll, held: heldAll },
+      { limit: limits.perMonth, where: "this month", spent: monthTotal.costUsd + heldAll, held: heldAll },
       {
         limit: limits.perProjectMonth,
         where: "on this project this month",
-        spent: windowTotal(state, { month, projectPath: allowance.projectPath }).costUsd,
+        spent: windowTotal(state, { month, projectPath: allowance.projectPath }).costUsd + heldProject,
+        held: heldProject,
       },
-    ].filter((check): check is { limit: SpendLimit; where: string; spent: number } => Boolean(check.limit))
+    ].filter((check): check is { limit: SpendLimit; where: string; spent: number; held: number } =>
+      Boolean(check.limit),
+    )
 
     // Unmeasured runs are reported against the widest window a limit can use,
     // so the status is honest about how much of the month it cannot see.
@@ -279,26 +325,35 @@ export function createSpendLedger(input: { userDataPath: string }) {
       return {
         allowed: false,
         state: "blocked",
-        reason: `Spend limit reached: ${formatUsd(blocked.spent)} spent ${blocked.where} against a ${formatUsd(blocked.limit.usd)} cap. Raise or clear the limit in Settings to continue.`,
+        reason: `Spend limit reached: ${formatUsd(blocked.spent)} spent ${blocked.where}${blocked.held > 0 ? ` (${formatUsd(blocked.held)} of it held by runs still going)` : ""} against a ${formatUsd(blocked.limit.usd)} cap. Raise or clear the limit in Settings → Spend limits to continue.`,
         remainingUsd: 0,
+        budgetUsd: 0,
         unmeasuredRuns,
         unmeasuredNote,
       }
     }
 
     const remainingUsd = checks.length ? Math.min(...checks.map((check) => check.limit.usd - check.spent)) : undefined
+    const budgetUsd =
+      remainingUsd === undefined || limits.perRun ? remainingUsd : remainingUsd * UNCAPPED_RUN_SHARE
+    // Nothing is awaited between the totals above and this hold, so no other
+    // check can read the headroom before it is held.
+    if (allowance.reserve && budgetUsd !== undefined && budgetUsd > 0) {
+      reservations.set(allowance.runId, { usd: budgetUsd, projectPath: allowance.projectPath })
+    }
     const warned = checks.find((check) => check.spent >= check.limit.usd * warnAtOf(check.limit))
     if (warned) {
       return {
         allowed: true,
         state: "warn",
-        reason: `Approaching a spend limit: ${formatUsd(warned.spent)} of ${formatUsd(warned.limit.usd)} spent ${warned.where}.`,
+        reason: `Approaching a spend limit: ${formatUsd(warned.spent)} of ${formatUsd(warned.limit.usd)} spent ${warned.where}${warned.held > 0 ? ` (${formatUsd(warned.held)} of it held by runs still going)` : ""}.`,
         remainingUsd,
+        budgetUsd,
         unmeasuredRuns,
         unmeasuredNote,
       }
     }
-    return { allowed: true, state: "ok", remainingUsd, unmeasuredRuns, unmeasuredNote }
+    return { allowed: true, state: "ok", remainingUsd, budgetUsd, unmeasuredRuns, unmeasuredNote }
   }
 
   const summary = async (scope?: { projectPath?: string; at?: Date }): Promise<SpendSummary> => {
@@ -327,6 +382,17 @@ export function createSpendLedger(input: { userDataPath: string }) {
     recordSpend,
     recordRunCost,
     summary,
+    // Holds `usd` of headroom for a run that is starting. recordRunCost or
+    // release gives it back.
+    reserve(runId: string, usd: number, projectPath: string) {
+      if (!Number.isFinite(usd) || usd <= 0) return
+      reservations.set(runId, { usd, projectPath })
+    },
+    // For a run that ends without recording spend, such as one that failed
+    // before it reached the engine. Safe to call more than once.
+    release(runId: string) {
+      reservations.delete(runId)
+    },
     async policy() {
       return (await load()).policy
     },

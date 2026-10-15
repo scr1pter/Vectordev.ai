@@ -14,7 +14,8 @@ type Tone = {
   start?: ColorInput
 }
 
-export type RunEntryTheme = Record<EntryKind, Tone>
+// `warning` colours an error entry that is a deliberate stop, such as a spend guard stop.
+export type RunEntryTheme = Record<EntryKind, Tone> & { warning: Tone }
 
 export type RunSplashTheme = {
   left: ColorInput
@@ -558,6 +559,9 @@ function map(
       error: {
         body: scrollbackTheme.error,
       },
+      warning: {
+        body: scrollbackTheme.warning,
+      },
     },
     splash,
     block: {
@@ -628,6 +632,7 @@ export const RUN_THEME_FALLBACK: RunTheme = {
     reasoning: tone(seed.muted),
     tool: tone(seed.text, seed.muted),
     error: tone(seed.error),
+    warning: tone(seed.warning),
   },
   splash: {
     left: fallbackSplashLeft,

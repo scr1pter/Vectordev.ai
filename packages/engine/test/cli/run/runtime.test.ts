@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
 import { VectorClient } from "@vectordevai/sdk/v2"
 import { runInteractiveMode } from "@/cli/cmd/run/runtime"
+import type { SessionTurnInput } from "@/cli/cmd/run/stream.transport"
 import type { FooterApi, RunProvider } from "@/cli/cmd/run/types"
 
 type SessionMessage = NonNullable<Awaited<ReturnType<VectorClient["session"]["messages"]>>["data"]>[number]
@@ -234,5 +235,59 @@ describe("run interactive runtime", () => {
     await task
 
     expect(transportProviders).toEqual([[provider]])
+  })
+
+  test("sends the --max-cost and --max-steps budget on every interactive prompt turn", async () => {
+    const sdk = new VectorClient()
+    spyOn(sdk.config, "providers").mockImplementation(() => ok({ providers: [provider], default: {} }))
+    spyOn(sdk.app, "agents").mockImplementation(() => ok([]))
+    spyOn(sdk.experimental.resource, "list").mockImplementation(() => ok({}))
+    spyOn(sdk.command, "list").mockImplementation(() => ok([]))
+    const turns: SessionTurnInput[] = []
+
+    await runInteractiveMode(
+      {
+        sdk,
+        directory: "/tmp",
+        sessionID: "ses-1",
+        sessionTitle: "Session",
+        resume: false,
+        replay: false,
+        agent: "build",
+        model: {
+          providerID: "openai",
+          modelID: "gpt-5",
+        },
+        variant: undefined,
+        budget: { usd: 2, steps: 60 },
+        files: [],
+        initialInput: "say hi",
+        thinking: true,
+        backgroundSubagents: false,
+      },
+      {
+        createRuntimeLifecycle: async () => ({
+          footer: footer(),
+          onResize: () => () => {},
+          refreshTheme: () => {},
+          resetForReplay: () => Promise.resolve(),
+          close: () => Promise.resolve(),
+        }),
+        streamTransport: Promise.resolve({
+          createSessionTransport: async (input: { footer: FooterApi }) => ({
+            runPromptTurn: async (turn: SessionTurnInput) => {
+              turns.push(turn)
+              input.footer.close()
+            },
+            selectSubagent: () => {},
+            replayOnResize: async () => false,
+            close: async () => {},
+          }),
+          formatUnknownError: (error: unknown) => (error instanceof Error ? error.message : String(error)),
+        }),
+      },
+    )
+
+    expect(turns.map((turn) => [turn.prompt.text, turn.budget])).toEqual([["say hi", { usd: 2, steps: 60 }]])
   })
 })

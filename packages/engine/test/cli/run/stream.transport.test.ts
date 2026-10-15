@@ -2067,6 +2067,46 @@ describe("run stream transport", () => {
     }
   })
 
+  test("carries the run budget on every prompt request", async () => {
+    const src = eventFeed()
+    const ui = footer()
+    const seen: unknown[] = []
+    const transport = await createSessionTransport({
+      sdk: sdk({
+        stream: src.stream,
+        promptAsync: async (input) => {
+          seen.push(input)
+          queueMicrotask(() => {
+            src.push(busy())
+            src.push(idle())
+          })
+          return ok(undefined)
+        },
+      }),
+      sessionID: "session-1",
+      thinking: true,
+      limits: () => ({}),
+      footer: ui.api,
+    })
+
+    try {
+      await transport.runPromptTurn({
+        agent: undefined,
+        model: undefined,
+        variant: undefined,
+        budget: { usd: 2, steps: 60 },
+        prompt: { text: "hello", parts: [] },
+        files: [],
+        includeFiles: false,
+      })
+
+      expect(seen).toEqual([expect.objectContaining({ budget: { usd: 2, steps: 60 } })])
+    } finally {
+      src.close()
+      await transport.close()
+    }
+  })
+
   test("falls back to session status polling when idle events are missing", async () => {
     const src = eventFeed()
     const ui = footer()

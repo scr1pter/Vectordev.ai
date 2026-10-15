@@ -1,9 +1,9 @@
 /** @jsxImportSource @opentui/solid */
 import { describe, expect, test } from "bun:test"
 import { tmpdir } from "../../../fixture/fixture"
-import { json, mount, wait } from "./sync-fixture"
+import { directory, json, mount, wait } from "./sync-fixture"
 import { useConnected } from "../../../../src/component/use-connected"
-import type { GlobalEvent } from "@vectordevai/sdk/v2"
+import type { GlobalEvent, PermissionRequest } from "@vectordevai/sdk/v2"
 
 function branchEvent(branch: string, workspace?: string): GlobalEvent {
   return {
@@ -134,6 +134,50 @@ describe("tui sync", () => {
       app.renderer.destroy()
     }
   })
+})
+
+function permissionEvent(id: string, permission: string): GlobalEvent {
+  const request: PermissionRequest = {
+    id,
+    sessionID: "ses_test",
+    permission,
+    patterns: [],
+    metadata: {},
+    always: [],
+  }
+  return {
+    directory,
+    project: "proj_test",
+    payload: { id: `evt_${id}`, type: "permission.asked", properties: request },
+  }
+}
+
+test("auto mode approves ordinary requests but leaves doom_loop for a person", async () => {
+  await using tmp = await tmpdir()
+  await Bun.write(`${tmp.path}/kv.json`, "{}")
+  const replies: string[] = []
+  const { app, emit, sync } = await mount(
+    (url) => {
+      if (!url.pathname.startsWith("/permission/")) return
+      replies.push(url.pathname)
+      return json(true)
+    },
+    tmp.path,
+    undefined,
+    true,
+  )
+  try {
+    emit(permissionEvent("per_edit", "edit"))
+    await wait(() => replies.length === 1)
+    emit(permissionEvent("per_loop", "doom_loop"))
+    await wait(() => (sync.data.permission.ses_test ?? []).length === 1)
+    await Bun.sleep(30)
+
+    expect(replies).toEqual(["/permission/per_edit/reply"])
+    expect(sync.data.permission.ses_test.map((request) => request.id)).toEqual(["per_loop"])
+  } finally {
+    app.renderer.destroy()
+  }
 })
 
 test.each([

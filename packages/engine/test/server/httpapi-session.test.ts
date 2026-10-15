@@ -28,6 +28,8 @@ import { MessageID, PartID, SessionID, type SessionID as SessionIDType } from ".
 import { Database } from "@vectordevai/core/database/database"
 import { SessionInputTable, SessionMessageTable, SessionTable } from "@vectordevai/core/session/sql"
 import { SessionMessage } from "@vectordevai/core/session/message"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { RunBudget } from "@vectordevai/schema/run-budget"
 import { ModelV2 } from "@vectordevai/core/model"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import * as DateTime from "effect/DateTime"
@@ -44,7 +46,15 @@ const noopBootstrapLayer = Layer.succeed(
   InstanceBootstrapService.Service.of({ run: Effect.void }),
 )
 const appLayer = AppNodeBuilder.build(
-  LayerNode.group([InstanceStore.node, Project.node, Session.node, Workspace.node, Database.node, Ripgrep.node]),
+  LayerNode.group([
+    InstanceStore.node,
+    Project.node,
+    Session.node,
+    Workspace.node,
+    Database.node,
+    Ripgrep.node,
+    SpendGuard.node,
+  ]),
   [[InstanceStore.bootstrapNode, noopBootstrapLayer]],
 )
 const servedRoutes: Layer.Layer<never, Config.ConfigError, HttpServer.HttpServer> = HttpRouter.serve(
@@ -557,8 +567,177 @@ describe("session HttpApi", () => {
         })
         expect(prompt.status).toBe(404)
         expect(yield* responseJson(prompt)).toEqual(expected)
+
+        const spend = yield* request(`/api/session/${missing}/spend`, { headers })
+        expect(spend.status).toBe(404)
+        expect(yield* responseJson(spend)).toEqual(expected)
       }),
     { trusted: true, git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "reports no spend for an idle session and accepts a v2 prompt budget",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const headers = { "x-vector-directory": test.directory }
+        const session = yield* createSession({ title: "v2 spend" })
+
+        expect(yield* requestJson(`/api/session/${session.id}/spend`, { headers })).toEqual({})
+
+        const budgeted = yield* request(`/api/session/${session.id}/prompt`, {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ prompt: { text: "hello" }, budget: { usd: 2, steps: 10 }, resume: false }),
+        })
+        expect(budgeted.status).toBe(200)
+        // Arming holds the budget for the next run; nothing has spent yet.
+        expect(yield* requestJson(`/api/session/${session.id}/spend`, { headers })).toEqual({})
+        // Beginning the run through the test's guard picks up the budget the prompt armed, which proves the prompt
+        // handler and the spend route share one guard.
+        const guard = yield* SpendGuard.Service
+        yield* guard.begin(session.id)
+        expect(yield* requestJson(`/api/session/${session.id}/spend`, { headers })).toEqual({
+          data: {
+            sessionID: session.id,
+            state: "ok",
+            budget: { usd: 2, steps: 10 },
+            spentUsd: 0,
+            steps: 0,
+            unpricedSteps: 0,
+          },
+        })
+        yield* guard.end(session.id)
+
+        const invalid = yield* request(`/api/session/${session.id}/prompt`, {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ prompt: { text: "hello" }, budget: { usd: -1 }, resume: false }),
+        })
+        expect(invalid.status).toBe(400)
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "reports a run's spend as it warns and stops",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const headers = { "x-vector-directory": test.directory }
+        const session = yield* createSession({ title: "v2 spend states" })
+        const guard = yield* SpendGuard.Service
+        const step = {
+          costKind: "priced" as const,
+          contextTokens: 0,
+          cachedTokens: 0,
+          continues: false,
+          tools: [],
+          patched: false,
+        }
+        const spend = () => requestJson<{ data: RunBudget.Snapshot }>(`/api/session/${session.id}/spend`, { headers })
+
+        yield* guard.arm(session.id, { usd: 1 })
+        yield* guard.begin(session.id)
+        yield* guard.record(session.id, { ...step, costUsd: 0.25 })
+        const ok = yield* spend()
+        expect(ok).toEqual({
+          data: {
+            sessionID: session.id,
+            state: "ok",
+            budget: { usd: 1 },
+            spentUsd: 0.25,
+            steps: 1,
+            unpricedSteps: 0,
+            costKind: "priced",
+          },
+        })
+        expect("reason" in ok.data).toBe(false)
+        expect("message" in ok.data).toBe(false)
+
+        yield* guard.record(session.id, { ...step, costUsd: 0.6 })
+        expect(yield* spend()).toEqual({
+          data: {
+            sessionID: session.id,
+            state: "warn",
+            message: "Approaching the spend cap: $0.85 of $1.00 spent on this run.",
+            budget: { usd: 1 },
+            spentUsd: 0.85,
+            steps: 2,
+            unpricedSteps: 0,
+            costKind: "priced",
+          },
+        })
+
+        yield* guard.record(session.id, { ...step, costUsd: 0.3 })
+        const stopped = {
+          data: {
+            sessionID: session.id,
+            state: "stopped",
+            reason: "cap",
+            message:
+              "Spend cap reached: $1.15 spent against a $1.00 cap for this run. Vector stopped after the step that crossed it.",
+            budget: { usd: 1 },
+            spentUsd: 1.15,
+            steps: 3,
+            unpricedSteps: 0,
+            costKind: "priced",
+          },
+        } as const
+        expect(yield* spend()).toEqual(stopped)
+
+        // A finished run stays readable until the next one begins.
+        yield* guard.end(session.id)
+        expect(yield* spend()).toEqual(stopped)
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "arms the spend guard from a v1 prompt budget",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const headers = { "x-vector-directory": test.directory, "content-type": "application/json" }
+        const session = yield* createSession({ title: "v1 spend" })
+
+        const budgeted = yield* request(pathFor(SessionPaths.prompt, { sessionID: session.id }), {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            agent: "build",
+            model: { providerID: "lmstudio", modelID: "test-model" },
+            noReply: true,
+            budget: { usd: 2 },
+            parts: [{ type: "text", text: "hello" }],
+          }),
+        })
+        expect(budgeted.status).toBe(200)
+
+        const guard = yield* SpendGuard.Service
+        yield* guard.begin(session.id)
+        expect(yield* guard.snapshot(session.id)).toMatchObject({ rootID: session.id, budget: { usd: 2 } })
+        yield* guard.end(session.id)
+
+        const invalid = yield* request(pathFor(SessionPaths.prompt, { sessionID: session.id }), {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            agent: "build",
+            model: { providerID: "lmstudio", modelID: "test-model" },
+            noReply: true,
+            budget: { usd: 0 },
+            parts: [{ type: "text", text: "hello" }],
+          }),
+        })
+        expect(invalid.status).toBe(400)
+        expect(yield* responseJson(invalid)).toMatchObject({
+          name: "BadRequest",
+          data: { message: expect.stringContaining('["budget"]["usd"]') },
+        })
+      }),
+    // noReply never calls the provider, so its URL is never dialed.
+    { git: true, config: testProviderConfig("http://127.0.0.1:9/v1") },
   )
 
   it.instance(

@@ -5,6 +5,7 @@ import {
 } from "@vectordevai/core/free-model-choice"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
+import { budgetStopNotice, type BudgetStopNotice } from "@/components/budget-stop-copy"
 import { AssistantMessage, Part, SessionStatus, SnapshotFileDiff, UserMessage } from "@vectordevai/sdk/v2"
 import { groupParts, renderable, type PartGroup } from "@vectordevai/session-ui/message-part"
 import { TimelineRow, type SummaryDiff } from "./timeline-row"
@@ -37,6 +38,7 @@ export type TimelineRowMap = {
     text: string
     freeLimit?: FreeModelsLimitNotice & { messageID: string; modelID: string }
     codium?: "credits" | "sign-in" | "unavailable"
+    budgetStop?: BudgetStopNotice
   }
 }
 
@@ -168,6 +170,7 @@ export namespace Timeline {
       const data = error.data?.message
       const freeLimit = freeModelsLimitNotice(error)
       const codium = ModelPlanStatus.failureAction(error)
+      const budgetStop = budgetStopNotice(failed)
       rows.push(
         new TimelineRow.Error({
           userMessageID: userMessage.id,
@@ -175,6 +178,7 @@ export namespace Timeline {
           ...(freeLimit && failed
             ? { freeLimit: { ...freeLimit, messageID: failed.id, modelID: failed.modelID } }
             : {}),
+          ...(budgetStop ? { budgetStop } : {}),
           text: freeLimit
             ? freeModelsLimitTitle(freeLimit)
             : unwrapErrorMessage(

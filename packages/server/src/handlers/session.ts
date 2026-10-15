@@ -1,5 +1,6 @@
 import { SessionV2 } from "@vectordevai/core/session"
 import { Location } from "@vectordevai/core/location"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { DateTime, Effect, Stream } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { Api } from "../api"
@@ -34,6 +35,7 @@ function allowsSessionLocation(principal: Principal, item: SessionV2.Info) {
 export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handlers) =>
   Effect.gen(function* () {
     const session = yield* SessionV2.Service
+    const guard = yield* SpendGuard.Service
 
     return handlers
       .handle(
@@ -239,6 +241,8 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.prompt",
         Effect.fn(function* (ctx) {
+          // The budget is armed in memory before admission, so the drain that promotes this input runs under it.
+          if (ctx.payload.budget) yield* guard.arm(ctx.params.sessionID, ctx.payload.budget)
           return {
             data: yield* session
               .prompt({
@@ -266,6 +270,26 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                   ),
                 ),
               ),
+          }
+        }),
+      )
+      .handle(
+        "session.spend",
+        Effect.fn(function* (ctx) {
+          const run = yield* guard.snapshot(ctx.params.sessionID)
+          if (!run) return {}
+          return {
+            data: {
+              sessionID: run.rootID,
+              state: run.stopped ? ("stopped" as const) : run.warned ? ("warn" as const) : ("ok" as const),
+              reason: run.stopped?.reason,
+              message: run.stopped?.message ?? (run.warned ? SpendGuard.warnMessage(run) : undefined),
+              budget: run.budget,
+              spentUsd: run.spentUsd,
+              steps: run.steps,
+              unpricedSteps: run.unpricedSteps,
+              costKind: run.costKind,
+            },
           }
         }),
       )

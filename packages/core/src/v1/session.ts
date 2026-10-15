@@ -4,6 +4,7 @@ import { Schema } from "effect"
 import { NonNegativeInt } from "../schema"
 import { NamedError } from "../util/error"
 import { FreeModelLimitReason } from "@vectordevai/schema/free-model"
+import { RunBudget } from "@vectordevai/schema/run-budget"
 
 export {
   AgentPart,
@@ -73,3 +74,11 @@ export const ContextOverflowError = NamedError.create("ContextOverflowError", {
   responseBody: Schema.optional(Schema.String),
 })
 export const ContentFilterError = NamedError.create("ContentFilterError", { message: Schema.String })
+export const BudgetStopError = NamedError.create("BudgetStopError", {
+  reason: RunBudget.StopReason,
+  message: Schema.String,
+  spentUsd: Schema.optional(Schema.Finite),
+  capUsd: Schema.optional(Schema.Finite),
+  unpricedSteps: Schema.optional(NonNegativeInt),
+  estimate: Schema.optional(Schema.Struct({ lowUsd: Schema.Finite, highUsd: Schema.Finite })),
+})

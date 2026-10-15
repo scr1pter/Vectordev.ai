@@ -56,6 +56,7 @@ import { AppNodeBuilderV1 } from "@/effect/app-node-builder-v1"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { EventV2 } from "@vectordevai/core/event"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { Npm } from "@vectordevai/core/npm"
 import { PermissionSaved } from "@vectordevai/core/permission/saved"
@@ -275,6 +276,7 @@ const app = LayerNode.group([
   ProjectV2.node,
   ProjectCopy.node,
   PtyTicket.node,
+  SpendGuard.node,
 ])
 
 export function createRoutes(

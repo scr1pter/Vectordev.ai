@@ -14,6 +14,7 @@ import type {
   McpResource,
   FormatterStatus,
   SessionStatus,
+  EventSessionSpend,
   ProviderListResponse,
   ProviderAuthMethod,
   VcsInfo,
@@ -78,6 +79,11 @@ export const {
       session_status: {
         [sessionID: string]: SessionStatus
       }
+      // Latest spend guard report per root session; child sessions report under their root. `warned` stays set for
+      // the rest of the run once it has warned or stopped.
+      session_spend: {
+        [sessionID: string]: EventSessionSpend["properties"] & { warned: boolean }
+      }
       session_diff: {
         [sessionID: string]: SnapshotFileDiff[]
       }
@@ -119,6 +125,7 @@ export const {
       provider_default: {},
       session: [],
       session_status: {},
+      session_spend: {},
       session_diff: {},
       todo: {},
       message: {},
@@ -314,6 +321,19 @@ export const {
 
         case "session.status": {
           setStore("session_status", event.properties.sessionID, event.properties.status)
+          break
+        }
+
+        case "session.spend": {
+          // The guard reports "warn" only on the step that crosses the threshold and "ok" on the steps after it, so the
+          // warning is carried forward until a new cap or a new run (whose step count starts over).
+          const previous = store.session_spend[event.properties.sessionID]
+          const warned =
+            event.properties.state !== "ok" ||
+            (previous?.warned === true &&
+              previous.capUsd === event.properties.capUsd &&
+              event.properties.steps > previous.steps)
+          setStore("session_spend", event.properties.sessionID, reconcile({ ...event.properties, warned }))
           break
         }
 

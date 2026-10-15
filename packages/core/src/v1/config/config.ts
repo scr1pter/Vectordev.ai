@@ -2,6 +2,7 @@ export * as ConfigV1 from "./config"
 
 import { Schema } from "effect"
 import { NonNegativeInt, PositiveInt, type DeepMutable } from "../../schema"
+import { RunBudget } from "@vectordevai/schema/run-budget"
 import { ConfigExperimental } from "../../config/experimental"
 import { ConfigReference } from "../../config/reference"
 import { ConfigAgentV1 } from "./agent"
@@ -171,6 +172,21 @@ export const Info = Schema.Struct({
       }),
     }),
   ),
+  budget: Schema.optional(
+    Schema.Struct({
+      run: Schema.optional(RunBudget.Info),
+      loop: Schema.optional(
+        Schema.Struct({
+          enabled: Schema.optional(Schema.Boolean).annotate({
+            description: "Stop runs that repeat the same tool call or error (default: true)",
+          }),
+        }),
+      ),
+    }),
+  ).annotate({
+    description:
+      "Spend and runaway limits applied to every run in this project. A prompt's own budget overrides run.",
+  }),
   experimental: Schema.optional(
     Schema.Struct({
       disable_paste_summary: Schema.optional(Schema.Boolean),

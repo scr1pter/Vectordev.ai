@@ -13,6 +13,7 @@ import { WorkspaceID } from "../workspace-id"
 import { PermissionV1 } from "./permission"
 import { FreeModelLimitReason } from "../free-model"
 import { PublicSession } from "../public-session"
+import { RunBudget } from "../run-budget"
 
 const Timestamp = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -68,6 +69,15 @@ export const ContextOverflowError = namedError("ContextOverflowError", {
 })
 export const ContentFilterError = namedError("ContentFilterError", {
   message: Schema.String,
+})
+// A run stopped by the spend guard: a cap, a predicted overshoot, too many unpriced steps, the step limit or a loop.
+export const BudgetStopError = namedError("BudgetStopError", {
+  reason: RunBudget.StopReason,
+  message: Schema.String,
+  spentUsd: Schema.optional(Schema.Finite),
+  capUsd: Schema.optional(Schema.Finite),
+  unpricedSteps: Schema.optional(NonNegativeInt),
+  estimate: Schema.optional(Schema.Struct({ lowUsd: Schema.Finite, highUsd: Schema.Finite })),
 })
 
 export class OutputFormatText extends Schema.Class<OutputFormatText>("OutputFormatText")({
@@ -401,6 +411,7 @@ const AssistantErrorSchema = Schema.Union([
   StructuredOutputError.EffectSchema,
   ContextOverflowError.EffectSchema,
   ContentFilterError.EffectSchema,
+  BudgetStopError.EffectSchema,
   APIError.EffectSchema,
   FreeModelsLimitError.EffectSchema,
 ]).annotate({ discriminator: "name" })

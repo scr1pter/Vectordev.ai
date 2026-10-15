@@ -164,6 +164,10 @@ export function formatError(error: {
     message?: string
   }
 }): string {
+  if (error.name === "BudgetStopError" && error.data?.message) {
+    return `Stopped: ${error.data.message}`
+  }
+
   if (error.data?.message) {
     return error.data.message
   }
@@ -863,6 +867,7 @@ export function reduceSessionData(input: SessionDataInput): SessionDataOutput {
         phase: "start",
         source: "system",
         messageID: info.id,
+        ...(info.error.name === "BudgetStopError" && { stopped: true }),
       })
     }
 
@@ -1105,6 +1110,7 @@ export function reduceSessionData(input: SessionDataInput): SessionDataOutput {
       text: formatError(event.properties.error),
       phase: "start",
       source: "system",
+      ...(event.properties.error.name === "BudgetStopError" && { stopped: true }),
     })
     return out(data, commits)
   }

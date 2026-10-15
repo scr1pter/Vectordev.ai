@@ -64,6 +64,8 @@ import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { TitleUsage } from "./title-usage"
 import { LLMEvent } from "@vectordevai/llm"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { RunBudget } from "@vectordevai/schema/run-budget"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -169,6 +171,7 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    const guard = yield* SpendGuard.Service
     const { db } = database
     const backgroundTasks = yield* InstanceState.make(
       Effect.fnUntraced(function* () {
@@ -1242,6 +1245,8 @@ const layer = Layer.effect(
       // Read before the message exists: a prompt sent while a run is going joins that run.
       const joined = (yield* status.get(input.sessionID)).type !== "idle"
       yield* revert.cleanup(session)
+      // The budget lives in the guard's memory for this process, not on the user message.
+      if (input.budget) yield* guard.arm(input.sessionID, input.budget)
       const message = yield* createUserMessage(input, options)
       yield* sessions.touch(input.sessionID)
 
@@ -1272,28 +1277,94 @@ const layer = Layer.effect(
       throw new Error("Impossible")
     })
 
+    // Every root run is a spend guard run, with the prompt's armed budget or else the config budget, and the loop
+    // rules even without either. A subagent's steps count against its root's run.
     const runLoop = Effect.fn("SessionPrompt.run")(function* (
       sessionID: SessionID,
       resumed?: ResumeFreeModelsInput & { parentID: MessageID },
     ) {
+      const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
       // A run that ends before the provider answers keeps its provisional title without starting another request.
       const answering = yield* Deferred.make<boolean>()
-      return yield* runSteps(sessionID, answering, resumed).pipe(
+      const steps = runSteps(session, answering, resumed).pipe(
         Effect.ensuring(Deferred.succeed(answering, false)),
         // Stop waits for queued snapshots so immediate undo sees all changes from completed steps.
         Effect.ensuring(processor.settle(sessionID)),
       )
+      if (session.parentID) {
+        const rootID = (yield* guard.rootOf(sessionID)) === sessionID ? (yield* rootSession(session)).id : undefined
+        // A helper started outside a run, such as a review the user asked for after the run ended, is a run of its
+        // own with its own limits, so an earlier run's stop does not block it. Started inside a run, it counts there.
+        if (!session.internal || !rootID || (yield* guard.running(rootID))) {
+          if (rootID) yield* guard.link(sessionID, rootID)
+          return yield* steps
+        }
+      }
+      yield* guard.begin(sessionID, (yield* config.get()).budget?.run)
+      return yield* steps.pipe(Effect.ensuring(guard.end(sessionID)))
+    })
+
+    // The top of a session's parent chain, or the last ancestor that could still be read.
+    const rootSession = (session: Session.Info): Effect.Effect<Session.Info> => {
+      if (!session.parentID) return Effect.succeed(session)
+      return sessions.get(session.parentID).pipe(
+        Effect.flatMap(rootSession),
+        Effect.catch(() => Effect.succeed(session)),
+      )
+    }
+
+    // Records why a turn the spend guard stopped at a loop boundary ended, as a BudgetStopError on this turn's latest
+    // assistant message. A subtask command, auto-compaction or a turn stopped before its first step leaves no such
+    // message after the latest user message, and a summary must stay error-free to count as a compaction, so those
+    // turns get a new assistant message that carries only the stop.
+    const markStopped = Effect.fn("SessionPrompt.markStopped")(function* (input: {
+      stop: SpendGuard.Stop
+      sessionID: SessionID
+      user: SessionV1.User
+      assistant: SessionV1.Assistant | undefined
+    }) {
+      const current = input.assistant && input.assistant.id > input.user.id ? input.assistant : undefined
+      if (current?.error) return
+      const run = yield* guard.snapshot(input.sessionID)
+      const error = new SessionV1.BudgetStopError({
+        reason: input.stop.reason,
+        message: input.stop.message,
+        spentUsd: run?.spentUsd,
+        capUsd: run?.budget.usd,
+        unpricedSteps: run?.unpricedSteps,
+      }).toObject()
+      if (current && !current.summary) {
+        yield* sessions.updateMessage({ ...current, error })
+        return
+      }
+      const ctx = yield* InstanceState.context
+      yield* sessions.updateMessage({
+        id: MessageID.ascending(),
+        parentID: input.user.id,
+        role: "assistant",
+        mode: input.user.agent,
+        agent: input.user.agent,
+        variant: input.user.model.variant,
+        path: { cwd: ctx.directory, root: ctx.worktree },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: input.user.model.modelID,
+        providerID: input.user.model.providerID,
+        time: { created: Date.now(), completed: Date.now() },
+        sessionID: input.sessionID,
+        error,
+      })
     })
 
     const runSteps = Effect.fn("SessionPrompt.runSteps")(function* (
-      sessionID: SessionID,
+      session: Session.Info,
       answering: Deferred.Deferred<boolean>,
       resumed?: ResumeFreeModelsInput & { parentID: MessageID },
     ) {
       const ctx = yield* InstanceState.context
+      const sessionID = session.id
       let structured: unknown
       let step = 0
-      const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
       // Before the first request, so a prompt arriving after the cache expired sends the cleared history.
       if (!resumed) yield* compaction.prune({ sessionID }).pipe(Effect.ignore)
 
@@ -1341,6 +1412,14 @@ const layer = Layer.effect(
             })
           }
           yield* Effect.logInfo("exiting loop", { "session.id": sessionID })
+          break
+        }
+
+        // A run the spend guard stopped, in this session or anywhere in its lineage, ends at this boundary. A turn
+        // that finished its answer has already left above, so a stop here always interrupts unfinished work.
+        const stop = yield* guard.stopped(sessionID)
+        if (stop) {
+          yield* markStopped({ stop, sessionID, user: lastUser, assistant: lastAssistant })
           break
         }
 
@@ -1883,6 +1962,7 @@ export const PromptInput = Schema.Struct({
   system: Schema.optional(Schema.String),
   variant: Schema.optional(Schema.String),
   executionMode: Schema.optional(Schema.Union([Schema.Literal("normal"), Schema.Literal("fast")])),
+  budget: Schema.optional(RunBudget.Info),
   parts: Schema.Array(
     Schema.Union([
       SessionV1.TextPartInput,
@@ -2063,6 +2143,7 @@ export const node = LayerNode.make({
     EventV2Bridge.node,
     RuntimeFlags.node,
     Database.node,
+    SpendGuard.node,
   ],
 })
 
