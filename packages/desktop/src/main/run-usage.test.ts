@@ -1,6 +1,16 @@
 import { describe, expect, test } from "bun:test"
 import { SessionID } from "@vectordevai/schema/session-id"
-import { combineSpend, formatUsd, measuredCost, newSpend, readSpend, tokenTotal, usageDelta } from "./run-usage"
+import {
+  combineSpend,
+  formatUsd,
+  measuredCost,
+  newSpend,
+  readSpend,
+  sessionCost,
+  sessionTokens,
+  tokenTotal,
+  usageDelta,
+} from "./run-usage"
 
 const snapshot = (input: { spentUsd: number; unpricedSteps?: number; costKind?: "priced" | "unknown" | "free" }) => ({
   sessionID: SessionID.make("ses_run_usage"),
@@ -29,6 +39,30 @@ describe("tokenTotal", () => {
     expect(tokenTotal({ input: 10, output: 5, cache: { read: 2 } })).toBe(17)
     expect(tokenTotal({})).toBeUndefined()
     expect(tokenTotal(undefined)).toBeUndefined()
+  })
+})
+
+describe("sessionCost and sessionTokens", () => {
+  test("add what the subagents and helpers below the session spent", () => {
+    const data = {
+      cost: 0.4,
+      tokens: { input: 100, output: 20 },
+      subagentCost: 0.25,
+      subagentTokens: { input: 50, cache: { read: 10 } },
+    }
+    expect(sessionCost(data)).toBeCloseTo(0.65, 10)
+    expect(sessionTokens(data)).toBe(180)
+  })
+
+  test("are undefined when the engine did not report the session's own spend", () => {
+    expect(sessionCost({ subagentCost: 1 })).toBeUndefined()
+    expect(sessionCost(undefined)).toBeUndefined()
+    expect(sessionTokens({ subagentTokens: { input: 5 } })).toBeUndefined()
+  })
+
+  test("a session with no subagents reads its own spend", () => {
+    expect(sessionCost({ cost: 0.3 })).toBe(0.3)
+    expect(sessionTokens({ tokens: { output: 7 } })).toBe(7)
   })
 })
 

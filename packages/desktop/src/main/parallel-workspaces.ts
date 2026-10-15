@@ -43,7 +43,8 @@ import {
   measuredCost,
   newSpend,
   readSpend,
-  tokenTotal,
+  sessionCost,
+  sessionTokens,
   usageDelta,
   type EngineSessionResponse,
 } from "./run-usage"
@@ -2503,7 +2504,7 @@ async function recordVectorRunSpend(
         ),
       )
     : undefined
-  const cost = measuredCost(combineSpend(spend.measured, last), spend.before?.cost, after?.data?.cost)
+  const cost = measuredCost(combineSpend(spend.measured, last), sessionCost(spend.before), sessionCost(after?.data))
   const record = readRecords().find((item) => item.id === id)
   const ledger = await spendLedger()
   await ledger.recordRunCost({
@@ -2513,7 +2514,7 @@ async function recordVectorRunSpend(
     model: after?.data?.model?.id ?? record?.model ?? "Current selected model",
     source: "parallel",
     totalCostUsd: cost,
-    totalTokens: usageDelta(tokenTotal(spend.before?.tokens), tokenTotal(after?.data?.tokens)),
+    totalTokens: usageDelta(sessionTokens(spend.before), sessionTokens(after?.data)),
   })
   if (!record) return
   const stop =
@@ -2539,7 +2540,7 @@ async function spentSoFar(spend: ParallelRunSpend, active: ActiveParallelRun, se
     `/api/session/${encodeURIComponent(sessionId)}`,
     { signal: active.controller.signal },
   ).catch(() => undefined)
-  return Math.max(spend.measured?.spentUsd ?? 0, usageDelta(spend.before?.cost, now?.data?.cost) ?? 0)
+  return Math.max(spend.measured?.spentUsd ?? 0, usageDelta(sessionCost(spend.before), sessionCost(now?.data)) ?? 0)
 }
 
 export async function runParallelWorkspace(

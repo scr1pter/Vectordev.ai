@@ -3,22 +3,40 @@ import { RunBudget } from "@vectordevai/schema/run-budget"
 
 // What a desktop run reads from GET /api/session/:id to measure itself. The
 // engine's JSON is untrusted, so every field is optional.
+type Tokens = {
+  input?: number
+  output?: number
+  reasoning?: number
+  cache?: { read?: number; write?: number }
+}
+
 export type EngineSessionResponse = {
   data?: {
     cost?: number
-    tokens?: {
-      input?: number
-      output?: number
-      reasoning?: number
-      cache?: { read?: number; write?: number }
-    }
+    tokens?: Tokens
+    // What the subagents and Vector's helpers below the session spent, which cost and tokens leave out.
+    subagentCost?: number
+    subagentTokens?: Tokens
     model?: { id?: string; providerID?: string }
   }
 }
 
 const SpendResponse = Schema.Struct({ data: RunBudget.Snapshot })
 
-export function tokenTotal(tokens: NonNullable<EngineSessionResponse["data"]>["tokens"]) {
+// What a session's work has cost so far: its own steps plus its subagents and helpers. Undefined when the engine
+// did not say what the session itself cost.
+export function sessionCost(data: EngineSessionResponse["data"]) {
+  if (!Number.isFinite(data?.cost)) return undefined
+  return (data?.cost ?? 0) + (Number.isFinite(data?.subagentCost) ? (data?.subagentCost ?? 0) : 0)
+}
+
+export function sessionTokens(data: EngineSessionResponse["data"]) {
+  const own = tokenTotal(data?.tokens)
+  if (own === undefined) return undefined
+  return own + (tokenTotal(data?.subagentTokens) ?? 0)
+}
+
+export function tokenTotal(tokens: Tokens | undefined) {
   if (!tokens) return undefined
   const values = [tokens.input, tokens.output, tokens.reasoning, tokens.cache?.read, tokens.cache?.write]
   if (!values.some((value) => typeof value === "number" && Number.isFinite(value))) return undefined
