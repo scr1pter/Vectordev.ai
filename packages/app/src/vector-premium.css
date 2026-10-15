@@ -3078,6 +3078,38 @@ html[data-vector-glass="false"] [data-vector-help-menu] {
   text-align: center;
 }
 
+/* Light theme. The session header, its title bar and the route background above are hard-coded dark,
+   while the text tokens on them flip to dark values, which left the title at 1.06:1 and the branch and
+   status chips at 2.2:1. The header and title bar take the stage colour of the conversation below them,
+   as they do in the dark theme, and the white-alpha edges and fills become dark-alpha ones. */
+:root[data-vector-theme="light"] [data-vector-session-route] {
+  --vector-workspace-bg: var(--vx-canvas);
+}
+
+:root[data-vector-theme="light"] [data-vector-session-header] {
+  background: var(--vx-stage);
+}
+
+:root[data-vector-theme="light"] [data-vector-session-route] [data-session-title] {
+  background: var(--vx-stage) !important;
+}
+
+/* :where keeps this below the branch picker's hover, open and switching rules in branch-picker.css. */
+:root[data-vector-theme="light"] :where([data-vector-session-branch], [data-vector-session-status]) {
+  border-color: var(--vx-line);
+  background: rgba(20, 16, 30, 0.025);
+}
+
+:root[data-vector-theme="light"] [data-vector-session-tool]:not([data-active="true"]):hover {
+  border-color: var(--vx-line);
+  background: rgba(20, 16, 30, 0.045);
+}
+
+:root[data-vector-theme="light"] [data-vector-session-count] {
+  background: rgba(20, 16, 30, 0.07);
+  color: var(--vx-workspace-text-secondary);
+}
+
 [data-vector-session-split] {
   background: var(--vx-canvas);
 }
