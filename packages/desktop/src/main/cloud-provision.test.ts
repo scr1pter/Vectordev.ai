@@ -596,7 +596,9 @@ test("disconnecting a Supabase sign-in revokes it through the broker and says wh
     port: 0,
     async fetch(request) {
       revocations.push({ path: new URL(request.url).pathname, body: await request.json() })
-      return Response.json(answer === 200 ? { ok: true } : { ok: false, error: "provider unavailable" }, { status: answer })
+      return Response.json(answer === 200 ? { ok: true } : { ok: false, error: "provider unavailable" }, {
+        status: answer,
+      })
     },
   })
   const previous = process.env.VECTOR_OAUTH_BROKER_URL

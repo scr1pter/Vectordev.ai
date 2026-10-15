@@ -430,7 +430,8 @@ export async function disconnectCloudProvider(
   const records = readConnections().filter((item) => item.provider !== provider)
   writeConnections(records)
   await removeStoreFileIfEmpty(CONNECTION_STORE)
-  if (revoked === true) return { revoked: true, detail: `${label} disconnected, and Vector's access on ${label} is revoked.` }
+  if (revoked === true)
+    return { revoked: true, detail: `${label} disconnected, and Vector's access on ${label} is revoked.` }
   if (revoked === false) {
     return {
       revoked: false,

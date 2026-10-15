@@ -557,9 +557,7 @@ export async function describeSupabaseCommand(
     if (command === "delete_user") {
       const userId = required(input, "userId")
       const email = await authUserEmail(await supabaseContext(project, options), userId)
-      return describe(
-        `Delete the user ${email ? `${email} (${userId})` : userId} from ${name}. This cannot be undone.`,
-      )
+      return describe(`Delete the user ${email ? `${email} (${userId})` : userId} from ${name}. This cannot be undone.`)
     }
     if (command === "create_bucket") {
       const visibility = bool(input, "public") ? "public" : "private"
@@ -615,9 +613,7 @@ export async function describeSupabaseCommand(
       )
     }
     if (command === "delete_function_secrets") {
-      return describe(
-        `Delete the Edge Function secrets ${(list(input, "secretNames") ?? []).join(", ")} from ${name}.`,
-      )
+      return describe(`Delete the Edge Function secrets ${(list(input, "secretNames") ?? []).join(", ")} from ${name}.`)
     }
     return { ok: false, error: `${command} does not change anything, so it needs no approval.` }
   } catch (error) {

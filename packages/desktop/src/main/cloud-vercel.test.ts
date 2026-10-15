@@ -1020,9 +1020,9 @@ describe("vector_cloud Vercel actions over the bridge", () => {
     })
     // Every account action asks each time (PermissionPolicy), so no describe carries an approval tier.
     for (const action of ["promote", "rollback", "redeploy", "add_domain", "enable_protection_bypass"]) {
-      expect(await command({ command: "describe", action, deploymentId: "dpl_old", domain: "shop.example" })).not.toHaveProperty(
-        "repeatable",
-      )
+      expect(
+        await command({ command: "describe", action, deploymentId: "dpl_old", domain: "shop.example" }),
+      ).not.toHaveProperty("repeatable")
     }
     expect(
       await command({

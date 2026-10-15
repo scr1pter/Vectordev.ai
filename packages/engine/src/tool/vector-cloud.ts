@@ -137,10 +137,12 @@ export const Parameters = Schema.Struct({
     description: "For set_release_settings: the package manager Vector installs and builds with.",
   }),
   testCommand: Schema.optional(Schema.String).annotate({
-    description: "For set_release_settings: the test command Vector runs before it publishes. An empty string runs none.",
+    description:
+      "For set_release_settings: the test command Vector runs before it publishes. An empty string runs none.",
   }),
   healthPath: Schema.optional(Schema.String).annotate({
-    description: "For set_release_settings: the path Vector's health probe opens on each release, for example /api/health.",
+    description:
+      "For set_release_settings: the path Vector's health probe opens on each release, for example /api/health.",
   }),
   requiredChecks: Schema.optional(
     Schema.Struct({

@@ -153,7 +153,11 @@ export async function runReleaseCommand(input: ReleaseInput) {
     }
     const release = findRelease(input)
     if (!release.ok) return release
-    const checked = await checkDeploymentHealth({ projectPath: input.projectPath, taskId: input.taskId, id: release.id })
+    const checked = await checkDeploymentHealth({
+      projectPath: input.projectPath,
+      taskId: input.taskId,
+      id: release.id,
+    })
     return { ok: true, url: checked.url, text: healthLine(checked) }
   }
   if (!input.deploymentId) return { ok: false, error: "Name the release with deploymentId (see list_deployments)." }
@@ -226,7 +230,11 @@ function requiredList(checks: CloudRequiredChecks) {
 // The agent names a release by Vercel's id or URL, from list_deployments; only
 // releases Vector published carry Vector's checks and health records.
 function findRelease(input: ReleaseInput): { ok: true; id: string } | { ok: false; error: string } {
-  const wanted = input.deploymentId?.trim().replace(/^https?:\/\//, "").replace(/\/$/, "") ?? ""
+  const wanted =
+    input.deploymentId
+      ?.trim()
+      .replace(/^https?:\/\//, "")
+      .replace(/\/$/, "") ?? ""
   const release = listDeployments(input.projectPath, input.taskId).find(
     (item) =>
       item.id === wanted ||
