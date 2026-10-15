@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test"
 
-import { fallbackSwarmPlan, parseSwarmPlan, routeSwarmModels, selectSwarmPlannerModel } from "./swarm-plan"
+import {
+  fallbackSwarmPlan,
+  parseSwarmPlan,
+  routeSwarmModels,
+  selectSwarmPlannerModel,
+  swarmModelPool,
+} from "./swarm-plan"
 
 describe("swarm plan", () => {
   test("parses a fenced dependency graph", () => {
@@ -122,6 +128,29 @@ describe("swarm plan", () => {
 
     expect(routed.find((task) => task.id === "map-project")?.model).toBe("gemini-flash")
     expect(routed.find((task) => task.id === "implement-objective")?.model).toBe("claude-opus")
+  })
+
+  test("routes work to Vector Codium only in a swarm whose chosen model is a Codium model", () => {
+    const connected = [
+      { provider: "vector", model: "qwen/qwen3-coder:free" },
+      { provider: "vector-plan", model: "xiaomi/mimo-v2.6-flash" },
+      { provider: "vector-plan", model: "anthropic/claude-haiku-5.5" },
+    ]
+    const free = swarmModelPool({ provider: "vector", model: "qwen/qwen3-coder:free" }, connected)
+    expect(free).toEqual([{ provider: "vector", model: "qwen/qwen3-coder:free" }])
+    // Neither the planner nor any task can land on a model that spends credits the person did not choose to spend.
+    expect(selectSwarmPlannerModel(free, "quality").provider).toBe("vector")
+    expect(
+      routeSwarmModels(fallbackSwarmPlan("Build the feature").tasks, free, "economy").map((task) => task.provider),
+    ).not.toContain("vector-plan")
+
+    const codium = swarmModelPool({ provider: "vector-plan", model: "deepseek/deepseek-v4.1-flash" }, connected)
+    expect(codium.map((candidate) => `${candidate.provider}/${candidate.model}`)).toEqual([
+      "vector-plan/deepseek/deepseek-v4.1-flash",
+      "vector/qwen/qwen3-coder:free",
+      "vector-plan/xiaomi/mimo-v2.6-flash",
+      "vector-plan/anthropic/claude-haiku-5.5",
+    ])
   })
 
   test("keeps every task the planner returns, past the old cap of 32", () => {

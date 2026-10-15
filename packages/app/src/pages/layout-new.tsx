@@ -678,10 +678,12 @@ export default function NewLayout(props: ParentProps) {
       .find((item) =>
         options.some((option) => option.providerID === item.providerID && option.modelID === item.modelID),
       )
+    // Without a recent or current choice, the first connected model that is not Codium: Codium spends the account's
+    // credits, so a swarm only runs on it when the person picks it.
     const selected = recent
       ? options.find((option) => option.providerID === recent.providerID && option.modelID === recent.modelID)
       : (options.find((option) => option.providerID === parallelProvider() && option.modelID === parallelModel()) ??
-        options[0])
+        options.find((option) => option.providerID !== ModelPlanStatus.PROVIDER_ID))
     if (!selected) return
     if (selected.providerID === parallelProvider() && selected.modelID === parallelModel()) return
     setParallelProvider(selected.providerID)
