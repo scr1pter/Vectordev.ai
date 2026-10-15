@@ -4,6 +4,7 @@ import { resolveThemeVariant } from "@vectordevai/ui/theme/resolve"
 import type { HexColor } from "@vectordevai/ui/theme/types"
 import { showToast } from "@/utils/toast"
 import type { FitAddon, Ghostty, Terminal as Term } from "ghostty-web"
+import ghosttyWasmURL from "ghostty-web/ghostty-vt.wasm?url&no-inline"
 import { type ComponentProps, createEffect, createMemo, onCleanup, onMount, splitProps } from "solid-js"
 import { SerializeAddon } from "@/addons/serialize"
 import { matchKeybind, parseKeybind } from "@/context/command"
@@ -32,8 +33,9 @@ let shared: Promise<{ mod: typeof import("ghostty-web"); ghostty: Ghostty }> | u
 
 const loadGhostty = () => {
   if (shared) return shared
+  // Ghostty's default data: fetch is excluded by the app's content security policy.
   shared = import("ghostty-web")
-    .then(async (mod) => ({ mod, ghostty: await mod.Ghostty.load() }))
+    .then(async (mod) => ({ mod, ghostty: await mod.Ghostty.load(ghosttyWasmURL) }))
     .catch((err) => {
       shared = undefined
       throw err
