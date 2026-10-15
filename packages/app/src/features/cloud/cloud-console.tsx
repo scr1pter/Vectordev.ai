@@ -1007,7 +1007,14 @@ export function CloudConsole(props: {
                                 : (connection()?.detail ?? "Checking provider availability…")}
                           </p>
 
-                          <Show when={manualTokenProvider() === provider && connectionMode() === "token"}>
+                          {/* With sign-in available, a token is still offered: it can reach every team the
+                              user picks, where a Vercel sign-in reaches the one it was installed on. */}
+                          <Show
+                            when={
+                              manualTokenProvider() === provider &&
+                              (connectionMode() === "token" || connectionMode() === "oauth")
+                            }
+                          >
                             <form
                               class="cloud-token-form"
                               onSubmit={(event) => {
@@ -1123,6 +1130,16 @@ export function CloudConsole(props: {
                                     ? "Waiting for sign-in…"
                                     : `Connect ${providerLabel(provider)}`}
                                 </button>
+                                <Show when={manualTokenProvider() !== provider}>
+                                  <button
+                                    class="cloud-button"
+                                    type="button"
+                                    disabled={providerBusy() === provider}
+                                    onClick={() => openManualToken(provider)}
+                                  >
+                                    Use access token
+                                  </button>
+                                </Show>
                               </Show>
                             }
                           >

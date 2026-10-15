@@ -71,14 +71,14 @@ the desktop's required relay capability are present, not that registration,
 permissions or live consent have been verified. Supabase readiness is unchanged:
 desktop 1.99.8 already supports its S256 PKCE flow.
 
-Desktop **Vector Cloud → Connections** offers hosted sign-in when configured.
-If hosted OAuth is unavailable and this desktop supports manual tokens, it
-instead offers the provider's personal-access-token flow with local encrypted
-storage. Older unsupported desktops show an unavailable state. The Database
-panel routes users to this same connection setup, including manual Supabase
-access when available.
+Desktop **Vector Cloud → Connections** offers hosted sign-in (**Connect**)
+when configured, and the provider's personal-access-token flow (**Use access
+token**) beside it, with local encrypted storage. When hosted sign-in is
+unavailable, only the token flow is offered. Older unsupported desktops show an
+unavailable state. The Database panel routes users to this same connection
+setup.
 
-## Callback URLs and identity access
+## Callback URLs and scopes
 
 Register these exact HTTPS callback URLs:
 
@@ -87,24 +87,13 @@ https://vectordev.ai/api/cloud/oauth/callback-vercel
 https://vectordev.ai/api/cloud/oauth/callback-supabase
 ```
 
-Grant only the management access required for the selected operations:
-
-- Vercel: user identity (`/v2/user`, including User read), selected team/project
-  listing, deployment, environment variables and project domains.
-- Supabase: the OAuth app's scopes must cover every control in Vector Cloud
-  and the agent's tool
-  ([scope list](https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration/oauth-scopes)):
-  Organizations read; Projects read and write (create, pause, restore);
-  Database read and write (SQL, migrations, pooler, password rotation); Secrets
-  read and write (API keys, Edge Function secrets); Auth read and write; Edge
-  Functions read and write; Storage read; and Analytics read for logs and the
-  security advisors where the dashboard offers it. Users who connected before
-  a scope was added must reconnect for it to apply. A personal access token
-  already carries the account's full access.
-
-Do not request billing or destructive account-wide permissions. Provider
+The scopes each provider app needs, and what each one is used for, are listed
+once, in [owner-actions/cloud-oauth.md](owner-actions/cloud-oauth.md). Do not
+request billing or destructive account-wide permissions. Provider
 configuration must support the identity checks: a token exchange alone is not
-a completed connection.
+a completed connection. A personal access token already carries the account's
+full access. A Vercel sign-in is an integration installed on one personal
+account or team, and Vector lists and uses only that scope.
 
 ## Project variables and Supabase client keys
 
@@ -163,10 +152,10 @@ provider project. It is separate from writing local `.env`. Removing a local
 variable is not proof that a previously synchronized remote value was deleted;
 manage remote deletion explicitly.
 
-Vercel's `project-env-vars` read/write scope manages variables owned by the
-integration. Existing variables created outside that integration may require
-direct management in Vercel; local variable listing, `.env` application and
-project listing remain available. See [Vercel's integration scopes](https://vercel.com/docs/integrations/create-integration/vercel-api-integrations#project-environmental-variables).
+A Vercel sign-in manages variables created outside Vector through the
+`global-project-env-vars` scope; with only `project-env-vars`, Vercel would
+limit it to the variables the integration created. See
+[Vercel's integration scopes](https://vercel.com/docs/integrations/create-integration/vercel-api-integrations#scopes).
 
 ## Agent permissions
 

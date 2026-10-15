@@ -11,15 +11,19 @@ export const prerender = true
     database operations free.
   </p>
   <p class="note">
-    The connection, environment and publishing improvements below arrived in desktop 1.99.99. Hosted provider
-    sign-in is not enabled yet; use the manual token option in Connections where your desktop version supports it.
+    The connection, environment and publishing improvements below arrived in desktop 1.99.99. Connections offers
+    sign-in with Vercel and Supabase when Vector's sign-in service is available for your desktop version, and an
+    access token in every version that supports Vector Cloud.
   </p>
 
   <h2 id="connect-accounts">Connect an account and select a project</h2>
   <p>
-    Open Vector Cloud from Home, or from the Cloud button in a session, then Connections. Choose Use access token: Vector
-    opens the provider's token page, and the token you paste is validated and encrypted on this device. Supabase setup
-    from Database leads to the same connection flow. Vector verifies the account before showing it as connected.
+    Open Vector Cloud from Home, or from the Cloud button in a session, then Connections. Choose Connect to sign in with
+    the provider in your browser and return to Vector, or Use access token to paste a token you create on the
+    provider's token page. Either way the credential is validated and encrypted on this device. A Vercel sign-in is
+    installed on one personal account or team, the one you choose on Vercel's screen; a token reaches every team it
+    can. Supabase setup from Database leads to the same connection flow. Vector verifies the account before showing it
+    as connected.
   </p>
   <p>
     For Vercel, pick the personal account or team the project lives in, then link one of its projects or create a new

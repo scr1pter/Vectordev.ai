@@ -1,43 +1,122 @@
-# Configure Vector Cloud OAuth
+# Configure Vector Cloud sign-in (Vercel and Supabase)
 
-The desktop connects directly to Vercel and Supabase. The website's `api/cloud/oauth/*` functions broker sign-in; deploy these functions on the production `vectordev.ai` project before enabling the connection buttons. Provider app registration and the credentials below are owner actions. No registration or production account changes were performed during the local review.
+Vector Cloud → Connections offers **Connect Vercel** and **Connect Supabase** (one-click sign-in in the browser) when Vector's sign-in broker on `vectordev.ai` reports the provider as configured, and **Use access token** in every case. This page is the owner's checklist for that broker: the two provider registrations, the server variables, the deploy and the checks in the desktop. All of it is an owner action; nothing here was registered, changed or deployed by an agent.
 
-## Vercel registration
+## Where it stands (read 2026-10-15)
 
-1. In the [Vercel dashboard](https://vercel.com/dashboard), choose the team that owns Vector. Open **Integrations → Integrations Console → Create** and create a connectable-account integration named Vector. Complete the required website, support, logo, privacy and terms fields. Follow the [integration registration guide](https://vercel.com/docs/integrations/create-integration).
-2. Set **Redirect URL** to `https://vectordev.ai/api/cloud/oauth/callback-vercel`. Keep the assigned URL slug; it is used in the installation URL.
-3. Configure these scopes for the implemented controls: `deployment` read/write, `project` read/write, `domain` read/write, `project-env-vars` read/write, `global-project-env-vars` read/write, `team` read, and `user` read. Global project environment access is needed to manage existing variables created outside Vector. Domain changes require both project and domain write access. Confirm the current scope labels against [Vercel's API scope table](https://vercel.com/docs/integrations/create-integration/vercel-api-integrations#scopes).
-4. Save the integration. Copy its slug, client ID and client secret from the integration settings into the website deployment variables listed below. Install it on a test team and grant access to a disposable project before exposing it publicly. If scopes change later, existing installations need to confirm the new permissions.
+`GET https://vectordev.ai/api/cloud/oauth/status?relay=v1` (public, no credentials) answered `configured: true` with no missing variables for both `vercel` and `supabase`. So the production server variables exist, and released desktops already offer one-click sign-in.
 
-## Supabase registration
+That answer only proves the variables are set. It does not prove the provider registrations use the callback URLs and scopes below, and no live sign-in has been checked. The same answer still lists `netlify`, which means production runs a broker older than this branch; the branch's broker supports only Vercel and Supabase.
 
-1. Open the organization that owns Vector in the [Supabase dashboard](https://supabase.com/dashboard), then **Organization Settings → OAuth Apps → Add application**. Enter Vector's application details and confirm. See [Supabase's registration guide](https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration).
-2. Set its redirect URL to `https://vectordev.ai/api/cloud/oauth/callback-supabase`.
-3. Enable **Organizations: Read**, **Projects: Read and Write**, **Database: Read and Write**, **Auth: Read and Write**, **Secrets: Read and Write**, **Edge Functions: Read and Write**, and **Storage: Read**. These cover project creation/linking/lifecycle, SQL and schema types, Auth settings, project keys and function secrets, Edge Functions, and bucket discovery. Bucket mutations and Auth user administration use the linked project's server key, obtained through Secrets read access. Refer to the [current scope definitions](https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration/oauth-scopes).
-4. Save the app and copy its client ID and secret into the website variables below. Publish/enable the OAuth app in the dashboard so another test organization can authorize it. Scopes are set on the app, not sent as a deprecated `scope` query parameter; changed scopes require users to reconnect. The implemented flow uses S256 PKCE.
+## How the desktop uses it
 
-## Website deployment variables
+1. Connections calls `GET <broker>/status?relay=v1`. The broker is `https://vectordev.ai/api/cloud/oauth` unless the desktop was started with `VECTOR_OAUTH_BROKER_URL`.
+2. When a provider is configured, **Connect** calls `POST <broker>/start`. The browser opens:
+   - Vercel: `https://vercel.com/integrations/<VECTOR_VERCEL_INTEGRATION_SLUG>/new?state=…`. The state carries a one-time public key of the desktop.
+   - Supabase: `https://api.supabase.com/v1/oauth/authorize` with `client_id`, `redirect_uri`, `response_type=code`, `state` and an S256 PKCE challenge.
+3. The provider sends the browser back to the callback below. The callback page hands the result to the desktop through `vector://cloud/oauth`. For Vercel, the code is first encrypted to the desktop's key in the browser.
+4. The desktop exchanges the code through `POST <broker>/exchange`. The client secret stays on the server. The desktop then checks the account identity and stores the token in its encrypted credential vault.
+5. Supabase tokens are renewed through `POST <broker>/refresh`.
+6. **Disconnect** revokes the sign-in. For Supabase it calls `POST <broker>/revoke`. For Vercel it deletes the integration installation directly with the token, which is why the `integration-configuration` scope is needed.
 
-Set these in the production website project's server environment, then redeploy its OAuth functions. Do not place client secrets in a desktop bundle, frontend `VITE_*` variable, tracked file, or chat transcript.
+## 1. Vercel integration
 
-| Variable                         | Value                                                                             |
-| -------------------------------- | --------------------------------------------------------------------------------- |
-| `VECTOR_OAUTH_PUBLIC_URL`        | `https://vectordev.ai`                                                            |
-| `VECTOR_OAUTH_STATE_SECRET`      | A generated random secret of at least 32 characters; retain it across deployments |
-| `VECTOR_VERCEL_INTEGRATION_SLUG` | The Vercel integration's URL slug                                                 |
-| `VECTOR_VERCEL_CLIENT_ID`        | The Vercel integration client ID                                                  |
-| `VECTOR_VERCEL_CLIENT_SECRET`    | The Vercel integration client secret                                              |
-| `VECTOR_SUPABASE_CLIENT_ID`      | The Supabase OAuth application client ID                                          |
-| `VECTOR_SUPABASE_CLIENT_SECRET`  | The Supabase OAuth application client secret                                      |
+Vercel calls this a *connectable account integration*. Each sign-in installs it on one scope: the personal account or one team, chosen on Vercel's install screen. Its token reaches only that scope. Vector lists only that scope; to use another team, the user signs in again or uses an access token.
 
-The desktop defaults to `https://vectordev.ai/api/cloud/oauth`. For a separate staging installation, register separate provider apps and set their HTTPS callbacks, the staging broker's `VECTOR_OAUTH_PUBLIC_URL`, and the desktop's `VECTOR_OAUTH_BROKER_URL` consistently. The provider callback is the HTTPS function above; `vector://cloud/oauth` is only the broker-to-desktop return URI. Vercel credentials return in an envelope encrypted to the initiating desktop; Supabase's code is exchanged with that desktop's PKCE verifier. Desktop credentials are kept in the OS-backed credential vault.
+1. Open the [Vercel dashboard](https://vercel.com/dashboard) and choose the team that will own the integration in the team switcher.
+2. Open **Integrations** in the sidebar, then **Integrations Console** (direct: `https://vercel.com/dashboard/integrations/console`), then **Create**.
+3. Fill in the form:
 
-## Owner verification in the installed desktop
+   | Field | Value |
+   | --- | --- |
+   | Name | `Vector` |
+   | URL Slug | e.g. `vector` (at most 32 characters). This is `VECTOR_VERCEL_INTEGRATION_SLUG`. |
+   | Developer | The legal name Vector is published under |
+   | Contact email | Private; Vercel uses it to reach you |
+   | Support contact email | Public |
+   | Short description | At most 40 characters |
+   | Logo | Non-transparent PNG, at least 256 px square |
+   | Category | Dev Tools |
+   | Website | `https://vectordev.ai` |
+   | Documentation URL | `https://vectordev.ai/docs/cloud-services` |
+   | EULA URL | `https://vectordev.ai/legal/terms` |
+   | Privacy Policy URL | `https://vectordev.ai/legal/privacy` |
+   | Overview | At most 768 characters |
+   | Feature media | 1 to 8 PNG images, 1920×1080 |
+   | **Redirect URL** | `https://vectordev.ai/api/cloud/oauth/callback-vercel` |
+   | Webhook URL | Leave empty; Vector uses no webhooks |
+   | Configuration URL | Leave empty |
 
-Use disposable provider projects and the released desktop build. Record the build version and results with the release evidence.
+4. Under **API Scopes**, set exactly these. Anything not listed stays `None`.
 
-- **Connections:** connect Vercel and Supabase, finish browser consent, return to Vector, and verify the selected account/team or organization. Disconnect and reconnect once to verify revocation/recovery. A failed or canceled login must leave the prior connection usable.
-- **Deployments:** link an existing Vercel project and confirm its provider deployment history is present. Make a local uncommitted change and verify the warning before publishing. Publish a preview, then use Redeploy, Promote and Roll back. Production confirmation must name the target project; failed required checks must prevent promotion. A project's first deployment is labelled production when Vercel will make it production.
-- **Project controls:** change a disposable environment variable after reviewing its target environment and sync plan, verify exact domain DNS records, and exercise project settings. Stored secret values must not appear in agent replies, checks or logs. Test protected deployment checks with the project's automation bypass secret if used.
-- **Database:** link an existing Supabase project. Verify schema browsing, a harmless SQL query, a migration dry run, Auth configuration and editable storage limits. Review the exact SQL before approving a migration; only the approved text may execute. Confirm the generated TypeScript client and ignored `.env` are written to the selected project/worktree.
-- **Agent permissions:** with auto-accept enabled, ask separately for publishing, a database mutation, an environment sync and a hosting mutation. Each must still show a permission prompt, and rejecting it must make no provider change. Only inspection and the read-only migration dry run may auto-accept. Repeat a risky action to verify no permanent approval was retained.
+   | Scope | Level | Used for |
+   | --- | --- | --- |
+   | `user` | Read | Account identity (`/v2/user`) |
+   | `team` | Read | The installed team's name (`/v2/teams`) |
+   | `project` | Read/Write | List, create, link and configure projects; promote, roll back; Protection Bypass for Automation; project domains |
+   | `deployment` | Read/Write | Deployment history, build events and runtime logs; publish, redeploy and cancel |
+   | `domain` | Read/Write | DNS configuration, verification and certificates. Vercel requires both `project` and `domain` write to change a project's domains. |
+   | `project-env-vars` | Read/Write | Variables Vector creates |
+   | `global-project-env-vars` | Read/Write | Variables created outside Vector, which Environment variables lists, compares, syncs and pulls |
+   | `integration-configuration` | Read/Write | Disconnect deletes Vector's installation, which revokes its token |
+
+   Vercel's scope table does not name the runtime-logs endpoint. Treat the **Logs** check in the verification below as the proof that `deployment` covers it.
+
+5. Accept the Vercel Integrations Marketplace Agreement and save. The integration gets the Community badge. Anyone can then install it from Vector without a marketplace listing.
+6. Copy the client (integration) ID and client secret from the integration's settings page (**Credentials**, at the bottom) into the variables in section 3.
+
+If you add a scope to an integration that is already installed, every installation has to confirm the change on Vercel before it applies.
+
+## 2. Supabase OAuth app
+
+1. Open **OAuth Apps** in the settings of the Supabase organization that will own the app: `https://supabase.com/dashboard/org/_/apps`. Choose **Add application**.
+2. Enter Vector's name, website (`https://vectordev.ai`) and icon. Set the **redirect (callback) URL** to `https://vectordev.ai/api/cloud/oauth/callback-supabase`.
+3. Scopes are set on the app; Vector does not send a `scope` parameter. Enable:
+
+   | Scope | Level | Used for |
+   | --- | --- | --- |
+   | Organizations | Read | Account identity and choosing where to create a project |
+   | Projects | Read and Write | List, create, pause and restore projects; reset the database password |
+   | Database | Read and Write | SQL console, migrations, pooler settings for `DATABASE_URL`, schema types |
+   | Auth | Read and Write | Site URL, redirect URLs, email and Google, GitHub or Apple sign-in |
+   | Secrets | Read and Write | Project API keys (the public key for `.env`; the server key, kept in memory only, for users and buckets) and Edge Function secrets |
+   | Edge Functions | Read and Write | Deploy, list and delete functions |
+   | Storage | Read | Bucket discovery |
+
+   Supabase's [scope list](https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration/oauth-scopes) does not name the logs endpoint (`/analytics/endpoints/logs`) or the security advisors (`/advisors/security`). If the form offers an Analytics or Advisors read scope, enable it. Either way, check **Database logs** and **Security** after connecting. When the advisors are not allowed, Security skips them and asks the user to reconnect.
+
+4. Save the app. Copy its client ID and client secret into section 3. If the dashboard shows a publish or visibility control for the app, publish it so other organizations can authorize it.
+
+If you change the scopes later, users who connected before have to disconnect and connect again.
+
+## 3. Server variables on the `vectordev.ai` Vercel project
+
+Set these in the production environment of the Vercel project that serves `vectordev.ai`. Never put them in a desktop build, in a `VITE_`, `PUBLIC_` or `NEXT_PUBLIC_` variable, in a tracked file or in a chat.
+
+| Variable | Value |
+| --- | --- |
+| `VECTOR_OAUTH_PUBLIC_URL` | `https://vectordev.ai` (the origin both callback URLs are built from) |
+| `VECTOR_OAUTH_STATE_SECRET` | At least 32 random characters from a secure generator. Keep it stable: changing it cancels sign-ins in progress. |
+| `VECTOR_VERCEL_INTEGRATION_SLUG` | The URL slug from step 1.3 |
+| `VECTOR_VERCEL_CLIENT_ID` | The integration's client ID |
+| `VECTOR_VERCEL_CLIENT_SECRET` | The integration's client secret |
+| `VECTOR_SUPABASE_CLIENT_ID` | The OAuth app's client ID |
+| `VECTOR_SUPABASE_CLIENT_SECRET` | The OAuth app's client secret |
+
+For staging, register separate provider apps whose callbacks use the staging origin. Set that origin as the staging broker's `VECTOR_OAUTH_PUBLIC_URL`, and start the staging desktop with `VECTOR_OAUTH_BROKER_URL=https://<staging origin>/api/cloud/oauth`.
+
+## 4. Deploy and check the broker
+
+1. Deploy `main` with this branch merged to the `vectordev.ai` project, so `api/cloud/oauth/*` is the Vercel-and-Supabase-only broker.
+2. Open `https://vectordev.ai/api/cloud/oauth/status?relay=v1`. Expect exactly two providers, `vercel` and `supabase`, each with `configured: true`, `missing: []` and the callback URL above. A missing variable is named there; its value never is.
+
+## 5. Verify in the desktop
+
+Use disposable Vercel and Supabase projects and an installed desktop build. Record the build version and the results with the release evidence.
+
+- **Sign-in:** in Connections, **Connect Vercel**. On Vercel's screen, choose a test team. Vector must return as signed in, and the team picker must show only that team. Then **Connect Supabase**. A canceled sign-in must leave the earlier connection working.
+- **Token path:** **Use access token** must still connect each provider while sign-in is offered.
+- **Disconnect:** disconnect Vercel. Vector must say its access is revoked, and the installation must be gone from the team's Integrations page on Vercel. Disconnect Supabase. Vector must say its access is revoked, and the app must be gone from the organization's authorized apps.
+- **Vercel controls:** link a project and check that its deployment history appears. Check build and runtime logs, Redeploy, Promote and Roll back (failed required checks must stop a promotion), an environment variable change through its sync plan, a domain with its DNS records, and project settings. Stored secret values must not appear in agent replies, checks or logs.
+- **Supabase controls:** link an existing project. Check a read-only SQL query, a new migration written from Database and applied after reviewing its SQL, Auth settings, storage limits, Database logs and Security.
+- **Agent permissions:** with auto-accept on, ask the agent for a preview publish, a database change, an environment sync, a hosting change and a release-settings change. Each must show a prompt every time, with no Always allow, and rejecting it must change nothing. Only the migration dry run may run without a prompt.

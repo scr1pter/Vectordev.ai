@@ -195,12 +195,12 @@ export type PublishPlan =
 /**
  * Where a preview would go, or what has to be set up first. Publishing needs
  * what the agent's publish needs too: the Vercel account connected in Vector
- * Cloud with an access token, a Vercel project linked to this project, and a
+ * Cloud, a Vercel project linked to this project, and a
  * machine that can run the deploy.
  */
 export function publishPlan(hosting: CloudOverview["hosting"], target?: PublishTarget): PublishPlan {
   if (!hosting.connected) {
-    return { ready: false, reason: "Connect Vercel in Vector Cloud > Connections with an access token.", connect: true }
+    return { ready: false, reason: "Connect Vercel in Vector Cloud > Connections.", connect: true }
   }
   if (!hosting.project) {
     return {

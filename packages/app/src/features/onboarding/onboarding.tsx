@@ -104,7 +104,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       {
         title: "Connections",
         where: "Vector Cloud → Connections.",
-        body: "Connect your Vercel and Supabase accounts with an access token: Vector opens the provider's token page, you create a token and paste it once, and Vector checks it and keeps it encrypted on this device. Then link the Vercel project this repository publishes to.",
+        body: "Connect your Vercel and Supabase accounts: sign in with each provider, or paste an access token you create on its token page. Vector checks the connection and keeps the credential encrypted on this device. Then link the Vercel project this repository publishes to.",
         tip: "Vector never shows a saved token again. To replace one, disconnect the account and connect it with the new token.",
       },
       {

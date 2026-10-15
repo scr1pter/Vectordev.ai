@@ -177,7 +177,7 @@ describe("publish plan", () => {
     })
     expect(publishPlan(overview().hosting)).toEqual({
       ready: false,
-      reason: "Connect Vercel in Vector Cloud > Connections with an access token.",
+      reason: "Connect Vercel in Vector Cloud > Connections.",
       connect: true,
     })
     // The agent publishes only through the connected account, so a machine
