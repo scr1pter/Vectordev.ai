@@ -129,7 +129,12 @@ test("a minute of task-route polling reads each store file once", async () => {
   const workspaces = open([record("ws-listed", userDataPath), record("ws-worker", join(userDataPath, "elsewhere"))])
   const runs = fakeStore("swarm-orchestrator-state", new Map([["runs", [swarm("ws-worker")]]]))
   const tasks = fakeStore("background-tasks")
-  createBackgroundTask({ kind: "parallel-workspace", projectPath: userDataPath, taskId: "ses_task", name: "Background task" })
+  createBackgroundTask({
+    kind: "parallel-workspace",
+    projectPath: userDataPath,
+    taskId: "ses_task",
+    name: "Background task",
+  })
   const scope = { sourcePath: userDataPath, parentSessionId: "ses_task" }
   // The layout polls every 1.5 s: the scoped workspaces, the swarm runs, a refresh of the swarm worker the list
   // leaves out, then the background tasks.
@@ -173,7 +178,12 @@ test("a store opened again is read again", () => {
 
 test("a background task update is visible to the next list without reading the file again", () => {
   const tasks = fakeStore("background-tasks")
-  const task = createBackgroundTask({ kind: "parallel-workspace", projectPath: userDataPath, taskId: "ses_task", name: "Task" })
+  const task = createBackgroundTask({
+    kind: "parallel-workspace",
+    projectPath: userDataPath,
+    taskId: "ses_task",
+    name: "Task",
+  })
   updateBackgroundTask(task.id, { status: "running", currentStep: "Editing" })
   expect(listBackgroundTasks({ projectPath: userDataPath, taskId: "ses_task" })[0]).toMatchObject({
     status: "running",
