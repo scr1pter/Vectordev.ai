@@ -9,8 +9,6 @@ export const PURCHASE_URL = `${SITE}/codium`
 export const MANAGE_URL = `${SITE}/account`
 // The stable internal ID stays "vector-plan"; people see the provider as Vector Codium.
 export const PROVIDER_ID = "vector-plan"
-/** Customer-facing Codium credits per USD of model credit. A display conversion only; the gateway accounts in USD. */
-export const CREDITS_PER_USD = 100
 
 const Remote = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
@@ -24,6 +22,11 @@ const Remote = Schema.Struct({
   wallet: Schema.optional(Schema.Struct({ credits: Schema.Number, remaining: Schema.optional(Schema.Number) })),
 })
 
+/**
+ * The signed-in account's Codium plan and balances, as the account page shows them: each balance is the share of the
+ * credits bought that is left, never an amount, since an amount next to the purchase price would reveal what a
+ * purchase buys.
+ */
 export type Status = {
   signedIn: boolean
   /** Whether vectordev.ai currently sells Codium and serves its models. */
@@ -33,14 +36,13 @@ export type Status = {
   plan?: {
     id: string
     name: string
-    credits: number
-    remaining?: number
+    /** The share of this period's monthly credits left, from 0 to 1, when the gateway could verify it. */
+    left?: number
     renewsAt: number
     cancelAtPeriodEnd: boolean
   }
-  purchased: { credits: number; remaining?: number }
-  /** Monthly plus purchased credits left, when the gateway could verify both. */
-  remaining?: number
+  /** Top-up credits: whether any were bought, and the share of everything bought that is left. */
+  purchased: { bought: boolean; left?: number }
   /** Every credit is spent, including a subscriber's monthly credits before they renew. */
   empty: boolean
   low: boolean
@@ -51,12 +53,15 @@ const EMPTY: Status = {
   signedIn: false,
   enabled: false,
   access: false,
-  purchased: { credits: 0 },
+  purchased: { bought: false },
   empty: false,
   low: false,
 }
-// Running low warns below a tenth of the monthly grant, and never later than at 100 credits ($1 of usage).
-const LOW_FLOOR = 100
+// Running low warns below a tenth of the month's plan credits, and always once less than a dollar of model usage
+// is left. Below a cent nothing more can be sent.
+const LOW_FLOOR_USD = 1
+const EMPTY_BELOW_USD = 0.01
+const percent = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 })
 
 /** Reads the signed-in account's Codium plan and balances. The token is only ever sent to vectordev.ai. */
 export async function fetchStatus(
@@ -78,55 +83,59 @@ export async function fetchStatus(
   return fromRemote(decoded.value)
 }
 
+/** The gateway accounts in USD of model usage; only shares and the empty and low flags leave this function. */
 export function fromRemote(remote: typeof Remote.Type): Status {
-  const plan =
+  const grant =
     remote.active && remote.plan && remote.credits !== undefined && remote.periodEnd !== undefined
-      ? {
-          id: remote.plan,
-          name: planName(remote.plan),
-          credits: credits(remote.credits),
-          remaining: remote.remaining === undefined ? undefined : credits(remote.remaining),
-          renewsAt: remote.periodEnd,
-          cancelAtPeriodEnd: remote.cancelAtPeriodEnd === true,
-        }
+      ? { id: remote.plan, credits: remote.credits, renewsAt: remote.periodEnd }
       : undefined
-  const purchased = {
-    credits: credits(remote.wallet?.credits ?? 0),
-    remaining: remote.wallet?.remaining === undefined ? undefined : credits(remote.wallet.remaining),
+  const plan = grant && {
+    id: grant.id,
+    name: planName(grant.id),
+    ...(remote.remaining === undefined ? {} : { left: share(remote.remaining, grant.credits) }),
+    renewsAt: grant.renewsAt,
+    cancelAtPeriodEnd: remote.cancelAtPeriodEnd === true,
   }
-  const known =
-    (!plan || plan.remaining !== undefined) && (purchased.credits === 0 || purchased.remaining !== undefined)
-  const remaining = known
-    ? (plan?.remaining ?? 0) + (purchased.credits === 0 ? 0 : (purchased.remaining ?? 0))
-    : undefined
+  const wallet = remote.wallet && remote.wallet.credits > 0 ? remote.wallet : undefined
+  const monthly = grant ? remote.remaining : 0
+  const topup = wallet ? wallet.remaining : 0
+  const remaining = monthly === undefined || topup === undefined ? undefined : positive(monthly) + positive(topup)
   return {
     signedIn: true,
     enabled: remote.enabled !== false,
     access: remote.access,
     plan,
-    purchased,
-    remaining,
+    purchased: {
+      bought: wallet !== undefined,
+      ...(wallet?.remaining === undefined ? {} : { left: share(wallet.remaining, wallet.credits) }),
+    },
     // The server still grants access to an active plan whose monthly credits are spent; this says so plainly.
-    empty: remaining === 0,
+    empty: remaining !== undefined && remaining < EMPTY_BELOW_USD,
     // Purchased credits count every top-up ever bought, so only the monthly grant scales the threshold.
-    low: remaining !== undefined && remaining > 0 && remaining < Math.max(LOW_FLOOR, (plan?.credits ?? 0) / 10),
+    low:
+      remaining !== undefined &&
+      remaining >= EMPTY_BELOW_USD &&
+      remaining < Math.max(LOW_FLOOR_USD, (grant?.credits ?? 0) / 10),
   }
 }
 
-/** "vector-20" is the Codium 20 subscription. */
+/** "vector-10" is the Codium 10 subscription. */
 export function planName(id: string) {
   const price = /^vector-(\d+)$/.exec(id)?.[1]
   return price ? `Codium ${price}` : id
 }
 
-// Round down so a balance is never overstated.
-function credits(usd: number) {
-  if (!Number.isFinite(usd) || usd <= 0) return 0
-  return Math.floor(usd * CREDITS_PER_USD + 1e-6)
+function positive(usd: number) {
+  return Number.isFinite(usd) && usd > 0 ? usd : 0
 }
 
-export function formatCredits(value: number) {
-  return value.toLocaleString("en-US")
+function share(left: number, total: number) {
+  return total > 0 ? Math.min(1, positive(left) / total) : 0
+}
+
+/** "42%": the same rounding as the account page, so both show the same figure. */
+export function formatShare(value: number) {
+  return percent.format(value)
 }
 
 export function formatDate(time: number) {
@@ -140,10 +149,10 @@ export function describe(status: Status) {
   const plan = status.plan
   const lines = [
     plan
-      ? `Plan: ${plan.name}, ${plan.remaining === undefined ? "balance unavailable" : `${formatCredits(plan.remaining)} of ${formatCredits(plan.credits)} monthly credits left`}, ${plan.cancelAtPeriodEnd ? "ends" : "renews"} ${formatDate(plan.renewsAt)}`
+      ? `Plan: ${plan.name}, ${plan.left === undefined ? "balance unavailable" : `${formatShare(plan.left)} of this month's credits left`}, ${plan.cancelAtPeriodEnd ? "ends" : "renews"} ${formatDate(plan.renewsAt)}`
       : "Plan: none",
-    status.purchased.credits
-      ? `Purchased credits: ${status.purchased.remaining === undefined ? "balance unavailable" : `${formatCredits(status.purchased.remaining)} of ${formatCredits(status.purchased.credits)} left`}`
+    status.purchased.bought
+      ? `Purchased credits: ${status.purchased.left === undefined ? "balance unavailable" : `${formatShare(status.purchased.left)} left`}`
       : "Purchased credits: none",
   ]
   const current = notice(status)
@@ -166,11 +175,7 @@ export function notice(status: Status): { kind: "unavailable" | "empty" | "low";
     }
   if (status.empty || !status.access)
     return { kind: "empty", text: "You have no Codium credits available. Buy credits to use Codium models." }
-  if (status.low)
-    return {
-      kind: "low",
-      text: `You are running low on Codium credits${status.remaining === undefined ? "" : ` (${formatCredits(status.remaining)} left)`}.`,
-    }
+  if (status.low) return { kind: "low", text: "You are running low on Codium credits." }
 }
 
 export type Action = "credits" | "sign-in" | "unavailable"

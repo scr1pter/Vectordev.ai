@@ -49,18 +49,19 @@ export const textStream = [
 export function codiumGateway(token: string) {
   const state = {
     mode: "ok" as "ok" | "text" | "credits" | "disabled" | "context" | "capacity",
+    // Synthetic allowances: half of each price, which is not a real Codium allowance.
     status: {
       enabled: true,
       active: true,
       access: true,
-      plan: "vector-20",
-      credits: 16,
-      remaining: 1.2,
+      plan: "vector-50",
+      credits: 25,
+      remaining: 1.5,
       periodStart: 1_000,
       periodEnd: 1_790_000_000_000,
       cancelAtPeriodEnd: false,
       customer: true,
-      wallet: { credits: 8, used: 7.9, remaining: 0.1 },
+      wallet: { credits: 10, used: 9.5, remaining: 0.5 },
     } as Record<string, unknown>,
   }
   const seen: { path: string; authorization: string | null; body?: unknown }[] = []

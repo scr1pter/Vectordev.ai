@@ -419,7 +419,7 @@ test("gateway answers map to the action that fixes them", () => {
   expect(ModelPlans.usageCost({ choices: [] })).toBeUndefined()
 })
 
-test("status reads plan and balances in Codium credits and flags a low balance", async () => {
+test("status reads the plan and the share of each balance left, never an amount, and flags a low balance", async () => {
   const before = gateway.seen.length
   const status = await ModelPlanStatus.fetchStatus(token, gateway.forward)
   expect(gateway.seen.slice(before)).toEqual([
@@ -429,24 +429,18 @@ test("status reads plan and balances in Codium credits and flags a low balance",
     signedIn: true,
     enabled: true,
     access: true,
-    plan: {
-      id: "vector-20",
-      name: "Codium 20",
-      credits: 1600,
-      remaining: 120,
-      renewsAt: 1_790_000_000_000,
-      cancelAtPeriodEnd: false,
-    },
-    purchased: { credits: 800, remaining: 10 },
-    remaining: 130,
+    plan: { id: "vector-50", name: "Codium 50", left: 0.06, renewsAt: 1_790_000_000_000, cancelAtPeriodEnd: false },
+    purchased: { bought: true, left: 0.05 },
     empty: false,
     low: true,
   })
   expect(ModelPlanStatus.describe(status)).toEqual([
-    `Plan: Codium 20, 120 of 1,600 monthly credits left, renews ${ModelPlanStatus.formatDate(1_790_000_000_000)}`,
-    "Purchased credits: 10 of 800 left",
-    "You are running low on Codium credits (130 left).",
+    `Plan: Codium 50, 6% of this month's credits left, renews ${ModelPlanStatus.formatDate(1_790_000_000_000)}`,
+    "Purchased credits: 5% left",
+    "You are running low on Codium credits.",
   ])
+  // No balance amount reaches the app or the CLI: with the purchase price it would reveal what a purchase buys.
+  expect(JSON.stringify(status)).not.toMatch(/"(credits|remaining)"/)
   expect(JSON.stringify(status)).not.toContain(token)
 })
 
@@ -460,10 +454,19 @@ test("status without credits, signed out, expired or unreachable says what to do
     wallet: { credits: 0, used: 0, remaining: 0 },
   }
   const empty = await ModelPlanStatus.fetchStatus(token, gateway.forward)
-  expect(empty).toMatchObject({ signedIn: true, access: false, plan: undefined, remaining: 0, empty: true, low: false })
-  expect(ModelPlanStatus.describe(empty).at(-1)).toBe(
+  expect(empty).toMatchObject({
+    signedIn: true,
+    access: false,
+    plan: undefined,
+    purchased: { bought: false },
+    empty: true,
+    low: false,
+  })
+  expect(ModelPlanStatus.describe(empty)).toEqual([
+    "Plan: none",
+    "Purchased credits: none",
     "You have no Codium credits available. Buy credits to use Codium models.",
-  )
+  ])
   gateway.state.status = { enabled: false, active: false, access: false, wallet: { credits: 0, used: 0, remaining: 0 } }
   expect(ModelPlanStatus.describe(await ModelPlanStatus.fetchStatus(token, gateway.forward)).at(-1)).toBe(
     "Vector Codium is not available yet.",
@@ -484,20 +487,20 @@ test("status without credits, signed out, expired or unreachable says what to do
 })
 
 test("a subscriber whose monthly credits are spent is told so, even though the plan still grants access", () => {
-  // What the server's modelPlanStatus returns for a Codium 10 subscriber who used all $8.
+  // The server's modelPlanStatus shape for a subscriber who used every monthly credit (synthetic allowance).
   const spent = {
     enabled: true,
     active: true,
     access: true,
     plan: "vector-10",
-    credits: 8,
+    credits: 5,
     remaining: 0,
     periodEnd: 1_790_000_000_000,
     cancelAtPeriodEnd: false,
     wallet: { credits: 0, remaining: 0 },
   }
   const status = ModelPlanStatus.fromRemote(spent)
-  expect(status).toMatchObject({ access: true, remaining: 0, empty: true, low: false })
+  expect(status).toMatchObject({ access: true, plan: { left: 0 }, empty: true, low: false })
   const renews = ModelPlanStatus.formatDate(1_790_000_000_000)
   expect(ModelPlanStatus.notice(status)).toEqual({
     kind: "empty",
@@ -509,31 +512,33 @@ test("a subscriber whose monthly credits are spent is told so, even though the p
   )
   // Purchased credits left keep the account going.
   expect(ModelPlanStatus.fromRemote({ ...spent, wallet: { credits: 10, remaining: 9 } })).toMatchObject({
-    remaining: 900,
+    purchased: { bought: true, left: 0.9 },
     empty: false,
   })
+  // Less than a cent of usage left cannot pay for a request.
+  expect(ModelPlanStatus.fromRemote({ ...spent, remaining: 0.004 })).toMatchObject({ empty: true, low: false })
 })
 
 test("running low follows the monthly grant, not every top-up ever bought", () => {
-  // A long-time buyer: $1,600 of top-ups over time, $15 (1,500 credits) left.
+  // A long-time buyer of many top-ups, with $15 of usage left.
   const buyer = { enabled: true, active: false, access: true, wallet: { credits: 1600, remaining: 15 } }
-  expect(ModelPlanStatus.fromRemote(buyer)).toMatchObject({ remaining: 1500, low: false })
+  expect(ModelPlanStatus.fromRemote(buyer)).toMatchObject({ purchased: { left: 15 / 1600 }, low: false })
   expect(ModelPlanStatus.fromRemote({ ...buyer, wallet: { credits: 1600, remaining: 0.9 } })).toMatchObject({
-    remaining: 90,
     low: true,
   })
-  // A Codium 200 subscriber is warned under a tenth of the month's 16,000 credits.
+  // A subscriber is warned under a tenth of the month's plan credits.
   const subscriber = {
     enabled: true,
     active: true,
     access: true,
     plan: "vector-200",
-    credits: 160,
+    credits: 100,
     periodEnd: 1_790_000_000_000,
     wallet: { credits: 0, remaining: 0 },
   }
-  expect(ModelPlanStatus.fromRemote({ ...subscriber, remaining: 15.99 })).toMatchObject({ remaining: 1599, low: true })
-  expect(ModelPlanStatus.fromRemote({ ...subscriber, remaining: 16 })).toMatchObject({ remaining: 1600, low: false })
+  expect(ModelPlanStatus.fromRemote({ ...subscriber, remaining: 9.99 })).toMatchObject({ low: true })
+  expect(ModelPlanStatus.fromRemote({ ...subscriber, remaining: 10 })).toMatchObject({ low: false })
+  expect(ModelPlanStatus.formatShare(0.1)).toBe("10%")
 })
 
 test("the app recognises a failed Codium turn from the engine's error and from a V2 assistant error", () => {

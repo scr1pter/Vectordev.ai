@@ -23,8 +23,9 @@ export const CodiumCommand = effectCmd({
     const status = yield* Effect.promise(() => ModelPlanStatus.fetchStatus(token))
     UI.println(UI.Style.TEXT_NORMAL_BOLD + "Vector Codium" + UI.Style.TEXT_NORMAL)
     for (const line of ModelPlanStatus.describe(status)) UI.println(line)
-    UI.println(`Buy credits or a plan: ${ModelPlanStatus.PURCHASE_URL}`)
-    if (status.plan || status.purchased.credits) UI.println(`Manage your plan: ${ModelPlanStatus.MANAGE_URL}`)
+    // While sales are off the purchase page only says Codium is coming soon.
+    if (!status.signedIn || status.enabled) UI.println(`Buy credits or a plan: ${ModelPlanStatus.PURCHASE_URL}`)
+    if (status.plan || status.purchased.bought) UI.println(`Manage your plan: ${ModelPlanStatus.MANAGE_URL}`)
     if (status.signedIn && status.enabled && !status.error)
       UI.println(UI.Style.TEXT_DIM + 'Codium models are listed by "vector models vector-plan".' + UI.Style.TEXT_NORMAL)
     if (!status.signedIn || status.error) process.exitCode = 1
