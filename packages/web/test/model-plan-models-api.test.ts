@@ -60,7 +60,25 @@ const models = (token?: string) =>
 test("a signed-in account without credits sees the catalog, and only its revocation is checked", async () => {
   const response = await models(mintCliToken(user).token)
   expect(response.status).toBe(200)
-  expect(await response.json()).toEqual({ enabled: true, models: CODIUM_MODELS })
+  const body = await response.json()
+  // Vector offers the first model as Codium's default.
+  expect(body.models.map((model: { name: string }) => model.name)).toEqual([
+    "DeepSeek V4.1 Flash",
+    "Xiaomi MiMo V2.6 Flash",
+    "Claude Haiku 5.5",
+  ])
+  // Only what Vector reads; the server's routing policy stays on the server.
+  expect(body).toEqual({
+    enabled: true,
+    models: CODIUM_MODELS.map((model) => ({
+      id: model.id,
+      name: model.name,
+      contextLength: model.contextLength,
+      maxOutputTokens: model.maxOutputTokens,
+      inputPrice: model.inputPrice,
+      outputPrice: model.outputPrice,
+    })),
+  })
   expect(state.calls).toEqual([environment.KV_REST_API_URL])
 })
 
