@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message, Session } from "@vectordevai/sdk/v2/client"
+import type { AssistantMessage, Message } from "@vectordevai/sdk/v2/client"
 import { brandProviderName } from "@/utils/provider-brand"
 
 type Provider = {
@@ -71,9 +71,4 @@ const build = (messages: Message[] = [], providers: Provider[] = []): Context | 
 
 export function getSessionContext(messages: Message[] = [], providers: Provider[] = []) {
   return build(messages, providers)
-}
-
-export function getSessionTokenTotal(tokens: Session["tokens"] | undefined) {
-  if (!tokens) return undefined
-  return tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write
 }
