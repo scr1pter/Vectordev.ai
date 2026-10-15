@@ -1,8 +1,9 @@
 import { freeModelSource } from "@vectordevai/core/free-model-choice"
 import { Popover as Kobalte } from "@kobalte/core/popover"
-import { Component, ComponentProps, createMemo, createSignal, For, JSX, Show, ValidComponent } from "solid-js"
+import { Component, ComponentProps, createMemo, createSignal, For, JSX, onMount, Show, ValidComponent } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLocal } from "@/context/local"
+import { useServerSync } from "@/context/server-sync"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { popularProviders } from "@/hooks/use-providers"
 import { ScrollView } from "@vectordevai/ui/scroll-view"
@@ -182,6 +183,7 @@ export function ModelSelectorPopoverV2(props: {
   onClose?: () => void
 }) {
   const model = props.model ?? useLocal().model
+  const serverSync = useServerSync()
   const language = useLanguage()
   const dialog = useDialog()
   // `now` is captured when the popover opens, so "New" can't change while it's showing.
@@ -223,6 +225,9 @@ export function ModelSelectorPopoverV2(props: {
   }
   const setOpen = (open: boolean) => {
     if (open) {
+      // Account models can arrive after the list was first read, as when vectordev.ai answers a first Codium
+      // catalog read slowly; opening the picker reads the list again so they show up.
+      void serverSync().refreshProviders()
       restoreTrigger = true
       pointerMoved = createPointerGuard()
       setStore({ open: true, now: Date.now(), active: picker.current() ?? "" })
@@ -414,9 +419,13 @@ export function ModelSelectorPopoverV2(props: {
 export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelState }> = (props) => {
   const local = useLocal()
   const model = props.model ?? local.model
+  const serverSync = useServerSync()
   const language = useLanguage()
   const dialog = useDialog()
   const directory = () => decode64(local.slug())
+  // Account models can arrive after the list was first read, as when vectordev.ai answers a first Codium catalog
+  // read slowly; opening the picker reads the list again so they show up.
+  onMount(() => void serverSync().refreshProviders())
   const [search, setSearch] = createSignal("")
   const [picked, setPicked] = createSignal("")
   // Captured once, so "New" can't change while the dialog is open.

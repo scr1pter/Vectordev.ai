@@ -54,6 +54,37 @@ const it = testEffect(
 )
 const id = ProviderV2.ID.make(ModelPlans.PROVIDER_ID)
 
+// The real catalog client, answering only when the test releases it, as a slow first read after signing in does.
+const slowCatalog = { answer: Promise.withResolvers<void>() }
+const slowClient = ModelPlans.createClient({
+  timeout: 20,
+  request: () => slowCatalog.answer.promise.then(() => Response.json({ enabled: true, models: [codiumModel] })),
+})
+const slow = testEffect(
+  LayerNode.compile(Provider.node, [
+    [
+      FreeModels.node,
+      Layer.succeed(FreeModels.Service, {
+        catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
+        forKey: () => Effect.succeed([]),
+      }),
+    ],
+    [
+      FreeModels.credentialsNode,
+      Layer.succeed(FreeModels.CredentialsService, {
+        get: (provider) => Effect.succeed(provider === "vector" ? token : undefined),
+      }),
+    ],
+    [
+      ModelPlans.node,
+      Layer.succeed(ModelPlans.Service, {
+        catalog: (value, options) => Effect.promise(() => slowClient.catalog(value, options)),
+        request: gateway.forward,
+      }),
+    ],
+  ]),
+)
+
 it.instance(
   "Codium publishes the account's models without credentials and replaces project overrides",
   () =>
@@ -97,6 +128,18 @@ it.instance(
       },
     },
   },
+)
+
+slow.instance("a first Codium catalog read slower than the listing deadline lists Codium on the next read", () =>
+  Effect.gen(function* () {
+    const provider = yield* Provider.Service
+    // The app's first read of the provider list does not wait for vectordev.ai.
+    expect((yield* provider.list())[id]).toBeUndefined()
+    slowCatalog.answer.resolve()
+    yield* Effect.promise(() => slowClient.catalog(token, { wait: true }))
+    // The app reads the list again when a model picker opens, and Codium is there.
+    expect(Object.keys((yield* provider.list())[id]?.models ?? {})).toEqual([codiumModel.id])
+  }),
 )
 
 test("Codium's own default is the first model its catalog lists, not the last by ID", () => {
