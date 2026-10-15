@@ -247,7 +247,8 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
           <div className="cx-panel" data-mode={item.mode} key={item.mode}>
             <div className="cx-cards">
               {offers.map((offer, index) => {
-                const first = offers[0]!.name
+                // "the Codium 10 top-up", but "Codium 10" for the plan.
+                const first = `${monthly ? "" : "the "}${offers[0]!.name}`
                 // Later tiers differ only in credits, as a multiple of the first so they never read as adding up, and in
                 // the usage those credits buy on each model. Credit amounts never appear.
                 const features =
@@ -268,7 +269,16 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
                   <article className="cx-card" key={offer.id}>
                     <div className="cx-card-top">
                       <div className="cx-card-head">
-                        <h3>{offer.name}</h3>
+                        <h3>
+                          {/* "top-up" always takes its own line, so all four top-up names break in the same place. */}
+                          {!monthly && offer.name.endsWith(" top-up") ? (
+                            <React.Fragment>
+                              {offer.name.slice(0, -" top-up".length)} <span className="cx-card-kind">top-up</span>
+                            </React.Fragment>
+                          ) : (
+                            offer.name
+                          )}
+                        </h3>
                         <p>{FIT[item.mode][index] ?? "For more usage."}</p>
                       </div>
                       <div className="cx-card-buy">

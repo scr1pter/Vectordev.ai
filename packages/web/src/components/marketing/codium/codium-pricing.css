@@ -131,6 +131,10 @@ html[data-codium-mode="topup"] .cx-toggle button[data-mode="topup"] svg {
   letter-spacing: -0.01em;
 }
 
+.cx-card-kind {
+  display: block;
+}
+
 .cx-card-head p {
   font-size: 17px;
   line-height: 28px;

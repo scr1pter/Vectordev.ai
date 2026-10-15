@@ -102,7 +102,7 @@ describe("Codium pricing page", () => {
     expect(monthly).not.toContain("with Hard Coder")
     const topups = text(render(config, "topup"))
     expect(topups).toContain(
-      "5× the credits of Codium 10 About 300–2,700 typical tasks with Everyday Coder About 160–1,400 typical tasks with Hard Coder",
+      "5× the credits of the Codium 10 top-up About 300–2,700 typical tasks with Everyday Coder About 160–1,400 typical tasks with Hard Coder",
     )
     // Every model in the launch catalog has a range, in catalog order.
     expect(text(render(live))).toContain(
@@ -110,21 +110,24 @@ describe("Codium pricing page", () => {
     )
   })
 
-  test("top-ups are the same four amounts as one-time packs in the same cards, named like the plans", () => {
+  test("top-ups are the same four amounts as one-time packs in the same cards, named as checkout names them", () => {
     const html = render(selling, "topup")
     expect(live.topups?.map((pack) => pack.price)).toEqual([10, 50, 100, 200])
     expect(html.match(/<article class="cx-card"/g)).toHaveLength(4)
     for (const pack of live.topups ?? []) {
       expect(html).toContain(`<span class="cx-amount">$${pack.price}</span><span class="cx-period">one-time</span>`)
-      expect(html).toContain(`<h3>Codium ${pack.price}</h3>`)
-      expect(html).toContain(`Buy Codium ${pack.price}<svg`)
+      expect(pack.name).toBe(`Codium ${pack.price} top-up`)
+      expect(html).toContain(`<h3>Codium ${pack.price} <span class="cx-card-kind">top-up</span></h3>`)
+      expect(html).toContain(`Buy Codium ${pack.price} top-up<svg`)
     }
     expect(html).not.toContain("/ month")
     expect(html).not.toContain("Get Codium")
-    // One naming scheme: the cards, their lists and the usage table all say Codium 10, never "the $10 top-up".
+    // One name everywhere: the cards, their lists, the usage table, the account page and checkout all say
+    // "Codium 10 top-up", so a top-up never shares a name with the plan of the same price.
     expect(html).not.toContain("top-up&#x27;s")
-    expect(html.match(/Everything in Codium 10, and:/g)).toHaveLength(3)
-    expect(html).toContain("20× the credits of Codium 10</li>")
+    expect(html).not.toMatch(/<h3>Codium \d+<\/h3>/)
+    expect(html.match(/Everything in the Codium 10 top-up, and:/g)).toHaveLength(3)
+    expect(html).toContain("20× the credits of the Codium 10 top-up</li>")
     expect(html).toContain("Unused credits carry forward separately from any plan</li>")
     expect(html).toContain("No subscription needed</li>")
     expect(html).toContain("Unused top-up credits carry forward separately from your subscription.")
