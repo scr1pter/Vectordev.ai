@@ -540,7 +540,7 @@ export async function getSupabaseManagementToken(request: CloudFetch = fetch): P
 
 export async function getCloudProviderRuntimeAuth(
   provider: Exclude<CloudProviderId, "supabase">,
-): Promise<{ token?: string; account?: string; accountId?: string; teamId?: string }> {
+): Promise<{ token?: string; account?: string; accountId?: string; teamId?: string; installation?: boolean }> {
   const record = storedConnection(provider)
   if (!record) return {}
   return {
@@ -548,14 +548,23 @@ export async function getCloudProviderRuntimeAuth(
     account: record.account,
     accountId: record.accountId,
     teamId: record.teamId,
+    // A sign-in is a Vercel integration installed on one scope, and its token
+    // reaches that scope only; a pasted token reaches every team it can.
+    installation: Boolean(record.configurationId),
   }
 }
 
 // The team a Vercel token lists projects in until a project link names its own.
-// Undefined selects the personal account.
+// Undefined selects the personal account. A sign-in stays on the scope it was
+// installed on.
 export function setCloudProviderDefaultTeam(provider: Exclude<CloudProviderId, "supabase">, teamId?: string): void {
   const record = storedConnection(provider)
   if (!record) throw new Error(`Connect ${connectionLabel(provider)} in Vector Cloud first.`)
+  if (record.configurationId && record.teamId !== teamId) {
+    throw new Error(
+      `This ${connectionLabel(provider)} sign-in is installed on one ${record.teamId ? "team" : "personal account"} only. To use another, disconnect and sign in again choosing it on Vercel's install screen, or connect with an access token.`,
+    )
+  }
   saveConnection({ ...record, teamId })
 }
 

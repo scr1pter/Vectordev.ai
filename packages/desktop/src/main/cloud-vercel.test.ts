@@ -120,6 +120,18 @@ describe("Vercel connection and scope", () => {
     expect((await projects.selectVercelScope(null)).selected).toBeUndefined()
   })
 
+  test("a sign-in lists and keeps only the scope its integration was installed on", async () => {
+    connect("team_2")
+    const records = stores.get("cloud-provider-connections")!.get("records") as Record<string, unknown>[]
+    records[0].configurationId = "icfg_2"
+    expect((await projects.listVercelScopes()).scopes).toEqual([
+      { kind: "team", teamId: "team_2", slug: "globex", name: "Globex" },
+    ])
+    await expect(projects.selectVercelScope("team_1")).rejects.toThrow("not available to the connected token")
+    await expect(projects.selectVercelScope(null)).rejects.toThrow("installed on one team only")
+    expect((await projects.selectVercelScope("team_2")).selected).toBe("team_2")
+  })
+
   test("a rejected token reads as a reconnect step and never repeats the token", async () => {
     connect()
     api.state.rejectToken = true
