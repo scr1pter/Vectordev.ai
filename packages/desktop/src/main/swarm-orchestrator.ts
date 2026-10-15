@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { stat } from "node:fs/promises"
 
+import type { SessionMessage } from "@vectordevai/schema/session-message"
+
 import { getStore } from "./store"
 import {
   createParallelWorkspace,
@@ -803,12 +805,19 @@ async function readPlannerPlan(
     signal,
   })
   await waitForPlannerIdle(run.id, sessionID, engine, signal)
-  const context = await engineRequest<{ data?: unknown }>(
+  const context = await engineRequest<{ data?: readonly (typeof SessionMessage.Message.Encoded)[] }>(
     engine,
     `/api/session/${encodeURIComponent(sessionID)}/context`,
     { signal },
   )
-  return findSwarmPlan(collectText(context?.data).reverse(), run.objective, run.maxAgents)
+  // Only the planner's own answers can hold its plan. Tool results carry text parts too, so a JSON file the planner
+  // read, such as a tasks.json, would otherwise be accepted as the task graph.
+  const answers = (context?.data ?? []).flatMap((message) =>
+    message.type === "assistant"
+      ? message.content.flatMap((part) => (part.type === "text" && part.text.trim() ? [part.text.trim()] : []))
+      : [],
+  )
+  return findSwarmPlan(answers.reverse(), run.objective, run.maxAgents)
 }
 
 function plannerPrompt(run: SwarmRunRecord) {
@@ -881,18 +890,6 @@ function activeSessionMap(value: unknown) {
   const record = value as Record<string, unknown>
   const candidate = record.data && typeof record.data === "object" ? record.data : record
   return candidate as Record<string, unknown>
-}
-
-function collectText(value: unknown, output: string[] = []) {
-  if (!value || typeof value === "string" || typeof value !== "object") return output
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectText(item, output))
-    return output
-  }
-  const record = value as Record<string, unknown>
-  if (record.type === "text" && typeof record.text === "string" && record.text.trim()) output.push(record.text.trim())
-  Object.values(record).forEach((item) => collectText(item, output))
-  return output
 }
 
 function sleep(milliseconds: number, signal: AbortSignal) {

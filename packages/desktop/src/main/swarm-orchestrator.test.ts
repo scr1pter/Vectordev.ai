@@ -173,8 +173,14 @@ describe("swarm lifecycle", () => {
     expect(stopped.logs.some((log) => log.includes("fallback"))).toBe(false)
   })
 
-  // The planner reports busy once, then idle, and its context holds `answer` as the newest text.
-  async function plan(answer: unknown) {
+  // The planner's own answer, as the engine's session context holds it.
+  const answer = (value: unknown) => ({
+    type: "assistant",
+    content: [{ type: "text", id: "answer", text: JSON.stringify(value) }],
+  })
+
+  // The planner reports busy once, then idle, and its session context holds `messages`, oldest first.
+  async function plan(messages: unknown[]) {
     const run = await seed()
     let busy = true
     route = (url) => {
@@ -183,8 +189,7 @@ describe("swarm lifecycle", () => {
         busy = false
         return Response.json({ data: active })
       }
-      if (url.pathname === "/api/session/planner/context")
-        return Response.json({ data: [{ type: "text", text: JSON.stringify(answer) }] })
+      if (url.pathname === "/api/session/planner/context") return Response.json({ data: messages })
       return undefined
     }
     const scheduled = Promise.withResolvers<SwarmRunRecord>()
@@ -199,16 +204,18 @@ describe("swarm lifecycle", () => {
   }
 
   test("a plan with null dependencies and one task too many is folded, not replaced by the fallback", async () => {
-    const planned = await plan({
-      summary: "Five steps",
-      tasks: [
-        { id: "inspect", title: "Inspect", prompt: "Map the files", role: "explore", dependsOn: null },
-        { id: "api", title: "API", prompt: "Change the API", dependsOn: ["inspect"] },
-        { id: "ui", title: "UI", prompt: "Change the UI", dependsOn: ["inspect"] },
-        { id: "test", title: "Test", prompt: "Run the tests", role: "test", dependsOn: ["api", "ui"] },
-        { id: "review", title: "Review", prompt: "Review the diff", role: "review", dependsOn: ["test"] },
-      ],
-    })
+    const planned = await plan([
+      answer({
+        summary: "Five steps",
+        tasks: [
+          { id: "inspect", title: "Inspect", prompt: "Map the files", role: "explore", dependsOn: null },
+          { id: "api", title: "API", prompt: "Change the API", dependsOn: ["inspect"] },
+          { id: "ui", title: "UI", prompt: "Change the UI", dependsOn: ["inspect"] },
+          { id: "test", title: "Test", prompt: "Run the tests", role: "test", dependsOn: ["api", "ui"] },
+          { id: "review", title: "Review", prompt: "Review the diff", role: "review", dependsOn: ["test"] },
+        ],
+      }),
+    ])
 
     expect(planned.tasks.map((task) => task.id)).toEqual(["inspect", "api", "ui", "test"])
     expect(planned.tasks[0]?.dependsOn).toEqual([])
@@ -220,9 +227,7 @@ describe("swarm lifecycle", () => {
   })
 
   test("a rejected plan falls back, logs why, and interrupts the planner", async () => {
-    const planned = await plan({
-      tasks: [{ id: "inspect" }, { id: "build", dependsOn: ["missing"] }],
-    })
+    const planned = await plan([answer({ tasks: [{ id: "inspect" }, { id: "build", dependsOn: ["missing"] }] })])
 
     expect(planned.tasks.map((task) => task.id)).toEqual([
       "map-project",
@@ -232,6 +237,47 @@ describe("swarm lifecycle", () => {
     ])
     expect(planned.logs.some((log) => log.includes("fallback") && log.includes("unknown task missing"))).toBe(true)
     expect(requests).toContain("POST /api/session/planner/interrupt")
+  })
+
+  test("a JSON file the planner read is never taken for its plan", async () => {
+    // A read tool's result: the project's .vscode/tasks.json, whose "tasks" array would pass as a two-task graph.
+    const tasksFile = JSON.stringify({
+      version: "2.0.0",
+      tasks: [
+        { label: "build", type: "shell", command: "npm run build" },
+        { label: "test", type: "shell", command: "npm test" },
+      ],
+    })
+    const planned = await plan([
+      {
+        type: "assistant",
+        content: [
+          {
+            type: "tool",
+            id: "read",
+            name: "read",
+            state: {
+              status: "completed",
+              input: { filePath: ".vscode/tasks.json" },
+              structured: {},
+              content: [{ type: "text", text: tasksFile }],
+            },
+            time: { created: 0 },
+          },
+        ],
+      },
+      { type: "assistant", content: [{ type: "text", id: "final", text: "I could not finish the plan." }] },
+    ])
+
+    expect(planned.tasks.map((task) => task.id)).toEqual([
+      "map-project",
+      "implement-objective",
+      "validate-result",
+      "review-result",
+    ])
+    expect(
+      planned.logs.some((log) => log.includes("fallback") && log.includes("did not return a JSON task graph")),
+    ).toBe(true)
   })
 
   test("resuming an active swarm keeps its current scheduler and progress", async () => {
