@@ -15,6 +15,10 @@ import {
   readModelPlanAccount,
 } from "../../../api/_lib/model-plan-account"
 import { handleModelPlanChat } from "../../../api/_lib/model-plan-chat"
+import { handleModelPlanModels } from "../../../api/_lib/model-plan-models"
+import { handleModelPlanStatus } from "../../../api/_lib/model-plan-status"
+import { ModelPlans } from "@vectordevai/core/model-plans"
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 
 // External HTTP boundaries are local fixtures; leases and rate-limit Lua run
 // against a real, isolated Redis/Valkey database, just as in free-models-api.
@@ -297,6 +301,9 @@ const fetcher: typeof fetch = Object.assign(
   { preconnect: fetch.preconnect },
 )
 const server = createServer((request, response) => {
+  // /chat is the gateway as the other tests call it; the /api/model-plans paths are what Vector itself requests.
+  if (request.url === "/api/model-plans/models") return void handleModelPlanModels(request, response, fetcher)
+  if (request.url === "/api/model-plans/status") return void handleModelPlanStatus(request, response, fetcher)
   void handleModelPlanChat(request, response, fetcher)
 })
 
@@ -844,5 +851,79 @@ describe("model plan HTTP inference", () => {
       expect(body).not.toContain("fixture-paid-secret")
     }
     expect(chats()).toHaveLength(3)
+  })
+})
+
+describe("Codium credits used from Vector", () => {
+  // Vector's own client code, sending what it would send to vectordev.ai to the gateway handlers here instead.
+  const forward = (url: string, init: RequestInit) => {
+    if (!url.startsWith(`${ModelPlanStatus.SITE}/api/model-plans/`)) throw new Error(`Unexpected destination ${url}`)
+    return fetch(`${state.origin}${url.slice(ModelPlanStatus.SITE.length)}`, init)
+  }
+  const turn = (token: string) => {
+    const catalog = ModelPlans.createClient({ request: forward })
+    return ModelPlans.createFetch({
+      modelID: model.id,
+      credential: async () => token,
+      catalog: (value) => catalog.catalog(value, { wait: true }),
+      request: forward,
+    })("https://vectordev.ai/api/model-plans/chat/completions", {
+      method: "POST",
+      body: JSON.stringify({ model: model.id, messages: [{ role: "user", content: "Fix the failing test" }] }),
+    })
+  }
+
+  test("a signed-in turn is debited from the monthly credits, and running out stops at Buy credits", async () => {
+    await paid()
+    const token = mintCliToken(user).token
+    const catalog = await ModelPlans.createClient({ request: forward }).catalog(token, { force: true })
+    expect(catalog).toEqual({ enabled: true, models: [model] })
+
+    state.charge = 0.5
+    const answer = await turn(token)
+    expect(answer.status).toBe(200)
+    const usage = (await answer.text())
+      .split("\n\n")
+      .map((frame) => frame.replace(/^data: /, ""))
+      .filter((frame) => frame.startsWith("{"))
+      .map((frame) => ModelPlans.usageCost(JSON.parse(frame)))
+      .find((cost) => cost !== undefined)
+    // What the step records as its cost is exactly what the account's key was charged.
+    expect(usage).toBe(0.5)
+    expect(chats()).toHaveLength(1)
+    expect(chats()[0]!.headers.get("authorization")).toBe("Bearer fixture-paid-secret-1")
+    expect(JSON.stringify(chats()[0]!.body)).not.toContain(token)
+    const status = await ModelPlanStatus.fetchStatus(token, forward)
+    expect(status).toMatchObject({ signedIn: true, enabled: true, plan: { name: "Codium 10", left: 0.9 } })
+    expect(ModelPlanStatus.describe(status)[0]).toContain("90% of this month's credits left")
+
+    // The monthly credits run out: the next turn is refused before any model request, with Buy credits.
+    keys.get("hash_fixture1")!.data.usage = 5
+    const refused = await turn(token)
+    expect(refused.status).toBe(402)
+    expect(ModelPlans.gatewayFailure(refused.status, await refused.text())).toMatchObject({
+      kind: "credits",
+      message: expect.stringContaining(`Buy credits at ${ModelPlanStatus.PURCHASE_URL}`),
+    })
+    expect(chats()).toHaveLength(1)
+    const empty = await ModelPlanStatus.fetchStatus(token, forward)
+    expect(empty).toMatchObject({ plan: { left: 0 }, empty: true })
+    expect(ModelPlanStatus.notice(empty)?.kind).toBe("empty")
+    state.charge = 0
+  })
+
+  test("while sales are off Vector lists no Codium and a turn sends nothing", async () => {
+    await paid()
+    process.env.MODEL_PLANS_ENABLED = "false"
+    const token = mintCliToken(user).token
+    expect(await ModelPlans.createClient({ request: forward }).catalog(token, { force: true })).toEqual({
+      enabled: false,
+      models: [],
+    })
+    const refused = await turn(token)
+    expect(ModelPlans.gatewayFailure(refused.status, await refused.text())).toMatchObject({ kind: "unavailable" })
+    expect(chats()).toHaveLength(0)
+    const status = await ModelPlanStatus.fetchStatus(token, forward)
+    expect(ModelPlanStatus.notice(status)).toEqual({ kind: "unavailable", text: "Vector Codium is not available yet." })
   })
 })
