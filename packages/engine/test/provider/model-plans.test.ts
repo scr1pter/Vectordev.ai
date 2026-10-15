@@ -150,6 +150,10 @@ test("Codium's own default is the first model its catalog lists, not the last by
   expect(Provider.defaultModelIDs({ [id]: Provider.fromModelPlans(launch) })).toEqual({
     [id]: "deepseek/deepseek-v4.1-flash",
   })
+  // The pickers keep this order, so the provider list sent to them must keep it too.
+  expect(Object.keys(Provider.toClientInfo(Provider.fromModelPlans(launch)).models)).toEqual(
+    launch.map((model) => model.id),
+  )
 })
 
 it.instance("a Codium turn streams text and a tool call through the gateway and records its tokens, not dollars", () =>
