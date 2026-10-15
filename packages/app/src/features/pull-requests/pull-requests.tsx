@@ -672,6 +672,8 @@ export function PullRequests(props: {
   const [busy, setBusy] = createSignal<string>()
   // What the running review's hidden sessions have spent so far.
   const [liveSpend, setLiveSpend] = createSignal<ReviewSpend>()
+  // A review that ended without a result either was stopped by the user or failed, and its spend line says which.
+  const [reviewFailed, setReviewFailed] = createSignal(false)
   // Set by "Sign in again" for automatic reviews: the next GitHub sign-in also asks for the workflow permission.
   const [workflowSignIn, setWorkflowSignIn] = createSignal(false)
   const [error, setError] = createSignal<string>()
@@ -919,6 +921,7 @@ export function PullRequests(props: {
     setReview(undefined)
     setCheckout(undefined)
     setLiveSpend(undefined)
+    setReviewFailed(false)
     setSeverityFilter("all")
     setDismissed({})
     setMenuFor(undefined)
@@ -1042,6 +1045,7 @@ export function PullRequests(props: {
     setReview(undefined)
     setCheckout(undefined)
     setLiveSpend(undefined)
+    setReviewFailed(false)
     setPosted(false)
     setConfirmingMerge(false)
     // Commits pushed since the pull request was opened are reviewed too, and the review is pinned to the newest one.
@@ -1153,7 +1157,9 @@ export function PullRequests(props: {
         },
       })
       .catch((cause: unknown) => {
-        if (current()) setError(pullRequestErrorMessage(cause))
+        if (!current()) return undefined
+        setError(pullRequestErrorMessage(cause))
+        setReviewFailed(!controller.signal.aborted)
         return undefined
       })
 
@@ -1349,7 +1355,7 @@ export function PullRequests(props: {
               : review()
                 ? `Reviewed ${subject.pr ? review()!.head.slice(0, 7) : "your uncommitted changes"} · ${reviewFooter(review()!)}`
                 : liveSpend()
-                  ? `Review stopped · ${reviewSpendText(liveSpend()!)}`
+                  ? `${reviewFailed() ? "Review failed" : "Review stopped"} · ${reviewSpendText(liveSpend()!)}`
                   : "Not reviewed yet"}
           </div>
         </div>
