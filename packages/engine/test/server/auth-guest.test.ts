@@ -376,6 +376,48 @@ test("guest session lists and replay routes stay within canonical claims", async
     expect(claimedRead.status).toBe(200)
     expect(((await claimedRead.json()) as { directory: string }).directory).toBe(other.path)
 
+    // The router also matches these spellings; scope must follow the session it matched, not a re-parsed path.
+    const origin = new URL(listener.url)
+    const statusOf = (method: string, target: string) =>
+      new Promise<number>((resolve, reject) => {
+        const socket = connect(Number(origin.port), origin.hostname)
+        let head = ""
+        socket.on("data", (chunk) => {
+          head += chunk.toString()
+          if (!head.includes("\r\n")) return
+          socket.destroy()
+          resolve(Number(head.split(" ")[1]))
+        })
+        socket.on("error", reject)
+        socket.write(
+          [
+            `${method} ${target} HTTP/1.1`,
+            `Host: ${origin.host}`,
+            `Authorization: ${guest.authorization}`,
+            "Content-Type: application/json",
+            "Content-Length: 2",
+            "Connection: close",
+            "",
+            "{}",
+          ].join("\r\n"),
+        )
+      })
+    const scoped = `directory=${encodeURIComponent(tmp.path)}`
+    const spellings = [
+      ["GET", `/SESSION/${escaped}`],
+      ["PATCH", `/SESSION/${escaped}`],
+      ["GET", `//session/${escaped}`],
+      ["PATCH", `/session//${escaped}`],
+      ["GET", `/Session/${escaped}/message`],
+      ["GET", `/session/${escaped};/../${allowed}`],
+      ["PATCH", `/session/${escaped};/../${allowed}`],
+    ]
+    const spelled = await Promise.all(
+      spellings.map(async ([method, target]) => [method, target, await statusOf(method, `${target}?${scoped}`)]),
+    )
+    expect(spelled).toEqual(spellings.map(([method, target]) => [method, target, 403]))
+    expect(await statusOf("GET", `/SESSION/${allowed}?${scoped}`)).toBe(200)
+
     const deniedMutation = await fetch(new URL(`/session/${escaped}`, listener.url), {
       method: "PATCH",
       headers: { ...guest, "content-type": "application/json" },
