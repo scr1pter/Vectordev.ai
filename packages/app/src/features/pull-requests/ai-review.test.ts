@@ -494,6 +494,32 @@ describe("runReview", () => {
     })
   })
 
+  test("a failed review whose security reviewer's history is unreadable states its spend as a floor", async () => {
+    const progress: Parameters<NonNullable<ReviewRunInput["onProgress"]>>[0][] = []
+    const { client } = fakeClient({
+      files: { "src/list.ts": HEAD, ...NO_VERIFY },
+      reply: () => answer(undefined, 0.02),
+    })
+    const messages = client.session.messages
+    client.session.messages = async (input) => {
+      if (input.sessionID === "ses_2") throw new Error("history read failed")
+      return messages(input)
+    }
+    const error = await run(client, {
+      diff: join(listDiff, authDiff),
+      onProgress: (event) => progress.push(event),
+    }).then(
+      () => "",
+      (cause: Error) => cause.message,
+    )
+    const spend = progress.findLast((event) => event.type === "spend")
+    expect(spend).toEqual({ type: "spend", costUsd: 0.04, tokens: 2400, partial: true })
+    if (spend?.type === "spend") expect(reviewSpendText(spend)).toBe("At least $0.04 · 2.4k tokens")
+    expect(error).toBe(
+      "Vector could not finish this review: No review came back. At least $0.04 and 2.4k tokens so far.",
+    )
+  })
+
   test("a failed unpriced review reports its tokens and unknown cost", async () => {
     const progress: Parameters<NonNullable<ReviewRunInput["onProgress"]>>[0][] = []
     const { client } = fakeClient({
