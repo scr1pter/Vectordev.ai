@@ -629,12 +629,7 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
         Number.isFinite(key.usage) &&
         key.usage >= 0
       ) {
-        if (key.usage >= paid.plan.credits || paid.plan.credits - key.usage < requiredCredits)
-          throw new ApiError(
-            402,
-            "MODEL_PLAN_EXHAUSTED",
-            "Your included model credits are used up. They renew at the next billing period.",
-          )
+        requireMonthlyCredits(paid.plan.credits, key.usage, requiredCredits)
         return revealModelPlanKey(existing.key.encrypted, `${id}:${paid.id}:${paid.start}`)
       }
     }
@@ -678,12 +673,7 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
           key.usage < 0
         )
           throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your model allowance could not be verified.")
-        if (key.usage >= paid.plan.credits || paid.plan.credits - key.usage < requiredCredits)
-          throw new ApiError(
-            402,
-            "MODEL_PLAN_EXHAUSTED",
-            "Your included model credits are used up. They renew at the next billing period.",
-          )
+        requireMonthlyCredits(paid.plan.credits, key.usage, requiredCredits)
         if (
           key.disabled ||
           key.limit !== paid.plan.credits ||
@@ -748,6 +738,24 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
     },
     fetcher,
   )
+}
+
+// Spent credits and credits too few for this request's longest reply are different answers: a shorter conversation
+// or a model that uses fewer credits can still be served by the second. Both keep the code that lets purchased
+// credits cover the request instead.
+function requireMonthlyCredits(credits: number, usage: number, requiredCredits: number) {
+  if (usage >= credits)
+    throw new ApiError(
+      402,
+      "MODEL_PLAN_EXHAUSTED",
+      "Your included model credits are used up. They renew at the next billing period.",
+    )
+  if (credits - usage < requiredCredits)
+    throw new ApiError(
+      402,
+      "MODEL_PLAN_EXHAUSTED",
+      "The monthly credits left cannot cover the longest reply this request could get. Choose a model that uses fewer credits, shorten the conversation, or add a top-up.",
+    )
 }
 
 export async function modelPlanCheckout(

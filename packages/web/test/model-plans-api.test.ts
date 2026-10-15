@@ -16,7 +16,7 @@ import {
 } from "../../../api/_lib/model-plan-account"
 import { handleModelPlanChat } from "../../../api/_lib/model-plan-chat"
 import { handleModelPlanModels } from "../../../api/_lib/model-plan-models"
-import { handleModelPlanStatus } from "../../../api/_lib/model-plan-status"
+import { handleModelPlanStatus, modelPlanBalance } from "../../../api/_lib/model-plan-status"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 
@@ -825,6 +825,39 @@ describe("model plan HTTP inference", () => {
     expect(response.status).toBe(402)
     expect(await response.json()).toMatchObject({ error: { code: "MODEL_PLAN_EXHAUSTED" } })
     expect(chats()).toHaveLength(0)
+  })
+
+  test("credits too few for the request's longest reply say so, unlike credits that are used up", async () => {
+    await paid()
+    await modelPlanCredential(user.id, fetcher)
+    // The fixture model's longest reply, 2,048 output tokens at $2 per million, costs $0.004096 before any input.
+    keys.get("hash_fixture1")!.data.usage = 5 - 0.003
+    const short = await chat()
+    expect(short.status).toBe(402)
+    const body = await short.json()
+    expect(body).toEqual({
+      error: {
+        code: "MODEL_PLAN_EXHAUSTED",
+        message:
+          "The monthly credits left cannot cover the longest reply this request could get. Choose a model that uses fewer credits, shorten the conversation, or add a top-up.",
+      },
+    })
+    // Vector's client offers Buy credits with it, as for any shortfall.
+    expect(ModelPlans.gatewayFailure(402, JSON.stringify(body))).toMatchObject({ kind: "credits" })
+    // The account's status agrees: too few left for a reply, not merely running low.
+    expect(modelPlanBalance(await modelPlanStatus(user.id, fetcher))).toMatchObject({ empty: true, low: false })
+    // A request small enough for what is left is still served.
+    const small = await chat({ model: model.id, max_tokens: 64, messages: [{ role: "user", content: "A title" }] })
+    expect(small.status).toBe(200)
+    expect(chats()).toHaveLength(1)
+    keys.get("hash_fixture1")!.data.usage = 5
+    expect(await (await chat()).json()).toEqual({
+      error: {
+        code: "MODEL_PLAN_EXHAUSTED",
+        message: "Your included model credits are used up. They renew at the next billing period.",
+      },
+    })
+    expect(chats()).toHaveLength(1)
   })
 
   test("normalizes upstream capacity and busy failures without leaking credentials or retrying", async () => {
