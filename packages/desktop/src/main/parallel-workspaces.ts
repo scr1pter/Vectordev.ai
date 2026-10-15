@@ -153,6 +153,9 @@ export type ParallelWorkspaceRecord = {
   actualCost?: string
   finalSummary: string
   mergeState: "none" | "merged" | "discarded"
+  // Set just before a merge starts writing into the source. With mergeState still "none" it means Vector stopped
+  // part-way through those writes, so the source may already hold some of this workspace's changes.
+  mergeStartedAt?: string
   logs: string[]
   terminalOutput: string[]
   browserResults: string[]
@@ -2632,6 +2635,12 @@ async function cleanupIsolation(record: ParallelWorkspaceRecord) {
   await rm(dirname(record.isolatedPath), { recursive: true, force: true }).catch(() => undefined)
 }
 
+// Written before the first change reaches the source, so after a restart a merge Vector stopped part-way through can
+// be told apart from one that never began.
+function recordMergeStarted(id: string) {
+  updateRecord(id, (current) => ({ ...current, mergeStartedAt: now(), lastActivityAt: now() }))
+}
+
 async function mergeGitWorktree(record: ParallelWorkspaceRecord, force: boolean, checkpointPath: string) {
   const patch = (
     await runGit(["diff", "--binary", record.baseCommit ?? "HEAD", "--"], record.isolatedPath, { allowFailure: true })
@@ -2658,15 +2667,25 @@ async function mergeGitWorktree(record: ParallelWorkspaceRecord, force: boolean,
     )
   }
 
-  if (patch.trim()) {
+  // Finishing a merge Vector stopped part-way through: the patch may already be in the source, where it now applies
+  // only in reverse. Applying it again would fail, so only the untracked copies are redone.
+  const landed =
+    Boolean(record.mergeStartedAt && patch.trim()) &&
+    !(await runGit(["apply", "--reverse", "--check", "-"], record.sourcePath, { allowFailure: true, input: patch }))
+      .failed
+  const pending = patch.trim() && !landed ? patch : ""
+  if (pending) {
     const check = await runGit(["apply", "--3way", "--check", "-"], record.sourcePath, {
       allowFailure: true,
-      input: patch,
+      input: pending,
     })
     if (check.failed && !force) {
       throw new Error(`Merge conflict detected. Review before forcing merge.\n${check.stderr.trim()}`)
     }
-    const applied = await runGit(["apply", "--3way", "-"], record.sourcePath, { allowFailure: true, input: patch })
+  }
+  recordMergeStarted(record.id)
+  if (pending) {
+    const applied = await runGit(["apply", "--3way", "-"], record.sourcePath, { allowFailure: true, input: pending })
     if (applied.failed) throw new Error(applied.stderr || "Git could not apply the workspace diff.")
   }
 
@@ -2685,13 +2704,17 @@ async function mergeCopy(record: ParallelWorkspaceRecord, force: boolean, checkp
   for (const file of refreshed.changedFiles) {
     const sourceHash = await hashFile(join(record.sourcePath, file)).catch(() => "missing")
     const baselineHash = record.baselineHashes?.[file] ?? "missing"
-    if (sourceHash !== baselineHash) conflicts.push(file)
+    // A source file that already holds this workspace's version loses nothing when it is copied again. That is the
+    // case for every file a merge Vector stopped part-way through had already copied.
+    if (sourceHash === baselineHash) continue
+    if (sourceHash !== (await hashFile(join(record.isolatedPath, file)).catch(() => "missing"))) conflicts.push(file)
   }
   if (conflicts.length && !force) {
     throw new Error(
       `Merge conflict detected in ${conflicts.slice(0, 8).join(", ")}. Main project changed since workspace creation.`,
     )
   }
+  recordMergeStarted(record.id)
   for (const file of refreshed.changedFiles) {
     const from = join(record.isolatedPath, file)
     const to = join(record.sourcePath, file)
@@ -2754,6 +2777,10 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
   if (refreshed.mergeState === "merged") return refreshed
   if (refreshed.mergeState === "discarded") throw new Error("Discarded workspaces cannot be merged.")
   if (!refreshed.changedFiles.length) throw new Error("There are no changes to merge.")
+  // A copy merge reads a missing file as one the agent deleted, so merging from a checkout that is gone would delete
+  // those files from the source.
+  if (!(await stat(refreshed.isolatedPath).catch(() => undefined)))
+    throw new Error("This workspace's isolated copy no longer exists, so its changes cannot be merged.")
   const record = await validateBeforeIntegration(refreshed, force)
   const checkpointPath = await createCheckpoint(record)
   try {
@@ -2772,6 +2799,17 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
     syncBackgroundTask(failed, "Merge was blocked by a conflict or failed patch.")
     return failed
   }
+  // Every change is in the source now. Record that before the cleanup, which can take seconds: Vector closing during it
+  // must not leave a workspace that looks unmerged, or a swarm would run its task again on top of its own changes.
+  // Closing the record compacts its file list away, so the summary below counts from `record`.
+  updateRecord(id, (current) => ({
+    ...current,
+    status: "merged",
+    mergeState: "merged",
+    checkpointPath,
+    lastAction: "Merged; removing the isolated copy",
+    lastActivityAt: now(),
+  }))
   await cleanupIsolation(record)
 
   // Optional real commit: the merge already landed in main's working tree
@@ -2811,7 +2849,7 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
       : "Merged into main project",
     lastActivityAt: now(),
     finalSummary: [
-      `Merged ${current.changedFiles.length} changed file${current.changedFiles.length === 1 ? "" : "s"} into the main project.`,
+      `Merged ${record.changedFiles.length} changed file${record.changedFiles.length === 1 ? "" : "s"} into the main project.`,
       commitNote,
       commitError,
     ]
