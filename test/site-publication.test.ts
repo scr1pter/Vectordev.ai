@@ -36,26 +36,36 @@ test("publishes browser assets while excluding server code and nested private ar
   expect(await readFile(path.join(directory, "404.html"), "utf8")).toBe("public")
 })
 
-test("keeps noindex pages such as the unlisted investor page out of the published sitemap", async () => {
+test.each([
+  ["a resolved path", (directory: string) => directory],
+  ["a path with a trailing slash", (directory: string) => directory + path.sep],
+])("keeps noindex pages and pages the prune deletes out of the published sitemap, given %s", async (_, given) => {
   const directory = await mkdtemp(path.join(tmpdir(), "vector-publication-"))
   directories.push(directory)
-  await mkdir(path.join(directory, "investors"))
-  await mkdir(path.join(directory, "docs"))
-  await writeFile(path.join(directory, "index.html"), "<html><head><title>Vector</title></head></html>")
-  await writeFile(path.join(directory, "docs", "index.html"), "<html><head><title>Docs</title></head></html>")
-  await writeFile(
-    path.join(directory, "investors", "index.html"),
-    '<html><head><meta name="robots" content="noindex, nofollow"></head></html>',
+  await Promise.all(
+    ["investors", "docs", "download", "dev/account-preview"].map((page) =>
+      mkdir(path.join(directory, page), { recursive: true }),
+    ),
+  )
+  await Promise.all(
+    [
+      ["index.html", "<html><head><title>Vector</title></head></html>"],
+      ["docs/index.html", "<html><head><title>Docs</title></head></html>"],
+      ["download/index.html", "<html><head><title>Download</title></head></html>"],
+      // /dev is not on the keep list, so the prune deletes this page even though it is indexable.
+      ["dev/account-preview/index.html", "<html><head><title>Preview</title></head></html>"],
+      ["investors/index.html", '<html><head><meta name="robots" content="noindex, nofollow"></head></html>'],
+    ].map(([file, html]) => writeFile(path.join(directory, file), html)),
   )
   const url = (page: string) => `<url><loc>https://vectordev.ai/${page}</loc></url>`
   await writeFile(
     path.join(directory, "sitemap-0.xml"),
-    `<?xml version="1.0" encoding="UTF-8"?><urlset>${url("")}${url("docs/")}${url("investors/")}${url("download/")}</urlset>`,
+    `<?xml version="1.0" encoding="UTF-8"?><urlset>${["", "docs/", "investors/", "dev/account-preview/", "download/", "missing/"].map(url).join("")}</urlset>`,
   )
 
-  await pruneVectorSite(directory)
+  await pruneVectorSite(given(directory))
 
   expect(await readFile(path.join(directory, "sitemap-0.xml"), "utf8")).toBe(
-    `<?xml version="1.0" encoding="UTF-8"?><urlset>${url("")}${url("docs/")}${url("download/")}</urlset>`,
+    `<?xml version="1.0" encoding="UTF-8"?><urlset>${["", "docs/", "download/"].map(url).join("")}</urlset>`,
   )
 })
