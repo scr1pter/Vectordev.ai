@@ -1,29 +1,18 @@
 import path from "node:path"
-import { pathToFileURL } from "node:url"
 import type { Stream as NodeStream } from "node:stream"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { type Tool } from "ai"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
-import { Client, type ClientOptions } from "@modelcontextprotocol/sdk/client/index.js"
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
-import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
-import {
-  ErrorCode,
-  ListRootsRequestSchema,
-  type LoggingMessageNotification,
-  LoggingMessageNotificationSchema,
-  McpError,
-  type Tool as MCPToolDef,
-  ToolListChangedNotificationSchema,
-} from "@modelcontextprotocol/sdk/types.js"
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import type { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
+import type { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
+import type { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
+import type { LoggingMessageNotification, Tool as MCPToolDef } from "@modelcontextprotocol/sdk/types.js"
 import { Config } from "@/config/config"
 import { ConfigMCPV1 } from "@vectordevai/core/v1/config/mcp"
 import { NamedError } from "@vectordevai/core/util/error"
-import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { withTimeout } from "@/util/timeout"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Redaction } from "@vectordevai/core/redaction"
@@ -81,25 +70,8 @@ export function drainStderr(stream: NodeStream | null | undefined, log: (text: s
   })
 }
 
-/**
- * True when a request failed because the server did not answer in time. The SDK
- * also reports an aborted request as a RequestTimeout McpError, so a cancelled
- * tool call is excluded through its abort signal.
- */
-export function isRequestTimeout(error: unknown, signal?: AbortSignal) {
-  if (signal?.aborted) return false
-  return (
-    error instanceof McpError && error.code === ErrorCode.RequestTimeout && /timed out|timeout/i.test(error.message)
-  )
-}
-const CLIENT_OPTIONS = {
-  capabilities: {
-    // sampling: {},
-    // elicitation: {},
-    roots: {},
-    // tasks: {},
-  },
-} satisfies ClientOptions
+// The SDK loads with the first connection rather than with the engine; see ./sdk.
+const loadSdk = Effect.promise(() => import("./sdk"))
 
 export const Resource = Schema.Struct({
   name: Schema.String,
@@ -123,14 +95,6 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("MCP
 }) {}
 
 type MCPClient = Client
-
-function createClient(directory: string) {
-  const client = new Client({ name: "vector", version: InstallationVersion }, CLIENT_OPTIONS)
-  client.setRequestHandler(ListRootsRequestSchema, () =>
-    Promise.resolve({ roots: [{ uri: pathToFileURL(directory).href }] }),
-  )
-  return client
-}
 
 const StatusConnected = Schema.Struct({ status: Schema.Literal("connected") }).annotate({
   identifier: "MCPStatusConnected",
@@ -330,12 +294,13 @@ const layer = Layer.effect(
      */
     const connectTransport = Effect.fn("MCP.connectTransport")(function* (transport: Transport, timeout: number) {
       const directory = yield* InstanceState.directory
+      const sdk = yield* loadSdk
       return yield* Effect.acquireUseRelease(
         Effect.succeed(transport),
         (t) =>
           Effect.tryPromise({
             try: () => {
-              const client = createClient(directory)
+              const client = sdk.createClient(directory)
               return withTimeout(client.connect(t), timeout).then(() => client)
             },
             catch: (e) => (e instanceof Error ? e : new Error(String(e))),
@@ -381,17 +346,18 @@ const layer = Layer.effect(
       }
 
       const headers = resolveMcpHeaders(mcp.headers, process.env, secrets)
+      const sdk = yield* loadSdk
       const transports: Array<{ name: string; transport: TransportWithAuth }> = [
         {
           name: "StreamableHTTP",
-          transport: new StreamableHTTPClientTransport(url, {
+          transport: new sdk.StreamableHTTPClientTransport(url, {
             authProvider,
             requestInit: headers ? { headers } : undefined,
           }),
         },
         {
           name: "SSE",
-          transport: new SSEClientTransport(url, {
+          transport: new sdk.SSEClientTransport(url, {
             authProvider,
             requestInit: headers ? { headers } : undefined,
           }),
@@ -407,7 +373,7 @@ const layer = Layer.effect(
           Effect.catch((error) => {
             const lastError = error instanceof Error ? error : new Error(String(error))
             const isAuthError =
-              error instanceof UnauthorizedError || (authProvider && lastError.message.includes("OAuth"))
+              error instanceof sdk.UnauthorizedError || (authProvider && lastError.message.includes("OAuth"))
 
             if (isAuthError) {
               if (lastError.message.includes("registration") || lastError.message.includes("client_id")) {
@@ -471,7 +437,8 @@ const layer = Layer.effect(
           )
         : undefined
       const bridge = yield* EffectBridge.make()
-      const transport = new StdioClientTransport({
+      const sdk = yield* loadSdk
+      const transport = new sdk.StdioClientTransport({
         stderr: "pipe",
         command: cmd,
         args,
@@ -563,7 +530,14 @@ const layer = Layer.effect(
       Effect.catch(() => Effect.succeed([] as number[])),
     )
 
-    function watch(s: State, name: string, client: MCPClient, bridge: EffectBridge.Shape, timeout?: number) {
+    function watch(
+      sdk: typeof import("./sdk"),
+      s: State,
+      name: string,
+      client: MCPClient,
+      bridge: EffectBridge.Shape,
+      timeout?: number,
+    ) {
       client.onclose = () => {
         if (s.clients[name] !== client) return
         delete s.clients[name]
@@ -578,12 +552,12 @@ const layer = Layer.effect(
         )
       }
 
-      client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) =>
+      client.setNotificationHandler(sdk.LoggingMessageNotificationSchema, (notification) =>
         bridge.promise(serverLog(name, notification.params)),
       )
 
       if (!client.getServerCapabilities()?.tools) return
-      client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
+      client.setNotificationHandler(sdk.ToolListChangedNotificationSchema, async () => {
         if (s.clients[name] !== client || s.status[name]?.status !== "connected") return
 
         const listed = await bridge.promise(McpCatalog.defs(client, timeout))
@@ -640,7 +614,8 @@ const layer = Layer.effect(
               clients,
               (client) =>
                 Effect.gen(function* () {
-                  const pid = client.transport instanceof StdioClientTransport ? client.transport.pid : null
+                  const sdk = yield* loadSdk
+                  const pid = client.transport instanceof sdk.StdioClientTransport ? client.transport.pid : null
                   if (typeof pid === "number") {
                     const pids = yield* descendants(pid)
                     for (const dpid of pids) {
@@ -678,10 +653,11 @@ const layer = Layer.effect(
               const result = yield* create(key, mcp)
               s.status[key] = result.status
               if (result.mcpClient) {
+                const sdk = yield* loadSdk
                 s.clients[key] = result.mcpClient
                 s.defs[key] = result.defs!
                 if (result.instructions) s.instructions[key] = result.instructions
-                watch(s, key, result.mcpClient, bridge, mcp.timeout)
+                watch(sdk, s, key, result.mcpClient, bridge, mcp.timeout)
               }
             }),
           { concurrency: "unbounded" },
@@ -719,7 +695,8 @@ const layer = Layer.effect(
       // chance to answer, so leave the strike count where it was rather than
       // letting a cancel between two timeouts hide a wedged server forever.
       if (signal?.aborted) return
-      if (!isRequestTimeout(error, signal)) {
+      const sdk = yield* loadSdk
+      if (!sdk.isRequestTimeout(error, signal)) {
         delete s.timeouts[name]
         return
       }
@@ -745,6 +722,7 @@ const layer = Layer.effect(
       timeout?: number,
     ) {
       const bridge = yield* EffectBridge.make()
+      const sdk = yield* loadSdk
       const previous = s.clients[name]
       s.status[name] = { status: "connected" }
       s.clients[name] = client
@@ -752,7 +730,7 @@ const layer = Layer.effect(
       s.defs[name] = listed
       if (instructions) s.instructions[name] = instructions
       else delete s.instructions[name]
-      watch(s, name, client, bridge, timeout)
+      watch(sdk, s, name, client, bridge, timeout)
       if (previous) yield* Effect.tryPromise(() => previous.close()).pipe(Effect.ignore)
       return s.status[name]
     })
@@ -1143,7 +1121,8 @@ const layer = Layer.effect(
       )
 
       const secrets = (yield* auth.get(mcpName))?.secrets ?? {}
-      const transport = new StreamableHTTPClientTransport(url, {
+      const sdk = yield* loadSdk
+      const transport = new sdk.StreamableHTTPClientTransport(url, {
         authProvider,
         requestInit: mcpConfig.headers
           ? { headers: resolveMcpHeaders(mcpConfig.headers, process.env, secrets) }
@@ -1153,7 +1132,7 @@ const layer = Layer.effect(
 
       return yield* Effect.tryPromise({
         try: () => {
-          const client = createClient(directory)
+          const client = sdk.createClient(directory)
           return client.connect(transport).then(async () => {
             await authProvider.commit()
             return { authorizationUrl: "", oauthState, client } satisfies AuthResult
@@ -1162,7 +1141,7 @@ const layer = Layer.effect(
         catch: (error) => error,
       }).pipe(
         Effect.catch((error) => {
-          if (error instanceof UnauthorizedError && capturedUrl) {
+          if (error instanceof sdk.UnauthorizedError && capturedUrl) {
             pendingOAuthTransports.set(mcpName, { transport, provider: authProvider })
             return Effect.succeed({ authorizationUrl: capturedUrl.toString(), oauthState } satisfies AuthResult)
           }

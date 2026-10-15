@@ -12,6 +12,8 @@ const FEATURE_ONLY = [
   "bonjour-service",
   // turndown's DOM, for webfetch markdown conversion
   "@mixmark-io/domino",
+  // MCP servers: the SDK, its own zod copy and its JSON Schema validator
+  "@modelcontextprotocol/sdk",
   // GitLab models
   "gitlab-ai-provider",
   // the experimental OpenTelemetry exporter

@@ -1,19 +1,10 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js"
-import {
-  CallToolResultSchema,
-  ListToolsResultSchema,
-  ToolSchema,
-  type Tool as MCPToolDef,
-} from "@modelcontextprotocol/sdk/types.js"
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import type { Tool as MCPToolDef } from "@modelcontextprotocol/sdk/types.js"
 import { dynamicTool, jsonSchema, type JSONSchema7, type Tool } from "ai"
 import { Effect } from "effect"
 
 const DEFAULT_TIMEOUT = 30_000
 const MAX_LIST_PAGES = 1_000
-
-const TolerantListToolsResultSchema = ListToolsResultSchema.extend({
-  tools: ToolSchema.omit({ outputSchema: true }).array(),
-})
 
 export async function paginate<T, R extends { nextCursor?: string }>(
   list: (cursor?: string) => Promise<R>,
@@ -56,6 +47,8 @@ export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: numbe
     description: mcpTool.description ?? "",
     inputSchema: jsonSchema(inputSchema),
     execute: async (args: unknown, options) => {
+      // Clients are created through ./sdk, so by now this resolves to the module already loaded.
+      const { CallToolResultSchema } = await import("./sdk")
       const result = await client
         .callTool(
           {
@@ -168,6 +161,7 @@ function listTools(client: Client, timeout: number) {
             return await client.listTools(params, { timeout })
           } catch (error) {
             if (!(error instanceof Error) || !isOutputSchemaValidationError(error)) throw error
+            const { TolerantListToolsResultSchema } = await import("./sdk")
             return client.request({ method: "tools/list", params }, TolerantListToolsResultSchema, { timeout })
           }
         },

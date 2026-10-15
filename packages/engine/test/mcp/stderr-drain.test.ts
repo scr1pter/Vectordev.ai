@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test"
 import path from "node:path"
 import { PassThrough } from "node:stream"
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js"
-import { drainStderr, isRequestTimeout } from "@/mcp/index"
+import { drainStderr } from "@/mcp/index"
+import { isRequestTimeout } from "@/mcp/sdk"
 
 describe("drainStderr", () => {
   test("consumes stderr so the pipe never backs up and bounds what it logs", async () => {
