@@ -787,6 +787,35 @@ describe("runReview", () => {
     expect(unpriced).toContain("Double-checking 1 finding… 1.2k tokens so far.")
   })
 
+  test("runs on Vector Codium only when the person chose it, since it spends their credits", async () => {
+    const codium: ReviewModel = {
+      providerID: "vector-plan",
+      modelID: "deepseek/deepseek-v4.1-flash",
+      context: 262_144,
+      price: { input: 0.3, output: 1.2 },
+      costKind: "priced",
+    }
+    const beside = fakeClient()
+    await run(beside.client, { preferredModels: [], catalog: [codium, sonnet] })
+    expect(beside.calls.prompt[0]!.model).toEqual({ providerID: sonnet.providerID, modelID: sonnet.modelID })
+
+    const alone = fakeClient()
+    await expect(run(alone.client, { preferredModels: [], catalog: [codium] })).rejects.toThrow(
+      "Choose a Codium model for your agent",
+    )
+    expect(alone.calls.prompt).toEqual([])
+
+    const chosen = fakeClient()
+    await run(chosen.client, {
+      preferredModels: ["vector-plan/deepseek/deepseek-v4.1-flash"],
+      catalog: [codium, sonnet],
+    })
+    expect(chosen.calls.prompt[0]!.model).toEqual({ providerID: codium.providerID, modelID: codium.modelID })
+    expect(workflowModel([], [{ id: "vector-plan", models: { [codium.modelID]: { id: codium.modelID } } }])).toBe(
+      undefined,
+    )
+  })
+
   test("explains provider setup when the connected catalog is empty", async () => {
     const { client, calls } = fakeClient()
     await expect(run(client, { preferredModels: [], catalog: [] })).rejects.toThrow("Settings → Providers")

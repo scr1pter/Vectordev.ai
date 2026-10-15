@@ -1,3 +1,4 @@
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { providerUsable } from "@vectordevai/schema/provider-policy"
 import { totalTokens } from "../economics/economics-types"
@@ -371,7 +372,7 @@ export function workflowModel(
   providers: readonly (CatalogProvider & { env?: readonly string[] })[],
 ) {
   const catalog = reviewCatalog(providers)
-  const model = pickReviewModel(candidates, catalog) ?? catalog.find((item) => item.costKind === "free") ?? catalog[0]
+  const model = pickReviewModel(candidates, catalog) ?? fallbackReviewModel(catalog)
   if (!model) return undefined
   const keys = [...(providers.find((provider) => provider.id === model.providerID)?.env ?? [])]
   const name = modelName(model)
@@ -390,6 +391,15 @@ export function workflowModel(
       reason: `GitHub Actions can't sign in to ${model.providerID} with a repository secret. Choose another provider's model for your agent, or run \`vector github install\` to pick one.`,
     }
   return { model: name, keys }
+}
+
+// Without a chosen model a review runs on a free one, then on another connected model. Vector Codium spends the
+// account's credits, so a review only uses it when the person chose it for their agent or the review.
+function fallbackReviewModel(catalog: readonly ReviewModel[]) {
+  return (
+    catalog.find((item) => item.costKind === "free") ??
+    catalog.find((item) => item.providerID !== ModelPlanStatus.PROVIDER_ID)
+  )
 }
 
 // The first candidate that is a connected, supported provider model.
@@ -598,12 +608,12 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
   // The resolved model is passed explicitly to every prompt.
   const catalog = input.catalog ?? []
   const model =
-    pickReviewModel([config.model, ...(input.preferredModels ?? [])], catalog) ??
-    catalog.find((item) => item.costKind === "free") ??
-    catalog[0]
+    pickReviewModel([config.model, ...(input.preferredModels ?? [])], catalog) ?? fallbackReviewModel(catalog)
   if (!model)
     throw new Error(
-      "Connect a provider in Settings → Providers, or configure a local provider and set model in .vector/review.json.",
+      catalog.some((item) => item.providerID === ModelPlanStatus.PROVIDER_ID)
+        ? "Vectorscope runs on Vector Codium only when you choose it, since it spends your credits. Choose a Codium model for your agent, or set model in .vector/review.json."
+        : "Connect a provider in Settings → Providers, or configure a local provider and set model in .vector/review.json.",
     )
   const refusal = model?.context ? contextRefusal(modelName(model), model.context) : undefined
   if (refusal) throw new Error(refusal)

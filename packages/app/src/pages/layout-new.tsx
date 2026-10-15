@@ -24,6 +24,7 @@ import { samePolledRecords, sameWorkspaceRevisions } from "@/utils/workspace-rev
 import { modelDisplayName } from "@/utils/provider-brand"
 import { bestOwnFreeModel } from "@/utils/free-model"
 import { freeModelName } from "@vectordevai/core/free-model-choice"
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { decodeRouteSegment, projectPathFromWorkspaceRoute, sessionIDFromRouteValue } from "@/utils/project-route"
 import { taskScopeId, taskScopeSearch, type TaskScope } from "@/utils/task-scope"
 import { WORKSPACE_FILE_SAVED_EVENT, workspaceFileSavedDetail } from "@/utils/workspace-file-saved"
@@ -632,17 +633,20 @@ export default function NewLayout(props: ParentProps) {
   const byokModels = useModels()
   // What Vectorscope reviews run on, in order: an explicit review model, then the agent's own (the model last chosen
   // in its picker, as the agent launcher defaults to), then the configured default and the connected providers'
-  // defaults.
+  // defaults. Vector Codium spends the account's credits, so only a choice the person made puts a review on it.
   const reviewModels = () => {
     const config = serverSync().data.config
     return [
       config.agent?.review?.model,
       ...byokModels.recent.list().map((item) => `${item.providerID}/${item.modelID}`),
       config.model,
-      ...byokProviders.connected().map((provider) => {
-        const model = byokProviders.default()[provider.id]
-        return model ? `${provider.id}/${model}` : undefined
-      }),
+      ...byokProviders
+        .connected()
+        .filter((provider) => provider.id !== ModelPlanStatus.PROVIDER_ID)
+        .map((provider) => {
+          const model = byokProviders.default()[provider.id]
+          return model ? `${provider.id}/${model}` : undefined
+        }),
     ]
   }
   const parallelModelState: ModelSelectorModelState = {
