@@ -32,9 +32,11 @@ export const prerender = true
             From 1.99.99, Vector offers guarded access through your own free OpenRouter account.
             In Settings → Providers, choose Connect OpenRouter, then choose an eligible model under
             Models included with Vector, marked Your OpenRouter account. This personal section works while
-            Vector's shared allowance is off. Its selection is limited to explicit free variants with
-            online, tool-capable, zero-price endpoints from providers reviewed as not training on prompts:
-            Cohere, AtlasCloud, NovitaAI and ModelRun. It does not include every model OpenRouter lists as free.
+            Vector's shared allowance is off. Its selection is limited to the explicit free variants on Vector's
+            allowlist, each with online, tool-capable, zero-price endpoints from the provider allowlisted for it:
+            today Cohere's North Mini Code, served by Cohere, and Dots3-Note Preview, served by AtlasCloud.
+            A new free model is not offered until Vector adds it to the allowlist, so this is not every model
+            OpenRouter lists as free.
           </p>
           <p>
             Keep that account free: do not buy credits, add a payment method, enable automatic top-ups,
@@ -47,9 +49,9 @@ export const prerender = true
           <p>
             Prompts are processed by OpenRouter and the selected model provider. These models are not zero data
             retention: providers may keep prompts and outputs under their own policies. Vector requests that they
-            are not used for training: every request denies data collection using OpenRouter's routing controls and
-            is limited to the reviewed providers. This relies on the providers' published policies, not an
-            independent audit. It does not cover Vector's local history, OpenRouter account logging or other
+            are not used for training: every request asks OpenRouter to deny data collection, which excludes
+            endpoints OpenRouter records as training on prompts, and is limited to the allowlisted providers.
+            This relies on the providers' published policies and OpenRouter's records, not an independent audit. It does not cover Vector's local history, OpenRouter account logging or other
             connected services. Review those settings before sending confidential code.
             Other provider connections have their own terms. Releases before 1.99.99, such as desktop 1.99.8, do not
             include this route. The shared service remains off.
