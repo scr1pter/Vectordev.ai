@@ -6512,6 +6512,8 @@ export default function NewLayout(props: ParentProps) {
           setAgentDashboardOpen(true)
           void refreshTeamConversations()
         }}
+        coordinatedRuns={{ total: swarmRuns().length, running: swarmRuns().filter(isSwarmRunning).length }}
+        onCoordinatedRuns={openOrchestration}
         onPullRequests={() => setPullRequestsOpen(true)}
         onBrowser={openPreviewPanel}
         onMcp={() => void openMcpDialog()}

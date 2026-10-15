@@ -83,6 +83,9 @@ export function WorkspaceNavigation(props: {
   onMoveWorkspace: (sourceID: string, targetID: string) => void
   onCodeEditor: () => void
   onAgentDashboard: () => void
+  /** The open task's coordinated runs; the entry only shows once there is one. */
+  coordinatedRuns?: { total: number; running: number }
+  onCoordinatedRuns?: () => void
   onPullRequests: () => void
   onBrowser: () => void
   onMcp: () => void
@@ -477,6 +480,35 @@ export function WorkspaceNavigation(props: {
             </svg>
             <span>Agent Dashboard</span>
           </button>
+          {/* A coordinated run's overlay is where it is stopped, resumed, merged or discarded. Launching opens it once;
+              this brings it back after it was closed. */}
+          <Show when={props.coordinatedRuns?.total ? props.coordinatedRuns : undefined}>
+            {(runs) => (
+              <button
+                type="button"
+                data-vector-nav-item
+                data-vector-nav-coordinated-runs
+                onClick={() => props.onCoordinatedRuns?.()}
+              >
+                <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
+                  <circle cx="8" cy="3.4" r="1.6" fill="none" stroke="currentColor" stroke-width="1.15" />
+                  <circle cx="3.6" cy="12.4" r="1.6" fill="none" stroke="currentColor" stroke-width="1.15" />
+                  <circle cx="12.4" cy="12.4" r="1.6" fill="none" stroke="currentColor" stroke-width="1.15" />
+                  <path
+                    d="M7.2 4.8 4.4 11M8.8 4.8l2.8 6.2M5.2 12.4h5.6"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.15"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                <span>Coordinated runs</span>
+                <span class="ml-auto text-[11px] font-normal tabular-nums text-[color:var(--vx-workspace-text-tertiary)]">
+                  {runs().running ? `${runs().running} running` : runs().total}
+                </span>
+              </button>
+            )}
+          </Show>
           <button
             type="button"
             data-vector-nav-item
