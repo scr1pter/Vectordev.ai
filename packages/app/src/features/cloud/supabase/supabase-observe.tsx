@@ -1,4 +1,5 @@
 import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js"
+import { securityFixPrompt } from "../cloud-handoff"
 import type { LogService, SecurityReport } from "./supabase-api"
 import { failed, formatWhen, NotLinked, PanelHead, type SupabasePanelProps } from "./supabase-ui"
 import "./supabase.css"
@@ -120,7 +121,13 @@ export function SupabaseLogs(props: SupabasePanelProps & { icon: JSX.Element }) 
   )
 }
 
-export function SupabaseSecurity(props: SupabasePanelProps & { icon: JSX.Element }) {
+export function SupabaseSecurity(
+  props: SupabasePanelProps & {
+    icon: JSX.Element
+    /** Starts the agent with `prompt` as its first message. */
+    onFix?: (prompt: string) => void
+  },
+) {
   const [report, setReport] = createSignal<SecurityReport>()
   const [busy, setBusy] = createSignal(false)
 
@@ -174,6 +181,24 @@ export function SupabaseSecurity(props: SupabasePanelProps & { icon: JSX.Element
             >
               {busy() ? "Checking…" : "Run check"}
             </button>
+            <Show
+              when={
+                props.onFix &&
+                report() &&
+                (report()!.environment.length ||
+                  report()!.bundle.length ||
+                  report()!.advisors.some((item) => item.level !== "INFO"))
+              }
+            >
+              <button
+                class="cloud-button"
+                type="button"
+                disabled={busy()}
+                onClick={() => props.onFix?.(securityFixPrompt(props.projectName ?? "this project", report()!))}
+              >
+                Fix with the agent
+              </button>
+            </Show>
           </PanelHead>
           <Show when={report()}>
             {(current) => (

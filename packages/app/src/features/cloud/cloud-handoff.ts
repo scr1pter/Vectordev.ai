@@ -1,5 +1,6 @@
 import type { CloudDeployment, CloudOverview, PublishTarget } from "./cloud-api"
 import type { CloudSection } from "./cloud-console"
+import type { SecurityReport } from "./supabase/supabase-api"
 
 // How the rest of Vector hands work to Vector Cloud and back: deep links into
 // the Cloud screens, prompts that start the agent on a cloud task, and the
@@ -119,6 +120,31 @@ export function deployRepairPrompt(input: DeployEvidence) {
   ]
     .filter((line) => line !== undefined)
     .join("\n\n")
+}
+
+/**
+ * The prompt that starts the agent on what the Supabase security check found.
+ * Findings carry variable names, file paths and advisor titles, never a value.
+ */
+export function securityFixPrompt(
+  project: string,
+  report: Pick<SecurityReport, "advisors" | "environment" | "bundle">,
+) {
+  const findings = [
+    ...report.environment.map((item) => `${item.level} · the variable ${item.where} ${item.reason}`),
+    ...report.bundle.map((item) => `${item.level} · the built file ${item.where} ${item.reason}`),
+    ...report.advisors
+      .filter((item) => item.level !== "INFO")
+      .map(
+        (item) =>
+          `${item.level} · ${item.title}${item.entity ? ` · ${item.entity}` : ""}${item.remediation ? ` (${item.remediation})` : ""}`,
+      ),
+  ]
+  return [
+    `Fix what Vector Cloud's security check found on the Supabase project ${project}.`,
+    findings.join("\n"),
+    "Make database fixes, such as row level security and its policies, as migrations: write each with vector_cloud create_migration, with down SQL, and apply it with apply_migrations so I review the SQL first. For a server key in a public variable or a built file, change the code to read it only on the server, tell me which variable to rename to a server-only name in Vector Cloud > Environment variables, and say that the exposed key should be rotated; never print its value. Then run vector_cloud security_check again and report what is left.",
+  ].join("\n\n")
 }
 
 /**

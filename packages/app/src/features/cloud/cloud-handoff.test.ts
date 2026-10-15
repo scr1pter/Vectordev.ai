@@ -12,6 +12,7 @@ import {
   publishPlan,
   publishRan,
   requestComposerPrompt,
+  securityFixPrompt,
   uncommittedNote,
   type ComposerPrompt,
 } from "./cloud-handoff"
@@ -262,5 +263,32 @@ describe("cloud status", () => {
     expect(cloudStatus(overview({ latest: release, failure: { ...failure, at: "2026-10-10T09:00:00.000Z" } }))).toEqual(
       { tone: "success", label: "Preview published" },
     )
+  })
+})
+
+describe("securityFixPrompt", () => {
+  test("hands the agent every finding by name and asks for reviewed migrations, never a value", () => {
+    const prompt = securityFixPrompt("shop-db", {
+      environment: [{ where: "VITE_SUPABASE_SERVICE_KEY", reason: "is public but holds a secret key", level: "ERROR" }],
+      bundle: [{ where: "dist/assets/index.js", reason: "ships a secret key", level: "ERROR" }],
+      advisors: [
+        {
+          name: "rls_disabled_in_public",
+          title: "RLS Disabled in Public",
+          level: "ERROR",
+          entity: "public.profiles",
+          remediation: "https://supabase.com/docs/guides/database/database-linter?lint=0013_rls_disabled_in_public",
+        },
+        { name: "info_only", title: "Informational", level: "INFO" },
+      ],
+    })
+    expect(prompt).toContain("Supabase project shop-db")
+    expect(prompt).toContain("ERROR · the variable VITE_SUPABASE_SERVICE_KEY is public but holds a secret key")
+    expect(prompt).toContain("ERROR · the built file dist/assets/index.js ships a secret key")
+    expect(prompt).toContain("ERROR · RLS Disabled in Public · public.profiles")
+    expect(prompt).not.toContain("Informational")
+    expect(prompt).toContain("create_migration")
+    expect(prompt).toContain("security_check again")
+    expect(prompt).toContain("never print its value")
   })
 })

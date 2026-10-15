@@ -1835,7 +1835,7 @@ export function CloudConsole(props: {
                   <p>Supabase's security advisors and a scan for server keys in what Vector would publish.</p>
                 </div>
               </div>
-              <SupabaseSecurity {...supabasePanel} icon={sectionIcon("authentication")} />
+              <SupabaseSecurity {...supabasePanel} icon={sectionIcon("authentication")} onFix={props.onRepair} />
             </Show>
 
             {/* Build and runtime */}
