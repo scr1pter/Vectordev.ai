@@ -4,6 +4,18 @@ import { CODIUM_CATALOG_UPDATED, CODIUM_MODELS } from "./codium-catalog.js"
 
 export const MODEL_PLAN_PRICES = [10, 50, 100, 200] as const
 export const MODEL_PLAN_ROOT = "https://openrouter.ai/api/v1"
+// Generation options a client may set on a Codium request; the gateway owns every other field.
+export const MODEL_PLAN_OPTIONS = [
+  "temperature",
+  "top_p",
+  "stop",
+  "seed",
+  "tools",
+  "tool_choice",
+  "frequency_penalty",
+  "presence_penalty",
+  "response_format",
+] as const
 export const ModelPlanModel = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -16,6 +28,8 @@ export const ModelPlanModel = Schema.Struct({
   quantizations: Schema.optional(Schema.Array(Schema.Literals(["fp8", "bf16"]))),
   reasoningEffort: Schema.optional(Schema.Literals(["high"])),
   explicitCache: Schema.optional(Schema.Boolean),
+  promptTokenLimit: Schema.optional(Schema.Number),
+  options: Schema.optional(Schema.Array(Schema.Literals(MODEL_PLAN_OPTIONS))),
 })
 export type ModelPlanModel = typeof ModelPlanModel.Type
 
@@ -89,6 +103,8 @@ export function configuredPlanModels() {
         !Number.isSafeInteger(model.maxOutputTokens) ||
         model.maxOutputTokens < 1 ||
         model.maxOutputTokens > model.contextLength ||
+        (model.promptTokenLimit !== undefined &&
+          (!Number.isSafeInteger(model.promptTokenLimit) || model.promptTokenLimit < 1)) ||
         !Number.isFinite(model.inputPrice) ||
         model.inputPrice <= 0 ||
         !Number.isFinite(model.outputPrice) ||

@@ -211,7 +211,7 @@ describe("paid entitlement", () => {
 })
 
 describe("gateway request policy", () => {
-  test("reviewed model routing pins precision and effort and adds portable Haiku cache breakpoints", () => {
+  test("reviewed model routing pins precision, effort and options, and marks Haiku's cache breakpoints", () => {
     const models = configuredPlanModels()
     for (const model of models) {
       const body = modelPlanRequest(
@@ -220,19 +220,40 @@ describe("gateway request policy", () => {
           messages: [
             { role: "system", content: "Stable instructions" },
             { role: "user", content: "Fix it" },
+            {
+              role: "assistant",
+              content: null,
+              tool_calls: [{ id: "call", type: "function", function: { name: "read", arguments: "{}" } }],
+            },
+            {
+              role: "tool",
+              tool_call_id: "call",
+              content: [{ type: "text", text: "source", cache_control: { type: "ephemeral", ttl: "1h" } }],
+            },
           ],
           tool_choice: "required",
+          temperature: 0.2,
+          parallel_tool_calls: true,
           reasoning: { effort: "max" },
           provider: { quantizations: ["fp4"] },
         },
         models,
       )
+      // No reviewed endpoint takes it, and with require_parameters it would leave none to route to.
+      expect(body).not.toHaveProperty("parallel_tool_calls")
       if (model.id.startsWith("anthropic/")) {
         expect(body.tool_choice).toBe("auto")
         expect(body.reasoning).toEqual({ effort: "high" })
-        expect(body.messages[1]).toMatchObject({
-          content: [{ type: "text", text: "Fix it", cache_control: { type: "ephemeral" } }],
-        })
+        // Its endpoints refuse sampling options.
+        expect(body).not.toHaveProperty("temperature")
+        // The system prompt, the latest user message and the conversation's end, never a client's own marker.
+        expect(
+          body.messages.map((message) =>
+            Array.isArray(message.content) ? message.content.map((part) => part.cache_control) : undefined,
+          ),
+        ).toEqual([[{ type: "ephemeral" }], [{ type: "ephemeral" }], undefined, [{ type: "ephemeral" }]])
+        expect(JSON.stringify(body)).not.toContain("1h")
+        // Each of these characters can be up to three tokens, so they count by their UTF-8 bytes.
         expect(() =>
           requireModelPlanContext({ ...body, messages: [{ role: "user", content: "界".repeat(34_000) }] }, model),
         ).toThrow()
@@ -241,7 +262,9 @@ describe("gateway request policy", () => {
       }
       expect(body.provider.quantizations).toEqual(["fp8", "bf16"])
       expect(body.tool_choice).toBe("required")
+      expect(body).toHaveProperty("temperature", 0.2)
       expect(body.reasoning).toEqual(model.id.startsWith("deepseek/") ? { effort: "high" } : undefined)
+      expect(JSON.stringify(body)).not.toContain("cache_control")
     }
   })
 

@@ -93,6 +93,13 @@ describe("configured Codium model audit", () => {
     expect(
       auditModelPlanCatalog([{ ...configured, contextLength: 64000 }], [model], [{ ...endpoint, pricing }])[0].ok,
     ).toBe(true)
+    // The gateway keeps every prompt under its limit, so the threshold is out of reach in a larger window too.
+    expect(
+      auditModelPlanCatalog([{ ...configured, promptTokenLimit: 100000 }], [model], [{ ...endpoint, pricing }])[0].ok,
+    ).toBe(true)
+    expect(
+      auditModelPlanCatalog([{ ...configured, promptTokenLimit: 100001 }], [model], [{ ...endpoint, pricing }])[0].ok,
+    ).toBe(false)
     expect(
       auditModelPlanCatalog(
         [configured],
@@ -105,6 +112,16 @@ describe("configured Codium model audit", () => {
         ],
       )[0].ok,
     ).toBe(true)
+  })
+
+  test("an endpoint must accept every option the gateway forwards to the model", () => {
+    const result = auditModelPlanCatalog(
+      [{ ...configured, options: ["tools", "tool_choice", "stop"] }],
+      [model],
+      [endpoint, { ...endpoint, tag: "stops", supported_parameters: ["tools", "tool_choice", "stop"] }],
+    )[0]
+    expect(result.ok).toBe(true)
+    expect(result.providers.map((provider) => provider.id)).toEqual(["stops"])
   })
 
   test("accepts zero flat fees but rejects unknown positive fees and malformed pricing overrides", () => {

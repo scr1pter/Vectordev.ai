@@ -27,7 +27,7 @@ const tools = await Promise.all(
 )
 const source = (await Bun.file(path.join(engine, "provider/provider.ts")).text()).slice(0, 50_000)
 
-const turn = (reads: number) => {
+const turn = (reads: number, target: (typeof CODIUM_MODELS)[number] = model) => {
   const messages = [
     { role: "system", content: system },
     { role: "user", content: "Fix the provider fallback bug and add a test." },
@@ -48,8 +48,8 @@ const turn = (reads: number) => {
   ]
   return {
     body: modelPlanRequest(
-      JSON.parse(ModelPlans.serializeRequest({ messages, tools, max_tokens: model.maxOutputTokens }, model)),
-      [model],
+      JSON.parse(ModelPlans.serializeRequest({ messages, tools, max_tokens: target.maxOutputTokens }, target)),
+      [target],
     ),
     // What Vector itself estimates for the same conversation, four characters per token.
     estimate: Token.estimate(
@@ -89,6 +89,25 @@ test("a conversation the engine has not yet compacted is accepted, and one past 
   )
 })
 
+test("Haiku takes a long coding turn but refuses a prompt that could reach the long-prompt price", () => {
+  const haiku = CODIUM_MODELS.find((item) => item.id === "anthropic/claude-haiku-5.5")!
+  // Three 50 KB reads after the system prompt and tools: over 180 KB of request, which a byte ceiling refused.
+  const long = turn(3, haiku)
+  expect(Buffer.byteLength(JSON.stringify(long.body))).toBeGreaterThan(180_000)
+  expect(long.estimate).toBeGreaterThan(45_000)
+  expect(() => requireModelPlanContext(long.body, haiku)).not.toThrow()
+  // One more read would put the prompt within reach of 100,000 tokens, so Vector compacts instead of paying five
+  // times the price for the whole request.
+  const over = turn(4, haiku)
+  // The window alone would take it.
+  expect(() => requireModelPlanContext(over.body, { ...haiku, promptTokenLimit: undefined })).not.toThrow()
+  expect(() => requireModelPlanContext(over.body, haiku)).toThrow(
+    expect.objectContaining({ statusCode: 400, code: "MODEL_PLAN_CONTEXT" }),
+  )
+  // The other models are not held to Haiku's prompt bound.
+  expect(() => requireModelPlanContext(turn(5).body, model)).not.toThrow()
+})
+
 test("a provider refusing the context gets the gateway's own context answer, so Vector compacts instead of retrying", async () => {
   const refusals = [
     Response.json(
@@ -112,9 +131,7 @@ test("a provider refusing the context gets the gateway's own context answer, so 
     ),
   )
   expect(failures.every((failure) => failure instanceof ApiError)).toBe(true)
-  expect(failures).toEqual(
-    refusals.map(() => expect.objectContaining({ statusCode: 400, code: "MODEL_PLAN_CONTEXT" })),
-  )
+  expect(failures).toEqual(refusals.map(() => expect.objectContaining({ statusCode: 400, code: "MODEL_PLAN_CONTEXT" })))
   expect(failures.filter((failure) => failure instanceof ApiError && failure.message.includes("131072"))).toEqual([])
   // The engine and the Core V2 runner read this answer as a context overflow.
   expect(
