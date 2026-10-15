@@ -84,7 +84,9 @@ export default defineConfig({
     publicDir: "../../../app/public",
     root: "src/renderer",
     build: {
-      sourcemap: true,
+      // Maps are made only for the private Sentry upload, which deletes them afterwards. A customer build without it
+      // ships no original sources.
+      sourcemap: sentry ? "hidden" : false,
       rollupOptions: {
         input: {
           main: "src/renderer/index.html",
