@@ -4702,6 +4702,7 @@ withBackground.instance(
       const guard = yield* SpendGuard.Service
       const chat = yield* guardedChat({ usd: 1 })
       const gate = Promise.withResolvers<void>()
+      const rootGate = Promise.withResolvers<void>()
       const child = asksFor("look into the cache key path")
       const root = (hit: { body: Record<string, unknown> }) => !child(hit)
       yield* llm.pushMatch(
@@ -4713,7 +4714,7 @@ withBackground.instance(
           background: true,
         }),
         // The root's second step spends $2.00 against the $1.00 cap while its subagent's first step is in flight.
-        reply().tool("first", { value: 1 }).usage({ input: 20_000, output: 0 }),
+        reply().wait(rootGate.promise).tool("first", { value: 1 }).usage({ input: 20_000, output: 0 }),
       )
       yield* llm.pushMatch(
         child,
@@ -4721,7 +4722,11 @@ withBackground.instance(
         reply().text("never requested").stop(),
       )
 
-      const result = yield* prompt.loop({ sessionID: chat.id })
+      const running = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+      // The root's second step answers only once the subagent's first request is in flight.
+      yield* llm.wait(3)
+      rootGate.resolve()
+      const result = yield* Fiber.join(running)
       expect(budgetStop(result.info)?.reason).toBe("cap")
       const kids = yield* sessions.children(chat.id)
       expect(kids).toHaveLength(1)
