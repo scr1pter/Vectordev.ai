@@ -9,6 +9,8 @@ const model = { providerID: "openai", modelID: "gpt-6.1" }
 // session while its history is being read, as a late title or subagent spend can.
 function setup(input: {
   writeDuringHistory: boolean
+  // Called once the engine has written the session during the history read, before the history is answered.
+  onWrite?: () => void
   working?: () => boolean
   cached?: (id: string) => Session | undefined
 }) {
@@ -37,6 +39,16 @@ function setup(input: {
       parts: [],
     },
   ]
+  const info = (): Session => ({
+    id: "ses_root",
+    slug: "ses_root",
+    projectID: "project",
+    directory,
+    title: "Fix the login form",
+    version: "1",
+    time: { created: 1, updated: state.updated },
+    cost: state.cost,
+  })
   const fetch = async (request: Request) => {
     const path = new URL(request.url).pathname
     requests.push(path)
@@ -44,19 +56,9 @@ function setup(input: {
       state.wrote = true
       state.updated += 1
       state.cost += 0.0003
+      input.onWrite?.()
     }
-    const body = path.endsWith("/message")
-      ? history
-      : {
-          id: "ses_root",
-          slug: "ses_root",
-          projectID: "project",
-          directory,
-          title: "Fix the login form",
-          version: "1",
-          time: { created: 1, updated: state.updated },
-          cost: state.cost,
-        }
+    const body = path.endsWith("/message") ? history : info()
     return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })
   }
   const saved: { costUsd?: number; updatedAt: number }[] = []
@@ -70,7 +72,7 @@ function setup(input: {
     activated() {},
     workspaces: async () => true,
   })
-  return { requests, saved, economics, state }
+  return { requests, saved, economics, state, info }
 }
 
 async function settle(requests: string[]) {
@@ -112,6 +114,78 @@ test("a write during the history read discards that snapshot and records the new
   expect(ctx.saved).toHaveLength(1)
   expect(ctx.saved[0]?.updatedAt).toBe(11)
   expect(ctx.saved[0]?.costUsd).toBeCloseTo(0.0043, 10)
+})
+
+test("a root update event during the history read records the run at the newer revision", async () => {
+  // A root's own session.updated never triggers its family; only the recorder hears it. The engine forks the step
+  // summary, so its update can land after idle, while the history read is in flight.
+  const ctx = setup({
+    writeDuringHistory: true,
+    onWrite: () =>
+      ctx.economics.handle({
+        name: directory,
+        details: { type: "session.updated", properties: { sessionID: "ses_root", info: ctx.info() } } as Event,
+      }),
+  })
+  ctx.economics.handle({ name: directory, details: idle })
+  await settle(ctx.requests)
+  ctx.economics.dispose()
+
+  // The superseded read stops after its history; the retry reads the newer revision on its own.
+  expect(ctx.requests).toEqual([
+    "/session/ses_root",
+    "/session/ses_root/message",
+    "/session/ses_root",
+    "/session/ses_root/message",
+    "/session/ses_root",
+  ])
+  expect(ctx.saved).toHaveLength(1)
+  expect(ctx.saved[0]?.updatedAt).toBe(11)
+  expect(ctx.saved[0]?.costUsd).toBeCloseTo(0.0043, 10)
+})
+
+const status = (type: "busy" | "idle") =>
+  ({ type: "session.status", properties: { sessionID: "ses_root", status: { type } } }) as Event
+
+test("the idle status and the idle event settle a run once, in either order", async () => {
+  for (const order of ["one flush", "status first"]) {
+    const state = { working: true }
+    const ctx = setup({ writeDuringHistory: false, working: () => state.working })
+    // The layout reconciles the status snapshot after each flush of events.
+    ctx.economics.handle({ name: directory, details: status("busy") })
+    ctx.economics.reconcile([ctx.info()])
+    state.working = false
+    ctx.economics.handle({ name: directory, details: status("idle") })
+    if (order === "status first") ctx.economics.reconcile([ctx.info()])
+    ctx.economics.handle({ name: directory, details: idle })
+    ctx.economics.reconcile([ctx.info()])
+    await settle(ctx.requests)
+    ctx.economics.dispose()
+
+    expect(ctx.requests).toEqual(["/session/ses_root", "/session/ses_root/message", "/session/ses_root"])
+    expect(ctx.saved).toEqual([{ costUsd: 0.004, updatedAt: 10 }])
+  }
+})
+
+test("a run that starts and stops within one flush still settles after a reconnect snapshot", async () => {
+  const state = { working: true }
+  const ctx = setup({ writeDuringHistory: false, working: () => state.working })
+  ctx.economics.reconcile([ctx.info()])
+  state.working = false
+  // Reconnect bootstrap settles the run without its idle event.
+  ctx.economics.reconcile([ctx.info()])
+  await settle(ctx.requests)
+  ctx.state.updated += 1
+  ctx.state.cost += 0.002
+  // A short failed run: the snapshot after this flush never sees it busy, so only its events can settle it.
+  ctx.economics.handle({ name: directory, details: status("busy") })
+  ctx.economics.handle({ name: directory, details: status("idle") })
+  ctx.economics.handle({ name: directory, details: idle })
+  ctx.economics.reconcile([ctx.info()])
+  await settle(ctx.requests)
+  ctx.economics.dispose()
+
+  expect(ctx.saved.map((sample) => sample.updatedAt)).toEqual([10, 11])
 })
 
 test("reconnect status reconciliation captures a run whose idle event was missed", async () => {

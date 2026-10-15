@@ -27,6 +27,9 @@ export function createSessionEconomics(input: {
   // finds it taken and reads again.
   const roots = new Map<string, Session>()
   const active = new Map<string, Session>()
+  // The engine publishes idle right after the idle status, so the two announce one settlement. Whichever the app
+  // observes first refreshes the family; the other would only read the root again at the same revision.
+  const settled = new Set<string>()
   const outcomes = createSessionOutcomeRecorder(async (sessionID, directory, current) => {
     const client = input.client(directory)
     const key = JSON.stringify([directory, sessionID])
@@ -116,17 +119,28 @@ export function createSessionEconomics(input: {
         if (session.internal === "codespace.autocomplete") return
         if (input.working(session.id)) {
           active.set(session.id, session)
+          settled.delete(session.id)
           return
         }
         if (!active.delete(session.id)) return
+        settled.add(session.id)
         void family.refresh(session.id, session.directory).catch(() => undefined)
       })
     },
     handle(event: { name?: string; details: Event }) {
       const directory = event.name
       if (!directory) return
+      // A new run starts a new settlement, even one that goes busy and idle within a single flush of events.
+      if (event.details.type === "session.status" && event.details.properties.status.type !== "idle")
+        settled.delete(event.details.properties.sessionID)
       // Idle reaches the root through the family refresh too, which records each settled revision once.
       const familyID = sessionFamilyEventID(event.details, input.working)
+      // The idle event of a run the status snapshot already settled is a repeat. When the event comes first, taking
+      // the run out of active keeps the snapshot after this flush from settling it again.
+      const repeated =
+        event.details.type === "session.idle" &&
+        !active.delete(event.details.properties.sessionID) &&
+        settled.delete(event.details.properties.sessionID)
       const cached = familyID ? input.cached(familyID) : undefined
       // Frequent autocomplete updates are included at the task's next settlement; other helpers settle their
       // parent after completion, including a review that was launched after the parent became idle.
@@ -135,6 +149,7 @@ export function createSessionEconomics(input: {
         (event.details.type === "session.updated" && isInternalSession(event.details.properties.info))
       if (
         familyID &&
+        !repeated &&
         (!helper || (event.details.type === "session.idle" && cached?.internal !== "codespace.autocomplete"))
       )
         void family.refresh(familyID, directory).catch(() => undefined)
@@ -153,6 +168,7 @@ export function createSessionEconomics(input: {
       outcomes.dispose()
       roots.clear()
       active.clear()
+      settled.clear()
     },
   }
 }
