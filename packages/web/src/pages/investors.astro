@@ -34,7 +34,8 @@ const groups = [
       },
       {
         cap: "Runs other vendors' agents",
-        note: "Side by side, supervised, in one place",
+        // Conductor and Superset are not columns in this grid, so the row itself says they do this too.
+        note: "Side by side, in one place; orchestrators such as Conductor and Superset do this too",
         cells: [
           ["p", "Their editor extensions, in separate panels"],
           ["n", "Imports their settings, runs its own"],
@@ -67,7 +68,7 @@ const groups = [
         cells: [
           ["y", "Bugbot from the $30 plan, about $1–1.50 a run"],
           ["y", "@codex review, on plans from $20/mo"],
-          ["y", "Team and Enterprise preview, about $15–25 a review"],
+          ["y", "Team and Enterprise, billed on tokens; Anthropic puts the average at $15–25 a review"],
           ["n", "Security scan before publishing"],
           ["n", "App security scan"],
         ],
@@ -137,7 +138,7 @@ const groups = [
         cells: [
           ["p", "Monthly spend limits; no per-task cost documented"],
           ["p", "Workspace spend controls; no per-task cost documented"],
-          ["p", "Session estimate and limits, Claude models only"],
+          ["p", "Session estimate and limits"],
           ["p", "Credits per message, credit limits"],
           ["p", "Monthly credits, not dollars"],
         ],
@@ -148,8 +149,8 @@ const groups = [
         note: "Including local and free models",
         cells: [
           ["p", "Hosted models; own keys for 5 providers"],
-          ["p", "OpenAI models; local through Ollama or LM Studio"],
-          ["p", "Claude models only"],
+          ["p", "OpenAI models by default; Responses-compatible providers, Bedrock, Ollama or LM Studio"],
+          ["p", "Officially Claude models only; others unsupported, through an Anthropic-compatible URL"],
           ["n", "No model picker documented"],
           ["p", "10 models; picking one needs a paid plan"],
         ],
@@ -225,13 +226,14 @@ const buckets = [
 const bucketCentre = (bucket: (typeof buckets)[number]) =>
   (scale(bucket.models[0].size) + scale(bucket.models[bucket.models.length - 1].size)) / 2
 const ticks = [10, 30, 100, 300, 1000]
-const velocityAt = scale(400)
+// Velocity's planned size is "over 300 billion", as the README and the landing page have said since September 2026.
+const velocityAt = scale(300)
 
 const stack = [
   {
     job: "AI code review",
-    today: "CodeRabbit $24–30 per developer · Greptile $30 per seat plus credits · Graphite $40 per user · Cursor Bugbot about $1–1.50 a run · Claude Code Review about $15–25 a review",
-    vector: "Vectorscope reviews pull requests on GitHub, in the desktop app and in the CLI, with a security reviewer on sensitive paths, a verify pass that drops findings it cannot confirm, and a spend limit per review.",
+    today: "CodeRabbit $24–30 per developer · Greptile $30 per seat plus credits · Graphite $40 per user · Cursor Bugbot about $1–1.50 a run · Claude Code Review billed on tokens, averaging $15–25 a review",
+    vector: "Vectorscope reviews pull requests on GitHub, in the desktop app and in the CLI, with a security reviewer on sensitive paths, a verify pass that re-checks blocking findings and drops the ones it cannot confirm, and a spend limit per review.",
     fit: "Replaces on GitHub",
   },
   {
@@ -254,7 +256,7 @@ const stack = [
   },
   {
     job: "Separate agent apps",
-    today: "Claude Code, Codex and Cursor, each in its own window with its own history",
+    today: "Without an orchestrator, Claude Code, Codex and Cursor each run in their own window with their own history",
     vector: "One dashboard runs all of them on your existing subscriptions, next to Vector's own agent.",
     fit: "Runs them",
   },
@@ -270,7 +272,7 @@ const stack = [
 {/* The investor one-pager. Unlisted: noindex, not linked from the site, shared by link only. */}
 <MarketingLayout
   title="Vector · Investor one-pager"
-  description="Vector, the control room for AI coding agents: how it compares, the tools it replaces, why it is building its own coding model, the offline cost benchmark, roadmap and business model."
+  description="Vector, the control room for AI coding agents: how it compares, the tools it replaces, why it plans to build its own coding model, the offline cost benchmark, roadmap and business model."
   noindex
 >
   <div class="ip-root">
@@ -286,7 +288,7 @@ const stack = [
   <section class="ip-thesis" aria-labelledby="thesis-title">
     <div class="ip-eyebrow">For teams that build with AI agents</div>
     <h1 id="thesis-title">The control room for AI <em>coding agents</em>.</h1>
-    <p class="ip-lede">Teams now use several coding agents, such as Claude Code, Codex and Cursor, then pay for a review bot, an orchestration app and a cost tracker on top, often per seat. Vector puts that stack in one free workspace: its own agent beside Claude Code, Codex and Cursor Agent, any model, code review, browser testing, deploys and a price on every Vector session. Next, it is building <strong>Vector Velocity</strong>, its own large coding model for that loop.</p>
+    <p class="ip-lede">Teams now use several coding agents, such as Claude Code, Codex and Cursor, then pay for a review bot, an orchestration app and a cost tracker on top, often per seat. Vector puts that stack in one free workspace: its own agent beside Claude Code, Codex and Cursor Agent, any model, code review, browser testing, deploys and a price on every Vector session. Next, it plans to build <strong>Vector Velocity</strong>, its own large coding model for that loop.</p>
     <div class="ip-facts">
       <div class="ip-fact"><strong class="ip-num">219</strong><span>providers in the model catalog, plus local and free models</span></div>
       <div class="ip-fact"><strong class="ip-num">3</strong><span>outside agents run inside Vector: Claude Code, Codex, Cursor Agent</span></div>
@@ -302,8 +304,8 @@ const stack = [
         <h2>AI agents multiplied. Control didn't.</h2>
       </div>
       <ul class="ip-clean">
-        <li><strong>Every agent is a separate island.</strong> Each vendor's tool runs its own agent in its own window, so three agents means three places to look.</li>
-        <li><strong>The labs' own agents run their own models:</strong> Claude Code runs Claude, and Codex runs OpenAI's models or local ones, though 27% of organisations already send different work to different models.<sup>1</sup></li>
+        <li><strong>Without an orchestrator, every agent is a separate island.</strong> Each vendor's agent runs in its own window, so three agents means three places to look.</li>
+        <li><strong>The labs' own agents are built around their own models:</strong> Claude Code officially supports only Claude models, and Codex defaults to OpenAI's, with other providers through compatible endpoints, though 27% of organisations already send different work to different models.<sup>1</sup></li>
         <li><strong>The rest is a stack of subscriptions.</strong> AI review, agent orchestration and cost tracking are bought separately, review and orchestration often per developer.</li>
         <li><strong>The bill per task is hard to see.</strong> Spend mostly arrives as credits, limits or a monthly invoice, and no single tool prices each task across vendors, while 38% of organisations already set usage limits to control AI cost.<sup>1</sup></li>
       </ul>
@@ -316,7 +318,7 @@ const stack = [
       <div class="ip-caps">
         <div class="ip-cap"><h3>Your agents, one dashboard</h3><p>Vector's agent and your installed Claude Code, Codex and Cursor Agent each run in an isolated checkout, on one dashboard that flags clashes, then merge back after your tests and a secret scan.</p></div>
         <div class="ip-cap"><h3>Any model</h3><p>8,184 models from 219 providers in Vector's catalog, connected with your own key or sign-in, plus any OpenAI-compatible or local endpoint and free models through OpenRouter.</p></div>
-        <div class="ip-cap"><h3>Vectorscope review</h3><p>Pull-request review on GitHub, desktop and CLI, with a verify pass that drops findings it cannot confirm. An issue comment becomes a branch and a PR listing the commands it ran and their results.</p></div>
+        <div class="ip-cap"><h3>Vectorscope review</h3><p>Pull-request review on GitHub, desktop and CLI, with a verify pass that re-checks blocking findings and drops the ones it cannot confirm. An issue comment becomes a branch and a PR listing the commands it ran and their results.</p></div>
         <div class="ip-cap"><h3>Specialist subagents</h3><p>Explore, Review, Judge, Security, Debug, Test, Performance and Migration specialists run in the background and report back.</p></div>
         <div class="ip-cap"><h3>Tokenomics</h3><p>Every Vector session is priced from the tokens the provider reported, subagents included, and Vector recommends models once a task type has three measured runs.</p></div>
         <div class="ip-cap"><h3>Test and ship from the task</h3><p>A browser agent tests the running app. Environment variables, Supabase migrations with a dry run, and Vercel publishing with health and browser checks.</p></div>
@@ -374,7 +376,7 @@ const stack = [
         </tfoot>
       </table>
     </div>
-    <p class="ip-footnote"><strong>Where Vector matches the field:</strong> parallel agents in worktrees, subagents, AI pull-request review, issue-to-PR, browser testing and local repos. Cursor, Codex and Claude Code have these too, and Lovable and Base44 lead on live collaboration and built-in hosting. Vector's edge is running other vendors' agents beside its own, on any model, with a price on each Vector session, for free. Competitor details come from each company's official docs and pricing pages, checked 15 October 2026; sources are listed at the end.</p>
+    <p class="ip-footnote"><strong>Where Vector matches the field:</strong> parallel agents in worktrees, subagents, AI pull-request review, issue-to-PR, browser testing and local repos. Cursor, Codex and Claude Code have these too, and Lovable and Base44 lead on live collaboration and built-in hosting. Orchestrators such as Conductor and Superset, not in this grid, also run Claude Code, Codex and other agents side by side in isolated workspaces. Vector's edge is running them beside its own agent, on any model, with a price on each Vector session. Competitor details come from each company's official docs and pricing pages, checked 15 October 2026; sources are listed at the end.</p>
   </section>
 
   <section class="ip-section" aria-labelledby="stack-title">
@@ -400,7 +402,7 @@ const stack = [
       </div>
       <div class="ip-callout">
         <strong class="ip-num">$1.5B</strong>
-        <p>CodeRabbit's valuation for AI review alone (Series C, August 2026), and Cursor agreed to buy Graphite in December 2025. Orchestration on its own is harder to charge for: Vibe Kanban's maker shut down in April 2026 with most users on its free tier. Vector gives the whole workspace away and earns from Codium, the model credits sold inside it.</p>
+        <p>CodeRabbit's valuation for AI review alone (Series C, August 2026), and Cursor agreed to buy Graphite in December 2025. Orchestration on its own is harder to charge for: Vibe Kanban's maker shut down in April 2026 with most users on its free tier. Vector gives the whole workspace away and plans to earn from Codium, the model credits it will sell inside the workspace once payments are connected.</p>
       </div>
     </div>
     <p class="ip-footnote"><strong>Controlled, not hosted:</strong> Vector deploys to Vercel and migrates Supabase on the team's own accounts. Hosting, databases and billing for them stay with those providers.</p>
@@ -409,7 +411,7 @@ const stack = [
   <section class="ip-section" aria-labelledby="model-title">
     <div class="ip-section-head">
       <div class="ip-eyebrow">The model layer</div>
-      <h2 id="model-title">Why Vector is building its own coding model</h2>
+      <h2 id="model-title">Why Vector plans to build its own coding model</h2>
       <p>Every coding tool sells software but pays for tokens. Whoever owns the model controls the cost line, the speed and the roadmap.</p>
     </div>
     <div class="ip-reasons">
@@ -432,10 +434,10 @@ const stack = [
 
     <div class="ip-gap">
       <div class="ip-gap-head">
-        <h3>Large open coding models are rare, and each is tuned for its maker's own agent.</h3>
+        <h3>Large open coding models are rare, and the two largest are paired with their makers' own agents.</h3>
       </div>
       <figure class="ip-chart">
-        <div class="ip-plot" role="img" aria-label={`Strip chart of ${models.length} open-weight coding-specialised models by total parameters, on a log scale: ${buckets.map((bucket) => `${bucket.models.length} between ${bucket.label}`).join(", ")}. A dashed line marks Vector Velocity's planned size of about 400B; only Qwen3-Coder-480B and Kimi K2.7 Code are larger.`}>
+        <div class="ip-plot" role="img" aria-label={`Strip chart of ${models.length} open-weight coding-specialised models by total parameters, on a log scale: ${buckets.map((bucket) => `${bucket.models.length} between ${bucket.label}`).join(", ")}. A dashed line marks Vector Velocity's planned size of 300B+; only Qwen3-Coder-480B and Kimi K2.7 Code are larger than 300B.`}>
           <div class="ip-clusters" aria-hidden="true">
             {buckets.map((bucket) => (
               <span style={`left:${bucketCentre(bucket).toFixed(2)}%`}><b class="ip-num">{bucket.models.length}</b> models<br />{bucket.label}</span>
@@ -445,15 +447,15 @@ const stack = [
             {models.map((model) => (
               <span class="ip-dot" style={`left:${scale(model.size).toFixed(2)}%;--y:${model.y}px`} title={`${model.name} · ${model.maker} · ${sizeLabel(model.size)}`}></span>
             ))}
-            <span class="ip-vring" style={`left:${velocityAt.toFixed(2)}%`} title="Vector Velocity · planned about 400B · in development"></span>
+            <span class="ip-vring" style={`left:${velocityAt.toFixed(2)}%`} title="Vector Velocity · planned 300B+ · not built yet"></span>
           </div>
           <div class="ip-vline" style={`left:${velocityAt.toFixed(2)}%`} aria-hidden="true"></div>
           <div class="ip-axis" aria-hidden="true">
             {ticks.map((tick) => <span style={`left:${scale(tick).toFixed(2)}%`}>{sizeLabel(tick)}</span>)}
           </div>
-          <div class="ip-vlabel" style={`left:${velocityAt.toFixed(2)}%`} aria-hidden="true">Velocity · planned ~400B</div>
+          <div class="ip-vlabel" style={`left:${velocityAt.toFixed(2)}%`} aria-hidden="true">Velocity · planned 300B+</div>
         </div>
-        <figcaption class="ip-footnote">Each dot is one open-weight, coding-specialised model released since 2024, by total parameters on a log scale; hover a dot, or open the list below, for names. Vector's count from public model cards, checked 11 and 15 October 2026; small releases may be missing. Most new specialists are mixture-of-experts models that use only 2.5–8B parameters per token. Size alone does not make a model better.</figcaption>
+        <figcaption class="ip-footnote">Each dot is one open-weight, coding-specialised model released since 2024, by total parameters on a log scale; hover a dot, or open the list below, for names. Vector's count from public model cards, checked 11 and 15 October 2026; small releases may be missing. Several are mixture-of-experts models that use only about 3–8B parameters per token, such as Qwen3-Coder-Next and Laguna S 2.1; the four largest use 21–35B, and others, such as Devstral 2, are dense. Size alone does not make a model better.</figcaption>
         <details class="ip-details">
           <summary>The {models.length} models in this chart</summary>
           <div class="ip-model-list">
@@ -470,7 +472,7 @@ const stack = [
       </figure>
       <ul class="ip-gap-points">
         <li><strong>Most open coding specialists stop around 35B parameters:</strong> 11 of the 20 counted here.</li>
-        <li><strong>Of those counted, only four pass 200B, and only two are larger than Velocity's planned size:</strong> Qwen3-Coder-480B (July 2025) and Kimi K2.7 Code (1T, a coding model built on the general Kimi K2.6). Each is tuned for its maker's own command-line agent.</li>
+        <li><strong>Of those counted, only four pass 200B, and only two pass 300B, where Velocity's planned size starts:</strong> Qwen3-Coder-480B (July 2025), released with Qwen's own Qwen Code and also supported in agents such as Cline, and Kimi K2.7 Code (1T, a coding model built on the general Kimi K2.6), which its card says works best in Kimi Code CLI.</li>
         <li><strong>At the frontier, coding runs on general models.</strong> All 35 entries on the Terminal-Bench 4.0 leaderboard (updated 6 October 2026) use one, and OpenAI now recommends its general GPT-6.1 Sol for Codex.</li>
         <li><strong>Coding companies build their own models on open bases:</strong> Cursor built Composer 2 on the open Kimi K2.5, and Cognition built SWE-1.5 for Windsurf's Cascade on an open base. Each is tuned for one company's agent.</li>
       </ul>
@@ -478,9 +480,9 @@ const stack = [
 
     <div class="ip-velocity">
       <div class="ip-vcard">
-        <span class="ip-status">In development</span>
+        <span class="ip-status">Planned</span>
         <h3>Vector Velocity</h3>
-        <p class="ip-vsize"><b class="ip-num">~400B</b> parameters, planned</p>
+        <p class="ip-vsize"><b class="ip-num">300B+</b> parameters, planned</p>
         <p>Vector's own coding model. At its planned size it would sit among the largest disclosed coding-tuned models, and, as far as public information shows, the first designed for a workspace that runs several vendors' agents on any model.</p>
         <ul class="ip-clean">
           <li><strong>Designed for Vector's loop:</strong> planning, tool calls, edits, checks and verification, across the specialists and the review pass.</li>
@@ -559,7 +561,7 @@ const stack = [
       <div class="ip-milestone">
         <span class="ip-stage">Early prototype</span>
         <h3>Computer Use</h3>
-        <p>Agents that see and operate desktop apps, not just code and the browser. An early native helper with per-app permission grants and input controls exists; it is not in any release yet.</p>
+        <p>Agents that see and operate desktop apps, not just code and the browser. Vector's own early native helper, with per-app permission grants and input controls, is not in any release yet; a community Computer Use plugin is in the plugin catalog today.</p>
       </div>
       <div class="ip-milestone">
         <span class="ip-stage">Early version live</span>
@@ -572,19 +574,19 @@ const stack = [
         <p>Managed coding models on one Vector account, with no provider keys: monthly plans or top-ups. The plans are built into the next release; sales open once payments are connected.</p>
       </div>
       <div class="ip-milestone">
-        <span class="ip-stage">In development</span>
+        <span class="ip-stage">Planned</span>
         <h3>Vector Velocity</h3>
-        <p>Vector's own coding model, planned at about 400B parameters, designed for the loop Vector runs and offered beside every other provider.</p>
+        <p>Vector's own coding model, planned at 300B+ parameters, designed for the loop Vector runs and offered beside every other provider.</p>
       </div>
     </div>
-    <p class="ip-footnote"><strong>Also on the way:</strong> live spend caps for interactive runs (built, not yet merged; scheduled and parallel agents already stop at $5 a run and $25 a day by default), signed installers, and one-click sign-in for Vercel and Supabase (waiting on app registration).</p>
+    <p class="ip-footnote"><strong>Also on the way:</strong> live spend caps for interactive runs (built, not in any published release yet; scheduled agents already stop at $5 a run and $25 a day by default), signed installers, and one-click sign-in for Vercel and Supabase (waiting on app registration).</p>
   </section>
 
   <section class="ip-split" aria-label="Business model and limitations">
     <div class="ip-panel">
       <div class="ip-eyebrow">Business model</div>
       <h2>Free workspace, paid model credits</h2>
-      <p class="ip-muted">The workspace stays free, which puts the agents, review and testing in front of every developer. Revenue comes from <strong class="ip-ink">Vector Codium</strong>, a managed service for coding models: one account, no provider keys, the same curated models at every price. <span class="ip-status">In development</span></p>
+      <p class="ip-muted">The workspace stays free, which puts the agents, review and testing in front of every developer. Revenue is planned to come from <strong class="ip-ink">Vector Codium</strong>, a managed service for coding models: one account, no provider keys, the same curated models at every price. <span class="ip-status">In development</span></p>
       <div class="ip-tiers ip-num" aria-label="Plans">
         <span class="ip-tier"><b>$10</b> <span>/ mo</span></span>
         <span class="ip-tier"><b>$50</b> <span>/ mo</span></span>
@@ -604,19 +606,20 @@ const stack = [
       <ul class="ip-clean ip-limits">
         <li><strong>Very early.</strong> The first desktop previews shipped in July 2026, the app became free on 4 October 2026, and daily usage counts started on 10 October 2026, so there is no retention data yet.</li>
         <li><strong>Codex still wins on cost, speed and memory.</strong> In Vector's own matched live test (October 2026), Codex used less time, cost and memory per task. The next release cuts what Vector sends per request; no matched live re-run has been done yet.</li>
+        <li><strong>Claude Code is faster and lighter offline.</strong> In the archived later runs of the offline harness, Claude Code finished each scripted task in 0.4–1.0 seconds against Vector's 3.2–3.8, with about half the peak memory (326–350 MiB against 656–804). Vector ran from source there, the others as installed builds.</li>
         <li><strong>Velocity is a plan, not a model yet:</strong> no weights and no benchmarks.</li>
         <li><strong>Vectorscope reviews GitHub only,</strong> with no GitLab or Bitbucket review yet.</li>
         <li><strong>Unsigned installers.</strong> macOS and Windows show a warning on first launch until code signing is set up.</li>
         <li><strong>Windows and Linux trail macOS</strong> in testing and maturity.</li>
         <li><strong>No SOC 2, SSO or admin console</strong> for larger companies yet.</li>
-        <li><strong>Interactive Vector runs have no spend cap yet;</strong> the live caps are built but not merged. Vercel and Supabase connect with pasted tokens until hosted sign-in is approved.</li>
+        <li><strong>Interactive Vector sessions have no spend cap in any published release,</strong> and parallel agents have none by default; only scheduled agents stop at a default cap. The live caps are built but not released. Vercel and Supabase connect with pasted tokens until hosted sign-in is approved.</li>
         <li><strong>Built on open source.</strong> The agent core is adapted from an MIT-licensed open-source coding agent; the workspace, orchestration, cost and review layers are Vector's own.</li>
       </ul>
     </div>
   </section>
 
   <footer class="ip-foot">
-    <p class="ip-footnote"><strong>* Benchmark method.</strong> Vector's offline footprint benchmark (script/agent-eval/footprint.ts), run 9–10 October 2026 against Claude Code 2.1.215. Both agents perform identical scripted tool steps against a local fake model server; each request is priced at Claude Sonnet 4.5 list prices with Anthropic prompt-caching rules, and tokens are estimated as characters ÷ 4. It measures what each agent sends, not the quality of answers, live cache behaviour or speed. Later runs of the same harness, archived in Vector's repository, found gaps at least this large; this page quotes the smaller figures. Codex was not part of this run; Vector's live comparison with Codex is under Limitations.</p>
+    <p class="ip-footnote"><strong>* Benchmark method.</strong> Vector's offline footprint benchmark (script/agent-eval/footprint.ts), run 9–10 October 2026 against Claude Code 2.1.215. Both agents perform identical scripted tool steps against a local fake model server; each request is priced at Claude Sonnet 4.5 list prices with Anthropic prompt-caching rules, and tokens are estimated as characters ÷ 4. It measures what each agent sends, not the quality of answers, live cache behaviour or speed. Later runs of the same harness, archived in Vector's repository, found request-cost gaps at least this large; this page quotes the smaller figures. Those runs also show Claude Code faster and lighter than Vector; see Limitations. Codex was not part of this run; Vector's live comparison with Codex is under Limitations.</p>
     <p class="ip-footnote"><strong>1.</strong> Stack Overflow 2026 Developer Survey, published 6 October 2026.</p>
     <details class="ip-details ip-sources">
       <summary>Sources, checked 11–15 October 2026</summary>
@@ -626,7 +629,7 @@ const stack = [
           <ul>
             <li>Cursor: <a href="https://cursor.com/pricing" rel="noopener">pricing</a>, <a href="https://cursor.com/blog/may-2026-bugbot-changes" rel="noopener">Bugbot changes</a>, <a href="https://cursor.com/help/account-and-billing/bugbot-usage-based-billing" rel="noopener">Bugbot billing</a>, <a href="https://cursor.com/docs/configuration/worktrees" rel="noopener">worktrees</a>, <a href="https://cursor.com/docs/subagents" rel="noopener">subagents</a>, <a href="https://cursor.com/docs/agent/tools/browser" rel="noopener">browser</a>, <a href="https://cursor.com/docs/integrations/linear" rel="noopener">Linear</a>, <a href="https://cursor.com/help/account-and-billing/spend-limits" rel="noopener">spend limits</a>, <a href="https://cursor.com/help/models-and-usage/api-keys" rel="noopener">API keys</a>, <a href="https://cursor.com/help/ai-features/shared-transcripts" rel="noopener">shared transcripts</a></li>
             <li>Codex: <a href="https://learn.chatgpt.com/docs/pricing" rel="noopener">pricing</a>, <a href="https://learn.chatgpt.com/docs/code-review" rel="noopener">code review</a>, <a href="https://learn.chatgpt.com/docs/environments/git-worktrees" rel="noopener">worktrees</a>, <a href="https://learn.chatgpt.com/docs/agent-configuration/subagents" rel="noopener">subagents</a>, <a href="https://learn.chatgpt.com/docs/browser" rel="noopener">browser</a>, <a href="https://learn.chatgpt.com/docs/third-party/linear" rel="noopener">Linear</a>, <a href="https://learn.chatgpt.com/docs/import" rel="noopener">import</a>, <a href="https://learn.chatgpt.com/docs/models" rel="noopener">models</a></li>
-            <li>Claude Code: <a href="https://claude.com/pricing" rel="noopener">pricing</a>, <a href="https://code.claude.com/docs/en/code-review" rel="noopener">code review</a>, <a href="https://code.claude.com/docs/en/agents" rel="noopener">agents</a>, <a href="https://code.claude.com/docs/en/chrome" rel="noopener">Chrome</a>, <a href="https://code.claude.com/docs/en/costs" rel="noopener">costs</a>, <a href="https://code.claude.com/docs/en/github-actions" rel="noopener">GitHub Actions</a>, <a href="https://code.claude.com/docs/en/claude-code-on-the-web" rel="noopener">web sessions</a></li>
+            <li>Claude Code: <a href="https://claude.com/pricing" rel="noopener">pricing</a>, <a href="https://code.claude.com/docs/en/code-review" rel="noopener">code review</a>, <a href="https://code.claude.com/docs/en/code-review-costs" rel="noopener">code review costs</a>, <a href="https://support.claude.com/en/articles/14233555-set-up-code-review-for-claude-code" rel="noopener">code review average cost</a>, <a href="https://code.claude.com/docs/en/llm-gateway" rel="noopener">LLM gateways</a>, <a href="https://code.claude.com/docs/en/agents" rel="noopener">agents</a>, <a href="https://code.claude.com/docs/en/chrome" rel="noopener">Chrome</a>, <a href="https://code.claude.com/docs/en/costs" rel="noopener">costs</a>, <a href="https://code.claude.com/docs/en/github-actions" rel="noopener">GitHub Actions</a>, <a href="https://code.claude.com/docs/en/claude-code-on-the-web" rel="noopener">web sessions</a></li>
             <li>Lovable: <a href="https://docs.lovable.dev/introduction/subscription-plans" rel="noopener">plans</a>, <a href="https://docs.lovable.dev/features/cloud" rel="noopener">Cloud</a>, <a href="https://docs.lovable.dev/features/browser-testing" rel="noopener">browser testing</a>, <a href="https://docs.lovable.dev/features/security" rel="noopener">security</a>, <a href="https://docs.lovable.dev/features/subagents" rel="noopener">subagents</a>, <a href="https://docs.lovable.dev/features/collaboration" rel="noopener">collaboration and drafts</a>, <a href="https://docs.lovable.dev/integrations/git-sync-overview" rel="noopener">Git sync</a></li>
             <li>Base44: <a href="https://base44.com/pricing" rel="noopener">pricing</a>, <a href="https://docs.base44.com/Building-your-app/AI-chat-modes" rel="noopener">models</a>, <a href="https://docs.base44.com/Building-your-app/Canvas" rel="noopener">canvas</a>, <a href="https://docs.base44.com/documentation/managing-app-data/testing-agent" rel="noopener">testing agent</a>, <a href="https://docs.base44.com/Setting-up-your-app/running-a-security-scan" rel="noopener">security scan</a></li>
           </ul>
@@ -634,7 +637,7 @@ const stack = [
         <div>
           <h4>Tools and market</h4>
           <ul>
-            <li>Pricing: <a href="https://www.coderabbit.ai/pricing" rel="noopener">CodeRabbit</a>, <a href="https://www.greptile.com/pricing" rel="noopener">Greptile</a>, <a href="https://graphite.com/pricing" rel="noopener">Graphite</a>, <a href="https://www.conductor.build/pricing" rel="noopener">Conductor</a>, <a href="https://superset.sh/pricing" rel="noopener">Superset</a>, <a href="https://www.helicone.ai/pricing" rel="noopener">Helicone</a>, <a href="https://langfuse.com/pricing" rel="noopener">Langfuse</a>, <a href="https://momentic.ai/pricing" rel="noopener">Momentic</a>, <a href="https://www.qawolf.com/pricing" rel="noopener">QA Wolf</a></li>
+            <li>Pricing: <a href="https://www.coderabbit.ai/pricing" rel="noopener">CodeRabbit</a>, <a href="https://www.greptile.com/pricing" rel="noopener">Greptile</a>, <a href="https://graphite.com/pricing" rel="noopener">Graphite</a>, <a href="https://www.conductor.build/pricing" rel="noopener">Conductor</a> (<a href="https://www.conductor.build/" rel="noopener">product</a>), <a href="https://superset.sh/pricing" rel="noopener">Superset</a> (<a href="https://superset.sh/" rel="noopener">product</a>), <a href="https://www.helicone.ai/pricing" rel="noopener">Helicone</a>, <a href="https://langfuse.com/pricing" rel="noopener">Langfuse</a>, <a href="https://momentic.ai/pricing" rel="noopener">Momentic</a>, <a href="https://www.qawolf.com/pricing" rel="noopener">QA Wolf</a></li>
             <li><a href="https://www.coderabbit.ai/newsroom/coderabbit-series-c-agentic-change-management" rel="noopener">CodeRabbit Series C</a>, <a href="https://cursor.com/blog/graphite" rel="noopener">Cursor and Graphite</a>, <a href="https://vibekanban.com/blog/shutdown" rel="noopener">Vibe Kanban shutdown</a></li>
             <li><a href="https://stackoverflow.blog/2026/10/06/the-results-of-the-2026-developer-survey-are-here/" rel="noopener">Stack Overflow 2026 Developer Survey</a></li>
             <li><a href="https://techcrunch.com/2026/04/17/sources-cursor-in-talks-to-raise-2b-at-50b-valuation-as-enterprise-growth-surges/" rel="noopener">TechCrunch on Cursor's margins</a>, <a href="https://www.anthropic.com/news/anthropic-raises-30-billion-series-g-funding-380-billion-post-money-valuation" rel="noopener">Anthropic Series G</a>, <a href="https://techcrunch.com/2025/06/03/windsurf-says-anthropic-is-limiting-its-direct-access-to-claude-ai-models" rel="noopener">TechCrunch on Windsurf</a>, <a href="https://venturebeat.com/ai/anthropic-cracks-down-on-unauthorized-claude-usage-by-third-party-harnesses/" rel="noopener">VentureBeat, January 2026</a>, <a href="https://www.channelinsider.com/ai/news-openai-cursor-model-access-spacex-acquisition/" rel="noopener">Channel Insider on OpenAI and Cursor</a></li>

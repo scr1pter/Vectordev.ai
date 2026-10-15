@@ -104,7 +104,7 @@ The shell and PowerShell installers at `https://vectordev.ai/install` and `https
 
 ## Coming soon
 
-**Vector Velocity**, Vector's own model, planned at about 400 billion parameters and tuned for the loop Vector actually runs — planning, tool calls, edits, checks, and verification — rather than for open-ended chat. An **API platform** will expose the same workspace programmatically. Both are in development.
+**Vector Velocity**, Vector's own model at over 300 billion parameters, tuned for the loop Vector actually runs — planning, tool calls, edits, checks, and verification — rather than for open-ended chat. An **API platform** will expose the same workspace programmatically. Both are in development.
 
 ## Repository
 
