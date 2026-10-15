@@ -49,8 +49,9 @@ export function parseFreeModelLimit(value: unknown): FreeModelLimit | undefined 
   return Option.getOrUndefined(Schema.decodeUnknownOption(FreeModelLimit)(candidate))
 }
 
-// Included free models are not zero data retention. Reviewed providers may keep prompts and outputs under their
-// own policies; every request asks OpenRouter to deny data collection so they are not used for training.
+// Included free models are not zero data retention. Allowlisted providers may keep prompts and outputs under their
+// own policies; every request asks OpenRouter to deny data collection, which excludes endpoints it records as
+// training on prompts.
 export const NO_TRAINING_RETENTION =
   "May keep prompts and outputs under its own policy. Vector requests that they are not used for training."
 

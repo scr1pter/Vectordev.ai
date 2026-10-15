@@ -32,7 +32,7 @@ test("disables account-default plugins and preserves the safeguards through shar
   )
 })
 
-test("routes to no-training, zero-price reviewed endpoints only, without requiring zero data retention", () => {
+test("routes to no-training, zero-price allowlisted endpoints only, without requiring zero data retention", () => {
   const request = freeModelRequest(
     {
       model: FREE_MODEL_FALLBACKS[0].id,

@@ -115,8 +115,8 @@ export function freeModelRequest(body: unknown, models: readonly FreeModelInfo[]
     // https://openrouter.ai/docs/guides/features/plugins
     plugins: DISABLED_PLUGINS.map((id) => ({ id, enabled: false })),
     // Included free models are no-training, not zero data retention: providers may keep prompts under their
-    // own policy, so zdr is not requested. data_collection: "deny" keeps training endpoints out, and the
-    // provider allowlist plus zero max_price leave no paid endpoint to fall back to.
+    // own policy, so zdr is not requested. data_collection: "deny" asks OpenRouter to exclude endpoints it records
+    // as training on prompts, and the provider allowlist plus zero max_price leave no paid endpoint to fall back to.
     provider: {
       data_collection: "deny",
       require_parameters: true,

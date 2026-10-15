@@ -6,7 +6,7 @@ import {
   freeModelInfo,
   includedFreeModel,
   isFreeModelID,
-  noTrainingProvider,
+  noTrainingEndpoint,
 } from "../../packages/core/src/free-model-catalog.js"
 import { ApiError } from "./http.js"
 import { persistentStore } from "./persistent-store.js"
@@ -68,12 +68,13 @@ export async function refreshFreeModelCatalog(
       ? [model.value]
       : []
   })
-  // OpenRouter publishes no per-endpoint training flag; the no-training selection keeps reviewed providers
-  // only, and each request also sends data_collection: "deny".
+  // OpenRouter publishes no per-endpoint training flag; the no-training selection keeps allowlisted model and
+  // provider pairs only, and each request also asks OpenRouter to deny data collection.
   const checked = await Promise.all(
     candidates.map(async (model) => {
-      const endpoints = await read(`${ROOT}/models/${model.id}/endpoints`, EndpointList, request)
-      return freeModelInfo(model, endpoints.data.endpoints, { noTraining: true })
+      // The cron runs once a day, so one unreadable endpoint list drops only its own model, not the whole refresh.
+      const endpoints = await read(`${ROOT}/models/${model.id}/endpoints`, EndpointList, request).catch(() => undefined)
+      return endpoints && freeModelInfo(model, endpoints.data.endpoints, { noTraining: true })
     }),
   )
   const models = checked.filter((model): model is FreeModelInfo => model !== undefined)
@@ -106,7 +107,7 @@ export async function currentFreeModelCatalog(
         !Number.isSafeInteger(model.maxOutputTokens) ||
         model.maxOutputTokens < 1 ||
         !model.providers.length ||
-        model.providers.some((provider) => !noTrainingProvider(provider.id)),
+        model.providers.some((provider) => !noTrainingEndpoint(model.id, provider.id)),
     )
   )
     throw new ApiError(

@@ -95,6 +95,8 @@ const initial = () => ({
   models: [...fixture.models] as { id: string }[],
   endpoints: { ...fixture.endpoints },
   userModels: fixture.models.map((item) => item.id),
+  // Replaces OpenRouter's answer for one catalog path, such as an endpoint list that is rate limited.
+  catalogReplies: {} as Record<string, () => Response>,
   catalogReads: [] as string[],
 })
 const state = { origin: "", ...initial() }
@@ -113,6 +115,8 @@ const upstream = Bun.serve({
       return Response.json({ result: await redis(command) })
     }
     if (url.pathname.startsWith("/api/v1/models")) state.catalogReads.push(url.pathname)
+    const reply = state.catalogReplies[url.pathname]
+    if (reply) return reply()
     if (url.pathname === "/api/v1/models") return Response.json({ data: state.models })
     if (url.pathname === "/api/v1/models/user") {
       expect(request.headers.get("authorization")).toBe("Bearer fixture-openrouter-key")
@@ -281,51 +285,81 @@ describe("curated free catalog", () => {
     expect(await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000)).toEqual(catalog)
     expect(Number(await redis(["TTL", FREE_MODELS_CATALOG_KEY]))).toBeGreaterThan(100000)
     expect(FREE_MODELS_CATALOG_KEY).toBe("vector:free-models:catalog:v3:no-training")
-    // Only eligible candidates get an endpoint lookup; the ZDR feed is never read.
+    // Only allowlisted, eligible candidates get an endpoint lookup; the ZDR feed is never read.
     expect(state.catalogReads.slice(2).sort()).toEqual([
       "/api/v1/models/cohere/north-mini-code:free/endpoints",
       "/api/v1/models/dots-studio/dots-3-note-preview:free/endpoints",
-      "/api/v1/models/poolside/laguna-s-2.1:free/endpoints",
-      "/api/v1/models/poolside/laguna-xs-2.1:free/endpoints",
     ])
     expect(JSON.stringify(catalog)).not.toMatch(/zero data retention|ZDR/i)
   })
   test("curates live prices, tools, expiry, author exclusions, providers and account availability", async () => {
-    const extra = [
-      synthetic("cohere/paid:free", { pricing: { prompt: "1", completion: "0" } }),
-      synthetic("google/training:free"),
-      synthetic("nvidia/trial:free"),
-      synthetic("liquid/training:free"),
-      synthetic("cohere/no-tools:free", { supported_parameters: ["tools"] }),
-      synthetic("cohere/expiring:free", { expiration_date: new Date(fixture.capturedAt + 86400000).toISOString() }),
-      synthetic("cohere/hidden:free"),
-      synthetic("cohere/offline:free"),
-      synthetic("cohere/priced-endpoint:free"),
-      synthetic("cohere/unreviewed:free"),
+    const cohere = "cohere/north-mini-code:free"
+    const [endpoint] = fixture.endpoints[cohere]
+    const scenarios: { name: string; model?: object; endpoint?: object; hidden?: boolean }[] = [
+      { name: "paid", model: { pricing: { prompt: "1", completion: "0" } } },
+      { name: "no tool choice", model: { supported_parameters: ["tools"] } },
+      { name: "expiring", model: { expiration_date: new Date(fixture.capturedAt + 86400000).toISOString() } },
+      { name: "hidden from the account", hidden: true },
+      { name: "offline", endpoint: { status: -1 } },
+      { name: "priced endpoint", endpoint: { pricing: { prompt: "0", completion: "0", request: "0.01" } } },
+      { name: "unknown provider", endpoint: { provider_name: "Unknown", tag: "unknown" } },
+      { name: "provider not allowlisted for it", endpoint: { provider_name: "AtlasCloud", tag: "atlas-cloud/fp8" } },
     ]
-    const [endpoint] = fixture.endpoints["cohere/north-mini-code:free"]
-    state.models.push(...extra)
-    for (const item of extra) state.endpoints[item.id] = [{ ...endpoint, model_id: item.id }]
-    state.endpoints["cohere/offline:free"] = [{ ...endpoint, model_id: "cohere/offline:free", status: -1 }]
-    state.endpoints["cohere/priced-endpoint:free"] = [
-      {
-        ...endpoint,
-        model_id: "cohere/priced-endpoint:free",
-        pricing: { prompt: "0", completion: "0", request: "0.01" },
-      },
-    ]
-    state.endpoints["cohere/unreviewed:free"] = [
-      { ...endpoint, model_id: "cohere/unreviewed:free", provider_name: "Unknown", tag: "unknown" },
-    ]
-    state.userModels = state.models.map((item) => item.id).filter((id) => id !== "cohere/hidden:free")
+    for (const scenario of scenarios) {
+      Object.assign(state, initial())
+      state.models = state.models.map((item) => (item.id === cohere ? { ...item, ...scenario.model } : item))
+      state.endpoints[cohere] = [{ ...endpoint, ...scenario.endpoint }]
+      if (scenario.hidden) state.userModels = state.userModels.filter((id) => id !== cohere)
+      const catalog = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
+      expect({ name: scenario.name, models: catalog.models.map((item) => item.id) }).toEqual({
+        name: scenario.name,
+        models: ["dots-studio/dots-3-note-preview:free"],
+      })
+      // Model and account checks refuse before any endpoint lookup; endpoint checks refuse after it.
+      expect(state.catalogReads.includes(`/api/v1/models/${cohere}/endpoints`)).toBe(!!scenario.endpoint)
+    }
+  })
+  test("never looks up endpoints for models off the allowlist or from excluded authors", async () => {
+    state.models.push(
+      synthetic("cohere/north-code-next:free"),
+      synthetic("google/north-mini-code:free"),
+      synthetic("nvidia/north-mini-code:free"),
+    )
+    state.userModels = state.models.map((item) => item.id)
     const catalog = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
-    expect(catalog.models.map((item) => item.id)).toEqual(catalogModels.map((item) => item.id))
+    expect(catalog.models).toEqual(catalogModels)
     expect(catalog.models.every((item) => !item.name.endsWith("(free)"))).toBe(true)
-    expect(
-      state.catalogReads.filter((path) => /(google|nvidia|liquid|paid|no-tools|expiring|hidden)/.test(path)),
-    ).toEqual([])
-    // These pass the model checks and are refused on their endpoint: offline, priced or unreviewed provider.
-    expect(state.catalogReads.filter((path) => /(offline|priced-endpoint|unreviewed)/.test(path))).toHaveLength(3)
+    expect(state.catalogReads.filter((path) => /north-code-next|google|nvidia/.test(path))).toEqual([])
+  })
+  test("one unreadable endpoint list drops only that model and the rest still publish", async () => {
+    const dots = "dots-studio/dots-3-note-preview:free"
+    for (const [failure, reply] of [
+      ["429", () => Response.json({ error: { message: "Rate limited", code: 429 } }, { status: 429 })],
+      ["404", () => Response.json({ error: { message: "Not Found", code: 404 } }, { status: 404 })],
+      ["undecodable", () => Response.json({ data: { endpoints: "unexpected" } })],
+      ["not JSON", () => new Response("<html>")],
+    ] as const) {
+      Object.assign(state, initial())
+      state.catalogReplies[`/api/v1/models/${dots}/endpoints`] = reply
+      const catalog = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
+      expect({ failure, catalog }).toEqual({
+        failure,
+        catalog: { enabled: true, updatedAt: fixture.capturedAt, models: [catalogModels[0]] },
+      })
+      expect(await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000)).toEqual(catalog)
+    }
+  })
+  test("a failed model list or account list still aborts the whole refresh and keeps the stored catalog", async () => {
+    const stored = await redis(["GET", FREE_MODELS_CATALOG_KEY])
+    for (const path of ["/api/v1/models", "/api/v1/models/user"]) {
+      Object.assign(state, initial())
+      state.catalogReplies[path] = () => Response.json({ error: { code: 429 } }, { status: 429 })
+      await expect(refreshFreeModelCatalog(fetcher, fixture.capturedAt)).rejects.toMatchObject({
+        statusCode: 503,
+        code: "FREE_MODELS_CATALOG_UNAVAILABLE",
+      })
+      expect(await redis(["GET", FREE_MODELS_CATALOG_KEY])).toBe(stored)
+    }
   })
   test("publishes OFF when nothing qualifies and serves it as a clean empty catalog", async () => {
     for (const scenario of ["no free models listed", "every endpoint list empty"]) {
@@ -358,6 +392,8 @@ describe("curated free catalog", () => {
       { providers: [] },
       { providers: [{ id: "unknown", name: "Unknown", retention: "Unknown" }] },
       { providers: [{ id: "poolside/fp4", name: "Poolside", retention: NO_TRAINING_RETENTION }] },
+      { providers: [{ id: "atlas-cloud/fp8", name: "AtlasCloud", retention: NO_TRAINING_RETENTION }] },
+      { id: "cohere/north-code-next:free" },
       { id: "nvidia/nemotron-3.5-super-vl:free" },
       { maxOutputTokens: -1 },
       { id: "cohere/paid" },
@@ -423,7 +459,7 @@ describe("shared free inference", () => {
     expect(chats[0].headers.get("http-referer")).toBe("https://vectordev.ai/")
     expect(chats[0].headers.get("x-openrouter-title")).toBe("Vector")
     expect(chats[0].body.models).toEqual(catalogModels.map((item) => item.id))
-    // No-training routing: zdr is not requested, data collection is denied, and the reviewed provider
+    // No-training routing: zdr is not requested, data collection is denied, and the allowlisted provider
     // list plus a zero price ceiling leave no paid endpoint to fall back to.
     expect(chats[0].body.provider).toEqual({
       data_collection: "deny",

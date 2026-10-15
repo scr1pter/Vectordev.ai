@@ -139,16 +139,17 @@ export function createClient(
       const model = Schema.decodeUnknownOption(FreeModelMetadata)(value)
       return Option.isSome(model) && includedFreeModel(model.value, now()) ? [model.value] : []
     })
-    // Personal accounts follow the included-model policy: reviewed no-training providers only, read from
-    // each model's public endpoint list, with data_collection: "deny" on every request.
+    // Personal accounts follow the included-model policy: allowlisted model and provider pairs only, read from
+    // each model's public endpoint list, and every request asks OpenRouter to deny data collection.
     const endpoints = await Promise.all(
       candidates.map((model) => read(`${OPENROUTER_ROOT}/models/${model.id}/endpoints`, EndpointList)),
     )
-    // A rejected key or changed price/privacy policy must never revive stale models.
-    if (!available || endpoints.some((item) => !item)) {
+    // A rejected key must never revive stale models.
+    if (!available) {
       users.delete(digest)
       return []
     }
+    // An unreadable endpoint list leaves that model without endpoints, which drops only that model.
     const models = candidates
       .map((model, index) => freeModelInfo(model, endpoints[index]?.data.endpoints ?? [], { noTraining: true }))
       .filter((model): model is FreeModelInfo => model !== undefined)

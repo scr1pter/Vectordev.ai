@@ -35,11 +35,15 @@ export const FreeEndpointMetadata = Schema.Struct({
   status: Schema.Number,
 })
 
-// OpenRouter's public endpoint data does not say whether a provider trains on prompts, so the no-training
-// selection uses this reviewed allowlist, keyed by endpoint tag slug, and every request also sends
-// data_collection: "deny". Poolside is left out: OpenRouter's free Laguna pages say free use may train on
-// inputs and outputs.
-export const NO_TRAINING_PROVIDERS = new Set(["cohere", "atlas-cloud", "novita", "modelrun"])
+// OpenRouter's public endpoint data has no training flag, and provider-level policy records do not describe free
+// endpoints reliably: they recorded Poolside as not training while its free Laguna pages say free use may train.
+// So the no-training selection allowlists each model with the provider slugs that may serve it, and a new free
+// model is never offered until it is added here. Every request also asks OpenRouter to deny data collection.
+// The dated evidence and the owner confirmations each pair needs are in docs/vector/owner-actions/openrouter.md.
+export const NO_TRAINING_ENDPOINTS = new Map([
+  ["cohere/north-mini-code:free", ["cohere"]],
+  ["dots-studio/dots-3-note-preview:free", ["atlas-cloud"]],
+])
 
 // Free variants from these authors log or may train on prompts, or their free tier is unreviewed.
 const EXCLUDED_AUTHORS = /^(?:nvidia|stealth|thinkingmachines|liquid|google)\//i
@@ -69,17 +73,19 @@ export function eligibleFreeModel(model: typeof FreeModelMetadata.Type, now: num
   )
 }
 
-/** Included and personal no-training catalogs share the author exclusions and a 7-day expiry buffer. */
+/** Included and personal no-training catalogs share the allowlist, author exclusions and a 7-day expiry buffer. */
 export function includedFreeModel(model: typeof FreeModelMetadata.Type, now: number) {
-  return !excludedFreeModel(model.id) && eligibleFreeModel(model, now + 7 * 86400000)
+  return (
+    NO_TRAINING_ENDPOINTS.has(model.id) && !excludedFreeModel(model.id) && eligibleFreeModel(model, now + 7 * 86400000)
+  )
 }
 
 export function excludedFreeModel(id: string) {
   return EXCLUDED_AUTHORS.test(id)
 }
 
-export function noTrainingProvider(id: string) {
-  return NO_TRAINING_PROVIDERS.has(id.split("/")[0] ?? "")
+export function noTrainingEndpoint(modelID: string, tag: string) {
+  return !!NO_TRAINING_ENDPOINTS.get(modelID)?.includes(tag.split("/")[0] ?? "")
 }
 
 /** Shared and personal catalogs use the same price, capability and endpoint policy checks. */
@@ -99,7 +105,7 @@ export function freeModelInfo(
           )
         : undefined
     if (("zdr" in selection || "noTraining" in selection) && endpoint.model_id !== model.id) return []
-    if ("noTraining" in selection && !noTrainingProvider(endpoint.tag)) return []
+    if ("noTraining" in selection && !noTrainingEndpoint(model.id, endpoint.tag)) return []
     if (
       ("policies" in selection &&
         (!provider ||
