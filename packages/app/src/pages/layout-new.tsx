@@ -627,6 +627,8 @@ export default function NewLayout(props: ParentProps) {
   const [parallelFilter, setParallelFilter] = createSignal("")
   const [parallelBusy, setParallelBusy] = createSignal(false)
   const [parallelError, setParallelError] = createSignal("")
+  // Stop can take seconds while workers release their workspaces; the button says so instead of looking dead.
+  const [stoppingSwarms, setStoppingSwarms] = createSignal<ReadonlySet<string>>(new Set())
   const [parallelComposerOpen, setParallelComposerOpen] = createSignal(false)
   const byokProviders = useProviders()
   const byokModels = useModels()
@@ -2562,10 +2564,15 @@ export default function NewLayout(props: ParentProps) {
       reportDesktopOnlyParallel()
       return
     }
-    const run = await api.stop(id).catch((error: unknown) => {
-      setParallelError(error instanceof Error ? error.message : String(error))
-      return undefined
-    })
+    if (stoppingSwarms().has(id)) return
+    setStoppingSwarms((ids) => new Set([...ids, id]))
+    const run = await api
+      .stop(id)
+      .catch((error: unknown) => {
+        setParallelError(error instanceof Error ? error.message : String(error))
+        return undefined
+      })
+      .finally(() => setStoppingSwarms((ids) => new Set([...ids].filter((item) => item !== id))))
     if (!run) return
     replaceSwarmRun(run)
     logParallelTimeline("Agent swarm stopped", "warning", run.currentStep)
@@ -5142,10 +5149,12 @@ export default function NewLayout(props: ParentProps) {
                           <Show when={isSwarmRunning(run())}>
                             <button
                               type="button"
-                              class="h-9 rounded-[10px] border border-rose-400/25 px-3 text-[12px] text-rose-200"
+                              class="h-9 rounded-[10px] border border-rose-400/25 px-3 text-[12px] text-rose-200 disabled:opacity-60"
+                              disabled={stoppingSwarms().has(run().id)}
+                              aria-busy={stoppingSwarms().has(run().id)}
                               onClick={() => void stopSwarm(run().id)}
                             >
-                              Stop run
+                              {stoppingSwarms().has(run().id) ? "Stopping…" : "Stop run"}
                             </button>
                           </Show>
                           <Show when={["failed", "canceled", "interrupted"].includes(run().status)}>
@@ -5723,10 +5732,12 @@ export default function NewLayout(props: ParentProps) {
                       <Show when={isSwarmRunning(run())}>
                         <button
                           type="button"
-                          class="h-9 rounded-[10px] border border-rose-400/35 bg-rose-400/[0.08] px-3 text-[12px] font-medium text-rose-200 transition-colors duration-200 hover:bg-rose-400/[0.16]"
+                          class="h-9 rounded-[10px] border border-rose-400/35 bg-rose-400/[0.08] px-3 text-[12px] font-medium text-rose-200 transition-colors duration-200 hover:bg-rose-400/[0.16] disabled:opacity-60 disabled:hover:bg-rose-400/[0.08]"
+                          disabled={stoppingSwarms().has(run().id)}
+                          aria-busy={stoppingSwarms().has(run().id)}
                           onClick={() => void stopSwarm(run().id)}
                         >
-                          Stop swarm
+                          {stoppingSwarms().has(run().id) ? "Stopping…" : "Stop swarm"}
                         </button>
                       </Show>
                       <Show when={["failed", "canceled", "interrupted"].includes(run().status)}>
