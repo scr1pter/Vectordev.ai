@@ -2428,7 +2428,7 @@
                         <div class="cs-metrics">
                           <button class="cs-metric" type="button" data-cs-go="deployments"><span class="cs-metric-value">12</span><strong>Deployments</strong><small>3 current releases</small></button>
                           <button class="cs-metric" type="button" data-cs-go="observability"><span class="cs-metric-value">3/3</span><strong>Healthy releases</strong><small>Latest health checks passed</small></button>
-                          <button class="cs-metric" type="button" data-cs-go="connections"><span class="cs-metric-value">3</span><strong>Cloud accounts</strong><small>Vercel, Supabase and AWS</small></button>
+                          <button class="cs-metric" type="button" data-cs-go="connections"><span class="cs-metric-value">2</span><strong>Cloud accounts</strong><small>Vercel and Supabase</small></button>
                           <button class="cs-metric" type="button" data-cs-go="environment"><span class="cs-metric-value">18</span><strong>Environment variables</strong><small>Preview and Production</small></button>
                         </div>
                         <div class="cs-panel">
@@ -3605,7 +3605,6 @@
             label: "Connections",
             items: [
               ["connections", "Integrations", '<path d="M6.6 9.4 9.4 6.6M5.4 7.8 4 9.2a2.3 2.3 0 0 0 3.2 3.2l1.4-1.4M10.6 8.2 12 6.8a2.3 2.3 0 0 0-3.2-3.2L7.4 5"/>'],
-              ["aws", "AWS", '<rect x="2.5" y="3" width="11" height="4" rx="1"/><rect x="2.5" y="9" width="11" height="4" rx="1"/><path d="M5 5h.01M5 11h.01"/>'],
               ["settings", "Project settings", '<circle cx="8" cy="8" r="2.1"/><path d="M8 2.2v1.6M8 12.2v1.6M2.2 8h1.6M12.2 8h1.6M3.9 3.9 5 5M11 11l1.1 1.1M3.9 12.1 5 11M11 5l1.1-1.1"/>'],
             ],
           },
@@ -3625,7 +3624,6 @@
           functions: "Edge functions with their deploys, logs and secrets.",
           realtime: "Channels, presence and broadcast usage for this repository.",
           connections: "Vercel, Supabase, GitHub and GitLab accounts connected to this repository.",
-          aws: "AWS accounts and resources linked to this repository.",
           settings: "Project name, framework detection, build command and output directory for this repository.",
         }
         const NAMES = Object.fromEntries(GROUPS.flatMap((g) => g.items.map(([id, name]) => [id, name])))
