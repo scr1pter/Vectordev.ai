@@ -1273,29 +1273,25 @@ export function options(input: {
 }
 
 /**
- * The request body with `reasoning.context` set, or undefined to send the body unchanged. The Responses API documents
- * the field ("auto", "current_turn" or "all_turns") for the GPT-5.6 generation onward and the Codex CLI sends
- * "all_turns" for GPT-6, but the bundled SDK has no option for it, so the opt-in
- * VECTOR_EXPERIMENTAL_REASONING_CONTEXT flag sets it on the serialized body, HTTP and WebSocket alike, until a
- * measured comparison shows whether it should be the default.
+ * The request body with `reasoning.context` set, or undefined to send the body unchanged. OpenAI's reasoning guide
+ * documents the field ("auto", "current_turn" or "all_turns") and names the GPT-5.6 family, which already defaults to
+ * "all_turns", and GPT-6.1 Sol as the models that support "all_turns"; the Codex CLI sends "all_turns" for GPT-6.1 Sol.
+ * The bundled SDK has no option for it, so the opt-in VECTOR_EXPERIMENTAL_REASONING_CONTEXT flag sets it on the
+ * serialized body, HTTP and WebSocket alike, for those models only, until a measured comparison shows whether it
+ * should be the default.
  */
 export function reasoningContextBody(
   model: Provider.Model,
   context: RuntimeFlags.Info["experimentalReasoningContext"],
   body: unknown,
 ) {
-  if (!context || model.api.npm !== "@ai-sdk/openai" || !persistsReasoning(model.api.id)) return
+  if (!context || model.api.npm !== "@ai-sdk/openai") return
+  if (!/(?:^|\/)gpt-(?:5\.6|6\.1-sol)(?:-|$)/.test(model.api.id)) return
   if (typeof body !== "string") return
   const parsed = Option.getOrUndefined(decodeJson(body))
   // Only a reasoning request carries the object; one without it is not a request the field applies to.
   if (!isRecord(parsed) || !isRecord(parsed.reasoning)) return
   return JSON.stringify({ ...parsed, reasoning: { ...parsed.reasoning, context } })
-}
-
-function persistsReasoning(apiId: string) {
-  const version = /(?:^|\/)gpt-(\d+)(?:\.(\d+))?/.exec(apiId)
-  if (!version) return false
-  return Number(version[1]) > 5 || (Number(version[1]) === 5 && Number(version[2] ?? 0) >= 6)
 }
 
 export function smallOptions(model: Provider.Model) {
