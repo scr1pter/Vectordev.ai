@@ -18,9 +18,12 @@ export type ModelPlansPreview = { config: ModelPlanConfig; status: ModelPlanStat
 
 const count = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 })
 const price = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })
-// Balances are shown as a share of the credits bought, never as amounts, which with the purchase price would reveal
-// the dollars of model credit in it.
+// The monthly balance is shown as a share of the month's credits rather than an amount, so the page itself never
+// states the model credit a purchase buys.
 const share = (remaining: number, total: number) => (total > 0 ? Math.min(1, Math.max(0, remaining / total)) : 0)
+// Purchased credits pool every top-up ever bought, so they show a state rather than a share of that pool. Running low
+// starts below a dollar of usage, as in the app and CLI.
+const PURCHASED_LOW_USD = 1
 const percent = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 })
 
 export function ModelPlans(props: { accessToken: string; preview?: ModelPlansPreview | true }) {
@@ -159,14 +162,13 @@ export function ModelPlans(props: { accessToken: string; preview?: ModelPlansPre
         <div className="model-plans-usage">
           <h3>Purchased credits</h3>
           <p className="model-plans-balance">
-            {purchasedRemaining === undefined ? (
-              "Usage temporarily unavailable"
-            ) : (
-              <span>
-                <strong>{percent.format(share(purchasedRemaining, status.wallet.credits))}</strong> of your purchased
-                Codium credits remaining
-              </span>
-            )}
+            {purchasedRemaining === undefined
+              ? "Usage temporarily unavailable"
+              : purchasedRemaining <= 0
+                ? "Your purchased Codium credits are used up"
+                : purchasedRemaining < PURCHASED_LOW_USD
+                  ? "Your purchased Codium credits are running low"
+                  : "Purchased Codium credits available"}
           </p>
           <p>
             Purchased credits carry forward and work without a subscription. Your monthly allowance is used first when

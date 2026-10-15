@@ -444,7 +444,7 @@ test("status reads plan and balances in Codium credits and flags a low balance",
   })
   expect(ModelPlanStatus.describe(status)).toEqual([
     `Plan: Codium 50, 5% of monthly credits left, renews ${ModelPlanStatus.formatDate(1_790_000_000_000)}`,
-    "Purchased credits: 1% left",
+    "Purchased credits: running low",
     "You are running low on Codium credits.",
   ])
   expect(JSON.stringify(status)).not.toContain(token)
@@ -523,6 +523,16 @@ test("running low follows the monthly grant, not every top-up ever bought", () =
   // A long-time buyer: $1,600 of top-ups over time, $15 (1,500 credits) left.
   const buyer = { enabled: true, active: false, access: true, wallet: { credits: 1600, remaining: 15 } }
   expect(ModelPlanStatus.fromRemote(buyer)).toMatchObject({ remaining: 1500, low: false })
+  // A share of every top-up ever bought would read "under 1% left" here, so purchased credits show a state.
+  expect(ModelPlanStatus.describe(ModelPlanStatus.fromRemote(buyer))).toContain("Purchased credits: available")
+  expect(
+    [0, 0.9, undefined].map((remaining) =>
+      ModelPlanStatus.formatPurchased(
+        ModelPlanStatus.fromRemote({ ...buyer, wallet: { credits: 1600, remaining } }).purchased,
+      ),
+    ),
+  ).toEqual(["Used up", "Running low", "Balance unavailable"])
+  expect(ModelPlanStatus.formatPurchased({ credits: 0 })).toBe("None")
   expect(ModelPlanStatus.fromRemote({ ...buyer, wallet: { credits: 1600, remaining: 0.9 } })).toMatchObject({
     remaining: 90,
     low: true,

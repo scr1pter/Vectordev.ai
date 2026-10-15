@@ -10,8 +10,9 @@ export const MANAGE_URL = `${SITE}/account`
 // The stable internal ID stays "vector-plan"; people see the provider as Vector Codium.
 export const PROVIDER_ID = "vector-plan"
 /**
- * Codium credits per USD of model credit, the unit balances are kept in here. Balances are shown only as the share of a
- * grant left: with the purchase price, an amount would give away the model credit a purchase buys.
+ * Codium credits per USD of model credit, the unit balances are kept in here. Screens show the share of the monthly
+ * grant left and a state for purchased credits, never an amount. That keeps amounts off screens; it is not a secret
+ * from the subscriber, whose own status response carries the USD balances.
  */
 export const CREDITS_PER_USD = 100
 
@@ -134,6 +135,18 @@ export function formatShare(remaining: number, total: number) {
   return remaining > 0 && share === 0 ? "under 1%" : `${share}%`
 }
 
+/**
+ * Purchased credits as a state, not a share: they pool every top-up ever bought, so a share of that pool would read
+ * "8% left" for a repeat buyer right after a fresh purchase.
+ */
+export function formatPurchased(purchased: Status["purchased"]) {
+  if (!purchased.credits) return "None"
+  if (purchased.remaining === undefined) return "Balance unavailable"
+  if (purchased.remaining === 0) return "Used up"
+  if (purchased.remaining < LOW_FLOOR) return "Running low"
+  return "Available"
+}
+
 export function formatDate(time: number) {
   return new Date(time).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
 }
@@ -147,9 +160,7 @@ export function describe(status: Status) {
     plan
       ? `Plan: ${plan.name}, ${plan.remaining === undefined ? "balance unavailable" : `${formatShare(plan.remaining, plan.credits)} of monthly credits left`}, ${plan.cancelAtPeriodEnd ? "ends" : "renews"} ${formatDate(plan.renewsAt)}`
       : "Plan: none",
-    status.purchased.credits
-      ? `Purchased credits: ${status.purchased.remaining === undefined ? "balance unavailable" : `${formatShare(status.purchased.remaining, status.purchased.credits)} left`}`
-      : "Purchased credits: none",
+    `Purchased credits: ${formatPurchased(status.purchased).toLowerCase()}`,
   ]
   const current = notice(status)
   return current ? [...lines, current.text] : lines
