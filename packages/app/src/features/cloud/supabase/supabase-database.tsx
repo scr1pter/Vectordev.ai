@@ -12,7 +12,6 @@ export function SupabaseDatabase(
     connected: boolean
     onOpenConnections: () => void
     onDatabaseChange: () => Promise<void>
-    openLink: (url: string) => void
   },
 ) {
   const confirm = createConfirm()
@@ -356,17 +355,6 @@ export function SupabaseDatabase(
                 linkedProject()?.status ? ` · ${linkedProject()?.status?.toLowerCase().replaceAll("_", " ")}` : ""
               }`}
             >
-              <button
-                class="cloud-button"
-                type="button"
-                onClick={() =>
-                  props.openLink(
-                    `https://supabase.com/dashboard/project/${encodeURIComponent(projects()?.linked?.ref ?? "")}`,
-                  )
-                }
-              >
-                Open in Supabase
-              </button>
               <button
                 class="cloud-button"
                 type="button"

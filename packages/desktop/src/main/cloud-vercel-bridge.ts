@@ -417,7 +417,6 @@ async function run(input: VercelBridgeInput, scope: CloudScope, options: VercelB
           ? `Aliases: ${deployment.aliases.map((alias) => `https://${alias}`).join(", ")}`
           : undefined,
         deployment.errorMessage ? `Error: ${deployment.errorMessage}` : undefined,
-        deployment.inspectorUrl ? `Vercel inspector: ${deployment.inspectorUrl}` : undefined,
         deployment.state === "ERROR" ? "Read why with logs (source build) for this deploymentId." : undefined,
       ]
         .filter(Boolean)

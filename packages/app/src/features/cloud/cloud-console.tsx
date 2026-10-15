@@ -1762,7 +1762,6 @@ export function CloudConsole(props: {
                       openManualToken("supabase")
                   }}
                   onDatabaseChange={refreshDatabase}
-                  openLink={(url) => platform.openLink(url)}
                 />
               </Show>
             </Show>

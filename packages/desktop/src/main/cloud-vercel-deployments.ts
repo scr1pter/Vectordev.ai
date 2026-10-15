@@ -59,7 +59,6 @@ export type VercelDeployment = {
   commitSha?: string
   commitMessage?: string
   creator?: string
-  inspectorUrl?: string
   errorMessage?: string
   aliases: string[]
 }
@@ -181,7 +180,6 @@ function deploymentSummary(value: unknown, current?: string): VercelDeployment |
       stringField(meta, "gitlabCommitMessage") ??
       stringField(meta, "bitbucketCommitMessage"),
     creator: stringField(creator, "username") ?? stringField(creator, "email"),
-    inspectorUrl: stringField(value, "inspectorUrl"),
     errorMessage: stringField(value, "errorMessage"),
     aliases: alias,
   }

@@ -80,7 +80,6 @@ export type VercelDeployment = {
   commitSha?: string
   commitMessage?: string
   creator?: string
-  inspectorUrl?: string
   errorMessage?: string
   aliases: string[]
 }

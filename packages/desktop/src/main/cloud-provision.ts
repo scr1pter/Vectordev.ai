@@ -580,7 +580,7 @@ export async function createCloudDatabase(
       error: `Supabase would not create the project: ${message}`,
       nextStep: limited
         ? "Supabase declined this request because of an account or plan limit. Link an existing project in Vector Cloud > Database, or wait until the provider confirms capacity is available. Do not upgrade a plan or retry in another organization automatically."
-        : "Report this to the user as Supabase reported it, and offer to link an existing Supabase project in Vector Cloud > Database instead.",
+        : "Report this to the user as Supabase reported it, and offer to link an existing Supabase project instead (supabase_projects, then link_database).",
     }
   }
 }
