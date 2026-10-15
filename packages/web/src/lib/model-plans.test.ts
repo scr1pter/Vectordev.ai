@@ -32,7 +32,7 @@ describe("model plan API boundaries", () => {
   test("keeps only public fields, even when a response carries credit amounts or model prices", () => {
     const read = readModelPlanConfig({
       ...config,
-      plans: [{ ...plan, credits: 8, multiple: 5, tasks: [[60, 550], null] }],
+      plans: [{ ...plan, credits: 7, multiple: 5, tasks: [[60, 550], null] }],
       models: [{ id: "vendor/coder", name: "Coder", inputPrice: 0.1, outputPrice: 0.4, contextLength: 128_000 }],
     })
     expect(read.plans).toEqual([{ ...plan, multiple: 5, tasks: [[60, 550], null] }])

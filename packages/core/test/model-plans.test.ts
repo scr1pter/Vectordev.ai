@@ -430,29 +430,29 @@ test("status reads plan and balances in Codium credits and flags a low balance",
     enabled: true,
     access: true,
     plan: {
-      id: "vector-20",
-      name: "Codium 20",
-      credits: 1600,
+      id: "vector-50",
+      name: "Codium 50",
+      credits: 2100,
       remaining: 120,
       renewsAt: 1_790_000_000_000,
       cancelAtPeriodEnd: false,
     },
-    purchased: { credits: 800, remaining: 10 },
+    purchased: { credits: 900, remaining: 10 },
     remaining: 130,
     empty: false,
     low: true,
   })
   expect(ModelPlanStatus.describe(status)).toEqual([
-    `Plan: Codium 20, 7% of monthly credits left, renews ${ModelPlanStatus.formatDate(1_790_000_000_000)}`,
+    `Plan: Codium 50, 5% of monthly credits left, renews ${ModelPlanStatus.formatDate(1_790_000_000_000)}`,
     "Purchased credits: 1% left",
     "You are running low on Codium credits.",
   ])
   expect(JSON.stringify(status)).not.toContain(token)
   // Balances read as shares, never amounts, which with a purchase's price would give away its model credit.
-  expect(ModelPlanStatus.describe(status).join(" ")).not.toMatch(/\b(1,600|1600|800|130|120)\b/)
-  expect(ModelPlanStatus.formatShare(1, 1600)).toBe("under 1%")
-  expect(ModelPlanStatus.formatShare(0, 1600)).toBe("0%")
-  expect(ModelPlanStatus.formatShare(1600, 1600)).toBe("100%")
+  expect(ModelPlanStatus.describe(status).join(" ")).not.toMatch(/\b(2,100|2100|900|130|120)\b/)
+  expect(ModelPlanStatus.formatShare(1, 2100)).toBe("under 1%")
+  expect(ModelPlanStatus.formatShare(0, 2100)).toBe("0%")
+  expect(ModelPlanStatus.formatShare(2100, 2100)).toBe("100%")
 })
 
 test("status without credits, signed out, expired or unreachable says what to do", async () => {
@@ -495,7 +495,7 @@ test("a subscriber whose monthly credits are spent is told so, even though the p
     active: true,
     access: true,
     plan: "vector-10",
-    credits: 8,
+    credits: 7,
     remaining: 0,
     periodEnd: 1_790_000_000_000,
     cancelAtPeriodEnd: false,
@@ -533,12 +533,12 @@ test("running low follows the monthly grant, not every top-up ever bought", () =
     active: true,
     access: true,
     plan: "vector-200",
-    credits: 160,
+    credits: 150,
     periodEnd: 1_790_000_000_000,
     wallet: { credits: 0, remaining: 0 },
   }
-  expect(ModelPlanStatus.fromRemote({ ...subscriber, remaining: 15.99 })).toMatchObject({ remaining: 1599, low: true })
-  expect(ModelPlanStatus.fromRemote({ ...subscriber, remaining: 16 })).toMatchObject({ remaining: 1600, low: false })
+  expect(ModelPlanStatus.fromRemote({ ...subscriber, remaining: 14.99 })).toMatchObject({ remaining: 1499, low: true })
+  expect(ModelPlanStatus.fromRemote({ ...subscriber, remaining: 15 })).toMatchObject({ remaining: 1500, low: false })
 })
 
 test("the app recognises a failed Codium turn from the engine's error and from a V2 assistant error", () => {

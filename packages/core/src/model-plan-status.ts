@@ -116,7 +116,7 @@ export function fromRemote(remote: typeof Remote.Type): Status {
   }
 }
 
-/** "vector-20" is the Codium 20 subscription. */
+/** "vector-50" is the Codium 50 subscription. */
 export function planName(id: string) {
   const price = /^vector-(\d+)$/.exec(id)?.[1]
   return price ? `Codium ${price}` : id

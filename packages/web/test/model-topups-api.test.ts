@@ -209,10 +209,6 @@ beforeEach(async () => {
     NODE_ENV: "development",
     MODEL_PLANS_ENABLED: "true",
     MODEL_CREDIT_MARKUP_PERCENT: "100",
-    MODEL_TOPUP_10_CREDITS_USD: "8",
-    MODEL_TOPUP_50_CREDITS_USD: "40",
-    MODEL_TOPUP_100_CREDITS_USD: "80",
-    MODEL_TOPUP_200_CREDITS_USD: "160",
     STRIPE_SECRET_KEY: "fixture",
     MODEL_PLAN_KEY_ENCRYPTION_SECRET: "ef".repeat(32),
     OPENROUTER_MANAGEMENT_KEY: "fixture",
@@ -225,8 +221,9 @@ beforeEach(async () => {
   for (const price of [10, 50, 100, 200]) {
     process.env[`STRIPE_MODEL_TOPUP_${price}_PRICE_ID`] = `price_topup${price}`
     process.env[`STRIPE_MODEL_PLAN_${price}_PRICE_ID`] = `price_monthly${price}`
-    process.env[`MODEL_TOPUP_${price}_CREDITS_USD`] = String(price * 0.8)
-    process.env[`MODEL_PLAN_${price}_CREDITS_USD`] = String(price * 0.8)
+    // Fixture allowances only, unrelated to any live conversion.
+    process.env[`MODEL_TOPUP_${price}_CREDITS_USD`] = String(price / 2)
+    process.env[`MODEL_PLAN_${price}_CREDITS_USD`] = String(price / 2)
   }
 })
 afterAll(async () => {
@@ -328,56 +325,56 @@ test("paid top-ups unlock standalone inference, retain encrypted keys, and do no
   expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({
     active: false,
     access: true,
-    wallet: { credits: 8, used: 0, remaining: 8 },
+    wallet: { credits: 5, used: 0, remaining: 5 },
   })
   await reconcileModelTopup(user.id, String(bought.checkout.id), fetcher)
   await reconcileModelTopup(user.id, String(bought.checkout.id), fetcher)
   const key = await modelPlanCredential(user.id, fetcher)
   expect(key).toBe("wallet-secret-1")
   expect(await readModelPlanAccount(user.id, fetcher)).toMatchObject({
-    purchases: [{ credits: 8, payment: bought.payment.id }],
+    purchases: [{ credits: 5, payment: bought.payment.id }],
   })
   expect(JSON.stringify(await readModelPlanAccount(user.id, fetcher))).not.toContain(key)
   expect(keys.get("wallet_key_1")?.data).toMatchObject({
-    limit: 8,
+    limit: 5,
     limit_reset: null,
     expires_at: null,
     include_byok_in_limit: true,
   })
   keys.get("wallet_key_1")!.data.usage = 2
   process.env.MODEL_CREDIT_MARKUP_PERCENT = "100"
-  expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ wallet: { credits: 8, used: 2, remaining: 6 } })
+  expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ wallet: { credits: 5, used: 2, remaining: 3 } })
 })
 
 test("a second completed purchase increases the same lifetime cap without clearing usage", async () => {
   await purchase()
   await modelPlanCredential(user.id, fetcher)
-  keys.get("wallet_key_1")!.data.usage = 7
+  keys.get("wallet_key_1")!.data.usage = 4
   const next = await purchase(50)
   await reconcileModelTopup(user.id, String(next.checkout.id), fetcher)
   expect(await modelPlanCredential(user.id, fetcher)).toBe("wallet-secret-1")
   expect(keys.size).toBe(1)
-  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 48, usage: 7 })
-  expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ wallet: { credits: 48, used: 7, remaining: 41 } })
+  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 30, usage: 4 })
+  expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ wallet: { credits: 30, used: 4, remaining: 26 } })
 })
 
 test("partial refunds reduce credits proportionally and disputes preserve spent-credit debt", async () => {
   const bought = await purchase()
   await modelPlanCredential(user.id, fetcher)
-  keys.get("wallet_key_1")!.data.usage = 6
+  keys.get("wallet_key_1")!.data.usage = 3
   bought.payment.latest_charge.amount_refunded = 500
   await expect(modelPlanCredential(user.id, fetcher)).rejects.toMatchObject({ code: "MODEL_TOPUP_EXHAUSTED" })
-  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 4, disabled: true, usage: 6 })
+  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 2.5, disabled: true, usage: 3 })
   const next = await purchase()
   await reconcileModelTopup(user.id, String(next.checkout.id), fetcher)
-  expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ wallet: { credits: 12, used: 6, remaining: 6 } })
+  expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ wallet: { credits: 7.5, used: 3, remaining: 4.5 } })
   bought.payment.latest_charge.disputed = true
   await reconcileModelPlanEvent({ type: "charge.dispute.created", data: { object: { charge: "ch_wallet1" } } }, fetcher)
-  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 8, usage: 6 })
+  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 5, usage: 3 })
   state.disputes = [{ payment_intent: bought.payment.id, status: "won" }]
   bought.payment.latest_charge.amount_refunded = 0
   await reconcileModelPlanEvent({ type: "charge.dispute.closed", data: { object: { charge: "ch_wallet1" } } }, fetcher)
-  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 16, usage: 6 })
+  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 10, usage: 3 })
 })
 
 test("unpaid, underpaid, and cross-account checkouts never grant credits", async () => {
@@ -404,10 +401,10 @@ test("monthly allowance is selected first and wallet handles a request too large
   await purchase()
   state.subscriptions = [monthly()]
   expect(await modelPlanCredential(user.id, fetcher)).toBe("wallet-secret-1")
-  keys.get("wallet_key_1")!.data.usage = 7.9
+  keys.get("wallet_key_1")!.data.usage = 4.9
   expect(await modelPlanCredential(user.id, fetcher, Date.now(), 0.2)).toBe("wallet-secret-2")
-  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 8, usage: 7.9 })
-  expect(keys.get("wallet_key_2")?.data).toMatchObject({ limit: 8, usage: 0, expires_at: null })
+  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 5, usage: 4.9 })
+  expect(keys.get("wallet_key_2")?.data).toMatchObject({ limit: 5, usage: 0, expires_at: null })
   state.subscriptions = []
   expect(await modelPlanCredential(user.id, fetcher)).toBe("wallet-secret-2")
   expect(keys.get("wallet_key_1")?.data.disabled).toBe(true)
@@ -456,7 +453,7 @@ test("concurrent duplicate grant attempts cannot mint a second allowance", async
   )
   expect(results.some((result) => result.status === "fulfilled")).toBe(true)
   expect((await readModelPlanAccount(user.id, fetcher))?.purchases).toHaveLength(1)
-  expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ wallet: { credits: 8, remaining: 8 } })
+  expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ wallet: { credits: 5, remaining: 5 } })
 })
 
 test("renewing a monthly allowance does not roll over old monthly credits or reset purchased usage", async () => {
@@ -474,11 +471,11 @@ test("renewing a monthly allowance does not roll over old monthly credits or res
   state.subscriptions = [renewal]
   expect(await modelPlanCredential(user.id, fetcher)).toBe("wallet-secret-3")
   expect(keys.get("wallet_key_2")?.data.disabled).toBe(true)
-  expect(keys.get("wallet_key_3")?.data).toMatchObject({ limit: 8, usage: 0 })
+  expect(keys.get("wallet_key_3")?.data).toMatchObject({ limit: 5, usage: 0 })
   expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({
-    credits: 8,
+    credits: 5,
     used: 0,
-    wallet: { credits: 8, used: 2, remaining: 6 },
+    wallet: { credits: 5, used: 2, remaining: 3 },
   })
 })
 
@@ -488,7 +485,7 @@ test("missing provider usage fails closed instead of granting a new lifetime key
   delete keys.get("wallet_key_1")!.data.usage
   expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({
     access: false,
-    wallet: { credits: 8, used: undefined, remaining: undefined },
+    wallet: { credits: 5, used: undefined, remaining: undefined },
   })
   await expect(modelPlanCredential(user.id, fetcher)).rejects.toMatchObject({ code: "MODEL_PLAN_KEY_INVALID" })
   expect(keys.size).toBe(1)
@@ -529,7 +526,7 @@ test("historically disputed charges restore credits only after an authoritative 
   state.disputes = [{ payment_intent: bought.payment.id, status: "won" }]
   expect(await modelPlanCredential(user.id, fetcher)).toBe("wallet-secret-1")
   expect(bought.payment.latest_charge.disputed).toBe(true)
-  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 8, usage: 2, disabled: false })
+  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 5, usage: 2, disabled: false })
 })
 
 test("monthly dispute recovery reuses the paid period and preserves charged usage", async () => {
@@ -544,6 +541,6 @@ test("monthly dispute recovery reuses the paid period and preserves charged usag
   expect(keys.get("wallet_key_1")?.data.disabled).toBe(true)
   state.disputes = [{ charge: "ch_monthly", status: "won" }]
   expect(await modelPlanCredential(user.id, fetcher)).toBe("wallet-secret-1")
-  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 8, usage: 2, disabled: false })
+  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 5, usage: 2, disabled: false })
   expect(subscription.latest_invoice.charge.disputed).toBe(true)
 })

@@ -239,12 +239,12 @@ test("Codium balances are read in the main process and only the result reaches t
     enabled: true,
     active: true,
     access: true,
-    plan: "vector-20",
-    credits: 16,
+    plan: "vector-50",
+    credits: 21,
     remaining: 4.5,
     periodEnd: 2_000_000,
     cancelAtPeriodEnd: false,
-    wallet: { credits: 8, used: 1, remaining: 7 },
+    wallet: { credits: 9, used: 1, remaining: 8 },
   }
   const status = await app.controller.codium()
   expect(app.fetched.at(-1)).toBe("https://vectordev.ai/api/model-plans/status")
@@ -255,15 +255,15 @@ test("Codium balances are read in the main process and only the result reaches t
     enabled: true,
     access: true,
     plan: {
-      id: "vector-20",
-      name: "Codium 20",
-      credits: 1600,
+      id: "vector-50",
+      name: "Codium 50",
+      credits: 2100,
       remaining: 450,
       renewsAt: 2_000_000,
       cancelAtPeriodEnd: false,
     },
-    purchased: { credits: 800, remaining: 700 },
-    remaining: 1150,
+    purchased: { credits: 900, remaining: 800 },
+    remaining: 1250,
     empty: false,
     low: false,
   })

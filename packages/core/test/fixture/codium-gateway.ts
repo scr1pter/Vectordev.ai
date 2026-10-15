@@ -53,14 +53,14 @@ export function codiumGateway(token: string) {
       enabled: true,
       active: true,
       access: true,
-      plan: "vector-20",
-      credits: 16,
+      plan: "vector-50",
+      credits: 21,
       remaining: 1.2,
       periodStart: 1_000,
       periodEnd: 1_790_000_000_000,
       cancelAtPeriodEnd: false,
       customer: true,
-      wallet: { credits: 8, used: 7.9, remaining: 0.1 },
+      wallet: { credits: 9, used: 8.9, remaining: 0.1 },
     } as Record<string, unknown>,
   }
   const seen: { path: string; authorization: string | null; body?: unknown }[] = []
