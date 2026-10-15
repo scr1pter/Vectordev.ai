@@ -37,7 +37,9 @@ mock.module("./store", () => ({
   removeStoreFileIfEmpty: () => undefined,
 }))
 
-const { createCloudDatabase, supabaseProjectName, uniqueProjectName } = await import("./cloud-provision")
+const { createCloudDatabase, pendingProvision, supabaseProjectName, uniqueProjectName } = await import(
+  "./cloud-provision"
+)
 const { cloudProjectScopeKey, getDatabase } = await import("./cloud-console")
 const { decryptCloudCredential, encryptCloudCredential } = await import("./cloud-credential-vault")
 
@@ -437,6 +439,27 @@ describe("createCloudDatabase", () => {
     expect(getDatabase(project)).toMatchObject({ projectRef: "newprojectref01" })
   })
 
+  test("stops resuming a project Supabase gave up on, so the next run can make a working one", async () => {
+    seedConnection()
+    const failing = supabaseApi({ statuses: ["COMING_UP", "INIT_FAILED"] })
+
+    const report = await createCloudDatabase({ projectPath: project }, { request: failing.request, ...noWait })
+
+    expect(report.ok).toBe(false)
+    expect(report.error).toContain("INIT_FAILED")
+    expect(report.nextStep).toContain("Link another existing project in Vector Cloud > Database")
+    expect(report.nextStep).not.toContain("supabase.com")
+    expect(getDatabase(project)).toBeNull()
+    // Nothing is left for Finish setup or create_database to resume.
+    expect(pendingProvision(project)).toBeUndefined()
+
+    const fresh = supabaseApi()
+    const next = await createCloudDatabase({ projectPath: project }, { request: fresh.request, ...noWait })
+    expect(next).toMatchObject({ ok: true, createdNow: true })
+    expect(fresh.creates()).toBe(1)
+    expect(next.database).not.toHaveProperty("dashboardUrl")
+  })
+
   test("creates a fresh project when the linked one was disconnected on purpose", async () => {
     seedConnection()
     const first = supabaseApi()
@@ -482,6 +505,7 @@ describe("createCloudDatabase", () => {
     expect(report.error).toContain("was created, but Vector could not finish connecting it")
     expect(report.nextStep).toContain("newprojectref01")
     expect(report.nextStep).toContain("Do not create another project")
+    expect(report.nextStep).not.toContain("supabase.com")
   })
 
   test("treats a rejected saved token as a reconnect, not a crash", async () => {

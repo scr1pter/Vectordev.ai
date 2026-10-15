@@ -35,7 +35,6 @@ export type CloudProvisionDatabase = {
   projectRef?: string
   projectName?: string
   region?: string
-  dashboardUrl?: string
 }
 
 export type CloudProvisionReport = {
@@ -233,9 +232,6 @@ function databaseSummary(connection: NonNullable<CloudDatabaseConnection>, regio
     projectRef: connection.projectRef,
     projectName: connection.projectName,
     region,
-    dashboardUrl: connection.projectRef
-      ? `https://supabase.com/dashboard/project/${encodeURIComponent(connection.projectRef)}`
-      : undefined,
   }
 }
 
@@ -439,7 +435,7 @@ async function provision(
         nextStep: "It was probably deleted in the dashboard. Run create_database again to create a new one.",
       }
     }
-    return notHealthyReport(pending, resumed, intervalMs)
+    return notHealthyReport(input.projectPath, pending, resumed, intervalMs)
   }
 
   const organizations = await listOrganizations(token, request)
@@ -510,12 +506,21 @@ async function provision(
     tolerateMissing: true,
     progress: options.progress,
   })
-  if (!poll.healthy) return notHealthyReport(record, poll, intervalMs)
+  if (!poll.healthy) return notHealthyReport(input.projectPath, record, poll, intervalMs)
   return linkCreatedProject(input, token, record, poll, request, options.progress)
 }
 
-function notHealthyReport(record: ProvisionRecord, poll: PollResult, intervalMs: number): CloudProvisionReport {
+function notHealthyReport(
+  projectPath: string,
+  record: ProvisionRecord,
+  poll: PollResult,
+  intervalMs: number,
+): CloudProvisionReport {
   const failed = Boolean(poll.status && FAILED_STATUSES.has(poll.status))
+  // A project Supabase gave up on can never be finished. Kept as the pending
+  // job, it would make every later create_database and the Database screen's
+  // Finish setup resume it again, so neither could ever make a working one.
+  if (failed) clearProvisionRecord(projectPath)
   const waitedMs = poll.attempts * intervalMs
   // The timeout is not a failure of the project, only of the wait, so it says
   // what exists and how to finish it — never "try creating one again".
@@ -529,7 +534,7 @@ function notHealthyReport(record: ProvisionRecord, poll: PollResult, intervalMs:
         ? `${record.projectName} was created, but Supabase is not listing it on the account yet.`
         : `${record.projectName} was created but is still ${poll.status ?? "starting"} after ${Math.round(waitedMs / 1000)}s.`,
     nextStep: failed
-      ? `Ask the user to check ${record.projectName} at https://supabase.com/dashboard/project/${record.projectRef}. Nothing is connected to this project yet.`
+      ? `Nothing is connected to this project, and Vector no longer tries to finish ${record.projectName}. Link another existing project in Vector Cloud > Database (supabase_projects, then link_database), or create a new one, which Supabase bills as another project.`
       : resume,
   }
 }
@@ -568,7 +573,7 @@ export async function createCloudDatabase(
       return {
         ok: false,
         error: `The Supabase project was created, but Vector could not finish connecting it: ${message}`,
-        nextStep: `Run create_database again to finish linking ${created}, or ask the user to check https://supabase.com/dashboard/project/${created}. Do not create another project.`,
+        nextStep: `Run create_database again to finish linking ${created}; it resumes that same project. Do not create another project.`,
       }
     }
     // Free organizations cap how many projects they may hold, and a card on
