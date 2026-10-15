@@ -2141,7 +2141,8 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       throw new Error(allowance.reason || "A spend limit blocked this parallel agent run.")
     }
     const launched = activeRuns.get(id)
-    if (launched) launched.spend = { projectPath: persisted.sourcePath, budgetUsd: allowance.budgetUsd, draining: false }
+    if (launched)
+      launched.spend = { projectPath: persisted.sourcePath, budgetUsd: allowance.budgetUsd, draining: false }
     // A warning is information, not a gate: the run proceeds and the user gets
     // told how close the cap is.
     const warning = allowance.state === "warn" ? allowance.reason : undefined

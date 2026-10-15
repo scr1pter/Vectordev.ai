@@ -380,8 +380,7 @@ export const locationLayer = Layer.effect(
           return withPricing(modelPlanRoute(selected, modelPlans, freeCredentials), selected.cost)
         // Configuration can overwrite API metadata or add a free ID after catalog validation.
         // Free intent always crosses the final eligibility and zero-price request guard.
-        if (requiresFreeRoute(selected))
-          return withFreeRoute(freeModelRoute(selected, freeModels, freeCredentials))
+        if (requiresFreeRoute(selected)) return withFreeRoute(freeModelRoute(selected, freeModels, freeCredentials))
         const provider = yield* catalog.provider.get(selected.providerID)
         const connection = yield* integrations.connection.active(
           provider?.integrationID ?? Integration.ID.make(selected.providerID),

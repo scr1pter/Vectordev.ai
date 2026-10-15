@@ -334,8 +334,7 @@ export function createSpendLedger(input: { userDataPath: string }) {
     }
 
     const remainingUsd = checks.length ? Math.min(...checks.map((check) => check.limit.usd - check.spent)) : undefined
-    const budgetUsd =
-      remainingUsd === undefined || limits.perRun ? remainingUsd : remainingUsd * UNCAPPED_RUN_SHARE
+    const budgetUsd = remainingUsd === undefined || limits.perRun ? remainingUsd : remainingUsd * UNCAPPED_RUN_SHARE
     // Nothing is awaited between the totals above and this hold, so no other
     // check can read the headroom before it is held.
     if (allowance.reserve && budgetUsd !== undefined && budgetUsd > 0) {

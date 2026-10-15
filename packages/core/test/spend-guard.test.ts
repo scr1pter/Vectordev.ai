@@ -394,7 +394,9 @@ describe("SpendGuard service", () => {
       expect(quiet.map((verdict) => verdict.state)).toEqual(["ok", "ok", "ok"])
       // Its spend still counts against the run it is linked to.
       expect((yield* guard.snapshot(root))?.spentUsd).toBeCloseTo(0.3, 6)
-      const looping = yield* Effect.forEach([1, 2, 3], () => guard.record(root, step({ tools: [bash("cat src/a.ts")] })))
+      const looping = yield* Effect.forEach([1, 2, 3], () =>
+        guard.record(root, step({ tools: [bash("cat src/a.ts")] })),
+      )
       expect(looping[2]).toMatchObject({ state: "stopped", reason: "loop" })
     }),
   )
@@ -407,12 +409,14 @@ describe("SpendGuard service", () => {
       yield* guard.begin(root)
       // A command that writes a file each time is not a loop, but nothing in the step says so until its patch lands.
       for (const index of [1, 2, 3])
-        expect((yield* guard.record(root, step({ tools: [bash("bun run generate")] }), confirm(index, true))).state).toBe(
-          "ok",
-        )
+        expect(
+          (yield* guard.record(root, step({ tools: [bash("bun run generate")] }), confirm(index, true))).state,
+        ).toBe("ok")
       expect(asked).toEqual([3])
       // Once it changes nothing, the call that changed the files and the two after it are a loop.
-      expect((yield* guard.record(root, step({ tools: [bash("bun run generate")] }), confirm(4, false))).state).toBe("ok")
+      expect((yield* guard.record(root, step({ tools: [bash("bun run generate")] }), confirm(4, false))).state).toBe(
+        "ok",
+      )
       const verdict = yield* guard.record(root, step({ tools: [bash("bun run generate")] }), confirm(5, false))
       expect(verdict).toMatchObject({ state: "stopped", reason: "loop" })
       expect(asked).toEqual([3, 5])

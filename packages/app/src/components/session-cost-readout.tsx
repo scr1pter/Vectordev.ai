@@ -144,7 +144,9 @@ export function SessionCostReadout() {
           onFocusOut={() => setHovered(false)}
           class="flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-[color:var(--vx-line)] bg-white/[0.03] px-2.5 text-[11px] font-medium tabular-nums text-white/62 transition-colors duration-150 hover:border-[color:var(--vx-line)] hover:text-white/80"
         >
-          <span classList={{ "text-[#a78bfa]": !pill().warn, "text-[color:var(--vx-amber)]": pill().warn }}>{pill().label}</span>
+          <span classList={{ "text-[#a78bfa]": !pill().warn, "text-[color:var(--vx-amber)]": pill().warn }}>
+            {pill().label}
+          </span>
           <span class="text-white/25">·</span>
           <span>{compactTokens(tokens())}</span>
         </div>

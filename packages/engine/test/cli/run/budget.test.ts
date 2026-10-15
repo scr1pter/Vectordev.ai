@@ -125,20 +125,22 @@ describe("vector run budget flags", () => {
     60_000,
   )
 
-  cliIt.live("rejects budgets the spend guard cannot hold", ({ vector }) =>
-    Effect.gen(function* () {
-      const cost = yield* vector.spawn(["run", "--max-cost", "0", "hello"])
-      expect(cost.exitCode).toBe(1)
-      expect(cost.stderr).toContain("--max-cost must be a positive number of US dollars")
+  cliIt.live(
+    "rejects budgets the spend guard cannot hold",
+    ({ vector }) =>
+      Effect.gen(function* () {
+        const cost = yield* vector.spawn(["run", "--max-cost", "0", "hello"])
+        expect(cost.exitCode).toBe(1)
+        expect(cost.stderr).toContain("--max-cost must be a positive number of US dollars")
 
-      const steps = yield* vector.spawn(["run", "--max-steps", "2.5", "hello"])
-      expect(steps.exitCode).toBe(1)
-      expect(steps.stderr).toContain("--max-steps must be a positive integer")
+        const steps = yield* vector.spawn(["run", "--max-steps", "2.5", "hello"])
+        expect(steps.exitCode).toBe(1)
+        expect(steps.stderr).toContain("--max-steps must be a positive integer")
 
-      const command = yield* vector.spawn(["run", "--command", "init", "--max-steps", "3"])
-      expect(command.exitCode).toBe(1)
-      expect(command.stderr).toContain("--max-cost and --max-steps cannot be used with --command")
-    }),
+        const command = yield* vector.spawn(["run", "--command", "init", "--max-steps", "3"])
+        expect(command.exitCode).toBe(1)
+        expect(command.stderr).toContain("--max-cost and --max-steps cannot be used with --command")
+      }),
     30_000,
   )
 })

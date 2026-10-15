@@ -4174,7 +4174,6 @@ for (const mode of ["allow", "reject", "cancel", "definition", "override"] as co
   )
 }
 
-
 // Run guard: the test model priced through config, in USD per million tokens.
 function pricedCfg(cost: { input: number; output: number; cache_read?: number }, extra: Partial<ConfigV1.Info> = {}) {
   return (url: string) => {

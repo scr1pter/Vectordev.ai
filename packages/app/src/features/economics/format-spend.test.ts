@@ -120,9 +120,9 @@ describe("spendPill", () => {
 
   test("no cap follows free or cost unknown when the run spent nothing", () => {
     expect(spendPill({ session: { label: "free", kind: "free" }, run: run(0), running: true }).label).toBe("free")
-    expect(
-      spendPill({ session: { label: "Cost unknown", kind: "unpriced" }, run: run(0), running: true }).label,
-    ).toBe("Cost unknown")
+    expect(spendPill({ session: { label: "Cost unknown", kind: "unpriced" }, run: run(0), running: true }).label).toBe(
+      "Cost unknown",
+    )
   })
 
   test("with no reading or no cap the pill shows the session total", () => {
@@ -134,9 +134,7 @@ describe("spendPill", () => {
 
   test("a subagent reads its root's run, which counts every session in it", () => {
     // The child spent $1.10 itself; the root's run is at $5.02 across all its subagents.
-    expect(spendPill({ session: priced("$1.10"), run: run(5.02, "warn"), running: true }).label).toBe(
-      "$5.02 of $5.00",
-    )
+    expect(spendPill({ session: priced("$1.10"), run: run(5.02, "warn"), running: true }).label).toBe("$5.02 of $5.00")
   })
 })
 
