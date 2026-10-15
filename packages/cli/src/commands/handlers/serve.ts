@@ -19,7 +19,7 @@ export default Runtime.handler(
     return yield* Effect.scoped(
       Effect.gen(function* () {
         const daemon = yield* Daemon.Service
-        const address = yield* listen(input.hostname, input.port, yield* daemon.password())
+        const address = yield* listen(input.hostname, input.port, yield* daemon.password(), input.trustedNetwork)
         if (input.register) yield* daemon.register(address)
         console.log(`server listening on ${HttpServer.formatAddress(address)}`)
         return yield* Effect.never
@@ -28,7 +28,8 @@ export default Runtime.handler(
   }),
 )
 
-function listen(hostname: string, port: Option.Option<number>, password: string) {
+function listen(hostname: string, port: Option.Option<number>, password: string, trustedNetwork: boolean) {
+  ServerAuth.assertSecurePasswordListen(hostname, password, trustedNetwork)
   if (Option.isSome(port)) return bind(hostname, port.value, password)
   const next = (port: number): ReturnType<typeof bind> =>
     bind(hostname, port, password).pipe(
@@ -38,7 +39,6 @@ function listen(hostname: string, port: Option.Option<number>, password: string)
 }
 
 function bind(hostname: string, port: number, password: string) {
-  ServerAuth.assertSecurePasswordTransport(hostname, password)
   return Layer.build(
     HttpRouter.serve(createRoutes(password, { guardedHostname: hostname }), {
       disableListenLog: true,

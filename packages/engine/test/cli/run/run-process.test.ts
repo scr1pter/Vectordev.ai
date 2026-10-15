@@ -545,6 +545,18 @@ describe("vector run (non-interactive subprocess)", () => {
     30_000,
   )
 
+  cliIt.concurrent(
+    "attach refuses passwords over remote cleartext transport like run --attach",
+    ({ vector }) =>
+      Effect.gen(function* () {
+        const result = yield* vector.spawn(["attach", "http://example.com", "--password", "secret"])
+
+        expect(result.exitCode).not.toBe(0)
+        expect(result.stderr).toContain("Refusing to send or accept a reusable password over cleartext transport")
+      }),
+    30_000,
+  )
+
   cliIt.live(
     "SIGINT interrupts an active non-interactive run without leaking the process",
     ({ llm, vector }) =>

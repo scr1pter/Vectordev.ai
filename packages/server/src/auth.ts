@@ -204,6 +204,18 @@ export function isOwnerOnlyRoute(method: string, route: string) {
   )
 }
 
+/**
+ * A listener receives the password in every plain HTTP request, so it accepts one only on loopback, or on a network
+ * its operator marked trusted with --trusted-network, matching `vector serve`. Clients may still send a password to
+ * the user's own network (see assertSecurePasswordTransport), where the operator made that choice.
+ */
+export function assertSecurePasswordListen(hostname: string, password: string | undefined, trustedNetwork: boolean) {
+  if (!password || trustedNetwork || isLoopbackHostname(hostname)) return
+  throw new Error(
+    `Refusing to accept the server password over plain HTTP on ${hostname}. On a network you trust, such as a container bridge or a private LAN, pass --trusted-network; otherwise bind loopback behind a TLS reverse proxy or tunnel.`,
+  )
+}
+
 export function assertSecurePasswordTransport(target: string | URL, password: string | undefined) {
   if (!password) return
   if (typeof target === "string" && !target.includes("://")) {

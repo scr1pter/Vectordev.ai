@@ -69,4 +69,14 @@ describe("server authentication", () => {
     expect(() => ServerAuth.assertSecurePasswordTransport("0.0.0.0", "secret")).toThrow("cleartext")
     expect(() => ServerAuth.assertSecurePasswordTransport("http://vector.example", undefined)).not.toThrow()
   })
+
+  test("a password listener binds off loopback only on a network marked trusted, like vector serve", () => {
+    for (const host of ["127.0.0.1", "localhost", "::1"])
+      expect(() => ServerAuth.assertSecurePasswordListen(host, "secret", false)).not.toThrow()
+    for (const host of ["0.0.0.0", "::", "192.168.1.4", "10.0.0.2", "vector.local", "vector", "vector.example"]) {
+      expect(() => ServerAuth.assertSecurePasswordListen(host, "secret", false)).toThrow("--trusted-network")
+      expect(() => ServerAuth.assertSecurePasswordListen(host, "secret", true)).not.toThrow()
+    }
+    expect(() => ServerAuth.assertSecurePasswordListen("0.0.0.0", undefined, false)).not.toThrow()
+  })
 })
