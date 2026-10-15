@@ -9,7 +9,13 @@ on:
       - packages/core/src/session/runner/free-model-route.ts
       - packages/core/test/free-model*.test.ts
       - packages/web/test/**
+      - packages/web/scripts/model-plan*.ts
       - packages/web/src/lib/desktop-sign-in.ts
+      - packages/web/src/lib/model-plans*.ts
+      - packages/web/src/lib/codium-pricing.ts
+      - packages/web/src/components/marketing/account/**
+      - packages/web/src/components/marketing/codium/**
+      - packages/web/src/pages/codium.astro
       - packages/desktop/src/main/vector-account.ts
       - bun.lock
       - .github/workflows/vector-free-models.yml
@@ -52,4 +58,8 @@ jobs:
         working-directory: packages/web
         env:
           VECTOR_TEST_REDIS_URL: redis://127.0.0.1:6379
-        run: bun test test/model-plans-api.test.ts test/model-topups-api.test.ts test/model-plans.test.ts test/model-plan-models-api.test.ts test/model-plan-status-api.test.ts test/model-plan-context.test.ts
+        run: >-
+          bun test test/model-plans-api.test.ts test/model-topups-api.test.ts test/model-plans.test.ts
+          test/model-plan-models-api.test.ts test/model-plan-status-api.test.ts test/model-plan-context.test.ts
+          test/model-plan-catalog.test.ts src/lib/model-plans.test.ts src/components/marketing/codium
+          src/components/marketing/account
