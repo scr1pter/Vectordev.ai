@@ -729,7 +729,10 @@ describe("model plan HTTP inference", () => {
       messages: [{ role: "user", content: "Generate a concise title" }],
     })
     expect(response.status).toBe(200)
-    expect(await response.text()).toContain('"cost":0.000031')
+    // The provider's USD charge comes off the credits but never reaches Vector; the tokens do.
+    const text = await response.text()
+    expect(text).toContain('"completion_tokens":6')
+    expect(text).not.toContain("cost")
     expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ used: 0.000031, remaining: 4.999969 })
     expect(chats()).toHaveLength(1)
     state.charge = 0
@@ -877,7 +880,12 @@ describe("Codium credits used from Vector", () => {
     await paid()
     const token = mintCliToken(user).token
     const catalog = await ModelPlans.createClient({ request: forward }).catalog(token, { force: true })
-    expect(catalog).toEqual({ enabled: true, models: [model] })
+    expect(catalog).toEqual({
+      enabled: true,
+      models: [
+        { id: model.id, name: model.name, contextLength: model.contextLength, maxOutputTokens: model.maxOutputTokens },
+      ],
+    })
 
     state.charge = 0.5
     const answer = await turn(token)
@@ -886,10 +894,12 @@ describe("Codium credits used from Vector", () => {
       .split("\n\n")
       .map((frame) => frame.replace(/^data: /, ""))
       .filter((frame) => frame.startsWith("{"))
-      .map((frame) => ModelPlans.usageCost(JSON.parse(frame)))
-      .find((cost) => cost !== undefined)
-    // What the step records as its cost is exactly what the account's key was charged.
-    expect(usage).toBe(0.5)
+      .map((frame) => JSON.parse(frame).usage)
+      .find((usage) => usage !== undefined)
+    // The account's key was charged; Vector gets the tokens, never the dollars, which beside the share of the plan
+    // used would reveal its allowance.
+    expect(usage).toEqual({ prompt_tokens: 200, completion_tokens: 6, total_tokens: 206 })
+    expect(keys.get("hash_fixture1")!.data.usage).toBe(0.5)
     expect(chats()).toHaveLength(1)
     expect(chats()[0]!.headers.get("authorization")).toBe("Bearer fixture-paid-secret-1")
     expect(JSON.stringify(chats()[0]!.body)).not.toContain(token)

@@ -98,8 +98,8 @@ it.instance(
       const selected = yield* provider.getModel(id, ModelV2.ID.make(codiumModel.id))
       expect(selected.api.url).toBe(ModelPlans.API_URL)
       expect(selected.freeModel).toBeUndefined()
-      expect(selected.cost.input).toBe(codiumModel.inputPrice)
-      expect(selected.cost.output).toBe(codiumModel.outputPrice)
+      // Codium spends credits: no dollar price, so its steps are recorded unpriced and left out of dollar totals.
+      expect(selected.cost).toEqual({ input: 0, output: 0, cache: { read: 0, write: 0 }, unpriced: true })
       expect((yield* provider.getLanguage(selected)).provider).toContain(ModelPlans.PROVIDER_ID)
       entitlement.enabled = false
       expect((yield* provider.list())[id]).toBeUndefined()
@@ -152,7 +152,7 @@ test("Codium's own default is the first model its catalog lists, not the last by
   })
 })
 
-it.instance("a Codium turn streams text and a tool call through the gateway and records the billed cost", () =>
+it.instance("a Codium turn streams text and a tool call through the gateway and records its tokens, not dollars", () =>
   Effect.gen(function* () {
     const provider = yield* Provider.Service
     const selected = yield* provider.getModel(id, ModelV2.ID.make(codiumModel.id))
@@ -186,15 +186,14 @@ it.instance("a Codium turn streams text and a tool call through the gateway and 
     expect(JSON.parse(call.input)).toEqual({ path: "src/a.ts" })
     const finish = parts.find((part) => part.type === "finish")
     if (finish?.type !== "finish") throw new Error("Expected a finish part")
-    expect(finish.providerMetadata?.codium).toEqual({ cost: 0.00042 })
-    // Listed prices are ceilings; the step records what the gateway reports it billed.
+    expect(finish.providerMetadata?.codium).toBeUndefined()
+    // The credits it spent are a share of the plan, never dollars that could be added up beside the purchase price.
     const usage = Session.getUsage({
       model: selected,
       usage: new Usage({ inputTokens: 1000, outputTokens: 50 }),
       metadata: finish.providerMetadata,
     })
-    expect(usage.cost).toBe(0.00042)
-    expect(usage.unpriced).toBe(false)
+    expect(usage).toMatchObject({ cost: 0, unpriced: true, tokens: { input: 1000, output: 50 } })
     const sent = gateway.seen.slice(before)
     expect(sent.map((item) => item.path)).toEqual(["/api/model-plans/chat"])
     expect(sent[0].authorization).toBe(`Bearer ${token}`)
@@ -345,7 +344,7 @@ it.instance(
   { trusted: true, config: { enabled_providers: [ModelPlans.PROVIDER_ID] } },
 )
 
-it.instance("a Codium title stays on credits and records the gateway charge exactly once", () =>
+it.instance("a Codium title stays on credits and records its tokens, not dollars", () =>
   Effect.gen(function* () {
     const provider = yield* Provider.Service
     const selected = yield* provider.getSmallModel(id, ModelV2.ID.make(codiumModel.id))
@@ -367,14 +366,13 @@ it.instance("a Codium title stays on credits and records the gateway charge exac
     gateway.state.mode = "ok"
     const finish = parts.find((part) => part.type === "finish")
     if (finish?.type !== "finish") throw new Error("Missing title usage")
-    expect(finish.providerMetadata?.codium).toEqual({ cost: 0.000031 })
     expect(
       Session.getUsage({
         model: selected,
         usage: new Usage({ inputTokens: 200, outputTokens: 6 }),
         metadata: finish.providerMetadata,
-      }).cost,
-    ).toBe(0.000031)
+      }),
+    ).toMatchObject({ cost: 0, unpriced: true, tokens: { input: 200, output: 6 } })
     expect(gateway.seen.slice(before).map((request) => request.path)).toEqual(["/api/model-plans/chat"])
   }),
 )

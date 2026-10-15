@@ -14,7 +14,8 @@ export async function handleModelPlanModels(request: ApiRequest, response: ApiRe
     // Every signed-in account sees the catalog, so choosing a Codium model without credits leads to buying them.
     // The public /config lists the same models, and each chat request checks the balance itself, so this
     // frequently polled read never calls Stripe or OpenRouter. Vector lists the models in this order and offers the
-    // first as Codium's default. Routing policy (precision, reasoning, caching) stays on the server.
+    // first as Codium's default. Routing policy (precision, reasoning, caching) and the price ceilings stay on the
+    // server: Codium steps spend credits, never dollars Vector could add up.
     json(response, 200, {
       enabled: true,
       models: configuredPlanModels().map((model) => ({
@@ -22,8 +23,6 @@ export async function handleModelPlanModels(request: ApiRequest, response: ApiRe
         name: model.name,
         contextLength: model.contextLength,
         maxOutputTokens: model.maxOutputTokens,
-        inputPrice: model.inputPrice,
-        outputPrice: model.outputPrice,
       })),
     })
   } catch (error) {

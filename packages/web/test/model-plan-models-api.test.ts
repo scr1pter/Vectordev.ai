@@ -67,7 +67,7 @@ test("a signed-in account without credits sees the catalog, and only its revocat
     "Xiaomi MiMo V2.6 Flash",
     "Claude Haiku 5.5",
   ])
-  // Only what Vector reads; the server's routing policy stays on the server.
+  // Only what Vector reads; the server's routing policy and price ceilings stay on the server.
   expect(body).toEqual({
     enabled: true,
     models: CODIUM_MODELS.map((model) => ({
@@ -75,10 +75,9 @@ test("a signed-in account without credits sees the catalog, and only its revocat
       name: model.name,
       contextLength: model.contextLength,
       maxOutputTokens: model.maxOutputTokens,
-      inputPrice: model.inputPrice,
-      outputPrice: model.outputPrice,
     })),
   })
+  expect(JSON.stringify(body)).not.toMatch(/price|cost/i)
   expect(state.calls).toEqual([environment.KV_REST_API_URL])
 })
 

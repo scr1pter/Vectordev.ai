@@ -203,7 +203,7 @@ export async function streamModelPlanResponse(upstream: Response, response: ApiR
             "MODEL_PLAN_STREAM",
             "The model stopped responding. Your account shows any usage charged by the provider.",
           )
-        if (!response.write(`data: ${JSON.stringify(parsed.value)}\n\n`))
+        if (!response.write(`data: ${JSON.stringify(withoutCharge(parsed.value))}\n\n`))
           await once(response, "drain", { signal: controller.signal })
       }
       if (part.done) throw new ApiError(503, "MODEL_PLAN_STREAM", "The model response ended before completion.")
@@ -212,6 +212,19 @@ export async function streamModelPlanResponse(upstream: Response, response: ApiR
     response.off("close", cancel)
     await reader.cancel().catch(() => undefined)
     reader.releaseLock()
+  }
+}
+
+// The provider reports each request's charge in USD, which is exactly what comes off the credits. Beside the share of
+// a plan it used, that amount would reveal the plan's allowance, so it stays on the server and Vector counts Codium
+// steps by their tokens.
+function withoutCharge(chunk: Record<string, unknown>) {
+  if (!stripeRecord(chunk.usage)) return chunk
+  return {
+    ...chunk,
+    usage: Object.fromEntries(
+      Object.entries(chunk.usage).filter(([key]) => !["cost", "cost_details", "is_byok"].includes(key)),
+    ),
   }
 }
 

@@ -85,7 +85,7 @@ test("a refresh keeps the last catalog through slow, failed and garbled answers,
     async () => Bun.sleep(30).then(() => Response.json(active)),
     async () => Promise.reject(new Error("offline")),
     async () => new Response("unavailable", { status: 503 }),
-    async () => Response.json({ enabled: true, models: [{ ...codiumModel, inputPrice: -1 }] }),
+    async () => Response.json({ enabled: true, models: [{ ...codiumModel, maxOutputTokens: -1 }] }),
     async () => new Response("revoked", { status: 403 }),
     async () => Response.json(active),
     async () => Response.json(off),
@@ -294,14 +294,9 @@ test("native plan transport ignores project and request routing overlays and den
   })
 })
 
-test("a native Codium turn streams text and a tool call and records the cost the gateway billed", async () => {
-  const route = SessionRunnerModel.withPricing(modelPlanRoute(info, service(), credentials()), [
-    {
-      input: codiumModel.inputPrice,
-      output: codiumModel.outputPrice,
-      cache: { read: codiumModel.inputPrice, write: codiumModel.inputPrice },
-    },
-  ])
+test("a native Codium turn streams text and a tool call and leaves its credits out of dollar costs", async () => {
+  // The Codium catalog lists no dollar price, as the vector-plan plugin builds it.
+  const route = SessionRunnerModel.withPricing(modelPlanRoute(info, service(), credentials()), [])
   const before = gateway.seen.length
   const result = await stream(route)
   if (result._tag !== "Success") throw result.failure
@@ -320,8 +315,9 @@ test("a native Codium turn streams text and a tool call and records the cost the
   if (finish?.type !== "step-finish") throw new Error("Expected a step finish")
   expect(finish.reason).toBe("tool-calls")
   const tokens = { input: 1000, output: 50, reasoning: 0, cache: { read: 0, write: 0 } }
-  // The ceiling price would be 0.00022; the gateway reported what the provider actually billed.
-  expect(SessionRunnerModel.calculateCost(route, tokens, finish.usage?.providerMetadata)).toBe(0.00042)
+  // The step spent credits, not dollars Vector could add up, so its cost is unknown and it is recorded unpriced.
+  expect(finish.usage).toMatchObject({ inputTokens: 1000, outputTokens: 50 })
+  expect(SessionRunnerModel.calculateCost(route, tokens, finish.usage?.providerMetadata)).toBeUndefined()
   const sent = gateway.seen.slice(before)
   expect(sent.map((item) => item.path)).toEqual(["/api/model-plans/chat"])
   expect(sent[0].authorization).toBe(`Bearer ${token}`)
@@ -414,9 +410,6 @@ test("gateway answers map to the action that fixes them", () => {
   expect(ModelPlans.gatewayFailure(429, body("MODEL_PLAN_BUSY"))).toBeUndefined()
   expect(ModelPlans.gatewayFailure(503, body("MODEL_PLAN_UPSTREAM"))).toBeUndefined()
   expect(ModelPlans.contextFailure(body("MODEL_PLAN_CONTEXT"))).toBe(true)
-  expect(ModelPlans.usageCost({ usage: { cost: 0.5 } })).toBe(0.5)
-  expect(ModelPlans.usageCost({ usage: { cost: -1 } })).toBeUndefined()
-  expect(ModelPlans.usageCost({ choices: [] })).toBeUndefined()
 })
 
 test("status reads the plan and the share of each balance left, never an amount, and flags a low balance", async () => {

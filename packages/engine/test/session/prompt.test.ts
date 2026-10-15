@@ -67,7 +67,7 @@ import { ModelV2 } from "@vectordevai/core/model"
 import { LocationServiceMap, locationServiceMapLayer } from "@vectordevai/core/location-services"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import { Global } from "@vectordevai/core/global"
-import { codiumGateway, codiumModel, textStream } from "../../../core/test/fixture/codium-gateway"
+import { codiumGateway, codiumModel } from "../../../core/test/fixture/codium-gateway"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -805,7 +805,7 @@ it.instance("title generation sends only what the user typed", () =>
   }),
 )
 
-codiumPrompts.instance("a Codium session's title goes through the gateway and is charged what it billed", () =>
+codiumPrompts.instance("a Codium session's title goes through the gateway and counts its tokens, not dollars", () =>
   Effect.gen(function* () {
     gateway.state.mode = "text"
     const prompt = yield* SessionPrompt.Service
@@ -830,17 +830,18 @@ codiumPrompts.instance("a Codium session's title goes through the gateway and is
     const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.aggregate_id, chat.id)).all()
     const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.1`)
     expect(usage).toHaveLength(1)
-    // Title spend counts toward the session, at the cost the gateway billed the credits, not the ceiling price.
+    // Title spend counts toward the session in tokens; credits are a share of the plan, never dollars to add up.
     expect(usage[0]?.data).toMatchObject({
       purpose: "title",
       model: { providerID: ModelPlans.PROVIDER_ID, id: codiumModel.id },
-      cost: textStream[2]?.usage?.cost,
+      cost: 0,
+      unpriced: true,
     })
-    expect(usage[0]?.data.unpriced).toBeUndefined()
+    expect(usage[0]?.data.tokens).toMatchObject({ input: 200, output: 6 })
   }),
 )
 
-codiumPrompts.instance("a Codium subagent's charges count once: in its own session and in its parent's", () =>
+codiumPrompts.instance("a Codium subagent's steps count once, in tokens, and add no dollars", () =>
   Effect.gen(function* () {
     gateway.state.mode = "text"
     const prompt = yield* SessionPrompt.Service
@@ -863,16 +864,17 @@ codiumPrompts.instance("a Codium subagent's charges count once: in its own sessi
     const sent = gateway.seen.slice(before)
     expect(sent.length).toBeGreaterThan(1)
     expect(sent.every((item) => item.path === "/api/model-plans/chat")).toBe(true)
-    const charged = textStream[2]?.usage?.cost ?? 0
     const [child] = yield* sessions.children(chat.id)
     if (!child) throw new Error("Expected the subagent's session")
     const parent = yield* sessions.get(chat.id)
-    const spent = (yield* sessions.get(child.id)).cost
-    // Each gateway charge is recorded exactly once: the subagent's in its session and in its parent's delegated
-    // spend, the parent's own in its cost.
-    expect(spent).toBeGreaterThan(0)
-    expect(parent.subagentCost).toBeCloseTo(spent, 12)
-    expect(parent.cost + (parent.subagentCost ?? 0)).toBeCloseTo(sent.length * charged, 12)
+    const spent = yield* sessions.get(child.id)
+    // Codium steps spend credits, which Settings shows as a share of the plan; dollar totals leave them out and say
+    // so, and each step is counted once: the subagent's in its session and in its parent's delegated spend.
+    expect(spent.cost).toBe(0)
+    expect(spent.unpricedSteps).toBeGreaterThan(0)
+    expect(parent.subagentUnpricedSteps).toBe(spent.unpricedSteps)
+    expect((parent.cost ?? 0) + (parent.subagentCost ?? 0)).toBe(0)
+    expect((parent.unpricedSteps ?? 0) + (parent.subagentUnpricedSteps ?? 0)).toBe(sent.length)
   }),
 )
 

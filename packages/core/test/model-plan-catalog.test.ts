@@ -49,7 +49,8 @@ for (const enabled of [true, false])
       if (!enabled) return
       expect(String(listed[0].id)).toBe(codiumModel.id)
       expect(listed[0].name).toBe(codiumModel.name)
-      expect(listed[0].cost[0].input).toBe(codiumModel.inputPrice)
+      // Codium spends credits: no dollar price, so its steps are recorded unpriced.
+      expect(listed[0].cost).toEqual([])
       expect(listed[0].api.url).toBe(ModelPlans.API_URL)
       expect(JSON.stringify(listed)).not.toContain("private-account-token")
       expect(JSON.stringify(listed)).not.toContain("project-secret")

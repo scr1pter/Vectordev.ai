@@ -16,13 +16,12 @@ export const CATALOG_URL = `${API_URL}/models`
 export const CHAT_URL = `${API_URL}/chat`
 export const PURCHASE_URL = ModelPlanStatus.PURCHASE_URL
 
+// No prices: a Codium step spends credits, which Vector counts by tokens and never in dollars that could be added up.
 export const Model = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   contextLength: Schema.Number,
   maxOutputTokens: Schema.Number,
-  inputPrice: Schema.Number,
-  outputPrice: Schema.Number,
 })
 export type Model = typeof Model.Type
 const Catalog = Schema.Struct({ enabled: Schema.Boolean, models: Schema.Array(Model) })
@@ -144,11 +143,7 @@ function parse(body: unknown): Catalog | undefined {
         model.contextLength < 1 ||
         !Number.isSafeInteger(model.maxOutputTokens) ||
         model.maxOutputTokens < 1 ||
-        model.maxOutputTokens > model.contextLength ||
-        !Number.isFinite(model.inputPrice) ||
-        model.inputPrice < 0 ||
-        !Number.isFinite(model.outputPrice) ||
-        model.outputPrice < 0,
+        model.maxOutputTokens > model.contextLength,
     ) ||
     new Set(parsed.models.map((model) => model.id)).size !== parsed.models.length
   )
@@ -333,13 +328,4 @@ export function contextFailure(body: string | undefined) {
   if (!body) return false
   const parsed = Schema.decodeUnknownOption(Schema.fromJsonString(GatewayError))(body)
   return Option.isSome(parsed) && parsed.value.error.code === "MODEL_PLAN_CONTEXT"
-}
-
-const UsageChunk = Schema.Struct({ usage: Schema.Struct({ cost: Schema.Number }) })
-
-/** The provider-billed USD cost the gateway passes through in a usage chunk; this is what Codium credits are debited. */
-export function usageCost(chunk: unknown) {
-  const parsed = Option.getOrUndefined(Schema.decodeUnknownOption(UsageChunk)(chunk))
-  const cost = parsed?.usage.cost
-  return cost !== undefined && Number.isFinite(cost) && cost >= 0 ? cost : undefined
 }

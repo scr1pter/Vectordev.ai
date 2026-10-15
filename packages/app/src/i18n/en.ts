@@ -531,7 +531,8 @@ export const dict = {
   "context.usage.cost": "Cost",
   "session.cost.unknown": "Cost unknown",
   "session.cost.partial": "{{cost}} + unpriced",
-  "session.cost.unpricedNote": "Some steps ran on a model with no listed price, so they are not in this total.",
+  "session.cost.unpricedNote":
+    "Some steps spent Vector Codium credits or ran on a model with no listed price, so they are not in this total.",
   "context.usage.clickToView": "Click to view context",
   "context.usage.view": "View context usage",
 
