@@ -60,6 +60,12 @@ vector whoami</code><button class="doc-cmd-copy" type="button" aria-label="Copy 
           </p>
           <p class="doc-cmd"><code>vector run "why is the checkout test flaky?" --format json
 vector run -c "now fix it" --variant high</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p class="note">
+            In the next release, <code>--max-cost</code> caps one run in US dollars at catalog list prices and
+            <code>--max-steps</code> caps its model steps. Vector stops within one step of the cap, says why, and exits
+            with code 3, so a script can tell a budget stop from a failure. See
+            <a href="/docs/tokenomics">Tokenomics</a> for the Run Guard.
+          </p>
 
           <h2 id="cli-sessions">Sessions: list, export, import</h2>
           <p>
