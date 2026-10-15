@@ -130,7 +130,7 @@ export function VercelLogs(props: {
             </p>
             <Show when={props.onDiagnose && state.shown.lines}>
               <button class="cloud-button" type="button" onClick={diagnose}>
-                Diagnose with agent
+                Diagnose with the agent
               </button>
             </Show>
           </div>

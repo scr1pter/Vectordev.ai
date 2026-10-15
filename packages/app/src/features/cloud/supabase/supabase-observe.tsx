@@ -131,7 +131,7 @@ export function SupabaseLogs(props: SupabasePanelProps & { icon: JSX.Element; on
               <Show when={props.onDiagnose && lines().length}>
                 <div class="sb-actions mt-3">
                   <button class="cloud-button" type="button" onClick={diagnose}>
-                    Diagnose with agent
+                    Diagnose with the agent
                   </button>
                 </div>
               </Show>
