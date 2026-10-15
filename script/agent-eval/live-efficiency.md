@@ -47,6 +47,9 @@ await Bun.write(`${work}/key-off.json`, JSON.stringify(configuration, null, 2))
 configuration.vector.env.VECTOR_CONFIG_CONTENT = JSON.stringify({ provider: { openai: { options: { setCacheKey: true } } } })
 configuration.vector.env.VECTOR_DISABLE_WEBSOCKETS = "1"
 await Bun.write(`${work}/http.json`, JSON.stringify(configuration, null, 2))
+configuration.vector.env.VECTOR_DISABLE_WEBSOCKETS = "0"
+configuration.vector.env.VECTOR_EXPERIMENTAL_REASONING_CONTEXT = "all_turns"
+await Bun.write(`${work}/context-on.json`, JSON.stringify(configuration, null, 2))
 '
 cd "$VECTOR_BENCH_WORK"
 bun ./runner-self-test.ts
@@ -75,11 +78,43 @@ Vector emits bounded `openai transport` diagnostic records in the captured stder
 
 The runner captures each Vector `step_finish` event. For **each new session**, record the first provider turn's input tokens and `tokens.cache.read`, then all later turns separately. Keep first-request warmth separate from within-session cache share. Codex's aggregate turn totals alone do not establish its first-request `cached_tokens`; obtain per-request usage through the CLI's supported diagnostics if available, otherwise label that field unavailable. Do not infer a cache hit from a byte-identical prefix or previous_response_id.
 
-The shipped code restores `prompt_cache_key` by default, with `setCacheKey: false` as the A/B opt-out above. The ChatGPT sign-in path separates stable instructions from a per-session developer item; the API-key path was already stable. Keep the sign-in path consistent across comparisons.
+The shipped code restores `prompt_cache_key` by default, with `setCacheKey: false` as the A/B opt-out above. Read the first-request cache reads of new sessions in both arms, not only the within-session share: OpenAI routes a request by its opening tokens combined with the key, so a key that changes with every session may send each new session to a machine that does not hold the prefix an earlier session warmed, while the key-off arm routes every session with the same opening tokens together. Which effect wins on the sign-in backend is exactly what this A/B measures; the offline harness cannot model routing. The ChatGPT sign-in path separates stable instructions from a per-session developer item; the API-key path was already stable. Keep the sign-in path consistent across comparisons.
 
 ## Reasoning context experiment
 
-`reasoning.context: "all_turns"` is **not enabled by this release**, and the current SDK exposes no supported option for it. There is no working production flag to claim or invoke. Before a paid A/B, implement and offline-test a narrowly scoped experimental request-body hook on a separate worktree, prove the resulting GPT-6 request contains the field on both HTTP and WebSocket paths, and keep the unmodified cell as control. Then repeat the nine-run command with separate configurations and fresh run IDs. Do not silently inject it into only one comparison or enable it globally without a measured quality/cost benefit. This experiment remains an owner-authorized follow-up, not a completed result.
+OpenAI's reasoning guide documents `reasoning.context` with three values: `auto` (the model's default, the same as omitting it), `current_turn` (earlier turns' reasoning is not rendered into the next sample) and `all_turns` (available, compatible reasoning from earlier turns is rendered). It names the GPT-5.6 family, which already defaults to `all_turns`, and GPT-6.1 Sol as the models that support `all_turns`; it does not state GPT-6.1 Sol's default. The captured Codex CLI request for gpt-6.1-sol sends `all_turns`. The bundled SDK has no option for it, so Vector sends the field only when `VECTOR_EXPERIMENTAL_REASONING_CONTEXT` is set to one of those three values, and then only on OpenAI Responses reasoning requests to the GPT-5.6 family or GPT-6.1 Sol, over HTTP and the WebSocket alike. It is **off by default**; nothing in this release enables it, and no result for it exists yet.
+
+The guide also says each response reports the mode it ran with. Over the sign-in WebSocket, every `openai transport` `terminal` record now carries it as `effectiveReasoningContext`, next to the requested `reasoningContext` when one was sent. Read it first from the ordinary runs above, which cost nothing extra: if gpt-6.1-sol already reports `all_turns` without the flag, setting it changes nothing for that model and the paid comparison below is unnecessary. HTTP records do not parse the response stream and carry no effective mode.
+
+Check the wire shape offline first, without provider calls, and keep the dumps private:
+
+```sh
+VECTOR_EXPERIMENTAL_REASONING_CONTEXT=all_turns bun --no-env-file script/agent-eval/footprint.ts \
+  --runtime vector-openai --scenario solo-fix --openai-model gpt-6.1-sol --dump "$VECTOR_BENCH_WORK/context-http"
+VECTOR_EXPERIMENTAL_REASONING_CONTEXT=all_turns bun --no-env-file script/agent-eval/footprint.ts \
+  --runtime vector-openai --scenario solo-fix --openai-model gpt-6.1-sol --ws --dump "$VECTOR_BENCH_WORK/context-ws"
+```
+
+Every dumped request should show `reasoning.context: "all_turns"`, and the WebSocket requests after the first should still carry `previous_response_id`.
+
+The field changes only what is rendered from earlier **user turns**, and each archived task is a single prompt, so `context-on.json` in the nine-run matrix is a regression check (pass rate, cost, time), not the test of the hypothesis. That test needs a follow-up prompt in the same session. Run each arm the same number of times, each from its own fresh clone, using the `vector-source` launcher defined under "Behavioral gate" below:
+
+```sh
+for context in off all_turns; do
+  for attempt in 1 2 3; do
+    dir="$(mktemp -d -t "vector-context-${context}")"
+    git clone -q "$VECTOR_BENCH_SOURCE" "$dir/repo" && cd "$dir/repo"
+    flag=$([ "$context" = off ] || echo "$context")
+    VECTOR_EXPERIMENTAL_REASONING_CONTEXT="$flag" "$VECTOR_BENCH_WORK/vector-source" run --model openai/gpt-6.1-sol --variant medium --format json \
+      "Read packages/engine/src/provider/transform.ts and explain how the OpenAI prompt cache key is chosen. Do not edit files." > "$dir/turn-1.jsonl"
+    VECTOR_EXPERIMENTAL_REASONING_CONTEXT="$flag" "$VECTOR_BENCH_WORK/vector-source" run --continue --model openai/gpt-6.1-sol --variant medium --format json \
+      "Which other providers get a cache key, and under which option name? Do not edit files." > "$dir/turn-2.jsonl"
+    cd "$VECTOR_BENCH_SOURCE"
+  done
+done
+```
+
+For each attempt, compare the second prompt's first `step_finish`: input tokens, `tokens.cache.read`, output and reasoning tokens, and whether the answer is correct. `all_turns` is expected to raise input tokens (earlier reasoning is rendered again, mostly from cache); it is worth enabling only if answers or later-turn cost improve. Keep every attempt. Do not enable it globally without that evidence.
 
 ## Behavioral gate
 
