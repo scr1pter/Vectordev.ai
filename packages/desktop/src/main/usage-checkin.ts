@@ -188,8 +188,8 @@ async function countSessions(
   url.search = new URLSearchParams({
     start: String(start),
     archived: "true",
-    // Vector's helper sessions are out of session lists but still part of the day's usage.
-    internal: "true",
+    // The engine leaves Vector's helper sessions (Vectorscope, autocomplete, inline edit) out unless asked; they are not
+    // sessions the user started, and their tokens and cost already reach the usage report.
     limit: "500",
     ...(cursor ? { cursor } : {}),
   }).toString()
