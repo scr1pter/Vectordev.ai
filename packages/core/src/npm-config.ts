@@ -1,17 +1,19 @@
 export * as NpmConfig from "./npm-config"
 
 import { fileURLToPath } from "url"
-// @ts-expect-error npm does not publish types for this internal config API.
-import Config from "@npmcli/config"
-// @ts-expect-error npm does not publish types for this internal config API.
-import { definitions, flatten, nerfDarts, shorthands } from "@npmcli/config/lib/definitions/index.js"
 import { Effect } from "effect"
 
 const npmPath = fileURLToPath(new URL("..", import.meta.url))
 
+// npm's config loader and its option definitions are only needed when a package is installed or a registry is read,
+// so they load on first use instead of with every process that imports this module.
 export const load = (dir: string) =>
   Effect.tryPromise({
     try: async () => {
+      // @ts-expect-error npm does not publish types for this internal config API.
+      const { default: Config } = await import("@npmcli/config")
+      // @ts-expect-error npm does not publish types for this internal config API.
+      const { definitions, flatten, nerfDarts, shorthands } = await import("@npmcli/config/lib/definitions/index.js")
       const config = new Config({
         npmPath,
         cwd: dir,

@@ -72,10 +72,10 @@ describe("WebFetchTool helpers", () => {
     expect(() => decode({ url: "https://example.com", timeout: WebFetchTool.MAX_TIMEOUT_SECONDS + 1 })).toThrow()
   })
 
-  test("ports HTML text and markdown conversions without active content", () => {
+  test("ports HTML text and markdown conversions without active content", async () => {
     const html = "<h1>Hello</h1><script>bad()</script><p>world <strong>wide</strong></p><style>.bad {}</style>"
     expect(WebFetchTool.extractTextFromHTML(html)).toBe("Helloworld wide")
-    expect(WebFetchTool.convertHTMLToMarkdown(html)).toBe("# Hello\n\nworld **wide**")
+    expect(await WebFetchTool.convertHTMLToMarkdown(html)).toBe("# Hello\n\nworld **wide**")
   })
 
   it.effect("blocks private destinations even without an authorization callback", () =>

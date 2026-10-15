@@ -11,7 +11,7 @@ import { streamText, wrapLanguageModel, type ModelMessage, type Tool } from "ai"
 import type { LLMEvent, UsageInput } from "@vectordevai/llm"
 import { LLMClient } from "@vectordevai/llm/route"
 import type { LLMClientService } from "@vectordevai/llm/route"
-import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
+import type { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
 import { ProviderTransform } from "@/provider/transform"
 import { Config } from "@/config/config"
 import type { Agent } from "@/agent/agent"
@@ -26,7 +26,6 @@ import { Auth } from "@/auth"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import * as Option from "effect/Option"
-import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
@@ -133,7 +132,13 @@ const live: Layer.Layer<
         { concurrency: "unbounded" },
       )
 
-      const isWorkflow = language instanceof GitLabWorkflowLanguageModel
+      // The GitLab provider package is large. Its workflow models come only from its bundled SDK, which the provider
+      // loads for this npm name, so other models never load it here.
+      const gitlab =
+        input.model.api.npm === "gitlab-ai-provider"
+          ? yield* Effect.promise(() => import("gitlab-ai-provider"))
+          : undefined
+      const isWorkflow = gitlab !== undefined && language instanceof gitlab.GitLabWorkflowLanguageModel
       const prepared = yield* LLMRequestPrep.prepare({
         ...input,
         provider: item,
@@ -154,7 +159,7 @@ const live: Layer.Layer<
       // from the workflow service are executed via vector's tool system
       // and results sent back over the WebSocket.
       const bridge = yield* EffectBridge.make()
-      if (language instanceof GitLabWorkflowLanguageModel) {
+      if (isWorkflow) {
         const workflowModel = language as GitLabWorkflowLanguageModel & {
           sessionID?: string
           sessionPreapprovedTools?: string[]
@@ -243,8 +248,12 @@ const live: Layer.Layer<
         })
       }
 
+      // The OpenTelemetry tracer package loads only when the experimental exporter is configured.
       const tracer = cfg.experimental?.openTelemetry
-        ? Option.getOrUndefined(yield* Effect.serviceOption(OtelTracer.OtelTracer))
+        ? yield* Effect.promise(() => import("@effect/opentelemetry/Tracer")).pipe(
+            Effect.flatMap((otel) => Effect.serviceOption(otel.OtelTracer)),
+            Effect.map(Option.getOrUndefined),
+          )
         : undefined
       const telemetryTracer = tracer
         ? new Proxy(tracer, {
