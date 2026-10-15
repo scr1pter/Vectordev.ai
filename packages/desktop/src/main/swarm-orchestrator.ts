@@ -15,7 +15,7 @@ import {
 } from "./parallel-workspaces"
 import {
   fallbackSwarmPlan,
-  parseSwarmPlan,
+  findSwarmPlan,
   routeSwarmModels,
   selectSwarmPlannerModel,
   type SwarmAgentRole,
@@ -449,7 +449,7 @@ async function executeSwarmRun(id: string, engine: ParallelWorkspaceEngine, cont
         controller.signal.throwIfAborted()
         appendLog(
           id,
-          `Planner output could not be validated; using the safe fallback graph. ${error instanceof Error ? error.message : String(error)}`,
+          `The planner produced no usable plan; using the safe fallback graph. ${error instanceof Error ? error.message : String(error)}`,
         )
         return fallbackSwarmPlan(run!.objective, run!.maxAgents)
       })
@@ -757,41 +757,37 @@ async function generateSwarmPlan(
   const sessionID = created?.data?.id
   if (!sessionID) throw new Error("Vector's planner did not return a session ID.")
   updateRun(run.id, (current) => ({ ...current, plannerSessionId: sessionID }))
-  return Promise.resolve()
-    .then(async () => {
-      signal.throwIfAborted()
-      await engineRequest(engine, `/api/session/${encodeURIComponent(sessionID)}/prompt`, {
-        method: "POST",
-        body: { prompt: { text: plannerPrompt(run) }, resume: true },
-        signal,
-      })
-      await waitForPlannerIdle(run.id, sessionID, engine, signal)
-      const context = await engineRequest<{ data?: unknown }>(
-        engine,
-        `/api/session/${encodeURIComponent(sessionID)}/context`,
-        { signal },
-      )
-      const messages = collectText(context?.data).reverse()
-      const parsed = messages
-        .map((message) => {
-          try {
-            return parseSwarmPlan(message, run.objective, run.maxAgents)
-          } catch {
-            return undefined
-          }
-        })
-        .find((plan) => plan)
-      if (!parsed) throw new Error("Vector could not validate the planner's dependency graph.")
-      return parsed
-    })
-    .catch(async (error) => {
-      // Aborting the HTTP request does not interrupt the admitted model work.
-      await engineRequest(engine, `/api/session/${encodeURIComponent(sessionID)}/interrupt`, {
-        method: "POST",
-        signal: AbortSignal.timeout(5_000),
-      }).catch(() => undefined)
-      throw error
-    })
+  // Aborting the HTTP requests does not interrupt the model work the planner admitted, so planning that ends without a
+  // plan (Stop, the idle timeout, a failed request) interrupts the session too. The interrupt is bounded so a hung
+  // engine cannot hold Stop.
+  return readPlannerPlan(run, sessionID, engine, signal).catch(async (error) => {
+    await engineRequest(engine, `/api/session/${encodeURIComponent(sessionID)}/interrupt`, {
+      method: "POST",
+      signal: AbortSignal.timeout(5_000),
+    }).catch(() => undefined)
+    throw error
+  })
+}
+
+async function readPlannerPlan(
+  run: SwarmRunRecord,
+  sessionID: string,
+  engine: ParallelWorkspaceEngine,
+  signal: AbortSignal,
+) {
+  signal.throwIfAborted()
+  await engineRequest(engine, `/api/session/${encodeURIComponent(sessionID)}/prompt`, {
+    method: "POST",
+    body: { prompt: { text: plannerPrompt(run) }, resume: true },
+    signal,
+  })
+  await waitForPlannerIdle(run.id, sessionID, engine, signal)
+  const context = await engineRequest<{ data?: unknown }>(
+    engine,
+    `/api/session/${encodeURIComponent(sessionID)}/context`,
+    { signal },
+  )
+  return findSwarmPlan(collectText(context?.data).reverse(), run.objective, run.maxAgents)
 }
 
 function plannerPrompt(run: SwarmRunRecord) {

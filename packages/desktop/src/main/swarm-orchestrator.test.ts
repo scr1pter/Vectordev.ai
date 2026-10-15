@@ -173,6 +173,67 @@ describe("swarm lifecycle", () => {
     expect(stopped.logs.some((log) => log.includes("fallback"))).toBe(false)
   })
 
+  // The planner reports busy once, then idle, and its context holds `answer` as the newest text.
+  async function plan(answer: unknown) {
+    const run = await seed()
+    let busy = true
+    route = (url) => {
+      if (url.pathname === "/api/session/active") {
+        const active = busy ? { planner: { type: "busy" } } : {}
+        busy = false
+        return Response.json({ data: active })
+      }
+      if (url.pathname === "/api/session/planner/context")
+        return Response.json({ data: [{ type: "text", text: JSON.stringify(answer) }] })
+      return undefined
+    }
+    const scheduled = Promise.withResolvers<SwarmRunRecord>()
+    onWrite = (name) => {
+      const current = name === "swarm-orchestrator-state" ? getSwarmRun(run.id) : undefined
+      if (current?.tasks.length) scheduled.resolve(current)
+    }
+    await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
+    const planned = await scheduled.promise
+    await stopSwarmRun(run.id)
+    return planned
+  }
+
+  test("a plan with null dependencies and one task too many is folded, not replaced by the fallback", async () => {
+    const planned = await plan({
+      summary: "Five steps",
+      tasks: [
+        { id: "inspect", title: "Inspect", prompt: "Map the files", role: "explore", dependsOn: null },
+        { id: "api", title: "API", prompt: "Change the API", dependsOn: ["inspect"] },
+        { id: "ui", title: "UI", prompt: "Change the UI", dependsOn: ["inspect"] },
+        { id: "test", title: "Test", prompt: "Run the tests", role: "test", dependsOn: ["api", "ui"] },
+        { id: "review", title: "Review", prompt: "Review the diff", role: "review", dependsOn: ["test"] },
+      ],
+    })
+
+    expect(planned.tasks.map((task) => task.id)).toEqual(["inspect", "api", "ui", "test"])
+    expect(planned.tasks[0]?.dependsOn).toEqual([])
+    expect(planned.tasks[3]?.prompt).toContain("Run the tests")
+    expect(planned.tasks[3]?.prompt).toContain("Review the diff")
+    expect(planned.planSummary).toContain("The last 2 planned tasks run in order as one task")
+    expect(planned.logs.some((log) => log.includes("fallback"))).toBe(false)
+    expect(requests).not.toContain("POST /api/session/planner/interrupt")
+  })
+
+  test("a rejected plan falls back, logs why, and interrupts the planner", async () => {
+    const planned = await plan({
+      tasks: [{ id: "inspect" }, { id: "build", dependsOn: ["missing"] }],
+    })
+
+    expect(planned.tasks.map((task) => task.id)).toEqual([
+      "map-project",
+      "implement-objective",
+      "validate-result",
+      "review-result",
+    ])
+    expect(planned.logs.some((log) => log.includes("fallback") && log.includes("unknown task missing"))).toBe(true)
+    expect(requests).toContain("POST /api/session/planner/interrupt")
+  })
+
   test("resuming an active swarm keeps its current scheduler and progress", async () => {
     const run = await seed()
     const engine = { url: server.url.toString(), directory }
