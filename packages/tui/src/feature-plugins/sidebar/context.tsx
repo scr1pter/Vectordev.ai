@@ -15,9 +15,10 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
     const value = Locale.spend(total.cost, total.unpriced)
     return total.unpriced && !total.cost ? value : `${value} spent`
   })
+  // The delegated total includes what Vector's hidden helpers (a Vectorscope review, autocomplete) spent for the session.
   const delegated = createMemo(() =>
     session()?.subagentCost || session()?.subagentUnpricedSteps
-      ? `${Locale.spend(session()?.subagentCost, session()?.subagentUnpricedSteps)} by subagents`
+      ? `${Locale.spend(session()?.subagentCost, session()?.subagentUnpricedSteps)} by subagents and helpers`
       : undefined,
   )
 
