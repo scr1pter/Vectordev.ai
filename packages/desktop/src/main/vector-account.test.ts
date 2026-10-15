@@ -235,17 +235,15 @@ test("Codium balances are read in the main process and only the result reaches t
   expect(app.fetched).toEqual([])
   await app.controller.start()
   await app.controller.consume([app.callback()])
-  // Synthetic allowances, not real Codium ones.
+  // vectordev.ai answers shares and flags, never an amount of credits.
   app.state.codium = {
     enabled: true,
     active: true,
     access: true,
-    plan: "vector-50",
-    credits: 25,
-    remaining: 12.5,
-    periodEnd: 2_000_000,
-    cancelAtPeriodEnd: false,
-    wallet: { credits: 10, used: 3, remaining: 7 },
+    plan: { id: "vector-50", name: "Codium 50", left: 0.5, renewsAt: 2_000_000, cancelAtPeriodEnd: false },
+    purchased: { bought: true, left: 0.7 },
+    empty: false,
+    low: false,
   }
   const status = await app.controller.codium()
   expect(app.fetched.at(-1)).toBe("https://vectordev.ai/api/model-plans/status")

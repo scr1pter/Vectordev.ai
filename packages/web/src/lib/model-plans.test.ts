@@ -2,9 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   modelPlanPurchasable,
   modelPlanRedirect,
-  modelPlanRemaining,
   modelTopupPurchasable,
-  modelWalletRemaining,
   readModelPlanConfig,
   readModelPlanStatus,
 } from "./model-plans"
@@ -12,12 +10,12 @@ import {
 const plan = { id: "vector-10", name: "Vector 10", price: 10, available: true }
 const config = { enabled: true, currency: "usd" as const, interval: "month" as const, plans: [plan] }
 const status = {
-  active: true as const,
-  plan: plan.id,
-  credits: 100,
-  periodStart: 1_000,
-  periodEnd: 2_000,
-  cancelAtPeriodEnd: false,
+  active: true,
+  access: true,
+  plan: { id: plan.id, name: "Codium 10", left: 0.25, renewsAt: 2_000, cancelAtPeriodEnd: false },
+  purchased: { bought: false },
+  empty: false,
+  low: false,
 }
 
 describe("model plan API boundaries", () => {
@@ -85,28 +83,39 @@ describe("model plan API boundaries", () => {
   test("accepts inactive customers and keeps missing usage unknown", () => {
     expect(readModelPlanStatus({ active: false, customer: true })).toEqual({ active: false, customer: true })
     expect(readModelPlanStatus(status)).toEqual(status)
-    expect(modelPlanRemaining(status)).toBeUndefined()
+    const unknown = readModelPlanStatus({ ...status, plan: { ...status.plan, left: undefined } }).plan
+    expect(unknown).toEqual({ id: plan.id, name: "Codium 10", renewsAt: 2_000, cancelAtPeriodEnd: false })
+    expect(unknown).not.toHaveProperty("left")
   })
 
-  test("rejects invalid subscription periods and usage", () => {
+  test("rejects invalid plans, shares and flags", () => {
     for (const value of [
-      { ...status, periodEnd: 0 },
-      { ...status, periodEnd: 1e30 },
-      { ...status, remaining: NaN },
-      { ...status, used: -1 },
-      { ...status, cancelAtPeriodEnd: "false" },
+      { ...status, plan: { ...status.plan, renewsAt: 1e30 } },
+      { ...status, plan: { ...status.plan, left: 1.5 } },
+      { ...status, plan: { ...status.plan, left: -0.1 } },
+      { ...status, plan: { ...status.plan, cancelAtPeriodEnd: "false" } },
+      { ...status, plan: undefined },
+      { ...status, active: false },
+      { ...status, purchased: { bought: true, left: NaN } },
+      { ...status, low: "true" },
       { active: false, customer: "true" },
     ]) {
       expect(() => readModelPlanStatus(value)).toThrow("could not load your model plan")
     }
   })
 
-  test("uses reported remaining credits, including zero, and never invents an allowance", () => {
-    expect(modelPlanRemaining({ ...status, used: 25 })).toBe(75)
-    expect(modelPlanRemaining({ ...status, used: 125 })).toBe(0)
-    expect(modelPlanRemaining({ ...status, used: 0, remaining: 0 })).toBe(0)
-    expect(modelPlanRemaining({ ...status, remaining: 150 })).toBe(100)
-    expect(modelPlanRemaining({ active: false })).toBeUndefined()
+  test("keeps only shares and flags, even when a response carries credit amounts", () => {
+    const read = readModelPlanStatus({
+      ...status,
+      credits: 8,
+      used: 6,
+      remaining: 2,
+      plan: { ...status.plan, credits: 8, remaining: 2 },
+      purchased: { bought: true, left: 0.5, credits: 8 },
+      wallet: { credits: 8, used: 4, remaining: 4 },
+    })
+    expect(read).toEqual({ ...status, purchased: { bought: true, left: 0.5 } })
+    expect(JSON.stringify(read)).not.toMatch(/credits|used|remaining|wallet/)
   })
 
   test("purchase requires availability and a confirmed inactive subscription", () => {
@@ -119,20 +128,15 @@ describe("model plan API boundaries", () => {
   })
 
   test("purchased credits work without a subscription and keep unknown usage unknown", () => {
-    expect(readModelPlanStatus({ active: false, access: true, wallet: { credits: 8, used: 2, remaining: 6 } })).toEqual(
-      { active: false, access: true, wallet: { credits: 8, used: 2, remaining: 6 } },
-    )
-    expect(readModelPlanStatus({ ...status, access: true, wallet: { credits: 8 } })).toMatchObject({
-      active: true,
-      wallet: { credits: 8 },
+    expect(readModelPlanStatus({ active: false, access: true, purchased: { bought: true, left: 0.75 } })).toEqual({
+      active: false,
+      access: true,
+      purchased: { bought: true, left: 0.75 },
     })
-    expect(modelWalletRemaining({ credits: 8 })).toBeUndefined()
-    expect(modelWalletRemaining({ credits: 8, used: 2 })).toBe(6)
-    expect(modelWalletRemaining({ credits: 8, remaining: 0 })).toBe(0)
-    expect(modelWalletRemaining({ credits: 8, used: 10 })).toBe(0)
-    for (const wallet of [{ credits: NaN }, { credits: 8, used: -1 }, { credits: 8, remaining: Infinity }]) {
-      expect(() => readModelPlanStatus({ active: false, wallet })).toThrow("could not load your model plan")
-    }
+    expect(readModelPlanStatus({ ...status, purchased: { bought: true } })).toMatchObject({
+      active: true,
+      purchased: { bought: true },
+    })
     expect(modelTopupPurchasable(config, plan, status)).toBe(true)
     expect(modelTopupPurchasable(config, plan, { active: false })).toBe(true)
     expect(modelTopupPurchasable(config, plan, undefined)).toBe(false)

@@ -20,20 +20,19 @@ export type ModelPlanConfig = {
   product?: string
   models?: ModelPlanModel[]
 }
-export type ModelPlanWallet = { credits: number; used?: number; remaining?: number }
-export type ModelPlanStatus = (
-  | { active: false; customer?: boolean }
-  | {
-      active: true
-      plan: string
-      credits: number
-      used?: number
-      remaining?: number
-      periodStart: number
-      periodEnd: number
-      cancelAtPeriodEnd: boolean
-    }
-) & { access?: boolean; wallet?: ModelPlanWallet }
+/**
+ * The signed-in account's own balances, as /api/model-plans/status answers: shares of what was bought, from 0 to 1, and
+ * flags the server works out. Credit amounts never leave the server.
+ */
+export type ModelPlanStatus = {
+  active: boolean
+  customer?: boolean
+  access?: boolean
+  plan?: { id: string; name: string; left?: number; renewsAt: number; cancelAtPeriodEnd: boolean }
+  purchased?: { bought: boolean; left?: number }
+  empty?: boolean
+  low?: boolean
+}
 
 export function readModelPlanConfig(value: unknown): ModelPlanConfig {
   if (
@@ -86,69 +85,25 @@ export function readModelPlanConfig(value: unknown): ModelPlanConfig {
 }
 
 export function readModelPlanStatus(value: unknown): ModelPlanStatus {
-  if (!record(value) || (value.access !== undefined && typeof value.access !== "boolean"))
-    throw new Error("Vector could not load your model plan. Try again.")
-  const wallet = value.wallet
-  if (
-    wallet !== undefined &&
-    (!record(wallet) ||
-      !amount(wallet.credits) ||
-      (wallet.used !== undefined && !amount(wallet.used)) ||
-      (wallet.remaining !== undefined && !amount(wallet.remaining)))
-  )
-    throw new Error("Vector could not load your model plan. Try again.")
-  const purchased = {
-    ...(typeof value.access === "boolean" ? { access: value.access } : {}),
-    ...(record(wallet) && amount(wallet.credits)
-      ? {
-          wallet: {
-            credits: wallet.credits,
-            ...(amount(wallet.used) ? { used: wallet.used } : {}),
-            ...(amount(wallet.remaining) ? { remaining: wallet.remaining } : {}),
-          },
-        }
-      : {}),
-  }
-  if (
-    record(value) &&
-    value.active === false &&
-    (value.customer === undefined || typeof value.customer === "boolean")
-  ) {
-    return { active: false, ...(value.customer === undefined ? {} : { customer: value.customer }), ...purchased }
-  }
   if (
     !record(value) ||
-    value.active !== true ||
-    typeof value.plan !== "string" ||
-    !value.plan ||
-    !amount(value.credits) ||
-    (value.used !== undefined && !amount(value.used)) ||
-    (value.remaining !== undefined && !amount(value.remaining)) ||
-    !amount(value.periodStart) ||
-    !amount(value.periodEnd) ||
-    !Number.isFinite(new Date(value.periodEnd).getTime()) ||
-    value.periodEnd <= value.periodStart ||
-    typeof value.cancelAtPeriodEnd !== "boolean"
-  ) {
-    throw new Error("Vector could not load your model plan. Try again.")
-  }
+    typeof value.active !== "boolean" ||
+    ["customer", "access", "empty", "low"].some((key) => value[key] !== undefined && typeof value[key] !== "boolean")
+  )
+    throw statusError()
+  const plan = value.plan === undefined ? undefined : readStatusPlan(value.plan)
+  const purchased = value.purchased === undefined ? undefined : readPurchased(value.purchased)
+  // A plan is reported exactly when a paid subscription period is active.
+  if (value.active !== (plan !== undefined)) throw statusError()
   return {
-    active: true,
-    plan: value.plan,
-    credits: value.credits,
-    ...(value.used === undefined ? {} : { used: value.used }),
-    ...(value.remaining === undefined ? {} : { remaining: value.remaining }),
-    periodStart: value.periodStart,
-    periodEnd: value.periodEnd,
-    cancelAtPeriodEnd: value.cancelAtPeriodEnd,
-    ...purchased,
+    active: value.active,
+    ...(typeof value.customer === "boolean" ? { customer: value.customer } : {}),
+    ...(typeof value.access === "boolean" ? { access: value.access } : {}),
+    ...(plan ? { plan } : {}),
+    ...(purchased ? { purchased } : {}),
+    ...(typeof value.empty === "boolean" ? { empty: value.empty } : {}),
+    ...(typeof value.low === "boolean" ? { low: value.low } : {}),
   }
-}
-
-export function modelPlanRemaining(status: ModelPlanStatus) {
-  if (!status.active) return
-  if (status.remaining !== undefined) return Math.min(status.credits, status.remaining)
-  if (status.used !== undefined) return Math.max(0, status.credits - status.used)
 }
 
 export function modelPlanPurchasable(config: ModelPlanConfig, plan: ModelPlan, status: ModelPlanStatus | undefined) {
@@ -157,11 +112,6 @@ export function modelPlanPurchasable(config: ModelPlanConfig, plan: ModelPlan, s
 
 export function modelTopupPurchasable(config: ModelPlanConfig, pack: ModelPlan, status: ModelPlanStatus | undefined) {
   return config.enabled && pack.available && status !== undefined
-}
-
-export function modelWalletRemaining(wallet: ModelPlanWallet) {
-  if (wallet.remaining !== undefined) return Math.min(wallet.credits, wallet.remaining)
-  if (wallet.used !== undefined) return Math.max(0, wallet.credits - wallet.used)
 }
 
 /** Only navigate to the Stripe product requested; never trust an arbitrary API redirect. */
@@ -212,10 +162,50 @@ function readPlan(plan: unknown): ModelPlan {
   }
 }
 
+function readStatusPlan(plan: unknown) {
+  if (
+    !record(plan) ||
+    typeof plan.id !== "string" ||
+    !plan.id ||
+    typeof plan.name !== "string" ||
+    !plan.name.trim() ||
+    (plan.left !== undefined && !fraction(plan.left)) ||
+    !amount(plan.renewsAt) ||
+    !Number.isFinite(new Date(plan.renewsAt).getTime()) ||
+    typeof plan.cancelAtPeriodEnd !== "boolean"
+  )
+    throw statusError()
+  return {
+    id: plan.id,
+    name: plan.name,
+    ...(fraction(plan.left) ? { left: plan.left } : {}),
+    renewsAt: plan.renewsAt,
+    cancelAtPeriodEnd: plan.cancelAtPeriodEnd,
+  }
+}
+
+function readPurchased(purchased: unknown) {
+  if (
+    !record(purchased) ||
+    typeof purchased.bought !== "boolean" ||
+    (purchased.left !== undefined && !fraction(purchased.left))
+  )
+    throw statusError()
+  return { bought: purchased.bought, ...(fraction(purchased.left) ? { left: purchased.left } : {}) }
+}
+
+function statusError() {
+  return new Error("Vector could not load your model plan. Try again.")
+}
+
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
 function amount(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
+}
+
+function fraction(value: unknown): value is number {
+  return amount(value) && value <= 1
 }

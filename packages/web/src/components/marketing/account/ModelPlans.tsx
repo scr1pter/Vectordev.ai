@@ -4,9 +4,7 @@ import { readAccountApiResponse } from "../../../lib/account-client"
 import {
   modelPlanPurchasable,
   modelPlanRedirect,
-  modelPlanRemaining,
   modelTopupPurchasable,
-  modelWalletRemaining,
   readModelPlanConfig,
   readModelPlanStatus,
   type ModelPlanConfig,
@@ -18,9 +16,8 @@ export type ModelPlansPreview = { config: ModelPlanConfig; status: ModelPlanStat
 
 const count = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 })
 const price = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })
-// Balances are shown as a share of the credits bought, never as amounts, which with the purchase price would reveal
-// the dollars of model credit in it.
-const share = (remaining: number, total: number) => (total > 0 ? Math.min(1, Math.max(0, remaining / total)) : 0)
+// The status answers balances as a share of the credits bought, never as amounts, which with the purchase price would
+// reveal the dollars of model credit in it.
 const percent = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 })
 
 export function ModelPlans(props: { accessToken: string; preview?: ModelPlansPreview | true }) {
@@ -98,16 +95,16 @@ export function ModelPlans(props: { accessToken: string; preview?: ModelPlansPre
   }
 
   const status = data?.status
-  const remaining = status ? modelPlanRemaining(status) : undefined
-  const purchasedRemaining = status?.wallet ? modelWalletRemaining(status.wallet) : undefined
+  const monthly = status?.plan
+  const purchased = status?.purchased?.bought ? status.purchased : undefined
   const customer = status?.active || status?.customer
   const defaultModel = data?.config.models?.[0]
   return (
     <section className="acct-section model-plans" aria-labelledby="model-plans-heading" aria-busy={loading}>
       <div className="model-plans-heading">
         <h2 id="model-plans-heading">{data?.config.product ?? "Vector Codium"}</h2>
-        {status?.active && (
-          <span className="model-plans-badge">{status.cancelAtPeriodEnd ? "Ending this period" : "Active"}</span>
+        {monthly && (
+          <span className="model-plans-badge">{monthly.cancelAtPeriodEnd ? "Ending this period" : "Active"}</span>
         )}
       </div>
       <p>The same coding model catalog for every budget. Subscribe monthly or buy credits when you need them.</p>
@@ -127,44 +124,36 @@ export function ModelPlans(props: { accessToken: string; preview?: ModelPlansPre
           )}
         </div>
       )}
-      {status?.active && (
+      {monthly && (
         <div className="model-plans-usage">
-          <h3>
-            Monthly allowance · {data?.config.plans.find((plan) => plan.id === status.plan)?.name ?? "Your model plan"}
-          </h3>
+          <h3>Monthly allowance · {data?.config.plans.find((item) => item.id === monthly.id)?.name ?? monthly.name}</h3>
           <p className="model-plans-balance">
-            {remaining === undefined ? (
+            {monthly.left === undefined ? (
               "Usage temporarily unavailable"
             ) : (
               <span>
-                <strong>{percent.format(share(remaining, status.credits))}</strong> of this month&apos;s Codium credits
-                remaining
+                <strong>{percent.format(monthly.left)}</strong> of this month&apos;s Codium credits remaining
               </span>
             )}
           </p>
-          {remaining !== undefined && status.credits > 0 && (
-            <progress
-              value={Math.round(share(remaining, status.credits) * 100)}
-              max={100}
-              aria-label="Monthly Codium credits remaining"
-            />
+          {monthly.left !== undefined && (
+            <progress value={Math.round(monthly.left * 100)} max={100} aria-label="Monthly Codium credits remaining" />
           )}
           <p>
-            {status.cancelAtPeriodEnd ? "Access ends" : "Renews"}{" "}
-            {new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(status.periodEnd)}
+            {monthly.cancelAtPeriodEnd ? "Access ends" : "Renews"}{" "}
+            {new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(monthly.renewsAt)}
           </p>
         </div>
       )}
-      {status?.wallet && (
+      {purchased && (
         <div className="model-plans-usage">
           <h3>Purchased credits</h3>
           <p className="model-plans-balance">
-            {purchasedRemaining === undefined ? (
+            {purchased.left === undefined ? (
               "Usage temporarily unavailable"
             ) : (
               <span>
-                <strong>{percent.format(share(purchasedRemaining, status.wallet.credits))}</strong> of your purchased
-                Codium credits remaining
+                <strong>{percent.format(purchased.left)}</strong> of your purchased Codium credits remaining
               </span>
             )}
           </p>
@@ -214,7 +203,7 @@ export function ModelPlans(props: { accessToken: string; preview?: ModelPlansPre
               <p>{group.description}</p>
               <div className="model-plans-grid">
                 {group.plans.map((plan) => {
-                  const current = group.kind === "checkout" && status?.active && status.plan === plan.id
+                  const current = group.kind === "checkout" && status?.plan?.id === plan.id
                   const available =
                     group.kind === "checkout"
                       ? modelPlanPurchasable(data.config, plan, status)

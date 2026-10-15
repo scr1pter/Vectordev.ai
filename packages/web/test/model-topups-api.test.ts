@@ -11,6 +11,7 @@ import {
   readModelPlanAccount,
   reconcileModelTopup,
 } from "../../../api/_lib/model-plan-account"
+import { modelPlanBalance } from "../../../api/_lib/model-plan-status"
 import { reconcileModelPlanEvent } from "../../../api/model-plans/webhook"
 import { stripeRecord } from "../../../api/_lib/model-plan-stripe"
 
@@ -359,6 +360,22 @@ test("a second completed purchase increases the same lifetime cap without cleari
   expect(keys.size).toBe(1)
   expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 48, usage: 7 })
   expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ wallet: { credits: 48, used: 7, remaining: 41 } })
+  // Vector sees the share of everything bought that is left, and running low at a tenth of the smallest top-up, which
+  // reveals no allowance however much was bought.
+  const balance = async () => modelPlanBalance(await modelPlanStatus(user.id, fetcher))
+  expect(await balance()).toEqual({
+    active: false,
+    customer: true,
+    access: true,
+    purchased: { bought: true, left: 0.85 },
+    empty: false,
+    low: false,
+  })
+  keys.get("wallet_key_1")!.data.usage = 47.3
+  expect(await balance()).toMatchObject({ purchased: { left: 0.01 }, empty: false, low: true })
+  // Too few for the cheapest full reply in the catalog (Claude Haiku 5.5's 8,192 output tokens).
+  keys.get("wallet_key_1")!.data.usage = 47.996
+  expect(await balance()).toMatchObject({ access: true, purchased: { left: 0 }, empty: true, low: false })
 })
 
 test("partial refunds reduce credits proportionally and disputes preserve spent-credit debt", async () => {

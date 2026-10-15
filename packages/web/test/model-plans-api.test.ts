@@ -912,6 +912,48 @@ describe("Codium credits used from Vector", () => {
     state.charge = 0
   })
 
+  test("the status Vector reads carries shares and flags, never an amount of credits", async () => {
+    const current = await paid()
+    await modelPlanCredential(user.id, fetcher)
+    const token = mintCliToken(user).token
+    const read = async () =>
+      (await forward(ModelPlanStatus.STATUS_URL, { headers: { authorization: `Bearer ${token}` } })).json()
+    keys.get("hash_fixture1")!.data.usage = 1.234
+    const body = await read()
+    expect(body).toEqual({
+      enabled: true,
+      active: true,
+      customer: true,
+      access: true,
+      plan: {
+        id: "vector-10",
+        name: "Codium 10",
+        left: 0.75,
+        renewsAt: current.items.data[0]!.current_period_end * 1000,
+        cancelAtPeriodEnd: false,
+      },
+      purchased: { bought: false },
+      empty: false,
+      low: false,
+    })
+    // Neither the allowance (5), what was used nor what is left reaches the app, the CLI or the browser.
+    expect(JSON.stringify(body)).not.toMatch(/credits|used|remaining|wallet|1\.234|3\.766|"5"|:5[,}]/)
+
+    // Running low is a tenth of this month's credits; too few for the catalog's cheapest full reply
+    // (2048 output tokens at $2 per million) is empty, the point where the gateway refuses every Vector request.
+    keys.get("hash_fixture1")!.data.usage = 4.51
+    expect(await read()).toMatchObject({ plan: { left: 0.1 }, empty: false, low: true })
+    keys.get("hash_fixture1")!.data.usage = 5 - 0.005
+    expect(await read()).toMatchObject({ plan: { left: 0 }, empty: false, low: true })
+    keys.get("hash_fixture1")!.data.usage = 5 - 0.004
+    expect(await read()).toMatchObject({ plan: { left: 0 }, empty: true, low: false })
+    // A key whose usage cannot be read leaves the share unknown and raises no flag.
+    delete keys.get("hash_fixture1")!.data.usage
+    const unknown = await read()
+    expect(unknown).toMatchObject({ empty: false, low: false })
+    expect(unknown.plan).not.toHaveProperty("left")
+  })
+
   test("while sales are off Vector lists no Codium and a turn sends nothing", async () => {
     await paid()
     process.env.MODEL_PLANS_ENABLED = "false"

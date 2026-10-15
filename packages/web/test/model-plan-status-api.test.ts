@@ -60,7 +60,9 @@ test("a Vector account token reads Codium status, including whether Codium is on
     enabled: true,
     active: false,
     access: false,
-    wallet: { credits: 0, used: 0, remaining: 0 },
+    purchased: { bought: false },
+    empty: true,
+    low: false,
   })
   // Verified locally and checked against revocation; Supabase is not involved.
   expect(state.calls.some((url) => url.startsWith(environment.SUPABASE_URL))).toBe(false)

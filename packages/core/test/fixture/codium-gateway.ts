@@ -49,19 +49,16 @@ export const textStream = [
 export function codiumGateway(token: string) {
   const state = {
     mode: "ok" as "ok" | "text" | "credits" | "disabled" | "context" | "capacity",
-    // Synthetic allowances: half of each price, which is not a real Codium allowance.
+    // What the server answers: shares and flags, never an amount.
     status: {
       enabled: true,
       active: true,
-      access: true,
-      plan: "vector-50",
-      credits: 25,
-      remaining: 1.5,
-      periodStart: 1_000,
-      periodEnd: 1_790_000_000_000,
-      cancelAtPeriodEnd: false,
       customer: true,
-      wallet: { credits: 10, used: 9.5, remaining: 0.5 },
+      access: true,
+      plan: { id: "vector-50", name: "Codium 50", left: 0.06, renewsAt: 1_790_000_000_000, cancelAtPeriodEnd: false },
+      purchased: { bought: true, left: 0.05 },
+      empty: false,
+      low: true,
     } as Record<string, unknown>,
   }
   const seen: { path: string; authorization: string | null; body?: unknown }[] = []
