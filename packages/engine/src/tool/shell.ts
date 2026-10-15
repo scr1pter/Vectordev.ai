@@ -344,7 +344,7 @@ function tail(text: string, maxLines: number, maxBytes: number) {
 }
 
 const parse = Effect.fn("ShellTool.parse")(function* (command: string, ps: boolean) {
-  const tree = yield* Effect.promise(() => parser().then((p) => (ps ? p.ps : p.bash).parse(command)))
+  const tree = yield* Effect.promise(() => (ps ? psParser() : bashParser()).then((parser) => parser.parse(command)))
   if (!tree) throw new Error("Failed to parse command")
   return tree
 })
@@ -449,7 +449,7 @@ const cmd = Effect.fn("ShellTool.cmd")(function* (
     detached: process.platform !== "win32",
   })
 })
-const parser = lazy(async () => {
+const runtime = lazy(async () => {
   const { Parser } = await import("web-tree-sitter")
   const { default: treeWasm } = await import("web-tree-sitter/tree-sitter.wasm" as string, {
     with: { type: "wasm" },
@@ -460,21 +460,28 @@ const parser = lazy(async () => {
       return treePath
     },
   })
-  const { default: bashWasm } = await import("tree-sitter-bash/tree-sitter-bash.wasm" as string, {
-    with: { type: "wasm" },
-  })
-  const { default: psWasm } = await import("tree-sitter-powershell/tree-sitter-powershell.wasm" as string, {
-    with: { type: "wasm" },
-  })
-  const bashPath = resolveWasm(bashWasm)
-  const psPath = resolveWasm(psWasm)
-  const [bashLanguage, psLanguage] = await Promise.all([Language.load(bashPath), Language.load(psPath)])
-  const bash = new Parser()
-  bash.setLanguage(bashLanguage)
-  const ps = new Parser()
-  ps.setLanguage(psLanguage)
-  return { bash, ps }
+  return Parser
 })
+// Each grammar loads on the first command in its language. The PowerShell grammar alone adds about 15 MiB, and a
+// session whose shell is not PowerShell never parses with it.
+const grammar = (wasm: () => Promise<{ default: string }>) =>
+  lazy(async () => {
+    const Parser = await runtime()
+    const { default: asset } = await wasm()
+    const parser = new Parser()
+    parser.setLanguage(await Language.load(resolveWasm(asset)))
+    return parser
+  })
+const bashParser = grammar(() =>
+  import("tree-sitter-bash/tree-sitter-bash.wasm" as string, {
+    with: { type: "wasm" },
+  }),
+)
+const psParser = grammar(() =>
+  import("tree-sitter-powershell/tree-sitter-powershell.wasm" as string, {
+    with: { type: "wasm" },
+  }),
+)
 
 export const ShellTool = Tool.define(
   ShellID.ToolID,
