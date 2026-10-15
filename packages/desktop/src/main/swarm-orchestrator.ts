@@ -259,27 +259,48 @@ export async function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine
       throw new Error("The swarm staging workspace no longer exists. Discard this run and launch a new swarm.")
   }
   if (activeRuns.has(id)) return getSwarmRun(id)!
+  const retryable = (task: SwarmTaskRecord) => ["failed", "blocked", "canceled", "interrupted"].includes(task.status)
+  const workspace = (task: SwarmTaskRecord) => (task.workspaceId ? getParallelWorkspace(task.workspaceId) : undefined)
+  // A retry starts in a new workspace from the staging baseline, and the task forgets the old one, so nothing could
+  // open or discard the previous attempt's copy of the project again. Release it instead of leaving it on disk.
+  const retired = getSwarmRun(id)!
+    .tasks.filter((task) => retryable(task) && workspace(task)?.mergeState === "none")
+    .map((task) => task.workspaceId!)
   updateRun(id, (run) => ({
     ...run,
     status: run.tasks.length ? "running" : "planning",
     currentStep: run.tasks.length ? "Resuming dependency scheduler" : "Resuming project decomposition",
     completedAt: undefined,
     error: undefined,
-    tasks: run.tasks.map((task) =>
-      ["failed", "blocked", "canceled", "interrupted"].includes(task.status)
-        ? {
-            ...task,
-            status: "planned",
-            workspaceId: undefined,
-            startedAt: undefined,
-            completedAt: undefined,
-            lastAction: "Ready to retry",
-            error: undefined,
-          }
-        : task,
-    ),
+    tasks: run.tasks.map((task): SwarmTaskRecord => {
+      if (!retryable(task)) return task
+      const merged = workspace(task)
+      // Vector closed after this worker's changes reached staging but before the task was recorded complete. Running
+      // it again would apply the same edits on top of themselves.
+      if (merged?.mergeState === "merged")
+        return {
+          ...task,
+          status: "complete",
+          completedAt: task.completedAt ?? now(),
+          lastAction: "Validated changes integrated into staging",
+          changedFilesCount: merged.changedFilesCount,
+          riskLevel: merged.riskLevel,
+          summary: task.summary || "Validated changes integrated into staging",
+          error: undefined,
+        }
+      return {
+        ...task,
+        status: "planned",
+        workspaceId: undefined,
+        startedAt: undefined,
+        completedAt: undefined,
+        lastAction: "Ready to retry",
+        error: undefined,
+      }
+    }),
   }))
   appendLog(id, "Swarm resumed by the user.")
+  void Promise.all(retired.map((workspaceID) => discardParallelWorkspace(workspaceID).catch(() => undefined)))
   startSwarmRun(id, engine)
   return getSwarmRun(id)!
 }

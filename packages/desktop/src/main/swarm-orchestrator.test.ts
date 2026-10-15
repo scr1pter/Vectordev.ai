@@ -326,6 +326,63 @@ describe("swarm lifecycle", () => {
     expect(getSwarmRun(run.id)?.status).toBe("running")
   })
 
+  // A worker workspace from an earlier attempt, as the parallel workspace store keeps it.
+  async function previousWorker(id: string, mergeState: "none" | "merged") {
+    const isolatedPath = join(directory, id, "workspace")
+    await mkdir(isolatedPath, { recursive: true })
+    const records = stores.get("parallel-workspaces-state")!.get("records") as unknown[]
+    stores.get("parallel-workspaces-state")!.set("records", [
+      ...records,
+      {
+        id,
+        name: "Previous attempt",
+        sourcePath: join(directory, "staging", "repo"),
+        isolatedPath,
+        isolation: "copy",
+        status: mergeState === "merged" ? "merged" : "failed",
+        mergeState,
+        changedFiles: ["result.txt"],
+        changedFilesCount: 1,
+        riskLevel: "medium",
+        diff: "",
+        logs: [],
+      },
+    ])
+    return isolatedPath
+  }
+
+  test("Resume releases a retried task's previous workspace instead of leaving its copy on disk", async () => {
+    const run = await seed("failed", [{ ...inspectTask, status: "failed", workspaceId: "old-worker" }])
+    const isolatedPath = await previousWorker("old-worker", "none")
+    const resumed = await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
+
+    expect(resumed.tasks[0]?.workspaceId).not.toBe("old-worker")
+    const deadline = Date.now() + 3_000
+    while (getParallelWorkspace("old-worker")?.mergeState !== "discarded" && Date.now() < deadline) await Bun.sleep(20)
+    expect(getParallelWorkspace("old-worker")?.mergeState).toBe("discarded")
+    expect(await stat(isolatedPath).catch(() => undefined)).toBeUndefined()
+  })
+
+  test("Resume records a task complete when Vector closed after its changes merged into staging", async () => {
+    const run = await seed("interrupted", [
+      {
+        ...inspectTask,
+        status: "interrupted",
+        workspaceId: "merged-worker",
+        lastAction: "Interrupted when Vector closed",
+      },
+    ])
+    const isolatedPath = await previousWorker("merged-worker", "merged")
+    const resumed = await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
+
+    expect(resumed.tasks[0]?.status).toBe("complete")
+    expect(resumed.tasks[0]?.workspaceId).toBe("merged-worker")
+    expect(resumed.tasks[0]?.lastAction).toBe("Validated changes integrated into staging")
+    expect(resumed.tasks[0]?.changedFilesCount).toBe(1)
+    expect(await stat(isolatedPath).catch(() => undefined)).toBeDefined()
+    expect(requests).not.toContain("POST /session")
+  })
+
   test("stopping an executing worker interrupts its session before the scheduler finishes", async () => {
     const run = await seed("interrupted", [inspectTask])
     await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
