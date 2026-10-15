@@ -181,6 +181,11 @@ under `edit`.
 Connecting or disconnecting a Vercel or Supabase account is never an agent
 action: only the user can do it, in Vector Cloud → Connections.
 
+The agent reaches Vector Cloud only through this tool. The desktop's cloud
+bridge token is kept out of the agent's shell environment and out of the
+engine's launch environment, which other processes of the same user can read,
+so a shell command cannot call the bridge and skip these prompts.
+
 ## Repository migrations
 
 `apply_migrations` runs the repository's `.sql` files against the linked
