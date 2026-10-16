@@ -404,7 +404,7 @@ describe("cloud bridge publish destination", () => {
       provider: "Vector",
       environment: "local .env",
       summary:
-        "Write this project's 2 stored environment variables (STRIPE_SECRET_KEY, VITE_SITE_NAME) to the .env of this project. Values are not shown.",
+        "Write this project's 2 stored environment variables (STRIPE_SECRET_KEY, VITE_SITE_NAME) to the .env of this project. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.",
     })
     expect(await command({ command: "write_env_file" })).toEqual({
       ok: true,
@@ -488,7 +488,7 @@ describe("cloud bridge publish destination", () => {
       project: "shop-db",
       environment: "local .env",
       summary:
-        "Write this project's 3 stored environment variables (API_URL, SUPABASE_URL, SUPABASE_ANON_KEY) to the .env of this project, including the Supabase project shop-db's public client settings. Values are not shown.",
+        "Write this project's 3 stored environment variables (API_URL, SUPABASE_URL, SUPABASE_ANON_KEY) to the .env of this project, including the Supabase project shop-db's public client settings. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.",
     })
     expect(JSON.stringify(prepare)).not.toContain("api.fixture.invalid")
     const missing = await bridgeCommand(bridge, { command: "describe" })

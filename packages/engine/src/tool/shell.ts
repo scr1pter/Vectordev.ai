@@ -78,6 +78,8 @@ type Scan = {
   patterns: Set<string>
   always: Set<string>
   writes: Set<string>
+  /** Environment files a command names or reads from, relative to the worktree. */
+  reads: Set<string>
   /** Vercel and Supabase CLI calls that act on a cloud account, by permission pattern. */
   cloud: Map<string, CloudCli.Request & { command: string }>
 }
@@ -184,6 +186,26 @@ function redirects(node: Node, ps: boolean) {
       })
   return targets.filter((target) => target && !DEVICES.has(target.toLowerCase()))
 }
+
+// Bash input redirects (`< .env`). PowerShell has no input redirect operator.
+function inputRedirects(node: Node, ps: boolean) {
+  if (ps) return []
+  return node.descendantsOfType("file_redirect").flatMap((item) => {
+    const children = item?.children.filter((child): child is Node => Boolean(child)) ?? []
+    const index = children.findIndex((child) => child.type === "<")
+    if (index === -1) return []
+    return [
+      children
+        .slice(index + 1)
+        .map((child) => child.text)
+        .join(""),
+    ]
+  })
+}
+
+// The environment files the read tool asks for by default (`*.env`, `*.env.*`,
+// but not `*.env.example`), so a shell command that names one asks the same way.
+const ENV_FILE = /\.env(\.(?!example$)[^/\\]*)?$/
 
 function unquote(text: string) {
   if (text.length < 2) return text
@@ -426,6 +448,20 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
     },
   })
 
+  // The read tool's permission and patterns, so the read rules that ask for
+  // `.env` files (and a session that may not read them) apply to the shell too.
+  if (scan.reads.size > 0) {
+    yield* ctx.ask({
+      permission: "read",
+      patterns: Array.from(scan.reads),
+      always: Array.from(scan.reads),
+      metadata: {
+        command: input.command,
+        files: Array.from(scan.reads),
+      },
+    })
+  }
+
   // After the shell's own permission, so a session that may not run the command
   // is refused without a cloud prompt. These ask every time, as vector_cloud's
   // own actions do: auto-accept and allow rules never answer them.
@@ -581,6 +617,7 @@ export const ShellTool = Tool.define(
         patterns: new Set<string>(),
         always: new Set<string>(),
         writes: new Set<string>(),
+        reads: new Set<string>(),
         cloud: new Map(),
       }
       const shellKind = ShellID.toKind(Shell.name(shell))
@@ -605,6 +642,14 @@ export const ShellTool = Tool.define(
           scan.always.add(BashArity.prefix(tokens).join(" ") + " *")
         }
 
+        // `cat .env`, `grep KEY .env.local` or `source .env` read the same
+        // secrets the read tool asks for, so they ask under read too.
+        for (const item of command.slice(1)) {
+          if (!ENV_FILE.test(path.basename(unquote(item.text)))) continue
+          const resolved = yield* argPath(item.text, cwd, ps, shell)
+          if (resolved) scan.reads.add(path.relative(instance.worktree, resolved))
+        }
+
         for (const cloud of yield* cloudRequests(tokens, 0)) {
           const text = source(node)
           scan.cloud.set(
@@ -612,6 +657,13 @@ export const ShellTool = Tool.define(
             { ...cloud, command: text.length > 200 ? `${text.slice(0, 200)}…` : text },
           )
         }
+      }
+
+      // `while read line; do ...; done < .env`
+      for (const source of inputRedirects(root, ps)) {
+        if (!ENV_FILE.test(path.basename(unquote(source)))) continue
+        const resolved = yield* argPath(source, cwd, ps, shell)
+        if (resolved) scan.reads.add(path.relative(instance.worktree, resolved))
       }
 
       // A target that cannot be resolved (`> "$OUT"`) is asked for as written, so a rule that denies edits denies it.

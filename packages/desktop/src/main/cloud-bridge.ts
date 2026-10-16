@@ -296,7 +296,7 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
       basename(input.projectPath),
       "local .env",
       keys.length
-        ? `Write this project's ${keys.length} stored environment ${keys.length === 1 ? "variable" : "variables"} (${keys.join(", ")}) to the .env of ${where}. Values are not shown.`
+        ? `Write this project's ${keys.length} stored environment ${keys.length === 1 ? "variable" : "variables"} (${keys.join(", ")}) to the .env of ${where}. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.`
         : `Clear Vector's managed block from the .env of ${where}: no variables are stored for this project.`,
     )
   }
@@ -431,7 +431,7 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
     "Supabase",
     name,
     "local .env",
-    `Write this project's ${keys.length} stored environment ${keys.length === 1 ? "variable" : "variables"} (${keys.join(", ")}) to the .env of ${workspace.directory !== workspace.projectPath ? "this agent workspace" : "this project"}, including the Supabase project ${name}'s public client settings. Values are not shown.`,
+    `Write this project's ${keys.length} stored environment ${keys.length === 1 ? "variable" : "variables"} (${keys.join(", ")}) to the .env of ${workspace.directory !== workspace.projectPath ? "this agent workspace" : "this project"}, including the Supabase project ${name}'s public client settings. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.`,
   )
 }
 

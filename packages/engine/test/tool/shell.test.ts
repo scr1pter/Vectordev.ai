@@ -566,6 +566,47 @@ describe("tool.shell permissions", () => {
     }),
   )
 
+  each("asks under read, as the read tool does, before a command reads an environment file", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped({ git: true })
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const err = new Error("read prompt rejected")
+          const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          const rejectRead = {
+            ...ctx,
+            ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+              Effect.sync(() => {
+                requests.push(req)
+                if (req.permission === "read") throw err
+              }),
+          }
+          const cases = [
+            ["cat .env", ".env"],
+            ["grep STRIPE apps/web/.env.local", path.join("apps", "web", ".env.local")],
+            ["source ./.env", ".env"],
+            ["while read line; do echo $line; done < .env.production", ".env.production"],
+          ] as const
+          for (const [command, file] of cases) {
+            requests.length = 0
+            expect({ command, error: (yield* fail({ command }, rejectRead)).message }).toEqual({
+              command,
+              error: err.message,
+            })
+            expect({ command, read: requests.find((item) => item.permission === "read")?.patterns }).toEqual({
+              command,
+              read: [file],
+            })
+          }
+          requests.length = 0
+          yield* run({ command: "cat .env.example .envrc 2>/dev/null; true" }, rejectRead)
+          expect(requests.map((item) => item.permission)).not.toContain("read")
+        }),
+      )
+    }),
+  )
+
   each("asks for edit permission for the files a redirect writes", () =>
     Effect.gen(function* () {
       const outside = yield* tmpdirScoped()

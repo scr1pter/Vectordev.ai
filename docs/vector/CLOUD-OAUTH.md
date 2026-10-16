@@ -121,6 +121,17 @@ agent or Supabase setup, first adds `.env` to `.gitignore` when git does not
 already ignore it, and refuses to put a server-only value into a `.env` that
 git tracks, naming the variables and leaving the file unchanged.
 
+Once values are in `.env`, the agent can read them. Approving a write keeps the
+values out of the prompt and the tool result, not out of the agent's reach:
+the read tool asks before it reads `.env` (`*.env`, `*.env.*`), shell commands
+that name such a file as an argument or an input redirect (`cat .env`, `source
+.env`, `< .env.local`) ask under the same `read` permission
+(`packages/engine/src/tool/shell.ts`), and auto-accept answers both. A program
+the agent runs can still open the file without a prompt, the shell sandbox
+does not hide the project's own `.env`, and the model is only instructed not to
+read it. Keep server-only values out of `.env` unless the app needs them on
+this machine.
+
 For projects positively identified as Vite by their saved framework or a Vite
 dependency, serialization preserves literal dollars and backslashes through
 Vite's environment parser. Enter literal values, not variable-expansion

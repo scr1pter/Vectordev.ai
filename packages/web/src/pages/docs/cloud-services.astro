@@ -114,7 +114,10 @@ export const prerender = true
     and rollback, variables and domains, everything listed for Supabase above, and Vector's own release checks: it can
     probe live releases, re-run a release's checks, and change the build commands and which checks are required before
     production. It can also list the names of the variables stored in Environment variables, write them to .env and
-    remove one, but never read or set a value there. It asks before it publishes, moves
+    remove one, but it cannot read or set a value in Environment variables. Once values are in .env, the agent can read
+    them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a
+    program the agent runs can open the file without one. It asks
+    before it publishes, moves
     production, changes a database, writes a host's environment, .env or the stored variables, or changes a Vercel
     project or domain, and the prompt
     names the provider, project and environment and shows any SQL that would run. It asks every time: auto-accepting
