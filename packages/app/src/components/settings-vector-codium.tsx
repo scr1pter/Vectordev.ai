@@ -89,13 +89,7 @@ export function SettingsVectorCodium() {
                   </Show>
                   <div>
                     <dt>Purchased credits</dt>
-                    <dd>
-                      {!current().purchased.bought
-                        ? "None"
-                        : current().purchased.left === undefined
-                          ? "Balance unavailable"
-                          : `${ModelPlanStatus.formatShare(current().purchased.left!)} left`}
-                    </dd>
+                    <dd>{ModelPlanStatus.formatPurchased(current().purchased)}</dd>
                   </div>
                 </dl>
                 <Show when={ModelPlanStatus.notice(current())}>

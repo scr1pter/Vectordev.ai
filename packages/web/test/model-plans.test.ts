@@ -211,7 +211,7 @@ describe("paid entitlement", () => {
 })
 
 describe("gateway request policy", () => {
-  test("reviewed model routing pins precision and effort and adds portable Haiku cache breakpoints", () => {
+  test("reviewed model routing pins precision, effort and options, and marks Haiku's cache breakpoints", () => {
     const models = configuredPlanModels()
     for (const model of models) {
       const body = modelPlanRequest(
@@ -219,20 +219,83 @@ describe("gateway request policy", () => {
           model: model.id,
           messages: [
             { role: "system", content: "Stable instructions" },
+            { role: "system", content: "Per-session context" },
             { role: "user", content: "Fix it" },
+            {
+              role: "assistant",
+              content: null,
+              // How both Vector runtimes send earlier reasoning back.
+              reasoning_content: "Read the file before editing it.",
+              reasoning_details: [
+                { type: "reasoning.text", text: "Read the file before editing it.", signature: "sig" },
+              ],
+              tool_calls: [{ id: "call", type: "function", function: { name: "read", arguments: "{}" } }],
+            },
+            {
+              role: "tool",
+              tool_call_id: "call",
+              content: [{ type: "text", text: "source", cache_control: { type: "ephemeral", ttl: "1h" } }],
+            },
+          ],
+          tools: [
+            {
+              type: "function",
+              cache_control: { type: "ephemeral", ttl: "1h" },
+              function: { name: "read", description: "Read a file", parameters: { type: "object" }, extra: true },
+            },
           ],
           tool_choice: "required",
+          temperature: 0.2,
+          parallel_tool_calls: true,
           reasoning: { effort: "max" },
           provider: { quantizations: ["fp4"] },
         },
         models,
       )
+      // No reviewed endpoint takes it, and with require_parameters it would leave none to route to.
+      expect(body).not.toHaveProperty("parallel_tool_calls")
+      // Thinking models need their earlier reasoning on a tool-call turn; OpenRouter reads it as reasoning.
+      expect(body.messages[3]).toMatchObject({
+        role: "assistant",
+        reasoning: "Read the file before editing it.",
+        reasoning_details: [{ type: "reasoning.text", text: "Read the file before editing it.", signature: "sig" }],
+      })
+      expect(body.messages[3]).not.toHaveProperty("reasoning_content")
+      // A tool keeps only its definition.
+      expect(body.tools).toEqual([
+        { type: "function", function: { name: "read", description: "Read a file", parameters: { type: "object" } } },
+      ])
       if (model.id.startsWith("anthropic/")) {
         expect(body.tool_choice).toBe("auto")
         expect(body.reasoning).toEqual({ effort: "high" })
-        expect(body.messages[1]).toMatchObject({
-          content: [{ type: "text", text: "Fix it", cache_control: { type: "ephemeral" } }],
-        })
+        // Its endpoints refuse sampling options.
+        expect(body).not.toHaveProperty("temperature")
+        // Vector's stable system block, the whole system prompt, the latest user message and the conversation's end,
+        // never a client's own marker.
+        expect(
+          body.messages.map((message) =>
+            Array.isArray(message.content) ? message.content.map((part) => part.cache_control) : undefined,
+          ),
+        ).toEqual([
+          [{ type: "ephemeral" }],
+          [{ type: "ephemeral" }],
+          [{ type: "ephemeral" }],
+          undefined,
+          [{ type: "ephemeral" }],
+        ])
+        expect(JSON.stringify(body)).not.toContain("1h")
+        // Naming one tool forces it as surely as required does.
+        expect(
+          modelPlanRequest(
+            {
+              model: model.id,
+              messages: [{ role: "user", content: "Fix it" }],
+              tool_choice: { type: "function", function: { name: "read" } },
+            },
+            models,
+          ).tool_choice,
+        ).toBe("auto")
+        // Each of these characters can be up to three tokens, so they count by their UTF-8 bytes.
         expect(() =>
           requireModelPlanContext({ ...body, messages: [{ role: "user", content: "界".repeat(34_000) }] }, model),
         ).toThrow()
@@ -241,8 +304,42 @@ describe("gateway request policy", () => {
       }
       expect(body.provider.quantizations).toEqual(["fp8", "bf16"])
       expect(body.tool_choice).toBe("required")
+      expect(body).toHaveProperty("temperature", 0.2)
       expect(body.reasoning).toEqual(model.id.startsWith("deepseek/") ? { effort: "high" } : undefined)
+      expect(JSON.stringify(body)).not.toContain("cache_control")
     }
+  })
+
+  test("refuses earlier reasoning that is not text or a list of reasoning blocks", () => {
+    const assistant = { role: "assistant", content: "Done" }
+    for (const extra of [
+      { reasoning_content: 7 },
+      { reasoning: { text: "x" } },
+      { reasoning_details: "x" },
+      { reasoning_details: [1] },
+    ])
+      expect(() =>
+        modelPlanRequest(
+          {
+            model: model.id,
+            messages: [
+              { role: "user", content: "fix" },
+              { ...assistant, ...extra },
+            ],
+          },
+          [model],
+        ),
+      ).toThrow(expect.objectContaining({ code: "MODEL_PLAN_MESSAGE" }))
+    // Only an assistant's own turn carries reasoning.
+    expect(
+      modelPlanRequest(
+        {
+          model: model.id,
+          messages: [{ role: "user", content: "fix", reasoning: "injected", reasoning_details: [{ type: "x" }] }],
+        },
+        [model],
+      ).messages,
+    ).toEqual([{ role: "user", content: "fix" }])
   })
 
   test("preserves bounded retry timing without exposing upstream billing errors", async () => {

@@ -54,10 +54,6 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
   const [failure, setFailure] = React.useState<{ id: string; message: string }>()
   const [open, setOpen] = React.useState(["run-out"])
   const radios = React.useRef<(HTMLButtonElement | null)[]>([])
-  // Later cards give their usage on the default model and, when the catalog has one, the advanced model.
-  const featured = [...new Set([0, props.pricing.models.findIndex((model) => model.category === "advanced")])].filter(
-    (row) => row >= 0 && row < props.pricing.models.length,
-  )
   const range = (tasks: readonly [number, number]) => `${count.format(tasks[0])}–${count.format(tasks[1])}`
   const names = (category: "everyday" | "advanced") =>
     new Intl.ListFormat("en-US", { type: "disjunction" }).format(
@@ -111,6 +107,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
       (intent.mode === "monthly" ? props.pricing.monthly : props.pricing.topups).find((item) => item.id === intent.id)
     if (!intent || !offer) return
     setMode(intent.mode)
+    document.documentElement.dataset.codiumMode = intent.mode
     buy(offer, intent.mode, true)
   }, [])
 
@@ -250,29 +247,21 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
           <div className="cx-panel" data-mode={item.mode} key={item.mode}>
             <div className="cx-cards">
               {offers.map((offer, index) => {
-                const first = offers[0]!
-                const anchor = monthly ? first.name : `the ${usd.format(first.price)} top-up`
-                // Later tiers differ only in credits: a multiple of the first, so they never read as adding up, and the
-                // usage that buys. Credit amounts never appear.
+                // "the Codium 10 top-up", but "Codium 10" for the plan.
+                const first = `${monthly ? "" : "the "}${offers[0]!.name}`
+                // Later tiers differ only in credits, as a multiple of the first so they never read as adding up, and in
+                // the usage those credits buy on each model. Credit amounts never appear.
                 const features =
                   index === 0
                     ? FEATURES[item.mode]
                     : [
                         offer.multiple &&
-                          (monthly
-                            ? `${count.format(offer.multiple)}× the monthly credits of ${anchor}`
-                            : `${count.format(offer.multiple)}× ${anchor}'s credits`),
-                        ...(monthly
-                          ? [
-                              "More room for daily coding and larger projects",
-                              "One monthly allowance across desktop and CLI",
-                            ]
-                          : ["A larger reserve for busy weeks", "Use across desktop and CLI without a subscription"]),
-                        ...featured.map((row) => {
+                          `${count.format(offer.multiple)}× the ${monthly ? "monthly " : ""}credits of ${first}`,
+                        ...props.pricing.models.map((model, row) => {
                           const tasks = offer.tasks[row]
                           return (
                             tasks &&
-                            `About ${range(tasks)} typical tasks${monthly ? " a month" : ""} with ${props.pricing.models[row]!.name}`
+                            `About ${range(tasks)} typical tasks${monthly ? " a month" : ""} with ${model.name}`
                           )
                         }),
                       ].filter((feature) => typeof feature === "string")
@@ -280,7 +269,16 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
                   <article className="cx-card" key={offer.id}>
                     <div className="cx-card-top">
                       <div className="cx-card-head">
-                        <h3>{offer.name}</h3>
+                        <h3>
+                          {/* "top-up" always takes its own line, so all four top-up names break in the same place. */}
+                          {!monthly && offer.name.endsWith(" top-up") ? (
+                            <React.Fragment>
+                              {offer.name.slice(0, -" top-up".length)} <span className="cx-card-kind">top-up</span>
+                            </React.Fragment>
+                          ) : (
+                            offer.name
+                          )}
+                        </h3>
                         <p>{FIT[item.mode][index] ?? "For more usage."}</p>
                       </div>
                       <div className="cx-card-buy">
@@ -304,7 +302,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
                             )
                           ) : (
                             <React.Fragment>
-                              {monthly ? `Get ${offer.name}` : `Buy ${usd.format(offer.price)} top-up`}
+                              {monthly ? `Get ${offer.name}` : `Buy ${offer.name}`}
                               <ChevronRight size={16} aria-hidden="true" />
                             </React.Fragment>
                           )}
@@ -319,7 +317,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
                     <div className="cx-card-bottom">
                       <div className="cx-card-list">
                         {index > 0 && features.length > 0 && (
-                          <p className="cx-everything">{`Everything in ${anchor}, and:`}</p>
+                          <p className="cx-everything">{`Everything in ${first}, and:`}</p>
                         )}
                         <ul>
                           {features.map((feature) => (

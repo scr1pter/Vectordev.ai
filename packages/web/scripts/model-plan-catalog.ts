@@ -1,5 +1,5 @@
 import { Option, Schema } from "effect"
-import { configuredPlanModels, type ModelPlanModel } from "../../../api/_lib/model-plan-config"
+import { configuredPlanModels, MODEL_PLAN_OPTIONS, type ModelPlanModel } from "../../../api/_lib/model-plan-config"
 
 const CatalogModel = Schema.Struct({
   id: Schema.String,
@@ -58,6 +58,11 @@ export function auditModelPlanCatalog(
           : []),
         ...(!endpoint.tag.trim() || !endpoint.provider_name.trim() ? ["missing provider identity"] : []),
         ...(!supportsTools(endpoint.supported_parameters) ? ["missing tools/tool_choice"] : []),
+        // The gateway requires every option it forwards, so an endpoint missing one is never routed a request that
+        // sets it. Without its own list a model forwards the gateway's default options.
+        ...((configured.options ?? MODEL_PLAN_OPTIONS).some((option) => !endpoint.supported_parameters.includes(option))
+          ? ["missing a forwarded request option"]
+          : []),
         ...(!Number.isSafeInteger(endpoint.context_length) || endpoint.context_length < configured.contextLength
           ? ["context below configured limit"]
           : []),
@@ -118,8 +123,8 @@ function withinPricingLimits(pricing: Readonly<Record<string, unknown>>, configu
           Number(override.min_prompt_tokens) < 0
         )
           return false
-        // A prompt cannot reach this threshold inside the configured total context.
-        if (Number(override.min_prompt_tokens) >= configured.contextLength) return true
+        // The gateway keeps every prompt under this threshold, or the total context cannot reach it.
+        if (Number(override.min_prompt_tokens) >= (configured.promptTokenLimit ?? configured.contextLength)) return true
         return withinPricingLimits(
           Object.fromEntries(
             Object.entries({ ...pricing, ...override }).filter(

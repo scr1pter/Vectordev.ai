@@ -27,7 +27,7 @@ const tools = await Promise.all(
 )
 const source = (await Bun.file(path.join(engine, "provider/provider.ts")).text()).slice(0, 50_000)
 
-const turn = (reads: number) => {
+const turn = (reads: number, target: (typeof CODIUM_MODELS)[number] = model) => {
   const messages = [
     { role: "system", content: system },
     { role: "user", content: "Fix the provider fallback bug and add a test." },
@@ -48,8 +48,8 @@ const turn = (reads: number) => {
   ]
   return {
     body: modelPlanRequest(
-      JSON.parse(ModelPlans.serializeRequest({ messages, tools, max_tokens: model.maxOutputTokens }, model)),
-      [model],
+      JSON.parse(ModelPlans.serializeRequest({ messages, tools, max_tokens: target.maxOutputTokens }, target)),
+      [target],
     ),
     // What Vector itself estimates for the same conversation, four characters per token.
     estimate: Token.estimate(
@@ -89,6 +89,57 @@ test("a conversation the engine has not yet compacted is accepted, and one past 
   )
 })
 
+test("Haiku takes a conversation until Vector compacts it, and its prompt bound refuses nothing sooner", () => {
+  const haiku = CODIUM_MODELS.find((item) => item.id === "anthropic/claude-haiku-5.5")!
+  // The engine compacts once a step reaches the window less the reply (pinned by the engine's Codium tests).
+  const compactsAt = haiku.contextLength - haiku.maxOutputTokens
+  // Three 50 KB reads after the system prompt and tools: over 180 KB of request, which a byte ceiling refused.
+  const long = turn(3, haiku)
+  expect(Buffer.byteLength(JSON.stringify(long.body))).toBeGreaterThan(180_000)
+  expect(long.estimate).toBeGreaterThan(45_000)
+  expect(long.estimate).toBeLessThan(compactsAt)
+  expect(() => requireModelPlanContext(long.body, haiku)).not.toThrow()
+  // The largest ASCII request the window check takes with a full reply still clears the prompt bound, so a
+  // conversation Vector has not compacted yet is never refused for the bound alone.
+  const request = (size: number) =>
+    modelPlanRequest(
+      { model: haiku.id, messages: [{ role: "user", content: "x".repeat(size) }], max_tokens: haiku.maxOutputTokens },
+      [haiku],
+    )
+  const largest = 4 * compactsAt - (JSON.stringify(request(1)).length - 1)
+  expect(() => requireModelPlanContext(request(largest), haiku)).not.toThrow()
+  expect(() => requireModelPlanContext(request(largest + 4), { ...haiku, promptTokenLimit: undefined })).toThrow(
+    expect.objectContaining({ code: "MODEL_PLAN_CONTEXT" }),
+  )
+  // A short reply does not let a longer prompt within reach of 100,000 tokens, where Haiku bills the whole request
+  // at five times the price.
+  const over = { ...turn(4, haiku).body, max_tokens: 1_000 }
+  expect(() => requireModelPlanContext(over, { ...haiku, promptTokenLimit: undefined })).not.toThrow()
+  expect(() => requireModelPlanContext(over, haiku)).toThrow(
+    expect.objectContaining({ statusCode: 400, code: "MODEL_PLAN_CONTEXT" }),
+  )
+  // The other models are not held to Haiku's prompt bound.
+  expect(() => requireModelPlanContext(turn(5).body, model)).not.toThrow()
+})
+
+test("a JSON escape counts as the one character it stands for, so backslashes cannot slip past the bound", () => {
+  const counted = (content: string) =>
+    requireModelPlanContext(
+      modelPlanRequest({ model: model.id, messages: [{ role: "user", content }], max_tokens: 1 }, [model]),
+      model,
+    )
+  for (const text of ["\\", "\n", '"', "\u0001", "/"])
+    expect(counted(text.repeat(40_000))).toBe(counted("x".repeat(40_000)))
+  const haiku = CODIUM_MODELS.find((item) => item.id === "anthropic/claude-haiku-5.5")!
+  const backslashes = modelPlanRequest(
+    { model: haiku.id, messages: [{ role: "user", content: "\\".repeat(300_000) }], max_tokens: 1 },
+    [haiku],
+  )
+  expect(() => requireModelPlanContext(backslashes, haiku)).toThrow(
+    expect.objectContaining({ code: "MODEL_PLAN_CONTEXT" }),
+  )
+})
+
 test("a provider refusing the context gets the gateway's own context answer, so Vector compacts instead of retrying", async () => {
   const refusals = [
     Response.json(
@@ -112,9 +163,7 @@ test("a provider refusing the context gets the gateway's own context answer, so 
     ),
   )
   expect(failures.every((failure) => failure instanceof ApiError)).toBe(true)
-  expect(failures).toEqual(
-    refusals.map(() => expect.objectContaining({ statusCode: 400, code: "MODEL_PLAN_CONTEXT" })),
-  )
+  expect(failures).toEqual(refusals.map(() => expect.objectContaining({ statusCode: 400, code: "MODEL_PLAN_CONTEXT" })))
   expect(failures.filter((failure) => failure instanceof ApiError && failure.message.includes("131072"))).toEqual([])
   // The engine and the Core V2 runner read this answer as a context overflow.
   expect(

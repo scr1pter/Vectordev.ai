@@ -133,12 +133,24 @@ describe("account model plans", () => {
     const html = renderToStaticMarkup(
       createElement(ModelPlans, {
         accessToken: "",
-        preview: { config, status: { ...status, purchased: { bought: true, left: 0.75 } } },
+        preview: { config, status: { ...status, purchased: { bought: true, state: "available" } } },
       }),
     )
     expect(html).toContain("Monthly allowance")
     expect(html).toContain("<strong>25%</strong> of this month&#x27;s Codium credits")
-    expect(html).toContain("<strong>75%</strong> of your purchased")
+    // Purchased credits pool every top-up ever bought, so they read as a state, not a share of that pool.
+    expect(html).toContain("Purchased Codium credits available")
+    expect(html).not.toMatch(/\d+%<\/strong> of your purchased/)
+    const state = (value: "available" | "low" | "used") =>
+      renderToStaticMarkup(
+        createElement(ModelPlans, {
+          accessToken: "",
+          preview: { config, status: { active: false, access: true, purchased: { bought: true, state: value } } },
+        }),
+      )
+    expect(state("available")).toContain("Purchased Codium credits available")
+    expect(state("low")).toContain("Your purchased Codium credits are running low")
+    expect(state("used")).toContain("Your purchased Codium credits are used up")
     const standalone = renderToStaticMarkup(
       createElement(ModelPlans, {
         accessToken: "",

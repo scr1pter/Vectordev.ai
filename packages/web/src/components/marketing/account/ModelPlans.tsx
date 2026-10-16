@@ -16,9 +16,15 @@ export type ModelPlansPreview = { config: ModelPlanConfig; status: ModelPlanStat
 
 const count = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 })
 const price = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })
-// The status answers balances as a share of the credits bought, never as amounts, which with the purchase price would
-// reveal the dollars of model credit in it.
+// The monthly balance is the share of the month's credits left and purchased credits are a state, never amounts,
+// which with the purchase price would reveal the dollars of model credit in them.
 const percent = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 })
+// Purchased credits pool every top-up ever bought, so they show a state rather than a share of that pool.
+const PURCHASED = {
+  available: "Purchased Codium credits available",
+  low: "Your purchased Codium credits are running low",
+  used: "Your purchased Codium credits are used up",
+} as const
 
 export function ModelPlans(props: { accessToken: string; preview?: ModelPlansPreview | true }) {
   const preview: ModelPlansPreview | undefined =
@@ -149,13 +155,7 @@ export function ModelPlans(props: { accessToken: string; preview?: ModelPlansPre
         <div className="model-plans-usage">
           <h3>Purchased credits</h3>
           <p className="model-plans-balance">
-            {purchased.left === undefined ? (
-              "Usage temporarily unavailable"
-            ) : (
-              <span>
-                <strong>{percent.format(purchased.left)}</strong> of your purchased Codium credits remaining
-              </span>
-            )}
+            {purchased.state === undefined ? "Usage temporarily unavailable" : PURCHASED[purchased.state]}
           </p>
           <p>
             Purchased credits carry forward and work without a subscription. Your monthly allowance is used first when

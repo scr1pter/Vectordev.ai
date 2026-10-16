@@ -1,17 +1,20 @@
 import { afterAll, afterEach, expect, test } from "bun:test"
 import { APICallError } from "ai"
-import { Effect, Layer, Stream } from "effect"
+import { Effect, Layer, Schema, Stream } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { ModelV2 } from "@vectordevai/core/model"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { SessionV1 } from "@vectordevai/core/v1/session"
+import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { Usage } from "@vectordevai/llm"
 import { Provider } from "@/provider/provider"
 import { ProviderError } from "@/provider/error"
 import { Session } from "@/session/session"
 import { SessionRetry } from "@/session/retry"
+import { usable } from "@/session/overflow"
+import { CODIUM_MODELS } from "../../../../api/_lib/codium-catalog"
 import { codiumGateway, codiumModel } from "../../../core/test/fixture/codium-gateway"
 import { disposeAllInstances } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -381,3 +384,12 @@ it.instance("a Codium title stays on credits and records its tokens, not dollars
     expect(gateway.seen.slice(before).map((request) => request.path)).toEqual(["/api/model-plans/chat"])
   }),
 )
+
+test("Vector compacts each reviewed Codium conversation once a step reaches the window less a full reply", () => {
+  // The gateway's context checks are sized against this threshold; see packages/web/test/model-plan-context.test.ts.
+  const cfg = Schema.decodeUnknownSync(ConfigV1.Info)({}) as ConfigV1.Info
+  const provider = Provider.fromModelPlans(CODIUM_MODELS)
+  expect(CODIUM_MODELS.map((model) => usable({ cfg, model: provider.models[model.id] }))).toEqual(
+    CODIUM_MODELS.map((model) => model.contextLength - model.maxOutputTokens),
+  )
+})

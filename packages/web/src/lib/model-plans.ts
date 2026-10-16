@@ -20,16 +20,19 @@ export type ModelPlanConfig = {
   product?: string
   models?: ModelPlanModel[]
 }
+/** Purchased credits pool every top-up ever bought, so the server answers their state rather than a share of them. */
+export type PurchasedState = "available" | "low" | "used"
+
 /**
- * The signed-in account's own balances, as /api/model-plans/status answers: shares of what was bought, from 0 to 1, and
- * flags the server works out. Credit amounts never leave the server.
+ * The signed-in account's own balances, as /api/model-plans/status answers: the share of this month's credits left,
+ * from 0 to 1, the purchased credits' state and flags the server works out. Credit amounts never leave the server.
  */
 export type ModelPlanStatus = {
   active: boolean
   customer?: boolean
   access?: boolean
   plan?: { id: string; name: string; left?: number; renewsAt: number; cancelAtPeriodEnd: boolean }
-  purchased?: { bought: boolean; left?: number }
+  purchased?: { bought: boolean; state?: PurchasedState }
   empty?: boolean
   low?: boolean
 }
@@ -188,10 +191,14 @@ function readPurchased(purchased: unknown) {
   if (
     !record(purchased) ||
     typeof purchased.bought !== "boolean" ||
-    (purchased.left !== undefined && !fraction(purchased.left))
+    (purchased.state !== undefined && !purchasedState(purchased.state))
   )
     throw statusError()
-  return { bought: purchased.bought, ...(fraction(purchased.left) ? { left: purchased.left } : {}) }
+  return { bought: purchased.bought, ...(purchasedState(purchased.state) ? { state: purchased.state } : {}) }
+}
+
+function purchasedState(value: unknown): value is PurchasedState {
+  return value === "available" || value === "low" || value === "used"
 }
 
 function statusError() {

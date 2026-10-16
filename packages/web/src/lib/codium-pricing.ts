@@ -13,8 +13,8 @@ export function codiumPricing(config: ModelPlanConfig) {
   const offers = (plans: ModelPlan[]) =>
     plans.map((plan) => ({
       id: plan.id,
-      // A top-up is named for the plan of the same price; the tab and its price line say it is one-time.
-      name: plan.name.replace(/ top-up$/i, ""),
+      // The account page's name too, such as "Codium 10 top-up", so a top-up never shares a plan's name.
+      name: plan.name,
       price: plan.price,
       available: config.enabled && plan.available,
       multiple: plan.multiple,

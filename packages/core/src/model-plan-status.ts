@@ -12,8 +12,9 @@ export const MANAGE_URL = `${SITE}/account`
 export const PROVIDER_ID = "vector-plan"
 
 const Share = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
-// What /api/model-plans/status answers: shares of what was bought and flags the server works out. No credit amount
-// leaves vectordev.ai, since an amount beside a purchase price would reveal what the purchase buys.
+// What /api/model-plans/status answers: the share of this month's credits left, the purchased credits' state and flags
+// the server works out. No credit amount leaves vectordev.ai, since an amount beside a purchase price would reveal what
+// the purchase buys.
 const Remote = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
   access: Schema.Boolean,
@@ -26,15 +27,18 @@ const Remote = Schema.Struct({
       cancelAtPeriodEnd: Schema.Boolean,
     }),
   ),
-  purchased: Schema.Struct({ bought: Schema.Boolean, left: Schema.optional(Share) }),
+  purchased: Schema.Struct({
+    bought: Schema.Boolean,
+    state: Schema.optional(Schema.Literals(["available", "low", "used"])),
+  }),
   empty: Schema.Boolean,
   low: Schema.Boolean,
 })
 
 /**
- * The signed-in account's Codium plan and balances, as the account page shows them: each balance is the share of the
- * credits bought that is left, in whole percent, never an amount, since an amount next to the purchase price would
- * reveal what a purchase buys.
+ * The signed-in account's Codium plan and balances, as the account page shows them: the monthly balance is the share
+ * of this month's credits left, in whole percent, and purchased credits are a state, never an amount, since an amount
+ * next to the purchase price would reveal what a purchase buys.
  */
 export type Status = {
   signedIn: boolean
@@ -50,8 +54,11 @@ export type Status = {
     renewsAt: number
     cancelAtPeriodEnd: boolean
   }
-  /** Top-up credits: whether any were bought, and the share of everything bought that is left. */
-  purchased: { bought: boolean; left?: number }
+  /**
+   * Top-up credits: whether any were bought and, when the gateway could verify it, whether they are available, running
+   * low or used up. They pool every top-up ever bought, so a share of that pool would mislead a repeat buyer.
+   */
+  purchased: { bought: boolean; state?: "available" | "low" | "used" }
   /**
    * Too few credits are left for a full reply on any Codium model, including a subscriber's monthly credits before they
    * renew. A turn asks the model for its longest reply, which the gateway refuses when the credits cannot pay for it.
@@ -71,6 +78,7 @@ const EMPTY: Status = {
   low: false,
 }
 const percent = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 })
+const PURCHASED = { available: "Available", low: "Running low", used: "Used up" } as const
 
 /** Reads the signed-in account's Codium plan and balances. The token is only ever sent to vectordev.ai. */
 export async function fetchStatus(
@@ -125,7 +133,7 @@ export function fromRemote(remote: typeof Remote.Type): Status {
     },
     purchased: {
       bought: remote.purchased.bought,
-      ...(remote.purchased.bought && remote.purchased.left !== undefined ? { left: remote.purchased.left } : {}),
+      ...(remote.purchased.bought && remote.purchased.state !== undefined ? { state: remote.purchased.state } : {}),
     },
     empty: remote.empty,
     low: remote.low,
@@ -135,6 +143,16 @@ export function fromRemote(remote: typeof Remote.Type): Status {
 /** "42%": the same rounding as the account page, so both show the same figure. */
 export function formatShare(value: number) {
   return percent.format(value)
+}
+
+/**
+ * Purchased credits as a state, not a share: they pool every top-up ever bought, so a share of that pool would read
+ * "8% left" for a repeat buyer right after a fresh purchase.
+ */
+export function formatPurchased(purchased: Status["purchased"]) {
+  if (!purchased.bought) return "None"
+  if (purchased.state === undefined) return "Balance unavailable"
+  return PURCHASED[purchased.state]
 }
 
 export function formatDate(time: number) {
@@ -150,9 +168,7 @@ export function describe(status: Status) {
     plan
       ? `Plan: ${plan.name}, ${plan.left === undefined ? "balance unavailable" : `${formatShare(plan.left)} of this month's credits left`}, ${plan.cancelAtPeriodEnd ? "ends" : "renews"} ${formatDate(plan.renewsAt)}`
       : "Plan: none",
-    status.purchased.bought
-      ? `Purchased credits: ${status.purchased.left === undefined ? "balance unavailable" : `${formatShare(status.purchased.left)} left`}`
-      : "Purchased credits: none",
+    `Purchased credits: ${formatPurchased(status.purchased).toLowerCase()}`,
   ]
   const current = notice(status)
   return current ? [...lines, current.text] : lines

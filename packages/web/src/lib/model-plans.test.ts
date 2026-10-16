@@ -30,7 +30,7 @@ describe("model plan API boundaries", () => {
   test("keeps only public fields, even when a response carries credit amounts or model prices", () => {
     const read = readModelPlanConfig({
       ...config,
-      plans: [{ ...plan, credits: 8, multiple: 5, tasks: [[60, 550], null] }],
+      plans: [{ ...plan, credits: 7, multiple: 5, tasks: [[60, 550], null] }],
       models: [{ id: "vendor/coder", name: "Coder", inputPrice: 0.1, outputPrice: 0.4, contextLength: 128_000 }],
     })
     expect(read.plans).toEqual([{ ...plan, multiple: 5, tasks: [[60, 550], null] }])
@@ -96,7 +96,7 @@ describe("model plan API boundaries", () => {
       { ...status, plan: { ...status.plan, cancelAtPeriodEnd: "false" } },
       { ...status, plan: undefined },
       { ...status, active: false },
-      { ...status, purchased: { bought: true, left: NaN } },
+      { ...status, purchased: { bought: true, state: "half" } },
       { ...status, low: "true" },
       { active: false, customer: "true" },
     ]) {
@@ -107,14 +107,15 @@ describe("model plan API boundaries", () => {
   test("keeps only shares and flags, even when a response carries credit amounts", () => {
     const read = readModelPlanStatus({
       ...status,
-      credits: 8,
-      used: 6,
+      credits: 7,
+      used: 5,
       remaining: 2,
-      plan: { ...status.plan, credits: 8, remaining: 2 },
-      purchased: { bought: true, left: 0.5, credits: 8 },
-      wallet: { credits: 8, used: 4, remaining: 4 },
+      plan: { ...status.plan, credits: 7, remaining: 2 },
+      purchased: { bought: true, state: "low", left: 0.5, credits: 7 },
+      wallet: { credits: 7, used: 3, remaining: 4 },
     })
-    expect(read).toEqual({ ...status, purchased: { bought: true, left: 0.5 } })
+    // Purchased credits keep only their state: a share of every top-up ever bought would mislead a repeat buyer.
+    expect(read).toEqual({ ...status, purchased: { bought: true, state: "low" } })
     expect(JSON.stringify(read)).not.toMatch(/credits|used|remaining|wallet/)
   })
 
@@ -128,10 +129,12 @@ describe("model plan API boundaries", () => {
   })
 
   test("purchased credits work without a subscription and keep unknown usage unknown", () => {
-    expect(readModelPlanStatus({ active: false, access: true, purchased: { bought: true, left: 0.75 } })).toEqual({
+    expect(
+      readModelPlanStatus({ active: false, access: true, purchased: { bought: true, state: "available" } }),
+    ).toEqual({
       active: false,
       access: true,
-      purchased: { bought: true, left: 0.75 },
+      purchased: { bought: true, state: "available" },
     })
     expect(readModelPlanStatus({ ...status, purchased: { bought: true } })).toMatchObject({
       active: true,

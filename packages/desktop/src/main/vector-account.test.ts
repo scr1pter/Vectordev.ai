@@ -241,7 +241,7 @@ test("Codium balances are read in the main process and only the result reaches t
     active: true,
     access: true,
     plan: { id: "vector-50", name: "Codium 50", left: 0.5, renewsAt: 2_000_000, cancelAtPeriodEnd: false },
-    purchased: { bought: true, left: 0.7 },
+    purchased: { bought: true, state: "available" },
     empty: false,
     low: false,
   }
@@ -254,7 +254,7 @@ test("Codium balances are read in the main process and only the result reaches t
     enabled: true,
     access: true,
     plan: { id: "vector-50", name: "Codium 50", left: 0.5, renewsAt: 2_000_000, cancelAtPeriodEnd: false },
-    purchased: { bought: true, left: 0.7 },
+    purchased: { bought: true, state: "available" },
     empty: false,
     low: false,
   })

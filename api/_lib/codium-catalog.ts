@@ -31,13 +31,20 @@ export const CODIUM_MODELS = [
     name: "Claude Haiku 5.5",
     category: "advanced",
     description: "For harder, multi-step problems. Uses credits faster than the other models.",
-    // Keep both the estimated context and a conservative UTF-8 prompt bound below the long-prompt threshold.
-    contextLength: 32768,
-    maxOutputTokens: 8192,
+    // Vector compacts once a step reaches this window less the reply: 48,000 tokens, which the gateway's window check
+    // counts as 192,000 characters. That stays under the 196,000 ASCII characters the prompt bound below admits, so for
+    // ASCII text the bound never refuses a full-reply request that the window check accepts.
+    contextLength: 64000,
+    maxOutputTokens: 16000,
+    // Every endpoint bills a whole request at five times the price once its prompt reaches 100,000 tokens.
+    promptTokenLimit: 100000,
     // Covers prompt-cache writes, which these endpoints bill at up to twice the 0.11 input price.
     inputPrice: 0.22,
     outputPrice: 0.55,
     reasoningEffort: "high",
+    // Without explicit breakpoints these endpoints cache nothing, and all input bills at ten times the cached price.
     explicitCache: true,
+    // Its endpoints take no sampling options, and with require_parameters any one of them would leave no endpoint.
+    options: ["stop", "tools", "tool_choice", "response_format"],
   },
 ] as const

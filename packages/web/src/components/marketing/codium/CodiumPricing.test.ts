@@ -94,32 +94,40 @@ describe("Codium pricing page", () => {
     expect(html).toContain("Works in the Vector desktop app and CLI</li>")
   })
 
-  test("later tiers list their usage on the default and advanced models, never their credits", () => {
+  test("later tiers list their usage on every model with a reviewed range, never their credits", () => {
     const monthly = text(render(config))
+    expect(monthly).toContain("5× the monthly credits of Codium 10")
     expect(monthly).toContain("About 300–2,700 typical tasks a month with Everyday Coder")
     // A model without a range gets no line.
     expect(monthly).not.toContain("with Hard Coder")
     const topups = text(render(config, "topup"))
     expect(topups).toContain(
-      "About 300–2,700 typical tasks with Everyday Coder About 160–1,400 typical tasks with Hard Coder",
+      "5× the credits of the Codium 10 top-up About 300–2,700 typical tasks with Everyday Coder About 160–1,400 typical tasks with Hard Coder",
     )
-    // Larger purchases retain concrete usage guidance even without reviewed ranges.
-    const bare = render({ ...config, plans: config.plans.map((plan) => ({ ...plan, multiple: undefined, tasks: [] })) })
-    expect(bare).toContain("More room for daily coding and larger projects")
+    // Every model in the launch catalog has a range, in catalog order.
+    expect(text(render(live))).toContain(
+      "About 1,000–10,000 typical tasks a month with DeepSeek V4.1 Flash About 1,600–16,000 typical tasks a month with Xiaomi MiMo V2.6 Flash About 600–6,000 typical tasks a month with Claude Haiku 5.5",
+    )
   })
 
-  test("top-ups are the same four amounts as one-time packs in the same cards", () => {
+  test("top-ups are the same four amounts as one-time packs in the same cards, named as checkout names them", () => {
     const html = render(selling, "topup")
     expect(live.topups?.map((pack) => pack.price)).toEqual([10, 50, 100, 200])
     expect(html.match(/<article class="cx-card"/g)).toHaveLength(4)
     for (const pack of live.topups ?? []) {
       expect(html).toContain(`<span class="cx-amount">$${pack.price}</span><span class="cx-period">one-time</span>`)
-      expect(html).toContain(`Buy $${pack.price} top-up<svg`)
+      expect(pack.name).toBe(`Codium ${pack.price} top-up`)
+      expect(html).toContain(`<h3>Codium ${pack.price} <span class="cx-card-kind">top-up</span></h3>`)
+      expect(html).toContain(`Buy Codium ${pack.price} top-up<svg`)
     }
     expect(html).not.toContain("/ month")
     expect(html).not.toContain("Get Codium")
-    expect(html.match(/Everything in the \$10 top-up, and:/g)).toHaveLength(3)
-    expect(html).toContain("20× the $10 top-up&#x27;s credits</li>")
+    // One name everywhere: the cards, their lists, the usage table, the account page and checkout all say
+    // "Codium 10 top-up", so a top-up never shares a name with the plan of the same price.
+    expect(html).not.toContain("top-up&#x27;s")
+    expect(html).not.toMatch(/<h3>Codium \d+<\/h3>/)
+    expect(html.match(/Everything in the Codium 10 top-up, and:/g)).toHaveLength(3)
+    expect(html).toContain("20× the credits of the Codium 10 top-up</li>")
     expect(html).toContain("Unused credits carry forward separately from any plan</li>")
     expect(html).toContain("No subscription needed</li>")
     expect(html).toContain("Unused top-up credits carry forward separately from your subscription.")

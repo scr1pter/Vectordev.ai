@@ -424,18 +424,23 @@ test("status reads the plan and the share of each balance left, never an amount,
     enabled: true,
     access: true,
     plan: { id: "vector-50", name: "Codium 50", left: 0.06, renewsAt: 1_790_000_000_000, cancelAtPeriodEnd: false },
-    purchased: { bought: true, left: 0.05 },
+    purchased: { bought: true, state: "low" },
     empty: false,
     low: true,
   })
   expect(ModelPlanStatus.describe(status)).toEqual([
     `Plan: Codium 50, 6% of this month's credits left, renews ${ModelPlanStatus.formatDate(1_790_000_000_000)}`,
-    "Purchased credits: 5% left",
+    "Purchased credits: running low",
     "You are running low on Codium credits.",
   ])
   // No balance amount reaches the app or the CLI: with the purchase price it would reveal what a purchase buys.
   expect(JSON.stringify(status)).not.toMatch(/"(credits|remaining)"/)
   expect(JSON.stringify(status)).not.toContain(token)
+  // Balances read as whole-percent shares, as on the account page, never amounts.
+  expect(ModelPlanStatus.describe(status).join(" ")).not.toMatch(/\b\d+(\.\d+)? credits\b/)
+  expect(ModelPlanStatus.formatShare(0)).toBe("0%")
+  expect(ModelPlanStatus.formatShare(0.06)).toBe("6%")
+  expect(ModelPlanStatus.formatShare(1)).toBe("100%")
 })
 
 test("status without credits, signed out, expired or unreachable says what to do", async () => {
@@ -516,13 +521,13 @@ test("a subscriber whose monthly credits are spent is told so, even though the p
   // Purchased credits too low for a reply, with no plan.
   expect(
     ModelPlanStatus.notice(
-      ModelPlanStatus.fromRemote({ ...spent, plan: undefined, purchased: { bought: true, left: 0 } }),
+      ModelPlanStatus.fromRemote({ ...spent, plan: undefined, purchased: { bought: true, state: "low" } }),
     ),
   ).toEqual({
     kind: "empty",
     text: "Too few Codium credits are left for a reply. Buy credits to keep using Codium models.",
   })
-  expect(ModelPlanStatus.fromRemote({ ...spent, purchased: { bought: false, left: 0.5 } }).purchased).toEqual({
+  expect(ModelPlanStatus.fromRemote({ ...spent, purchased: { bought: false, state: "available" } }).purchased).toEqual({
     bought: false,
   })
 })
@@ -558,6 +563,26 @@ test("status keeps no amount, even from a server that still sends one", async ()
     error: "Vector could not load your Codium balance. Try again shortly.",
   })
   gateway.state.status = saved
+})
+
+test("purchased credits read as a state, not as a share of every top-up ever bought", () => {
+  // A long-time buyer's share of every top-up ever bought would read "under 1% left" right after a fresh purchase.
+  const buyer = (purchased: { bought: boolean; state?: "available" | "low" | "used" }) =>
+    ModelPlanStatus.fromRemote({ enabled: true, access: true, purchased, empty: false, low: false })
+  expect(
+    [
+      buyer({ bought: true, state: "available" }),
+      buyer({ bought: true, state: "low" }),
+      buyer({ bought: true, state: "used" }),
+      buyer({ bought: true }),
+      buyer({ bought: false }),
+    ].map((status) => ModelPlanStatus.formatPurchased(status.purchased)),
+  ).toEqual(["Available", "Running low", "Used up", "Balance unavailable", "None"])
+  expect(ModelPlanStatus.describe(buyer({ bought: true, state: "available" }))).toContain(
+    "Purchased credits: available",
+  )
+  // A state is kept only for credits that were bought.
+  expect(buyer({ bought: false, state: "available" }).purchased).toEqual({ bought: false })
 })
 
 test("the app recognises a failed Codium turn from the engine's error and from a V2 assistant error", () => {
