@@ -33,6 +33,16 @@ export const ModelPlanModel = Schema.Struct({
 })
 export type ModelPlanModel = typeof ModelPlanModel.Type
 
+/**
+ * The credits a request to this model must find available, and holds until it settles: its whole context at the input
+ * price plus its longest reply at the output price, the most one request can cost. It comes from the public catalog
+ * and never from the request, so a refusal says only that the credits available are below this one public amount. Sized
+ * from the request instead, a client could vary max_tokens and read back exactly how much is left.
+ */
+export function modelPlanRequestCredits(model: ModelPlanModel) {
+  return (model.contextLength * model.inputPrice + model.maxOutputTokens * model.outputPrice) / 1_000_000
+}
+
 export function modelPlans() {
   return MODEL_PLAN_PRICES.map((price) => {
     const credits = creditAllowance(price, process.env[`MODEL_PLAN_${price}_CREDITS_USD`])

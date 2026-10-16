@@ -270,7 +270,12 @@ const upstream = Bun.serve({
         new ReadableStream({
           start(controller) {
             const encoder = new TextEncoder()
-            controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"fixture"}}]}\r'))
+            // OpenRouter names the provider that served the request, as it does on every chunk.
+            controller.enqueue(
+              encoder.encode(
+                'data: {"id":"gen-fixture","provider":"PRIVATE-PROVIDER","system_fingerprint":"fp_private","choices":[{"delta":{"content":"fixture"},"native_finish_reason":"PRIVATE-REASON"}]}\r',
+              ),
+            )
             controller.enqueue(encoder.encode("\n\r\n"))
             if (mode === "error")
               controller.enqueue(
@@ -280,7 +285,7 @@ const upstream = Bun.serve({
             if (state.charge)
               controller.enqueue(
                 encoder.encode(
-                  `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 200, completion_tokens: 6, total_tokens: 206, cost: state.charge } })}\n\n`,
+                  `data: ${JSON.stringify({ provider: "PRIVATE-PROVIDER", choices: [], usage: { prompt_tokens: 200, completion_tokens: 6, total_tokens: 206, cost: state.charge, is_byok: false, cost_details: { upstream_inference_cost: state.charge } } })}\n\n`,
                 ),
               )
             if (mode !== "truncated") controller.enqueue(encoder.encode("data: [DONE]\n\n"))
@@ -733,10 +738,13 @@ describe("model plan HTTP inference", () => {
       messages: [{ role: "user", content: "Generate a concise title" }],
     })
     expect(response.status).toBe(200)
-    // The provider's USD charge comes off the credits but never reaches Vector; the tokens do.
+    // The provider's USD charge comes off the credits but never reaches Vector; the tokens do. Nor does the provider
+    // that served the request, whose published price would give the charge away.
     const text = await response.text()
     expect(text).toContain('"completion_tokens":6')
-    expect(text).not.toContain("cost")
+    expect(text).toContain('"id":"gen-fixture"')
+    for (const leak of ["cost", "is_byok", "PRIVATE-PROVIDER", "fp_private", "PRIVATE-REASON"])
+      expect(text).not.toContain(leak)
     expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ used: 0.000031, remaining: 4.999969 })
     expect(chats()).toHaveLength(1)
     state.charge = 0
@@ -831,37 +839,48 @@ describe("model plan HTTP inference", () => {
     expect(chats()).toHaveLength(0)
   })
 
-  test("credits too few for the request's longest reply say so, unlike credits that are used up", async () => {
+  test("every shortfall gets one answer, checked against the model's largest request whatever the request's size", async () => {
     await paid()
     await modelPlanCredential(user.id, fetcher)
-    // The fixture model's longest reply, 2,048 output tokens at $2 per million, costs $0.004096 before any input.
-    keys.get("hash_fixture1")!.data.usage = 5 - 0.003
-    const short = await chat()
-    expect(short.status).toBe(402)
-    const body = await short.json()
-    expect(body).toEqual({
+    const answer = {
       error: {
         code: "MODEL_PLAN_EXHAUSTED",
         message:
-          "The monthly credits left cannot cover the longest reply this request could get. Choose a model that uses fewer credits, shorten the conversation, or add a top-up.",
+          "Your monthly Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, choose a model that uses fewer credits, or add a top-up. Monthly credits renew each billing period.",
       },
-    })
-    // Vector's client offers Buy credits with it, as for any shortfall.
-    expect(ModelPlans.gatewayFailure(402, JSON.stringify(body))).toMatchObject({ kind: "credits" })
-    // The account's status agrees: too few left for a reply, not merely running low.
+    }
+    // The fixture model's largest request, 8,192 context tokens at $1 and 2,048 output tokens at $2 per million,
+    // is $0.012288. The request's own size never changes the check, so a client cannot vary max_tokens to read the
+    // balance back.
+    keys.get("hash_fixture1")!.data.usage = 5 - 0.012
+    for (const body of [undefined, { model: model.id, max_tokens: 1, messages: [{ role: "user", content: "A" }] }]) {
+      const refused = await chat(body)
+      expect(refused.status).toBe(402)
+      const text = await refused.json()
+      expect(text).toEqual(answer)
+      // Vector's client offers Buy credits with it, as for any shortfall.
+      expect(ModelPlans.gatewayFailure(402, JSON.stringify(text))).toMatchObject({ kind: "credits" })
+    }
+    expect(chats()).toHaveLength(0)
+    // The account's status agrees: too few left for any request, not merely running low.
     expect(modelPlanBalance(await modelPlanStatus(user.id, fetcher))).toMatchObject({ empty: true, low: false })
-    // A request small enough for what is left is still served.
-    const small = await chat({ model: model.id, max_tokens: 64, messages: [{ role: "user", content: "A title" }] })
-    expect(small.status).toBe(200)
+    // Just enough for the largest request is served, whatever this request asks for.
+    keys.get("hash_fixture1")!.data.usage = 5 - 0.0123
+    const served = await chat()
+    expect(served.status).toBe(200)
+    await served.text()
     expect(chats()).toHaveLength(1)
+    // Credits that are used up get the same answer.
     keys.get("hash_fixture1")!.data.usage = 5
-    expect(await (await chat()).json()).toEqual({
-      error: {
-        code: "MODEL_PLAN_EXHAUSTED",
-        message: "Your included model credits are used up. They renew at the next billing period.",
-      },
-    })
+    expect(await (await chat()).json()).toEqual(answer)
     expect(chats()).toHaveLength(1)
+    // The served request settles its hold just after its answer ends, so wait for that before the next test.
+    const pool = "vector:model-plans:held:hash_fixture1"
+    for (let tries = 0; tries < 100; tries++) {
+      const [member] = (await redis(["ZRANGE", pool, 0, -1])) as string[]
+      if (member && Number(await redis(["ZSCORE", pool, member])) < Date.now() + 60_000) break
+      await Bun.sleep(10)
+    }
   })
 
   test("parallel requests hold their largest cost, so together they cannot spend past the balance", async () => {
@@ -878,23 +897,24 @@ describe("model plan HTTP inference", () => {
       }
       return members()
     }
-    // Room for two of the fixture's largest requests (2,048 output tokens at $2 per million, plus input), not three.
-    keys.get("hash_fixture1")!.data.usage = 5 - 0.01
+    // Room for two of the fixture model's largest requests ($0.012288 each), not three.
+    keys.get("hash_fixture1")!.data.usage = 5 - 0.03
     state.chatDelay = 100
     state.charge = 0.001
     const responses = await Promise.all(Array.from({ length: 5 }, () => chat()))
     expect(responses.map((response) => response.status).sort()).toEqual([200, 200, 402, 402, 402])
     expect(chats()).toHaveLength(2)
+    // Credits held by running requests get the same answer as any other shortfall.
     const refused = await responses.find((response) => response.status === 402)!.json()
     expect(refused).toEqual({
       error: {
         code: "MODEL_PLAN_EXHAUSTED",
         message:
-          "The monthly credits left cannot cover this request alongside the requests already sent. Wait for them to finish, or add a top-up.",
+          "Your monthly Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, choose a model that uses fewer credits, or add a top-up. Monthly credits renew each billing period.",
       },
     })
     // Finished requests keep only what they were charged, for a moment, until the key's usage shows it.
-    expect(keys.get("hash_fixture1")!.data.usage).toBeCloseTo(4.992, 9)
+    expect(keys.get("hash_fixture1")!.data.usage).toBeCloseTo(4.972, 9)
     expect(await held(2, "0.001")).toHaveLength(2)
     state.chatDelay = 0
     expect((await chat()).status).toBe(200)
@@ -924,8 +944,8 @@ describe("model plan HTTP inference", () => {
     expect(current).toHaveLength(2)
     const kept = current.find((member) => !member.endsWith(":0.001"))
     if (!kept) throw new Error("Expected the broken answer's hold")
-    // Still the request's largest cost, held until it lapses 11 minutes after the request started, not 30 seconds.
-    expect(Number(kept.split(":")[1])).toBeGreaterThan(0.004)
+    // Still the model's largest request, held until it lapses 11 minutes after the request started, not 30 seconds.
+    expect(Number(kept.split(":")[1])).toBeCloseTo(0.012288, 9)
     expect(Number(await redis(["ZSCORE", pool, kept]))).toBeGreaterThan(Date.now() + 600_000)
   })
 
@@ -1051,13 +1071,13 @@ describe("Codium credits used from Vector", () => {
     // Neither the allowance (5), what was used nor what is left reaches the app, the CLI or the browser.
     expect(JSON.stringify(body)).not.toMatch(/credits|used|remaining|wallet|1\.234|3\.766|"5"|:5[,}]/)
 
-    // Running low is a tenth of this month's credits; too few for the catalog's cheapest full reply
-    // (2048 output tokens at $2 per million) is empty, the point where the gateway refuses every Vector request.
+    // Running low is a tenth of this month's credits; too few for the catalog's cheapest largest request
+    // ($0.012288 for the fixture model) is empty, the point where the gateway refuses every request.
     keys.get("hash_fixture1")!.data.usage = 4.51
     expect(await read()).toMatchObject({ plan: { left: 0.1 }, empty: false, low: true })
-    keys.get("hash_fixture1")!.data.usage = 5 - 0.005
+    keys.get("hash_fixture1")!.data.usage = 5 - 0.013
     expect(await read()).toMatchObject({ plan: { left: 0 }, empty: false, low: true })
-    keys.get("hash_fixture1")!.data.usage = 5 - 0.004
+    keys.get("hash_fixture1")!.data.usage = 5 - 0.012
     expect(await read()).toMatchObject({ plan: { left: 0 }, empty: true, low: false })
     // A key whose usage cannot be read leaves the share unknown and raises no flag.
     delete keys.get("hash_fixture1")!.data.usage

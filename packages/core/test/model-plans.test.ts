@@ -337,7 +337,7 @@ test("out of credits, plans disabled and an over-long context fail the turn at o
     [
       "credits",
       "QuotaExceeded",
-      `Your included model credits are used up. They renew at the next billing period. Buy credits at ${ModelPlans.PURCHASE_URL}`,
+      `Your monthly Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, choose a model that uses fewer credits, or add a top-up. Monthly credits renew each billing period. Buy credits at ${ModelPlans.PURCHASE_URL}`,
       "credits",
     ],
     ["disabled", "InvalidRequest", "Vector Codium is not available yet. Choose another model.", "unavailable"],

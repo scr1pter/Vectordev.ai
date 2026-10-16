@@ -333,12 +333,7 @@ async function walletCredential(id: string, fetcher: typeof fetch, requiredCredi
       key.include_byok_in_limit === true &&
       key.expires_at === null
     ) {
-      if (credits <= usage || credits - usage < requiredCredits)
-        throw new ApiError(
-          402,
-          "MODEL_TOPUP_EXHAUSTED",
-          "Your purchased credits cannot cover this request's maximum cost. Shorten the context or response, or add credits.",
-        )
+      if (credits <= usage || credits - usage < requiredCredits) throw purchasedShortfall()
       return {
         key: revealModelPlanKey(existing.wallet.encrypted, `${id}:wallet`),
         pool: existing.wallet.hash,
@@ -359,20 +354,14 @@ async function walletCredential(id: string, fetcher: typeof fetch, requiredCredi
         const usage = verifiedUsage(result.data)
         if (usage === undefined)
           throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your purchased credits could not be verified.")
-        if (credits <= usage || credits - usage < requiredCredits)
-          throw new ApiError(
-            402,
-            "MODEL_TOPUP_EXHAUSTED",
-            "Your purchased credits cannot cover this request's maximum cost. Shorten the context or response, or add credits.",
-          )
+        if (credits <= usage || credits - usage < requiredCredits) throw purchasedShortfall()
         return {
           key: revealModelPlanKey(account.wallet.encrypted, `${id}:wallet`),
           pool: account.wallet.hash,
           available: credits - usage,
         }
       }
-      if (credits <= 0 || credits < requiredCredits)
-        throw new ApiError(402, "MODEL_TOPUP_EXHAUSTED", "Add purchased credits to cover this request's maximum cost.")
+      if (credits <= 0 || credits < requiredCredits) throw purchasedShortfall()
       await verify()
       const result = await openRouterManagement(
         "",
@@ -562,11 +551,7 @@ export async function modelPlanCredential(
       requiredCredits,
       now,
       fetcher,
-      new ApiError(
-        402,
-        "MODEL_PLAN_EXHAUSTED",
-        "The monthly credits left cannot cover this request alongside the requests already sent. Wait for them to finish, or add a top-up.",
-      ),
+      monthlyShortfall(),
     )
   } catch (error) {
     if (
@@ -581,13 +566,28 @@ export async function modelPlanCredential(
       requiredCredits,
       now,
       fetcher,
-      new ApiError(
-        402,
-        "MODEL_TOPUP_EXHAUSTED",
-        "Your purchased credits left cannot cover this request alongside the requests already sent. Wait for them to finish, or add credits.",
-      ),
+      purchasedShortfall(),
     )
   }
+}
+
+// Credits that are used up, too few for the model's largest request, or held by requests still running get one
+// answer per pool. A different answer for each would tell a client which side of a threshold its balance is on, and
+// with the share of a plan it has used, the allowance and so the markup.
+function monthlyShortfall() {
+  return new ApiError(
+    402,
+    "MODEL_PLAN_EXHAUSTED",
+    "Your monthly Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, choose a model that uses fewer credits, or add a top-up. Monthly credits renew each billing period.",
+  )
+}
+
+function purchasedShortfall() {
+  return new ApiError(
+    402,
+    "MODEL_TOPUP_EXHAUSTED",
+    "Your purchased Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, choose a model that uses fewer credits, or add credits.",
+  )
 }
 
 // Each hold is one member of the pool's sorted set, "<ticket>:<credits>", scored by when it lapses, so a hold whose
@@ -734,12 +734,7 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
           "Your model subscription needs an active paid billing period.",
         )
       }
-      if (paid.plan.credits < requiredCredits)
-        throw new ApiError(
-          402,
-          "MODEL_PLAN_EXHAUSTED",
-          "The remaining monthly credits cannot cover this request's maximum cost. Shorten the context or response, or add a top-up.",
-        )
+      if (paid.plan.credits < requiredCredits) throw monthlyShortfall()
       const context = `${id}:${paid.id}:${paid.start}`
       if (account.key?.subscription === paid.id && account.key.start === paid.start) {
         const result = await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, undefined, fetcher)
@@ -823,22 +818,9 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
   )
 }
 
-// Spent credits and credits too few for this request's longest reply are different answers: a shorter conversation
-// or a model that uses fewer credits can still be served by the second. Both keep the code that lets purchased
-// credits cover the request instead.
+// A shortfall keeps the code that lets purchased credits cover the request instead.
 function requireMonthlyCredits(credits: number, usage: number, requiredCredits: number) {
-  if (usage >= credits)
-    throw new ApiError(
-      402,
-      "MODEL_PLAN_EXHAUSTED",
-      "Your included model credits are used up. They renew at the next billing period.",
-    )
-  if (credits - usage < requiredCredits)
-    throw new ApiError(
-      402,
-      "MODEL_PLAN_EXHAUSTED",
-      "The monthly credits left cannot cover the longest reply this request could get. Choose a model that uses fewer credits, shorten the conversation, or add a top-up.",
-    )
+  if (usage >= credits || credits - usage < requiredCredits) throw monthlyShortfall()
 }
 
 export async function modelPlanCheckout(

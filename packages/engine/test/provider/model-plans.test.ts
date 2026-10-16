@@ -217,7 +217,7 @@ it.instance("an out-of-credits or disabled gateway fails the turn once, with an 
       [
         "credits",
         "credits",
-        `Your included model credits are used up. They renew at the next billing period. Buy credits at ${ModelPlans.PURCHASE_URL}`,
+        `Your monthly Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, choose a model that uses fewer credits, or add a top-up. Monthly credits renew each billing period. Buy credits at ${ModelPlans.PURCHASE_URL}`,
       ],
       ["disabled", "unavailable", "Vector Codium is not available yet. Choose another model."],
     ] as const) {

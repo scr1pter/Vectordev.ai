@@ -1,7 +1,13 @@
 import { requireAccountUser } from "./account.js"
 import { modelPlanStatus } from "./model-plan-account.js"
 import { requireModelPlanUser } from "./model-plan-chat.js"
-import { configuredPlanModels, modelPlans, modelPlansEnabled, modelTopups } from "./model-plan-config.js"
+import {
+  configuredPlanModels,
+  modelPlanRequestCredits,
+  modelPlans,
+  modelPlansEnabled,
+  modelTopups,
+} from "./model-plan-config.js"
 import { handleApiError, json, requireMethod, type ApiRequest, type ApiResponse } from "./http.js"
 
 export async function handleModelPlanStatus(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {
@@ -32,7 +38,7 @@ export async function handleModelPlanStatus(request: ApiRequest, response: ApiRe
 
 /**
  * The account's own Codium balances as every Vector screen shows them: the whole-percent share of this month's credits
- * left, the purchased credits' state, and whether the credits are running low or too low for a reply. The gateway
+ * left, the purchased credits' state, and whether the credits are running low or too low for any request. The gateway
  * accounts in provider-cost USD; an amount beside a purchase price would reveal what the purchase buys, so no amount,
  * and no fixed-amount threshold whose share would give one away, leaves the server.
  */
@@ -40,17 +46,17 @@ export function modelPlanBalance(status: Awaited<ReturnType<typeof modelPlanStat
   const monthly = status.active ? status.remaining : 0
   const remaining =
     monthly === undefined || status.wallet.remaining === undefined ? undefined : monthly + status.wallet.remaining
-  // A Vector turn asks the model for its longest reply, and the gateway refuses a request the credits left cannot pay
-  // for in full, so below the cheapest such reply in the catalog every turn is refused.
-  const replies = configuredPlanModels().map((model) => (model.maxOutputTokens * model.outputPrice) / 1_000_000)
-  const reply = replies.length ? Math.min(...replies) : 0
+  // The gateway refuses a request unless the credits available cover the model's largest request, so below the
+  // cheapest such amount in the catalog every request is refused.
+  const requests = configuredPlanModels().map(modelPlanRequestCredits)
+  const cheapest = requests.length ? Math.min(...requests) : 0
   // Running low scales with what was bought: a tenth of this month's credits, or of the smallest top-up.
   const smallest =
     modelTopups()
       .map((pack) => pack.credits)
       .filter((credits) => credits > 0)
       .sort((a, b) => a - b)[0] ?? 0
-  const empty = remaining !== undefined && (remaining <= 0 || remaining < reply)
+  const empty = remaining !== undefined && (remaining <= 0 || remaining < cheapest)
   return {
     active: status.active,
     ...(status.customer ? { customer: true } : {}),
@@ -69,7 +75,7 @@ export function modelPlanBalance(status: Awaited<ReturnType<typeof modelPlanStat
     purchased: {
       bought: status.wallet.credits > 0,
       ...(status.wallet.credits > 0 && status.wallet.remaining !== undefined
-        ? { state: purchasedState(status.wallet.remaining, reply, smallest) }
+        ? { state: purchasedState(status.wallet.remaining, cheapest, smallest) }
         : {}),
     },
     empty,
@@ -78,11 +84,11 @@ export function modelPlanBalance(status: Awaited<ReturnType<typeof modelPlanStat
 }
 
 // Purchased credits pool every top-up ever bought, so they answer a state, not a share of that pool, which would read
-// "8% left" for a repeat buyer right after a fresh purchase. They are used up once they cannot pay for the cheapest full
-// reply, and running low starts under a tenth of the smallest top-up, as the account's own flag does, so the state
-// reveals no allowance however much was bought.
-function purchasedState(remaining: number, reply: number, smallest: number) {
-  if (remaining <= 0 || remaining < reply) return "used" as const
+// "8% left" for a repeat buyer right after a fresh purchase. They are used up once they cannot cover the cheapest
+// model's largest request, and running low starts under a tenth of the smallest top-up, as the account's own flag
+// does, so the state reveals no allowance however much was bought.
+function purchasedState(remaining: number, cheapest: number, smallest: number) {
+  if (remaining <= 0 || remaining < cheapest) return "used" as const
   if (remaining < smallest / 10) return "low" as const
   return "available" as const
 }

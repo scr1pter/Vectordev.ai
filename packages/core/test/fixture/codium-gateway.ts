@@ -92,7 +92,8 @@ export function codiumGateway(token: string) {
           {
             error: {
               code: "MODEL_PLAN_EXHAUSTED",
-              message: "Your included model credits are used up. They renew at the next billing period.",
+              message:
+                "Your monthly Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, choose a model that uses fewer credits, or add a top-up. Monthly credits renew each billing period.",
             },
           },
           { status: 402 },

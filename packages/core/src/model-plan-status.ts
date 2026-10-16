@@ -60,8 +60,8 @@ export type Status = {
    */
   purchased: { bought: boolean; state?: "available" | "low" | "used" }
   /**
-   * Too few credits are left for a full reply on any Codium model, including a subscriber's monthly credits before they
-   * renew. A turn asks the model for its longest reply, which the gateway refuses when the credits cannot pay for it.
+   * Too few credits are left for any Codium request, including a subscriber's monthly credits before they renew: the
+   * gateway serves a request only when the credits available cover the model's largest request, whatever its size.
    */
   empty: boolean
   /** Less than a tenth of this month's credits, or of the smallest top-up, is left. */

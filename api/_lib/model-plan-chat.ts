@@ -8,6 +8,7 @@ import {
   configuredPlanModels,
   MODEL_PLAN_OPTIONS,
   MODEL_PLAN_ROOT,
+  modelPlanRequestCredits,
   requireModelPlans,
   type ModelPlanModel,
 } from "./model-plan-config.js"
@@ -181,8 +182,9 @@ function cacheBreakpoints(messages: Record<string, unknown>[]) {
 }
 
 /**
- * Rejects a request the model's context window cannot hold and returns its estimated input tokens, which also size
- * the credit check. The gateway has no tokenizer, so it estimates tokens as Vector's clients do, at four bytes of
+ * Rejects a request the model's context window cannot hold and returns its estimated input tokens. The credit check
+ * does not use them: it holds the model's largest request (modelPlanRequestCredits), so a refusal never depends on the
+ * request's size. The gateway has no tokenizer, so it estimates tokens as Vector's clients do, at four bytes of
  * content per token. A JSON escape stands for one character the model reads, so only the bytes it adds are left out:
  * one for \n, \" or \\, five for \u0001. Counting each byte as a token rejected conversations at about a quarter of
  * the window the catalog lists.
@@ -278,7 +280,7 @@ export async function streamModelPlanResponse(upstream: Response, response: ApiR
           )
         const cost = stripeRecord(parsed.value.usage) ? parsed.value.usage.cost : undefined
         if (typeof cost === "number" && Number.isFinite(cost) && cost >= 0) state.charge = cost
-        if (!response.write(`data: ${JSON.stringify(withoutCharge(parsed.value))}\n\n`))
+        if (!response.write(`data: ${JSON.stringify(forwardedChunk(parsed.value))}\n\n`))
           await once(response, "drain", { signal: controller.signal })
       }
       if (part.done) throw new ApiError(503, "MODEL_PLAN_STREAM", "The model response ended before completion.")
@@ -293,14 +295,29 @@ export async function streamModelPlanResponse(upstream: Response, response: ApiR
 
 // The provider reports each request's charge in USD, which is exactly what comes off the credits. Beside the share of
 // a plan it used, that amount would reveal the plan's allowance, so it stays on the server and Vector counts Codium
-// steps by their tokens.
-function withoutCharge(chunk: Record<string, unknown>) {
-  if (!stripeRecord(chunk.usage)) return chunk
+// steps by their tokens. The provider that served the request, its fingerprint and its own finish reason stay too:
+// with them a client could look up that provider's published price and work the charge out from the tokens.
+function forwardedChunk(chunk: Record<string, unknown>) {
   return {
-    ...chunk,
-    usage: Object.fromEntries(
-      Object.entries(chunk.usage).filter(([key]) => !["cost", "cost_details", "is_byok"].includes(key)),
+    ...Object.fromEntries(
+      Object.entries(chunk).filter(([key]) => ["id", "object", "created", "model", "choices"].includes(key)),
     ),
+    ...(Array.isArray(chunk.choices)
+      ? {
+          choices: chunk.choices.map((choice) =>
+            stripeRecord(choice)
+              ? Object.fromEntries(Object.entries(choice).filter(([key]) => key !== "native_finish_reason"))
+              : choice,
+          ),
+        }
+      : {}),
+    ...(stripeRecord(chunk.usage)
+      ? {
+          usage: Object.fromEntries(
+            Object.entries(chunk.usage).filter(([key]) => !["cost", "cost_details", "is_byok"].includes(key)),
+          ),
+        }
+      : {}),
   }
 }
 
@@ -343,9 +360,9 @@ export async function handleModelPlanChat(request: ApiRequest, response: ApiResp
       requirePersistent: true,
     })
     const model = configuredPlanModels().find((model) => model.id === body.model)!
-    // Estimate prompt tokens, including tool schemas, before reserving provider credit.
-    const inputTokens = requireModelPlanContext(body, model)
-    hold.required = (inputTokens * model.inputPrice + body.max_tokens * model.outputPrice) / 1_000_000
+    // Check the context, tool schemas included, before reserving provider credit.
+    requireModelPlanContext(body, model)
+    hold.required = modelPlanRequestCredits(model)
     const funding = await modelPlanCredential(account.id, fetcher, Date.now(), hold.required)
     hold.release = funding.release
     const upstream = await fetcher(`${MODEL_PLAN_ROOT}/chat/completions`, {

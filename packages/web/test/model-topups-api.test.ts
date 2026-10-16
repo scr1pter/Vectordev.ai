@@ -507,7 +507,7 @@ test("parallel requests on purchased credits hold their largest cost until they 
     reason: {
       code: "MODEL_TOPUP_EXHAUSTED",
       message:
-        "Your purchased credits left cannot cover this request alongside the requests already sent. Wait for them to finish, or add credits.",
+        "Your purchased Codium credits cannot cover this model's largest request right now. Wait for running requests to finish, choose a model that uses fewer credits, or add credits.",
     },
   })
   // A request that never reached the provider gives its hold back at once.
