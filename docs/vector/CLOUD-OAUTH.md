@@ -191,6 +191,22 @@ bridge token is kept out of the agent's shell environment and out of the
 engine's launch environment, which other processes of the same user can read,
 so a shell command cannot call the bridge and skip these prompts.
 
+The same work typed into the shell, on the Vercel or Supabase command-line
+tool's own login, asks under the same four permissions, every time
+(`packages/engine/src/tool/shell/cloud-cli.ts`): a deploy, promote, rollback,
+removal or alias change asks under `vector_cloud_publish`; `vercel env` changes
+and pulls under `vector_cloud_environment`; other Vercel project, domain and
+account commands under `vector_cloud_hosting`; and Supabase commands that change
+the linked project or account, or read its data or keys (`db push`,
+`db dump`, `projects api-keys`, `secrets set`, `functions deploy`, `link`),
+under `vector_cloud_database`. Local work (`vercel dev`, `vercel build`,
+`supabase start`, `supabase db reset` without `--linked`) and plain reads
+(`vercel ls`, `vercel env ls`) only ask as shell commands do. The check reads
+the command as written, including package runners such as `npx vercel` and
+`pnpm dlx supabase`; a script that calls a CLI (`npm run deploy`, `sh -c`) is
+not seen. With the shell sandbox on (`VECTOR_SHELL_SANDBOX=1`), sandboxed
+commands also cannot read the CLIs' stored logins.
+
 ## Repository migrations
 
 `apply_migrations` runs the repository's `.sql` files against the linked

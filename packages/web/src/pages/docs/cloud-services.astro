@@ -119,7 +119,10 @@ export const prerender = true
     project or domain, and the prompt
     names the provider, project and environment and shows any SQL that would run. It asks every time: auto-accepting
     permissions, a permission rule that allows it and an earlier approval never skip these prompts, and none of them
-    offers Always allow. Only the read-only migration dry run can be answered by auto-accept.
+    offers Always allow. Only the read-only migration dry run can be answered by auto-accept. A shell command the
+    agent runs with the Vercel or Supabase command-line tool, such as vercel --prod, vercel env add or supabase db push,
+    asks the same way every time; local work such as vercel dev or supabase start does not. That check reads the
+    command as written, so a script that calls the tool, such as npm run deploy, is not covered.
     A new migration file asks like any other edit, showing both the migration and its down file. OAuth client secrets, function secret values and the database password are entered
     in Vector Cloud, never in chat, and the agent can only refer to variables already stored there. Query results
     reach the agent as the query returns them, except cells in columns named like passwords, tokens or secrets, which

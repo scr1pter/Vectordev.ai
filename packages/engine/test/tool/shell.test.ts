@@ -491,6 +491,38 @@ describe("tool.shell permissions", () => {
     )
   }
 
+  each("asks every time under Vector Cloud's permission before a cloud CLI changes an account", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const err = new Error("cloud prompt rejected")
+          const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          // Rejecting the cloud prompt stops the command, so no real CLI runs.
+          const rejectCloud = {
+            ...ctx,
+            ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+              Effect.sync(() => {
+                requests.push(req)
+                if (req.permission.startsWith("vector_cloud_")) throw err
+              }),
+          }
+          expect(yield* fail({ command: "echo ready && npx --yes vercel@59.26.0 --prod" }, rejectCloud)).toMatchObject({
+            message: err.message,
+          })
+          expect(requests.map((item) => item.permission)).toEqual(["bash", "vector_cloud_publish"])
+          expect(requests[1]).toMatchObject({
+            patterns: [`vercel/${path.basename(tmp)}/production/shell deploy`],
+            always: [],
+            metadata: { provider: "Vercel", environment: "production", action: "deploy" },
+          })
+          expect(String(requests[1].metadata.summary)).toContain("npx --yes vercel@59.26.0 --prod")
+        }),
+      )
+    }),
+  )
+
   each("asks for edit permission for the files a redirect writes", () =>
     Effect.gen(function* () {
       const outside = yield* tmpdirScoped()

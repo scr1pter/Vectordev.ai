@@ -16,6 +16,7 @@ import { Shell } from "@vectordevai/core/shell"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { ShellID } from "./shell/id"
 import { Sandbox } from "./shell/sandbox"
+import { CloudCli } from "./shell/cloud-cli"
 
 import * as Truncate from "./truncate"
 import { Plugin } from "@/plugin"
@@ -77,6 +78,8 @@ type Scan = {
   patterns: Set<string>
   always: Set<string>
   writes: Set<string>
+  /** Vercel and Supabase CLI calls that act on a cloud account, by permission pattern. */
+  cloud: Map<string, CloudCli.Request & { command: string }>
 }
 
 type Chunk = {
@@ -390,6 +393,24 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
       command: input.command,
     },
   })
+
+  // After the shell's own permission, so a session that may not run the command
+  // is refused without a cloud prompt. These ask every time, as vector_cloud's
+  // own actions do: auto-accept and allow rules never answer them.
+  for (const [pattern, item] of scan.cloud) {
+    yield* ctx.ask({
+      permission: item.permission,
+      patterns: [pattern],
+      always: [],
+      metadata: {
+        command: input.command,
+        provider: item.provider,
+        environment: item.environment,
+        action: item.action,
+        summary: `Run \`${item.command}\` in the shell. It would ${item.summary} with the ${item.provider} command-line tool's own login, outside Vector Cloud.`,
+      },
+    })
+  }
 })
 
 const cmd = Effect.fn("ShellTool.cmd")(function* (
@@ -528,6 +549,7 @@ export const ShellTool = Tool.define(
         patterns: new Set<string>(),
         always: new Set<string>(),
         writes: new Set<string>(),
+        cloud: new Map(),
       }
       const shellKind = ShellID.toKind(Shell.name(shell))
 
@@ -549,6 +571,15 @@ export const ShellTool = Tool.define(
         if (tokens.length && (!cmd || !CWD.has(cmd))) {
           scan.patterns.add(source(node))
           scan.always.add(BashArity.prefix(tokens).join(" ") + " *")
+        }
+
+        const cloud = CloudCli.request(tokens)
+        if (cloud) {
+          const text = source(node)
+          scan.cloud.set(
+            [cloud.provider.toLowerCase(), path.basename(cwd), cloud.environment, `shell ${cloud.action}`].join("/"),
+            { ...cloud, command: text.length > 200 ? `${text.slice(0, 200)}…` : text },
+          )
         }
       }
 

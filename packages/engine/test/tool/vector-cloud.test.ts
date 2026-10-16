@@ -299,6 +299,8 @@ describe("vector_cloud bridge", () => {
         expect(text).not.toMatch(/Netlify|AWS|Cloud Services|Integrations/)
       }
       expect(tool.description).toContain("publishes a preview by default")
+      // The shell asks for these too (CloudCli), but skips Vector's release checks.
+      expect(VECTOR_CLOUD_POLICY).toContain("not with the vercel or supabase command-line tools in the shell")
       // One rule for every account change: it asks each time, whatever auto-accept or earlier approvals say.
       expect(tool.description).toContain("asks the user first, every time")
       expect(tool.description).not.toContain("allowed that kind of action always")
