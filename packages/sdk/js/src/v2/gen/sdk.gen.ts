@@ -4919,6 +4919,7 @@ export class Session2 extends HeyApiClient {
       command?: string
       variant?: string
       executionMode?: "normal" | "fast"
+      budget?: RunBudget
       parts?: Array<{
         id?: string
         type: "file"
@@ -4945,6 +4946,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "command" },
             { in: "body", key: "variant" },
             { in: "body", key: "executionMode" },
+            { in: "body", key: "budget" },
             { in: "body", key: "parts" },
           ],
         },

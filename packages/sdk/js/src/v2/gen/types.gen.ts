@@ -12766,6 +12766,7 @@ export type SessionCommandData = {
     command: string
     variant?: string
     executionMode?: "normal" | "fast"
+    budget?: RunBudget
     parts?: Array<{
       id?: string
       type: "file"
