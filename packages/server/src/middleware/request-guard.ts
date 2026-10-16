@@ -29,8 +29,12 @@ export const requestGuard = (options?: Options, authenticationRequired = false) 
       )
         return HttpServerResponse.empty({ status: 403 })
       const websocket = request.headers.upgrade?.toLowerCase() === "websocket"
+      // A password does not stop another site on its own: a browser that cached this server's Basic credentials
+      // replays them on requests any page sends it, such as a form post. So a page from an origin the server does not
+      // trust is refused here too, unless the browser itself says the request is same-origin, which keeps the app
+      // working behind a proxy that rewrites Host. Clients outside a browser send no Origin and are unaffected.
       if (
-        (websocket || !authenticationRequired) &&
+        (websocket || !authenticationRequired || request.headers["sec-fetch-site"] !== "same-origin") &&
         !isAllowedRequestOrigin(
           request.headers.origin,
           request.headers.host,

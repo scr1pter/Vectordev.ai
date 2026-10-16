@@ -50,9 +50,33 @@ describe("request transport guard", () => {
     expect(
       (await run({ host, origin: "http://localhost:5173" }, false, "/probe", { loopbackOrigins: true })).status,
     ).toBe(204)
-    // A password stops the attack instead, so local pages keep working there.
+    // With a password, local pages stay trusted unless the listener turns that off (release builds do).
     expect((await run({ host, origin: "http://localhost:5173" }, true)).status).toBe(204)
     expect((await run({ host, origin: "http://localhost:5173", upgrade: "websocket" }, true)).status).toBe(204)
+  })
+
+  test("a password server refuses other sites' pages even with credentials the browser cached", async () => {
+    const host = "192.168.1.20:4096"
+    // A form post or no-cors fetch from another site carries the Basic credentials a browser cached for this server.
+    for (const origin of ["https://attacker.example", "null", "http://192.168.1.20:5173"])
+      for (const site of ["cross-site", "same-site", undefined])
+        expect(
+          (await run({ host, origin, ...(site ? { "sec-fetch-site": site } : {}) }, true)).status,
+          `${origin} ${site}`,
+        ).toBe(403)
+    // The server's own pages, the app's origins, configured origins and clients outside a browser still work.
+    expect((await run({ host, origin: "http://192.168.1.20:4096" }, true)).status).toBe(204)
+    expect((await run({ host, origin: "https://vectordev.ai", "sec-fetch-site": "cross-site" }, true)).status).toBe(204)
+    expect((await run({ host, origin: "oc://renderer" }, true)).status).toBe(204)
+    expect(
+      (await run({ host, origin: "https://team.example" }, true, "/probe", { cors: ["https://team.example"] })).status,
+    ).toBe(204)
+    expect((await run({ host }, true)).status).toBe(204)
+    // Behind a proxy that rewrites Host, the browser's own same-origin flag vouches for the app's page.
+    expect(
+      (await run({ host: "127.0.0.1:4096", origin: "https://vector.team.example", "sec-fetch-site": "same-origin" }, true))
+        .status,
+    ).toBe(204)
   })
 
   test("validates Origin on password-protected WebSocket upgrades", async () => {
