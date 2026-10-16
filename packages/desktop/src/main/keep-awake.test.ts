@@ -489,6 +489,71 @@ describe("startKeepAwake", () => {
     keepAwake.stop()
   })
 
+  test("disposing a directory never forgets the prompt a V2 drain waits on", async () => {
+    const fake = engine()
+    const blocker = power()
+    const keepAwake = startKeepAwake({ source: fake.source, blocker: blocker.blocker, pollMs: 20, stalledMs: 50 })
+    await until(() => fake.streams.length === 1)
+    fake.drains.add("ses_worker")
+    fake.current().push(fake.event("session.next.step.started", { sessionID: "ses_worker" }, "/swarm/worker"))
+    await until(() => blocker.active.size === 1)
+    fake.current().push(fake.event("permission.v2.asked", { id: "per_1", sessionID: "ses_worker" }, "/swarm/worker"))
+    await until(() => blocker.active.size === 0)
+
+    // Connecting a provider or changing a setting disposes every directory; the runner keeps waiting on the user.
+    fake.current().push(fake.event("server.instance.disposed", { directory: "/other" }, "/other"))
+    fake.current().push(fake.event("server.instance.disposed", { directory: "/swarm/worker" }, "/swarm/worker"))
+    await pause(150)
+    expect(blocker.active.size).toBe(0)
+
+    fake.current().push(fake.event("permission.v2.replied", { sessionID: "ses_worker", requestID: "per_1" }))
+    await until(() => blocker.active.size === 1)
+    keepAwake.stop()
+  })
+
+  test("a drain whose prompts cannot be read on reconnect is counted without them, and the others keep theirs", async () => {
+    const fake = engine()
+    const blocker = power()
+    // ses_gone ended between the read of the drains and the read of its prompts.
+    const source: KeepAwakeSource = {
+      ...fake.source,
+      async prompts(sessionID, signal) {
+        if (sessionID === "ses_gone") throw new Error("The engine's route answered 404.")
+        return fake.source.prompts(sessionID, signal)
+      },
+    }
+    fake.drains.add("ses_waiting")
+    fake.drains.add("ses_gone")
+    fake.prompts.set("ses_waiting", [{ id: "per_1", sessionID: "ses_waiting" }])
+    const keepAwake = startKeepAwake({ source, blocker: blocker.blocker, pollMs: 20 })
+    await until(() => blocker.active.size === 1)
+
+    fake.drains.delete("ses_gone")
+    await until(() => blocker.active.size === 0)
+    keepAwake.stop()
+  })
+
+  test("a session the runner does not list reads the drains at most once per poll, and counts once its drain shows", async () => {
+    const fake = engine()
+    const blocker = power()
+    const keepAwake = startKeepAwake({ source: fake.source, blocker: blocker.blocker, pollMs: 1_000 })
+    await until(() => fake.state.drainReads === 1)
+    // A remote workspace's session relays its activity here but never runs on this runner.
+    for (let delta = 0; delta < 20; delta++) {
+      fake.current().push(fake.event("session.next.text.delta", { sessionID: "ses_remote", delta: "x" }))
+      await pause(2)
+    }
+    await pause(50)
+    expect(fake.state.drainReads).toBeLessThanOrEqual(3)
+    expect(blocker.active.size).toBe(0)
+
+    // Its drain shows on this runner after all: it is read for again once the poll interval has passed.
+    fake.drains.add("ses_remote")
+    fake.current().push(fake.event("session.next.text.delta", { sessionID: "ses_remote", delta: "x" }))
+    await until(() => blocker.active.size === 1, 5_000)
+    keepAwake.stop()
+  })
+
   test("asks the V2 runner nothing while nothing runs on it", async () => {
     const fake = engine()
     const blocker = power()

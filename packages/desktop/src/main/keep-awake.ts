@@ -16,7 +16,8 @@ import { Option, Schema } from "effect"
  * Sessions the engine's V2 runner drains (a parallel workspace's Vector agent, a swarm's planner and workers) never
  * report a session.status, and nothing announces that a drain ended. The runner lists the drains it owns, so that list
  * is read with each seed, as soon as a session it does not know of shows V2 activity, and every `pollMs` while any
- * drain is known. Nothing polls it while nothing runs on it.
+ * drain is known. A session a read did not list asks again at most once per `pollMs`: a remote workspace's sessions
+ * relay their activity here but never run on this runner.
  *
  * Nor is it held for work that waits on the user. A session stays busy while a permission or question prompt is
  * unanswered, so a session with one does not count. Its parent, waiting on it as a foreground subagent, still looks
@@ -92,10 +93,15 @@ export function startKeepAwake(input: {
   const silenceMs = input.silenceMs ?? SILENCE_MS
   const stalledMs = input.stalledMs ?? STALLED_MS
   const retryMs = input.retryMs ?? RETRY_MS
+  const pollMs = input.pollMs ?? POLL_MS
   // Each busy or retrying session, with the key of the location its status came from.
   const busy = new Map<string, string>()
   // Each session the V2 runner drained when it was last asked.
   const drains = new Set<string>()
+  // Sessions whose V2 activity asked for a read of the drains that has not started yet.
+  const asking = new Set<string>()
+  // Sessions whose V2 activity a read, started after it, did not list, with when that read ended.
+  const unlisted = new Map<string, number>()
   // Each prompt waiting on the user, with the session that asked it.
   const waiting = new Map<string, string>()
   const locations = new Map<string, KeepAwakeLocation>()
@@ -113,6 +119,8 @@ export function startKeepAwake(input: {
   let live: AbortSignal | undefined
   let polling = false
   let again = false
+  // A read put off until `pollMs` after a read that did not list a session asking again.
+  let deferred: ReturnType<typeof setTimeout> | undefined
 
   const apply = () => {
     const sessions = new Set([...busy.keys(), ...drains])
@@ -150,16 +158,20 @@ export function startKeepAwake(input: {
       return
     }
     polling = true
+    const asked = [...asking]
+    asking.clear()
+    // A session that asked for this read and is not in it, or asked for one that failed, asks again only once `pollMs`
+    // has passed.
+    const settle = (ids: readonly string[]) => {
+      if (live !== signal) return
+      setDrains(ids)
+      const at = Date.now()
+      for (const entry of unlisted) if (ids.includes(entry[0]) || at - entry[1] >= pollMs) unlisted.delete(entry[0])
+      asked.filter((sessionID) => !ids.includes(sessionID)).forEach((sessionID) => unlisted.set(sessionID, at))
+    }
     void input.source
       .drains(AbortSignal.any([signal, AbortSignal.timeout(SEED_TIMEOUT_MS)]))
-      .then(
-        (ids) => {
-          if (live === signal) setDrains(ids)
-        },
-        () => {
-          if (live === signal) setDrains([])
-        },
-      )
+      .then(settle, () => settle([]))
       .finally(() => {
         polling = false
         apply()
@@ -177,7 +189,21 @@ export function startKeepAwake(input: {
       const activity = Option.getOrUndefined(Schema.decodeUnknownOption(SessionProperties)(event.payload.properties))
       // A session the runner was not draining at the last read may have just started: read the drains now rather than
       // at the next poll, which only runs while a drain is known.
-      if (activity && !drains.has(activity.sessionID)) poll()
+      if (!activity || drains.has(activity.sessionID)) return
+      asking.add(activity.sessionID)
+      // A session a read did not list a moment ago is read for again once `pollMs` has passed, not dropped: its drain
+      // may have begun just after that read.
+      const wait = (unlisted.get(activity.sessionID) ?? -Infinity) + pollMs - Date.now()
+      if (wait <= 0) {
+        poll()
+        return
+      }
+      if (deferred) return
+      deferred = setTimeout(() => {
+        deferred = undefined
+        poll()
+      }, wait)
+      deferred.unref()
       return
     }
     if (type === "session.status") {
@@ -209,10 +235,11 @@ export function startKeepAwake(input: {
     if (type !== "server.instance.disposed") return
     const disposed = Option.getOrUndefined(Schema.decodeUnknownOption(DisposedProperties)(event.payload.properties))
     if (!disposed) return
-    // A disposed directory runs nothing, and asking it for statuses on the next connection would start it again.
+    // A disposed directory runs nothing, and asking it for statuses on the next connection would start it again. It
+    // ends its own sessions' prompts, never those of a V2 drain: the runner is process-global and keeps waiting.
     for (const entry of locations) if (entry[1].directory === disposed.directory) locations.delete(entry[0])
     for (const entry of busy) if (!locations.has(entry[1])) busy.delete(entry[0])
-    for (const entry of waiting) if (!busy.has(entry[1])) waiting.delete(entry[0])
+    for (const entry of waiting) if (!busy.has(entry[1]) && !drains.has(entry[1])) waiting.delete(entry[0])
   }
 
   // Events that arrive while the seed is in flight wait in the stream and apply after it, in order, so the newest
@@ -232,16 +259,20 @@ export function startKeepAwake(input: {
         }),
       ),
       Promise.allSettled([
+        // A drain whose prompts cannot be read, one that ended since the list was read for example, counts as waiting
+        // on nothing rather than hiding every other drain.
         input.source.drains(limit()).then(async (ids) => ({
           ids,
-          requests: (await Promise.all(ids.map((sessionID) => input.source.prompts(sessionID, limit())))).flat(),
+          prompts: await Promise.allSettled(ids.map((sessionID) => input.source.prompts(sessionID, limit()))),
         })),
       ]),
     ])
     signal.throwIfAborted()
     const answers = settled[0]
     const drained = settled[1][0]
-    const failed = [...answers, drained].flatMap((answer) => (answer.status === "rejected" ? [answer.reason] : []))
+    const failed = [...answers, drained, ...(drained.status === "fulfilled" ? drained.value.prompts : [])].flatMap(
+      (answer) => (answer.status === "rejected" ? [answer.reason] : []),
+    )
     if (failed.length > 0)
       input.log?.("keep awake: some sessions could not report their status", {
         sources: failed.length,
@@ -259,7 +290,9 @@ export function startKeepAwake(input: {
     })
     if (drained.status === "rejected") return
     drained.value.ids.forEach((sessionID) => drains.add(sessionID))
-    drained.value.requests.forEach((request) => waiting.set(request.id, request.sessionID))
+    drained.value.prompts
+      .flatMap((read) => (read.status === "fulfilled" ? read.value : []))
+      .forEach((request) => waiting.set(request.id, request.sessionID))
   }
 
   const connect = async () => {
@@ -316,7 +349,7 @@ export function startKeepAwake(input: {
   // Only a read of the drains says one ended.
   const poller = setInterval(() => {
     if (drains.size > 0) poll()
-  }, input.pollMs ?? POLL_MS)
+  }, pollMs)
   poller.unref()
   void run()
 
@@ -325,6 +358,7 @@ export function startKeepAwake(input: {
       stopped = true
       clearInterval(watchdog)
       clearInterval(poller)
+      clearTimeout(deferred)
       attempt?.abort()
       apply()
     },
