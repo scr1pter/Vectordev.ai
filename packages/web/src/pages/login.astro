@@ -2,6 +2,7 @@
 import { AuthPage } from "../components/marketing/account/AuthPage"
 import MatrixRain from "../components/marketing/account/MatrixRain.astro"
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import vectorMark from "../assets/vector-mark.webp"
 import "../components/marketing/account/account.css"
 
 export const prerender = true
@@ -13,7 +14,7 @@ export const prerender = true
     <div class="login-shell">
       <header class="login-top">
         <a class="login-brand" href="/" aria-label="Vector home">
-          <img src="/vector-logo.png" alt="" width="26" height="26" />
+          <img src={vectorMark.src} alt="" width="26" height="26" />
           <span>Vector</span>
         </a>
         <a class="login-top-link" href="/docs">Docs</a>

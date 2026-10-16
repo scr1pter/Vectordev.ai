@@ -3,6 +3,7 @@ import { Option, Schema } from "effect"
 import { UsageSummary } from "@vectordevai/schema/usage-summary"
 import { Check, Copy, RefreshCw } from "lucide-react"
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react"
+import vectorMark from "../../../assets/vector-mark.webp"
 import { readAccountApiResponse, rememberAccountReturnPath, vectorAccountClient } from "../../../lib/account-client"
 import { GoogleMark } from "../account/AuthPage"
 import { readShared, shareTokenFrom } from "./shared-link"
@@ -122,14 +123,14 @@ export function UsageDashboard(props: { preview?: UsageSummary.Summary; previewS
     <div className="login-shell">
       <header className="login-top">
         <a className="login-brand" href="/" aria-label="Vector home">
-          <img src="/vector-logo.png" alt="" width="26" height="26" />
+          <img src={vectorMark.src} alt="" width="26" height="26" />
           <span>Vector</span>
         </a>
       </header>
       <main className="login-main">
         <section className="auth-card" aria-labelledby="usage-title">
           <div className="auth-form-mark" aria-hidden="true">
-            <img src="/vector-logo.png" alt="" width="44" height="44" />
+            <img src={vectorMark.src} alt="" width="44" height="44" />
           </div>
           <p className="auth-form-eyebrow">{shareToken ? "SHARED" : "PRIVATE"}</p>
           <h1 id="usage-title">{state.kind === "closed" ? state.title : "Usage"}</h1>
@@ -194,7 +195,7 @@ export function Dashboard(props: {
       <header className="acct-header">
         <div className="acct-header-inner usage-wide">
           <a className="acct-brand" href="/" aria-label="Vector home">
-            <img src="/vector-logo.png" alt="" />
+            <img src={vectorMark.src} alt="" />
             <span>Vector</span>
           </a>
           {!props.shared && (
