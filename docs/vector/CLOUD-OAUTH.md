@@ -221,6 +221,26 @@ stays off by default because it confines every shell command to the workspace,
 is unavailable on Windows, and asks before running unconfined where the host
 cannot apply it; turning it on by default is a separate decision.
 
+Vercel's and Supabase's own MCP servers act on the same accounts with the
+server's own login: a hosted server at `mcp.vercel.com` or `mcp.supabase.com`
+(directly or through a local bridge such as `mcp-remote`), or the
+`@supabase/mcp-server-supabase` package, whether added from Plugins or by
+hand. Vector keeps both Plugins entries and holds their tools to the same rule
+(`packages/engine/src/mcp/cloud.ts`). A tool that only lists or reads
+(`list_*`, `get_*`, `search_*`, and Supabase's `query_logs` and
+`generate_typescript_types`) asks as other MCP tools do, unless its name
+mentions keys, secrets, tokens, access or variables. Every other tool asks
+again, every time, with its input shown: under `vector_cloud_database` for
+Supabase (`execute_sql`, `apply_migration`, `deploy_edge_function`,
+`create_project`, `get_publishable_keys` and any tool the server adds later),
+and under `vector_cloud_publish`, `vector_cloud_environment` or
+`vector_cloud_hosting` for Vercel, by what the tool's name says it does. The
+Plugins Supabase server starts with `--read-only`, so its SQL runs as a
+read-only Postgres user and its mutating tools are left out; it cannot be
+installed until its package is pinned to a reviewed version. A server Vector
+does not recognise, such as a community wrapper around either API, is not
+covered.
+
 ## Repository migrations
 
 `apply_migrations` runs the repository's `.sql` files against the linked

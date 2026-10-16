@@ -324,7 +324,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
   {
     id: "supabase",
     name: "Supabase",
-    blurb: "Databases, auth, migrations and schemas.",
+    blurb: "Read-only: tables, migrations, logs and docs. Changes go through Vector Cloud.",
     category: "Databases & payments",
     logo: "supabase",
     fill: "#3FCF8E",
@@ -334,8 +334,13 @@ export const PLUGIN_CATALOG: PluginDef[] = [
       docsUrl: "https://supabase.com/dashboard/account/tokens",
       docsLabel: "Create a token on supabase.com",
     },
+    // Read-only: SQL runs as a read-only Postgres user and the server leaves
+    // out its mutating tools. Vector still asks every time before execute_sql
+    // and any tool that returns keys (McpCloud in the engine).
     build: (v) =>
-      local(["npx", "-y", "@supabase/mcp-server-supabase@latest"], { SUPABASE_ACCESS_TOKEN: v.SUPABASE_ACCESS_TOKEN }),
+      local(["npx", "-y", "@supabase/mcp-server-supabase@latest", "--read-only"], {
+        SUPABASE_ACCESS_TOKEN: v.SUPABASE_ACCESS_TOKEN,
+      }),
   },
   {
     id: "neon",

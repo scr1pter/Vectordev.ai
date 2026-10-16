@@ -416,6 +416,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     })
   }
 
+  const cloud = yield* mcp.cloudTools()
   for (const [key, item] of Object.entries(yield* mcp.tools())) {
     const execute = item.execute
     if (!execute) continue
@@ -434,6 +435,25 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           )
           const result: Awaited<ReturnType<NonNullable<typeof execute>>> = yield* Effect.gen(function* () {
             yield* ctx.ask({ permission: key, metadata: {}, patterns: ["*"], always: ["*"] })
+            // A Vercel or Supabase server's tool that changes the account or
+            // reads its data or keys asks again under vector_cloud, every time
+            // (McpCloud), after its own permission so a denied tool is refused first.
+            const account = cloud[key]
+            if (account) {
+              const input = JSON.stringify(args, null, 2)
+              yield* ctx.ask({
+                permission: account.permission,
+                patterns: [[account.provider.toLowerCase(), "mcp", account.server, account.tool].join("/")],
+                always: [],
+                metadata: {
+                  provider: account.provider,
+                  environment: "account",
+                  action: account.tool,
+                  summary: `Call ${account.tool} on the "${account.server}" MCP server. It acts on the ${account.provider} account that server is signed in to, outside Vector Cloud.`,
+                  statements: [{ label: "Input", sql: input.slice(0, 4000), length: input.length }],
+                },
+              })
+            }
             return yield* Effect.promise(() => execute(args, opts))
           }).pipe(
             Effect.withSpan("Tool.execute", {

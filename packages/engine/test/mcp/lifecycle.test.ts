@@ -385,6 +385,44 @@ it.instance(
   { trusted: true, config: { mcp: {} } },
 )
 
+it.instance(
+  "cloudTools() names the Supabase server's account tools by key, and nothing for other servers",
+  () =>
+    MCP.Service.use((mcp: MCPNS.Interface) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "supabase"
+        getOrCreateClientState("supabase").tools = [
+          { name: "execute_sql", inputSchema: { type: "object", properties: {} } },
+          { name: "list_tables", inputSchema: { type: "object", properties: {} } },
+        ]
+        yield* mcp.add("supabase", {
+          type: "local",
+          command: ["npx", "-y", "@supabase/mcp-server-supabase@latest", "--read-only"],
+        })
+        lastCreatedClientName = "notes"
+        getOrCreateClientState("notes").tools = [
+          { name: "execute_sql", inputSchema: { type: "object", properties: {} } },
+        ]
+        yield* mcp.add("notes", { type: "local", command: ["echo", "test"] })
+
+        expect(Object.keys(yield* mcp.tools()).sort()).toEqual([
+          "notes_execute_sql",
+          "supabase_execute_sql",
+          "supabase_list_tables",
+        ])
+        expect(yield* mcp.cloudTools()).toEqual({
+          supabase_execute_sql: {
+            permission: "vector_cloud_database",
+            provider: "Supabase",
+            server: "supabase",
+            tool: "execute_sql",
+          },
+        })
+      }),
+    ),
+  { trusted: true, config: { mcp: {} } },
+)
+
 // ========================================================================
 // Test: tools() are cached after connect
 // ========================================================================
