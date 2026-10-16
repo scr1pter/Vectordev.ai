@@ -61,6 +61,8 @@ const play = (budget: RunBudget.Info, steps: SpendGuard.Step[], sessions: Sessio
   )
 
 const bash = (input: string, error?: string) => ({ tool: "bash", input, ...(error === undefined ? {} : { error }) })
+// A call with what it returned, for the loop rules.
+const call = (tool: string, input: string, output: string) => step({ tools: [{ tool, input, output }] })
 const reads = (count: number) =>
   Array.from({ length: count }, (_, index) => step({ tools: [{ tool: "read", input: `src/${index}.ts` }] }))
 
@@ -196,7 +198,8 @@ describe("SpendGuard.afterStep", () => {
     expect(repeated.verdicts[2]).toEqual({
       state: "stopped",
       reason: "loop",
-      message: "Paused a repeating loop: `bash` ran with the same input 3 times with no file changes in between.",
+      message:
+        "Paused a repeating loop: `bash` returned the same result for the same input 3 times, with no new results or file changes in between.",
     })
 
     const patched = play({}, [
@@ -225,22 +228,69 @@ describe("SpendGuard.afterStep", () => {
     expect(quiet.verdicts[3]).toMatchObject({ state: "stopped", reason: "cap" })
   })
 
-  test("forgets a call once it leaves the last 8 calls", () => {
-    const left = play({}, [
-      step({ tools: [bash("bun test")] }),
-      step({ tools: [bash("bun test")] }),
-      ...reads(6),
-      step({ tools: [bash("bun test")] }),
-    ])
-    expect(left.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
+  test("lets a page observed between clicks run on", () => {
+    const observe = (page: string) => call("browser", JSON.stringify({ action: "observe" }), page)
+    const click = (selector: string) => call("browser", JSON.stringify({ action: "click", selector }), "clicked")
+    const changing = play({}, [observe("home"), click("#a"), observe("form"), click("#b"), observe("done")])
+    expect(changing.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
 
-    const inside = play({}, [
-      step({ tools: [bash("bun test")] }),
-      step({ tools: [bash("bun test")] }),
-      ...reads(5),
-      step({ tools: [bash("bun test")] }),
+    // Different clicks that leave the page as it was are still different calls.
+    const unchanged = play({}, [observe("home"), click("#a"), observe("home"), click("#b"), observe("home")])
+    expect(unchanged.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
+
+    // The same click on Next with a new page each time is a walk through the pages, not a loop.
+    const pages = play({}, [
+      observe("page 1"),
+      click("#next"),
+      observe("page 2"),
+      click("#next"),
+      observe("page 3"),
+      click("#next"),
+      observe("page 4"),
     ])
-    expect(inside.verdicts.at(-1)?.reason).toBe("loop")
+    expect(pages.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
+
+    const stuck = play({}, [observe("home"), observe("home"), observe("home")])
+    expect(stuck.verdicts[2]).toMatchObject({ state: "stopped", reason: "loop" })
+  })
+
+  test("lets git status run between add and commit", () => {
+    const git = (command: string, output: string) => call("bash", JSON.stringify({ command }), output)
+    const result = play({}, [
+      git("git status", "modified: src/a.ts"),
+      git("git add -A", ""),
+      git("git status", "staged: src/a.ts"),
+      git("git commit -m fix", "[main 1a2b3c] fix"),
+      git("git status", "nothing to commit, working tree clean"),
+    ])
+    expect(result.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
+  })
+
+  test("pauses a cycle of calls that keep getting the same answers", () => {
+    const read = call("read", "src/a.ts", "same")
+    const test = call("bash", "bun test", "1 fail")
+    const result = play({}, [read, test, read, test, read, test])
+    expect(result.verdicts.slice(0, 5).every((verdict) => verdict.state === "ok")).toBe(true)
+    expect(result.verdicts[5]).toMatchObject({ state: "stopped", reason: "loop" })
+
+    // A call that returns something new between the repeats is progress.
+    const learning = play({}, [
+      test,
+      call("read", "src/a.ts", "a"),
+      test,
+      call("read", "src/b.ts", "b"),
+      test,
+      call("read", "src/c.ts", "c"),
+      test,
+    ])
+    expect(learning.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
+  })
+
+  test("treats a call last seen more than 8 calls back as new", () => {
+    const cycle = (length: number, rounds: number) =>
+      Array.from({ length: length * rounds }, (_, index) => call("read", `src/${index % length}.ts`, "same"))
+    expect(play({}, cycle(9, 3)).verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
+    expect(play({}, cycle(3, 3)).verdicts.at(-1)?.reason).toBe("loop")
   })
 
   test("detects loops per session, not across the lineage", () => {

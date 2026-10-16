@@ -44,7 +44,7 @@ export const runGuardRows = [
   ],
   [
     "Loops pause themselves",
-    "In chats, the terminal UI and vector run, an agent that repeats the same tool call three times with no file change in between, or hits the same error three times in a row, is paused. Auto-approve and --yolo cannot click through it. Set budget.loop.enabled to false to turn this off.",
+    "In chats, the terminal UI and vector run, an agent that gets the same result from the same tool call three times, with no file change and no call that returned something new in between, or hits the same error three times in a row, is paused. Checking a page between clicks or running git status between commands returns something new each time, so it runs on. Auto-approve and --yolo cannot click through a pause. Set budget.loop.enabled to false to turn this off.",
   ],
   [
     "Outages end",

@@ -85,7 +85,14 @@ interface ProcessorContext extends Input {
   opening: Fiber.Fiber<string | undefined> | undefined
   blocked: boolean
   // The tool calls of the current provider step, for the spend guard's loop rules.
-  stepTools: { callID: string; tool: string; input: string; error?: string; providerExecuted: boolean }[]
+  stepTools: {
+    callID: string
+    tool: string
+    input: string
+    output?: string
+    error?: string
+    providerExecuted: boolean
+  }[]
   needsCompaction: boolean
   currentText: SessionV1.TextPart | undefined
   reasoningMap: Record<string, SessionV1.ReasoningPart>
@@ -272,6 +279,12 @@ const layer = Layer.effect(
       ) {
         const match = yield* readToolCall(toolCallID)
         if (!match || match.part.state.status !== "running") return
+        // A digest of what the call returned, so the spend guard's loop rules can tell a repeat from a call that got
+        // a new answer.
+        const digest = Bun.hash(
+          [output.output, ...(output.attachments ?? []).map((attachment) => attachment.url)].join("\n"),
+        ).toString(36)
+        ctx.stepTools = ctx.stepTools.map((item) => (item.callID === toolCallID ? { ...item, output: digest } : item))
         yield* session.updatePart({
           ...match.part,
           state: {

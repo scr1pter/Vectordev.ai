@@ -4305,7 +4305,7 @@ unix(
         const stop = budgetStop(result.info)
         expect(stop?.reason).toBe("loop")
         expect(stop?.message).toBe(
-          "Paused a repeating loop: `bash` ran with the same input 3 times with no file changes in between.",
+          "Paused a repeating loop: `bash` returned the same result for the same input 3 times, with no new results or file changes in between.",
         )
         expect(yield* llm.pending).toBe(1)
       }),
@@ -4338,6 +4338,32 @@ unix(
     ),
   { git: true },
   30_000,
+)
+
+unix(
+  "run guard leaves a repeated bash call alone while it returns something new each time",
+  () =>
+    withSh(() =>
+      Effect.gen(function* () {
+        if (!(yield* hasBash)) return
+        const { llm } = yield* useServerConfig(providerCfg)
+        const prompt = yield* SessionPrompt.Service
+        const chat = yield* guardedChat()
+        // The same input every time, but each run prints the process ID of its own shell.
+        const call = { command: "echo $$", description: "Print the shell's process ID" }
+        yield* llm.tool("bash", call)
+        yield* llm.tool("bash", call)
+        yield* llm.tool("bash", call)
+        yield* llm.text("done")
+
+        const result = yield* prompt.loop({ sessionID: chat.id })
+
+        expect(budgetStop(result.info)).toBeUndefined()
+        expect(result.parts.some((part) => part.type === "text" && part.text === "done")).toBe(true)
+        expect(yield* llm.pending).toBe(0)
+      }),
+    ),
+  120_000,
 )
 
 unix(

@@ -55,13 +55,18 @@ export function priceOf(cost: {
   }
 }
 
-export type Sig = { readonly tool: string; readonly input: string }
+// A tool call as the loop rules see it. `output` stands for what the call returned (the engine passes a digest) and
+// `error` for how it failed, so a call that gets a different answer from the same input, such as a page observed
+// after a click, is not a repeat.
+export type Sig = { readonly tool: string; readonly input: string; readonly output?: string; readonly error?: string }
 export type Estimate = { readonly lowUsd: number; readonly highUsd: number }
 export type Stop = { readonly reason: RunBudget.StopReason; readonly message: string }
 type Streak = { readonly tool: string; readonly error: string; readonly count: number }
 // The loop detector's memory for one session of the run. Each session keeps its own, so parallel subagents that
-// run the same tool once each are not one loop, and a patch in one session does not clear another's.
-export type Loop = { readonly ring: readonly Sig[]; readonly errorStreak: Streak }
+// run the same tool once each are not one loop, and a patch in one session does not clear another's. `ring` holds
+// the last LOOP_WINDOW calls since a file change; `stale` holds the calls since the latest one that returned
+// something new, that one included.
+export type Loop = { readonly ring: readonly Sig[]; readonly stale: readonly Sig[]; readonly errorStreak: Streak }
 
 export type Run = {
   readonly rootID: SessionID
@@ -87,7 +92,12 @@ export type Step = {
   readonly cachedTokens: number
   // Whether another provider step follows this one.
   readonly continues: boolean
-  readonly tools: readonly { readonly tool: string; readonly input: string; readonly error?: string }[]
+  readonly tools: readonly {
+    readonly tool: string
+    readonly input: string
+    readonly output?: string
+    readonly error?: string
+  }[]
   // Whether the step changed a file, which clears the loop detector's memory.
   readonly patched: boolean
 }
@@ -155,7 +165,7 @@ export function stopMessage(reason: RunBudget.StopReason, run: Run, detail: Stop
   const tool = detail.loop?.tool ?? "a tool"
   if (detail.loop?.kind === "error")
     return `Paused a repeating loop: \`${tool}\` failed with the same error ${ERROR_STREAK} times in a row.`
-  return `Paused a repeating loop: \`${tool}\` ran with the same input ${LOOP_REPEATS} times with no file changes in between.`
+  return `Paused a repeating loop: \`${tool}\` returned the same result for the same input ${LOOP_REPEATS} times, with no new results or file changes in between.`
 }
 
 export function warnMessage(run: Run) {
@@ -206,14 +216,28 @@ function checkLimits(run: Run, step: Step): Verdict {
   return { state: "ok", ...(estimate ? { estimate } : {}) }
 }
 
-// A tool with the same input LOOP_REPEATS times in the last LOOP_WINDOW calls, with no file change in between, or
-// the same tool failing with the same error ERROR_STREAK calls in a row.
+// A tool returning the same result for the same input LOOP_REPEATS times, with no call that returned something new
+// and no file change in between, or the same tool failing with the same error ERROR_STREAK calls in a row. A call is
+// new when no call in the last LOOP_WINDOW since the last file change had its tool, input and result. Observing a
+// page between clicks, or `git status` between `git add` and `git commit`, returns something new each time, while a
+// cycle of calls that keep getting the same answers does not.
 function checkLoops(run: Run, step: Step, sessionID: SessionID): { run: Run; verdict: Verdict } {
-  const loop = run.loops.get(sessionID) ?? { ring: [], errorStreak: { tool: "", error: "", count: 0 } }
-  const ring = [
-    ...(step.patched ? [] : loop.ring),
-    ...step.tools.map((item) => ({ tool: item.tool, input: item.input })),
-  ].slice(-LOOP_WINDOW)
+  const loop = run.loops.get(sessionID) ?? { ring: [], stale: [], errorStreak: { tool: "", error: "", count: 0 } }
+  const calls = step.tools.reduce<{ ring: readonly Sig[]; stale: readonly Sig[]; repeated?: Sig }>(
+    (acc, item) => {
+      const sig = { tool: item.tool, input: item.input, output: item.output, error: item.error }
+      const stale = acc.ring.some((other) => sameCall(other, sig))
+        ? [...acc.stale, sig].slice(-LOOP_WINDOW)
+        : [sig]
+      return {
+        ring: [...acc.ring, sig].slice(-LOOP_WINDOW),
+        stale,
+        repeated:
+          acc.repeated ?? (stale.filter((other) => sameCall(other, sig)).length >= LOOP_REPEATS ? sig : undefined),
+      }
+    },
+    step.patched ? { ring: [], stale: [] } : { ring: loop.ring, stale: loop.stale },
+  )
   const streaks = step.tools.reduce<Streak[]>((all, item) => {
     const previous = all.at(-1) ?? loop.errorStreak
     if (item.error === undefined) return [...all, { tool: "", error: "", count: 0 }]
@@ -223,7 +247,11 @@ function checkLoops(run: Run, step: Step, sessionID: SessionID): { run: Run; ver
   }, [])
   const next = {
     ...run,
-    loops: new Map(run.loops).set(sessionID, { ring, errorStreak: streaks.at(-1) ?? loop.errorStreak }),
+    loops: new Map(run.loops).set(sessionID, {
+      ring: calls.ring,
+      stale: calls.stale,
+      errorStreak: streaks.at(-1) ?? loop.errorStreak,
+    }),
   }
   const failing = streaks.find((streak) => streak.count >= ERROR_STREAK)
   if (failing)
@@ -235,19 +263,25 @@ function checkLoops(run: Run, step: Step, sessionID: SessionID): { run: Run; ver
         message: stopMessage("loop", next, { loop: { tool: failing.tool, kind: "error" } }),
       },
     }
-  const repeated = ring.find(
-    (sig) => ring.filter((other) => other.tool === sig.tool && other.input === sig.input).length >= LOOP_REPEATS,
-  )
-  if (repeated)
+  if (calls.repeated)
     return {
       run: next,
       verdict: {
         state: "stopped",
         reason: "loop",
-        message: stopMessage("loop", next, { loop: { tool: repeated.tool, kind: "repeat" } }),
+        message: stopMessage("loop", next, { loop: { tool: calls.repeated.tool, kind: "repeat" } }),
       },
     }
   return { run: next, verdict: { state: "ok" } }
+}
+
+function sameCall(left: Sig, right: Sig) {
+  return (
+    left.tool === right.tool &&
+    left.input === right.input &&
+    left.output === right.output &&
+    left.error === right.error
+  )
 }
 
 export interface Interface {
@@ -396,7 +430,7 @@ const layer = Layer.effect(
           const found = runOf(current, sessionID)
           const loop = found?.run.loops.get(sessionID)
           if (!found || !loop?.ring.length) return current
-          const run = { ...found.run, loops: new Map(found.run.loops).set(sessionID, { ...loop, ring: [] }) }
+          const run = { ...found.run, loops: new Map(found.run.loops).set(sessionID, { ...loop, ring: [], stale: [] }) }
           if (found.active) return { ...current, runs: new Map(current.runs).set(found.rootID, run) }
           return { ...current, last: new Map(current.last).set(found.rootID, run) }
         })
