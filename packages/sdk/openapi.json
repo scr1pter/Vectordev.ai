@@ -26819,6 +26819,9 @@
               },
               "unpriced": {
                 "type": "boolean"
+              },
+              "plan": {
+                "type": "boolean"
               }
             },
             "required": ["input", "output", "cache"],

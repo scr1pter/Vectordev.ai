@@ -2332,6 +2332,7 @@ export type Model = {
       }
     }
     unpriced?: boolean
+    plan?: boolean
   }
   limit: {
     context: number
