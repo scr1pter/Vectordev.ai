@@ -351,6 +351,8 @@ export type TrustStatus = WorkspaceTrust.Status & {
    * language servers, formatters and local MCP servers the user enabled (see startsInWorkspace).
    */
   ignored: boolean
+  /** The project has settings of its own (config, .vector or skills content) that trust decides on. */
+  settings: boolean
 }
 
 // The permissions the user's own config sources declare, merged without any project file. Set only when a
@@ -976,14 +978,18 @@ const layer = Layer.effect(
         if (!trusted && !Flag.VECTOR_PURE && (WorkspaceTrust.hasInputs(trustSnapshot) || startsInWorkspace(result))) {
           // Without this the project's agents, commands and default model, or the user's language servers,
           // formatters and MCP servers, would vanish or change with no explanation.
+          // A project with no settings of its own holds back only the user's tools, so the notice claims no settings.
+          const settings = WorkspaceTrust.hasInputs(trustSnapshot)
+          const held = settings
+            ? "Vector is not loading this project's vector.json or .vector settings until you trust it, and keeps your language servers, formatters and MCP servers out of it."
+            : "Vector keeps your language servers, formatters and MCP servers out of this project until you trust it."
           GlobalBus.emit("event", {
             directory: "global",
             payload: {
               type: TuiEvent.ToastShow.type,
               properties: {
-                title: "Project settings ignored",
-                message:
-                  "Vector is not loading this project's vector.json or .vector settings until you trust it, and keeps your language servers, formatters and MCP servers out of it. Use /trust in the TUI, Trust project in the app, or run `vector trust approve` in the project.",
+                title: settings ? "Project settings ignored" : "Project not trusted",
+                message: `${held} Use /trust in the TUI, Trust project in the app, or run \`vector trust approve\` in the project.`,
                 variant: "warning",
                 duration: 15_000,
               },
@@ -1055,6 +1061,7 @@ const layer = Layer.effect(
               !status.trusted &&
               !Flag.VECTOR_PURE &&
               (WorkspaceTrust.hasInputs(s.trust) || startsInWorkspace(s.config)),
+            settings: WorkspaceTrust.hasInputs(s.trust),
           }
         }),
       )

@@ -28,7 +28,9 @@ export const prerender = true
           <p>
             The language servers and formatters you turn on in your own settings also stay off in a project you have not
             trusted, because they run its code, and your own local MCP servers start in an empty folder outside it, so
-            the project's <code>node_modules</code>, <code>.npmrc</code> or Python modules cannot take them over.
+            the project's <code>node_modules</code>, <code>.npmrc</code> or Python modules cannot take them over. This
+            holds in every new project, one with no settings of its own included; there the app shows
+            <strong>Project not trusted</strong> instead.
           </p>
           <p>
             Trust covers the project as it was when you approved it. A later change to anything that can run, from a

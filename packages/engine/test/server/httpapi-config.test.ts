@@ -49,7 +49,7 @@ describe("config HttpApi", () => {
 
       // The project's settings are not loaded, and clients can see why.
       expect((yield* request("/config")).body.model).not.toBe("test/project-model")
-      expect((yield* request("/config/trust")).body).toMatchObject({ trusted: false, ignored: true })
+      expect((yield* request("/config/trust")).body).toMatchObject({ trusted: false, ignored: true, settings: true })
       expect((yield* Fiber.join(notice)).payload.properties).toMatchObject({ title: "Project settings ignored" })
 
       const disposed = yield* waitDisposed(tmp.path).pipe(Effect.forkScoped({ startImmediately: true }))
@@ -89,8 +89,16 @@ describe("config HttpApi", () => {
         predicate: (event) => event.payload.type === "tui.toast.show",
       }).pipe(Effect.forkScoped({ startImmediately: true }))
 
-      expect((yield* request(tmp.path, "/config/trust")).body).toMatchObject({ trusted: false, ignored: true })
-      expect((yield* Fiber.join(notice)).payload.properties.message).toContain("language servers")
+      // The project has no settings of its own, so the notice says it is untrusted rather than that settings are ignored.
+      expect((yield* request(tmp.path, "/config/trust")).body).toMatchObject({
+        trusted: false,
+        ignored: true,
+        settings: false,
+      })
+      const held = (yield* Fiber.join(notice)).payload.properties
+      expect(held).toMatchObject({ title: "Project not trusted" })
+      expect(held.message).toContain("language servers")
+      expect(held.message).not.toContain("vector.json")
 
       const disposed = yield* waitDisposed(tmp.path).pipe(Effect.forkScoped({ startImmediately: true }))
       const approved = yield* request(tmp.path, "/config/trust", { method: "POST" })

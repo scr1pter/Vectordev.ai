@@ -748,6 +748,9 @@ export const dict = {
   "project.trust.ignored": "Project settings ignored",
   "project.trust.ignored.description":
     "Vector is not loading this project's vector.json or .vector agents, commands, plugins and MCP servers, because they can run code on this machine. Until you trust the project, your language servers and formatters stay off in it and your MCP servers start outside it. Trust the project to load them as they are now.",
+  "project.trust.untrusted": "Project not trusted",
+  "project.trust.untrusted.description":
+    "Until you trust this project, your language servers and formatters stay off in it and your MCP servers start outside it, because the project's files can run code on this machine through them. Trust the project to turn them on.",
   "project.trust.approve": "Trust project",
   "project.trust.approve.failed": "Could not trust this project",
   "project.trust.approve.failed.description": "Run `vector trust approve` in the project instead.",
