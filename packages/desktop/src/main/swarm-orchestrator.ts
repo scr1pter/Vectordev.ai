@@ -285,13 +285,18 @@ export async function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine
   //   worker merged afresh.
   // - The agent finished and passed its checks, and the merge never began: Vector closed during the pre-merge checks,
   //   or Stop came after the agent finished.
-  // Either way the worker's isolated copy must still exist: it is the only complete copy of the changes.
+  // - The merge failed for a reason other than a conflict, such as a write, after the agent finished and passed its
+  //   checks, and undid what it wrote.
+  // A merge refused by a conflict is never retried as it was: staging holds a sibling's change where this worker's
+  // changes go, and only the agent, run again from that staging, can work around it.
+  // In each case the worker's isolated copy must still exist: it is the only complete copy of the changes.
   const kept = new Set(
     (
       await Promise.all(
         current.tasks.filter(retryable).map(async (task) => {
           const previous = workspace(task)
           if (previous?.mergeState !== "none" || !(await stat(previous.isolatedPath).catch(() => undefined))) return []
+          if (previous.mergeFailure) return previous.mergeFailure === "error" ? [task.id] : []
           const finished =
             ["complete", "needs review"].includes(previous.status) &&
             previous.changedFilesCount > 0 &&

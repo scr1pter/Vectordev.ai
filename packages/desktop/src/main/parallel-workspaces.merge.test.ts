@@ -50,6 +50,7 @@ const {
   interruptEngineSession,
   listParallelWorkspaces,
   mergeParallelWorkspace,
+  mergeParallelWorkspaceSelection,
   refreshParallelWorkspace,
   rollBackUnfinishedMerge,
   runGit,
@@ -163,7 +164,7 @@ describe("merging a workspace Vector closed part-way through", () => {
     expect(getParallelWorkspace(created.id)?.mergeState).toBe("none")
   })
 
-  test.skipIf(!writeCanFail)("a git apply that stopped between files is undone, and the workspace then merges afresh", async () => {
+  test.skipIf(!writeCanFail)("a git apply that stopped between files is undone at once, and the workspace then merges afresh", async () => {
     await mkdir(join(sourcePath, "sub"))
     await writeFile(join(sourcePath, "a.txt"), "one\n")
     await writeFile(join(sourcePath, "sub", "b.txt"), "one\n")
@@ -176,18 +177,14 @@ describe("merging a workspace Vector closed part-way through", () => {
     await chmod(join(sourcePath, "sub"), 0o555)
     const stopped = await mergeParallelWorkspace(created.id).finally(() => chmod(join(sourcePath, "sub"), 0o755))
     expect(stopped.status).toBe("failed")
-    expect(await Bun.file(join(sourcePath, "a.txt")).text()).toBe("TWO\n")
-    expect(await Bun.file(join(sourcePath, "sub", "b.txt")).text()).toBe("one\n")
-    // Finishing that merge in place cannot work: the patch now applies in neither direction.
-    expect((await mergeParallelWorkspace(created.id)).error).toContain("a.txt: does not match index")
-
-    await rollBackUnfinishedMerge(created.id)
-    const undone = getParallelWorkspace(created.id)!
-    expect(undone.mergeStartedAt).toBeUndefined()
-    expect(undone.logs[0]).toContain("putting 1 file back as it was before it began")
+    expect(stopped.lastAction).toBe("Merge blocked")
+    expect(stopped.mergeFailure).toBe("error")
+    expect(stopped.mergeStartedAt).toBeUndefined()
+    expect(stopped.logs.some((log) => log.includes("putting 1 file back as it was before it began"))).toBe(true)
     expect(await Bun.file(join(sourcePath, "a.txt")).text()).toBe("one\n")
+    expect(await Bun.file(join(sourcePath, "sub", "b.txt")).text()).toBe("one\n")
     expect((await runGit(["status", "--porcelain"], sourcePath)).stdout.trim()).toBe("")
-    // What the unfinished merge had written is kept, not destroyed.
+    // What the stopped merge had written is kept, not destroyed.
     expect(await Bun.file(join(dirname(stopped.checkpointPath!), "rolled-back", "overwritten", "a.txt")).text()).toBe(
       "TWO\n",
     )
@@ -196,6 +193,77 @@ describe("merging a workspace Vector closed part-way through", () => {
     expect(merged.status).toBe("merged")
     expect(await Bun.file(join(sourcePath, "a.txt")).text()).toBe("TWO\n")
     expect(await Bun.file(join(sourcePath, "sub", "b.txt")).text()).toBe("TWO\n")
+  })
+
+  test.skipIf(!writeCanFail)("a git apply Vector closed during part-way is undone on request", async () => {
+    await mkdir(join(sourcePath, "sub"))
+    await writeFile(join(sourcePath, "a.txt"), "one\n")
+    await writeFile(join(sourcePath, "sub", "b.txt"), "one\n")
+    await commitAll(sourcePath)
+    const created = await workspace(sourcePath)
+    await writeFile(join(created.isolatedPath, "a.txt"), "TWO\n")
+    await writeFile(join(created.isolatedPath, "sub", "b.txt"), "TWO\n")
+    // What Vector had written when it closed, after git apply wrote a.txt and before it reached sub/b.txt.
+    let began: unknown
+    onWrite = (name, value) => {
+      const record = (value as ParallelWorkspaceRecord[]).find((item) => item.id === created.id)
+      if (name === "parallel-workspaces-state" && record?.mergeStartedAt) began = structuredClone(value)
+    }
+    await chmod(join(sourcePath, "sub"), 0o555)
+    await mergeParallelWorkspace(created.id).finally(() => chmod(join(sourcePath, "sub"), 0o755))
+    onWrite = () => {}
+    store.get("parallel-workspaces-state")!.set("records", began)
+    await writeFile(join(sourcePath, "a.txt"), "TWO\n")
+    expect(getParallelWorkspace(created.id)?.mergeStartedAt).toBeDefined()
+
+    await rollBackUnfinishedMerge(created.id)
+    const undone = getParallelWorkspace(created.id)!
+    expect(undone.mergeStartedAt).toBeUndefined()
+    expect(undone.logs[0]).toContain("putting 1 file back as it was before it began")
+    expect(await Bun.file(join(sourcePath, "a.txt")).text()).toBe("one\n")
+    expect((await runGit(["status", "--porcelain"], sourcePath)).stdout.trim()).toBe("")
+    expect((await mergeParallelWorkspace(created.id)).status).toBe("merged")
+  })
+
+  test.each([false, true])(
+    "a change that conflicts with one committed in the main project is refused before anything is written (force %p)",
+    async (force) => {
+      await writeFile(join(sourcePath, "app.txt"), "one\ntwo\nthree\n")
+      await commitAll(sourcePath)
+      const created = await workspace(sourcePath)
+      expect(created.isolation).toBe("git-worktree")
+      await writeFile(join(created.isolatedPath, "app.txt"), "one\nTWO-agent\nthree\n")
+      // The user commits their own edit to the same line while the agent works. `git apply --3way --check` passes this
+      // patch, saying only that it applies with conflicts.
+      await writeFile(join(sourcePath, "app.txt"), "one\nTWO-user\nthree\n")
+      await runGit(["-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-qam", "user edit"], sourcePath)
+      const blocked = await mergeParallelWorkspace(created.id, force)
+
+      expect(blocked.status).toBe("failed")
+      expect(blocked.lastAction).toBe("Merge blocked")
+      expect(blocked.mergeFailure).toBe("conflict")
+      expect(blocked.error).toContain("Merge conflict detected.")
+      expect(blocked.error).toContain("Applied patch to 'app.txt' with conflicts.")
+      expect(blocked.mergeStartedAt).toBeUndefined()
+      expect(await Bun.file(join(sourcePath, "app.txt")).text()).toBe("one\nTWO-user\nthree\n")
+      expect((await runGit(["status", "--porcelain"], sourcePath)).stdout.trim()).toBe("")
+    },
+  )
+
+  test("selected changes that conflict with the main project are refused, even when forced, before anything is written", async () => {
+    await writeFile(join(sourcePath, "app.txt"), "one\ntwo\nthree\n")
+    await commitAll(sourcePath)
+    const created = await workspace(sourcePath)
+    await writeFile(join(created.isolatedPath, "app.txt"), "one\nTWO-agent\nthree\n")
+    await writeFile(join(sourcePath, "app.txt"), "one\nTWO-user\nthree\n")
+    await runGit(["-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-qam", "user edit"], sourcePath)
+    const blocked = await mergeParallelWorkspaceSelection(created.id, { files: ["app.txt"] }, true)
+
+    expect(blocked.lastAction).toBe("Selective merge blocked")
+    expect(blocked.error).toContain("Selected changes conflict with the main project.")
+    expect(await Bun.file(join(sourcePath, "app.txt")).text()).toBe("one\nTWO-user\nthree\n")
+    expect((await runGit(["status", "--porcelain"], sourcePath)).stdout.trim()).toBe("")
+    expect(await Bun.file(join(created.isolatedPath, "app.txt")).text()).toBe("one\nTWO-agent\nthree\n")
   })
 
   test("two copies merging into one folder at once cannot both pass the conflict check", async () => {

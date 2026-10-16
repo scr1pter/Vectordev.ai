@@ -47,9 +47,8 @@ mock.module("./store", () => ({
 const { discardSwarmRun, getSwarmRun, listSwarmRuns, resumeSwarmRun, stopSwarmRun } = await import(
   "./swarm-orchestrator"
 )
-const { createParallelWorkspace, getParallelWorkspace, mergeParallelWorkspace, refreshParallelWorkspace } = await import(
-  "./parallel-workspaces"
-)
+const { createParallelWorkspace, getParallelWorkspace, mergeParallelWorkspace, refreshParallelWorkspace, runGit } =
+  await import("./parallel-workspaces")
 // These tests stop a merge part-way by making a folder read-only. That stops a write only on POSIX, and not for root.
 const writeCanFail = process.platform !== "win32" && process.getuid?.() !== 0
 const inspectTask = {
@@ -624,19 +623,42 @@ describe("swarm lifecycle", () => {
   }
 
   // The API worker changed a.txt and created sub/new.txt. Its merge into staging copied a.txt and then could not create
-  // sub/new.txt, which is where a merge Vector closed during, or one whose write failed, stops.
-  async function stoppedMerge() {
+  // sub/new.txt, so it undid the copy of a.txt at once.
+  async function failedMerge() {
     const staging = join(directory, "staging", "repo")
     const worker = await stagingWorker("api")
     await mkdir(join(worker.isolatedPath, "sub"), { recursive: true })
     await writeFile(join(worker.isolatedPath, "a.txt"), "api\n")
     await writeFile(join(worker.isolatedPath, "sub", "new.txt"), "api\n")
     await chmod(join(staging, "sub"), 0o555)
-    const stopped = await mergeParallelWorkspace(worker.id).finally(() => chmod(join(staging, "sub"), 0o755))
-    expect(stopped.status).toBe("failed")
-    expect(await Bun.file(join(staging, "a.txt")).text()).toBe("api\n")
+    const failed = await mergeParallelWorkspace(worker.id).finally(() => chmod(join(staging, "sub"), 0o755))
+    expect(failed.status).toBe("failed")
+    expect(failed.mergeFailure).toBe("error")
+    expect(failed.mergeStartedAt).toBeUndefined()
+    expect(await Bun.file(join(staging, "a.txt")).text()).toBe("before\n")
     expect(existsSync(join(staging, "sub", "new.txt"))).toBe(false)
-    return stopped
+    return failed
+  }
+
+  // The same merge when Vector closed after it copied a.txt and before it reached sub/new.txt: the record says the
+  // merge began, and staging holds a.txt as the worker changed it.
+  async function closedMidMerge() {
+    let began: Map<string, Map<string, unknown>> | undefined
+    onWrite = (name, _key, value) => {
+      if (name !== "parallel-workspaces-state") return
+      const worker = (value as ParallelWorkspaceRecord[]).find((record) => record.swarmTaskId === "api")
+      if (worker?.mergeStartedAt)
+        began = new Map([...stores].map(([store, entries]) => [store, structuredClone(entries)]))
+    }
+    const failed = await failedMerge()
+    onWrite = () => {}
+    stores.clear()
+    began!.forEach((entries, store) => stores.set(store, entries))
+    await writeFile(join(directory, "staging", "repo", "a.txt"), "api\n")
+    const closed = getParallelWorkspace(failed.id)!
+    expect(closed.mergeStartedAt).toBeDefined()
+    expect(closed.mergeFailure).toBeUndefined()
+    return closed
   }
 
   async function stagingFiles() {
@@ -646,13 +668,11 @@ describe("swarm lifecycle", () => {
     return staging
   }
 
-  test.skipIf(!writeCanFail)("Resume undoes a merge into staging that stopped part-way and merges the worker afresh without running it again", async () => {
-    const run = await seed("failed")
+  test.skipIf(!writeCanFail)("Resume undoes a merge into staging that Vector closed during part-way and merges the worker afresh without running it again", async () => {
+    const run = await seed("interrupted")
     const staging = await stagingFiles()
-    const stopped = await stoppedMerge()
-    patchRun({
-      tasks: [{ ...inspectTask, id: "api", title: "API", status: "failed", workspaceId: stopped.id, error: stopped.error }],
-    })
+    const closed = await closedMidMerge()
+    patchRun({ tasks: [{ ...inspectTask, id: "api", title: "API", status: "interrupted", workspaceId: closed.id }] })
     workers()
     await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
     const done = await settled(run.id)
@@ -661,11 +681,74 @@ describe("swarm lifecycle", () => {
     expect(done.tasks[0]?.lastAction).toBe("Validated changes integrated into staging")
     expect(await Bun.file(join(staging, "a.txt")).text()).toBe("api\n")
     expect(await Bun.file(join(staging, "sub", "new.txt")).text()).toBe("api\n")
-    expect(getParallelWorkspace(stopped.id)?.mergeState).toBe("merged")
-    expect(getParallelWorkspace(stopped.id)?.logs.some((log) => log.includes("Vector undid an unfinished merge"))).toBe(
-      true,
-    )
+    expect(getParallelWorkspace(closed.id)?.mergeState).toBe("merged")
+    expect(
+      getParallelWorkspace(closed.id)?.logs.some((log) => log.includes("Vector undid an unfinished merge")),
+    ).toBe(true)
     expect(requests).not.toContain("POST /session")
+  })
+
+  test.skipIf(!writeCanFail)("Resume merges again, without running it again, a worker whose merge into staging failed to write", async () => {
+    const run = await seed("failed")
+    const staging = await stagingFiles()
+    const failed = await failedMerge()
+    patchRun({
+      tasks: [
+        { ...inspectTask, id: "api", title: "API", status: "failed", workspaceId: failed.id, error: failed.error },
+      ],
+    })
+    workers()
+    await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
+    const done = await settled(run.id)
+
+    expect(done.tasks[0]?.status).toBe("complete")
+    expect(done.tasks[0]?.workspaceId).toBe(failed.id)
+    expect(await Bun.file(join(staging, "a.txt")).text()).toBe("api\n")
+    expect(await Bun.file(join(staging, "sub", "new.txt")).text()).toBe("api\n")
+    expect(requests).not.toContain("POST /session")
+  })
+
+  test("a worker refused by a sibling's change to the same line writes nothing into staging, and Resume runs it again from that staging", async () => {
+    const run = await seed("failed")
+    const staging = join(directory, "staging", "repo")
+    await writeFile(join(staging, "f.txt"), "one\ntwo\nthree\n")
+    await runGit(["init", "-q"], staging)
+    await runGit(["add", "."], staging)
+    await runGit(["-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-qm", "base"], staging)
+    // Two first-wave workers, made from the same staging, edit the same line.
+    const first = await stagingWorker("a")
+    const second = await stagingWorker("b")
+    expect([first.isolation, second.isolation]).toEqual(["git-worktree", "git-worktree"])
+    await writeFile(join(first.isolatedPath, "f.txt"), "one\nTWO-from-a\nthree\n")
+    await writeFile(join(second.isolatedPath, "f.txt"), "one\nTWO-from-b\nthree\n")
+    expect((await mergeParallelWorkspace(first.id)).status).toBe("merged")
+    const refused = await mergeParallelWorkspace(second.id)
+
+    expect(refused.status).toBe("failed")
+    expect(refused.mergeFailure).toBe("conflict")
+    expect(refused.mergeStartedAt).toBeUndefined()
+    expect(refused.error).toContain("Merge conflict detected.")
+    expect(await Bun.file(join(staging, "f.txt")).text()).toBe("one\nTWO-from-a\nthree\n")
+    expect((await runGit(["status", "--porcelain"], staging)).stdout).not.toContain("UU")
+
+    patchRun({
+      tasks: [
+        { ...inspectTask, id: "a", title: "A", status: "complete", workspaceId: first.id },
+        { ...inspectTask, id: "b", title: "B", status: "failed", workspaceId: second.id, error: refused.error },
+        { ...inspectTask, id: "c", title: "C", status: "blocked", dependsOn: ["b"] },
+      ],
+    })
+    workers()
+    await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
+    const done = await settled(run.id)
+
+    expect(done.tasks.map((task) => task.status)).toEqual(["complete", "complete", "complete"])
+    expect(done.tasks[1]?.workspaceId).not.toBe(second.id)
+    expect(requests.filter((request) => request === "POST /session")).toHaveLength(2)
+    expect(await Bun.file(join(staging, "f.txt")).text()).toBe("one\nTWO-from-a\nthree\n")
+    const deadline = Date.now() + 3_000
+    while (getParallelWorkspace(second.id)?.mergeState !== "discarded" && Date.now() < deadline) await Bun.sleep(20)
+    expect(getParallelWorkspace(second.id)?.mergeState).toBe("discarded")
   })
 
   test.skipIf(!writeCanFail)("undoing an unfinished merge never reverts a sibling's change merged after it", async () => {
@@ -677,13 +760,13 @@ describe("swarm lifecycle", () => {
     await writeFile(join(sibling.isolatedPath, "sub", "new.txt"), "ui\n")
     await refreshParallelWorkspace(sibling.id)
     patchWorkspace(sibling.id, { status: "complete", validationPassed: true })
-    const stopped = await stoppedMerge()
+    const closed = await closedMidMerge()
     // One agent slot, and the UI task first: it merges before the API task starts.
     patchRun({
       maxConcurrency: 1,
       tasks: [
         { ...inspectTask, id: "ui", title: "UI", status: "canceled", workspaceId: sibling.id },
-        { ...inspectTask, id: "api", title: "API", status: "failed", workspaceId: stopped.id, error: stopped.error },
+        { ...inspectTask, id: "api", title: "API", status: "interrupted", workspaceId: closed.id },
       ],
     })
     await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
