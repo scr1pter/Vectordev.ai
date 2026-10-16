@@ -917,6 +917,16 @@ test("guests cannot plant or run the repository's git hooks", async () => {
       "src/../.git/config",
       "hooks-link/pre-commit",
       "nested/.git",
+      // Windows and NTFS open these as .git, and HFS+ ignores the invisible character; on a missing target realpath
+      // keeps the spelling, so each must be refused by name. A nested .git would plant a repository of the guest's.
+      ".git./hooks/pre-commit",
+      ".git /hooks/pre-commit",
+      ".git. ./config",
+      ".git::$INDEX_ALLOCATION/hooks/pre-commit",
+      "GIT~1/hooks/pre-commit",
+      "git~2/config",
+      "nested/.git./config",
+      ".g‌it/config",
     ]
     const planted = await Promise.all(
       plants.map(async (file) => ({

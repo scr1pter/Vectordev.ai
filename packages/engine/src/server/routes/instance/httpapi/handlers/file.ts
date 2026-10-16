@@ -136,11 +136,11 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
         return yield* new InvalidRequestError({ message: "Path escapes the workspace.", field: "path" })
       }
       // git runs the programs its own directory names (hooks, config) as the owner, so a guest writing there would be
-      // running a command. Judged on both the requested and the real path, in any case.
+      // running a command. Judged on both the requested and the real path, in every spelling a file system reads as .git.
       if (
         (yield* RequestPrincipal).kind !== "owner" &&
         [path.relative(directory, target), path.relative(realpath(directory), realpath(target))].some((item) =>
-          item.split(/[\\/]/).some((segment) => segment.toLowerCase() === ".git"),
+          item.split(/[\\/]/).some(gitDirectoryName),
         )
       ) {
         return yield* new InvalidRequestError({ message: "Only the server owner can write git's files.", field: "path" })
@@ -169,3 +169,16 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       .handle("status", status)
   }),
 ).pipe(Layer.provide(locationServiceMapLayer))
+
+// Every spelling a file system may open as .git, after git's own checkout guards (is_ntfs_dotgit, is_hfs_dotgit): any
+// case, the trailing dots and spaces Windows drops, an NTFS stream suffix (`.git::$INDEX_ALLOCATION`), the 8.3 short
+// name (`GIT~1`) and the invisible characters HFS+ ignores. realpath keeps a missing target's spelling, so the name
+// itself is judged, on every system: a guest has no use for these names anywhere.
+function gitDirectoryName(segment: string) {
+  const name = segment
+    .replace(/[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g, "")
+    .split(":")[0]
+    .replace(/[. ]+$/, "")
+    .toUpperCase()
+  return name === ".GIT" || /^GIT~\d+$/.test(name)
+}
