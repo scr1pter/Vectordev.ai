@@ -1,13 +1,26 @@
 import type { AssistantMessage } from "@vectordevai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi } from "@vectordevai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
-import { createMemo, createResource, For } from "solid-js"
+import { createMemo, createResource, For, Show } from "solid-js"
 import { Locale } from "../../util/locale"
 import { delegatedSpendLines } from "../../util/session"
+import { useSync } from "../../context/sync"
 
 const id = "internal:sidebar-context"
 
+const money = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+})
+
+/** "$0.84 of $2.00" for a run under a spend cap, or undefined when the run has no dollar cap. */
+export function spendCapLabel(spend: { spentUsd: number; capUsd?: number } | undefined) {
+  if (spend?.capUsd === undefined) return undefined
+  return `${money.format(spend.spentUsd)} of ${money.format(spend.capUsd)}`
+}
+
 function View(props: { api: TuiPluginApi; session_id: string }) {
+  const sync = useSync()
   const theme = () => props.api.theme.current
   const msg = createMemo(() => props.api.state.session.messages(props.session_id))
   const session = createMemo(() => props.api.state.session.get(props.session_id))
@@ -38,6 +51,8 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       children.latest?.sessionID === props.session_id ? children.latest.sessions : undefined,
     ),
   )
+  // The spend guard reports under the root session, so a subagent's own sidebar shows no run cap.
+  const spend = createMemo(() => sync.data.session_spend[props.session_id])
 
   const state = createMemo(() => {
     const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
@@ -66,6 +81,9 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       <text fg={theme().textMuted}>{state().percent ?? 0}% used</text>
       <text fg={theme().textMuted}>{spent()}</text>
       <For each={delegated()}>{(line) => <text fg={theme().textMuted}>{line}</text>}</For>
+      <Show when={spendCapLabel(spend())}>
+        {(label) => <text fg={spend()?.warned ? theme().warning : theme().textMuted}>{label()} run cap</text>}
+      </Show>
     </box>
   )
 }

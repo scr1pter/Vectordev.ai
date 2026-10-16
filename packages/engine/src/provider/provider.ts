@@ -1009,6 +1009,9 @@ const ProviderCost = Schema.Struct({
   ),
   // No price is listed for the model: the zero rates mean unknown, not free, and its steps are recorded as unpriced.
   unpriced: optional(Schema.Boolean),
+  // The plan of the account signed in pays for the model's steps, such as a ChatGPT plan, so the zero rates mean
+  // nothing is billed per token.
+  plan: optional(Schema.Boolean),
 })
 
 const ProviderLimit = Schema.Struct({

@@ -19,6 +19,9 @@ import { ModelV2 } from "../../model"
 import { ProviderV2 } from "../../provider"
 import { SessionSchema } from "../schema"
 import { WorkspaceTrust } from "../../workspace-trust/workspace-trust"
+import { SpendGuard } from "../../spend-guard"
+import { NEXT_STEP_SLACK } from "../../review/plan"
+import { isFreeModel } from "@vectordevai/schema/free-model"
 
 export class ModelNotSelectedError extends Schema.TaggedErrorClass<ModelNotSelectedError>()(
   "SessionRunnerModel.ModelNotSelectedError",
@@ -113,6 +116,14 @@ export const withPricing = (model: Model, cost: ModelV2.Info["cost"]) => {
   return model
 }
 
+// Models sent through the free route, which refuses any request that is not priced at zero.
+const freeRoutes = new WeakSet<Model>()
+
+export const withFreeRoute = (model: Model) => {
+  freeRoutes.add(model)
+  return withPricing(model, [{ input: 0, output: 0, cache: { read: 0, write: 0 } }])
+}
+
 // The smallest long-context tier, at 200K or beyond, past which the model's listed price rises. Some catalogs price
 // input in bands from 32K up; those bands do not say where to compact.
 export const contextTier = (model: Model) => {
@@ -122,19 +133,69 @@ export const contextTier = (model: Model) => {
   return sizes.length ? Math.min(...sizes) : undefined
 }
 
-export const calculateCost = (model: Model, tokens: Tokens, metadata?: ProviderMetadata) => {
-  const totalNanoAiu = metadata?.copilot?.totalNanoAiu
-  if (typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0)
-    // Copilot bills in nano AI units: 1 AI credit is 1e9 nano-AIU and costs $0.01, so USD = nano-AIU / 1e11.
-    return totalNanoAiu / 100_000_000_000
-  const costs = pricing.get(model)
-  if (!costs?.length) return undefined
-  const context = tokens.input + tokens.cache.read + tokens.cache.write
-  const selected =
+// The rates the spend guard estimates the next step at: those a request carrying `contextTokens` is billed at.
+export const priceOf = (model: Model, contextTokens: number) => {
+  const cost = costAt(model, contextTokens)
+  return cost ? SpendGuard.priceOf(cost) : undefined
+}
+
+// The rates a request carrying `contextTokens` of context is billed at: the highest long-context tier it passes, else
+// the base rates.
+const costAt = (model: Model, contextTokens: number) => {
+  const costs = pricing.get(model) ?? []
+  return (
     costs
-      .filter((item) => item.tier?.type === "context" && context > item.tier.size)
+      .filter((item) => item.tier?.type === "context" && contextTokens > item.tier.size)
       .sort((left, right) => (right.tier?.size ?? 0) - (left.tier?.size ?? 0))[0] ??
     costs.find((item) => item.tier === undefined)
+  )
+}
+
+// Free models are exempt from the spend guard's dollar checks. An unpriced model is never free; a free-route one is.
+export const isFree = (model: Model) =>
+  freeRoutes.has(model) ||
+  isFreeModel({
+    providerID: model.provider,
+    id: model.id,
+    cost: pricing.get(model)?.find((item) => item.tier === undefined),
+  })
+
+// One settled provider step as the spend guard counts it. An unpriced step's cost stays undefined, never $0. A
+// catalog entry with no input and no output rate still prices every step at $0, so a step is listed only with real
+// catalog rates or a cost the provider reported (Copilot's metered cost). That is Vectorscope's rule, so both call such
+// a model unknown. A Vector Codium step carries neither, so it counts as unpriced.
+export const spendStep = (
+  model: Model,
+  settlement: { readonly tokens: Tokens; readonly providerMetadata?: ProviderMetadata },
+  step: { readonly continues: boolean; readonly patched: boolean },
+): SpendGuard.Step => {
+  const costUsd = calculateCost(model, settlement.tokens, settlement.providerMetadata)
+  const contextTokens = settlement.tokens.input + settlement.tokens.cache.read + settlement.tokens.cache.write
+  const price = priceOf(model, contextTokens + NEXT_STEP_SLACK)
+  return {
+    costUsd,
+    costKind: SpendGuard.costKindOf({
+      free: isFree(model),
+      // V2 does not detect OAuth plans yet.
+      oauthPlan: false,
+      listed:
+        reportedUsd(model, settlement.providerMetadata) !== undefined || (costUsd !== undefined && price !== undefined),
+    }),
+    price,
+    contextTokens,
+    cachedTokens: settlement.tokens.cache.read,
+    continues: step.continues,
+    // V2 does not collect loop signatures yet.
+    tools: [],
+    patched: step.patched,
+  }
+}
+
+export const calculateCost = (model: Model, tokens: Tokens, metadata?: ProviderMetadata) => {
+  const reported = reportedUsd(model, metadata)
+  if (reported !== undefined) return reported
+
+  const selected = costAt(model, tokens.input + tokens.cache.read + tokens.cache.write)
   if (!selected) return undefined
   const cost =
     (tokens.input * selected.input +
@@ -144,6 +205,16 @@ export const calculateCost = (model: Model, tokens: Tokens, metadata?: ProviderM
     1_000_000
   if (!Number.isFinite(cost)) return undefined
   return Math.max(0, cost)
+}
+
+// What the provider reported a step cost, whatever the catalog says.
+function reportedUsd(model: Model, metadata?: ProviderMetadata) {
+  const totalNanoAiu = metadata?.copilot?.totalNanoAiu
+  if (typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0)
+    // Copilot bills in nano AI units: 1 AI credit is 1e9 nano-AIU and costs $0.01, so USD = nano-AIU / 1e11.
+    return totalNanoAiu / 100_000_000_000
+  // Vector Codium is not here: its gateway keeps the provider's charge on vectordev.ai, so a Codium step is unpriced.
+  return undefined
 }
 
 const apiKey = (model: ModelV2.Info, credential?: Credential.Value) => {
@@ -315,10 +386,7 @@ export const locationLayer = Layer.effect(
           return withPricing(modelPlanRoute(selected, modelPlans, freeCredentials), selected.cost)
         // Configuration can overwrite API metadata or add a free ID after catalog validation.
         // Free intent always crosses the final eligibility and zero-price request guard.
-        if (requiresFreeRoute(selected))
-          return withPricing(freeModelRoute(selected, freeModels, freeCredentials), [
-            { input: 0, output: 0, cache: { read: 0, write: 0 } },
-          ])
+        if (requiresFreeRoute(selected)) return withFreeRoute(freeModelRoute(selected, freeModels, freeCredentials))
         const provider = yield* catalog.provider.get(selected.providerID)
         const connection = yield* integrations.connection.active(
           provider?.integrationID ?? Integration.ID.make(selected.providerID),

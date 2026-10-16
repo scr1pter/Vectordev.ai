@@ -28,6 +28,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@vectordevai/core/database/database"
 import { Provider } from "@/provider/provider"
 import { Locale } from "@/util/locale"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 import path from "path"
 
 export interface TaskPromptOps {
@@ -342,6 +343,7 @@ export const TaskTool = Tool.define(
     const provider = yield* Provider.Service
     const truncate = yield* Truncate.Service
     const statuses = yield* SessionStatus.Service
+    const guard = yield* SpendGuard.Service
     // Notes waiting to reach each parent, so tasks that end close together reach it as one message.
     const notes = new Map<
       SessionID,
@@ -396,6 +398,9 @@ export const TaskTool = Tool.define(
             Option.isSome(found) && found.value.info.role === "user" ? found.value.info : undefined,
           ),
         )
+      // A run the spend guard stopped stays stopped until the user continues it, so notes that land after the stop are
+      // recorded without starting a new, uncapped turn.
+      const halted = (yield* guard.snapshot(parentID))?.stopped !== undefined
       yield* first.ops.prompt({
         sessionID: parentID,
         agent: first.agent,
@@ -409,7 +414,7 @@ export const TaskTool = Tool.define(
           : { variant: first.variant }),
         // A stopped subagent is recorded for the parent's next turn without starting one, so stopping work never makes
         // the agent carry on alone. A batch with a finished task in it starts one turn for all of them.
-        ...(batch.every((note) => note.state === "cancelled") ? { noReply: true } : {}),
+        ...(halted || batch.every((note) => note.state === "cancelled") ? { noReply: true } : {}),
         parts: batch.map((note) => ({
           type: "text" as const,
           synthetic: true,
@@ -842,6 +847,8 @@ export const TaskTool = Tool.define(
             ],
           }))
         if (!session) batch?.own(nextSession.id)
+        // The child's spend counts against its parent's run, for new children and task_id resumes alike.
+        yield* guard.link(nextSession.id, ctx.sessionID)
 
         const metadata = {
           parentSessionId: ctx.sessionID,

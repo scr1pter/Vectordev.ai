@@ -65,6 +65,7 @@ import { SessionPrompt } from "@/session/prompt"
 import { SessionAdmission } from "@/session/admission"
 import type { SessionID } from "@/session/schema"
 import { Session } from "@/session/session"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { Truncate } from "@/tool/truncate"
 import type { ResolvedModel } from "./model"
 
@@ -148,9 +149,15 @@ export const run: (
 ) => Effect.Effect<
   ReviewOutcome,
   never,
-  Session.Service | SessionPrompt.Service | Permission.Service | EventV2Bridge.Service | Provider.Service
+  | Session.Service
+  | SessionPrompt.Service
+  | Permission.Service
+  | EventV2Bridge.Service
+  | Provider.Service
+  | SpendGuard.Service
 > = Effect.fn("Review.run")(function* (input: RunInput) {
   const sessions = yield* Session.Service
+  const guard = yield* SpendGuard.Service
   const prompts = yield* SessionPrompt.Service
   const permission = yield* Permission.Service
   const events = yield* EventV2Bridge.Service
@@ -293,6 +300,9 @@ export const run: (
         finalizing: false,
         denied: false,
       }
+      // The review has its own step, cost and time limits; the run guard's loop rules would pause a specialist that
+      // re-reads a file, since review agents never edit one.
+      yield* guard.ignoreLoops(session.id)
       tracks.set(session.id, track)
       sessionIDs.push(session.id)
       yield* progress({ type: "specialist", name: spec.name, status: "running" })
@@ -386,6 +396,9 @@ export const run: (
       const first = yield* send(spec.text, deadline - Date.now())
       if (first.timedOut) track.stop ??= "timeout"
       const message = first.timedOut ? undefined : first.message
+      // A project budget.run cap can still stop a specialist through the run guard. Count it as a budget stop, so
+      // the files it never reached are reported as not reviewed and the finalize prompt runs.
+      if (message?.info.role === "assistant" && message.info.error?.name === "BudgetStopError") track.stop ??= "budget"
       const structured = message?.info.role === "assistant" ? message.info.structured : undefined
       // The report came back whole; a stop that landed after its last step changes nothing.
       const value =

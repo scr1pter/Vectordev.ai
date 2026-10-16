@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   agentCardDetails,
+  agentCostLabel,
   boardColumns,
   elapsedLabel,
   filterAgents,
@@ -226,6 +227,16 @@ describe("agentCardDetails", () => {
     })
   })
 
+  test("a Vector-runtime agent never shows the estimate band", () => {
+    expect(agentCardDetails(agent({ runtime: "vector", status: "editing", estimatedCost: "< $0.01" })).cost).toBe(
+      "measuring…",
+    )
+    expect(agentCardDetails(agent({ runtime: "vector", status: "complete", estimatedCost: "< $0.01" })).cost).toBe(
+      "unmeasured",
+    )
+    expect(agentCardDetails(agent({ runtime: "vector", status: "failed", actualCost: "$0.42" })).cost).toBe("$0.42")
+  })
+
   test("uses a reported error as the most important activity", () => {
     expect(agentCardDetails(agent({ error: "Typecheck failed", lastAction: "Running tests" })).activity).toBe(
       "Typecheck failed",
@@ -355,5 +366,34 @@ describe("filtering agents", () => {
     expect(hasActiveFilters({ query: "warmup" })).toBe(true)
     expect(hasActiveFilters({ statuses: [] })).toBe(false)
     expect(hasActiveFilters({ pullRequest: "open" })).toBe(true)
+  })
+})
+
+describe("agentCostLabel", () => {
+  test("external runtimes keep their estimate until their own cost arrives", () => {
+    expect(agentCostLabel({ runtime: "claude-code", estimatedCost: "$0.10", running: true })).toBe("$0.10")
+    expect(agentCostLabel({ runtime: "claude-code", estimatedCost: "", running: false })).toBeUndefined()
+    expect(
+      agentCostLabel({ runtime: "claude-code", estimatedCost: "$0.10", actualCost: "$0.20", running: false }),
+    ).toBe("$0.20")
+  })
+
+  test("measured cost prints like the rest of the app", () => {
+    expect(agentCostLabel({ runtime: "vector", estimatedCost: "", actualCost: "$0.4213", running: false })).toBe(
+      "$0.42",
+    )
+    expect(agentCostLabel({ runtime: "vector", estimatedCost: "", actualCost: "$0.0031", running: false })).toBe(
+      "<$0.01",
+    )
+    expect(agentCostLabel({ runtime: "claude-code", estimatedCost: "", actualCost: "$1,204.5", running: false })).toBe(
+      "$1,204.50",
+    )
+    expect(agentCostLabel({ runtime: "claude-code", estimatedCost: "", actualCost: "n/a", running: false })).toBe("n/a")
+  })
+
+  test("the Vector runtime is measured, measuring or unmeasured", () => {
+    expect(agentCostLabel({ runtime: "vector", estimatedCost: "", running: true })).toBe("measuring…")
+    expect(agentCostLabel({ runtime: "vector", estimatedCost: "< $0.01", running: false })).toBe("unmeasured")
+    expect(agentCostLabel({ runtime: "vector", estimatedCost: "", actualCost: "$0.42", running: false })).toBe("$0.42")
   })
 })

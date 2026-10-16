@@ -29,8 +29,16 @@ import { Database } from "@vectordevai/core/database/database"
 import { Usage, type LLMEvent } from "@vectordevai/llm"
 import { EffectBridge } from "@/effect/bridge"
 import { NativePatch } from "./llm/native-patch"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { NEXT_STEP_SLACK } from "@vectordevai/core/review/plan"
+import { providerCredentialAllowed, providerUsable } from "@vectordevai/core/provider-policy"
+import { isFreeModel } from "@vectordevai/schema/free-model"
+import { Auth } from "@/auth"
 
 const DOOM_LOOP_THRESHOLD = 3
+// Tools that change files. Without a snapshot to diff, a successful call to one of these counts as a file change for
+// the spend guard's loop rules.
+const FILE_TOOLS = new Set(["edit", "write", "apply_patch"])
 export type Result = "compact" | "stop" | "continue"
 
 export interface Handle {
@@ -77,6 +85,15 @@ interface ProcessorContext extends Input {
   // The opening snapshot while it is still being taken.
   opening: Fiber.Fiber<string | undefined> | undefined
   blocked: boolean
+  // The tool calls of the current provider step, for the spend guard's loop rules.
+  stepTools: {
+    callID: string
+    tool: string
+    input: string
+    output?: string
+    error?: string
+    providerExecuted: boolean
+  }[]
   needsCompaction: boolean
   currentText: SessionV1.TextPart | undefined
   reasoningMap: Record<string, SessionV1.ReasoningPart>
@@ -104,6 +121,8 @@ const layer = Layer.effect(
     const image = yield* Image.Service
     const events = yield* EventV2Bridge.Service
     const database = yield* Database.Service
+    const auth = yield* Auth.Service
+    const guard = yield* SpendGuard.Service
 
     // A session's snapshot work runs in order and off the request path: each piece starts after the one before it, so
     // the closing snapshot and patch of one step land before the next step's opening snapshot. Every tool call waits
@@ -139,6 +158,26 @@ const layer = Layer.effect(
       // The opening snapshot is taken while the request is built and sent rather than before it. The AI SDK may run
       // tools before it emits start-step, so tools are held until it lands instead (see `gate` in process).
       const opening = yield* enqueue(input.sessionID, snapshot.track())
+      // How this model's steps count against a run budget. A plan, such as a ChatGPT plan, pays for them only when
+      // the credential llm.ts actually sends is the stored OAuth sign-in, so this applies the same credential rule.
+      // The sign-in is read from disk while the request is sent, off the request path.
+      const costKind = yield* auth.get(input.model.providerID).pipe(
+        Effect.catch(() => Effect.succeed(undefined)),
+        Effect.map((signIn) =>
+          SpendGuard.costKindOf({
+            free: isFreeModel(input.model) || input.model.freeModel !== undefined,
+            oauthPlan:
+              signIn?.type === "oauth" &&
+              providerCredentialAllowed(
+                input.model.providerID,
+                signIn,
+                providerUsable(input.model.providerID, { npm: input.model.api.npm, api: input.model.api.url }),
+              ),
+            listed: input.model.cost.input > 0 || input.model.cost.output > 0,
+          }),
+        ),
+        Effect.forkIn(scope),
+      )
       const ctx: ProcessorContext = {
         assistantMessage: input.assistantMessage,
         sessionID: input.sessionID,
@@ -148,6 +187,7 @@ const layer = Layer.effect(
         snapshot: undefined,
         opening,
         blocked: false,
+        stepTools: [],
         needsCompaction: false,
         currentText: undefined,
         reasoningMap: {},
@@ -174,10 +214,11 @@ const layer = Layer.effect(
 
       // Records the files the step changed since its opening snapshot. Queued, so it reads the worktree before any
       // later step's tools can change it.
+      // Whether the step changed a file, which the spend guard's loop rules also learn here.
       const recordPatch = (start: string) =>
         Effect.gen(function* () {
           const patch = yield* snapshot.patch(start)
-          if (!patch.files.length) return
+          if (!patch.files.length) return false
           yield* session.updatePart({
             id: PartID.ascending(),
             messageID: ctx.assistantMessage.id,
@@ -186,6 +227,8 @@ const layer = Layer.effect(
             hash: patch.hash,
             files: patch.files,
           })
+          yield* guard.changed(ctx.sessionID)
+          return true
         })
 
       const settleToolCall = Effect.fn("SessionProcessor.settleToolCall")(function* (toolCallID: string) {
@@ -236,6 +279,12 @@ const layer = Layer.effect(
       ) {
         const match = yield* readToolCall(toolCallID)
         if (!match || match.part.state.status !== "running") return
+        // A digest of what the call returned, so the spend guard's loop rules can tell a repeat from a call that got
+        // a new answer.
+        const digest = Bun.hash(
+          [output.output, ...(output.attachments ?? []).map((attachment) => attachment.url)].join("\n"),
+        ).toString(36)
+        ctx.stepTools = ctx.stepTools.map((item) => (item.callID === toolCallID ? { ...item, output: digest } : item))
         yield* session.updatePart({
           ...match.part,
           state: {
@@ -266,8 +315,66 @@ const layer = Layer.effect(
         if (error instanceof PermissionV1.RejectedError || error instanceof Question.RejectedError) {
           ctx.blocked = ctx.shouldBreak
         }
+        ctx.stepTools = ctx.stepTools.map((item) =>
+          item.callID === toolCallID ? { ...item, error: errorMessage(error) } : item,
+        )
         yield* settleToolCall(toolCallID)
         return true
+      })
+
+      // Counts one provider step against the run of this session's root. A stop on a step that would continue ends
+      // the turn with BudgetStopError. A stop on a final answer leaves the answer alone; the run's stopped flag still
+      // halts the rest of the lineage at its next boundary.
+      const recordStep = Effect.fn("SessionProcessor.recordStep")(function* (
+        step: {
+          costUsd: number
+          unpriced: boolean
+          tokens: SessionV1.Assistant["tokens"]
+          continues: boolean
+          patched: boolean
+        },
+        confirm?: Effect.Effect<boolean>,
+      ) {
+        const tools = ctx.stepTools
+        ctx.stepTools = []
+        const kind = (yield* result(costKind)) ?? "unknown"
+        const contextTokens = step.tokens.input + step.tokens.cache.read + step.tokens.cache.write
+        // The next step is estimated at the rates its context will be billed at, a long-context tier included.
+        const rates = Session.costAt(input.model.cost, contextTokens + NEXT_STEP_SLACK)
+        const verdict = yield* guard.record(
+          ctx.sessionID,
+          {
+            costUsd: step.costUsd,
+            // A model the catalog lists no price for is still priced when its provider reported what the step cost.
+            costKind: kind === "unknown" && step.costUsd > 0 && !step.unpriced ? "priced" : kind,
+            price: rates && SpendGuard.priceOf(rates),
+            contextTokens,
+            cachedTokens: step.tokens.cache.read,
+            continues: step.continues,
+            tools: (yield* config.get()).budget?.loop?.enabled === false ? [] : tools,
+            patched: step.patched,
+          },
+          confirm,
+        )
+        if (verdict.state !== "stopped" || !step.continues) return
+        yield* stopTurn(verdict)
+      })
+
+      // Ends this turn with the reason the spend guard stopped its run.
+      const stopTurn = Effect.fn("SessionProcessor.stopTurn")(function* (
+        stop: SpendGuard.Stop & { readonly estimate?: SpendGuard.Estimate },
+      ) {
+        const run = yield* guard.snapshot(ctx.sessionID)
+        ctx.assistantMessage.error = new SessionV1.BudgetStopError({
+          reason: stop.reason,
+          message: stop.message,
+          spentUsd: run?.spentUsd,
+          capUsd: run?.budget.usd,
+          unpricedSteps: run?.unpricedSteps,
+          estimate: stop.estimate,
+        }).toObject()
+        ctx.blocked = true
+        yield* session.updateMessage(ctx.assistantMessage)
       })
 
       const finishReasoning = Effect.fn("SessionProcessor.finishReasoning")(function* (reasoningID: string) {
@@ -398,8 +505,14 @@ const layer = Layer.effect(
             if (ctx.assistantMessage.summary) {
               throw new Error(`Tool call not allowed while generating summary: ${value.name}`)
             }
-            yield* ensureToolCall(value)
+            const call = yield* ensureToolCall(value)
             const input = isRecord(value.input) ? value.input : { value: value.input }
+            ctx.stepTools.push({
+              callID: value.id,
+              tool: value.name,
+              input: JSON.stringify(input),
+              providerExecuted: call.part.metadata?.providerExecuted === true,
+            })
             yield* updateToolCall(value.id, (match) => ({
               ...match,
               tool: value.name,
@@ -546,20 +659,36 @@ const layer = Layer.effect(
             const opening = ctx.opening
             ctx.snapshot = undefined
             ctx.opening = undefined
-            yield* enqueue(
+            const work = yield* enqueue(
               ctx.sessionID,
               Effect.gen(function* () {
                 const closing = yield* snapshot.track()
                 if (closing) yield* session.updatePart({ ...stepFinish, snapshot: closing })
                 const from = start ?? (opening ? yield* result(opening) : undefined)
-                if (from) yield* recordPatch(from)
+                const changed = from ? yield* recordPatch(from) : false
                 yield* summary
                   .summarize({
                     sessionID: ctx.sessionID,
                     messageID: ctx.assistantMessage.parentID,
                   })
                   .pipe(Effect.ignore, Effect.forkIn(scope))
+                return changed
               }),
+            )
+            yield* recordStep(
+              {
+                costUsd: usage.cost,
+                unpriced: usage.unpriced,
+                tokens: usage.tokens,
+                // The loop's own rule: it goes on after "tool-calls", and after local tool calls under any finish
+                // reason. A StructuredOutput call is the final answer.
+                continues:
+                  (value.reason === "tool-calls" || ctx.stepTools.some((item) => !item.providerExecuted)) &&
+                  !ctx.stepTools.some((item) => item.tool === "StructuredOutput"),
+                // The step's patch is taken off the request path, so a successful edit tool stands in for it here.
+                patched: ctx.stepTools.some((item) => FILE_TOOLS.has(item.tool) && item.error === undefined),
+              },
+              result(work).pipe(Effect.map((changed) => changed === true)),
             )
             if (
               !ctx.assistantMessage.summary &&
@@ -643,6 +772,14 @@ const layer = Layer.effect(
         ctx.assistantMessage.cost += usage.cost
         if (usage.unpriced) ctx.assistantMessage.unpriced = true
         ctx.assistantMessage.tokens = usage.tokens
+        // Billed too, so it counts against the run, as a step that stopped where it was.
+        yield* recordStep({
+          costUsd: usage.cost,
+          unpriced: usage.unpriced,
+          tokens: usage.tokens,
+          continues: false,
+          patched: false,
+        })
         yield* session.updatePart({
           id: PartID.ascending(),
           reason,
@@ -782,6 +919,14 @@ const layer = Layer.effect(
             Effect.gen(function* () {
               ctx.currentText = undefined
               ctx.reasoningMap = {}
+              ctx.stepTools = []
+              // This body is also re-entered on every retry, and a run the spend guard stopped meanwhile, in this
+              // session or anywhere in its lineage, starts no new attempt.
+              const stop = yield* guard.stopped(ctx.sessionID)
+              if (stop) {
+                yield* stopTurn(stop)
+                return
+              }
               yield* restore(status.set(ctx.sessionID, { type: "busy" }))
               // This body is re-entered on every retry. Refusal is a normal stop, never a retryable provider error.
               const lease = admission?.admit({
@@ -908,6 +1053,8 @@ export const node = LayerNode.make({
     Image.node,
     EventV2Bridge.node,
     Database.node,
+    Auth.node,
+    SpendGuard.node,
   ],
 })
 

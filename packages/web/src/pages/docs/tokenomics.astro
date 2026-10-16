@@ -1,6 +1,6 @@
 ---
 import DocsPage from "../../layouts/DocsPage.astro"
-import { spendRows } from "../../data/docs-content"
+import { runGuardRows, spendRows } from "../../data/docs-content"
 
 export const prerender = true
 ---
@@ -29,4 +29,14 @@ export const prerender = true
             the longest run and the peak day. It also keeps a daily streak with your current and longest run, seven
             days of activity, and your top five models by share of all-time token use.
           </p>
+          <h3>The Run Guard, in the next release</h3>
+          <p>
+            The next release holds runs to a live cap instead of checking only before they start. Vector checks spend
+            after every model step and stops within one step of the cap for each agent running at the time. Dollars
+            are the reported tokens at catalog
+            list price unless the provider reported what the step cost, so discounts are not reflected.
+          </p>
+          <dl class="doc-rows">
+            {runGuardRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
+          </dl>
 </DocsPage>

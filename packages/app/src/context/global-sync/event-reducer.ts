@@ -1,6 +1,7 @@
 import { Binary } from "@vectordevai/core/util/binary"
 import { produce, reconcile, type SetStoreFunction, type Store } from "solid-js/store"
 import type {
+  EventSessionSpend,
   Message,
   Part,
   PermissionRequest,
@@ -218,6 +219,11 @@ export function applyDirectoryEvent(input: {
     case "session.status": {
       const props = event.properties as { sessionID: string; status: SessionStatus }
       input.setStore("session_status", props.sessionID, reconcile(props.status))
+      break
+    }
+    case "session.spend": {
+      const props = event.properties as EventSessionSpend["properties"]
+      input.setStore("session_spend", props.sessionID, reconcile(props))
       break
     }
     case "message.updated": {

@@ -7,6 +7,7 @@ export type SettingsTab =
   | "models"
   | "servers"
   | "usage"
+  | "spend"
   | "about"
   | "voice"
   | "personalization"
@@ -40,6 +41,12 @@ export const settingsGroups: readonly SettingsGroup[] = [
         label: "Usage & streak",
         icon: "status",
         keywords: ["tokens", "cost", "activity", "economics"],
+      },
+      {
+        value: "spend",
+        label: "Spend limits",
+        icon: "shield",
+        keywords: ["budget", "cap", "cost", "limit"],
       },
       {
         value: "appearance",

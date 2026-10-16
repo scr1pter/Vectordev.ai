@@ -7,6 +7,7 @@ import { Auth } from "@/auth"
 import { Config } from "@/config/config"
 import { Provider } from "@/provider/provider"
 import { contextRefusal, type ReviewPrice } from "@vectordevai/core/review/plan"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 import type { CostKind, Trigger } from "@vectordevai/core/review/types"
 import type { ProviderV2 } from "@vectordevai/core/provider"
 import type { ModelV2 } from "@vectordevai/core/model"
@@ -86,15 +87,13 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
   if (refusal) return yield* new ReviewModelError({ message: refusal })
 
   const signIn = yield* auth.get(model.providerID).pipe(Effect.catch(() => Effect.succeed(undefined)))
-  const listed = model.cost.input > 0 || model.cost.output > 0
-  const costKind: CostKind = isFreeModel(model)
-    ? "free"
-    : signIn?.type === "oauth" &&
-        providerCredentialAllowed(model.providerID, signIn, Boolean(model.api.npm || model.api.url))
-      ? "plan"
-      : listed
-        ? "priced"
-        : "unknown"
+  const costKind = SpendGuard.costKindOf({
+    free: isFreeModel(model),
+    oauthPlan:
+      signIn?.type === "oauth" &&
+      providerCredentialAllowed(model.providerID, signIn, Boolean(model.api.npm || model.api.url)),
+    listed: model.cost.input > 0 || model.cost.output > 0,
+  })
 
   return {
     providerID: model.providerID,
@@ -102,16 +101,7 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
     // The agent's variant applies only when the agent's own model was chosen, as elsewhere in the engine.
     ...(chosen && chosen === agent?.model && agent.variant ? { variant: agent.variant } : {}),
     context: model.limit.context,
-    ...(costKind === "priced"
-      ? {
-          price: {
-            input: model.cost.input,
-            output: model.cost.output,
-            ...(model.cost.cache.read > 0 ? { cacheRead: model.cost.cache.read } : {}),
-            ...(model.cost.cache.write > 0 ? { cacheWrite: model.cost.cache.write } : {}),
-          },
-        }
-      : {}),
+    ...(costKind === "priced" ? { price: SpendGuard.priceOf(model.cost) } : {}),
     costKind,
   } satisfies ResolvedModel
 })

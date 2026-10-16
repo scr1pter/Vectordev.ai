@@ -155,6 +155,17 @@ describe("autoRespondsPermission", () => {
       ).toBe(false)
     },
   )
+
+  test("never auto-accepts a doom_loop request on an auto-accepting lineage", () => {
+    const directory = "/tmp/project"
+    const sessions = [session({ id: "root" }), session({ id: "child", parentID: "root" })]
+    const autoAccept = {
+      [`${base64Encode(directory)}/root`]: true,
+    }
+
+    expect(autoRespondsPermission(autoAccept, sessions, permission("child", "doom_loop"), directory)).toBe(false)
+    expect(autoRespondsPermission(autoAccept, sessions, permission("child", "edit"), directory)).toBe(true)
+  })
 })
 
 describe("isDirectoryAutoAccepting", () => {

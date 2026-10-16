@@ -14,7 +14,8 @@ import { useSDK } from "@/context/sdk"
 import { getSessionContext } from "@/components/session/session-context-metrics"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
-import { formatSessionCost, sessionSpend, sessionTokens } from "@/utils/session-cost"
+import { sessionSpend, sessionTokens } from "@/utils/session-cost"
+import { lastAssistantModel, sessionReading, spendKind } from "@/features/economics/format-spend"
 
 interface SessionContextUsageProps {
   variant?: "button" | "indicator"
@@ -73,13 +74,18 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
   // The same task totals as the cost beside it: the session's own tokens plus what its subagents and Vector's helpers
   // used for it.
   const tokens = createMemo(() => sessionTokens(info()))
-  const cost = createMemo(() =>
-    formatSessionCost({
-      ...sessionSpend(info()),
+  const cost = createMemo(() => {
+    const model = lastAssistantModel(messages())
+    const spend = sessionSpend(info())
+    return sessionReading({
+      cost: spend.cost,
+      unpricedSteps: spend.unpricedSteps,
+      tokens: tokens(),
+      kind: spendKind(providers.all(), model?.providerID, model?.modelID),
       format: (value) => usd().format(value),
       t: language.t,
-    }),
-  )
+    }).label
+  })
   const contextVisible = createMemo(() => view().reviewPanel.opened() && tabState.activeTab() === "context")
   const hasOtherTabs = createMemo(() =>
     tabs()

@@ -5,6 +5,7 @@ import { LLM } from "@vectordevai/llm"
 import { LLMClient, RequestExecutor } from "@vectordevai/llm/route"
 import { FreeModels } from "../src/free-models"
 import { freeModelRoute } from "../src/session/runner/free-model-route"
+import { SessionRunnerModel } from "../src/session/runner/model"
 import { ModelV2 } from "../src/model"
 import { ProviderV2 } from "../src/provider"
 import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
@@ -203,4 +204,22 @@ test("a saved shared selection routed to the own key is not subject to the Vecto
   )
   expect(requests).toEqual([FreeModels.OPENROUTER_CHAT_URL])
   expect(result._tag).toBe("Success")
+})
+
+test("the run guard counts a free-route step as free, whatever the model's ID says", () => {
+  const credentials = FreeModels.CredentialsService.of({ get: () => Effect.succeed("vct_shared") })
+  // A configured free ID need not end in :free; the route itself is what refuses anything not priced at zero.
+  const model = SessionRunnerModel.withFreeRoute(
+    freeModelRoute(
+      ModelV2.Info.make({ ...info, id: ModelV2.ID.make("example/coder"), freeModel: { source: "openrouter" } }),
+      client,
+      credentials,
+    ),
+  )
+  const tokens = { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } }
+  expect(SessionRunnerModel.isFree(model)).toBe(true)
+  expect(SessionRunnerModel.spendStep(model, { tokens }, { continues: true, patched: false })).toMatchObject({
+    costUsd: 0,
+    costKind: "free",
+  })
 })

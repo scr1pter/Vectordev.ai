@@ -594,6 +594,9 @@ import type {
   V2SessionRevertStageData,
   V2SessionRevertStageErrors,
   V2SessionRevertStageResponses,
+  V2SessionSpendData,
+  V2SessionSpendErrors,
+  V2SessionSpendResponses,
   V2SessionSwitchAgentData,
   V2SessionSwitchAgentErrors,
   V2SessionSwitchAgentResponses,
@@ -3187,6 +3190,18 @@ export class Session3 extends HeyApiClient {
         "Content-Type": "application/json",
         ...options.headers,
       },
+    })
+  }
+
+  /**
+   * Get session spend
+   *
+   * Retrieve what the run of the session's root has spent against its budget, or what its last finished run spent. Empty when no run has been guarded in this Vector process.
+   */
+  public spend<ThrowOnError extends boolean = false>(options: Options<V2SessionSpendData, ThrowOnError>) {
+    return (options.client ?? this.client).get<V2SessionSpendResponses, V2SessionSpendErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/spend",
+      ...options,
     })
   }
 

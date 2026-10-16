@@ -25,7 +25,7 @@ import { effectCmd } from "../effect-cmd"
 import { EOL } from "os"
 import { Filesystem } from "@/util/filesystem"
 import { isRecord } from "@/util/record"
-import { createVectorClient, type VectorClient, type ToolPart } from "@vectordevai/sdk/v2"
+import { createVectorClient, type Message, type RunBudget, type VectorClient, type ToolPart } from "@vectordevai/sdk/v2"
 import { FormatError, FormatUnknownError } from "../error"
 import { INTERACTIVE_INPUT_ERROR, resolveInteractiveStdin } from "./run/runtime.stdin"
 import { MODEL_SETUP_GUIDANCE } from "@/provider/setup"
@@ -94,6 +94,22 @@ function block(info: Inline, output?: string) {
 
 function formatRunError(error: unknown) {
   return FormatError(error) ?? FormatUnknownError(error)
+}
+
+/** The run budget carried on the prompt request, or undefined when neither --max-cost nor --max-steps is set. */
+export function budgetFrom(input: { "max-cost"?: number; "max-steps"?: number }): RunBudget | undefined {
+  if (input["max-cost"] === undefined && input["max-steps"] === undefined) return undefined
+  return {
+    ...(input["max-cost"] !== undefined && { usd: input["max-cost"] }),
+    ...(input["max-steps"] !== undefined && { steps: input["max-steps"] }),
+  }
+}
+
+/** Exit status for a finished run: 3 when the spend guard stopped it, 1 for any other error, 0 otherwise. */
+export function exitCodeFor(info: Message | undefined) {
+  if (info?.role !== "assistant" || !info.error) return 0
+  if (info.error.name === "BudgetStopError") return 3
+  return 1
 }
 
 async function tool(part: ToolPart) {
@@ -249,6 +265,15 @@ export const RunCommand = effectCmd({
         describe: "run in direct interactive split-footer mode",
         default: false,
       })
+      .option("max-cost", {
+        type: "number",
+        describe:
+          "stop this run within one step per running agent of spending this many US dollars, counted at the charge the provider reported or else at catalog list price",
+      })
+      .option("max-steps", {
+        type: "number",
+        describe: "stop this run after this many model steps",
+      })
       .option("auto", {
         type: "boolean",
         describe: "auto-approve permissions that are not explicitly denied (dangerous!)",
@@ -329,6 +354,16 @@ export const RunCommand = effectCmd({
       ) {
         die("--replay-limit must be a positive integer")
       }
+
+      if (args["max-cost"] !== undefined && !(Number.isFinite(args["max-cost"]) && args["max-cost"] > 0)) {
+        die("--max-cost must be a positive number of US dollars")
+      }
+
+      if (args["max-steps"] !== undefined && !(Number.isInteger(args["max-steps"]) && args["max-steps"] > 0)) {
+        die("--max-steps must be a positive integer")
+      }
+
+      const budget = budgetFrom(args)
 
       if (interactive && !process.stdout.isTTY) {
         die("--mini requires a TTY stdout")
@@ -760,6 +795,19 @@ export const RunCommand = effectCmd({
           process.exitCode = 1
         }
 
+        // A config budget (budget.run) can stop a run even without --max-cost, so every finished prompt is checked.
+        function conclude(info: Message | undefined) {
+          if (
+            info?.role === "assistant" &&
+            info.error?.name === "BudgetStopError" &&
+            !emit("error", { error: info.error })
+          ) {
+            UI.println(UI.Style.TEXT_WARNING_BOLD + "Stopped:", UI.Style.TEXT_NORMAL + info.error.data.message)
+          }
+          const code = exitCodeFor(info)
+          if (code) process.exitCode = code
+        }
+
         // Consume one subscribed event stream for the active session and mirror it
         // to stdout/UI. `client` is passed explicitly because attach mode may
         // rebind the SDK to the session's directory after the subscription is
@@ -944,6 +992,8 @@ export const RunCommand = effectCmd({
               const props = event.properties
               // A rejected request can also publish session.error; report that failure once in either arrival order.
               if (props.sessionID !== sessionID || !props.error || failure.request) continue
+              // A spend guard stop is reported once as "Stopped: ..." when the prompt returns, not as an error.
+              if (props.error.name === "BudgetStopError") continue
               failure.streamed = true
               let err = String(props.error.name)
               if ("data" in props.error && props.error.data && "message" in props.error.data) {
@@ -1030,12 +1080,14 @@ export const RunCommand = effectCmd({
               command: args.command,
               arguments: message,
               variant: args.variant,
+              budget,
             })
             if (result.error) {
               rejectRequest(result.error)
               return
             }
             await finish()
+            conclude(result.data?.info)
             return
           }
 
@@ -1045,6 +1097,7 @@ export const RunCommand = effectCmd({
             agent,
             model,
             variant: args.variant,
+            budget,
             parts: [...files, { type: "text", text: message }],
           })
           if (result.error) {
@@ -1052,6 +1105,7 @@ export const RunCommand = effectCmd({
             return
           }
           await finish()
+          conclude(result.data?.info)
           return
         }
 
@@ -1069,6 +1123,7 @@ export const RunCommand = effectCmd({
             agent,
             model,
             variant: args.variant,
+            budget,
             files,
             initialInput,
             createSession: createFreshSession,
@@ -1105,6 +1160,7 @@ export const RunCommand = effectCmd({
               agent: args.agent,
               model,
               variant: args.variant,
+              budget,
               replay,
               replayLimit: args["replay-limit"],
               files,
@@ -1201,6 +1257,10 @@ export async function runMini(input: MiniCommandInput) {
     yolo: false,
     "dangerously-skip-permissions": false,
     dangerouslySkipPermissions: false,
+    "max-cost": undefined,
+    maxCost: undefined,
+    "max-steps": undefined,
+    maxSteps: undefined,
     demo: input.demo ?? false,
   })
 }

@@ -54,7 +54,8 @@ describe("plugin.codex", () => {
     expect(Object.keys(models).sort()).toEqual(
       ["codex-mini-latest", "gpt-5.5", "gpt-5.6-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"].sort(),
     )
-    expect(models["gpt-6-astra"].cost.input).toBe(0)
+    // The plan pays for the steps, which the app labels as covered by the ChatGPT plan rather than unpriced.
+    expect(models["gpt-6-astra"].cost).toEqual({ input: 0, output: 0, cache: { read: 0, write: 0 }, plan: true })
     // The Codex backend's 272K window, not the API's 1,050,000.
     expect(models["gpt-6-astra"].limit).toEqual({ context: 400_000, input: 272_000, output: 128_000 })
     expect(models["gpt-6.1-sol"].limit.input).toBe(272_000)

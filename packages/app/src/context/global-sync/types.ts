@@ -1,5 +1,6 @@
 import type {
   Agent,
+  EventSessionSpend,
   Command,
   Config,
   LspStatus,
@@ -52,6 +53,10 @@ export type State = {
     [sessionID: string]: SessionStatus
   }
   session_working(id: string): boolean
+  // The run guard's latest reading per root session: spent, cap and warn state.
+  session_spend: {
+    [sessionID: string]: EventSessionSpend["properties"]
+  }
   session_diff: {
     [sessionID: string]: SnapshotFileDiff[]
   }

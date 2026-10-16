@@ -4,6 +4,7 @@ import { Schema } from "effect"
 import { optional } from "./schema"
 import { Event } from "./event"
 import { NonNegativeInt } from "./schema"
+import { RunBudget } from "./run-budget"
 import { SessionID } from "./session-id"
 
 export const Info = Schema.Union([
@@ -48,4 +49,21 @@ export const Idle = Event.define({
   },
 })
 
-export const Definitions = Event.inventory(Status, Idle)
+// What a run has spent, published after every guarded step. `sessionID` is the root session of the run.
+export const Spend = Event.define({
+  type: "session.spend",
+  schema: {
+    sessionID: SessionID,
+    state: Schema.Literals(["ok", "warn", "stopped"]),
+    reason: optional(RunBudget.StopReason),
+    message: optional(Schema.String),
+    spentUsd: Schema.Finite,
+    capUsd: optional(Schema.Finite),
+    steps: NonNegativeInt,
+    unpricedSteps: NonNegativeInt,
+    costKind: RunBudget.CostKind,
+    estimate: optional(Schema.Struct({ lowUsd: Schema.Finite, highUsd: Schema.Finite })),
+  },
+})
+
+export const Definitions = Event.inventory(Status, Idle, Spend)

@@ -20,6 +20,46 @@ export const spendRows = [
   ],
 ]
 
+// The Run Guard ships in the next release; keep these in step with the Tokenomics page.
+export const runGuardRows = [
+  [
+    "Where caps come from",
+    "Settings → Spend limits in the desktop app for chats and the parallel agents you start, the project's budget.run for chats, the terminal UI and vector run, or vector run --max-cost and --max-steps for one run. Automations use the Left alone limits: $5 a run and $25 a day unless you change them.",
+  ],
+  [
+    "A stop before the step that would cross",
+    "After a step, Vector estimates the next one from catalog prices and the context it carries, shows the estimate as a range, and stops before starting a step that would go over the cap. One step can still cost more than its estimate, and subagents running side by side each finish the step they are on, so a run stops within one step of the cap for each agent running at the time.",
+  ],
+  [
+    "Subagents and helpers share the cap",
+    "Spend from subagents, and from Vector's own helpers such as a Vectorscope review started during the run, counts against the same cap as the task that launched them. A helper you start after the run has ended runs under its own limits.",
+  ],
+  [
+    "Automations and parallel agents hold while they run",
+    "An automation or a parallel agent gets the headroom left in your limits as its live cap, up to the per-run limit. With no per-run limit it holds half of that headroom, so a run that starts beside it is not shut out, and runs going at the same time share the headroom instead of each spending all of it.",
+  ],
+  [
+    "Unpriced is not free",
+    "With a dollar cap set, a model with no catalog price stops after 40 unpriced steps, because its spend cannot be counted. A step whose provider reported what it charged, as OpenRouter does, counts at that amount. Vector Codium steps spend Codium credits, whose charge stays on vectordev.ai, so they count as unpriced steps. Free models are labelled free, and steps a plan pays for, such as a ChatGPT sign-in, are not counted in dollars; step and loop limits still hold both.",
+  ],
+  [
+    "Loops pause themselves",
+    "In chats, the terminal UI and vector run, an agent that gets the same result from the same tool call three times, with no file change and no call that returned something new in between, or hits the same error three times in a row, is paused. Checking a page between clicks or running git status between commands returns something new each time, so it runs on. Auto-approve and --yolo cannot click through a pause. Set budget.loop.enabled to false to turn this off.",
+  ],
+  [
+    "Outages end",
+    "In chats, the terminal UI and vector run, a provider outage ends the run after 10 retries or 15 minutes instead of retrying forever.",
+  ],
+  [
+    "A way to continue",
+    "The stop card says why the run stopped and what it spent. Continue starts a new run with a new cap of the same size, or with a new step limit, and the stopped turn stays in the history so the agent picks up where it was. A subagent spends under its main session's run, so its stop card points to the main session, where a new message or Continue starts the new run.",
+  ],
+  [
+    "Made for scripts",
+    "vector run exits with code 3 when a spend cap, step limit or loop pause stops it, so CI can tell a budget stop from a failure.",
+  ],
+]
+
 // The engine's eight subagent specialists (packages/engine/src/agent/agent.ts)
 // and the display identities painted over them. `general` is not listed: it is
 // the general-purpose Subagent described in `subagentKinds` below. Roles restate

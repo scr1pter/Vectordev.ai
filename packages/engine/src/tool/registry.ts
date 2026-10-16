@@ -11,6 +11,7 @@ import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { Database } from "@vectordevai/core/database/database"
 import { TodoWriteTool } from "./todo"
 import { TEAM_MARKER_RELATIVE_PATH, TeammateMessageTool } from "./teammate"
@@ -490,6 +491,7 @@ export const node = LayerNode.make({
     Auth.node,
     Database.node,
     Ripgrep.node,
+    SpendGuard.node,
   ],
 })
 

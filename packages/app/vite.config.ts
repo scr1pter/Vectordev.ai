@@ -28,6 +28,8 @@ export default defineConfig({
   },
   build: {
     target: "esnext",
-    sourcemap: true,
+    // Maps are made only for the private Sentry upload, which deletes them afterwards. A build without it ships no
+    // original sources.
+    sourcemap: sentry ? "hidden" : false,
   },
 })

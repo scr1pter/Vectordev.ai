@@ -8,6 +8,7 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 import { useSync } from "@/context/sync"
 import { same } from "@/utils/same"
 import { createOutcomes } from "@/features/economics/economics-repository"
+import { lastAssistantModel, sessionReading, spendKind } from "@/features/economics/format-spend"
 import { categorizeTask } from "@/features/economics/task-categorizer"
 import { getSessionContext } from "./session-context-metrics"
 import { rankModelsForCategory } from "./session-model-economics"
@@ -53,6 +54,7 @@ export function SessionContextTab() {
     }).format(value)
   const ctx = createMemo(() => getSessionContext(messages(), [...providers.all().values()]))
   const tokens = createMemo(() => info()?.tokens)
+  const lastModel = createMemo(() => lastAssistantModel(messages()))
   const formatter = createMemo(() => createSessionContextFormatter(language.intl()))
   const usage = createMemo(() => Math.max(0, Math.min(100, ctx()?.usage ?? 0)))
   const totalTokens = createMemo(() => sessionTokens(info()))
@@ -131,11 +133,13 @@ export function SessionContextTab() {
     },
     {
       label: "Total cost",
-      value: formatSessionCost({
+      value: sessionReading({
         ...sessionSpend(info()),
+        tokens: totalTokens(),
+        kind: spendKind(providers.all(), lastModel()?.providerID, lastModel()?.modelID),
         format: (value) => usd().format(value),
         t: language.t,
-      }),
+      }).label,
     },
     // Work Vector ran for this session under the hood, by helper, then its subagents; both are in the total above.
     ...[

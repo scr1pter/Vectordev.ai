@@ -59,7 +59,7 @@ export function entryLook(commit: StreamCommit, theme: RunEntryTheme): { fg: Col
 
   if (commit.kind === "error") {
     return {
-      fg: theme.error.body,
+      fg: commit.stopped ? theme.warning.body : theme.error.body,
       attrs: TextAttributes.BOLD,
     }
   }

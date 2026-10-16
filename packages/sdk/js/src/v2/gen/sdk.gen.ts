@@ -208,6 +208,7 @@ import type {
   QuestionReplyErrors,
   QuestionReplyResponses,
   QuestionV2Reply,
+  RunBudget,
   ServerSessionSessionImportArchiveErrors,
   ServerSessionSessionImportArchiveResponses,
   ServerSessionSessionShareErrors,
@@ -429,6 +430,8 @@ import type {
   V2SessionRevertCommitResponses,
   V2SessionRevertStageErrors,
   V2SessionRevertStageResponses,
+  V2SessionSpendErrors,
+  V2SessionSpendResponses,
   V2SessionSwitchAgentErrors,
   V2SessionSwitchAgentResponses,
   V2SessionSwitchModelErrors,
@@ -4390,6 +4393,7 @@ export class Session2 extends HeyApiClient {
       system?: string
       variant?: string
       executionMode?: "normal" | "fast"
+      budget?: RunBudget
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
     options?: Options<never, ThrowOnError>,
@@ -4411,6 +4415,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "system" },
             { in: "body", key: "variant" },
             { in: "body", key: "executionMode" },
+            { in: "body", key: "budget" },
             { in: "body", key: "parts" },
           ],
         },
@@ -4857,6 +4862,7 @@ export class Session2 extends HeyApiClient {
       system?: string
       variant?: string
       executionMode?: "normal" | "fast"
+      budget?: RunBudget
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
     options?: Options<never, ThrowOnError>,
@@ -4878,6 +4884,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "system" },
             { in: "body", key: "variant" },
             { in: "body", key: "executionMode" },
+            { in: "body", key: "budget" },
             { in: "body", key: "parts" },
           ],
         },
@@ -4912,6 +4919,7 @@ export class Session2 extends HeyApiClient {
       command?: string
       variant?: string
       executionMode?: "normal" | "fast"
+      budget?: RunBudget
       parts?: Array<{
         id?: string
         type: "file"
@@ -4938,6 +4946,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "command" },
             { in: "body", key: "variant" },
             { in: "body", key: "executionMode" },
+            { in: "body", key: "budget" },
             { in: "body", key: "parts" },
           ],
         },
@@ -6423,6 +6432,7 @@ export class Session3 extends HeyApiClient {
       prompt?: PromptInput
       delivery?: "steer" | "queue"
       resume?: boolean
+      budget?: RunBudget
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -6436,6 +6446,7 @@ export class Session3 extends HeyApiClient {
             { in: "body", key: "prompt" },
             { in: "body", key: "delivery" },
             { in: "body", key: "resume" },
+            { in: "body", key: "budget" },
           ],
         },
       ],
@@ -6449,6 +6460,25 @@ export class Session3 extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get session spend
+   *
+   * Retrieve what the run of the session's root has spent against its budget, or what its last finished run spent. Empty when no run has been guarded in this Vector process.
+   */
+  public spend<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<V2SessionSpendResponses, V2SessionSpendErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/spend",
+      ...options,
+      ...params,
     })
   }
 

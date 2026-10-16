@@ -36,6 +36,7 @@ import {
   type TaskDifficulty,
 } from "@/utils/task-intelligence"
 import { modelDisplayName } from "@/utils/provider-brand"
+import { cachedSpendPolicy, promptRunBudget } from "@/features/economics/spend-limits-api"
 
 type PendingPrompt = {
   abort: AbortController
@@ -147,6 +148,11 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
         return false
       }
 
+      // A command starts a run like a chat message does, so it gets the same per-run cap.
+      const budget = promptRunBudget({
+        configured: input.sync.data.config.budget?.run,
+        policy: await cachedSpendPolicy(),
+      })
       await input.client.session.command({
         sessionID: input.draft.sessionID,
         command: cmd,
@@ -155,6 +161,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
         model: `${input.draft.model.providerID}/${input.draft.model.modelID}`,
         variant: input.draft.variant,
         executionMode: input.draft.executionMode,
+        ...(budget ? { budget } : {}),
         parts: images.map((attachment) => ({
           id: Identifier.ascending("part"),
           type: "file" as const,
@@ -233,6 +240,10 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       ...(preparation?.instruction ? [preparation.instruction] : []),
       ...(llmJudge ? [completionPolicy(history, (id) => input.sync.data.part?.[id])] : []),
     ]
+    const budget = promptRunBudget({
+      configured: input.sync.data.config.budget?.run,
+      policy: await cachedSpendPolicy(),
+    })
     await input.client.session.promptAsync({
       sessionID: input.draft.sessionID,
       agent,
@@ -243,6 +254,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       parts: withSyntheticText(baseParts, syntheticText),
       variant: input.draft.variant,
       executionMode: input.draft.executionMode,
+      ...(budget ? { budget } : {}),
     })
     return true
   } catch (err) {

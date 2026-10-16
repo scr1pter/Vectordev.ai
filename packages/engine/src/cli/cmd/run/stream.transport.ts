@@ -92,6 +92,7 @@ export type SessionTurnInput = {
   agent: string | undefined
   model: RunInput["model"]
   variant: string | undefined
+  budget?: RunInput["budget"]
   prompt: RunPrompt
   files: RunFilePart[]
   includeFiles: boolean
@@ -1224,6 +1225,7 @@ function createLayer(input: StreamInput) {
             agent: next.agent,
             model: next.model,
             variant: next.variant,
+            budget: next.budget,
             parts: [
               ...(next.includeFiles ? next.files : []),
               { type: "text" as const, text: next.prompt.text },
