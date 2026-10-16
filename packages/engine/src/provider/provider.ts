@@ -216,7 +216,11 @@ const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>
 type CustomModelLoader = (sdk: any, modelID: string, options?: Record<string, any>, model?: Model) => Promise<any>
 type CustomVarsLoader = (options: Record<string, any>) => Record<string, string>
 type CustomDiscoverModels = () => Promise<Record<string, Model>>
-type CustomProvider = Pick<Info, "id" | "source" | "options"> & { hasModel: (id: string) => boolean }
+type CustomProvider = Pick<Info, "id" | "source" | "options"> & {
+  hasModel: (id: string) => boolean
+  // Already in the provider list when the loader runs, so its result is kept even without autoload.
+  configured: boolean
+}
 type CustomLoader = (provider: CustomProvider) => Effect.Effect<{
   autoload: boolean
   getModel?: CustomModelLoader
@@ -636,17 +640,22 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         },
       }),
     gitlab: Effect.fnUntraced(function* (input: CustomProvider) {
-      const {
-        VERSION: GITLAB_PROVIDER_VERSION,
-        isWorkflowModel,
-        discoverWorkflowModels,
-      } = yield* Effect.promise(() => import("gitlab-ai-provider"))
-
       const instanceUrl = (yield* dep.get("GITLAB_INSTANCE_URL")) || "https://gitlab.com"
 
       const auth = yield* dep.auth(input.id)
       const apiKey = auth?.type === "oauth" ? auth.access : auth?.type === "api" ? auth.key : undefined
       const token = apiKey ?? (yield* dep.get("GITLAB_TOKEN"))
+
+      // Without a token, and with GitLab not already in the provider list, the caller discards this result. The
+      // catalog lists GitLab for everyone, so loading its SDK here (with its own OpenAI and Anthropic clients) cost
+      // every start that had a catalog.
+      if (!token && !input.configured) return { autoload: false }
+
+      const {
+        VERSION: GITLAB_PROVIDER_VERSION,
+        isWorkflowModel,
+        discoverWorkflowModels,
+      } = yield* Effect.promise(() => import("gitlab-ai-provider"))
 
       const providerConfig = (yield* dep.config()).provider?.["gitlab"]
       const directory = yield* InstanceState.directory
@@ -1793,6 +1802,7 @@ const layer = Layer.effect(
             source: data?.source ?? "custom",
             options: data?.options ?? {},
             hasModel: (id) => Boolean(getDatabase(providerID)?.models[id]),
+            configured: Boolean(providers[providerID]),
           })
           if (result && (result.autoload || providers[providerID])) {
             if (result.getModel) modelLoaders[providerID] = result.getModel
