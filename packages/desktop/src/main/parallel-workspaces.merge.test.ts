@@ -40,8 +40,14 @@ mock.module("./store", () => ({
   removeStoreFileIfEmpty: () => undefined,
 }))
 
-const { createParallelWorkspace, getParallelWorkspace, mergeParallelWorkspace, refreshParallelWorkspace, runGit } =
-  await import("./parallel-workspaces")
+const {
+  createParallelWorkspace,
+  getParallelWorkspace,
+  interruptEngineSession,
+  mergeParallelWorkspace,
+  refreshParallelWorkspace,
+  runGit,
+} = await import("./parallel-workspaces")
 
 // What a merge Vector closed part-way through leaves in the record.
 function markMergeStarted(id: string) {
@@ -137,4 +143,38 @@ describe("merging a workspace Vector closed part-way through", () => {
     expect(await Bun.file(join(sourcePath, "a.txt")).text()).toBe("before\n")
     expect(getParallelWorkspace(created.id)?.mergeState).toBe("none")
   })
+})
+
+describe("interrupting an engine session", () => {
+  test("waits at most 5 seconds and never cancels the request, so a late interrupt still lands", async () => {
+    let aborted = false
+    const answered = Promise.withResolvers<void>()
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        request.signal.addEventListener("abort", () => (aborted = true))
+        await Bun.sleep(5_600)
+        answered.resolve()
+        return new Response(null, { status: 204 })
+      },
+    })
+    const notes: string[] = []
+    const started = Date.now()
+    await interruptEngineSession({ url: server.url.toString(), directory: userDataPath }, "ses-1", (note) =>
+      notes.push(note),
+    )
+    const waited = Date.now() - started
+    await answered.promise
+    await Bun.sleep(100)
+    await server.stop(true)
+
+    expect(waited).toBeGreaterThanOrEqual(4_900)
+    expect(waited).toBeLessThan(5_500)
+    expect(aborted).toBe(false)
+    expect(notes).toEqual([
+      "The engine had not confirmed the interrupt after 5 seconds. Vector is still waiting for it.",
+      "The engine confirmed the interrupt.",
+    ])
+  }, 15_000)
 })

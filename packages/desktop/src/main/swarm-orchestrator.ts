@@ -8,6 +8,7 @@ import {
   createParallelWorkspace,
   discardParallelWorkspace,
   getParallelWorkspace,
+  interruptEngineSession,
   mergeParallelWorkspace,
   mergeParallelWorkspaceSelection,
   refreshParallelWorkspace,
@@ -836,13 +837,9 @@ async function generateSwarmPlan(
   if (!sessionID) throw new Error("Vector's planner did not return a session ID.")
   updateRun(run.id, (current) => ({ ...current, plannerSessionId: sessionID }))
   // Aborting the HTTP requests does not interrupt the model work the planner admitted, so planning that ends without a
-  // plan (Stop, the idle timeout, a failed request) interrupts the session too. The interrupt is bounded so a hung
-  // engine cannot hold Stop.
+  // plan (Stop, the idle timeout, a failed request) interrupts the session too. Stop waits a bounded time for it.
   return readPlannerPlan(run, sessionID, engine, signal).catch(async (error) => {
-    await engineRequest(engine, `/api/session/${encodeURIComponent(sessionID)}/interrupt`, {
-      method: "POST",
-      signal: AbortSignal.timeout(5_000),
-    }).catch(() => undefined)
+    await interruptEngineSession(engine, sessionID, (message) => appendLog(run.id, `Planner: ${message}`))
     throw error
   })
 }

@@ -443,14 +443,38 @@ async function engineRequest<T>(
   return (text ? JSON.parse(text) : undefined) as T
 }
 
-// Aborting a run's requests does not stop the model work the engine admitted, so Stop and Discard interrupt the
-// session too. The interrupt is best effort and bounded: an engine that never answers must not hang Stop, Discard or
-// a swarm waiting on its workers.
-function interruptEngineSession(engine: ParallelWorkspaceEngine, sessionId: string) {
-  return engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/interrupt`, {
+// Aborting a run's requests does not stop the model work the engine admitted, so Stop, Discard and a failed run
+// interrupt the session too. Each waits at most 5 seconds for the engine to confirm, so an engine that never answers
+// cannot hang them or a swarm waiting on its workers. The request itself is never cancelled: the engine's HTTP server
+// interrupts a handler whose client disconnects, so a slow interrupt would be dropped and the session would keep
+// spending after Stop. `note` hears when the engine did not confirm in time, and how the request ended.
+export async function interruptEngineSession(
+  engine: ParallelWorkspaceEngine,
+  sessionId: string,
+  note: (message: string) => void,
+) {
+  const answer = engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/interrupt`, {
     method: "POST",
-    signal: AbortSignal.timeout(5_000),
-  }).catch(() => undefined)
+  }).then(
+    () => "",
+    (error) =>
+      `The engine did not confirm the interrupt, so the session may still be running: ${error instanceof Error ? error.message : String(error)}`,
+  )
+  const expired = Promise.withResolvers<undefined>()
+  const timer = setTimeout(() => expired.resolve(undefined), 5_000)
+  const failure = await Promise.race([answer, expired.promise]).finally(() => clearTimeout(timer))
+  if (failure) note(failure)
+  if (failure !== undefined) return
+  note("The engine had not confirmed the interrupt after 5 seconds. Vector is still waiting for it.")
+  void answer.then((late) => note(late || "The engine confirmed the interrupt.")).catch(() => undefined)
+}
+
+// A workspace's interrupt notes go to its log, while the workspace still exists.
+function logTo(id: string) {
+  return (message: string) => {
+    if (!readRecords().some((record) => record.id === id)) return
+    updateRecord(id, (current) => ({ ...current, logs: [message, ...current.logs].slice(0, 120) }))
+  }
 }
 
 function collectText(value: unknown, output: string[] = []) {
@@ -2392,7 +2416,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     // A failed or timed-out run must not leave the engine session running and
     // spending the user's API keys in the background.
     const active = activeRuns.get(id)
-    if (active?.sessionId && !stopped) await interruptEngineSession(engine, active.sessionId)
+    if (active?.sessionId && !stopped) await interruptEngineSession(engine, active.sessionId, logTo(id))
     const detail = stopped
       ? "The parallel agent was stopped by the user."
       : error instanceof Error
@@ -2527,7 +2551,7 @@ export async function stopParallelWorkspace(id: string) {
   queuedRuns.delete(id)
   active?.controller.abort()
   queued?.controller.abort()
-  if (active?.sessionId) await interruptEngineSession(active.engine, active.sessionId)
+  if (active?.sessionId) await interruptEngineSession(active.engine, active.sessionId, logTo(id))
   const current = readRecords().find((record) => record.id === id)
   if (!current) throw new Error("Parallel workspace was not found.")
   // Stopping is only meaningful for work in flight; settled records
@@ -3089,7 +3113,7 @@ export async function discardParallelWorkspace(id: string) {
   queuedRuns.delete(id)
   active?.controller.abort()
   queued?.controller.abort()
-  if (active?.sessionId) await interruptEngineSession(active.engine, active.sessionId)
+  if (active?.sessionId) await interruptEngineSession(active.engine, active.sessionId, logTo(id))
   await cleanupIsolation(record)
   const discarded = updateRecord(id, (current) => ({
     ...current,
