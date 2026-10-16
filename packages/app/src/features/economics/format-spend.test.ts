@@ -141,7 +141,9 @@ describe("spendPill", () => {
 describe("formatUsd and cap copy", () => {
   test("caps print with two decimals", () => {
     expect(formatUsd(5)).toBe("$5.00")
-    expect(capTooltip(5)).toBe("This run is capped at $5.00. Vector stops within one step of the cap.")
+    expect(capTooltip(5)).toBe(
+      "This run is capped at $5.00. Vector stops within one step of the cap for each agent running at the time.",
+    )
   })
 })
 

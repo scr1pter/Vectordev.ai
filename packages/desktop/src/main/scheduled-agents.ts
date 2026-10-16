@@ -493,7 +493,8 @@ export function createScheduledAgents(
       {
         method: "POST",
         // The ledger headroom is this run's live budget: the engine stops the
-        // run within one step of it instead of the ledger noticing afterwards.
+        // run within one step of it for each agent running at the time,
+        // instead of the ledger noticing afterwards.
         body: {
           prompt: { text: prompt },
           resume: true,

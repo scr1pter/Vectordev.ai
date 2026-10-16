@@ -28,7 +28,7 @@ export const runGuardRows = [
   ],
   [
     "A stop before the step that would cross",
-    "After a step, Vector estimates the next one from catalog prices and the context it carries, shows the estimate as a range, and stops before starting a step that would go over the cap. One step can still cost more than its estimate, so Vector stops within one step of the cap.",
+    "After a step, Vector estimates the next one from catalog prices and the context it carries, shows the estimate as a range, and stops before starting a step that would go over the cap. One step can still cost more than its estimate, and subagents running side by side each finish the step they are on, so a run stops within one step of the cap for each agent running at the time.",
   ],
   [
     "Subagents and helpers share the cap",

@@ -53,7 +53,8 @@ export type SpendDayTotal = {
 
 export type SpendLimit = {
   // The hard stop. Reaching it blocks new runs; a running Vector run gets the
-  // remaining headroom as its engine budget and stops within one step of it.
+  // remaining headroom as its engine budget and stops within one step of it
+  // for each agent running at the time.
   usd: number
   // Fraction of `usd` where the state turns to "warn", 0.8 unless set.
   warnAt?: number

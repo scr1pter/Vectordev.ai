@@ -358,6 +358,24 @@ describe("SpendGuard.afterStep", () => {
     expect(broken.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
   })
 
+  test("lets parallel subagents finish the steps they had in flight when the run stopped", () => {
+    // The root spends $0.70 of a $1.00 cap and starts three subagents, whose first steps of $0.25 run side by side.
+    const price = { input: 3, output: 15 }
+    const sub = () => step({ costUsd: 0.25, continues: true, contextTokens: 20_000, price })
+    const third = SessionID.make("ses_third")
+    const result = play(
+      { usd: 1 },
+      [step({ costUsd: 0.7, continues: true, price }), sub(), sub(), sub()],
+      [root, child, sibling, third],
+    )
+    // The first of them to finish leaves too little for its next step, so the run stops. The other two were already
+    // running, so they finish and count: the run ends past the cap by up to one step for each of them.
+    expect(result.verdicts.map((verdict) => verdict.state)).toEqual(["ok", "stopped", "stopped", "stopped"])
+    expect(result.run.stopped?.reason).toBe("predicted")
+    expect(result.run.spentUsd).toBeCloseTo(1.45, 6)
+    expect(result.run.steps).toBe(4)
+  })
+
   test("answers stop to every step after a stop, and keeps counting spend", () => {
     const result = play({ usd: 1 }, [step({ costUsd: 1.5 }), step({ costKind: "free" }), step({ costUsd: 0.25 })])
     expect(result.verdicts.map((verdict) => verdict.state)).toEqual(["stopped", "stopped", "stopped"])

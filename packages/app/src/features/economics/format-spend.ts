@@ -102,5 +102,5 @@ export const SPEND_TOOLTIP: Record<SpendKind, string> = {
 }
 
 export function capTooltip(capUsd: number) {
-  return `This run is capped at ${formatUsd(capUsd)}. Vector stops within one step of the cap.`
+  return `This run is capped at ${formatUsd(capUsd)}. Vector stops within one step of the cap for each agent running at the time.`
 }
