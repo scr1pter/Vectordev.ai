@@ -8,7 +8,7 @@
 import { describe, expect } from "bun:test"
 import path from "node:path"
 import { Effect } from "effect"
-import { HttpClient } from "effect/unstable/http"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { cliIt } from "../../lib/cli-process"
 
 describe("vector serve (subprocess)", () => {
@@ -139,6 +139,20 @@ describe("vector serve (subprocess)", () => {
         })
         const anonymous = yield* HttpClient.get(`http://127.0.0.1:${trusted.port}/config`)
         expect(anonymous.status).toBe(401)
+        const wrongUsername = yield* HttpClientRequest.get(`http://127.0.0.1:${trusted.port}/config`).pipe(
+          HttpClientRequest.setHeader("authorization", `Basic ${btoa("vector:owner-secret")}`),
+          HttpClient.execute,
+        )
+        expect(wrongUsername.status).toBe(401)
+        expect(yield* wrongUsername.json).toEqual({
+          _tag: "UnauthorizedError",
+          message: "Authentication required. Use the configured server username: alice.",
+        })
+        const owner = yield* HttpClientRequest.get(`http://127.0.0.1:${trusted.port}/config`).pipe(
+          HttpClientRequest.setHeader("authorization", `Basic ${btoa("alice:owner-secret")}`),
+          HttpClient.execute,
+        )
+        expect(owner.status).toBe(200)
         trusted.kill()
         yield* Effect.promise(() => trusted.exited)
       }),

@@ -2210,6 +2210,7 @@ export type ProjectTrustStatus = {
   workspace: string
   trusted: boolean
   ignored: boolean
+  settings: boolean
 }
 
 export type Model = {

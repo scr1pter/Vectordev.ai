@@ -46,6 +46,12 @@ export const Commands = Spec.make(typeof VECTOR_CLI_NAME === "string" ? VECTOR_C
         hostname: Flag.string("hostname").pipe(Flag.withDefault("127.0.0.1")),
         port: Flag.integer("port").pipe(Flag.optional),
         register: Flag.boolean("register").pipe(Flag.withDefault(false)),
+        trustedNetwork: Flag.boolean("trusted-network").pipe(
+          Flag.withDescription(
+            "accept the server password over plain HTTP on a non-loopback address, on a network you trust such as a container bridge or a private LAN",
+          ),
+          Flag.withDefault(false),
+        ),
       },
     }),
   ],

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { Context, Effect } from "effect"
+import fs from "node:fs/promises"
 import path from "path"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import { FilePaths } from "../../src/server/routes/instance/httpapi/groups/file"
@@ -29,7 +30,33 @@ afterEach(async () => {
   await resetDatabase()
 })
 
+function write(directory: string, body: { path: string; content: string }) {
+  return HttpApiApp.webHandler().handler(
+    new Request(`http://localhost${FilePaths.write}`, {
+      method: "POST",
+      headers: { "x-vector-directory": directory, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+    context,
+  )
+}
+
 describe("file HttpApi", () => {
+  test("writes only where the path really lands inside the workspace", async () => {
+    await using outside = await tmpdir()
+    await using tmp = await tmpdir({ git: true })
+    await fs.symlink(outside.path, path.join(tmp.path, "linked"))
+
+    for (const target of ["linked/new.txt", "linked/nested/new.txt"]) {
+      const response = await write(tmp.path, { path: target, content: "x" })
+      expect({ target, status: response.status }).toEqual({ target, status: 400 })
+    }
+    expect(await fs.readdir(outside.path)).toEqual([])
+
+    expect((await write(tmp.path, { path: "src/new.txt", content: "inside" })).status).toBe(200)
+    expect(await Bun.file(path.join(tmp.path, "src", "new.txt")).text()).toBe("inside")
+  })
+
   test("serves read endpoints", async () => {
     await using tmp = await tmpdir({ git: true })
     await Bun.write(path.join(tmp.path, "hello.txt"), "hello")

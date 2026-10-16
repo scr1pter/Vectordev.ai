@@ -10,7 +10,7 @@ import { getWorkspaceRouteSessionID, isLocalWorkspaceRoute, workspaceProxyURL } 
 import { NotFoundError } from "@/storage/storage"
 import { Flag } from "@vectordevai/core/flag/flag"
 import { Context, Data, Effect, Layer, Option, Schema } from "effect"
-import { HttpClient, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import * as Socket from "effect/unstable/socket/Socket"
 import { InvalidRequestError } from "../errors"
@@ -102,8 +102,8 @@ function defaultDirectory(request: HttpServerRequest.HttpServerRequest, url: URL
   }
 }
 
-function shouldStayOnControlPlane(request: HttpServerRequest.HttpServerRequest, url: URL): boolean {
-  return isLocalWorkspaceRoute(request.method, url.pathname) || url.pathname.startsWith("/console")
+function shouldStayOnControlPlane(request: HttpServerRequest.HttpServerRequest, routePath: string): boolean {
+  return isLocalWorkspaceRoute(request.method, routePath) || routePath.startsWith("/console")
 }
 
 function resolveWorkspace(
@@ -187,6 +187,7 @@ function planWorkspaceRequest(
 
 function planRequest(
   request: HttpServerRequest.HttpServerRequest,
+  routePath: string,
   session?: Session.Info,
 ): Effect.Effect<RequestPlan, never, Workspace.Service> {
   return Effect.gen(function* () {
@@ -194,7 +195,7 @@ function planRequest(
     const envWorkspaceID = configuredWorkspaceID()
     const workspaceID = selectedWorkspaceID(request, url, session?.workspaceID)
     if (workspaceID === InvalidWorkspaceID) {
-      if (url.pathname.startsWith("/api/")) return RequestPlan.InvalidWorkspace()
+      if (routePath.startsWith("/api/")) return RequestPlan.InvalidWorkspace()
       return RequestPlan.MissingWorkspace({ workspaceID: url.searchParams.get("workspace") ?? "unknown" })
     }
     const workspace = yield* resolveWorkspace(workspaceID, envWorkspaceID)
@@ -203,7 +204,7 @@ function planRequest(
       return RequestPlan.MissingWorkspace({ workspaceID })
     }
 
-    if (workspace !== undefined && !envWorkspaceID && !shouldStayOnControlPlane(request, url)) {
+    if (workspace !== undefined && !envWorkspaceID && !shouldStayOnControlPlane(request, routePath)) {
       return yield* planWorkspaceRequest(request, url, workspace, session)
     }
 
@@ -324,6 +325,7 @@ function routeHttpApiWorkspace<E>(
   | Workspace.Service
   | PtyTicket.Service
   | HttpServerRequest.HttpServerRequest
+  | HttpRouter.RouteContext
   | Socket.WebSocketConstructor
 > {
   return Effect.gen(function* () {
@@ -335,7 +337,11 @@ function routeHttpApiWorkspace<E>(
         { status: 400 },
       )
     }
-    const sessionID = getWorkspaceRouteSessionID(requestURL(request))
+    // Judge scope by the route the router matched. The URL parser reads another path for spellings the router
+    // accepts (case, '//', ';x', dot segments after ';'), so a re-parsed path could name a session the guest may open
+    // while the handler serves a different one.
+    const route = yield* HttpRouter.RouteContext
+    const sessionID = getWorkspaceRouteSessionID(route.params)
     const session = sessionID
       ? yield* Session.Service.use((svc) => svc.get(sessionID)).pipe(
           Effect.catchIf(
@@ -345,7 +351,7 @@ function routeHttpApiWorkspace<E>(
           Effect.catchDefect(() => Effect.succeed(undefined)),
         )
       : undefined
-    const plan = yield* planRequest(request, session)
+    const plan = yield* planRequest(request, route.route.path, session)
     return yield* routeWorkspace(client, effect, plan)
   })
 }

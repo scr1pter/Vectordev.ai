@@ -49,7 +49,7 @@ describe("config HttpApi", () => {
 
       // The project's settings are not loaded, and clients can see why.
       expect((yield* request("/config")).body.model).not.toBe("test/project-model")
-      expect((yield* request("/config/trust")).body).toMatchObject({ trusted: false, ignored: true })
+      expect((yield* request("/config/trust")).body).toMatchObject({ trusted: false, ignored: true, settings: true })
       expect((yield* Fiber.join(notice)).payload.properties).toMatchObject({ title: "Project settings ignored" })
 
       const disposed = yield* waitDisposed(tmp.path).pipe(Effect.forkScoped({ startImmediately: true }))
@@ -57,6 +57,53 @@ describe("config HttpApi", () => {
       expect(approved).toMatchObject({ status: 200, body: { trusted: true, ignored: false } })
       yield* Fiber.join(disposed)
       expect((yield* request("/config")).body.model).toBe("test/project-model")
+    }),
+  )
+
+  it.live(
+    "reports the user's language servers held back in an untrusted project without its own config",
+    Effect.gen(function* () {
+      const plain = yield* tmpdirEffect({})
+      const tmp = yield* tmpdirEffect({})
+      const request = (directory: string, route: string, init: RequestInit = {}) =>
+        Effect.promise(async () => {
+          const response = await app().request(route, {
+            ...init,
+            headers: { "content-type": "application/json", "x-vector-directory": directory },
+          })
+          return { status: response.status, body: await response.json() }
+        })
+      // Nothing is held back without project config or user tooling, so no notice.
+      expect((yield* request(plain.path, "/config/trust")).body).toMatchObject({ trusted: false, ignored: false })
+
+      const original = process.env.VECTOR_CONFIG_CONTENT
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (original === undefined) delete process.env.VECTOR_CONFIG_CONTENT
+          else process.env.VECTOR_CONFIG_CONTENT = original
+        }),
+      )
+      process.env.VECTOR_CONFIG_CONTENT = JSON.stringify({ lsp: true })
+      const notice = yield* waitGlobalBusEvent({
+        message: "timed out waiting for the held-back notice",
+        predicate: (event) => event.payload.type === "tui.toast.show",
+      }).pipe(Effect.forkScoped({ startImmediately: true }))
+
+      // The project has no settings of its own, so the notice says it is untrusted rather than that settings are ignored.
+      expect((yield* request(tmp.path, "/config/trust")).body).toMatchObject({
+        trusted: false,
+        ignored: true,
+        settings: false,
+      })
+      const held = (yield* Fiber.join(notice)).payload.properties
+      expect(held).toMatchObject({ title: "Project not trusted" })
+      expect(held.message).toContain("language servers")
+      expect(held.message).not.toContain("vector.json")
+
+      const disposed = yield* waitDisposed(tmp.path).pipe(Effect.forkScoped({ startImmediately: true }))
+      const approved = yield* request(tmp.path, "/config/trust", { method: "POST" })
+      expect(approved).toMatchObject({ status: 200, body: { trusted: true, ignored: false } })
+      yield* Fiber.join(disposed)
     }),
   )
 

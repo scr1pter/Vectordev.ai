@@ -17,7 +17,55 @@ const it = testEffect(
   Layer.mergeAll(LayerNode.compile(LayerNode.group([Format.node, CrossSpawnSpawner.node])), NodeFileSystem.layer),
 )
 
+// VECTOR_CONFIG_CONTENT loads like the user's own config, not the project's, so trust does not gate it.
+function withUserConfig<A, E, R>(config: object, effect: Effect.Effect<A, E, R>) {
+  return Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const original = process.env.VECTOR_CONFIG_CONTENT
+      process.env.VECTOR_CONFIG_CONTENT = JSON.stringify(config)
+      return original
+    }),
+    () => effect,
+    (original) =>
+      Effect.sync(() => {
+        if (original === undefined) delete process.env.VECTOR_CONFIG_CONTENT
+        else process.env.VECTOR_CONFIG_CONTENT = original
+      }),
+  )
+}
+
+const userFormatter = {
+  formatter: { probe: { command: ["bun", appendFixture, "formatted", "$FILE"], extensions: [".probe"] } },
+}
+
 describe("Format", () => {
+  it.instance("leaves a user-level formatter off in an untrusted project", () =>
+    withUserConfig(
+      userFormatter,
+      Effect.gen(function* () {
+        const file = path.join((yield* TestInstance).directory, "a.probe")
+        yield* Effect.promise(() => Bun.write(file, "x"))
+        expect(yield* Format.Service.use((fmt) => fmt.file(file))).toBe(false)
+        expect(yield* Effect.promise(() => Bun.file(file).text())).toBe("x")
+      }),
+    ),
+  )
+
+  it.instance(
+    "runs a user-level formatter once the project is trusted",
+    () =>
+      withUserConfig(
+        userFormatter,
+        Effect.gen(function* () {
+          const file = path.join((yield* TestInstance).directory, "a.probe")
+          yield* Effect.promise(() => Bun.write(file, "x"))
+          expect(yield* Format.Service.use((fmt) => fmt.file(file))).toBe(true)
+          expect(yield* Effect.promise(() => Bun.file(file).text())).toBe("xformatted")
+        }),
+      ),
+    { trusted: true },
+  )
+
   it.instance("status() returns empty list when no formatters are configured", () =>
     Format.Service.use((fmt) =>
       Effect.gen(function* () {

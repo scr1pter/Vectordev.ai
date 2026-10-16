@@ -26,6 +26,23 @@ const disabledDownloadIt = testEffect(
   Layer.mergeAll(lspLayer({ disableLspDownload: true }), LayerNode.compile(CrossSpawnSpawner.node)),
 )
 
+// VECTOR_CONFIG_CONTENT loads like the user's own config, not the project's, so trust does not gate it.
+function withUserConfig<A, E, R>(config: object, effect: Effect.Effect<A, E, R>) {
+  return Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const original = process.env.VECTOR_CONFIG_CONTENT
+      process.env.VECTOR_CONFIG_CONTENT = JSON.stringify(config)
+      return original
+    }),
+    () => effect,
+    (original) =>
+      Effect.sync(() => {
+        if (original === undefined) delete process.env.VECTOR_CONFIG_CONTENT
+        else process.env.VECTOR_CONFIG_CONTENT = original
+      }),
+  )
+}
+
 describe("lsp.spawn", () => {
   it.instance(
     "does not spawn builtin LSP for files outside instance",
@@ -92,6 +109,47 @@ describe("lsp.spawn", () => {
         }),
       ),
     { trusted: true, config: { lsp: true } },
+  )
+
+  it.instance("leaves a user-level lsp setting off in an untrusted project", () =>
+    withUserConfig(
+      { lsp: true },
+      LSP.Service.use((lsp) =>
+        Effect.gen(function* () {
+          const dir = (yield* TestInstance).directory
+          const spy = spyOn(LSPServer.Typescript, "spawn").mockResolvedValue(undefined)
+
+          try {
+            yield* lsp.hover({ file: path.join(dir, "src", "inside.ts"), line: 0, character: 0 })
+            expect(spy).toHaveBeenCalledTimes(0)
+          } finally {
+            spy.mockRestore()
+          }
+        }),
+      ),
+    ),
+  )
+
+  it.instance(
+    "applies a user-level lsp setting once the project is trusted",
+    () =>
+      withUserConfig(
+        { lsp: true },
+        LSP.Service.use((lsp) =>
+          Effect.gen(function* () {
+            const dir = (yield* TestInstance).directory
+            const spy = spyOn(LSPServer.Typescript, "spawn").mockResolvedValue(undefined)
+
+            try {
+              yield* lsp.hover({ file: path.join(dir, "src", "inside.ts"), line: 0, character: 0 })
+              expect(spy).toHaveBeenCalledTimes(1)
+            } finally {
+              spy.mockRestore()
+            }
+          }),
+        ),
+      ),
+    { trusted: true },
   )
 
   it.instance(

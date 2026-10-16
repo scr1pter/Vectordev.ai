@@ -381,6 +381,33 @@ describe("HttpApi Server.listen", () => {
     }
   })
 
+  test("a wildcard bind never shares a port another server answers on loopback", async () => {
+    // macOS lets 0.0.0.0:P bind beside 127.0.0.1:P, and localhost clients then reach the other, passwordless server.
+    Flag.VECTOR_SERVER_PASSWORD = auth.password
+    Flag.VECTOR_SERVER_USERNAME = auth.username
+    process.env.VECTOR_SERVER_PASSWORD = auth.password
+    process.env.VECTOR_SERVER_USERNAME = auth.username
+    const blocker = await occupyPort(0)
+    if (!blocker) throw new Error("could not open a loopback blocker")
+    const port = (blocker.address() as net.AddressInfo).port
+    try {
+      await expect(Server.listen({ hostname: "0.0.0.0", port, trustedNetwork: true })).rejects.toThrow("already in use")
+      const preferred = await occupyPort(4096)
+      try {
+        const listener = await Server.listen({ hostname: "0.0.0.0", port: 0, trustedNetwork: true })
+        try {
+          expect(listener.port).not.toBe(4096)
+        } finally {
+          await stop(listener, "timed out cleaning up wildcard fallback listener")
+        }
+      } finally {
+        if (preferred) await new Promise<void>((resolve) => preferred.close(() => resolve()))
+      }
+    } finally {
+      await new Promise<void>((resolve) => blocker.close(() => resolve()))
+    }
+  })
+
   testPty("rejects unsafe PTY ticket mint and connect requests", async () => {
     await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
     const listener = await startListener()

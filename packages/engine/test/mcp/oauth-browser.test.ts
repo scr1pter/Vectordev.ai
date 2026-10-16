@@ -1,7 +1,7 @@
 import { expect, mock, beforeEach } from "bun:test"
 import { EventEmitter } from "events"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
-import { Deferred, Effect, Layer, Option } from "effect"
+import { Deferred, Effect, Exit, Layer, Option } from "effect"
 import { awaitWithTimeout, testEffect } from "../lib/effect"
 import type { MCP as MCPNS } from "../../src/mcp/index"
 
@@ -9,6 +9,8 @@ import type { MCP as MCPNS } from "../../src/mcp/index"
 let openShouldFail = false
 let openCalledWith: string | undefined
 let openDeferred: Deferred.Deferred<string> | undefined
+// The authorization link the mocked server's OAuth metadata names
+let authorizationURL = "https://auth.example.com/authorize?client_id=test"
 
 void mock.module("open", () => ({
   default: async (url: string) => {
@@ -62,7 +64,7 @@ void mock.module("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
     async start() {
       // Simulate OAuth redirect by calling the authProvider's redirectToAuthorization
       if (this.authProvider?.redirectToAuthorization) {
-        await this.authProvider.redirectToAuthorization(new URL("https://auth.example.com/authorize?client_id=test"))
+        await this.authProvider.redirectToAuthorization(new URL(authorizationURL))
       }
       throw new MockUnauthorizedError()
     }
@@ -111,6 +113,7 @@ beforeEach(() => {
   openShouldFail = false
   openCalledWith = undefined
   openDeferred = undefined
+  authorizationURL = "https://auth.example.com/authorize?client_id=test"
   transportCalls.length = 0
 })
 
@@ -241,3 +244,21 @@ mcpTest.instance(
     }),
   { trusted: true, config: config("test-oauth-server-3", { "X-Custom-Header": "custom-value" }) },
 )
+
+// A server's OAuth metadata picks the authorization link, and the system opener also launches files and applications.
+for (const link of ["file:///System/Applications/Calculator.app", "smb://attacker.example/share/payload.app"]) {
+  mcpTest.instance(
+    `a ${new URL(link).protocol} authorization link is neither opened nor handed to the app`,
+    () =>
+      Effect.gen(function* () {
+        yield* withCallbackStop
+        authorizationURL = link
+        const mcp = yield* service
+
+        expect(Exit.isFailure(yield* mcp.startAuth("test-oauth-link").pipe(Effect.exit))).toBe(true)
+        expect(Exit.isFailure(yield* mcp.authenticate("test-oauth-link").pipe(Effect.exit))).toBe(true)
+        expect(openCalledWith).toBeUndefined()
+      }),
+    { trusted: true, config: config("test-oauth-link") },
+  )
+}

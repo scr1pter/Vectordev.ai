@@ -22,6 +22,7 @@ import { testEffect } from "../lib/effect"
 import { Tool } from "@/tool/tool"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { InstanceStore } from "@/project/instance-store"
+import { Global } from "@vectordevai/core/global"
 
 const shellLayer = Layer.mergeAll(
   LayerNode.compile(
@@ -550,6 +551,41 @@ describe("tool.shell permissions", () => {
       }),
     ),
   )
+
+  // git diff prints whole files once one of them lies outside the work tree, with or without --no-index.
+  for (const item of shells.filter((item) => !PS.has(item.label) && item.label !== "cmd")) {
+    it.live(`asks for external_directory permission for files git diff reads [${item.label}]`, () =>
+      withShell(
+        item,
+        Effect.gen(function* () {
+          const outside = yield* tmpdirScoped()
+          const file = path.join(outside, "id_rsa").replaceAll("\\", "/")
+          yield* Effect.promise(() => Bun.write(file, "secret"))
+          const tmp = yield* tmpdirScoped({ git: true })
+          yield* runIn(
+            tmp,
+            Effect.gen(function* () {
+              const err = new Error("stop after permission")
+              for (const [command, want] of [
+                [`git diff /dev/null ${file}`, glob(path.join(outside, "*"))],
+                [`git diff ${file} README.md`, glob(path.join(outside, "*"))],
+                [`git diff --no-index -- README.md ${file}`, glob(path.join(outside, "*"))],
+                ["git diff /dev/null .env", "/dev/*"],
+              ]) {
+                const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+                expect(yield* fail({ command }, capture(requests, err))).toMatchObject({ message: err.message })
+                expect(requests.find((r) => r.permission === "external_directory")?.patterns).toContain(want)
+              }
+              // Revisions and paths inside the workspace ask only for the command.
+              const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+              yield* fail({ command: "git diff main..HEAD -- src/index.ts HEAD~1" }, capture(requests, err))
+              expect(requests.map((r) => r.permission)).toEqual(["bash"])
+            }),
+          )
+        }),
+      ),
+    )
+  }
 
   if (process.platform === "win32") {
     if (bash) {
@@ -1234,6 +1270,7 @@ describe("tool.shell read-only allowlist", () => {
       "git status*": "allow",
       "git show*": "allow",
       "git log*": "allow",
+      "*--no-index*": "deny",
     },
   })
 
@@ -1281,6 +1318,110 @@ describe("tool.shell read-only allowlist", () => {
         ),
       )
     }
+
+    // Outside a git work tree git diff compares the two files whole, the way --no-index does.
+    it.live(`denies git diff of two files outside a git work tree [${item.label}]`, () =>
+      withShell(
+        item,
+        Effect.gen(function* () {
+          const tmp = yield* tmpdirScoped()
+          yield* Effect.promise(() => Bun.write(path.join(tmp, ".env"), "PLACEHOLDER=1"))
+          yield* Effect.promise(() => Bun.write(path.join(tmp, "README.md"), "readme"))
+          yield* runIn(
+            tmp,
+            Effect.gen(function* () {
+              const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+              expect(yield* fail({ command: "git diff .env README.md" }, enforce(requests))).toBeInstanceOf(
+                PermissionV1.DeniedError,
+              )
+              expect(requests.find((r) => r.permission === "bash")?.patterns).toContain(
+                "git diff --no-index .env README.md",
+              )
+            }),
+          )
+        }),
+      ),
+    )
+
+    // Inside a git work tree git diff still compares two whole files once one of them lies outside the work tree git
+    // starts in, so the explore agent's own rules must deny each of these before .env reaches it.
+    it.live(`denies the explore agent git diff of whole files in a git project [${item.label}]`, () =>
+      withShell(
+        item,
+        Effect.gen(function* () {
+          const tmp = yield* tmpdirScoped({ git: true })
+          const nested = path.join(tmp, "nested")
+          const output = path.join(Truncate.DIR, `tool_${path.basename(tmp)}`)
+          yield* Effect.promise(async () => {
+            await Bun.write(path.join(tmp, ".env"), "PLACEHOLDER_SECRET=1")
+            await Bun.write(path.join(tmp, "README.md"), "readme")
+            await Bun.write(path.join(nested, "n.txt"), "n")
+            await Bun.$`git init -q`.cwd(nested).quiet()
+            await Bun.write(output, "earlier output")
+            await Bun.write(path.join(Global.Path.tmp, ".keep"), "")
+          })
+          yield* runIn(
+            tmp,
+            Effect.gen(function* () {
+              const explore = yield* Agent.Service.use((svc) => svc.get("explore"))
+              const ruleset = explore!.permission
+              const decide = (requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">>) => ({
+                ...ctx,
+                agent: "explore",
+                ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+                  Effect.sync(() => {
+                    requests.push(req)
+                    const rules = req.patterns.map((pattern) => Permission.evaluate(req.permission, pattern, ruleset))
+                    if (rules.some((rule) => rule.action === "deny")) throw new PermissionV1.DeniedError({ ruleset })
+                    if (rules.some((rule) => rule.action === "ask"))
+                      throw new Error(`unexpected prompt: ${req.patterns}`)
+                  }),
+              })
+              const env = path.join(tmp, ".env")
+              const readme = path.join(tmp, "README.md")
+              for (const [command, workdir] of [
+                // A tool-output file and a whitelisted directory lie outside the work tree.
+                [`git diff ${output} .env`, undefined],
+                [`git diff ${Truncate.DIR} .`, undefined],
+                // Run from a directory outside any work tree, by workdir or by cd.
+                [`git diff ${env} ${readme}`, Global.Path.tmp],
+                [`cd ${Global.Path.tmp} && git diff ${env} ${readme}`, undefined],
+                ["git diff -- -a -b", Global.Path.tmp],
+                // A nested repository's work tree ends at its own root, and a .git directory has none.
+                ["git diff ../.env n.txt", nested],
+                ["git diff ../.env HEAD", path.join(tmp, ".git")],
+                // The shell decides where these point, so the scan cannot show them inside.
+                ['git diff "$HOME/.env" README.md', undefined],
+                ["git diff ~root/.profile README.md", undefined],
+              ] as const) {
+                const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+                const exit = yield* run({ command, workdir }, decide(requests)).pipe(Effect.exit)
+                const err = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+                if (!(err instanceof PermissionV1.DeniedError))
+                  throw new Error(
+                    `${command} (workdir ${workdir ?? "-"}) was not denied: ${Exit.isSuccess(exit) ? exit.value.output : String(err)}`,
+                  )
+                expect(
+                  requests.find((r) => r.permission === "bash")?.patterns.some((p) => p.includes("--no-index")),
+                ).toBe(true)
+              }
+              // Paths git sees inside its work tree still diff without a prompt, a nested repository's own included.
+              for (const [command, workdir] of [
+                ["git diff", undefined],
+                ["git diff HEAD -- README.md", undefined],
+                [`git diff ${readme} .env`, undefined],
+                ["git diff n.txt", nested],
+              ] as const) {
+                const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+                const result = yield* run({ command, workdir }, decide(requests))
+                expect(result.output).not.toContain("PLACEHOLDER_SECRET")
+                expect(requests.flatMap((r) => r.patterns).some((p) => p.includes("--no-index"))).toBe(false)
+              }
+            }),
+          )
+        }),
+      ),
+    )
 
     for (const command of ["git diff main", "git log -5"]) {
       it.live(`allows ${command} [${item.label}]`, () =>

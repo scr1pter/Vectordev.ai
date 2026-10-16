@@ -7,6 +7,7 @@ import { Cause, Effect, Exit, Fiber } from "effect"
 import type { MCP as MCPNS } from "../../src/mcp/index"
 import { testEffect } from "../lib/effect"
 import { TestInstance } from "../fixture/fixture"
+import { Global } from "@vectordevai/core/global"
 
 // --- Mock infrastructure ---
 
@@ -337,6 +338,23 @@ it.instance(
       }),
     ),
   { trusted: true, config: { mcp: {} } },
+)
+
+it.instance("an untrusted project starts local servers in an empty directory outside it", () =>
+  MCP.Service.use((mcp: MCPNS.Interface) =>
+    Effect.gen(function* () {
+      const { directory } = yield* TestInstance
+      lastCreatedClientName = "untrusted-cwd"
+      yield* mcp.add("untrusted-cwd", { type: "local", command: ["npx", "-y", "some-mcp-server"] })
+      lastCreatedClientName = "untrusted-rel-cwd"
+      yield* mcp.add("untrusted-rel-cwd", { type: "local", command: ["echo", "test"], cwd: "plugins/sub" })
+
+      const outside = path.join(Global.Path.state, "mcp", "untrusted-workspace")
+      expect(stdioOptsByName.get("untrusted-cwd")?.cwd).toBe(outside)
+      expect(stdioOptsByName.get("untrusted-rel-cwd")?.cwd).toBe(path.join(outside, "plugins/sub"))
+      expect(path.relative(directory, outside).startsWith("..")).toBe(true)
+    }),
+  ),
 )
 
 it.instance(

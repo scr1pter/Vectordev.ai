@@ -3,6 +3,7 @@ import { UI } from "@/cli/ui"
 import { errorMessage } from "@vectordevai/tui/util/error"
 import { validateSession } from "../tui/validate-session"
 import { ServerAuth } from "@/server/auth"
+import { Flag } from "@vectordevai/core/flag/flag"
 
 export const AttachCommand = cmd({
   command: "attach <url>",
@@ -111,6 +112,9 @@ export const AttachCommand = cmd({
       return
     }
 
+    // The same rule as `vector run --attach` and the app: a password goes over plain HTTP only to this machine or the
+    // user's own network.
+    ServerAuth.assertSecurePasswordTransport(args.url, args.password ?? Flag.VECTOR_SERVER_PASSWORD)
     const headers = ServerAuth.headers({ password: args.password, username: args.username })
     const config = await TuiConfig.get()
 

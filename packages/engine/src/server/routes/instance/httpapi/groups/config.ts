@@ -14,6 +14,9 @@ export const TrustStatus = Schema.Struct({
   workspace: Schema.String,
   trusted: Schema.Boolean,
   ignored: Schema.Boolean,
+  // Whether the project has settings of its own (config, .vector or skills content) that trust decides on. Without
+  // them `ignored` means only the user's language servers, formatters and MCP servers are held back.
+  settings: Schema.Boolean,
 }).annotate({ identifier: "ProjectTrustStatus" })
 
 export const ConfigApi = HttpApi.make("config")

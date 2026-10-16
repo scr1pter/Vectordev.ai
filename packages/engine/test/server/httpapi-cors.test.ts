@@ -77,7 +77,8 @@ describe("HttpApi CORS", () => {
         ),
       )
 
-      expect(response.status).toBe(401)
+      // A page from an untrusted site is refused before authentication, so cached browser credentials cannot help it.
+      expect(response.status).toBe(403)
       expect(response.headers.get("access-control-allow-origin")).toBeNull()
     }),
   )

@@ -28,7 +28,12 @@ export const configHandlers = HttpApiBuilder.group(InstanceHttpApi, "config", (h
 
     const trust = Effect.fn("ConfigHttpApi.trust")(function* () {
       const status = yield* configSvc.trust()
-      return { workspace: status.workspace, trusted: status.trusted, ignored: status.ignored }
+      return {
+        workspace: status.workspace,
+        trusted: status.trusted,
+        ignored: status.ignored,
+        settings: status.settings,
+      }
     })
 
     // Approves what the config was loaded from, then reloads the instance so the trusted config takes effect.

@@ -45,6 +45,7 @@ import {
 import { InvalidRequestError, PermissionNotFoundError, notFound } from "../errors"
 import * as SessionError from "./session-errors"
 import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
+import { ForbiddenError } from "@vectordevai/protocol/errors"
 import { allowsSessionID, allowsSessionLocation } from "./session-access"
 
 const tryParseJson = (text: string) =>
@@ -105,6 +106,19 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const requireSession = Effect.fn("SessionHttpApi.requireSession")(function* (sessionID: SessionID) {
       return yield* SessionError.mapStorageNotFound(session.get(sessionID))
+    })
+
+    // A session's own rules come last and win, so an allow or ask from a guest would let its session skip the
+    // owner's approval for an outside directory, a guarded file or an unsandboxed shell. A guest may only take
+    // tools away; switching one on, as rules or as a prompt's tools, stays with the owner.
+    const requireOwnerToAllow = Effect.fn("SessionHttpApi.requireOwnerToAllow")(function* (input: {
+      readonly permission?: readonly PermissionV1.Rule[]
+      readonly tools?: Readonly<Record<string, boolean>>
+    }) {
+      if ((yield* RequestPrincipal).kind === "owner") return
+      if (!input.permission?.some((rule) => rule.action !== "deny") && !Object.values(input.tools ?? {}).includes(true))
+        return
+      return yield* new ForbiddenError({ message: "Only the server owner can allow tools in a session" })
     })
 
     const get = Effect.fn("SessionHttpApi.get")(function* (ctx: { params: { sessionID: SessionID } }) {
@@ -178,7 +192,24 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const create = Effect.fn("SessionHttpApi.create")(function* (ctx: { payload?: Session.CreateInput }) {
+      yield* requireOwnerToAllow({ permission: ctx.payload?.permission })
+      yield* requireGuestParent({ parentID: ctx.payload?.parentID, internal: ctx.payload?.internal })
       return yield* shareSvc.create(ctx.payload)
+    })
+
+    // A guest's session may hang only under a session the guest may open. A helper session is left out of every
+    // list, so a guest's helper needs such a parent: its spend then shows in a session the owner sees.
+    const requireGuestParent = Effect.fn("SessionHttpApi.requireGuestParent")(function* (input: {
+      readonly parentID?: SessionID
+      readonly internal?: string
+    }) {
+      const principal = yield* RequestPrincipal
+      if (principal.kind === "owner") return
+      if (input.parentID === undefined && input.internal === undefined) return
+      if (input.parentID === undefined)
+        return yield* new ForbiddenError({ message: "A guest's helper session must belong to one of its sessions" })
+      if (yield* allowsSessionID(session, principal, input.parentID)) return
+      return yield* new ForbiddenError({ message: "The parent session is outside the guest's workspace" })
     })
 
     const createRaw = Effect.fn("SessionHttpApi.createRaw")(function* (ctx: {
@@ -219,6 +250,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof UpdatePayload.Type
     }) {
       const current = yield* requireSession(ctx.params.sessionID)
+      yield* requireOwnerToAllow({ permission: ctx.payload.permission })
       if (ctx.payload.title !== undefined) {
         yield* session.setTitle({ sessionID: ctx.params.sessionID, title: ctx.payload.title })
       }
@@ -343,6 +375,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof PromptPayload.Type
     }) {
       yield* requireSession(ctx.params.sessionID)
+      yield* requireOwnerToAllow({ tools: ctx.payload.tools })
       const message = yield* promptSvc
         .prompt({ ...ctx.payload, sessionID: ctx.params.sessionID }, yield* attachments)
         .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
@@ -356,6 +389,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof PromptPayload.Type
     }) {
       yield* requireSession(ctx.params.sessionID)
+      yield* requireOwnerToAllow({ tools: ctx.payload.tools })
       yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID }, yield* attachments).pipe(
         Effect.catchCause((cause) =>
           Effect.gen(function* () {

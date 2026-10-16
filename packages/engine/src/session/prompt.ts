@@ -23,7 +23,7 @@ import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
 import { MAX_STEPS_PROMPT } from "@vectordevai/core/session/runner/max-steps"
 import { ToolRegistry } from "@/tool/registry"
-import { assertExternalDirectoryEffect } from "@/tool/external-directory"
+import { assertExternalDirectoryEffect, readPatterns } from "@/tool/external-directory"
 import type { Tool } from "@/tool/tool"
 import { MCP } from "../mcp"
 import { LSP } from "@/lsp/lsp"
@@ -1109,7 +1109,7 @@ const layer = Layer.effect(
                 yield* assertExternalDirectoryEffect(readContext, filepath, { bypass: attachedByUser })
                 yield* readContext.ask({
                   permission: "read",
-                  patterns: [path.relative(instance.worktree, filepath)],
+                  patterns: readPatterns(instance.worktree, filepath),
                   always: ["*"],
                   metadata: {},
                 })

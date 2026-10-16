@@ -34,6 +34,13 @@ function allowsSessionLocation(principal: Principal, item: SessionV2.Info) {
 export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handlers) =>
   Effect.gen(function* () {
     const session = yield* SessionV2.Service
+    const allowsSessionID = (principal: Principal, sessionID: SessionV2.ID) =>
+      allowsSession(principal, sessionID)
+        ? Effect.succeed(true)
+        : session.get(sessionID).pipe(
+            Effect.map((item) => allowsSessionLocation(principal, item)),
+            Effect.catch(() => Effect.succeed(false)),
+          )
 
     return handlers
       .handle(
@@ -127,21 +134,29 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
           const guestDirectory = guestWorkspaceDirectory(principal, requested.workspaceID)
           if (principal.kind === "guest" && guestDirectory === undefined)
             return yield* new ForbiddenError({ message: "Guest sessions require an allowed workspace" })
+          // A guest's session may hang only under a session the guest may open. A helper session is left out of every
+          // list, so a guest's helper needs such a parent: its spend then shows in a session the owner sees.
+          if (principal.kind === "guest" && ctx.payload.parentID === undefined && ctx.payload.internal !== undefined)
+            return yield* new ForbiddenError({ message: "A guest's helper session must belong to one of its sessions" })
+          if (ctx.payload.parentID !== undefined && !(yield* allowsSessionID(principal, ctx.payload.parentID)))
+            return yield* new ForbiddenError({ message: "The parent session is outside the guest's workspace" })
           const location =
             principal.kind === "guest"
               ? Location.Ref.make({ directory: AbsolutePath.make(guestDirectory!), workspaceID: requested.workspaceID })
               : requested
-          return {
-            data: yield* session.create({
-              id: ctx.payload.id,
-              agent: ctx.payload.agent,
-              model: ctx.payload.model,
-              location,
-              title: ctx.payload.title,
-              parentID: ctx.payload.parentID,
-              internal: ctx.payload.internal,
-            }),
-          }
+          const created = yield* session.create({
+            id: ctx.payload.id,
+            agent: ctx.payload.agent,
+            model: ctx.payload.model,
+            location,
+            title: ctx.payload.title,
+            parentID: ctx.payload.parentID,
+            internal: ctx.payload.internal,
+          })
+          // An ID that already names a session adopts it wherever it lives, so the guest's claims decide the answer.
+          if (!allowsSessionLocation(principal, created))
+            return yield* new ForbiddenError({ message: "This session is outside the guest's workspace" })
+          return { data: created }
         }),
       )
       .handle(
@@ -149,12 +164,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         Effect.fn(function* () {
           const principal = yield* RequestPrincipal
           const allowed = yield* Effect.filter(Array.from(yield* session.active), (sessionID) =>
-            allowsSession(principal, sessionID)
-              ? Effect.succeed(true)
-              : session.get(sessionID).pipe(
-                  Effect.map((item) => allowsSessionLocation(principal, item)),
-                  Effect.catch(() => Effect.succeed(false)),
-                ),
+            allowsSessionID(principal, sessionID),
           )
           return {
             data: Object.fromEntries(allowed.map((sessionID) => [sessionID, { type: "running" as const }])),

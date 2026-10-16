@@ -43,6 +43,8 @@ const layer = Layer.effectDiscard(
       const fromProject = relative(stop, start)
       const insideProject =
         fromProject === "" || (fromProject !== ".." && !fromProject.startsWith(`..${sep}`) && !isAbsolute(fromProject))
+      // A repository can ship AGENTS.md as a link to ../../.ssh/id_rsa, and these files reach the model with the system
+      // prompt, so one is read only where it really lands inside the project.
       const discovered = new Set(
         (Flag.VECTOR_DISABLE_PROJECT_CONFIG || !insideProject
           ? []
@@ -51,7 +53,9 @@ const layer = Layer.effectDiscard(
               start,
               stop,
             })
-        ).map(FSUtil.resolve),
+        )
+          .map(FSUtil.resolve)
+          .filter((file) => FSUtil.contains(stop, file)),
       )
       const paths = Array.dedupe([FSUtil.resolve(join(global.config, "AGENTS.md")), ...discovered])
       const files = yield* Effect.forEach(

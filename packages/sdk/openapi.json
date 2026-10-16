@@ -26324,9 +26324,12 @@
           },
           "ignored": {
             "type": "boolean"
+          },
+          "settings": {
+            "type": "boolean"
           }
         },
-        "required": ["workspace", "trusted", "ignored"],
+        "required": ["workspace", "trusted", "ignored", "settings"],
         "additionalProperties": false
       },
       "Model": {

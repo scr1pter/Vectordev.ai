@@ -79,7 +79,19 @@ export async function assertExternalDirectory(ctx: Tool.Context, target?: string
   return Effect.runPromise(assertExternalDirectoryEffect(ctx, target, options))
 }
 
-function realpath(target: string): string {
+/**
+ * The read permission patterns for a file: the name the caller used and, when it differs, the file really read.
+ * Rules such as `*.env: ask` name real files, so a link (`notes.txt -> .env`) or another spelling on a disk that
+ * ignores case (`.ENV` on macOS) would otherwise read the guarded file under a name no rule matches.
+ */
+export function readPatterns(worktree: string, target: string) {
+  const requested = path.relative(worktree, target)
+  const real = path.relative(realpath(worktree), realpath(target))
+  return requested === real ? [requested] : [requested, real]
+}
+
+/** Where a path really lands, following links in it and in its parents, even when the file does not exist yet. */
+export function realpath(target: string): string {
   const resolved = FSUtil.resolve(target)
   const link = lstatSync(resolved, { throwIfNoEntry: false })
   // A dangling symlink cannot be resolved by realpath, but writing through it

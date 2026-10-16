@@ -33,6 +33,7 @@ describe("server authentication", () => {
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/api/pty")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/session/:sessionID/shell")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/session/:sessionID/command")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/session/:sessionID/init")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/permission/:requestID/reply")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/session/:sessionID/permissions/:permissionID")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/api/session/:sessionID/permission/:requestID/reply")).toBe(true)
@@ -50,6 +51,15 @@ describe("server authentication", () => {
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/global/dispose")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("GET", "/project/:projectID/directories")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("PATCH", "/project/:projectID")).toBe(true)
+    // A new worktree runs startup commands; removing or resetting one discards work outside the guest's workspace.
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/experimental/worktree")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("DELETE", "/experimental/worktree")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/experimental/worktree/reset")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("GET", "/experimental/worktree")).toBe(false)
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/vcs/commit")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/vcs/switch")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/vcs/apply")).toBe(false)
+    expect(ServerAuth.isOwnerOnlyRoute("GET", "/vcs/status")).toBe(false)
     // A guest still prompts, reads its own pending requests and answers its own questions.
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/session/:sessionID/message")).toBe(false)
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/session/:sessionID/prompt_async")).toBe(false)
@@ -68,5 +78,15 @@ describe("server authentication", () => {
     expect(() => ServerAuth.assertSecurePasswordTransport("http://vector.example", "secret")).toThrow("cleartext")
     expect(() => ServerAuth.assertSecurePasswordTransport("0.0.0.0", "secret")).toThrow("cleartext")
     expect(() => ServerAuth.assertSecurePasswordTransport("http://vector.example", undefined)).not.toThrow()
+  })
+
+  test("a password listener binds off loopback only on a network marked trusted, like vector serve", () => {
+    for (const host of ["127.0.0.1", "localhost", "::1"])
+      expect(() => ServerAuth.assertSecurePasswordListen(host, "secret", false)).not.toThrow()
+    for (const host of ["0.0.0.0", "::", "192.168.1.4", "10.0.0.2", "vector.local", "vector", "vector.example"]) {
+      expect(() => ServerAuth.assertSecurePasswordListen(host, "secret", false)).toThrow("--trusted-network")
+      expect(() => ServerAuth.assertSecurePasswordListen(host, "secret", true)).not.toThrow()
+    }
+    expect(() => ServerAuth.assertSecurePasswordListen("0.0.0.0", undefined, false)).not.toThrow()
   })
 })

@@ -333,9 +333,52 @@ test("guest session lists and replay routes stay within canonical claims", async
 
     expect((await fetch(new URL(`/api/session/${denied}/event`, listener.url), { headers: guest })).status).toBe(403)
 
+    // Creating a session under an existing ID adopts it, which must not hand a guest a session it cannot read, and a
+    // guest's sessions stay in the owner's lists, so a guest cannot mark one as a hidden helper.
+    const guestCreate = (body: unknown) =>
+      fetch(new URL("/api/session", listener.url), {
+        method: "POST",
+        headers: { ...guest, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      })
+    const location = { directory: tmp.path, workspaceID: "wrk_allowed" }
+    const adopted = await guestCreate({ id: denied, location })
+    expect(adopted.status).toBe(403)
+    expect(await adopted.text()).not.toContain("wrk_denied")
+    expect((await guestCreate({ id: escaped, location })).status).toBe(403)
+    expect((await guestCreate({ id: allowed, location })).status).toBe(200)
+    // A guest's helper (Codespace edit and autocomplete, Browser Agent) belongs to a session the guest may open, whose
+    // spend the owner sees. Without one, or under a session outside the guest's claims, it is refused.
+    expect((await guestCreate({ location, internal: "vectorscope" })).status).toBe(403)
+    expect((await guestCreate({ location, internal: "codespace.edit", parentID: denied })).status).toBe(403)
+    expect((await guestCreate({ location, internal: "codespace.edit", parentID: escaped })).status).toBe(403)
+    expect((await guestCreate({ location, parentID: escaped })).status).toBe(403)
+    const helper = await guestCreate({ location, internal: "codespace.edit", parentID: allowed })
+    expect(helper.status).toBe(200)
+    const helperInfo = ((await helper.json()) as { data: { id: string; parentID?: string } }).data
+    expect(helperInfo.parentID).toBe(allowed)
+    expect((await guestCreate({ location, internal: "codespace.autocomplete", parentID: claimed })).status).toBe(200)
+    const helperList = await fetch(new URL("/api/session", listener.url), { headers: guest })
+    expect(((await helperList.json()) as { data: Array<{ id: string }> }).data.map((item) => item.id)).not.toContain(
+      helperInfo.id,
+    )
+
     await events.return(undefined)
     events = undefined
     Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+
+    const legacyCreate = (body: unknown) =>
+      fetch(new URL("/session", listener.url), {
+        method: "POST",
+        headers: { ...guest, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      })
+    expect((await legacyCreate({ internal: "vectorscope" })).status).toBe(403)
+    expect((await legacyCreate({ internal: "codespace.edit", parentID: escaped })).status).toBe(403)
+    expect((await legacyCreate({ parentID: denied })).status).toBe(403)
+    const legacyHelper = await legacyCreate({ internal: "codespace.edit", parentID: allowed })
+    expect(legacyHelper.status).toBe(200)
+    expect(((await legacyHelper.json()) as { parentID?: string }).parentID).toBe(allowed)
 
     const legacyList = await fetch(new URL("/session", listener.url), { headers: guest })
     expect(legacyList.status).toBe(200)
@@ -375,6 +418,48 @@ test("guest session lists and replay routes stay within canonical claims", async
     )
     expect(claimedRead.status).toBe(200)
     expect(((await claimedRead.json()) as { directory: string }).directory).toBe(other.path)
+
+    // The router also matches these spellings; scope must follow the session it matched, not a re-parsed path.
+    const origin = new URL(listener.url)
+    const statusOf = (method: string, target: string) =>
+      new Promise<number>((resolve, reject) => {
+        const socket = connect(Number(origin.port), origin.hostname)
+        let head = ""
+        socket.on("data", (chunk) => {
+          head += chunk.toString()
+          if (!head.includes("\r\n")) return
+          socket.destroy()
+          resolve(Number(head.split(" ")[1]))
+        })
+        socket.on("error", reject)
+        socket.write(
+          [
+            `${method} ${target} HTTP/1.1`,
+            `Host: ${origin.host}`,
+            `Authorization: ${guest.authorization}`,
+            "Content-Type: application/json",
+            "Content-Length: 2",
+            "Connection: close",
+            "",
+            "{}",
+          ].join("\r\n"),
+        )
+      })
+    const scoped = `directory=${encodeURIComponent(tmp.path)}`
+    const spellings = [
+      ["GET", `/SESSION/${escaped}`],
+      ["PATCH", `/SESSION/${escaped}`],
+      ["GET", `//session/${escaped}`],
+      ["PATCH", `/session//${escaped}`],
+      ["GET", `/Session/${escaped}/message`],
+      ["GET", `/session/${escaped};/../${allowed}`],
+      ["PATCH", `/session/${escaped};/../${allowed}`],
+    ]
+    const spelled = await Promise.all(
+      spellings.map(async ([method, target]) => [method, target, await statusOf(method, `${target}?${scoped}`)]),
+    )
+    expect(spelled).toEqual(spellings.map(([method, target]) => [method, target, 403]))
+    expect(await statusOf("GET", `/SESSION/${allowed}?${scoped}`)).toBe(200)
 
     const deniedMutation = await fetch(new URL(`/session/${escaped}`, listener.url), {
       method: "PATCH",
@@ -571,6 +656,105 @@ test("guests cannot run host commands or answer permission requests", async () =
   }
 }, 30_000)
 
+test("guests cannot allow tools in their own sessions", async () => {
+  await using outside = await tmpdir()
+  const secret = path.join(outside.path, "host-secret.bin")
+  await fs.writeFile(secret, "HOST-ONLY-SECRET-VALUE")
+  await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
+  const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
+  const call = (url: URL, init: RequestInit = {}) => fetch(url, { ...init, keepalive: false })
+  const at = (route: string) => new URL(`${route}?directory=${encodeURIComponent(tmp.path)}`, listener.url)
+  const send = (route: string, method: string, headers: Record<string, string>, body: unknown) =>
+    call(at(route), { method, headers, body: JSON.stringify(body) })
+  const model = { providerID: "probe", modelID: "probe" }
+  // An allow would skip the external_directory approval that this attachment otherwise waits on.
+  const allow = [{ permission: "*", pattern: "*", action: "allow" }]
+  const ask = [{ permission: "external_directory", pattern: "*", action: "ask" }]
+  const deny = [{ permission: "bash", pattern: "*", action: "deny" }]
+  const file = { type: "file", mime: "application/octet-stream", filename: "x.bin", url: `file://${secret}` }
+  try {
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+    for (const permission of [allow, ask])
+      expect((await send("/session", "POST", guest, { permission })).status).toBe(403)
+    const created = await send("/session", "POST", guest, { permission: deny })
+    expect(created.status).toBe(200)
+    const session = (await created.json()) as { id: string }
+
+    for (const permission of [allow, ask])
+      expect((await send(`/session/${session.id}`, "PATCH", guest, { permission })).status).toBe(403)
+    for (const route of ["prompt_async", "message"])
+      expect(
+        (
+          await send(`/session/${session.id}/${route}`, "POST", guest, {
+            noReply: true,
+            model,
+            tools: { "*": true },
+            parts: [{ type: "text", text: "hi" }],
+          })
+        ).status,
+      ).toBe(403)
+    // The init command can be the owner's own template, so it is as powerful as a slash command.
+    expect(
+      (await send(`/session/${session.id}/init`, "POST", guest, { ...model, messageID: "msg_probe" })).status,
+    ).toBe(403)
+
+    // Taking tools away is still the guest's call, and the outside file still waits for the owner.
+    expect(
+      (
+        await send(`/session/${session.id}/prompt_async`, "POST", guest, {
+          noReply: true,
+          model,
+          tools: { bash: false },
+          parts: [file],
+        })
+      ).status,
+    ).toBe(204)
+    const deadline = Date.now() + 15_000
+    const pending = async () =>
+      ((await (await call(at("/permission"), { headers: owner })).json()) as Array<{ sessionID: string }>).filter(
+        (item) => item.sessionID === session.id,
+      )
+    while ((await pending()).length === 0 && Date.now() < deadline) await Bun.sleep(50)
+    expect(await pending()).toHaveLength(1)
+    const messages = await (await call(at(`/session/${session.id}/message`), { headers: guest })).text()
+    expect(messages).not.toContain(Buffer.from("HOST-ONLY-SECRET-VALUE").toString("base64"))
+
+    // The owner still sets any rules.
+    expect((await send(`/session/${session.id}`, "PATCH", owner, { permission: allow })).status).toBe(200)
+    expect((await send("/session", "POST", owner, { permission: allow })).status).toBe(200)
+  } finally {
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 30_000)
+
 test("guests cannot reach owner-only routes by spelling the path another way", async () => {
   await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
   const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
@@ -648,6 +832,9 @@ test("guests cannot reach owner-only routes by spelling the path another way", a
       { method: "PATCH", route: "/config", body: {} },
       { method: "PATCH", route: "/global/config", body: {} },
       { method: "PUT", route: "/auth/probe-provider", body: { type: "api", key: "placeholder-key" } },
+      { method: "POST", route: "/experimental/worktree", body: { startCommand: "echo SPELLING-PROBE" } },
+      { method: "DELETE", route: "/experimental/worktree", body: { directory: tmp.path } },
+      { method: "POST", route: "/experimental/worktree/reset", body: { directory: tmp.path } },
     ]
     const spellings = (route: string) => [
       route,
@@ -673,6 +860,108 @@ test("guests cannot reach owner-only routes by spelling the path another way", a
     expect(await sendRaw("PUT", "/pty/..", { title: "probe" })).toBe(403)
     // The guest's own routes still answer under the router's spellings.
     expect((await send("GET", `/Session/${sessionID}/Message/`)).status).toBe(200)
+  } finally {
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 30_000)
+
+test("guests cannot plant or run the repository's git hooks", async () => {
+  await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
+  const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
+  const directory = `directory=${encodeURIComponent(tmp.path)}`
+  const send = (headers: Record<string, string>, method: string, route: string, body: unknown) =>
+    fetch(`${new URL(listener.url).origin}${route}?${directory}`, {
+      method,
+      headers,
+      body: JSON.stringify(body),
+      keepalive: false,
+    })
+  const marker = path.join(tmp.path, "hook-ran")
+  const hook = `#!/bin/sh\ntouch "${marker}"\n`
+  try {
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+    // A hook runs as the owner the next time anyone commits, so writing one is running a command.
+    await fs.symlink(path.join(tmp.path, ".git", "hooks"), path.join(tmp.path, "hooks-link"))
+    const plants = [
+      ".git/hooks/pre-commit",
+      ".GIT/hooks/pre-commit",
+      "./.git/hooks/post-checkout",
+      "src/../.git/config",
+      "hooks-link/pre-commit",
+      "nested/.git",
+      // Windows and NTFS open these as .git, and HFS+ ignores the invisible character; on a missing target realpath
+      // keeps the spelling, so each must be refused by name. A nested .git would plant a repository of the guest's.
+      ".git./hooks/pre-commit",
+      ".git /hooks/pre-commit",
+      ".git. ./config",
+      ".git::$INDEX_ALLOCATION/hooks/pre-commit",
+      "GIT~1/hooks/pre-commit",
+      "git~2/config",
+      "nested/.git./config",
+      ".g‌it/config",
+    ]
+    const planted = await Promise.all(
+      plants.map(async (file) => ({
+        file,
+        status: (await send(guest, "POST", "/file/write", { path: file, content: hook })).status,
+      })),
+    )
+    expect(planted).toEqual(plants.map((file) => ({ file, status: 400 })))
+    expect(await fs.readdir(path.join(tmp.path, ".git", "hooks"))).not.toContain("pre-commit")
+    expect(await Bun.file(path.join(tmp.path, ".git", "config")).text()).not.toContain("touch")
+    expect((await send(guest, "POST", "/file/write", { path: "notes.txt", content: "guest notes" })).status).toBe(200)
+
+    // A hook the repository already has, such as one a hook manager installed, runs on commit and branch switch.
+    await fs.writeFile(path.join(tmp.path, ".git", "hooks", "pre-commit"), hook, { mode: 0o755 })
+    await fs.writeFile(path.join(tmp.path, ".git", "hooks", "post-checkout"), hook, { mode: 0o755 })
+    const spellings = (route: string) => [route, route.toUpperCase(), `${route}/`, `${route};x`, `/${route}`]
+    const attempts = [
+      ...spellings("/vcs/commit").map((route) => ({ route, body: { message: "guest commit" } })),
+      ...spellings("/vcs/switch").map((route) => ({ route, body: { branch: "guest-branch", create: true } })),
+    ]
+    const results = await Promise.all(
+      attempts.map(async (item) => ({
+        route: item.route,
+        status: (await send(guest, "POST", item.route, item.body)).status,
+      })),
+    )
+    expect(results).toEqual(attempts.map((item) => ({ route: item.route, status: 403 })))
+    expect(await Bun.file(marker).exists()).toBe(false)
+
+    // The owner still writes, commits and switches as before, hooks included.
+    expect((await send(owner, "POST", "/file/write", { path: "owner.txt", content: "owner" })).status).toBe(200)
+    const committed = await send(owner, "POST", "/vcs/commit", { message: "owner commit" })
+    expect(committed.status).toBe(200)
+    expect(((await committed.json()) as { committed: boolean }).committed).toBe(true)
+    expect(await Bun.file(marker).exists()).toBe(true)
   } finally {
     Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
     await listener.stop(true)
@@ -745,6 +1034,13 @@ test("guests load the app's bootstrap routes, narrowed to their workspace", asyn
     const ownerList = (await (await call("/project", { headers: owner })).json()) as Array<{ worktree: string }>
     expect(ownerList.map((item) => item.worktree)).toContain(other.path)
     expect((await call(`/project/${project.id}/directories`, { headers: guest })).status).toBe(403)
+    // The experimental list spans every project for the owner, and only the guest's workspace for a guest.
+    const sessions = async (headers: Record<string, string>) =>
+      ((await (await call("/experimental/session", { headers })).json()) as Array<{ directory: string }>).map(
+        (item) => item.directory,
+      )
+    expect(await sessions(owner)).toContain(other.path)
+    expect(await sessions(guest)).not.toContain(other.path)
 
     // The live stream carries the guest's workspace and nothing from the owner's other project.
     await call(`/session?directory=${encodeURIComponent(other.path)}`, { method: "POST", headers: owner, body: "{}" })

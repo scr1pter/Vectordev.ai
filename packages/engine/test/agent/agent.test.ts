@@ -285,6 +285,7 @@ it.instance(
         expect(action("bash", "git push origin main")).toBe("deny")
         expect(action("bash", "git difftool -y --extcmd=sh")).toBe("deny")
         expect(action("bash", "git diff --output=src/app.ts")).toBe("deny")
+        expect(action("bash", "git diff --no-index .env README.md")).toBe("deny")
         expect(action("mcp_github_create_or_update_file", "*")).toBe("deny")
       }
     }),

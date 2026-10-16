@@ -204,11 +204,13 @@ const layer = Layer.effect(
           "cargo test*": "ask",
           "go test*": "ask",
         } as const
-        // Flags that make an allowed command write a chosen file or run another program. They come after every other
-        // rule, so no ask or allow can reopen them.
+        // Flags that make an allowed command write a chosen file, run another program, or read any file without the
+        // read tool's asks (`git diff --no-index .env README.md`). They come after every other rule, so no ask or
+        // allow can reopen them.
         const readonlyBashDenies = {
           "git difftool*": "deny",
           "*--output*": "deny",
+          "*--no-index*": "deny",
           "*--ext-diff*": "deny",
           "*--extcmd*": "deny",
           "*--basetemp*": "deny",

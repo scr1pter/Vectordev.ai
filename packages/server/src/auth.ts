@@ -170,8 +170,9 @@ export function isOwnerOnlyRoute(method: string, route: string) {
   if (route === "/api/session/import" || /\/session\/[^/]+\/share(?:\/|$)/.test(route)) return true
   if (route.startsWith("/api/pty") || route.startsWith("/pty")) return true
   // The session shell route runs its command on the host with no permission prompt, and a slash
-  // command can run its template's shell snippets, so both are as powerful as a terminal.
-  if (/\/session\/[^/]+\/(?:shell|command)(?:\/|$)/.test(route)) return true
+  // command can run its template's shell snippets, so both are as powerful as a terminal. init runs the
+  // init command, which the owner's config can replace with a template of its own.
+  if (/\/session\/[^/]+\/(?:shell|command|init)(?:\/|$)/.test(route)) return true
   // Approving a permission request is how a session crosses the workspace boundary (an outside
   // directory, a guarded file), so only the owner may answer one, even for a guest's own session.
   if (/\/permission\/[^/]+\/reply(?:\/|$)/.test(route) || /\/session\/[^/]+\/permissions\//.test(route)) return true
@@ -180,6 +181,11 @@ export function isOwnerOnlyRoute(method: string, route: string) {
   if (route.startsWith("/api/permission/request") || route.startsWith("/api/question/request")) return true
   if (route.startsWith("/api/credential") || route.startsWith("/api/permission/saved")) return true
   if (route.startsWith("/experimental/project/") && route.includes("/copy")) return true
+  // Creating a worktree runs the project's start command and an extra startup command from the request, and removing
+  // or resetting one discards the owner's work in a directory outside the guest's workspace.
+  if (route.startsWith("/experimental/worktree")) return method !== "GET" && method !== "HEAD"
+  // Committing and switching branches run the repository's git hooks, programs that run as the owner.
+  if (route === "/vcs/commit" || route === "/vcs/switch") return true
   if (
     route.startsWith("/global/") ||
     route === "/experimental/console" ||
@@ -201,6 +207,18 @@ export function isOwnerOnlyRoute(method: string, route: string) {
     route === "/config" ||
     route.startsWith("/config/") ||
     route === "/instance/dispose"
+  )
+}
+
+/**
+ * A listener receives the password in every plain HTTP request, so it accepts one only on loopback, or on a network
+ * its operator marked trusted with --trusted-network, matching `vector serve`. Clients may still send a password to
+ * the user's own network (see assertSecurePasswordTransport), where the operator made that choice.
+ */
+export function assertSecurePasswordListen(hostname: string, password: string | undefined, trustedNetwork: boolean) {
+  if (!password || trustedNetwork || isLoopbackHostname(hostname)) return
+  throw new Error(
+    `Refusing to accept the server password over plain HTTP on ${hostname}. On a network you trust, such as a container bridge or a private LAN, pass --trusted-network; otherwise bind loopback behind a TLS reverse proxy or tunnel.`,
   )
 }
 
