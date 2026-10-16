@@ -3,7 +3,8 @@ import { spawn } from "child_process"
 import fs from "fs/promises"
 import path from "path"
 import os from "os"
-import { Cause, Effect, Exit, Fiber, Scope } from "effect"
+import { Cause, Clock, Effect, Exit, Fiber, Scope } from "effect"
+import { TestClock } from "effect/testing"
 import { testEffect } from "../lib/effect"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -226,6 +227,60 @@ describe("util.effect-flock", () => {
       expect(joined).toBe(true)
       yield* Effect.promise(() => fs.rm(tmp, { recursive: true, force: true }))
     }),
+  )
+
+  it.effect(
+    "a fiber queued behind another fiber of the same process times out on one five-minute deadline",
+    Effect.gen(function* () {
+      const flock = yield* EffectFlock.Service
+      const tmp = yield* Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "eflock-test-")))
+      const dir = path.join(tmp, "locks")
+      const key = "eflock:local-deadline"
+      const held = lock(dir, key)
+      // Another process holds the lock file, with a fresh heartbeat for the whole test.
+      yield* Effect.promise(async () => {
+        await fs.mkdir(held, { recursive: true })
+        await fs.writeFile(path.join(held, "heartbeat"), "")
+        await fs.writeFile(path.join(held, "meta.json"), "{}")
+      })
+      const finished: Array<{ name: string; at: number; exit: Exit.Exit<void, EffectFlock.LockError> }> = []
+      const wait = (name: string) =>
+        flock.withLock(Effect.void, key, dir).pipe(
+          Effect.exit,
+          Effect.flatMap((exit) =>
+            Clock.currentTimeMillis.pipe(Effect.map((at) => void finished.push({ name, at, exit }))),
+          ),
+          Effect.forkChild,
+        )
+      // The test clock moves in steps, with real time between them for the lock attempts' file system calls.
+      const advance = (minutes: number, until: () => boolean) =>
+        Effect.gen(function* () {
+          for (let second = 0; second < minutes * 60 && !until(); second++) {
+            yield* TestClock.adjust("1 second")
+            yield* Effect.promise(() => sleep(2))
+          }
+        })
+
+      // The first fiber holds this process's place in line while it waits for the other process.
+      yield* wait("first")
+      yield* Effect.promise(() => sleep(50))
+      yield* advance(1, () => false)
+      const queued = yield* Clock.currentTimeMillis
+      yield* wait("second")
+      yield* Effect.promise(() => sleep(50))
+      yield* advance(12, () => finished.length === 2)
+
+      expect(finished.map((entry) => entry.name)).toEqual(["first", "second"])
+      for (const entry of finished) {
+        expect(Exit.isFailure(entry.exit) ? Cause.pretty(entry.exit.cause) : "").toContain("LockTimeoutError")
+      }
+      // Before, the second fiber waited five minutes in line and then five more on the lock file.
+      const waited = finished[1].at - queued
+      expect(waited).toBeGreaterThanOrEqual(5 * 60_000 - 1_000)
+      expect(waited).toBeLessThanOrEqual(5 * 60_000 + 10_000)
+      yield* Effect.promise(() => fs.rm(tmp, { recursive: true, force: true }))
+    }),
+    30_000,
   )
 
   it.live(
