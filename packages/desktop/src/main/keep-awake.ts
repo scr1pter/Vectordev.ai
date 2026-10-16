@@ -13,6 +13,11 @@ import { Option, Schema } from "effect"
  * held on old news: once the stream has been down or silent for longer than `silenceMs` (the engine sends a heartbeat
  * every 10 seconds), it is released until a fresh connection has been seeded.
  *
+ * Sessions the engine's V2 runner drains (a parallel workspace's Vector agent, a swarm's planner and workers) never
+ * report a session.status, and nothing announces that a drain ended. The runner lists the drains it owns, so that list
+ * is read with each seed, as soon as a session it does not know of shows V2 activity, and every `pollMs` while any
+ * drain is known. Nothing polls it while nothing runs on it.
+ *
  * Nor is it held for work that waits on the user. A session stays busy while a permission or question prompt is
  * unanswered, so a session with one does not count. Its parent, waiting on it as a foreground subagent, still looks
  * busy; so while any prompt is unanswered, the blocker is released once nothing has moved for `stalledMs`.
@@ -20,13 +25,21 @@ import { Option, Schema } from "effect"
 
 const SILENCE_MS = 5 * 60_000
 const STALLED_MS = 10 * 60_000
+const POLL_MS = 15_000
 const RETRY_MS = 1_000
 const RETRY_MAX_MS = 30_000
 const WATCHDOG_MAX_MS = 15_000
 const SEED_TIMEOUT_MS = 10_000
 const BUSY = new Set(["busy", "retry"])
-const ASKED = new Set(["permission.asked", "question.asked"])
-const ANSWERED = new Set(["permission.replied", "question.replied", "question.rejected"])
+const ASKED = new Set(["permission.asked", "question.asked", "permission.v2.asked", "question.v2.asked"])
+const ANSWERED = new Set([
+  "permission.replied",
+  "question.replied",
+  "question.rejected",
+  "permission.v2.replied",
+  "question.v2.replied",
+  "question.v2.rejected",
+])
 
 const KeepAwakeEvent = Schema.Struct({
   directory: Schema.optional(Schema.String),
@@ -39,6 +52,9 @@ const Status = Schema.Struct({ type: Schema.String })
 const Statuses = Schema.Record(Schema.String, Status)
 const Request = Schema.Struct({ id: Schema.String, sessionID: Schema.String })
 const Requests = Schema.Array(Request)
+const Drains = Schema.Struct({ data: Schema.Record(Schema.String, Schema.Unknown) })
+const SessionRequests = Schema.Struct({ data: Requests })
+const SessionProperties = Schema.Struct({ sessionID: Schema.String })
 const StatusProperties = Schema.Struct({ sessionID: Schema.String, status: Status })
 const AnsweredProperties = Schema.Struct({ requestID: Schema.String })
 const DisposedProperties = Schema.Struct({ directory: Schema.String })
@@ -52,6 +68,10 @@ export type KeepAwakeSource = {
   statuses(location: KeepAwakeLocation, signal: AbortSignal): Promise<Readonly<Record<string, { type: string }>>>
   /** The permission and question prompts waiting on the user in one directory. */
   requests(location: KeepAwakeLocation, signal: AbortSignal): Promise<readonly { id: string; sessionID: string }[]>
+  /** The sessions the engine's V2 runner is draining; sessions missing from it are not running there. */
+  drains(signal: AbortSignal): Promise<readonly string[]>
+  /** The permission and question prompts one session on the V2 runner waits on the user for. */
+  prompts(sessionID: string, signal: AbortSignal): Promise<readonly { id: string; sessionID: string }[]>
 }
 
 export type PowerBlocker = { start(): number; stop(id: number): void }
@@ -63,6 +83,8 @@ export function startKeepAwake(input: {
   silenceMs?: number
   /** How long work may go without progress, while a prompt waits on the user, before it stops holding the blocker. */
   stalledMs?: number
+  /** How often the V2 runner's drains are read while any is known to run. */
+  pollMs?: number
   /** The first reconnect delay; it doubles after each failed attempt, up to 30 seconds. */
   retryMs?: number
   log?: (message: string, meta?: Record<string, unknown>) => void
@@ -72,6 +94,8 @@ export function startKeepAwake(input: {
   const retryMs = input.retryMs ?? RETRY_MS
   // Each busy or retrying session, with the key of the location its status came from.
   const busy = new Map<string, string>()
+  // Each session the V2 runner drained when it was last asked.
+  const drains = new Set<string>()
   // Each prompt waiting on the user, with the session that asked it.
   const waiting = new Map<string, string>()
   const locations = new Map<string, KeepAwakeLocation>()
@@ -85,11 +109,16 @@ export function startKeepAwake(input: {
   let seeded = 0
   let stopped = false
   let attempt: AbortController | undefined
+  // The seeded connection the drains are read for; a read that outlives it says nothing about the next one.
+  let live: AbortSignal | undefined
+  let polling = false
+  let again = false
 
   const apply = () => {
+    const sessions = new Set([...busy.keys(), ...drains])
     const blocked = new Set(waiting.values())
-    const working = [...busy.keys()].filter((sessionID) => !blocked.has(sessionID))
-    const stalled = working.length < busy.size && Date.now() - progressAt > stalledMs
+    const working = [...sessions].filter((sessionID) => !blocked.has(sessionID))
+    const stalled = working.length < sessions.size && Date.now() - progressAt > stalledMs
     const hold = !stopped && working.length > 0 && !stalled && Date.now() - heardAt <= silenceMs
     if (hold && held === undefined) {
       held = input.blocker.start()
@@ -98,13 +127,59 @@ export function startKeepAwake(input: {
     if (!hold && held !== undefined) {
       input.blocker.stop(held)
       held = undefined
-      input.log?.("keep awake: released", { sessions: working.length, waiting: busy.size - working.length })
+      input.log?.("keep awake: released", { sessions: working.length, waiting: sessions.size - working.length })
     }
+  }
+
+  // A drain that ended has nothing left to ask, like a session that went idle.
+  const setDrains = (ids: readonly string[]) => {
+    const ended = [...drains].filter((sessionID) => !ids.includes(sessionID))
+    for (const entry of waiting) if (ended.includes(entry[1])) waiting.delete(entry[0])
+    drains.clear()
+    ids.forEach((sessionID) => drains.add(sessionID))
+  }
+
+  // A read that fails forgets the drains rather than holding the blocker on old news; the next read counts them again.
+  // A read asked for while one is in flight runs after it, since the one in flight may have started too early to see a
+  // drain that just began.
+  const poll = () => {
+    const signal = live
+    if (!signal) return
+    if (polling) {
+      again = true
+      return
+    }
+    polling = true
+    void input.source
+      .drains(AbortSignal.any([signal, AbortSignal.timeout(SEED_TIMEOUT_MS)]))
+      .then(
+        (ids) => {
+          if (live === signal) setDrains(ids)
+        },
+        () => {
+          if (live === signal) setDrains([])
+        },
+      )
+      .finally(() => {
+        polling = false
+        apply()
+        if (!again) return
+        again = false
+        poll()
+      })
   }
 
   const handle = (event: KeepAwakeEvent) => {
     const type = event.payload.type
-    if (type.startsWith("message.") || type === "session.status") progressAt = Date.now()
+    if (type.startsWith("message.") || type.startsWith("session.next.") || type === "session.status")
+      progressAt = Date.now()
+    if (type.startsWith("session.next.")) {
+      const activity = Option.getOrUndefined(Schema.decodeUnknownOption(SessionProperties)(event.payload.properties))
+      // A session the runner was not draining at the last read may have just started: read the drains now rather than
+      // at the next poll, which only runs while a drain is known.
+      if (activity && !drains.has(activity.sessionID)) poll()
+      return
+    }
     if (type === "session.status") {
       const change = Option.getOrUndefined(Schema.decodeUnknownOption(StatusProperties)(event.payload.properties))
       if (!change || !event.directory) return
@@ -141,27 +216,39 @@ export function startKeepAwake(input: {
   }
 
   // Events that arrive while the seed is in flight wait in the stream and apply after it, in order, so the newest
-  // word on each session wins. A directory that cannot answer is left out rather than failing the connection, so one
-  // bad directory never keeps the others from being followed; its sessions count again from their next status.
+  // word on each session wins. A directory, or the V2 runner, that cannot answer is left out rather than failing the
+  // connection, so one bad source never keeps the others from being followed; its sessions count again from their next
+  // status, or the next read of the drains.
   const seed = async (signal: AbortSignal) => {
-    const answers = await Promise.allSettled(
-      [...locations].map(async (entry) => {
-        const limited = AbortSignal.any([signal, AbortSignal.timeout(SEED_TIMEOUT_MS)])
-        const both = await Promise.all([
-          input.source.statuses(entry[1], limited),
-          input.source.requests(entry[1], limited),
-        ])
-        return { key: entry[0], statuses: both[0], requests: both[1] }
-      }),
-    )
+    const limit = () => AbortSignal.any([signal, AbortSignal.timeout(SEED_TIMEOUT_MS)])
+    const settled = await Promise.all([
+      Promise.allSettled(
+        [...locations].map(async (entry) => {
+          const both = await Promise.all([
+            input.source.statuses(entry[1], limit()),
+            input.source.requests(entry[1], limit()),
+          ])
+          return { key: entry[0], statuses: both[0], requests: both[1] }
+        }),
+      ),
+      Promise.allSettled([
+        input.source.drains(limit()).then(async (ids) => ({
+          ids,
+          requests: (await Promise.all(ids.map((sessionID) => input.source.prompts(sessionID, limit())))).flat(),
+        })),
+      ]),
+    ])
     signal.throwIfAborted()
-    const failed = answers.flatMap((answer) => (answer.status === "rejected" ? [answer.reason] : []))
+    const answers = settled[0]
+    const drained = settled[1][0]
+    const failed = [...answers, drained].flatMap((answer) => (answer.status === "rejected" ? [answer.reason] : []))
     if (failed.length > 0)
-      input.log?.("keep awake: some directories could not report their sessions", {
-        directories: failed.length,
+      input.log?.("keep awake: some sessions could not report their status", {
+        sources: failed.length,
         error: String(failed[0]),
       })
     busy.clear()
+    drains.clear()
     waiting.clear()
     answers.forEach((answer) => {
       if (answer.status === "rejected") return
@@ -170,6 +257,9 @@ export function startKeepAwake(input: {
         .forEach((entry) => busy.set(entry[0], answer.value.key))
       answer.value.requests.forEach((request) => waiting.set(request.id, request.sessionID))
     })
+    if (drained.status === "rejected") return
+    drained.value.ids.forEach((sessionID) => drains.add(sessionID))
+    drained.value.requests.forEach((request) => waiting.set(request.id, request.sessionID))
   }
 
   const connect = async () => {
@@ -185,6 +275,7 @@ export function startKeepAwake(input: {
         if (event.payload.type === "server.connected") {
           await seed(controller.signal)
           ready = true
+          live = controller.signal
           seeded += 1
         }
         handle(event)
@@ -192,6 +283,7 @@ export function startKeepAwake(input: {
         apply()
       }
     } finally {
+      if (live === controller.signal) live = undefined
       controller.abort()
     }
   }
@@ -221,12 +313,18 @@ export function startKeepAwake(input: {
     Math.min(silenceMs / 4, stalledMs / 4, WATCHDOG_MAX_MS),
   )
   watchdog.unref()
+  // Only a read of the drains says one ended.
+  const poller = setInterval(() => {
+    if (drains.size > 0) poll()
+  }, input.pollMs ?? POLL_MS)
+  poller.unref()
   void run()
 
   return {
     stop() {
       stopped = true
       clearInterval(watchdog)
+      clearInterval(poller)
       attempt?.abort()
       apply()
     },
@@ -273,10 +371,11 @@ function syncDesktopWork() {
 /** The local engine's event stream, session statuses and prompts, over its authenticated loopback HTTP server. */
 export function engineEventSource(connection: { url: string; username: string; password: string }): KeepAwakeSource {
   const authorization = `Basic ${Buffer.from(`${connection.username}:${connection.password}`).toString("base64")}`
-  const read = async (path: string, location: KeepAwakeLocation, signal: AbortSignal) => {
+  // The V2 routes place a request by its session, or need no place at all, so they take no location.
+  const read = async (path: string, signal: AbortSignal, location?: KeepAwakeLocation) => {
     const url = new URL(path, connection.url)
-    url.searchParams.set("directory", location.directory)
-    if (location.workspace) url.searchParams.set("workspace", location.workspace)
+    if (location) url.searchParams.set("directory", location.directory)
+    if (location?.workspace) url.searchParams.set("workspace", location.workspace)
     const response = await fetch(url, { headers: { authorization }, signal })
     const body = await response.text()
     if (!response.ok) throw new Error(`The engine's ${path} route answered ${response.status}.`)
@@ -315,12 +414,30 @@ export function engineEventSource(connection: { url: string; username: string; p
       }
     },
     statuses: async (location, signal) =>
-      Schema.decodeUnknownPromise(Schema.fromJsonString(Statuses))(await read("/session/status", location, signal)),
+      Schema.decodeUnknownPromise(Schema.fromJsonString(Statuses))(await read("/session/status", signal, location)),
     requests: async (location, signal) =>
       (
         await Promise.all(
           ["/permission", "/question"].map(async (path) =>
-            Schema.decodeUnknownPromise(Schema.fromJsonString(Requests))(await read(path, location, signal)),
+            Schema.decodeUnknownPromise(Schema.fromJsonString(Requests))(await read(path, signal, location)),
+          ),
+        )
+      ).flat(),
+    drains: async (signal) =>
+      Object.keys(
+        (await Schema.decodeUnknownPromise(Schema.fromJsonString(Drains))(await read("/api/session/active", signal)))
+          .data,
+      ),
+    prompts: async (sessionID, signal) =>
+      (
+        await Promise.all(
+          ["permission", "question"].map(
+            async (kind) =>
+              (
+                await Schema.decodeUnknownPromise(Schema.fromJsonString(SessionRequests))(
+                  await read(`/api/session/${encodeURIComponent(sessionID)}/${kind}`, signal),
+                )
+              ).data,
           ),
         )
       ).flat(),
