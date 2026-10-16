@@ -20,7 +20,7 @@ export function SettingsVectorCodium() {
           signedIn: true,
           enabled: false,
           access: false,
-          purchased: { credits: 0 },
+          purchased: { bought: false },
           empty: false,
           low: false,
           error: "Vector could not load your Codium balance. Try again shortly.",
@@ -75,9 +75,9 @@ export function SettingsVectorCodium() {
                         <div>
                           <dt>Monthly credits</dt>
                           <dd>
-                            {active().remaining === undefined
+                            {active().left === undefined
                               ? "Balance unavailable"
-                              : `${ModelPlanStatus.formatCredits(active().remaining!)} of ${ModelPlanStatus.formatCredits(active().credits)} left`}
+                              : `${ModelPlanStatus.formatShare(active().left!)} left this month`}
                           </dd>
                         </div>
                         <div>
@@ -90,11 +90,11 @@ export function SettingsVectorCodium() {
                   <div>
                     <dt>Purchased credits</dt>
                     <dd>
-                      {current().purchased.credits === 0
+                      {!current().purchased.bought
                         ? "None"
-                        : current().purchased.remaining === undefined
+                        : current().purchased.left === undefined
                           ? "Balance unavailable"
-                          : `${ModelPlanStatus.formatCredits(current().purchased.remaining!)} left`}
+                          : `${ModelPlanStatus.formatShare(current().purchased.left!)} left`}
                     </dd>
                   </div>
                 </dl>
@@ -117,7 +117,7 @@ export function SettingsVectorCodium() {
           <Show when={status()?.signedIn && status()?.enabled}>
             <Button onClick={() => platform.openLink(ModelPlanStatus.PURCHASE_URL)}>Buy credits</Button>
           </Show>
-          <Show when={plan() || status()?.purchased.credits}>
+          <Show when={plan() || status()?.purchased.bought}>
             <Button variant="secondary" onClick={() => platform.openLink(ModelPlanStatus.MANAGE_URL)}>
               Manage plan
             </Button>

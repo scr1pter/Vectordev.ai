@@ -11,13 +11,9 @@ const config: ModelPlansPreview["config"] = {
 }
 const status: ModelPlansPreview["status"] = {
   active: true,
-  plan: "vector-10",
-  credits: 100,
-  used: 75,
-  remaining: 25,
-  periodStart: Date.UTC(2026, 9, 1),
-  periodEnd: Date.UTC(2026, 10, 1),
-  cancelAtPeriodEnd: false,
+  access: true,
+  plan: { id: "vector-10", name: "Codium 10", left: 0.25, renewsAt: Date.UTC(2026, 10, 1), cancelAtPeriodEnd: false },
+  purchased: { bought: false },
 }
 
 describe("account model plans", () => {
@@ -51,8 +47,7 @@ describe("account model plans", () => {
     const html = renderToStaticMarkup(createElement(ModelPlans, { accessToken: "", preview: { config, status } }))
     expect(html).toContain("<strong>25%</strong> of this month&#x27;s Codium credits")
     expect(html).toContain('value="25" max="100"')
-    // Amounts, with the price, would give away the dollars of model credit in the plan.
-    expect(html.replace(/<progress[^>]*>/, "")).not.toMatch(/\b(100|10,000|2,500|75)\b/)
+    expect(html).not.toContain("Purchased credits")
     expect(html).toContain("Renews")
     expect(html).toContain("Manage subscription")
     expect(html).toContain("Current plan")
@@ -62,7 +57,10 @@ describe("account model plans", () => {
     const html = renderToStaticMarkup(
       createElement(ModelPlans, {
         accessToken: "",
-        preview: { config, status: { ...status, used: undefined, remaining: undefined, cancelAtPeriodEnd: true } },
+        preview: {
+          config,
+          status: { ...status, plan: { ...status.plan!, left: undefined, cancelAtPeriodEnd: true } },
+        },
       }),
     )
     expect(html).toContain("Usage temporarily unavailable")
@@ -135,7 +133,7 @@ describe("account model plans", () => {
     const html = renderToStaticMarkup(
       createElement(ModelPlans, {
         accessToken: "",
-        preview: { config, status: { ...status, access: true, wallet: { credits: 8, remaining: 6 } } },
+        preview: { config, status: { ...status, purchased: { bought: true, left: 0.75 } } },
       }),
     )
     expect(html).toContain("Monthly allowance")
@@ -144,7 +142,7 @@ describe("account model plans", () => {
     const standalone = renderToStaticMarkup(
       createElement(ModelPlans, {
         accessToken: "",
-        preview: { config, status: { active: false, access: true, wallet: { credits: 8 } } },
+        preview: { config, status: { active: false, access: true, purchased: { bought: true } } },
       }),
     )
     expect(standalone).toContain("Purchased credits")

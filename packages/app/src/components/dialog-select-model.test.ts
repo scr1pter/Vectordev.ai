@@ -99,6 +99,28 @@ describe("modelAccess", () => {
     expect(sections.find((section) => section.items.includes(coder))?.access?.label).toBe("Codium credits")
   })
 
+  test("Vector Codium keeps its catalog's order, led by DeepSeek V4.1 Flash, as the engine lists it", () => {
+    const codium: Provider = { id: "vector-plan", name: "Vector Codium", source: "custom", env: [], options: {} }
+    // Codium models list no release date and no price, as Provider.fromModelPlans builds them.
+    const catalog = [
+      ["deepseek/deepseek-v4.1-flash", "DeepSeek V4.1 Flash", 262_144],
+      ["xiaomi/mimo-v2.6-flash", "Xiaomi MiMo V2.6 Flash", 262_144],
+      ["anthropic/claude-haiku-5.5", "Claude Haiku 5.5", 32_768],
+    ] as const
+    const names = (provider: Provider) =>
+      buildModelSections({
+        models: catalog.map(([id, name, context]) =>
+          model(provider, id, name, { release_date: "", cost: { input: 0 }, limit: { context } }),
+        ),
+        now: NOW,
+      })
+        .find((section) => section.kind === "provider")
+        ?.items.map((item) => item.name)
+    expect(names(codium)).toEqual(["DeepSeek V4.1 Flash", "Xiaomi MiMo V2.6 Flash", "Claude Haiku 5.5"])
+    // Undated models of any other provider still sort by name.
+    expect(names(local)).toEqual(["Claude Haiku 5.5", "DeepSeek V4.1 Flash", "Xiaomi MiMo V2.6 Flash"])
+  })
+
   test("ambiguous environment credentials and unlisted providers claim no access method", () => {
     expect(modelAccess(model(copilotToken, "coding", "Coding", { cost: { input: 2 } })).kind).toBe("none")
     expect(modelAccess(model(unlistedKey, "coding", "Coding", { cost: { input: 2 } })).kind).toBe("none")

@@ -24,6 +24,7 @@ import {
   findSwarmPlan,
   routeSwarmModels,
   selectSwarmPlannerModel,
+  swarmModelPool,
   type SwarmAgentRole,
   type SwarmModelCandidate,
   type SwarmStrategy,
@@ -230,14 +231,10 @@ export async function createSwarmRun(input: CreateSwarmRunInput, engine: Paralle
     throw new Error("Connect and select a model before launching an agent swarm.")
   }
 
-  const primary = { provider: input.primaryProvider.trim(), model: input.primaryModel.trim() }
-  const modelPool = [
-    ...new Map(
-      [primary, ...(input.modelPool ?? [])]
-        .filter((candidate) => candidate.provider.trim() && candidate.model.trim())
-        .map((candidate) => [`${candidate.provider}/${candidate.model}`, candidate]),
-    ).values(),
-  ]
+  const modelPool = swarmModelPool(
+    { provider: input.primaryProvider.trim(), model: input.primaryModel.trim() },
+    input.modelPool ?? [],
+  )
   const strategy = input.strategy ?? "balanced"
   const planner = selectSwarmPlannerModel(modelPool, strategy)
   const requestedAgents = Number.isFinite(input.maxAgents) ? Math.floor(input.maxAgents!) : 8

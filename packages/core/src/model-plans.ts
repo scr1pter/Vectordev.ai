@@ -16,13 +16,12 @@ export const CATALOG_URL = `${API_URL}/models`
 export const CHAT_URL = `${API_URL}/chat`
 export const PURCHASE_URL = ModelPlanStatus.PURCHASE_URL
 
+// No prices: a Codium step spends credits, which Vector counts by tokens and never in dollars that could be added up.
 export const Model = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   contextLength: Schema.Number,
   maxOutputTokens: Schema.Number,
-  inputPrice: Schema.Number,
-  outputPrice: Schema.Number,
 })
 export type Model = typeof Model.Type
 const Catalog = Schema.Struct({ enabled: Schema.Boolean, models: Schema.Array(Model) })
@@ -144,11 +143,7 @@ function parse(body: unknown): Catalog | undefined {
         model.contextLength < 1 ||
         !Number.isSafeInteger(model.maxOutputTokens) ||
         model.maxOutputTokens < 1 ||
-        model.maxOutputTokens > model.contextLength ||
-        !Number.isFinite(model.inputPrice) ||
-        model.inputPrice < 0 ||
-        !Number.isFinite(model.outputPrice) ||
-        model.outputPrice < 0,
+        model.maxOutputTokens > model.contextLength,
     ) ||
     new Set(parsed.models.map((model) => model.id)).size !== parsed.models.length
   )
@@ -283,7 +278,8 @@ export type Failure = {
   code: string
   /**
    * credits: buy credits or a plan. sign-in: sign in to Vector again. unavailable: choose another model.
-   * capacity: Vector's model capacity is short for a moment; the turn is retried and nothing asks for a purchase.
+   * capacity: the provider refused the request for want of credit, which is Vector's capacity or the account key's
+   * limit; the turn is retried and nothing asks for a purchase.
    */
   kind: ModelPlanStatus.Action | "capacity"
   message: string
@@ -307,7 +303,7 @@ const UNAVAILABLE: Record<string, string> = {
 
 /**
  * Account, billing and availability answers from the Codium gateway, or the same answers given locally before a
- * request. Only capacity improves on a retry; none may move the conversation to another paid provider.
+ * request. Only capacity may improve on a retry; none may move the conversation to another paid provider.
  */
 export function gatewayFailure(status: number | undefined, body: string | undefined): Failure | undefined {
   const parsed = body
@@ -320,7 +316,8 @@ export function gatewayFailure(status: number | undefined, body: string | undefi
     return {
       code,
       kind: "capacity",
-      message: "Vector Codium is short of model capacity for a moment. Vector will try again shortly.",
+      message:
+        "Vector Codium could not run this request: model capacity may be short for a moment, or your credits may have reached their limit. Vector will try again shortly; if it keeps failing, check your balance.",
     }
   if (status === 402 && parsed && CREDIT_CODES.includes(code))
     return { code, kind: "credits", message: `${parsed.error.message} Buy credits at ${PURCHASE_URL}` }
@@ -333,13 +330,4 @@ export function contextFailure(body: string | undefined) {
   if (!body) return false
   const parsed = Schema.decodeUnknownOption(Schema.fromJsonString(GatewayError))(body)
   return Option.isSome(parsed) && parsed.value.error.code === "MODEL_PLAN_CONTEXT"
-}
-
-const UsageChunk = Schema.Struct({ usage: Schema.Struct({ cost: Schema.Number }) })
-
-/** The provider-billed USD cost the gateway passes through in a usage chunk; this is what Codium credits are debited. */
-export function usageCost(chunk: unknown) {
-  const parsed = Option.getOrUndefined(Schema.decodeUnknownOption(UsageChunk)(chunk))
-  const cost = parsed?.usage.cost
-  return cost !== undefined && Number.isFinite(cost) && cost >= 0 ? cost : undefined
 }

@@ -32,14 +32,8 @@ export const VectorPlanPlugin = define({
             draft.name = model.name
             draft.api = { id: model.id, type: "aisdk", package: "@ai-sdk/openai-compatible", url: ModelPlans.API_URL }
             draft.capabilities = { tools: true, input: ["text"], output: ["text"] }
-            // Ceiling prices per million tokens; the recorded cost prefers what the gateway reports it billed.
-            draft.cost = [
-              {
-                input: model.inputPrice,
-                output: model.outputPrice,
-                cache: { read: model.inputPrice, write: model.inputPrice },
-              },
-            ]
+            // No dollar price: a Codium step spends credits, so it is recorded unpriced and left out of dollar totals.
+            draft.cost = []
             draft.limit = { context: model.contextLength, output: model.maxOutputTokens }
             draft.enabled = true
           })

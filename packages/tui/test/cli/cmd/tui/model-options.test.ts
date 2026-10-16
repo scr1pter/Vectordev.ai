@@ -25,6 +25,28 @@ describe("model choices", () => {
     }
   })
 
+  test("keeps Vector Codium in its catalog's order, led by DeepSeek V4.1 Flash", () => {
+    // Codium models list no release date, as the engine builds them from vectordev.ai's catalog.
+    const catalog = [
+      { title: "DeepSeek V4.1 Flash", releaseDate: "" },
+      { title: "Xiaomi MiMo V2.6 Flash", releaseDate: "" },
+      { title: "Claude Haiku 5.5", releaseDate: "" },
+    ]
+    for (const scoped of [true, false]) {
+      expect(sortModelOptions(catalog, scoped, "vector-plan").map((model) => model.title)).toEqual([
+        "DeepSeek V4.1 Flash",
+        "Xiaomi MiMo V2.6 Flash",
+        "Claude Haiku 5.5",
+      ])
+    }
+    // Any other provider's undated models still sort by title.
+    expect(sortModelOptions(catalog, false, "lmstudio").map((model) => model.title)).toEqual([
+      "Claude Haiku 5.5",
+      "DeepSeek V4.1 Flash",
+      "Xiaomi MiMo V2.6 Flash",
+    ])
+  })
+
   test("hides unknown catalog entries but accepts new custom provider ids", () => {
     const ids = ["unlisted-a", "unlisted-b", "unlisted-c", "unlisted-d", "anthropic"]
     const options = providerOptions(ids.map((id) => ({ id, name: id })))

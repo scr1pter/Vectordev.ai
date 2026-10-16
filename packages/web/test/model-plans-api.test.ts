@@ -15,6 +15,10 @@ import {
   readModelPlanAccount,
 } from "../../../api/_lib/model-plan-account"
 import { handleModelPlanChat } from "../../../api/_lib/model-plan-chat"
+import { handleModelPlanModels } from "../../../api/_lib/model-plan-models"
+import { handleModelPlanStatus, modelPlanBalance } from "../../../api/_lib/model-plan-status"
+import { ModelPlans } from "@vectordevai/core/model-plans"
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 
 // External HTTP boundaries are local fixtures; leases and rate-limit Lua run
 // against a real, isolated Redis/Valkey database, just as in free-models-api.
@@ -130,6 +134,7 @@ const state = {
   streamMode: "normal",
   charge: 0,
   keyReadDelay: 0,
+  chatDelay: 0,
   subscriptions: [] as ReturnType<typeof subscription>[],
 }
 const calls: { path: string; method: string; headers: Headers; body: Record<string, unknown> }[] = []
@@ -256,6 +261,8 @@ const upstream = Bun.serve({
       expect(request.headers.get("authorization")).toBe(`Bearer ${keys.values().next().value?.secret}`)
       if (state.upstreamStatus !== 200)
         return Response.json({ error: { message: "PRIVATE fixture-paid-secret-1" } }, { status: state.upstreamStatus })
+      // The provider bills a request, and the key's usage grows, only once it finishes.
+      if (state.chatDelay) await Bun.sleep(state.chatDelay)
       const charged = keys.values().next().value
       if (charged && state.charge) charged.data.usage = Number(charged.data.usage ?? 0) + state.charge
       const mode = state.streamMode
@@ -297,6 +304,9 @@ const fetcher: typeof fetch = Object.assign(
   { preconnect: fetch.preconnect },
 )
 const server = createServer((request, response) => {
+  // /chat is the gateway as the other tests call it; the /api/model-plans paths are what Vector itself requests.
+  if (request.url === "/api/model-plans/models") return void handleModelPlanModels(request, response, fetcher)
+  if (request.url === "/api/model-plans/status") return void handleModelPlanStatus(request, response, fetcher)
   void handleModelPlanChat(request, response, fetcher)
 })
 
@@ -345,6 +355,7 @@ beforeEach(async () => {
     streamMode: "normal",
     charge: 0,
     keyReadDelay: 0,
+    chatDelay: 0,
     subscriptions: [],
   })
   calls.length = 0
@@ -616,7 +627,7 @@ describe("model plan account deletion", () => {
 describe("paid credential lifecycle", () => {
   test("persists only encrypted credentials and reuses the period key with a hard nonresetting cap", async () => {
     const subscription = await paid()
-    const credential = await modelPlanCredential(user.id, fetcher)
+    const credential = (await modelPlanCredential(user.id, fetcher)).key
     expect(credential).toBe("fixture-paid-secret-1")
     expect(String(await redis(["GET", accountKey]))).not.toContain(credential)
     expect(await readModelPlanAccount(user.id, fetcher)).toMatchObject({
@@ -628,20 +639,20 @@ describe("paid credential lifecycle", () => {
       include_byok_in_limit: true,
       expires_at: new Date(subscription.items.data[0]!.current_period_end * 1000).toISOString(),
     })
-    expect(await modelPlanCredential(user.id, fetcher)).toBe(credential)
+    expect((await modelPlanCredential(user.id, fetcher)).key).toBe(credential)
     expect(keys.size).toBe(1)
     expect(mutations()).toHaveLength(1)
   })
 
   test("parallel paid-key reads do not serialize through a mutation lease", async () => {
     await paid()
-    const credential = await modelPlanCredential(user.id, fetcher)
+    const credential = (await modelPlanCredential(user.id, fetcher)).key
     calls.length = 0
     commands.length = 0
     state.keyReadDelay = 25
-    expect(await Promise.all(Array.from({ length: 8 }, () => modelPlanCredential(user.id, fetcher)))).toEqual(
-      Array(8).fill(credential),
-    )
+    expect(
+      await Promise.all(Array.from({ length: 8 }, async () => (await modelPlanCredential(user.id, fetcher)).key)),
+    ).toEqual(Array(8).fill(credential))
     expect(mutations()).toHaveLength(0)
     expect(commands.every((command) => command[0] === "GET")).toBe(true)
     expect(calls.filter((call) => call.path === "/api/v1/keys/hash_fixture1")).toHaveLength(8)
@@ -649,9 +660,9 @@ describe("paid credential lifecycle", () => {
 
   test("same-period restoration re-enables the same key without clearing already charged usage", async () => {
     await paid()
-    const credential = await modelPlanCredential(user.id, fetcher)
+    const credential = (await modelPlanCredential(user.id, fetcher)).key
     Object.assign(keys.get("hash_fixture1")!.data, { disabled: true, usage: 3.5 })
-    expect(await modelPlanCredential(user.id, fetcher)).toBe(credential)
+    expect((await modelPlanCredential(user.id, fetcher)).key).toBe(credential)
     expect(keys.size).toBe(1)
     expect(keys.get("hash_fixture1")?.data).toMatchObject({ disabled: false, usage: 3.5, limit: 5, limit_reset: null })
     expect(calls.findLast((call) => call.method === "PATCH")?.body).not.toHaveProperty("usage")
@@ -660,10 +671,10 @@ describe("paid credential lifecycle", () => {
 
   test("renewal disables the old key before issuing a new period allowance", async () => {
     const current = await paid()
-    const first = await modelPlanCredential(user.id, fetcher)
+    const first = (await modelPlanCredential(user.id, fetcher)).key
     const start = current.items.data[0]!.current_period_end
     state.subscriptions = [subscription(start, start + 7200)]
-    const next = await modelPlanCredential(user.id, fetcher, (start + 1) * 1000)
+    const next = (await modelPlanCredential(user.id, fetcher, (start + 1) * 1000)).key
     expect(next).not.toBe(first)
     expect(keys.size).toBe(2)
     expect(keys.get("hash_fixture1")?.data.disabled).toBe(true)
@@ -722,7 +733,10 @@ describe("model plan HTTP inference", () => {
       messages: [{ role: "user", content: "Generate a concise title" }],
     })
     expect(response.status).toBe(200)
-    expect(await response.text()).toContain('"cost":0.000031')
+    // The provider's USD charge comes off the credits but never reaches Vector; the tokens do.
+    const text = await response.text()
+    expect(text).toContain('"completion_tokens":6')
+    expect(text).not.toContain("cost")
     expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ used: 0.000031, remaining: 4.999969 })
     expect(chats()).toHaveLength(1)
     state.charge = 0
@@ -817,6 +831,104 @@ describe("model plan HTTP inference", () => {
     expect(chats()).toHaveLength(0)
   })
 
+  test("credits too few for the request's longest reply say so, unlike credits that are used up", async () => {
+    await paid()
+    await modelPlanCredential(user.id, fetcher)
+    // The fixture model's longest reply, 2,048 output tokens at $2 per million, costs $0.004096 before any input.
+    keys.get("hash_fixture1")!.data.usage = 5 - 0.003
+    const short = await chat()
+    expect(short.status).toBe(402)
+    const body = await short.json()
+    expect(body).toEqual({
+      error: {
+        code: "MODEL_PLAN_EXHAUSTED",
+        message:
+          "The monthly credits left cannot cover the longest reply this request could get. Choose a model that uses fewer credits, shorten the conversation, or add a top-up.",
+      },
+    })
+    // Vector's client offers Buy credits with it, as for any shortfall.
+    expect(ModelPlans.gatewayFailure(402, JSON.stringify(body))).toMatchObject({ kind: "credits" })
+    // The account's status agrees: too few left for a reply, not merely running low.
+    expect(modelPlanBalance(await modelPlanStatus(user.id, fetcher))).toMatchObject({ empty: true, low: false })
+    // A request small enough for what is left is still served.
+    const small = await chat({ model: model.id, max_tokens: 64, messages: [{ role: "user", content: "A title" }] })
+    expect(small.status).toBe(200)
+    expect(chats()).toHaveLength(1)
+    keys.get("hash_fixture1")!.data.usage = 5
+    expect(await (await chat()).json()).toEqual({
+      error: {
+        code: "MODEL_PLAN_EXHAUSTED",
+        message: "Your included model credits are used up. They renew at the next billing period.",
+      },
+    })
+    expect(chats()).toHaveLength(1)
+  })
+
+  test("parallel requests hold their largest cost, so together they cannot spend past the balance", async () => {
+    await paid()
+    await modelPlanCredential(user.id, fetcher)
+    // Each hold is "<ticket>:<credits>". A request settles its hold just after its answer ends.
+    const held = async (count: number, charge?: string) => {
+      const members = async () => (await redis(["ZRANGE", "vector:model-plans:held:hash_fixture1", 0, -1])) as string[]
+      for (let tries = 0; tries < 100; tries++) {
+        const current = await members()
+        if (current.length === count && current.every((member) => !charge || member.endsWith(`:${charge}`)))
+          return current
+        await Bun.sleep(10)
+      }
+      return members()
+    }
+    // Room for two of the fixture's largest requests (2,048 output tokens at $2 per million, plus input), not three.
+    keys.get("hash_fixture1")!.data.usage = 5 - 0.01
+    state.chatDelay = 100
+    state.charge = 0.001
+    const responses = await Promise.all(Array.from({ length: 5 }, () => chat()))
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 200, 402, 402, 402])
+    expect(chats()).toHaveLength(2)
+    const refused = await responses.find((response) => response.status === 402)!.json()
+    expect(refused).toEqual({
+      error: {
+        code: "MODEL_PLAN_EXHAUSTED",
+        message:
+          "The monthly credits left cannot cover this request alongside the requests already sent. Wait for them to finish, or add a top-up.",
+      },
+    })
+    // Finished requests keep only what they were charged, for a moment, until the key's usage shows it.
+    expect(keys.get("hash_fixture1")!.data.usage).toBeCloseTo(4.992, 9)
+    expect(await held(2, "0.001")).toHaveLength(2)
+    state.chatDelay = 0
+    expect((await chat()).status).toBe(200)
+    expect(await held(3, "0.001")).toHaveLength(3)
+    // A request the provider refuses releases its hold at once.
+    keys.get("hash_fixture1")!.data.usage = 4
+    state.upstreamStatus = 500
+    expect((await chat()).status).toBe(503)
+    expect(await held(3, "0.001")).toHaveLength(3)
+    expect(chats()).toHaveLength(4)
+  })
+
+  test("an answer that breaks off keeps its largest cost held, since the provider may still bill it", async () => {
+    await paid()
+    const pool = "vector:model-plans:held:hash_fixture1"
+    const members = async () => (await redis(["ZRANGE", pool, 0, -1])) as string[]
+    state.charge = 0.001
+    state.streamMode = "truncated"
+    const broken = await chat()
+    expect(await broken.text()).toContain('"code":"MODEL_PLAN_STREAM"')
+    state.streamMode = "normal"
+    expect((await chat()).status).toBe(200)
+    // The finished answer settles to its charge just after it ends.
+    for (let tries = 0; tries < 100 && !(await members()).some((member) => member.endsWith(":0.001")); tries++)
+      await Bun.sleep(10)
+    const current = await members()
+    expect(current).toHaveLength(2)
+    const kept = current.find((member) => !member.endsWith(":0.001"))
+    if (!kept) throw new Error("Expected the broken answer's hold")
+    // Still the request's largest cost, held until it lapses 11 minutes after the request started, not 30 seconds.
+    expect(Number(kept.split(":")[1])).toBeGreaterThan(0.004)
+    expect(Number(await redis(["ZSCORE", pool, kept]))).toBeGreaterThan(Date.now() + 600_000)
+  })
+
   test("normalizes upstream capacity and busy failures without leaking credentials or retrying", async () => {
     await paid()
     for (const status of [402, 429, 500]) {
@@ -844,5 +956,128 @@ describe("model plan HTTP inference", () => {
       expect(body).not.toContain("fixture-paid-secret")
     }
     expect(chats()).toHaveLength(3)
+  })
+})
+
+describe("Codium credits used from Vector", () => {
+  // Vector's own client code, sending what it would send to vectordev.ai to the gateway handlers here instead.
+  const forward = (url: string, init: RequestInit) => {
+    if (!url.startsWith(`${ModelPlanStatus.SITE}/api/model-plans/`)) throw new Error(`Unexpected destination ${url}`)
+    return fetch(`${state.origin}${url.slice(ModelPlanStatus.SITE.length)}`, init)
+  }
+  const turn = (token: string) => {
+    const catalog = ModelPlans.createClient({ request: forward })
+    return ModelPlans.createFetch({
+      modelID: model.id,
+      credential: async () => token,
+      catalog: (value) => catalog.catalog(value, { wait: true }),
+      request: forward,
+    })("https://vectordev.ai/api/model-plans/chat/completions", {
+      method: "POST",
+      body: JSON.stringify({ model: model.id, messages: [{ role: "user", content: "Fix the failing test" }] }),
+    })
+  }
+
+  test("a signed-in turn is debited from the monthly credits, and running out stops at Buy credits", async () => {
+    await paid()
+    const token = mintCliToken(user).token
+    const catalog = await ModelPlans.createClient({ request: forward }).catalog(token, { force: true })
+    expect(catalog).toEqual({
+      enabled: true,
+      models: [
+        { id: model.id, name: model.name, contextLength: model.contextLength, maxOutputTokens: model.maxOutputTokens },
+      ],
+    })
+
+    state.charge = 0.5
+    const answer = await turn(token)
+    expect(answer.status).toBe(200)
+    const usage = (await answer.text())
+      .split("\n\n")
+      .map((frame) => frame.replace(/^data: /, ""))
+      .filter((frame) => frame.startsWith("{"))
+      .map((frame) => JSON.parse(frame).usage)
+      .find((usage) => usage !== undefined)
+    // The account's key was charged; Vector gets the tokens, never the dollars, which beside the share of the plan
+    // used would reveal its allowance.
+    expect(usage).toEqual({ prompt_tokens: 200, completion_tokens: 6, total_tokens: 206 })
+    expect(keys.get("hash_fixture1")!.data.usage).toBe(0.5)
+    expect(chats()).toHaveLength(1)
+    expect(chats()[0]!.headers.get("authorization")).toBe("Bearer fixture-paid-secret-1")
+    expect(JSON.stringify(chats()[0]!.body)).not.toContain(token)
+    const status = await ModelPlanStatus.fetchStatus(token, forward)
+    expect(status).toMatchObject({ signedIn: true, enabled: true, plan: { name: "Codium 10", left: 0.9 } })
+    expect(ModelPlanStatus.describe(status)[0]).toContain("90% of this month's credits left")
+
+    // The monthly credits run out: the next turn is refused before any model request, with Buy credits.
+    keys.get("hash_fixture1")!.data.usage = 5
+    const refused = await turn(token)
+    expect(refused.status).toBe(402)
+    expect(ModelPlans.gatewayFailure(refused.status, await refused.text())).toMatchObject({
+      kind: "credits",
+      message: expect.stringContaining(`Buy credits at ${ModelPlanStatus.PURCHASE_URL}`),
+    })
+    expect(chats()).toHaveLength(1)
+    const empty = await ModelPlanStatus.fetchStatus(token, forward)
+    expect(empty).toMatchObject({ plan: { left: 0 }, empty: true })
+    expect(ModelPlanStatus.notice(empty)?.kind).toBe("empty")
+    state.charge = 0
+  })
+
+  test("the status Vector reads carries shares and flags, never an amount of credits", async () => {
+    const current = await paid()
+    await modelPlanCredential(user.id, fetcher)
+    const token = mintCliToken(user).token
+    const read = async () =>
+      (await forward(ModelPlanStatus.STATUS_URL, { headers: { authorization: `Bearer ${token}` } })).json()
+    keys.get("hash_fixture1")!.data.usage = 1.234
+    const body = await read()
+    expect(body).toEqual({
+      enabled: true,
+      active: true,
+      customer: true,
+      access: true,
+      plan: {
+        id: "vector-10",
+        name: "Codium 10",
+        left: 0.75,
+        renewsAt: current.items.data[0]!.current_period_end * 1000,
+        cancelAtPeriodEnd: false,
+      },
+      purchased: { bought: false },
+      empty: false,
+      low: false,
+    })
+    // Neither the allowance (5), what was used nor what is left reaches the app, the CLI or the browser.
+    expect(JSON.stringify(body)).not.toMatch(/credits|used|remaining|wallet|1\.234|3\.766|"5"|:5[,}]/)
+
+    // Running low is a tenth of this month's credits; too few for the catalog's cheapest full reply
+    // (2048 output tokens at $2 per million) is empty, the point where the gateway refuses every Vector request.
+    keys.get("hash_fixture1")!.data.usage = 4.51
+    expect(await read()).toMatchObject({ plan: { left: 0.1 }, empty: false, low: true })
+    keys.get("hash_fixture1")!.data.usage = 5 - 0.005
+    expect(await read()).toMatchObject({ plan: { left: 0 }, empty: false, low: true })
+    keys.get("hash_fixture1")!.data.usage = 5 - 0.004
+    expect(await read()).toMatchObject({ plan: { left: 0 }, empty: true, low: false })
+    // A key whose usage cannot be read leaves the share unknown and raises no flag.
+    delete keys.get("hash_fixture1")!.data.usage
+    const unknown = await read()
+    expect(unknown).toMatchObject({ empty: false, low: false })
+    expect(unknown.plan).not.toHaveProperty("left")
+  })
+
+  test("while sales are off Vector lists no Codium and a turn sends nothing", async () => {
+    await paid()
+    process.env.MODEL_PLANS_ENABLED = "false"
+    const token = mintCliToken(user).token
+    expect(await ModelPlans.createClient({ request: forward }).catalog(token, { force: true })).toEqual({
+      enabled: false,
+      models: [],
+    })
+    const refused = await turn(token)
+    expect(ModelPlans.gatewayFailure(refused.status, await refused.text())).toMatchObject({ kind: "unavailable" })
+    expect(chats()).toHaveLength(0)
+    const status = await ModelPlanStatus.fetchStatus(token, forward)
+    expect(ModelPlanStatus.notice(status)).toEqual({ kind: "unavailable", text: "Vector Codium is not available yet." })
   })
 })

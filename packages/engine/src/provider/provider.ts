@@ -1102,9 +1102,15 @@ export function defaultModelIDs<
 >(providers: Record<string, T>) {
   return Object.fromEntries(
     Object.entries(providers).flatMap(([id, item]) => {
-      const model = sort(
-        Object.values(item.models).filter((model) => id !== "openrouter" || model.freeModel?.source === "openrouter"),
-      )[0]
+      // Vector Codium lists its models in the catalog's order, led by the model it recommends.
+      const model =
+        id === ModelPlans.PROVIDER_ID
+          ? Object.values(item.models)[0]
+          : sort(
+              Object.values(item.models).filter(
+                (model) => id !== "openrouter" || model.freeModel?.source === "openrouter",
+              ),
+            )[0]
       return model ? [[id, model.id]] : []
     }),
   )
@@ -1417,12 +1423,8 @@ export function fromModelPlans(models: readonly ModelPlans.Model[]): Info {
           options: {},
           release_date: "",
           variants: {},
-          // Ceiling prices per million tokens; a step's cost prefers what the gateway reports it billed.
-          cost: {
-            input: model.inputPrice,
-            output: model.outputPrice,
-            cache: { read: model.inputPrice, write: model.inputPrice },
-          },
+          // No dollar price: a Codium step spends credits, so it is recorded unpriced and left out of dollar totals.
+          cost: { ...UNPRICED },
           limit: { context: model.contextLength, output: model.maxOutputTokens },
           capabilities: {
             temperature: true,
@@ -1990,21 +1992,6 @@ const layer = Layer.effect(
               catalog: (token) => runtimeBridge.promise(modelPlans.catalog(token, { wait: true })),
               request: modelPlans.request,
             }),
-            metadataExtractor: {
-              extractMetadata: async ({ parsedBody }) => {
-                const cost = ModelPlans.usageCost(parsedBody)
-                return cost === undefined ? undefined : { codium: { cost } }
-              },
-              createStreamExtractor: () => {
-                const billed = { cost: undefined as number | undefined }
-                return {
-                  processChunk: (chunk) => {
-                    billed.cost = ModelPlans.usageCost(chunk) ?? billed.cost
-                  },
-                  buildMetadata: () => (billed.cost === undefined ? undefined : { codium: { cost: billed.cost } }),
-                }
-              },
-            },
           })
         }
         if (

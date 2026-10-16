@@ -54,6 +54,37 @@ const it = testEffect(
 )
 const id = ProviderV2.ID.make(ModelPlans.PROVIDER_ID)
 
+// The real catalog client, answering only when the test releases it, as a slow first read after signing in does.
+const slowCatalog = { answer: Promise.withResolvers<void>() }
+const slowClient = ModelPlans.createClient({
+  timeout: 20,
+  request: () => slowCatalog.answer.promise.then(() => Response.json({ enabled: true, models: [codiumModel] })),
+})
+const slow = testEffect(
+  LayerNode.compile(Provider.node, [
+    [
+      FreeModels.node,
+      Layer.succeed(FreeModels.Service, {
+        catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
+        forKey: () => Effect.succeed([]),
+      }),
+    ],
+    [
+      FreeModels.credentialsNode,
+      Layer.succeed(FreeModels.CredentialsService, {
+        get: (provider) => Effect.succeed(provider === "vector" ? token : undefined),
+      }),
+    ],
+    [
+      ModelPlans.node,
+      Layer.succeed(ModelPlans.Service, {
+        catalog: (value, options) => Effect.promise(() => slowClient.catalog(value, options)),
+        request: gateway.forward,
+      }),
+    ],
+  ]),
+)
+
 it.instance(
   "Codium publishes the account's models without credentials and replaces project overrides",
   () =>
@@ -67,8 +98,8 @@ it.instance(
       const selected = yield* provider.getModel(id, ModelV2.ID.make(codiumModel.id))
       expect(selected.api.url).toBe(ModelPlans.API_URL)
       expect(selected.freeModel).toBeUndefined()
-      expect(selected.cost.input).toBe(codiumModel.inputPrice)
-      expect(selected.cost.output).toBe(codiumModel.outputPrice)
+      // Codium spends credits: no dollar price, so its steps are recorded unpriced and left out of dollar totals.
+      expect(selected.cost).toEqual({ input: 0, output: 0, cache: { read: 0, write: 0 }, unpriced: true })
       expect((yield* provider.getLanguage(selected)).provider).toContain(ModelPlans.PROVIDER_ID)
       entitlement.enabled = false
       expect((yield* provider.list())[id]).toBeUndefined()
@@ -99,7 +130,33 @@ it.instance(
   },
 )
 
-it.instance("a Codium turn streams text and a tool call through the gateway and records the billed cost", () =>
+slow.instance("a first Codium catalog read slower than the listing deadline lists Codium on the next read", () =>
+  Effect.gen(function* () {
+    const provider = yield* Provider.Service
+    // The app's first read of the provider list does not wait for vectordev.ai.
+    expect((yield* provider.list())[id]).toBeUndefined()
+    slowCatalog.answer.resolve()
+    yield* Effect.promise(() => slowClient.catalog(token, { wait: true }))
+    // The app reads the list again when a model picker opens, and Codium is there.
+    expect(Object.keys((yield* provider.list())[id]?.models ?? {})).toEqual([codiumModel.id])
+  }),
+)
+
+test("Codium's own default is the first model its catalog lists, not the last by ID", () => {
+  // The launch lineup in the order vectordev.ai lists it: DeepSeek V4.1 Flash is the recommended default.
+  const launch = ["deepseek/deepseek-v4.1-flash", "xiaomi/mimo-v2.6-flash", "anthropic/claude-haiku-5.5"].map(
+    (model) => ({ ...codiumModel, id: model, name: model }),
+  )
+  expect(Provider.defaultModelIDs({ [id]: Provider.fromModelPlans(launch) })).toEqual({
+    [id]: "deepseek/deepseek-v4.1-flash",
+  })
+  // The pickers keep this order, so the provider list sent to them must keep it too.
+  expect(Object.keys(Provider.toClientInfo(Provider.fromModelPlans(launch)).models)).toEqual(
+    launch.map((model) => model.id),
+  )
+})
+
+it.instance("a Codium turn streams text and a tool call through the gateway and records its tokens, not dollars", () =>
   Effect.gen(function* () {
     const provider = yield* Provider.Service
     const selected = yield* provider.getModel(id, ModelV2.ID.make(codiumModel.id))
@@ -133,15 +190,14 @@ it.instance("a Codium turn streams text and a tool call through the gateway and 
     expect(JSON.parse(call.input)).toEqual({ path: "src/a.ts" })
     const finish = parts.find((part) => part.type === "finish")
     if (finish?.type !== "finish") throw new Error("Expected a finish part")
-    expect(finish.providerMetadata?.codium).toEqual({ cost: 0.00042 })
-    // Listed prices are ceilings; the step records what the gateway reports it billed.
+    expect(finish.providerMetadata?.codium).toBeUndefined()
+    // The credits it spent are a share of the plan, never dollars that could be added up beside the purchase price.
     const usage = Session.getUsage({
       model: selected,
       usage: new Usage({ inputTokens: 1000, outputTokens: 50 }),
       metadata: finish.providerMetadata,
     })
-    expect(usage.cost).toBe(0.00042)
-    expect(usage.unpriced).toBe(false)
+    expect(usage).toMatchObject({ cost: 0, unpriced: true, tokens: { input: 1000, output: 50 } })
     const sent = gateway.seen.slice(before)
     expect(sent.map((item) => item.path)).toEqual(["/api/model-plans/chat"])
     expect(sent[0].authorization).toBe(`Bearer ${token}`)
@@ -214,7 +270,8 @@ it.instance("short Codium capacity is retried like a busy provider, with no purc
     const parsed = ProviderError.parseAPICallError({ providerID: id, error })
     expect(parsed).toMatchObject({
       type: "api_error",
-      message: "Vector Codium is short of model capacity for a moment. Vector will try again shortly.",
+      message:
+        "Vector Codium could not run this request: model capacity may be short for a moment, or your credits may have reached their limit. Vector will try again shortly; if it keeps failing, check your balance.",
       isRetryable: true,
     })
     if (parsed.type !== "api_error") throw new Error("Expected an API error")
@@ -292,7 +349,7 @@ it.instance(
   { trusted: true, config: { enabled_providers: [ModelPlans.PROVIDER_ID] } },
 )
 
-it.instance("a Codium title stays on credits and records the gateway charge exactly once", () =>
+it.instance("a Codium title stays on credits and records its tokens, not dollars", () =>
   Effect.gen(function* () {
     const provider = yield* Provider.Service
     const selected = yield* provider.getSmallModel(id, ModelV2.ID.make(codiumModel.id))
@@ -314,14 +371,13 @@ it.instance("a Codium title stays on credits and records the gateway charge exac
     gateway.state.mode = "ok"
     const finish = parts.find((part) => part.type === "finish")
     if (finish?.type !== "finish") throw new Error("Missing title usage")
-    expect(finish.providerMetadata?.codium).toEqual({ cost: 0.000031 })
     expect(
       Session.getUsage({
         model: selected,
         usage: new Usage({ inputTokens: 200, outputTokens: 6 }),
         metadata: finish.providerMetadata,
-      }).cost,
-    ).toBe(0.000031)
+      }),
+    ).toMatchObject({ cost: 0, unpriced: true, tokens: { input: 200, output: 6 } })
     expect(gateway.seen.slice(before).map((request) => request.path)).toEqual(["/api/model-plans/chat"])
   }),
 )

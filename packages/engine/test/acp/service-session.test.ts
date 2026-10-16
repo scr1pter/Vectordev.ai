@@ -716,6 +716,36 @@ describe("ACP service sessions", () => {
     )
   })
 
+  it("never picks a Vector Codium model by itself, and uses one the person configured", async () => {
+    const codiumID = ProviderV2.ID.make("vector-plan")
+    const codium = {
+      ...provider,
+      id: codiumID,
+      name: "Vector Codium",
+      source: "custom" as const,
+      // The cheapest-sorting ID, so an unguarded fallback would pick it first.
+      models: { "zz/coder": { ...provider.models[modelID]!, id: ModelV2.ID.make("zz/coder"), providerID: codiumID } },
+    }
+    const beside = makeService([], { providers: [codium, provider] })
+    const created = await Effect.runPromise(beside.service.newSession({ cwd: "/workspace", mcpServers: [] }))
+    expect(created.configOptions?.find((option) => option.id === "model")?.currentValue).toStartWith("lmstudio/")
+
+    const alone = makeService([], { providers: [codium] })
+    const refused = await Effect.runPromise(
+      alone.service.newSession({ cwd: "/workspace", mcpServers: [] }).pipe(Effect.result),
+    )
+    expect(refused).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "ACPAuthRequiredError", providerId: "vector-plan" },
+    })
+    if (refused._tag !== "Failure") throw new Error("Expected Codium alone to need an explicit choice")
+    expect(ACPError.toRequestError(refused.failure).message).toContain("Vector never chooses it for you")
+
+    const chosen = makeService([], { providers: [codium], model: "vector-plan/zz/coder" })
+    const picked = await Effect.runPromise(chosen.service.newSession({ cwd: "/workspace", mcpServers: [] }))
+    expect(picked.configOptions?.find((option) => option.id === "model")?.currentValue).toBe("vector-plan/zz/coder")
+  })
+
   it("does not scan last-used sessions when resolving the new session default", async () => {
     const historyCalls: string[] = []
     const sdk = {

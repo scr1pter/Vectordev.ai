@@ -7,6 +7,7 @@ on:
       - packages/schema/**
       - packages/core/src/free-model*.ts
       - packages/core/src/session/runner/free-model-route.ts
+      - packages/core/src/model-plan*.ts
       - packages/core/test/free-model*.test.ts
       - packages/web/test/**
       - packages/web/src/lib/desktop-sign-in.ts

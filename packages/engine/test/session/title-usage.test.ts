@@ -267,23 +267,27 @@ it.effect("retains an unpriced OpenRouter metadata-only charge when title genera
   }),
 )
 
-it.effect("Codium title charges persist once using the gateway cost instead of catalog ceilings", () =>
+it.effect("a Codium title's spend persists once as tokens and stays out of the dollar cost", () =>
   Effect.gen(function* () {
-    const test = yield* setup({ ...model, providerID: ProviderV2.ID.make("vector-plan") })
+    // As Provider.fromModelPlans lists Codium models: credits, not a dollar price.
+    const test = yield* setup({
+      ...model,
+      providerID: ProviderV2.ID.make("vector-plan"),
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 }, unpriced: true },
+    })
     yield* test.usage.record(
       LLMEvent.stepFinish({
         index: 0,
         reason: "stop",
         usage: { inputTokens: 200, outputTokens: 6 },
+        // A dollar charge an older gateway forwarded is not a Codium cost either.
         providerMetadata: { codium: { cost: 0.000031 } },
       }),
     )
     yield* test.usage.finish()
     expect(yield* test.records).toHaveLength(1)
-    expect((yield* test.records)[0]?.data).toMatchObject({ purpose: "title", cost: 0.000031 })
-    expect((yield* test.session)?.cost).toBe(0.000031)
-    expect((yield* test.session)?.tokens_input).toBe(200)
-    expect((yield* test.session)?.tokens_output).toBe(6)
+    expect((yield* test.records)[0]?.data).toMatchObject({ purpose: "title", cost: 0, unpriced: true })
+    expect(yield* test.session).toMatchObject({ cost: 0, unpriced_steps: 1, tokens_input: 200, tokens_output: 6 })
     expect(yield* test.messages).toHaveLength(0)
   }),
 )

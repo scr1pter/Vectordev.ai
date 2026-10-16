@@ -235,16 +235,15 @@ test("Codium balances are read in the main process and only the result reaches t
   expect(app.fetched).toEqual([])
   await app.controller.start()
   await app.controller.consume([app.callback()])
+  // vectordev.ai answers shares and flags, never an amount of credits.
   app.state.codium = {
     enabled: true,
     active: true,
     access: true,
-    plan: "vector-20",
-    credits: 16,
-    remaining: 4.5,
-    periodEnd: 2_000_000,
-    cancelAtPeriodEnd: false,
-    wallet: { credits: 8, used: 1, remaining: 7 },
+    plan: { id: "vector-50", name: "Codium 50", left: 0.5, renewsAt: 2_000_000, cancelAtPeriodEnd: false },
+    purchased: { bought: true, left: 0.7 },
+    empty: false,
+    low: false,
   }
   const status = await app.controller.codium()
   expect(app.fetched.at(-1)).toBe("https://vectordev.ai/api/model-plans/status")
@@ -254,16 +253,8 @@ test("Codium balances are read in the main process and only the result reaches t
     signedIn: true,
     enabled: true,
     access: true,
-    plan: {
-      id: "vector-20",
-      name: "Codium 20",
-      credits: 1600,
-      remaining: 450,
-      renewsAt: 2_000_000,
-      cancelAtPeriodEnd: false,
-    },
-    purchased: { credits: 800, remaining: 700 },
-    remaining: 1150,
+    plan: { id: "vector-50", name: "Codium 50", left: 0.5, renewsAt: 2_000_000, cancelAtPeriodEnd: false },
+    purchased: { bought: true, left: 0.7 },
     empty: false,
     low: false,
   })

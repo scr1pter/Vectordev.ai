@@ -4,7 +4,8 @@ import {
   freeModelSource,
   preferOwnFreeModels,
 } from "@vectordevai/core/free-model-choice"
-import { createMemo, createSignal } from "solid-js"
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
+import { createMemo, createSignal, onMount } from "solid-js"
 import { useLocal } from "../context/local"
 import { map, pipe, flatMap, entries, filter, sortBy, take } from "remeda"
 import { DialogSelect } from "../ui/dialog-select"
@@ -21,6 +22,8 @@ export function DialogModel(props: { providerID?: string }) {
   const sync = useSync()
   const dialog = useDialog()
   const [query, setQuery] = createSignal("")
+  // Account models can arrive after startup, as when vectordev.ai answers a first Codium catalog read slowly.
+  onMount(() => void sync.refreshProviders().catch(() => undefined))
 
   const connected = useConnected()
   const providers = createDialogProviderOptions()
@@ -114,7 +117,7 @@ export function DialogModel(props: { providerID?: string }) {
               return false
             return true
           }),
-          (options) => sortModelOptions(options, props.providerID !== undefined),
+          (options) => sortModelOptions(options, props.providerID !== undefined, provider.id),
         ),
       ),
       preferOwnFreeModels,
@@ -215,6 +218,10 @@ export function searchModelOptions<
 export function sortModelOptions<T extends { footer?: string; releaseDate: string | number; title: string }>(
   options: T[],
   _newestFirst: boolean,
+  providerID?: string,
 ) {
+  // Vector Codium keeps its catalog's order, led by the model it recommends: its models list no release date, so
+  // sorting by date and title would put Claude Haiku 5.5, the model that uses credits fastest, first.
+  if (providerID === ModelPlanStatus.PROVIDER_ID) return options
   return sortBy(options, [(option) => option.releaseDate, "desc"], (option) => option.title)
 }

@@ -127,11 +127,6 @@ export const calculateCost = (model: Model, tokens: Tokens, metadata?: ProviderM
   if (typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0)
     // Copilot bills in nano AI units: 1 AI credit is 1e9 nano-AIU and costs $0.01, so USD = nano-AIU / 1e11.
     return totalNanoAiu / 100_000_000_000
-  // Vector Codium debits the cost the gateway reports it billed; the catalog prices are only ceilings.
-  const reported =
-    model.provider === ModelPlans.PROVIDER_ID ? ModelPlans.usageCost({ usage: metadata?.openai }) : undefined
-  if (reported !== undefined) return reported
-
   const costs = pricing.get(model)
   if (!costs?.length) return undefined
   const context = tokens.input + tokens.cache.read + tokens.cache.write

@@ -55,6 +55,37 @@ describe("tui sync", () => {
     }
   })
 
+  test("reading the providers again lists Vector Codium once a slow first catalog read answers", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const codium = {
+      id: "vector-plan",
+      name: "Vector Codium",
+      source: "custom" as const,
+      env: [],
+      options: {},
+      models: {},
+    }
+    // The engine's first answer came before vectordev.ai did, so Codium was not listed yet.
+    const engine = { providers: [] as (typeof codium)[] }
+    const { app, sync } = await mount((url) => {
+      if (url.pathname === "/config/providers")
+        return json({ providers: engine.providers, default: engine.providers.length ? { [codium.id]: "coder" } : {} })
+      if (url.pathname === "/provider")
+        return json({ all: engine.providers, connected: engine.providers.map((item) => item.id), default: {} })
+    }, tmp.path)
+    try {
+      expect(sync.data.provider).toEqual([])
+      engine.providers = [codium]
+      await sync.refreshProviders()
+      expect(sync.data.provider).toEqual([codium])
+      expect(sync.data.provider_default).toEqual({ [codium.id]: "coder" })
+      expect(sync.data.provider_next.connected).toEqual([codium.id])
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
   test("refresh scopes sessions by default and lists project sessions when disabled", async () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")

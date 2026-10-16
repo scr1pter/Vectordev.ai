@@ -1,3 +1,4 @@
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { Option, Schema } from "effect"
 
 export type SwarmStrategy = "economy" | "balanced" | "quality"
@@ -244,6 +245,22 @@ export function selectSwarmPlannerModel(candidates: SwarmModelCandidate[], strat
     if (distance !== 0) return distance
     return modelKey(left).localeCompare(modelKey(right))
   })[0]
+}
+
+/**
+ * The models a swarm may route work to: the chosen primary model first, then the other connected models, once each.
+ * Vector Codium spends the account's credits, so its models join only a swarm whose primary model is a Codium model.
+ */
+export function swarmModelPool(primary: SwarmModelCandidate, connected: readonly SwarmModelCandidate[]) {
+  const codium = primary.provider === ModelPlanStatus.PROVIDER_ID
+  return [
+    ...new Map(
+      [primary, ...connected]
+        .filter((candidate) => candidate.provider.trim() && candidate.model.trim())
+        .filter((candidate) => codium || candidate.provider !== ModelPlanStatus.PROVIDER_ID)
+        .map((candidate) => [modelKey(candidate), candidate]),
+    ).values(),
+  ]
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

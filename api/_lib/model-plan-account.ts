@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto"
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto"
 import { Option, Schema } from "effect"
 import type { AccountUser } from "./account.js"
 import { withBillingMutation } from "./billing-lock.js"
@@ -339,7 +339,11 @@ async function walletCredential(id: string, fetcher: typeof fetch, requiredCredi
           "MODEL_TOPUP_EXHAUSTED",
           "Your purchased credits cannot cover this request's maximum cost. Shorten the context or response, or add credits.",
         )
-      return revealModelPlanKey(existing.wallet.encrypted, `${id}:wallet`)
+      return {
+        key: revealModelPlanKey(existing.wallet.encrypted, `${id}:wallet`),
+        pool: existing.wallet.hash,
+        available: credits - usage,
+      }
     }
   }
   return withBillingMutation(
@@ -361,7 +365,11 @@ async function walletCredential(id: string, fetcher: typeof fetch, requiredCredi
             "MODEL_TOPUP_EXHAUSTED",
             "Your purchased credits cannot cover this request's maximum cost. Shorten the context or response, or add credits.",
           )
-        return revealModelPlanKey(account.wallet.encrypted, `${id}:wallet`)
+        return {
+          key: revealModelPlanKey(account.wallet.encrypted, `${id}:wallet`),
+          pool: account.wallet.hash,
+          available: credits - usage,
+        }
       }
       if (credits <= 0 || credits < requiredCredits)
         throw new ApiError(402, "MODEL_TOPUP_EXHAUSTED", "Add purchased credits to cover this request's maximum cost.")
@@ -390,7 +398,7 @@ async function walletCredential(id: string, fetcher: typeof fetch, requiredCredi
         { ...account, wallet: { hash: result.data.hash, encrypted: protectModelPlanKey(result.key, `${id}:wallet`) } },
         fetcher,
       )
-      return result.key
+      return { key: result.key, pool: result.data.hash, available: credits }
     },
     fetcher,
   )
@@ -535,6 +543,11 @@ export async function modelPlanStatus(id: string, fetcher: typeof fetch = fetch,
   }
 }
 
+/**
+ * The key that pays for one request, with the request's largest possible cost held against its pool until release.
+ * A key's usage only grows when a request finishes, so without the hold parallel requests would each pass the same
+ * stale balance and spend past it, at Vector's cost.
+ */
 export async function modelPlanCredential(
   id: string,
   fetcher: typeof fetch = fetch,
@@ -544,7 +557,17 @@ export async function modelPlanCredential(
   // Only choose a funding pool before starting inference. A provider error may
   // already represent billable work and must never trigger a second request.
   try {
-    return await monthlyCredential(id, fetcher, now, requiredCredits)
+    return await holdCredits(
+      await monthlyCredential(id, fetcher, now, requiredCredits),
+      requiredCredits,
+      now,
+      fetcher,
+      new ApiError(
+        402,
+        "MODEL_PLAN_EXHAUSTED",
+        "The monthly credits left cannot cover this request alongside the requests already sent. Wait for them to finish, or add a top-up.",
+      ),
+    )
   } catch (error) {
     if (
       !(error instanceof ApiError) ||
@@ -553,7 +576,59 @@ export async function modelPlanCredential(
       throw error
     const account = await readModelPlanAccount(id, fetcher)
     if (!account?.topupCheckout && !account?.purchases?.length) throw error
-    return walletCredential(id, fetcher, requiredCredits)
+    return holdCredits(
+      await walletCredential(id, fetcher, requiredCredits),
+      requiredCredits,
+      now,
+      fetcher,
+      new ApiError(
+        402,
+        "MODEL_TOPUP_EXHAUSTED",
+        "Your purchased credits left cannot cover this request alongside the requests already sent. Wait for them to finish, or add credits.",
+      ),
+    )
+  }
+}
+
+// Each hold is one member of the pool's sorted set, "<ticket>:<credits>", scored by when it lapses, so a hold whose
+// request never settles (an answer that broke off or was cancelled, or a function killed at its time limit) frees
+// itself once the request could no longer run.
+const HOLD =
+  "redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1]) local held = 0 for _, member in ipairs(redis.call('ZRANGE', KEYS[1], 0, -1)) do held = held + (tonumber(string.match(member, ':([^:]+)$')) or 0) end if tonumber(ARGV[2]) - held < tonumber(ARGV[3]) then return 0 end redis.call('ZADD', KEYS[1], ARGV[4], ARGV[5]) redis.call('PEXPIRE', KEYS[1], ARGV[6]) return 1"
+const SETTLE = "redis.call('ZREM', KEYS[1], ARGV[1]) redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3]) return 1"
+// The gateway gives a provider request 600 seconds.
+const HOLD_MS = 660_000
+// The provider adds a finished request to the key's usage; its charge stays held a little longer so a request sent
+// meanwhile cannot spend it a second time.
+const SETTLED_MS = 30_000
+
+async function holdCredits(
+  funding: { key: string; pool: string; available: number },
+  requiredCredits: number,
+  now: number,
+  fetcher: typeof fetch,
+  refusal: ApiError,
+) {
+  // Provisioning and checks without a request to pay for hold nothing.
+  if (requiredCredits <= 0) return { key: funding.key, release: async (_charge?: number) => {} }
+  const pool = `vector:model-plans:held:${funding.pool}`
+  const ticket = randomUUID()
+  const member = `${ticket}:${requiredCredits}`
+  const held = await persistentStore(
+    ["EVAL", HOLD, 1, pool, now, funding.available, requiredCredits, now + HOLD_MS, member, HOLD_MS],
+    fetcher,
+  )
+  if (held !== 1) throw refusal
+  return {
+    key: funding.key,
+    /** Pass what the request was charged once it reached the provider, or nothing when it never did. */
+    release: async (charge?: number) => {
+      if (charge === undefined) {
+        await persistentStore(["ZREM", pool, member], fetcher)
+        return
+      }
+      await persistentStore(["EVAL", SETTLE, 1, pool, member, Date.now() + SETTLED_MS, `${ticket}:${charge}`], fetcher)
+    },
   }
 }
 
@@ -629,13 +704,12 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
         Number.isFinite(key.usage) &&
         key.usage >= 0
       ) {
-        if (key.usage >= paid.plan.credits || paid.plan.credits - key.usage < requiredCredits)
-          throw new ApiError(
-            402,
-            "MODEL_PLAN_EXHAUSTED",
-            "Your included model credits are used up. They renew at the next billing period.",
-          )
-        return revealModelPlanKey(existing.key.encrypted, `${id}:${paid.id}:${paid.start}`)
+        requireMonthlyCredits(paid.plan.credits, key.usage, requiredCredits)
+        return {
+          key: revealModelPlanKey(existing.key.encrypted, `${id}:${paid.id}:${paid.start}`),
+          pool: existing.key.hash,
+          available: paid.plan.credits - key.usage,
+        }
       }
     }
   }
@@ -678,12 +752,7 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
           key.usage < 0
         )
           throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your model allowance could not be verified.")
-        if (key.usage >= paid.plan.credits || paid.plan.credits - key.usage < requiredCredits)
-          throw new ApiError(
-            402,
-            "MODEL_PLAN_EXHAUSTED",
-            "Your included model credits are used up. They renew at the next billing period.",
-          )
+        requireMonthlyCredits(paid.plan.credits, key.usage, requiredCredits)
         if (
           key.disabled ||
           key.limit !== paid.plan.credits ||
@@ -705,7 +774,11 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
             "PATCH",
           )
         }
-        return revealModelPlanKey(account.key.encrypted, context)
+        return {
+          key: revealModelPlanKey(account.key.encrypted, context),
+          pool: account.key.hash,
+          available: paid.plan.credits - key.usage,
+        }
       }
       if (account.key)
         await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
@@ -744,10 +817,28 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
         },
         fetcher,
       )
-      return result.key
+      return { key: result.key, pool: result.data.hash, available: paid.plan.credits }
     },
     fetcher,
   )
+}
+
+// Spent credits and credits too few for this request's longest reply are different answers: a shorter conversation
+// or a model that uses fewer credits can still be served by the second. Both keep the code that lets purchased
+// credits cover the request instead.
+function requireMonthlyCredits(credits: number, usage: number, requiredCredits: number) {
+  if (usage >= credits)
+    throw new ApiError(
+      402,
+      "MODEL_PLAN_EXHAUSTED",
+      "Your included model credits are used up. They renew at the next billing period.",
+    )
+  if (credits - usage < requiredCredits)
+    throw new ApiError(
+      402,
+      "MODEL_PLAN_EXHAUSTED",
+      "The monthly credits left cannot cover the longest reply this request could get. Choose a model that uses fewer credits, shorten the conversation, or add a top-up.",
+    )
 }
 
 export async function modelPlanCheckout(

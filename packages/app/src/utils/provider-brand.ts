@@ -347,7 +347,9 @@ export function buildModelSections<T extends PickerModel>(input: {
     else groups.set(model.provider.id, [model])
   }
   const rank = (model: T) => ranks.get(model) ?? 0
-  const order = (a: T, b: T) => rank(a) - rank(b) || byRelease(a, b)
+  // Vector Codium keeps its catalog's order, led by the model it recommends: its models list no release date, so
+  // sorting by date and name would put Claude Haiku 5.5, the model that uses credits fastest, first.
+  const order = (a: T, b: T) => rank(a) - rank(b) || (a.provider.id === "vector-plan" ? 0 : byRelease(a, b))
 
   const popular = (input.popular ?? []).filter(providerAllowed)
   const popularity = (id: string) => {
