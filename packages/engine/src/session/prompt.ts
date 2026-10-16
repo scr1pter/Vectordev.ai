@@ -1263,9 +1263,16 @@ const layer = Layer.effect(
       const result = yield* loop({ sessionID: input.sessionID })
       // A prompt sent while the session is busy joins the run already going, and that run can end without reading it:
       // a rejected permission, a content filter or a provider error ends the loop where it is. It is answered now,
-      // unless the run was stopped.
+      // unless the run was stopped, by the user or by the spend guard: a budget-stopped run goes on only through
+      // Continue, under a new cap.
       if (!joined || result.info.id > message.info.id) return result
-      if (result.info.role === "assistant" && SessionV1.AbortedError.isInstance(result.info.error)) return result
+      if (
+        result.info.role === "assistant" &&
+        (SessionV1.AbortedError.isInstance(result.info.error) || SessionV1.BudgetStopError.isInstance(result.info.error))
+      )
+        return result
+      // The prompt's budget went to the run it joined, which has ended, so the run that answers it gets it again.
+      if (input.budget) yield* guard.arm(input.sessionID, input.budget)
       return yield* loop({ sessionID: input.sessionID })
     })
 

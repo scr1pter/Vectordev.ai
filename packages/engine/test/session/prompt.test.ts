@@ -4473,6 +4473,91 @@ it.instance(
   30_000,
 )
 
+// Sends `text` while the session's run is going and waits until its user message is saved.
+const joinRun = Effect.fn("test.joinRun")(function* (
+  sessionID: SessionID,
+  text: string,
+  budget?: { usd?: number; steps?: number },
+) {
+  const prompt = yield* SessionPrompt.Service
+  const sessions = yield* Session.Service
+  const id = MessageID.ascending()
+  const fiber = yield* prompt
+    .prompt({ sessionID, messageID: id, agent: "build", parts: [{ type: "text", text }], ...(budget ? { budget } : {}) })
+    .pipe(Effect.forkChild)
+  yield* pollWithTimeout(
+    sessions
+      .messages({ sessionID })
+      .pipe(
+        Effect.map((msgs) => (msgs.some((msg) => msg.info.role === "user" && msg.info.id === id) ? true : undefined)),
+      ),
+    "timed out waiting for the joining prompt to save",
+  )
+  return fiber
+})
+
+it.instance(
+  "run guard leaves a prompt that joined a budget-stopped run for Continue",
+  () =>
+    Effect.gen(function* () {
+      // The first step costs $0.10 against a $0.05 cap and calls a tool, so the guard ends the turn there.
+      const { llm } = yield* useServerConfig(pricedCfg({ input: 0, output: 100 }))
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const gate = yield* Deferred.make<void>()
+      const chat = yield* guardedChat({ usd: 0.05 })
+      yield* llm.push(
+        reply()
+          .wait(deferredAsPromise(gate))
+          .tool("first", { value: 1 })
+          .usage({ input: 100, output: 1000 }),
+      )
+      yield* llm.text("never requested")
+
+      const running = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+      yield* llm.wait(1)
+      yield* waitForBusy(chat.id)
+      const joined = yield* joinRun(chat.id, "second")
+      yield* Deferred.succeed(gate, void 0)
+      yield* Fiber.join(running)
+      const result = yield* Fiber.join(joined)
+
+      expect(budgetStop(result.info)?.reason).toBe("cap")
+      expect(yield* llm.calls).toBe(1)
+      expect(yield* llm.pending).toBe(1)
+      expect((yield* sessions.messages({ sessionID: chat.id })).at(-1)?.info.role).toBe("user")
+    }),
+  120_000,
+)
+
+it.instance(
+  "run guard answers a prompt that joined a run which ended without reading it under the prompt's budget",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const guard = yield* SpendGuard.Service
+      const gate = yield* Deferred.make<void>()
+      const chat = yield* guardedChat({ usd: 1 })
+      // The first turn ends on a content filter, which stops the loop before it reads the joining prompt.
+      yield* llm.push(reply().wait(deferredAsPromise(gate)).contentFilter())
+      yield* llm.text("second answered")
+
+      const running = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+      yield* llm.wait(1)
+      yield* waitForBusy(chat.id)
+      const joined = yield* joinRun(chat.id, "second", { usd: 3 })
+      yield* Deferred.succeed(gate, void 0)
+      yield* Fiber.join(running)
+      const result = yield* Fiber.join(joined)
+
+      expect(result.parts.some((part) => part.type === "text" && part.text === "second answered")).toBe(true)
+      expect(yield* llm.calls).toBe(2)
+      expect((yield* guard.snapshot(chat.id))?.budget.usd).toBe(3)
+    }),
+  120_000,
+)
+
 it.instance(
   "run guard ends a subagent that starts after its lineage was stopped, without a request",
   () =>
