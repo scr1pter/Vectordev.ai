@@ -50,6 +50,8 @@ const { discardSwarmRun, getSwarmRun, listSwarmRuns, resumeSwarmRun, stopSwarmRu
 const { createParallelWorkspace, getParallelWorkspace, mergeParallelWorkspace, refreshParallelWorkspace } = await import(
   "./parallel-workspaces"
 )
+// These tests stop a merge part-way by making a folder read-only. That stops a write only on POSIX, and not for root.
+const writeCanFail = process.platform !== "win32" && process.getuid?.() !== 0
 const inspectTask = {
   id: "inspect",
   title: "Inspect the project",
@@ -644,7 +646,7 @@ describe("swarm lifecycle", () => {
     return staging
   }
 
-  test("Resume undoes a merge into staging that stopped part-way and merges the worker afresh without running it again", async () => {
+  test.skipIf(!writeCanFail)("Resume undoes a merge into staging that stopped part-way and merges the worker afresh without running it again", async () => {
     const run = await seed("failed")
     const staging = await stagingFiles()
     const stopped = await stoppedMerge()
@@ -666,7 +668,7 @@ describe("swarm lifecycle", () => {
     expect(requests).not.toContain("POST /session")
   })
 
-  test("undoing an unfinished merge never reverts a sibling's change merged after it", async () => {
+  test.skipIf(!writeCanFail)("undoing an unfinished merge never reverts a sibling's change merged after it", async () => {
     const run = await seed("canceled")
     const staging = await stagingFiles()
     // The UI worker finished and passed its checks before Stop, so its merge never began. It also created sub/new.txt.

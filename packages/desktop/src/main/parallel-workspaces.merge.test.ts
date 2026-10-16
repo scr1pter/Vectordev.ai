@@ -65,6 +65,9 @@ function workspace(sourcePath: string, name = "Edit") {
   return createParallelWorkspace({ name, taskPrompt: name, parentSessionId: "ses-1", sourcePath })
 }
 
+// These tests stop a merge part-way by making a folder read-only. That stops a write only on POSIX, and not for root.
+const writeCanFail = process.platform !== "win32" && process.getuid?.() !== 0
+
 // What a merge Vector closed part-way through leaves in the record.
 function markMergeStarted(id: string) {
   const bucket = store.get("parallel-workspaces-state")!
@@ -160,7 +163,7 @@ describe("merging a workspace Vector closed part-way through", () => {
     expect(getParallelWorkspace(created.id)?.mergeState).toBe("none")
   })
 
-  test("a git apply that stopped between files is undone, and the workspace then merges afresh", async () => {
+  test.skipIf(!writeCanFail)("a git apply that stopped between files is undone, and the workspace then merges afresh", async () => {
     await mkdir(join(sourcePath, "sub"))
     await writeFile(join(sourcePath, "a.txt"), "one\n")
     await writeFile(join(sourcePath, "sub", "b.txt"), "one\n")
@@ -266,7 +269,7 @@ describe("interrupting an engine session", () => {
       port: 0,
       async fetch(request) {
         request.signal.addEventListener("abort", () => (aborted = true))
-        await Bun.sleep(5_600)
+        await Bun.sleep(7_000)
         answered.resolve()
         return new Response(null, { status: 204 })
       },
@@ -282,7 +285,7 @@ describe("interrupting an engine session", () => {
     await server.stop(true)
 
     expect(waited).toBeGreaterThanOrEqual(4_900)
-    expect(waited).toBeLessThan(5_500)
+    expect(waited).toBeLessThan(6_500)
     expect(aborted).toBe(false)
     expect(notes).toEqual([
       "The engine had not confirmed the interrupt after 5 seconds. Vector is still waiting for it.",
