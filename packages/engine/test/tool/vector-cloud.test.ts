@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { Cause, Effect, Exit, Schema } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { MessageID, SessionID } from "../../src/session/schema"
@@ -1005,6 +1006,135 @@ describe("vector_cloud Vercel actions", () => {
       expect(requests[0]).toMatchObject({ command: "logs", source: "runtime" })
       expect(result.output).toContain("Source: Vercel runtime logs.")
       expect(result.output).toContain("GET /cart 500")
+    }),
+  )
+})
+
+type CloudAction = Schema.Schema.Type<typeof Parameters>["action"]
+
+type AccountPermission =
+  | "vector_cloud_publish"
+  | "vector_cloud_environment"
+  | "vector_cloud_hosting"
+  | "vector_cloud_database"
+
+// What every vector_cloud action does before it runs. A Record over the tool's
+// own action list, so a new action does not compile until it is classified
+// here, and the test below then holds it to that class.
+const ACTION_PERMISSION: Record<CloudAction, "read" | "edit" | AccountPermission> = {
+  status: "read",
+  detect_build: "read",
+  database_status: "read",
+  cloud_connections: "read",
+  supabase_services: "read",
+  list_deployments: "read",
+  logs: "read",
+  check_health: "read",
+  rerun_checks: "read",
+  stored_env: "read",
+  vercel_scopes: "read",
+  vercel_projects: "read",
+  vercel_project: "read",
+  inspect_deployment: "read",
+  list_env: "read",
+  env_diff: "read",
+  env_plan: "read",
+  list_domains: "read",
+  supabase_projects: "read",
+  migration_status: "read",
+  auth_config: "read",
+  auth_users: "read",
+  function_secrets: "read",
+  supabase_logs: "read",
+  security_check: "read",
+  create_migration: "edit",
+  publish: "vector_cloud_publish",
+  promote: "vector_cloud_publish",
+  rollback: "vector_cloud_publish",
+  redeploy: "vector_cloud_publish",
+  cancel_deployment: "vector_cloud_publish",
+  sync_environment: "vector_cloud_environment",
+  write_env_file: "vector_cloud_environment",
+  remove_stored_env: "vector_cloud_environment",
+  set_env: "vector_cloud_environment",
+  remove_env: "vector_cloud_environment",
+  pull_env: "vector_cloud_environment",
+  set_release_settings: "vector_cloud_hosting",
+  create_project: "vector_cloud_hosting",
+  link_project: "vector_cloud_hosting",
+  unlink_project: "vector_cloud_hosting",
+  update_project_settings: "vector_cloud_hosting",
+  enable_protection_bypass: "vector_cloud_hosting",
+  add_domain: "vector_cloud_hosting",
+  verify_domain: "vector_cloud_hosting",
+  remove_domain: "vector_cloud_hosting",
+  create_database: "vector_cloud_database",
+  prepare_database: "vector_cloud_database",
+  prepare_auth: "vector_cloud_database",
+  apply_migrations: "vector_cloud_database",
+  create_organization: "vector_cloud_database",
+  link_database: "vector_cloud_database",
+  unlink_database: "vector_cloud_database",
+  pause_database: "vector_cloud_database",
+  restore_database: "vector_cloud_database",
+  write_database_url: "vector_cloud_database",
+  rotate_database_password: "vector_cloud_database",
+  rollback_migration: "vector_cloud_database",
+  run_sql: "vector_cloud_database",
+  update_auth: "vector_cloud_database",
+  invite_user: "vector_cloud_database",
+  delete_user: "vector_cloud_database",
+  create_bucket: "vector_cloud_database",
+  update_bucket: "vector_cloud_database",
+  delete_bucket: "vector_cloud_database",
+  deploy_function: "vector_cloud_database",
+  delete_function: "vector_cloud_database",
+  set_function_secrets: "vector_cloud_database",
+  delete_function_secrets: "vector_cloud_database",
+}
+
+describe("vector_cloud permissions for every action", () => {
+  it.instance("classifies exactly the tool's actions", () =>
+    Effect.sync(() => {
+      expect(Object.keys(ACTION_PERMISSION).toSorted()).toEqual([...Parameters.fields.action.literals].toSorted())
+    }),
+  )
+
+  it.instance("reads run unasked, and every account change asks each time with no Always, even under auto-accept", () =>
+    Effect.gen(function* () {
+      const requests = yield* bridge({ ok: true }, 200, {
+        report: {
+          ok: true,
+          scope: { provider: "Vercel", project: "shop", environment: "production", summary: "Change shop." },
+          files: ["supabase/migrations/20261016000000_add_profiles.sql"],
+        },
+      })
+      for (const [action, expected] of Object.entries(ACTION_PERMISSION) as [CloudAction, string][]) {
+        requests.length = 0
+        const asks = recordAsks()
+        yield* execute({ action }, asks.ask)
+        if (expected === "read") {
+          expect({ action, asks: asks.permissions, commands: requests.map((item) => item.command) }).toEqual({
+            action,
+            asks: [],
+            commands: [action],
+          })
+          continue
+        }
+        expect({ action, commands: requests.map((item) => item.command) }).toEqual({
+          action,
+          commands: ["describe", action],
+        })
+        expect(asks.permissions).toHaveLength(1)
+        const asked = asks.permissions[0]
+        expect({ action, permission: asked.permission }).toEqual({ action, permission: expected })
+        if (expected === "edit") continue
+        // The same policy the clients' auto-accept, the permission rules and
+        // "Always allow" consult: none of them may answer an account change.
+        expect({ action, always: asked.always }).toEqual({ action, always: [] })
+        expect(PermissionPolicy.canAutoApprove(asked.permission, asked.always)).toBe(false)
+        expect(PermissionPolicy.canAlwaysApprove(asked.permission, asked.patterns)).toBe(false)
+      }
     }),
   )
 })
