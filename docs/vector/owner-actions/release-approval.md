@@ -6,7 +6,8 @@ The owner authorized finishing the handoff, landing the verified integration on
 `main`, and dispatching the desktop release. Desktop **1.99.107** is prepared;
 its `vectorRequiredCliVersion` remains **1.99.99**. Verify the already-published
 CLI, plugin packages and standalone CLI archives at **1.99.99**. This desktop-only
-release requires no new npm publication or CLI version bump.
+release requires no new npm publication or CLI version bump; see the next
+section for the CLI build that already carries the number 1.99.107.
 
 The release continues the established interim unsigned installer and in-app
 update-feed policy; `1.99.107` is in the version-specific unsigned allowlist.
@@ -16,6 +17,37 @@ Once it exists and the final checks pass, dispatch the manual desktop workflow
 from the exact integrated main commit with tag `v1.99.107`,
 `allow_unsigned=true` and `prerelease=false`. All platforms must build that same
 commit and immutable catalog.
+
+### A CLI numbered 1.99.107 is already public
+
+Checked 16 October 2026 with public, unauthenticated reads. A CLI build from
+11 October already uses the number 1.99.107, so that number now names two
+different builds: that CLI and this desktop.
+
+- `https://vectordev.ai/api/cli-release` (the default `latest` that
+  `vectordev.ai/install` and `install.ps1` read) answers version **1.99.107**,
+  channel `latest`, published 2026-10-11T19:00:13Z, source revision
+  `a0af895b2`, with archives for every target. That build predates this
+  candidate: it has no `vector trust`, no `vector codium` and no
+  `vector run --max-cost`/`--max-steps`.
+- npm `latest` is **1.99.107** for `@vectordevai/plugin`,
+  `@vectordevai/cli-darwin-arm64`, `@vectordevai/cli-darwin-x64` and
+  `@vectordevai/cli-linux-x64`, published 2026-10-11 21:34–21:39Z. The
+  umbrella `@vectordevai/cli`, `@vectordevai/cli-linux-arm64` and the Windows
+  packages are still at **1.99.99**, so `npm install -g @vectordevai/cli`
+  installs 1.99.99.
+
+Consequences:
+
+- The next CLI cannot be 1.99.107. `packages/cloud/src/upload-cli-release.ts`
+  refuses a manifest that differs from the published one, and
+  `packages/engine/script/publish-vector.ts` skips packages already published,
+  so a 1.99.107 publish would ship the 11 October darwin and linux-x64
+  binaries beside new ones. Plan the next CLI as **1.99.108 or later**.
+- Owner decision (a production action, not done): whether to move the
+  standalone `latest` pointer and the npm `latest` dist-tags of the packages
+  above back to 1.99.99, so new installs match the npm CLI until 1.99.108
+  ships.
 
 This is preparation, not a publication record. Final source CI, the pinned
 catalog, all native release checks, installer verification and all four
