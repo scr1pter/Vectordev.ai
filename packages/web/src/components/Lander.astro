@@ -265,7 +265,7 @@ const trustCards = [
   <main>
     <section id="ch-start" data-chapter="Start" class="scene scene-hero simple-hero-section" aria-labelledby="hero-title">
       <div class="scene-stage simple-stage">
-        <div class="sky" aria-hidden="true">
+        <div class="sky" aria-hidden="true" data-ambient>
           <i class="sky-aurora"></i>
           <i class="sky-stars"></i>
         </div>
@@ -305,7 +305,7 @@ const trustCards = [
           <p class="hero-note">Free with a Vector account. macOS, Windows, and Linux.</p>
         </div>
 
-        <div class="showcase simple-showcase" aria-label="Interactive preview of the Vector interface">
+        <div class="showcase simple-showcase" aria-label="Interactive preview of the Vector interface" data-ambient>
           <ShotWindow shot={sessionShot} class="product-window" />
           <p class="showcase-note">
             An interactive preview — switch the branch, open Tasks, Changes or the terminal, fold the todos. The desktop
@@ -762,6 +762,20 @@ const trustCards = [
     }
   }
 
+  const initAmbient = () => {
+    // A decorative loop that is still running anywhere on the page keeps the
+    // compositor drawing every display frame, seen or not. Each [data-ambient]
+    // block holds its loops still while it is off screen; the rule is in the
+    // styles below. Pausing keeps the current pose, so nothing jumps on return.
+    if (!("IntersectionObserver" in globalThis)) return () => {}
+    const observer = new IntersectionObserver(
+      (entries) => entries.forEach((entry) => entry.target.toggleAttribute("data-offscreen", !entry.isIntersecting)),
+      { rootMargin: "120px 0px" },
+    )
+    document.querySelectorAll("[data-ambient]").forEach((node) => observer.observe(node))
+    return () => observer.disconnect()
+  }
+
   const initTrust = () => {
     const row = document.querySelector<HTMLElement>("[data-trust-row]")
     const controls = document.querySelector<HTMLElement>("[data-trust-controls]")
@@ -816,7 +830,7 @@ const trustCards = [
   let cleanups: Array<() => void> = []
   const boot = () => {
     cleanups.forEach((cleanup) => cleanup())
-    cleanups = [initReveals(), initScramble(), initField(), initTrust()]
+    cleanups = [initReveals(), initScramble(), initField(), initAmbient(), initTrust()]
   }
   const teardown = () => {
     cleanups.forEach((cleanup) => cleanup())
@@ -1052,6 +1066,17 @@ const trustCards = [
     .sky-stars {
       animation: none;
     }
+  }
+
+  /* Off-screen decorative loops hold their pose until they scroll back (initAmbient). Important,
+     because each loop's own rule sets the animation shorthand, which resets the play state. */
+  :global([data-ambient][data-offscreen]),
+  :global([data-ambient][data-offscreen]::before),
+  :global([data-ambient][data-offscreen]::after),
+  :global([data-ambient][data-offscreen] *),
+  :global([data-ambient][data-offscreen] *::before),
+  :global([data-ambient][data-offscreen] *::after) {
+    animation-play-state: paused !important;
   }
 
   /* ---- hero ---- */
