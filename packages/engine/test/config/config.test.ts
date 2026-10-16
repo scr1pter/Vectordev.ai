@@ -1183,6 +1183,43 @@ it.instance("lets an untrusted project make sharing and snapshots only safer", (
   ),
 )
 
+it.instance("lets an untrusted project make run limits and loop pauses only stricter", () =>
+  withGlobalConfig(
+    {
+      config: {
+        budget: { run: { usd: 2, steps: 50 }, loop: { enabled: true } },
+        experimental: { continue_loop_on_deny: false },
+      },
+    },
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* writeConfigEffect(test.directory, {
+          budget: { run: { usd: 100_000, steps: 100_000, warnAt: 1, unpricedSteps: 1_000 }, loop: { enabled: false } },
+          experimental: { continue_loop_on_deny: true },
+        })
+        const config = yield* Config.use.get()
+        expect(config.budget).toEqual({
+          run: { usd: 2, steps: 50, warnAt: 0.8, unpricedSteps: 40 },
+          loop: { enabled: true },
+        })
+        expect(config.experimental?.continue_loop_on_deny).toBe(false)
+      }),
+  ),
+)
+
+it.instance("lets an untrusted project lower the run limits and switch loop pauses on", () =>
+  withGlobalConfig({ config: { budget: { run: { usd: 2 }, loop: { enabled: false } } } }, () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* writeConfigEffect(test.directory, {
+        budget: { run: { usd: 1, steps: 20 }, loop: { enabled: true } },
+      })
+      expect((yield* Config.use.get()).budget).toEqual({ run: { usd: 1, steps: 20 }, loop: { enabled: true } })
+    }),
+  ),
+)
+
 it.instance("lets an untrusted project turn sharing off", () =>
   withGlobalConfig({ config: { share: "auto" } }, () =>
     Effect.gen(function* () {

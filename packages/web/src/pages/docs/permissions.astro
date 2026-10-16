@@ -20,8 +20,10 @@ export const prerender = true
           <p>
             From the next release, a project's own <code>vector.json</code> and <code>.vector</code> folder (its agents,
             commands, modes, plugins, tools, skills, MCP servers, formatters and language servers) load only after you
-            trust the project, because they can run code on your computer. Until then Vector applies only the project's
-            deny rules, and the app shows <strong>Project settings ignored</strong> with a <strong>Trust project</strong>
+            trust the project, because they can run code on your computer. Until then Vector applies the project's
+            deny rules, and its run limits, loop pauses and sharing settings only where they are stricter than yours, so
+            a cloned repository cannot raise your spend cap or switch loop pauses off. The app shows
+            <strong>Project settings ignored</strong> with a <strong>Trust project</strong>
             button. In the TUI, run <code>/trust</code>; in the terminal, run <code>vector trust status</code> or
             <code>vector trust approve</code> in the project.
           </p>

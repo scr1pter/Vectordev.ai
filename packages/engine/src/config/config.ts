@@ -43,6 +43,7 @@ import { ConfigDependencies } from "./dependencies"
 import { ConfigVariable } from "./variable"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 
 // Custom merge function that concatenates array fields instead of replacing them
 // Keep remeda's deep conditional merge type out of hot config-loading paths; TS profiling showed it dominates here.
@@ -105,6 +106,21 @@ function projectExecutableConfig(config: Info, trusted: boolean, base: Info): In
     if (next.share && (base.share === "disabled" || next.share === "auto")) delete next.share
     if (next.autoshare) delete next.autoshare
     if (next.snapshot === false) delete next.snapshot
+    // Run limits may only get stricter too: a cloned repository cannot raise or lift the user's cap, step limits or
+    // warning share, switch loop pauses off, or keep the agent going after a denied tool call.
+    if (next.budget) {
+      const budget = {
+        ...(next.budget.run && { run: SpendGuard.tighter(base.budget?.run, next.budget.run) }),
+        ...(next.budget.loop?.enabled === true && { loop: { enabled: true } }),
+      }
+      if (Object.keys(budget).length) next.budget = budget
+      else delete next.budget
+    }
+    if (next.experimental?.continue_loop_on_deny === true && base.experimental?.continue_loop_on_deny !== true) {
+      const experimental = { ...next.experimental }
+      delete experimental.continue_loop_on_deny
+      next.experimental = experimental
+    }
     return next
   }
   if (next.provider) {

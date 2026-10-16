@@ -132,6 +132,31 @@ export function start(rootID: SessionID, budget: RunBudget.Info, loopRules = tru
   }
 }
 
+// The stricter of two budgets, limit by limit, for a source that may tighten the limits it is given and never loosen
+// them, such as an untrusted project's config or an invited guest's prompt. A limit only one side sets applies as it
+// is; the warning share and the unpriced-step limit are compared with the defaults a side that leaves them out runs
+// with, so `{ warnAt: 1 }` cannot push the warning past WARN_AT.
+export function tighter(base: RunBudget.Info | undefined, next: RunBudget.Info): RunBudget.Info {
+  const least = (left: number | undefined, right: number | undefined) =>
+    left === undefined ? right : right === undefined ? left : Math.min(left, right)
+  const usd = least(base?.usd, next.usd)
+  const steps = least(base?.steps, next.steps)
+  const warnAt =
+    base?.warnAt === undefined && next.warnAt === undefined
+      ? undefined
+      : Math.min(base?.warnAt ?? WARN_AT, next.warnAt ?? WARN_AT)
+  const unpricedSteps =
+    base?.unpricedSteps === undefined && next.unpricedSteps === undefined
+      ? undefined
+      : Math.min(base?.unpricedSteps ?? UNPRICED_STEPS, next.unpricedSteps ?? UNPRICED_STEPS)
+  return {
+    ...(usd !== undefined && { usd }),
+    ...(steps !== undefined && { steps }),
+    ...(warnAt !== undefined && { warnAt }),
+    ...(unpricedSteps !== undefined && { unpricedSteps }),
+  }
+}
+
 // Called after every provider step of any session in the run, with the session that took the step. Spend and steps
 // count against the run; loops are detected per session. A stopped run keeps counting what in-flight steps spent,
 // and answers stop to every later step, which is how a stop reaches the rest of the lineage.
@@ -294,6 +319,10 @@ function sameCall(left: Sig, right: Sig) {
 export interface Interface {
   // Sets the budget for the root of `sessionID`: replaces an active run's budget, or holds it for begin().
   readonly arm: (sessionID: SessionID, budget: RunBudget.Info) => Effect.Effect<void>
+  // Like arm, for a sender who may not raise the owner's limits, such as an invited guest: each limit can only get
+  // stricter than the one the run has. An active run keeps the stricter of its budget and this one; otherwise the
+  // armed budget does, and one armed only this way is held to begin()'s `fallback` too.
+  readonly tighten: (sessionID: SessionID, budget: RunBudget.Info) => Effect.Effect<void>
   // Starts a run for a root session with the armed budget, else `fallback`. A no-op while the run is active.
   readonly begin: (rootID: SessionID, fallback?: RunBudget.Info) => Effect.Effect<void>
   // Turns the loop rules off for a session that polices itself, such as a Vectorscope specialist: it has its own
@@ -324,10 +353,14 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@vector/SpendGuard") {}
 
+// A budget held for a root's next run. `tighten` marks one armed only by tighten(), which begin() holds to its
+// fallback as well; one the owner armed replaces the fallback.
+type Armed = { readonly budget: RunBudget.Info; readonly tighten: boolean }
+
 type State = {
   readonly runs: ReadonlyMap<SessionID, Run>
   readonly roots: ReadonlyMap<SessionID, SessionID>
-  readonly armed: ReadonlyMap<SessionID, RunBudget.Info>
+  readonly armed: ReadonlyMap<SessionID, Armed>
   readonly last: ReadonlyMap<SessionID, Run>
   readonly quiet: ReadonlySet<SessionID>
 }
@@ -361,10 +394,29 @@ const layer = Layer.effect(
         yield* Ref.update(state, (current) => {
           const rootID = rootIn(current, sessionID)
           const run = current.runs.get(rootID)
-          if (!run) return { ...current, armed: new Map(current.armed).set(rootID, budget) }
+          if (!run) return { ...current, armed: new Map(current.armed).set(rootID, { budget, tighten: false }) }
           // A new cap may warn again.
           const warned = run.warned && run.budget.usd === budget.usd
           return { ...current, runs: new Map(current.runs).set(rootID, { ...run, budget, warned }) }
+        })
+      }),
+      tighten: Effect.fn("SpendGuard.tighten")(function* (sessionID, budget) {
+        yield* Ref.update(state, (current) => {
+          const rootID = rootIn(current, sessionID)
+          const run = current.runs.get(rootID)
+          if (run) {
+            const next = tighter(run.budget, budget)
+            const warned = run.warned && run.budget.usd === next.usd
+            return { ...current, runs: new Map(current.runs).set(rootID, { ...run, budget: next, warned }) }
+          }
+          const held = current.armed.get(rootID)
+          return {
+            ...current,
+            armed: new Map(current.armed).set(
+              rootID,
+              held ? { budget: tighter(held.budget, budget), tighten: held.tighten } : { budget, tighten: true },
+            ),
+          }
         })
       }),
       begin: Effect.fn("SpendGuard.begin")(function* (rootID, fallback) {
@@ -372,7 +424,9 @@ const layer = Layer.effect(
           if (current.runs.has(rootID)) return current
           const armed = new Map(current.armed)
           armed.delete(rootID)
-          const run = start(rootID, current.armed.get(rootID) ?? fallback ?? {}, !current.quiet.has(rootID))
+          const held = current.armed.get(rootID)
+          const budget = held ? (held.tighten ? tighter(fallback, held.budget) : held.budget) : (fallback ?? {})
+          const run = start(rootID, budget, !current.quiet.has(rootID))
           return { ...current, armed, runs: new Map(current.runs).set(rootID, run) }
         })
       }),

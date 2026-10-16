@@ -405,6 +405,23 @@ describe("SpendGuard.afterStep", () => {
     expect(result.run.spentUsd).toBe(1.75)
   })
 
+  test("tighter keeps the stricter of each limit and never loosens one", () => {
+    expect(SpendGuard.tighter({ usd: 2, steps: 50 }, { usd: 100_000, steps: 100_000 })).toEqual({ usd: 2, steps: 50 })
+    expect(SpendGuard.tighter({ usd: 2, steps: 50 }, { usd: 1 })).toEqual({ usd: 1, steps: 50 })
+    expect(SpendGuard.tighter({ usd: 2, steps: 50 }, {})).toEqual({ usd: 2, steps: 50 })
+    // A limit the base leaves out is still a new limit, so it applies.
+    expect(SpendGuard.tighter(undefined, { usd: 5, unpricedSteps: 10 })).toEqual({ usd: 5, unpricedSteps: 10 })
+    expect(SpendGuard.tighter({}, {})).toEqual({})
+    // The warning share and the unpriced-step limit compare with the defaults a side runs with when it sets none.
+    expect(SpendGuard.tighter({ usd: 2 }, { warnAt: 1, unpricedSteps: 1_000 })).toEqual({
+      usd: 2,
+      warnAt: SpendGuard.WARN_AT,
+      unpricedSteps: SpendGuard.UNPRICED_STEPS,
+    })
+    expect(SpendGuard.tighter({ warnAt: 0.5 }, { warnAt: 0.9 })).toEqual({ warnAt: 0.5 })
+    expect(SpendGuard.tighter({ warnAt: 0.9 }, { warnAt: 0.5 })).toEqual({ warnAt: 0.5 })
+  })
+
   test("formats money with two decimals, or <$0.01 for less than a cent", () => {
     expect(SpendGuard.formatUsd(0.004)).toBe("<$0.01")
     expect(SpendGuard.formatUsd(0)).toBe("$0.00")
@@ -637,6 +654,48 @@ describe("SpendGuard service", () => {
         state: "warn",
         message: "Approaching the spend cap: $4.12 of $4.50 spent on this run.",
       })
+    }),
+  )
+
+  it.effect("tightens an active run's budget without loosening any limit", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const owner = SessionID.make("ses_tighten_active")
+      yield* guard.begin(owner, { usd: 2, steps: 50 })
+      yield* guard.tighten(owner, {})
+      expect((yield* guard.snapshot(owner))?.budget).toEqual({ usd: 2, steps: 50 })
+      yield* guard.tighten(owner, { usd: 100, steps: 10 })
+      expect((yield* guard.snapshot(owner))?.budget).toEqual({ usd: 2, steps: 10 })
+      // The owner can still replace it.
+      yield* guard.arm(owner, { usd: 100 })
+      expect((yield* guard.snapshot(owner))?.budget).toEqual({ usd: 100 })
+      yield* guard.end(owner)
+    }),
+  )
+
+  it.effect("holds a budget armed only by tighten to begin's fallback, and to a budget the owner armed", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const fresh = SessionID.make("ses_tighten_fresh")
+      yield* guard.tighten(fresh, { usd: 100, steps: 10 })
+      yield* guard.begin(fresh, { usd: 2, steps: 50 })
+      expect((yield* guard.snapshot(fresh))?.budget).toEqual({ usd: 2, steps: 10 })
+      yield* guard.end(fresh)
+
+      // An empty budget lifts nothing: the run keeps the fallback's limits.
+      const empty = SessionID.make("ses_tighten_empty")
+      yield* guard.tighten(empty, {})
+      yield* guard.begin(empty, { usd: 2, steps: 50 })
+      expect((yield* guard.snapshot(empty))?.budget).toEqual({ usd: 2, steps: 50 })
+      yield* guard.end(empty)
+
+      // On top of a budget the owner armed, which replaces the fallback, the stricter limits of the two apply.
+      const armed = SessionID.make("ses_tighten_armed")
+      yield* guard.arm(armed, { usd: 5 })
+      yield* guard.tighten(armed, { usd: 50, steps: 20 })
+      yield* guard.begin(armed, { usd: 2 })
+      expect((yield* guard.snapshot(armed))?.budget).toEqual({ usd: 5, steps: 20 })
+      yield* guard.end(armed)
     }),
   )
 
