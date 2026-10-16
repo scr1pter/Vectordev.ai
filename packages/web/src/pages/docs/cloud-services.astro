@@ -46,13 +46,13 @@ export const prerender = true
   <p>
     For a detected or configured Vite project, Vector preserves literal dollar signs and backslashes through Vite's
     environment parser. Enter literal values rather than expansion expressions. Multiline values and unsupported quote
-    combinations are rejected before the file changes; set those values directly in the provider's environment settings.
-    Other frameworks retain their existing serialization.
+    combinations are rejected before the file changes; add those in the On Vercel panel below instead, which sends them
+    to the linked Vercel project without writing .env. Other frameworks retain their existing serialization.
   </p>
   <p>
     The linked Vercel project's variables are listed by name, environment (production, preview, development) and
     type; their values are never shown. Add, change or remove a variable per environment, optionally for one preview
-    branch. Compare with local compares values by hash. A sync first shows its plan: it creates what is missing and
+    branch. A value can span several lines, such as a PEM key: Shift+Enter adds a line, and Enter saves. Compare with local compares values by hash. A sync first shows its plan: it creates what is missing and
     updates or deletes only variables an earlier Vector sync wrote, and nothing is written until you apply that plan.
     Pull development values copies readable development values into this project's .env after you review them.
     Publishing uploads .env with the source, so a site without a build step, which Vercel serves from its root, must

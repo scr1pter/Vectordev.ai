@@ -116,14 +116,18 @@ removal. It preserves content above Vector's managed marker. A successful load
 is required before an empty list can be applied. The writer rejects a symbolic
 link or non-regular `.env`, stages a private file and replaces the directory
 entry atomically; new files use mode `0600` where POSIX modes apply. It does
-not encrypt the project's `.env` contents.
+not encrypt the project's `.env` contents. Every write, from the screen, the
+agent or Supabase setup, first adds `.env` to `.gitignore` when git does not
+already ignore it, and refuses to put a server-only value into a `.env` that
+git tracks, naming the variables and leaving the file unchanged.
 
 For projects positively identified as Vite by their saved framework or a Vite
 dependency, serialization preserves literal dollars and backslashes through
 Vite's environment parser. Enter literal values, not variable-expansion
 expressions. Multiline values and quote combinations that cannot be represented
-literally are rejected before replacing `.env`; use the hosting provider's
-environment settings for such values. Other project types retain their existing
+literally are rejected before replacing `.env`; set such values on the linked
+Vercel project in the **On Vercel** panel, whose value field keeps line breaks
+(Shift+Enter), instead. Other project types retain their existing
 serialization, so this is not a guarantee about every framework's parser.
 
 Supabase connection writes the project URL and publishable (or legacy

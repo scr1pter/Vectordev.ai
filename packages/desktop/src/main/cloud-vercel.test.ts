@@ -682,6 +682,11 @@ describe("Vercel environment variables", () => {
       env.setVercelEnv(project, { key: "BRANCHED", value: "x", targets: ["production"], gitBranch: "dev" }),
     ).rejects.toThrow("only target preview")
     await env.setVercelEnv(project, { key: "BRANCHED", value: "x", targets: ["preview"], gitBranch: "dev" })
+    // A PEM key keeps its line breaks: .env cannot hold it, so this is how it reaches Vercel from Vector.
+    const pem = "-----BEGIN PRIVATE KEY-----\nfixture-line-one\nfixture-line-two\n-----END PRIVATE KEY-----"
+    await env.setVercelEnv(project, { key: "SIGNING_KEY", value: pem, targets: ["production"] })
+    expect(api.state.env.find((item) => item.key === "SIGNING_KEY")?.value).toBe(pem)
+    await env.removeVercelEnv(project, { key: "SIGNING_KEY" })
 
     await env.removeVercelEnv(project, { key: "API_URL", targets: ["preview"] })
     expect(api.state.env.filter((item) => item.key === "API_URL").map((item) => item.target)).toEqual([["development"]])

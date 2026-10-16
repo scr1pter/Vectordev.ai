@@ -1670,6 +1670,16 @@ export function CloudConsole(props: {
                       class="cloud-input flex-1"
                       value={environment.state.value}
                       onInput={(event) => environment.setValue(event.currentTarget.value)}
+                      onPaste={(event) => {
+                        // An input drops line breaks, which would silently store
+                        // a broken PEM key; .env cannot hold them either.
+                        if (!/[\r\n]/.test(event.clipboardData?.getData("text").trimEnd() ?? "")) return
+                        event.preventDefault()
+                        setNotice({
+                          tone: "error",
+                          text: "That value has line breaks, which .env cannot hold. Add it in the On Vercel panel below, which sends it to the linked Vercel project with its line breaks.",
+                        })
+                      }}
                       placeholder="value"
                       aria-label="Variable value"
                       type="password"
