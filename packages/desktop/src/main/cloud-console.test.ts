@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { lstat, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -86,9 +87,33 @@ describe("managed cloud environment", () => {
 
   test("creates a private environment file without disclosing values in its result", async () => {
     setEnv(project, undefined, "SECRET", "fixture-only-secret")
-    expect(await applyEnv(project)).toEqual({ written: ".env" })
+    expect(await applyEnv(project)).toEqual({ written: ".env", gitignoreUpdated: true })
     expect(await readFile(join(project, ".env"), "utf8")).toContain("SECRET=fixture-only-secret")
     if (process.platform !== "win32") expect((await lstat(join(project, ".env"))).mode & 0o777).toBe(0o600)
+  })
+
+  test("never puts a server-only value into a .env that git tracks", async () => {
+    execFileSync("git", ["init", "-q"], { cwd: project })
+    await writeFile(join(project, ".env"), "KEEP=yes\n")
+    execFileSync("git", ["add", ".env"], { cwd: project })
+    setEnv(project, undefined, "VITE_SUPABASE_URL", "https://fixture.supabase.co", "public")
+    expect(await applyEnv(project)).toEqual({ written: ".env", gitignoreUpdated: false })
+    expect(await readFile(join(project, ".env"), "utf8")).toContain("VITE_SUPABASE_URL=")
+    setEnv(project, undefined, "STRIPE_SECRET_KEY", "fixture-server-secret", "server")
+    const before = await readFile(join(project, ".env"), "utf8")
+    await expect(applyEnv(project)).rejects.toThrow(
+      "commits it to git and it would hold the server-only value STRIPE_SECRET_KEY. Stop tracking it with `git rm --cached .env`",
+    )
+    expect(await readFile(join(project, ".env"), "utf8")).toBe(before)
+    expect(await Bun.file(join(project, ".gitignore")).exists()).toBe(false)
+  })
+
+  test("keeps an untracked .env out of git before writing a value into it", async () => {
+    execFileSync("git", ["init", "-q"], { cwd: project })
+    setEnv(project, undefined, "SECRET", "fixture-only-secret")
+    expect(await applyEnv(project)).toEqual({ written: ".env", gitignoreUpdated: true })
+    execFileSync("git", ["check-ignore", "-q", ".env"], { cwd: project })
+    expect(await applyEnv(project)).toEqual({ written: ".env", gitignoreUpdated: false })
   })
 
   test("rejects a symlink without touching its target", async () => {
@@ -412,6 +437,16 @@ describe("cloud bridge publish destination", () => {
     expect(dryRun.scope.summary).toContain("Nothing changes")
     expect(dryRun).not.toHaveProperty("repeatable")
     expect((await describe({ action: "create_database" })).scope.summary).toContain("nothing new is created")
+    // prepare rewrites the whole managed block, so the prompt names every stored variable, never a value.
+    const prepare = await describe({ action: "prepare_database" })
+    expect(prepare.scope).toEqual({
+      provider: "Supabase",
+      project: "shop-db",
+      environment: "local .env",
+      summary:
+        "Write this project's 3 stored environment variables (API_URL, SUPABASE_URL, SUPABASE_ANON_KEY) to the .env of this project, including the Supabase project shop-db's public client settings. Values are not shown.",
+    })
+    expect(JSON.stringify(prepare)).not.toContain("api.fixture.invalid")
     const missing = await bridgeCommand(bridge, { command: "describe" })
     expect(missing.status).toBe(400)
     expect(await (await bridgeCommand(bridge, { command: "describe", action: "status" })).json()).toEqual({

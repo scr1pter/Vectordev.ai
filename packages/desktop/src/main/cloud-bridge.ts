@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { createServer, type Server } from "node:http"
 
-import { applyEnv, detectBuildSettings, getBuildSettings, getDatabase, listDeployments } from "./cloud-console"
+import { applyEnv, detectBuildSettings, getBuildSettings, getDatabase, listDeployments, listEnv } from "./cloud-console"
 import {
   cachedCloudProviderConnection,
   getCloudProviderProjectLink,
@@ -373,11 +373,15 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
       approved: { approvalID: plan.approvalID },
     }
   }
+  // prepare_database and prepare_auth rewrite the whole managed block of .env,
+  // so the prompt names every stored variable that lands there, not only the
+  // Supabase settings.
+  const keys = listEnv(input.projectPath, input.taskId).map((item) => item.key)
   return scope(
     "Supabase",
     name,
     "local .env",
-    `Write the Supabase project ${name}'s public client settings to this project's .env.`,
+    `Write this project's ${keys.length} stored environment ${keys.length === 1 ? "variable" : "variables"} (${keys.join(", ")}) to the .env of ${workspace.directory !== workspace.projectPath ? "this agent workspace" : "this project"}, including the Supabase project ${name}'s public client settings. Values are not shown.`,
   )
 }
 

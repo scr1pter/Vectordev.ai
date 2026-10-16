@@ -10,6 +10,7 @@ import { isSupabasePublicKey } from "./cloud-public-key"
 import { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
 import {
   ensureEnvIgnored,
+  envTracked,
   projectRefFromUrl,
   scaffoldSupabaseClient,
   supabaseFramework,
@@ -795,7 +796,7 @@ export async function applyEnv(
   projectPath: string,
   taskId?: string,
   directory = projectPath,
-): Promise<{ written: string }> {
+): Promise<{ written: string; gitignoreUpdated: boolean }> {
   const stats = directory ? await stat(directory).catch(() => undefined) : undefined
   if (!stats?.isDirectory()) {
     throw new Error("Open a project folder before applying environment variables.")
@@ -804,9 +805,22 @@ export async function applyEnv(
   const vars = listEnv(projectPath)
   for (const item of vars) {
     if (/[\r\n]/.test(item.value)) {
-      throw new Error(`The value for "${item.key}" contains a line break, which cannot be written to .env.`)
+      throw new Error(
+        `The value for "${item.key}" contains a line break, which cannot be written to .env. Remove it here and set it in the On Vercel panel of Environment variables, which sends it to the linked Vercel project without writing .env.`,
+      )
     }
   }
+  // A .env that git tracks goes out with the next commit, so it never takes a
+  // server-only value. One git does not track is kept out of git before it
+  // gets any value; a .gitignore that is a link or directory is the user's own
+  // arrangement and is left alone.
+  const server = vars.filter((item) => item.visibility === "server").map((item) => item.key)
+  if (server.length && (await envTracked(directory))) {
+    throw new Error(
+      `Vector did not write .env, because this repository commits it to git and it would hold the server-only ${server.length === 1 ? "value" : "values"} ${server.join(", ")}. Stop tracking it with \`git rm --cached .env\` (the file stays on disk), commit that, then write .env again.`,
+    )
+  }
+  const ignored = await ensureEnvIgnored(directory).catch(() => ({ added: false }))
   const manifest = await readFile(join(directory, "package.json"), "utf8")
     .then(parsePackageManifest)
     .catch(() => undefined)
@@ -847,7 +861,7 @@ export async function applyEnv(
   } finally {
     await rm(temporary, { force: true })
   }
-  return { written: ".env" }
+  return { written: ".env", gitignoreUpdated: ignored.added }
 }
 
 function formatEnvValue(value: string) {
@@ -865,7 +879,7 @@ function formatViteEnvValue(value: string) {
   )
   if (!quote) {
     throw new Error(
-      "A variable contains a combination of quotes that cannot be written literally for Vite. Set it directly in the hosting provider environment instead.",
+      "A variable contains a combination of quotes that cannot be written literally for Vite. Remove it here and set it in the On Vercel panel of Environment variables, which sends it to the linked Vercel project without writing .env.",
     )
   }
   return `${quote}${value.replace(/\$/g, "\\$")}${quote}`
@@ -920,7 +934,7 @@ export async function connectDatabase(
     managedByOAuth?: boolean
   },
   directory = projectPath,
-): Promise<CloudDatabaseConnection> {
+) {
   const url = (input.url ?? "").trim()
   let host = ""
   try {
@@ -960,11 +974,7 @@ export async function connectDatabase(
   // A minimal client so `import { supabase }` just works. It never replaces an
   // existing file, and a locked src/ does not fail the connection.
   await scaffoldSupabaseClient(directory, framework).catch(() => undefined)
-  // A .gitignore that is a link or directory is the user's own arrangement.
-  await ensureEnvIgnored(directory).catch(() => undefined)
-  await applyEnv(projectPath, taskId, directory)
-
-  return connection
+  return { ...connection, env: await applyEnv(projectPath, taskId, directory) }
 }
 
 export function disconnectDatabase(projectPath: string, taskId?: string): void {

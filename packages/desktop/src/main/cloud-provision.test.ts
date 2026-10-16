@@ -255,7 +255,7 @@ describe("createCloudDatabase", () => {
       host: "newprojectref01.supabase.co",
       projectRef: "newprojectref01",
     })
-    expect(report.applied).toEqual({ written: ".env" })
+    expect(report.applied).toEqual({ written: ".env", gitignoreUpdated: true })
     // The name the directory implies, made unique against the organization.
     expect(api.created[0]).toMatchObject({
       name: "my-cool-app-2",

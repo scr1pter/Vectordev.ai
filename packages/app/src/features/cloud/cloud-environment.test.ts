@@ -31,7 +31,7 @@ function fixture() {
       },
       apply: async (projectPath: string, taskId?: string) => {
         writes.push({ projectPath, taskId, variables: projects.get(projectPath) ?? [] })
-        return { written: ".env" }
+        return { written: ".env", gitignoreUpdated: false }
       },
     },
   }
@@ -93,6 +93,19 @@ describe("Cloud environment scope", () => {
     await f.editor.apply()
     expect(f.writes).toEqual([{ projectPath: "/project-a", taskId: "task-a", variables: [] }])
     expect(f.notices.at(-1)?.text).toContain("Cleared Vector's managed variables")
+  })
+
+  test("says when writing .env also added it to .gitignore", async () => {
+    using f = fixture()
+    f.projects.set("/project-a", [{ key: "API_KEY", value: "fixture", visibility: "server" as const }])
+    f.api.env.apply = async () => ({ written: ".env", gitignoreUpdated: true })
+    f.editor.changeScope("/project-a")
+    await f.editor.refresh()
+    await f.editor.apply()
+    expect(f.notices.at(-1)?.text).toBe(
+      "Wrote 1 variable to .env in your project. Added .env to .gitignore so git leaves it out of commits.",
+    )
+    expect(f.notices.at(-1)?.text).not.toContain("fixture")
   })
 
   test("does not mistake unloaded or failed variable state for a confirmed empty list", async () => {
@@ -208,7 +221,7 @@ describe("Cloud environment scope", () => {
 
   test("prevents overlapping mutations and ignores an old write's success", async () => {
     using f = fixture()
-    const pending = Promise.withResolvers<{ written: string }>()
+    const pending = Promise.withResolvers<{ written: string; gitignoreUpdated: boolean }>()
     const calls: string[] = []
     f.api.env.apply = (projectPath) => {
       calls.push(projectPath)
@@ -221,7 +234,7 @@ describe("Cloud environment scope", () => {
     await f.editor.save()
     expect(f.projects.get("/project-a")).toBeUndefined()
     f.editor.changeScope("/project-b")
-    pending.resolve({ written: ".env" })
+    pending.resolve({ written: ".env", gitignoreUpdated: false })
     await writing
     expect(calls).toEqual(["/project-a"])
     expect(f.notices).toEqual([])

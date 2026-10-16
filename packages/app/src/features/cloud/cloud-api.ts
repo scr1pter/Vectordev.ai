@@ -199,7 +199,7 @@ export type CloudApi = {
       visibility?: CloudEnvVisibility,
     ) => Promise<CloudEnvVar[]>
     remove: (projectPath: string, taskId: string | undefined, key: string) => Promise<CloudEnvVar[]>
-    apply: (projectPath: string, taskId?: string) => Promise<{ written: string }>
+    apply: (projectPath: string, taskId?: string) => Promise<{ written: string; gitignoreUpdated: boolean }>
   }
   database: {
     get: (projectPath: string, taskId?: string) => Promise<CloudDatabaseConnection>

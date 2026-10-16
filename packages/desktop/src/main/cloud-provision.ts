@@ -2,13 +2,7 @@ import { VECTOR_USER_AGENT } from "./user-agent"
 import { randomBytes } from "node:crypto"
 import { basename } from "node:path"
 
-import {
-  applyEnv,
-  cloudProjectScopeKey,
-  connectDatabase,
-  getDatabase,
-  type CloudDatabaseConnection,
-} from "./cloud-console"
+import { cloudProjectScopeKey, connectDatabase, getDatabase, type CloudDatabaseConnection } from "./cloud-console"
 import { getSupabaseManagementToken } from "./cloud-connections"
 import { encryptCloudCredential } from "./cloud-credential-vault"
 import { getStore } from "./store"
@@ -46,7 +40,7 @@ export type CloudProvisionReport = {
   nextStep?: string
   database?: CloudProvisionDatabase
   organizations?: SupabaseOrganization[]
-  applied?: { written: string }
+  applied?: { written: string; gitignoreUpdated: boolean }
   waitedMs?: number
 }
 
@@ -361,7 +355,7 @@ async function linkCreatedProject(
     ok: true,
     createdNow: true,
     database: databaseSummary(connection, poll.region ?? record.region),
-    applied: await applyEnv(input.projectPath, input.taskId, input.directory),
+    applied: connection.env,
     nextStep:
       "The database is live and wired into .env. Write the schema as a .sql file and run apply_migrations to create the tables this feature needs.",
   }
