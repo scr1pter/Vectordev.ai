@@ -192,8 +192,11 @@ function safeReportUrl(value: string) {
   return url.toString()
 }
 
+// Includes what the Vercel and Supabase dashboards call the actions vector_cloud
+// asks for every time (Promote, Instant Rollback, Run in the SQL editor, Save on
+// a variable), so the browser is not a way around those prompts.
 const SENSITIVE_ACTION =
-  /\b(approve|authorize|book|buy|checkout|confirm|create|delete|deploy|discard|merge|message|pay|publish|purchase|remove|reserve|send|submit|transfer|upgrade)\b/i
+  /\b(add|approve|authorize|book|buy|checkout|confirm|create|delete|deploy|disconnect|discard|invite|merge|message|pause|pay|promote|publish|purchase|redeploy|remove|reserve|reset|restore|revoke|roll ?back|rotate|run|save|send|submit|transfer|uninstall|upgrade)\b/i
 
 export function describeSensitiveBrowserAction(
   params: Pick<Schema.Schema.Type<typeof Parameters>, "action" | "key" | "selector">,

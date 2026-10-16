@@ -36,6 +36,43 @@ describe("browser sensitive action detection", () => {
     ).toContain("Deploy project")
   })
 
+  test("requires approval for the cloud dashboard actions vector_cloud asks for every time", () => {
+    for (const text of [
+      "Promote to Production",
+      "Instant Rollback",
+      "Roll Back",
+      "Redeploy",
+      "Save",
+      "Add Environment Variable",
+      "Run",
+      "Pause project",
+      "Restore project",
+      "Reset database password",
+      "Rotate key",
+      "Revoke access",
+      "Invite user",
+      "Uninstall",
+      "Disconnect",
+    ]) {
+      const report = {
+        ok: true,
+        finalUrl: "https://vercel.com/team/shop",
+        title: "",
+        description: "",
+        screenshotDataUrl: "",
+        console: [],
+        pageErrors: [],
+        domSummary: { textSample: "", inputs: [], interactives: [{ tag: "button", text, selector: "#action" }] },
+      }
+      expect({ text, asked: describeSensitiveBrowserAction({ action: "click", selector: "#action" }, report) }).toEqual(
+        {
+          text,
+          asked: `Click ${text} on an external page`,
+        },
+      )
+    }
+  })
+
   test("does not interrupt harmless navigation clicks", () => {
     expect(
       describeSensitiveBrowserAction(
