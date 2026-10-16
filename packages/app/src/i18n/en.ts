@@ -566,7 +566,8 @@ export const dict = {
   "toast.workspace.disabled.description": "Only the main worktree is shown in the sidebar",
 
   "toast.permissions.autoaccept.on.title": "Auto-accepting permissions",
-  "toast.permissions.autoaccept.on.description": "Permission requests will be automatically approved",
+  "toast.permissions.autoaccept.on.description":
+    "Permission requests are approved automatically. Vector Cloud account changes, sensitive browser actions, computer use and repeated tool calls still ask.",
   "toast.permissions.autoaccept.off.title": "Stopped auto-accepting permissions",
   "toast.permissions.autoaccept.off.description": "Permission requests will require approval",
 

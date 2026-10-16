@@ -439,7 +439,8 @@ export const dict = {
   "toast.workspace.disabled.description": "Тільки головне робоче дерево відображається на бічній панелі",
 
   "toast.permissions.autoaccept.on.title": "Автоматичне прийняття дозволів",
-  "toast.permissions.autoaccept.on.description": "Запити дозволів будуть автоматично схвалюватися",
+  "toast.permissions.autoaccept.on.description":
+    "Запити дозволів схвалюються автоматично. Зміни облікових записів Vector Cloud, чутливі дії в браузері, керування комп’ютером і повторювані виклики інструментів і далі потребують підтвердження.",
   "toast.permissions.autoaccept.off.title": "Автоматичне прийняття дозволів зупинено",
   "toast.permissions.autoaccept.off.description": "Запити дозволів вимагатимуть схвалення",
 

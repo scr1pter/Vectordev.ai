@@ -420,7 +420,8 @@ export const dict = {
   "toast.workspace.disabled.description": "Samo glavni worktree se prikazuje u bočnoj traci",
 
   "toast.permissions.autoaccept.on.title": "Automatsko prihvatanje dozvola",
-  "toast.permissions.autoaccept.on.description": "Zahtjevi za dozvole će biti automatski odobreni",
+  "toast.permissions.autoaccept.on.description":
+    "Zahtjevi za dozvole se automatski odobravaju. Promjene Vector Cloud računa, osjetljive radnje u pregledniku, korištenje računara i ponovljeni pozivi alata i dalje traže dozvolu.",
   "toast.permissions.autoaccept.off.title": "Zaustavljeno automatsko prihvatanje dozvola",
   "toast.permissions.autoaccept.off.description": "Zahtjevi za dozvole će zahtijevati odobrenje",
 

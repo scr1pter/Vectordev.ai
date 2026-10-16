@@ -413,7 +413,8 @@ export const dict = {
   "toast.scheme.title": "Farveskema",
 
   "toast.permissions.autoaccept.on.title": "Accepterer tilladelser automatisk",
-  "toast.permissions.autoaccept.on.description": "Anmodninger om tilladelse godkendes automatisk",
+  "toast.permissions.autoaccept.on.description":
+    "Anmodninger om tilladelse godkendes automatisk. Ændringer af Vector Cloud-konti, følsomme browserhandlinger, computerbrug og gentagne værktøjskald spørger stadig.",
   "toast.permissions.autoaccept.off.title": "Stoppet med at acceptere tilladelser automatisk",
   "toast.permissions.autoaccept.off.description": "Anmodninger om tilladelse vil kræve godkendelse",
 
