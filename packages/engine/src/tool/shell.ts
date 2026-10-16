@@ -535,9 +535,12 @@ export const ShellTool = Tool.define(
         const command = parts(node)
         const tokens = command.map((item) => item.text)
         const cmd = ps || shellKind === "cmd" ? tokens[0]?.toLowerCase() : tokens[0]
+        // `git diff` prints any two files once one of them lies outside the work tree (`git diff /dev/null ~/.ssh/id_rsa`),
+        // --no-index or not, so its arguments are paths as much as cat's. A revision resolves inside the workspace.
+        const diff = cmd === "git" && tokens[1] === "diff"
 
-        if (cmd && (FILES.has(cmd) || (shellKind === "cmd" && CMD_FILES.has(cmd)))) {
-          for (const arg of pathArgs(command, ps, shellKind === "cmd")) {
+        if (cmd && (FILES.has(cmd) || diff || (shellKind === "cmd" && CMD_FILES.has(cmd)))) {
+          for (const arg of pathArgs(diff ? command.slice(1) : command, ps, shellKind === "cmd")) {
             const resolved = yield* argPath(arg, cwd, ps, shell)
             yield* Effect.logInfo("resolved path", { arg, resolved })
             if (!resolved || containsPath(resolved, instance)) continue

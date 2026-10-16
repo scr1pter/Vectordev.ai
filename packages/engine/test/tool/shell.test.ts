@@ -551,6 +551,41 @@ describe("tool.shell permissions", () => {
     ),
   )
 
+  // git diff prints whole files once one of them lies outside the work tree, with or without --no-index.
+  for (const item of shells.filter((item) => !PS.has(item.label) && item.label !== "cmd")) {
+    it.live(`asks for external_directory permission for files git diff reads [${item.label}]`, () =>
+      withShell(
+        item,
+        Effect.gen(function* () {
+          const outside = yield* tmpdirScoped()
+          const file = path.join(outside, "id_rsa").replaceAll("\\", "/")
+          yield* Effect.promise(() => Bun.write(file, "secret"))
+          const tmp = yield* tmpdirScoped({ git: true })
+          yield* runIn(
+            tmp,
+            Effect.gen(function* () {
+              const err = new Error("stop after permission")
+              for (const [command, want] of [
+                [`git diff /dev/null ${file}`, glob(path.join(outside, "*"))],
+                [`git diff ${file} README.md`, glob(path.join(outside, "*"))],
+                [`git diff --no-index -- README.md ${file}`, glob(path.join(outside, "*"))],
+                ["git diff /dev/null .env", "/dev/*"],
+              ]) {
+                const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+                expect(yield* fail({ command }, capture(requests, err))).toMatchObject({ message: err.message })
+                expect(requests.find((r) => r.permission === "external_directory")?.patterns).toContain(want)
+              }
+              // Revisions and paths inside the workspace ask only for the command.
+              const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+              yield* fail({ command: "git diff main..HEAD -- src/index.ts HEAD~1" }, capture(requests, err))
+              expect(requests.map((r) => r.permission)).toEqual(["bash"])
+            }),
+          )
+        }),
+      ),
+    )
+  }
+
   if (process.platform === "win32") {
     if (bash) {
       it.live("asks for nested bash command permissions [bash]", () =>
