@@ -12,6 +12,7 @@ import {
   mergeParallelWorkspace,
   mergeParallelWorkspaceSelection,
   refreshParallelWorkspace,
+  rollBackUnfinishedMerge,
   runParallelWorkspace,
   stopParallelWorkspace,
   type ParallelWorkspaceEngine,
@@ -273,23 +274,48 @@ export async function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine
     if (!exists)
       throw new Error("The swarm staging workspace no longer exists. Discard this run and launch a new swarm.")
   }
-  if (activeRuns.has(id)) return getSwarmRun(id)!
-  if (stoppingRuns.has(id))
-    throw new Error("The stopped swarm is still cleaning up. Wait for its workspaces to settle before resuming.")
-  // Nothing else owns the run now, so a task still in flight lost its worker, for example when Vector closed while
-  // Stop was waiting for it.
+  // Nothing else owns the run by the time the scheduler starts, so a task still in flight lost its worker, for example
+  // when Vector closed while Stop was waiting for it.
   const retryable = (task: SwarmTaskRecord) =>
     ["failed", "blocked", "canceled", "interrupted", ...IN_FLIGHT].includes(task.status)
   const workspace = (task: SwarmTaskRecord) => (task.workspaceId ? getParallelWorkspace(task.workspaceId) : undefined)
-  // Vector stopped part-way through writing this worker's changes into staging. The scheduler finishes that merge; a
-  // fresh attempt would redo the edits on top of the ones already there, and discarding would delete the only
-  // complete copy of them.
-  const unfinishedMerge = (task: SwarmTaskRecord) =>
-    Boolean(workspace(task)?.mergeStartedAt) && workspace(task)?.mergeState === "none"
+  // Workers whose merge into staging is all that is left of their task, so the scheduler merges them instead of running
+  // the agent again, which would pay for the same work twice (see executeSwarmTask):
+  // - Vector stopped part-way through writing the worker's changes into staging. That merge is undone below and the
+  //   worker merged afresh.
+  // - The agent finished and passed its checks, and the merge never began: Vector closed during the pre-merge checks,
+  //   or Stop came after the agent finished.
+  // Either way the worker's isolated copy must still exist: it is the only complete copy of the changes.
+  const kept = new Set(
+    (
+      await Promise.all(
+        current.tasks.filter(retryable).map(async (task) => {
+          const previous = workspace(task)
+          if (previous?.mergeState !== "none" || !(await stat(previous.isolatedPath).catch(() => undefined))) return []
+          const finished =
+            ["complete", "needs review"].includes(previous.status) &&
+            previous.changedFilesCount > 0 &&
+            previous.validationPassed !== false &&
+            !previous.error
+          return previous.mergeStartedAt || finished ? [task.id] : []
+        }),
+      )
+    ).flat(),
+  )
+  // Undo what an unfinished merge wrote into staging now, while no worker of this run can merge there. Once the
+  // scheduler runs, a sibling could merge a file the unfinished merge never reached, and undoing it would revert that.
+  await Promise.all(
+    current.tasks
+      .filter((task) => retryable(task) && workspace(task)?.mergeStartedAt && workspace(task)?.mergeState === "none")
+      .map((task) => rollBackUnfinishedMerge(task.workspaceId!)),
+  )
+  if (activeRuns.has(id)) return getSwarmRun(id)!
+  if (stoppingRuns.has(id))
+    throw new Error("The stopped swarm is still cleaning up. Wait for its workspaces to settle before resuming.")
   // A retry starts in a new workspace from the staging baseline, and the task forgets the old one, so nothing could
   // open or discard the previous attempt's copy of the project again. Release it instead of leaving it on disk.
   const retired = getSwarmRun(id)!
-    .tasks.filter((task) => retryable(task) && workspace(task)?.mergeState === "none" && !unfinishedMerge(task))
+    .tasks.filter((task) => retryable(task) && workspace(task)?.mergeState === "none" && !kept.has(task.id))
     .map((task) => task.workspaceId!)
   updateRun(id, (run) => ({
     ...run,
@@ -302,7 +328,7 @@ export async function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine
       const merged = workspace(task)
       // Vector closed after this worker's changes reached staging but before the task was recorded complete. Running
       // it again would apply the same edits on top of themselves. The task's own summary may be the error of an
-      // attempt that failed before someone merged the worker by hand, so the workspace says what it did.
+      // attempt that failed before someone merged the worker by hand, so the workspace says what the agent did.
       if (merged?.mergeState === "merged") {
         const integrated =
           merged.validationPassed === true
@@ -315,16 +341,16 @@ export async function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine
           lastAction: integrated,
           changedFilesCount: merged.changedFilesCount,
           riskLevel: merged.riskLevel,
-          summary: merged.finalSummary || integrated,
+          summary: merged.summaryBeforeMerge || merged.finalSummary || integrated,
           error: undefined,
         }
       }
-      if (unfinishedMerge(task))
+      if (kept.has(task.id))
         return {
           ...task,
           status: "planned",
           completedAt: undefined,
-          lastAction: "Ready to finish integrating its changes into staging",
+          lastAction: "Ready to integrate its finished changes into staging",
           error: undefined,
         }
       return {
@@ -678,13 +704,10 @@ async function executeSwarmTask(id: string, taskID: string, engine: ParallelWork
   if (!run || !task || !coordinator) throw new Error("Swarm task lost its coordinator state.")
   if (signal.aborted) throw new DOMException("Swarm stopped.", "AbortError")
 
-  // Vector stopped part-way through merging this worker into staging (see resumeSwarmRun). Its agent already finished
-  // and passed its checks, so only the merge is left to finish.
-  const unfinished = task.workspaceId ? getParallelWorkspace(task.workspaceId) : undefined
-  const settled =
-    unfinished?.mergeStartedAt && unfinished.mergeState === "none"
-      ? unfinished
-      : await runSwarmWorker(run, task, coordinator, engine, signal)
+  // A planned task that still names a workspace is one Resume kept (see resumeSwarmRun): its agent finished and passed
+  // its checks, and Resume undid any merge Vector stopped part-way through, so only a fresh merge into staging is left.
+  const kept = task.workspaceId ? getParallelWorkspace(task.workspaceId) : undefined
+  const settled = kept ?? (await runSwarmWorker(run, task, coordinator, engine, signal))
 
   const summary = settled.finalSummary || settled.lastAction
   if (settled.changedFilesCount) {

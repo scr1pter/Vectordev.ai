@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import type { ParallelWorkspaceRecord } from "./parallel-workspaces"
 
 let userDataPath = ""
@@ -46,8 +46,19 @@ const {
   interruptEngineSession,
   mergeParallelWorkspace,
   refreshParallelWorkspace,
+  rollBackUnfinishedMerge,
   runGit,
 } = await import("./parallel-workspaces")
+
+async function commitAll(path: string) {
+  await runGit(["init", "-q"], path)
+  await runGit(["add", "."], path)
+  await runGit(["-c", "user.name=Vector Test", "-c", "user.email=test@example.com", "commit", "-qm", "base"], path)
+}
+
+function workspace(sourcePath: string, name = "Edit") {
+  return createParallelWorkspace({ name, taskPrompt: name, parentSessionId: "ses-1", sourcePath })
+}
 
 // What a merge Vector closed part-way through leaves in the record.
 function markMergeStarted(id: string) {
@@ -142,6 +153,72 @@ describe("merging a workspace Vector closed part-way through", () => {
     await expect(mergeParallelWorkspace(created.id)).rejects.toThrow("isolated copy no longer exists")
     expect(await Bun.file(join(sourcePath, "a.txt")).text()).toBe("before\n")
     expect(getParallelWorkspace(created.id)?.mergeState).toBe("none")
+  })
+
+  test("a git apply that stopped between files is undone, and the workspace then merges afresh", async () => {
+    await mkdir(join(sourcePath, "sub"))
+    await writeFile(join(sourcePath, "a.txt"), "one\n")
+    await writeFile(join(sourcePath, "sub", "b.txt"), "one\n")
+    await commitAll(sourcePath)
+    const created = await workspace(sourcePath)
+    expect(created.isolation).toBe("git-worktree")
+    await writeFile(join(created.isolatedPath, "a.txt"), "TWO\n")
+    await writeFile(join(created.isolatedPath, "sub", "b.txt"), "TWO\n")
+    // git apply writes a.txt, cannot replace sub/b.txt, and stops there without updating the index.
+    await chmod(join(sourcePath, "sub"), 0o555)
+    const stopped = await mergeParallelWorkspace(created.id).finally(() => chmod(join(sourcePath, "sub"), 0o755))
+    expect(stopped.status).toBe("failed")
+    expect(await Bun.file(join(sourcePath, "a.txt")).text()).toBe("TWO\n")
+    expect(await Bun.file(join(sourcePath, "sub", "b.txt")).text()).toBe("one\n")
+    // Finishing that merge in place cannot work: the patch now applies in neither direction.
+    expect((await mergeParallelWorkspace(created.id)).error).toContain("a.txt: does not match index")
+
+    await rollBackUnfinishedMerge(created.id)
+    const undone = getParallelWorkspace(created.id)!
+    expect(undone.mergeStartedAt).toBeUndefined()
+    expect(undone.logs[0]).toContain("putting 1 file back as it was before it began")
+    expect(await Bun.file(join(sourcePath, "a.txt")).text()).toBe("one\n")
+    expect((await runGit(["status", "--porcelain"], sourcePath)).stdout.trim()).toBe("")
+    // What the unfinished merge had written is kept, not destroyed.
+    expect(await Bun.file(join(dirname(stopped.checkpointPath!), "rolled-back", "overwritten", "a.txt")).text()).toBe(
+      "TWO\n",
+    )
+
+    const merged = await mergeParallelWorkspace(created.id)
+    expect(merged.status).toBe("merged")
+    expect(await Bun.file(join(sourcePath, "a.txt")).text()).toBe("TWO\n")
+    expect(await Bun.file(join(sourcePath, "sub", "b.txt")).text()).toBe("TWO\n")
+  })
+
+  test("two copies merging into one folder at once cannot both pass the conflict check", async () => {
+    await writeFile(join(sourcePath, "shared.txt"), "base\n")
+    const first = await workspace(sourcePath, "First")
+    const second = await workspace(sourcePath, "Second")
+    expect([first.isolation, second.isolation]).toEqual(["copy", "copy"])
+    await writeFile(join(first.isolatedPath, "shared.txt"), "first\n")
+    await writeFile(join(second.isolatedPath, "shared.txt"), "second\n")
+    const results = await Promise.all([mergeParallelWorkspace(first.id), mergeParallelWorkspace(second.id)])
+
+    expect(results.map((result) => result.status).sort()).toEqual(["failed", "merged"])
+    const merged = results.find((result) => result.status === "merged")!
+    expect(results.find((result) => result.status === "failed")?.error).toContain("Merge conflict detected in shared.txt")
+    expect(await Bun.file(join(sourcePath, "shared.txt")).text()).toBe(merged.id === first.id ? "first\n" : "second\n")
+  })
+
+  test("two git worktrees merging into one repository at once both land", async () => {
+    await writeFile(join(sourcePath, "a.txt"), "one\n")
+    await writeFile(join(sourcePath, "b.txt"), "one\n")
+    await commitAll(sourcePath)
+    const first = await workspace(sourcePath, "First")
+    const second = await workspace(sourcePath, "Second")
+    await writeFile(join(first.isolatedPath, "a.txt"), "first\n")
+    await writeFile(join(second.isolatedPath, "b.txt"), "second\n")
+    const results = await Promise.all([mergeParallelWorkspace(first.id), mergeParallelWorkspace(second.id)])
+
+    expect(results.map((result) => result.error)).toEqual([undefined, undefined])
+    expect(results.map((result) => result.status)).toEqual(["merged", "merged"])
+    expect(await Bun.file(join(sourcePath, "a.txt")).text()).toBe("first\n")
+    expect(await Bun.file(join(sourcePath, "b.txt")).text()).toBe("second\n")
   })
 })
 
