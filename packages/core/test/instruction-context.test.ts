@@ -109,6 +109,52 @@ describe("InstructionContext", () => {
     ),
   )
 
+  it.live("reads a project AGENTS.md only where it lands inside the project", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const secret = path.join(tmp.path, "home", ".ssh", "id_rsa")
+          const project = path.join(tmp.path, "project")
+          const directory = path.join(project, "packages", "core")
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.dirname(secret), { recursive: true })
+            await fs.mkdir(path.join(project, "docs"), { recursive: true })
+            await fs.mkdir(directory, { recursive: true })
+            await fs.writeFile(secret, "PRIVATE KEY")
+            await fs.writeFile(path.join(project, "docs", "rules.md"), "shared rules")
+            await fs.symlink(secret, path.join(directory, "AGENTS.md"))
+            await fs.symlink(path.join("docs", "rules.md"), path.join(project, "AGENTS.md"))
+          })
+
+          const context = yield* SystemContextRegistry.Service.pipe(
+            Effect.flatMap((service) => service.load()),
+            Effect.provide(
+              instructionLayer({
+                config: path.join(tmp.path, "global"),
+                locationServiceLayer: Layer.succeed(
+                  Location.Service,
+                  Location.Service.of(
+                    location(
+                      { directory: AbsolutePath.make(directory) },
+                      { projectDirectory: AbsolutePath.make(project) },
+                    ),
+                  ),
+                ),
+              }),
+            ),
+          )
+
+          const baseline = (yield* SystemContext.initialize(context)).baseline
+          expect(baseline).not.toContain("PRIVATE KEY")
+          expect(baseline).toContain("shared rules")
+        }),
+      ),
+    ),
+  )
+
   it.live("keeps an empty AGENTS.md as available context", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),

@@ -2,7 +2,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import path from "path"
 import { SessionV1 } from "@vectordevai/core/v1/session"
-import { Effect, Layer, Context } from "effect"
+import { Effect, Layer, Context, Option } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Config } from "@/config/config"
 import { InstanceState } from "@/effect/instance-state"
@@ -13,6 +13,8 @@ import { withTransientReadRetry } from "@/util/effect-http-client"
 import { Global } from "@vectordevai/core/global"
 import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import { collectBoundedResponseBody } from "@vectordevai/core/tool/http-body"
+import { containsPath } from "@/project/instance-context"
+import { realpath } from "@/tool/external-directory"
 import type { MessageID } from "./schema"
 
 function extract(messages: SessionV1.WithParts[]) {
@@ -104,6 +106,28 @@ const layer: Layer.Layer<
       return (yield* fs.readFileStringSafe(filepath)) ?? ""
     })
 
+    // Every instruction file goes to the model with the system prompt, and a repository can ship AGENTS.md as a link to
+    // ../../.ssh/id_rsa. A file inside the project is read only where it really lands inside the project; one found
+    // above a directory that is not a git repository is the user's own.
+    const landsInProject = Effect.fnUntraced(function* (file: string) {
+      const ctx = yield* InstanceState.context
+      if (!containsPath(file, ctx)) return true
+      // A link that cannot be resolved (a loop) cannot be read either, and the read reports it.
+      const resolved = yield* Effect.try({ try: () => realpath(file), catch: (error) => error }).pipe(Effect.option)
+      if (Option.isNone(resolved)) return true
+      const target = resolved.value
+      if (containsPath(target, { ...ctx, directory: realpath(ctx.directory), worktree: realpath(ctx.worktree) }))
+        return true
+      yield* Effect.logWarning("not loading a project instruction file that links outside the project", { file, target })
+      return false
+    })
+
+    const projectFiles = (found: Effect.Effect<string[], unknown>) =>
+      found.pipe(
+        Effect.catch(() => Effect.succeed([] as string[])),
+        Effect.flatMap((matches) => Effect.filter(matches, landsInProject)),
+      )
+
     const fetch = Effect.fnUntraced(function* (url: string) {
       // Instruction URLs come from the user's own config (or a project they trusted), so an intranet page is fine.
       return yield* WebFetchRequest.execute(http, HttpClientRequest.get(url), {
@@ -147,9 +171,7 @@ const layer: Layer.Layer<
       // request's tree and must not take instructions from it.
       if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
         for (const file of additiveProjectFiles) {
-          const matches = yield* fs
-            .findUp(file, ctx.directory, ctx.worktree)
-            .pipe(Effect.catch(() => Effect.succeed([])))
+          const matches = yield* projectFiles(fs.findUp(file, ctx.directory, ctx.worktree))
           matches.forEach((item) => paths.add(path.resolve(item)))
         }
       }
@@ -157,9 +179,7 @@ const layer: Layer.Layer<
       // The first project-level match wins so we don't stack AGENTS.md/CLAUDE.md from every ancestor.
       if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
         for (const file of instructionFiles) {
-          const matches = yield* fs
-            .findUp(file, ctx.directory, ctx.worktree)
-            .pipe(Effect.catch(() => Effect.succeed([])))
+          const matches = yield* projectFiles(fs.findUp(file, ctx.directory, ctx.worktree))
           if (matches.length > 0) {
             matches.forEach((item) => paths.add(path.resolve(item)))
             break
@@ -173,13 +193,15 @@ const layer: Layer.Layer<
           const instruction = raw.startsWith("~/") ? path.join(global.home, raw.slice(2)) : raw
           const matches = yield* (
             path.isAbsolute(instruction)
-              ? fs.glob(path.basename(instruction), {
-                  cwd: path.dirname(instruction),
-                  absolute: true,
-                  include: "file",
-                })
-              : relative(instruction)
-          ).pipe(Effect.catch(() => Effect.succeed([] as string[])))
+              ? fs
+                  .glob(path.basename(instruction), {
+                    cwd: path.dirname(instruction),
+                    absolute: true,
+                    include: "file",
+                  })
+                  .pipe(Effect.catch(() => Effect.succeed([] as string[])))
+              : projectFiles(relative(instruction))
+          )
           matches.forEach((item) => paths.add(path.resolve(item)))
         }
       }
@@ -228,7 +250,7 @@ const layer: Layer.Layer<
       // Walk upward from the file being read and attach nearby instruction files once per message.
       while (current.startsWith(root) && current !== root) {
         const found = yield* find(current)
-        if (!found || found === target || sys.has(found) || already.has(found)) {
+        if (!found || found === target || sys.has(found) || already.has(found) || !(yield* landsInProject(found))) {
           current = path.dirname(current)
           continue
         }

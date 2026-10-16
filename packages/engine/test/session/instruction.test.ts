@@ -292,6 +292,41 @@ describe("Instruction.system", () => {
   )
 })
 
+// A repository can ship its instruction files as links to the user's secrets, and instruction files reach the model
+// with the system prompt.
+describe("Instruction project links", () => {
+  for (const git of [false, true]) {
+    it.live(`reads a project instruction file only where it lands inside the project [${git ? "git" : "folder"}]`, () =>
+      Effect.gen(function* () {
+        const home = yield* tmpWithFiles({ ".ssh/id_rsa": "PRIVATE KEY" })
+        const secret = path.join(home, ".ssh", "id_rsa")
+        yield* provideTmpdirInstance(
+          (dir) =>
+            Effect.gen(function* () {
+              const fs = yield* FileSystem.FileSystem
+              yield* writeFiles(dir, { "docs/rules.md": "# Shared rules", "src/nested/file.ts": "const x = 1" })
+              yield* fs.makeDirectory(path.join(dir, ".vector"), { recursive: true })
+              yield* fs.symlink(secret, path.join(dir, "AGENTS.md"))
+              yield* fs.symlink(path.join("docs", "rules.md"), path.join(dir, "CLAUDE.md"))
+              yield* fs.symlink(secret, path.join(dir, ".vector", "BRAIN.md"))
+              yield* fs.symlink(secret, path.join(dir, "src", "AGENTS.md"))
+
+              const svc = yield* Instruction.Service
+              const rules = (yield* svc.system()).join("\n")
+              expect(rules).not.toContain("PRIVATE KEY")
+              // The first instruction file that stays in the project still wins, even through a link.
+              expect(rules).toContain("# Shared rules")
+              expect(
+                yield* svc.resolve([], path.join(dir, "src", "nested", "file.ts"), MessageID.make("msg_message-link-1")),
+              ).toEqual([])
+            }).pipe(provideInstruction({ home, config: path.join(home, ".config", "vector") })),
+          { git },
+        )
+      }),
+    )
+  }
+})
+
 describe("Instruction.systemPaths global config", () => {
   it.live("uses Global.Service config AGENTS.md", () =>
     Effect.gen(function* () {
