@@ -199,13 +199,27 @@ and pulls under `vector_cloud_environment`; other Vercel project, domain and
 account commands under `vector_cloud_hosting`; and Supabase commands that change
 the linked project or account, or read its data or keys (`db push`,
 `db dump`, `projects api-keys`, `secrets set`, `functions deploy`, `link`),
-under `vector_cloud_database`. Local work (`vercel dev`, `vercel build`,
-`supabase start`, `supabase db reset` without `--linked`) and plain reads
-(`vercel ls`, `vercel env ls`) only ask as shell commands do. The check reads
-the command as written, including package runners such as `npx vercel` and
-`pnpm dlx supabase`; a script that calls a CLI (`npm run deploy`, `sh -c`) is
-not seen. With the shell sandbox on (`VECTOR_SHELL_SANDBOX=1`), sandboxed
-commands also cannot read the CLIs' stored logins.
+under `vector_cloud_database`, as does `supabase test db` against the linked
+database (`--linked`, `--db-url`). `vercel dev` and `vercel build --yes` ask
+under `vector_cloud_environment`, since they download the project's variables.
+Local work (`vercel build` without `--yes`, `supabase start`, `supabase db
+reset` without `--linked`), plain reads (`vercel ls`, `vercel env ls`), help
+(`--help`) and lookups (`command -v vercel`) only ask as shell commands do.
+
+This is a best-effort check on direct calls, not a boundary. It sees the CLI
+behind package runners and their options (`npx vercel`, `pnpm --filter web exec
+vercel`, `yarn run vercel`, `npm --prefix web exec vercel`), behind wrappers
+(`env`, `sudo`, `doas`, `timeout`, `nice`, `ionice`, `xargs`, `caffeinate`,
+`stdbuf`, `chronic`, `unbuffer`, `setsid`, `find -exec`), and in command lines
+run from a string (`sh -c`, `bash -lc`, `zsh -c`, `eval`, `watch`, `env -S`,
+`npx -c`), which the shell parses and checks command by command. It does not
+see a call inside a project script (`npm run deploy`), behind a variable
+(`$CLI --prod`), or in a program that reads the CLI's stored login or calls the
+provider's API itself. Only the shell sandbox (`VECTOR_SHELL_SANDBOX=1`) closes
+that route: sandboxed commands cannot read the CLIs' stored logins. The sandbox
+stays off by default because it confines every shell command to the workspace,
+is unavailable on Windows, and asks before running unconfined where the host
+cannot apply it; turning it on by default is a separate decision.
 
 ## Repository migrations
 

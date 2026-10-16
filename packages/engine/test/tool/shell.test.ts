@@ -523,6 +523,49 @@ describe("tool.shell permissions", () => {
     }),
   )
 
+  each("asks for a cloud CLI behind eval, xargs, wrappers and a shell's -c string", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const err = new Error("cloud prompt rejected")
+          const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          const rejectCloud = {
+            ...ctx,
+            ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+              Effect.sync(() => {
+                requests.push(req)
+                if (req.permission.startsWith("vector_cloud_")) throw err
+              }),
+          }
+          // `false &&` keeps a real CLI from running if the check missed one:
+          // the scan reads every command, the shell runs none after `false`.
+          const cases = [
+            ["false && eval vercel --prod", "vector_cloud_publish"],
+            ["false && nice -n 5 vercel --prod", "vector_cloud_publish"],
+            ["false && echo x | xargs vercel --prod", "vector_cloud_publish"],
+            ["false && sh -c 'vercel --prod'", "vector_cloud_publish"],
+            [`false && bash -lc "cd web && vercel deploy --prod"`, "vector_cloud_publish"],
+            [`false && timeout 60 bash -c 'eval "supabase db push"'`, "vector_cloud_database"],
+          ] as const
+          for (const [command, permission] of cases) {
+            requests.length = 0
+            expect({ command, error: (yield* fail({ command }, rejectCloud)).message }).toEqual({
+              command,
+              error: err.message,
+            })
+            expect({ command, asked: requests.map((item) => item.permission) }).toEqual({
+              command,
+              asked: ["bash", permission],
+            })
+            expect(requests[1].always).toEqual([])
+          }
+        }),
+      )
+    }),
+  )
+
   each("asks for edit permission for the files a redirect writes", () =>
     Effect.gen(function* () {
       const outside = yield* tmpdirScoped()

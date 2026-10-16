@@ -119,10 +119,15 @@ export const prerender = true
     project or domain, and the prompt
     names the provider, project and environment and shows any SQL that would run. It asks every time: auto-accepting
     permissions, a permission rule that allows it and an earlier approval never skip these prompts, and none of them
-    offers Always allow. Only the read-only migration dry run can be answered by auto-accept. A shell command the
-    agent runs with the Vercel or Supabase command-line tool, such as vercel --prod, vercel env add or supabase db push,
-    asks the same way every time; local work such as vercel dev or supabase start does not. That check reads the
-    command as written, so a script that calls the tool, such as npm run deploy, is not covered.
+    offers Always allow. Only the read-only migration dry run can be answered by auto-accept. Vector also looks for
+    direct calls to the Vercel or Supabase command-line tool in the agent's shell commands, such as vercel --prod,
+    vercel env add or supabase db push, including calls behind wrappers such as timeout or xargs, package runners and
+    sh -c, and asks for those the same way every time. Local work such as supabase start does not ask; vercel dev
+    does, since it downloads the project's Development variables. This is a best-effort check on direct calls, not a
+    boundary: a call it cannot see, such as one inside a project script (npm run deploy), behind a variable, or in a
+    program that uses the command-line tool's stored login itself, runs without that prompt. Only the shell sandbox
+    (VECTOR_SHELL_SANDBOX=1, off by default), which hides those stored logins from the agent's commands, closes that
+    route.
     A new migration file asks like any other edit, showing both the migration and its down file. OAuth client secrets, function secret values and the database password are entered
     in Vector Cloud, never in chat, and the agent can only refer to variables already stored there. Query results
     reach the agent as the query returns them, except cells in columns named like passwords, tokens or secrets, which

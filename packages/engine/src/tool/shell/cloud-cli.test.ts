@@ -43,8 +43,8 @@ describe("cloud CLI commands in the shell", () => {
 
   test("local Vercel work and plain reads run without a cloud prompt", () => {
     for (const command of [
-      "vercel dev",
       "vercel build",
+      "vercel build --prod",
       "vercel --version",
       "vercel -h",
       "vercel whoami",
@@ -55,8 +55,112 @@ describe("cloud CLI commands in the shell", () => {
       "vercel domains ls",
       "vercel project ls",
       "vercel alias ls",
+      "vercel deploy --prod --help",
+      "vercel --prod -h",
+      "command -v vercel",
+      "command -V supabase",
     ]) {
       expect({ command, request: ask(command) }).toEqual({ command, request: undefined })
+    }
+  })
+
+  test("a dev server or a build that downloads the project's variables asks under environment", () => {
+    expect(ask("vercel dev")).toMatchObject({
+      permission: "vector_cloud_environment",
+      environment: "development",
+      action: "dev",
+    })
+    expect(ask("vercel build --prod --yes")).toMatchObject({
+      permission: "vector_cloud_environment",
+      environment: "production",
+      action: "build",
+    })
+    expect(ask("vercel build -y")).toMatchObject({ permission: "vector_cloud_environment", environment: "preview" })
+  })
+
+  test("sees the CLI behind wrappers that take options or a duration first", () => {
+    for (const command of [
+      "timeout 300 vercel deploy --prod",
+      "gtimeout -s KILL 5m vercel --prod",
+      "nice -n 10 vercel --prod",
+      "nice -5 vercel --prod",
+      "ionice -c 3 vercel --prod",
+      "xargs vercel --prod",
+      "xargs -n 1 -P 2 vercel --prod",
+      "caffeinate -i vercel --prod",
+      "caffeinate -t 600 vercel --prod",
+      "doas vercel --prod",
+      "doas -u ada vercel --prod",
+      "sudo -u ada vercel --prod",
+      "stdbuf -oL vercel --prod",
+      "stdbuf -o L vercel --prod",
+      "chronic vercel --prod",
+      "unbuffer vercel --prod",
+      "setsid vercel --prod",
+      "find . -maxdepth 0 -exec vercel --prod ;",
+    ]) {
+      expect({ command, request: ask(command) }).toMatchObject({
+        command,
+        request: { permission: "vector_cloud_publish", environment: "production" },
+      })
+    }
+  })
+
+  test("sees the CLI behind package runner options that come before the verb", () => {
+    for (const command of [
+      "pnpm --filter web exec vercel --prod",
+      "pnpm -F web exec vercel --prod",
+      "pnpm -C apps/web dlx vercel --prod",
+      "pnpm --dir apps/web exec vercel --prod",
+      "pnpm -w exec vercel --prod",
+      "pnpm -r --filter=web exec vercel --prod",
+      "yarn --cwd web vercel deploy --prod",
+      "yarn run vercel deploy --prod",
+      "npm --prefix web exec vercel -- --prod",
+      "npm -w web exec vercel -- --prod",
+      "bun --cwd web x vercel --prod",
+    ]) {
+      expect({ command, request: ask(command) }).toMatchObject({
+        command,
+        request: { permission: "vector_cloud_publish", environment: "production" },
+      })
+    }
+    for (const command of ["yarn run deploy", "pnpm --filter web run build", "npm --prefix web run deploy"]) {
+      expect({ command, request: ask(command) }).toEqual({ command, request: undefined })
+    }
+  })
+
+  test("hands a command line run from a string back to the shell to check", () => {
+    const cases: Array<[string[], string]> = [
+      [["eval", "vercel", "--prod"], "vercel --prod"],
+      [["eval", '"vercel --prod"'], "vercel --prod"],
+      [["watch", "-n", "5", "vercel", "--prod"], "vercel --prod"],
+      [["sh", "-c", "'vercel --prod'"], "vercel --prod"],
+      [["bash", "-lc", '"cd web && vercel --prod"'], "cd web && vercel --prod"],
+      [["bash", "-euo", "pipefail", "-c", "'supabase db push'"], "supabase db push"],
+      [["zsh", "-c", "'vercel --prod'", "zsh"], "vercel --prod"],
+      [["env", "-S", "'vercel --prod'"], "vercel --prod"],
+      [["npx", "-c", "'vercel --prod'"], "vercel --prod"],
+      [["npm", "exec", "-c", "'vercel --prod'"], "vercel --prod"],
+      [["pnpm", "-c", "exec", "'vercel --prod'"], "vercel --prod"],
+      [["timeout", "60", "sh", "-c", "'vercel --prod'"], "vercel --prod"],
+      [["xargs", "sh", "-c", "'vercel --prod'"], "vercel --prod"],
+    ]
+    for (const [tokens, script] of cases) {
+      expect({ tokens, script: CloudCli.script(tokens), request: CloudCli.request(tokens) }).toEqual({
+        tokens,
+        script,
+        request: undefined,
+      })
+    }
+    // A script file is not read, and a plain command has no inner command line.
+    for (const tokens of [
+      ["bash", "deploy.sh"],
+      ["sh", "-e", "deploy.sh"],
+      ["vercel", "--prod"],
+      ["ls", "-la"],
+    ]) {
+      expect({ tokens, script: CloudCli.script(tokens) }).toEqual({ tokens, script: undefined })
     }
   })
 
@@ -100,6 +204,8 @@ describe("cloud CLI commands in the shell", () => {
       "supabase branches get dev",
       "supabase encryption get-root-key",
       "supabase config push",
+      "supabase test db --linked",
+      "supabase test db --db-url postgres://db.example/postgres",
       "npx supabase@latest db push",
     ]) {
       expect({ command, request: ask(command) }).toMatchObject({
@@ -125,6 +231,9 @@ describe("cloud CLI commands in the shell", () => {
       "supabase secrets list",
       "supabase projects list",
       "supabase postgres-config get",
+      "supabase test db",
+      "supabase test new profiles",
+      "supabase db push --help",
     ]) {
       expect({ command, request: ask(command) }).toEqual({ command, request: undefined })
     }

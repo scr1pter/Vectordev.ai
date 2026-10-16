@@ -94,6 +94,25 @@ const resolveWasm = (asset: string) => {
   return fileURLToPath(url)
 }
 
+// A command's name and arguments. Numbers and expansions are arguments too:
+// without them `timeout 60 vercel` would read as `timeout vercel`, and the
+// word after a wrapper's duration would be taken for the duration.
+const ARGUMENTS = new Set([
+  "command_name",
+  "command_name_expr",
+  "word",
+  "string",
+  "raw_string",
+  "concatenation",
+  "number",
+  "simple_expansion",
+  "expansion",
+  "command_substitution",
+  "arithmetic_expansion",
+  "ansi_c_string",
+  "translated_string",
+])
+
 function parts(node: Node) {
   const out: Part[] = []
   for (let i = 0; i < node.childCount; i++) {
@@ -107,16 +126,7 @@ function parts(node: Node) {
       }
       continue
     }
-    if (
-      child.type !== "command_name" &&
-      child.type !== "command_name_expr" &&
-      child.type !== "word" &&
-      child.type !== "string" &&
-      child.type !== "raw_string" &&
-      child.type !== "concatenation"
-    ) {
-      continue
-    }
+    if (!ARGUMENTS.has(child.type)) continue
     out.push({ type: child.type, text: child.text })
   }
   return out
@@ -352,6 +362,28 @@ const parse = Effect.fn("ShellTool.parse")(function* (command: string, ps: boole
   return tree
 })
 
+// The Vercel and Supabase CLI calls a command makes, including those in a
+// command line it runs from a string (`sh -c "vercel --prod"`, `eval ...`),
+// which is parsed as bash and checked command by command. Each level is a
+// strictly shorter string; the depth limit only bounds pathological nesting.
+const cloudRequests = Effect.fn("ShellTool.cloudRequests")(function* (
+  tokens: string[],
+  depth: number,
+): Effect.fn.Return<CloudCli.Request[]> {
+  const found = CloudCli.request(tokens)
+  if (found) return [found]
+  const inner = CloudCli.script(tokens)
+  if (!inner?.trim() || depth >= 8) return []
+  const tree = yield* parse(inner, false)
+  const nested = yield* Effect.forEach(commands(tree.rootNode), (node) =>
+    cloudRequests(
+      parts(node).map((item) => item.text),
+      depth + 1,
+    ),
+  )
+  return nested.flat()
+})
+
 const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan, input: { command: string }) {
   if (scan.dirs.size > 0) {
     const directories = Array.from(scan.dirs)
@@ -573,8 +605,7 @@ export const ShellTool = Tool.define(
           scan.always.add(BashArity.prefix(tokens).join(" ") + " *")
         }
 
-        const cloud = CloudCli.request(tokens)
-        if (cloud) {
+        for (const cloud of yield* cloudRequests(tokens, 0)) {
           const text = source(node)
           scan.cloud.set(
             [cloud.provider.toLowerCase(), path.basename(cwd), cloud.environment, `shell ${cloud.action}`].join("/"),
