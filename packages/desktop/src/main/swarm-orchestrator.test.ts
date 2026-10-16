@@ -751,6 +751,26 @@ describe("swarm lifecycle", () => {
     expect(getParallelWorkspace(second.id)?.mergeState).toBe("discarded")
   })
 
+  test("Discard clicked while Resume is still checking the run leaves the run discarded", async () => {
+    const run = await seed("canceled", [{ ...inspectTask, status: "canceled" }])
+    workers()
+    const results = await Promise.all([
+      resumeSwarmRun(run.id, { url: server.url.toString(), directory }),
+      discardSwarmRun(run.id),
+    ])
+    expect(results[1].status).toBe("discarded")
+    // Discard stopped the scheduler Resume started before it returned, so nothing works on the run after it.
+    const discarded = getSwarmRun(run.id)
+    const asked = requests.length
+    await Bun.sleep(500)
+
+    expect(getSwarmRun(run.id)).toEqual(discarded)
+    expect(requests).toHaveLength(asked)
+    expect(getParallelWorkspace("coordinator")?.mergeState).toBe("discarded")
+    const worker = getSwarmRun(run.id)?.tasks[0]?.workspaceId
+    if (worker) expect(getParallelWorkspace(worker)?.mergeState).toBe("discarded")
+  })
+
   test.skipIf(!writeCanFail)("undoing an unfinished merge never reverts a sibling's change merged after it", async () => {
     const run = await seed("canceled")
     const staging = await stagingFiles()
