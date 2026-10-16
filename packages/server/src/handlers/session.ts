@@ -127,21 +127,26 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
           const guestDirectory = guestWorkspaceDirectory(principal, requested.workspaceID)
           if (principal.kind === "guest" && guestDirectory === undefined)
             return yield* new ForbiddenError({ message: "Guest sessions require an allowed workspace" })
+          // A helper session is left out of the owner's lists, so a guest's work could not be seen there.
+          if (principal.kind === "guest" && ctx.payload.internal !== undefined)
+            return yield* new ForbiddenError({ message: "Only the server owner can start helper sessions" })
           const location =
             principal.kind === "guest"
               ? Location.Ref.make({ directory: AbsolutePath.make(guestDirectory!), workspaceID: requested.workspaceID })
               : requested
-          return {
-            data: yield* session.create({
-              id: ctx.payload.id,
-              agent: ctx.payload.agent,
-              model: ctx.payload.model,
-              location,
-              title: ctx.payload.title,
-              parentID: ctx.payload.parentID,
-              internal: ctx.payload.internal,
-            }),
-          }
+          const created = yield* session.create({
+            id: ctx.payload.id,
+            agent: ctx.payload.agent,
+            model: ctx.payload.model,
+            location,
+            title: ctx.payload.title,
+            parentID: ctx.payload.parentID,
+            internal: ctx.payload.internal,
+          })
+          // An ID that already names a session adopts it wherever it lives, so the guest's claims decide the answer.
+          if (!allowsSessionLocation(principal, created))
+            return yield* new ForbiddenError({ message: "This session is outside the guest's workspace" })
+          return { data: created }
         }),
       )
       .handle(

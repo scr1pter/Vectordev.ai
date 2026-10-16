@@ -333,9 +333,35 @@ test("guest session lists and replay routes stay within canonical claims", async
 
     expect((await fetch(new URL(`/api/session/${denied}/event`, listener.url), { headers: guest })).status).toBe(403)
 
+    // Creating a session under an existing ID adopts it, which must not hand a guest a session it cannot read, and a
+    // guest's sessions stay in the owner's lists, so a guest cannot mark one as a hidden helper.
+    const guestCreate = (body: unknown) =>
+      fetch(new URL("/api/session", listener.url), {
+        method: "POST",
+        headers: { ...guest, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      })
+    const location = { directory: tmp.path, workspaceID: "wrk_allowed" }
+    const adopted = await guestCreate({ id: denied, location })
+    expect(adopted.status).toBe(403)
+    expect(await adopted.text()).not.toContain("wrk_denied")
+    expect((await guestCreate({ id: escaped, location })).status).toBe(403)
+    expect((await guestCreate({ id: allowed, location })).status).toBe(200)
+    expect((await guestCreate({ location, internal: "vectorscope" })).status).toBe(403)
+
     await events.return(undefined)
     events = undefined
     Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+
+    expect(
+      (
+        await fetch(new URL("/session", listener.url), {
+          method: "POST",
+          headers: { ...guest, "content-type": "application/json" },
+          body: JSON.stringify({ internal: "vectorscope" }),
+        })
+      ).status,
+    ).toBe(403)
 
     const legacyList = await fetch(new URL("/session", listener.url), { headers: guest })
     expect(legacyList.status).toBe(200)

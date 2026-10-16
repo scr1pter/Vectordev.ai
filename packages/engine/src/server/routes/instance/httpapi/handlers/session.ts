@@ -193,6 +193,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const create = Effect.fn("SessionHttpApi.create")(function* (ctx: { payload?: Session.CreateInput }) {
       yield* requireOwnerToAllow({ permission: ctx.payload?.permission })
+      // A helper session is left out of the owner's lists, so a guest's work could not be seen there.
+      if (ctx.payload?.internal !== undefined && (yield* RequestPrincipal).kind !== "owner")
+        return yield* new ForbiddenError({ message: "Only the server owner can start helper sessions" })
       return yield* shareSvc.create(ctx.payload)
     })
 
