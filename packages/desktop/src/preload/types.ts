@@ -408,6 +408,8 @@ export type BrowserAutomationRun = {
     interactives: BrowserAutomationRun["interactives"]
     inputs: BrowserAutomationRun["inputs"]
   }
+  /** For an inspectDom with a selector: the element it matches and the name of what a click there would press. */
+  target?: { found: boolean; label: string }
   computedStyles?: {
     tag: string
     selector: string

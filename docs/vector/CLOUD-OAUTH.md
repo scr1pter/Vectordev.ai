@@ -241,6 +241,15 @@ installed until its package is pinned to a reviewed version. A server Vector
 does not recognise, such as a community wrapper around either API, is not
 covered.
 
+In Vector's own browser, every click and key press on the Vercel and Supabase
+dashboards asks under `browser_sensitive`, which nothing answers but the user
+(`packages/engine/src/tool/browser.ts`). On any external page so do Enter,
+Return, Space and modifier+Enter, text typed with a line break, and a click
+whose target reads like a release, payment or settings action. The target is
+judged by the name the page gives the element the selector matches, so a
+positional selector such as `div[role=dialog] button:last-child` is judged by
+the button it presses.
+
 ## Repository migrations
 
 `apply_migrations` runs the repository's `.sql` files against the linked
