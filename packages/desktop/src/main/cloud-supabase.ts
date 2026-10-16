@@ -123,10 +123,6 @@ export function isSupabaseCommand(value: unknown): value is SupabaseCommand {
   return SUPABASE_COMMANDS.some((item) => item === value)
 }
 
-export function isSupabaseChange(value: unknown) {
-  return CHANGES.some((item) => item === value)
-}
-
 type Input = Record<string, unknown>
 
 export async function runSupabaseCommand(command: unknown, raw: unknown, options: SupabaseRunOptions) {
