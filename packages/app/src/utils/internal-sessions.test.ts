@@ -12,11 +12,15 @@ describe("isInternalSession", () => {
     expect(isInternalSession({ title: "Vectorscope review · uncommitted changes · review" })).toBe(true)
     expect(isInternalSession({ title: "Vector review · #12 · review" })).toBe(true)
     expect(isInternalSession({ title: "Vector review · 1a2b3c4 · verify" })).toBe(true)
+    expect(isInternalSession({ title: "Vecbot review · #7 · security" })).toBe(true)
+    expect(isInternalSession({ title: "Vecbot review · 0f9e8d7 · review" })).toBe(true)
   })
 
   test("leaves the user's own sessions alone", () => {
     expect(isInternalSession({ title: "Review the Vectorscope panel" })).toBe(false)
     expect(isInternalSession({ title: "Vector review · notes for the launch" })).toBe(false)
+    expect(isInternalSession({ title: "Vector review · login · review" })).toBe(false)
+    expect(isInternalSession({ title: "Vector review · #12 login · security" })).toBe(false)
     expect(isInternalSession({ title: "New session - 2026-10-10T10:00:00.000Z" })).toBe(false)
     expect(isInternalSession(undefined)).toBe(false)
   })

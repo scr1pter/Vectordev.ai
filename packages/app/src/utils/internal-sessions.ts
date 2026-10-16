@@ -5,8 +5,10 @@
 export const REVIEW_SESSION_TITLE_PREFIX = "Vectorscope review · "
 
 const LEGACY_TITLE_PREFIXES = ["Vector Tool · ", "Vectorscope review · "]
-// Desktop 1.99.8 and `vector review` titled reviewers "Vector review · #12 · review" before Vectorscope had its name.
-const EARLY_REVIEW_TITLE = /^Vector review · .+ · (review|security|verify)$/
+// Before Vectorscope had its name, the desktop titled reviewers "Vector review · #12 · review" (1.99.8) or "Vecbot
+// review · #12 · review", and `vector review` put the seven-character commit in the middle. Only that middle counts,
+// so a session the user titled "Vector review · login · review" stays visible.
+const EARLY_REVIEW_TITLE = /^(Vector|Vecbot) review · (#\d+|[0-9a-f]{7}) · (review|security|verify)$/
 
 export function isInternalSession(session: { internal?: string; title?: string | null } | undefined | null) {
   if (!session) return false

@@ -473,7 +473,7 @@ describe("DatabaseMigration", () => {
     )
   })
 
-  test("classifies the reviewer sessions 1.99.8 titled before Vectorscope had its name", async () => {
+  test("classifies the reviewer sessions titled before Vectorscope had its name", async () => {
     await run(
       Effect.gen(function* () {
         const db = yield* makeDb
@@ -485,8 +485,14 @@ describe("DatabaseMigration", () => {
           ["desktop-security", "Vector review · #12 · security"],
           ["cli", "Vector review · 1a2b3c4 · review"],
           ["cli-verify", "Vector review · 1a2b3c4 · verify"],
+          ["vecbot", "Vecbot review · #7 · security"],
+          ["vecbot-cli", "Vecbot review · 0f9e8d7 · review"],
           ["own", "Vector review · notes for the team"],
           ["own-prefix", "Vector review of the login flow · review"],
+          ["own-suffix", "Vector review · login · review"],
+          ["own-number", "Vector review · #12 login · review"],
+          ["own-more", "Vector review · #12 · review · notes"],
+          ["own-word", "Vecbot review · abcdefg · verify"],
         ]
         for (const [id, title] of rows)
           yield* db.run(sql`INSERT INTO session (id, title, cost) VALUES (${id}, ${title}, 0.75)`)
@@ -503,7 +509,13 @@ describe("DatabaseMigration", () => {
           { id: "desktop-security", internal: "vectorscope.security", cost: 0.75 },
           { id: "marked", internal: "codespace.edit", cost: 0.5 },
           { id: "own", internal: null, cost: 0.75 },
+          { id: "own-more", internal: null, cost: 0.75 },
+          { id: "own-number", internal: null, cost: 0.75 },
           { id: "own-prefix", internal: null, cost: 0.75 },
+          { id: "own-suffix", internal: null, cost: 0.75 },
+          { id: "own-word", internal: null, cost: 0.75 },
+          { id: "vecbot", internal: "vectorscope.security", cost: 0.75 },
+          { id: "vecbot-cli", internal: "vectorscope.review", cost: 0.75 },
         ])
       }),
     )
