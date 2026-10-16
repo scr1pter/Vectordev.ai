@@ -160,7 +160,11 @@ void mock.module("@modelcontextprotocol/sdk/client/sse.js", () => ({
   SSEClientTransport: MockSSE,
 }))
 
+// The engine loads the SDK only on its first MCP connection, so this can be the module's first load: keep its real
+// exports for test files that run later.
+const realAuth = await import("@modelcontextprotocol/sdk/client/auth.js")
 void mock.module("@modelcontextprotocol/sdk/client/auth.js", () => ({
+  ...realAuth,
   UnauthorizedError: class extends Error {
     constructor() {
       super("Unauthorized")

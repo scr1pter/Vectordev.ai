@@ -1,6 +1,6 @@
 export * as Observability from "./observability"
 
-import { NodeFileSystem } from "@effect/platform-node"
+import { NodeFileSystem } from "./effect/platform-node"
 import { LayerNode } from "./effect/layer-node"
 import { Effect, Layer, Logger, References } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"

@@ -1,5 +1,4 @@
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
-import { NodePath } from "@effect/platform-node"
 import { Cause, Duration, Effect, Layer, Option, Schedule, Context } from "effect"
 import path from "path"
 import type { Agent } from "../agent/agent"

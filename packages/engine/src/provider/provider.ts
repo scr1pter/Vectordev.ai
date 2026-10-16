@@ -41,8 +41,9 @@ import { iife } from "@/util/iife"
 import { Global } from "@vectordevai/core/global"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context, Schema, Types } from "effect"
+import { Effect, Layer, Context, Schema, Stream, Types } from "effect"
 import { EffectBridge } from "@/effect/bridge"
+import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectPromise } from "@/effect/promise"
 import { FSUtil } from "@vectordevai/core/fs-util"
@@ -216,7 +217,11 @@ const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>
 type CustomModelLoader = (sdk: any, modelID: string, options?: Record<string, any>, model?: Model) => Promise<any>
 type CustomVarsLoader = (options: Record<string, any>) => Record<string, string>
 type CustomDiscoverModels = () => Promise<Record<string, Model>>
-type CustomProvider = Pick<Info, "id" | "source" | "options"> & { hasModel: (id: string) => boolean }
+type CustomProvider = Pick<Info, "id" | "source" | "options"> & {
+  hasModel: (id: string) => boolean
+  // Already in the provider list when the loader runs, so its result is kept even without autoload.
+  configured: boolean
+}
 type CustomLoader = (provider: CustomProvider) => Effect.Effect<{
   autoload: boolean
   getModel?: CustomModelLoader
@@ -636,17 +641,22 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         },
       }),
     gitlab: Effect.fnUntraced(function* (input: CustomProvider) {
-      const {
-        VERSION: GITLAB_PROVIDER_VERSION,
-        isWorkflowModel,
-        discoverWorkflowModels,
-      } = yield* Effect.promise(() => import("gitlab-ai-provider"))
-
       const instanceUrl = (yield* dep.get("GITLAB_INSTANCE_URL")) || "https://gitlab.com"
 
       const auth = yield* dep.auth(input.id)
       const apiKey = auth?.type === "oauth" ? auth.access : auth?.type === "api" ? auth.key : undefined
       const token = apiKey ?? (yield* dep.get("GITLAB_TOKEN"))
+
+      // Without a token, and with GitLab not already in the provider list, the caller discards this result. The
+      // catalog lists GitLab for everyone, so loading its SDK here (with its own OpenAI and Anthropic clients) cost
+      // every start that had a catalog.
+      if (!token && !input.configured) return { autoload: false }
+
+      const {
+        VERSION: GITLAB_PROVIDER_VERSION,
+        isWorkflowModel,
+        discoverWorkflowModels,
+      } = yield* Effect.promise(() => import("gitlab-ai-provider"))
 
       const providerConfig = (yield* dep.config()).provider?.["gitlab"]
       const directory = yield* InstanceState.directory
@@ -1466,6 +1476,7 @@ const layer = Layer.effect(
     const freeModels = yield* FreeModels.Service
     const modelPlans = yield* ModelPlans.Service
     const freeCredentials = yield* FreeModels.CredentialsService
+    const events = yield* EventV2Bridge.Service
     const runtimeBridge = yield* EffectBridge.make()
     const planID = ProviderV2.ID.make(ModelPlans.PROVIDER_ID)
 
@@ -1793,6 +1804,7 @@ const layer = Layer.effect(
             source: data?.source ?? "custom",
             options: data?.options ?? {},
             hasModel: (id) => Boolean(getDatabase(providerID)?.models[id]),
+            configured: Boolean(providers[providerID]),
           })
           if (result && (result.autoload || providers[providerID])) {
             if (result.getModel) modelLoaders[providerID] = result.getModel
@@ -1932,6 +1944,15 @@ const layer = Layer.effect(
           varsLoaders,
         }
       }),
+    )
+
+    // The catalog's startup refresh runs after its first load, which building this state usually performs, so a
+    // changed mirror arrives after the state was built from the cached copy, and an hourly refresh can change it at any
+    // time. Rebuild each instance's state on its next read, as an instance reload would. A refresh that finds the
+    // mirror unchanged publishes nothing.
+    yield* events.subscribe(ModelCatalog.Event.Refreshed).pipe(
+      Stream.runForEach(() => InstanceState.invalidateAll(state)),
+      Effect.forkScoped({ startImmediately: true }),
     )
 
     // A plan bought, a sign-in or a sign-out must not require restarting the local engine.
@@ -2482,6 +2503,7 @@ export const node = LayerNode.make({
     FreeModels.node,
     ModelPlans.node,
     FreeModels.credentialsNode,
+    EventV2Bridge.node,
   ],
 })
 

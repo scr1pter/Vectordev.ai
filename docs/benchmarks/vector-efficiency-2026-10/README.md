@@ -37,6 +37,21 @@ Each arrow is baseline → integration. Comparison CLI versions and scripted pay
 
 The measured warm-solo Vector memory peaks increased: Messages rose from 573 to 720 MiB, and Responses from 576 to 718 MiB. This run does not support a claim that the integrated runtime is lighter. Timing also improved for the unchanged comparison CLIs, so the lower Vector wall times cannot all be attributed to code changes.
 
+### Addendum, 16 October 2026: Vector warm-solo memory after the speed-memory changes
+
+A later offline A/B used the same harness, unchanged since harness revision `2bc9c6224`, on `solo-fix` for Vector on both APIs with two sessions. It measured three revisions three times each, rotating their order in every repetition: the baseline `c46b66efa`, the integration branch `a077cd0fc`, and the `speed-memory` branch `4f8f5708a`. That branch loads feature-only packages such as the MCP SDK, the GitLab SDK and the PowerShell grammar on first use, imports only the platform modules it uses, builds each layer node once, hands a released file lock to the next fiber of the same process, and changes model catalog refreshes; the difference below is not attributed to individual commits. The figures describe that branch before it merges with the other tracks; the merged revision needs its own measurement. Each revision ran from source with its frozen dependencies on Bun 1.3.14, macOS 27.0.1 arm64, 8 cores. One-minute load averages at run starts were 2.8 to 4.1. All 36 cells exited cleanly with every scripted step played, and all 36 final fixture checks passed. The reports, their hashes and the run order are in [`addendum-2026-10-16/`](addendum-2026-10-16/manifest.json); `summarize.py` there recomputes these medians.
+
+| Runtime          | Session |  Requests |    Baseline MiB | Integration MiB | speed-memory MiB |
+| ---------------- | ------: | --------: | --------------: | --------------: | ---------------: |
+| Vector Messages  |       2 | 6 → 5 → 5 | 724 (684 – 780) | 767 (755 – 838) |  521 (515 – 545) |
+| Vector Responses |       2 | 6 → 5 → 5 | 721 (701 – 771) | 764 (725 – 775) |  517 (504 – 539) |
+| Vector Messages  |       1 | 6 → 5 → 5 | 745 (693 – 765) | 767 (765 – 773) |  518 (503 – 527) |
+| Vector Responses |       1 | 6 → 5 → 5 | 724 (715 – 782) | 771 (677 – 772) |  528 (527 – 530) |
+
+Peak process-tree RSS, median of three with the range in parentheses.
+
+The 573 and 576 MiB baseline peaks in the table above did not reproduce: this run's baseline medians are 721 to 745 MiB, so the earlier baseline figures were low samples of a noisy measure, and the rise from baseline to integration is smaller here, about 6% on session 2. The `speed-memory` peaks are 31 to 33% below the integration branch's and 27 to 31% below this run's baseline. Session 2 medians of the first primary request were 1.42, 1.22 and 0.86 seconds, and of wall time 2.77, 2.20 and 1.78 seconds, for baseline, integration and `speed-memory` on Messages; Responses was within 0.03 seconds of each. These runs included no comparison CLI to show machine noise, so the timings are not a speed claim. This addendum compares Vector revisions only. The comparison rows above remain the only measurements of other agents, and Vector's lowest peak here is still well above theirs.
+
 ### All Vector scenarios, warm session
 
 | API       | Scenario         | Requests | UTF-8 payload bytes |           Modeled USD | Wall seconds | Tail milliseconds |

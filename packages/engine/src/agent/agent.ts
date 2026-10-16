@@ -32,7 +32,6 @@ import { Skill } from "../skill"
 import { Effect, Context, Layer, Schema } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import * as Option from "effect/Option"
-import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { AbsolutePath, type DeepMutable } from "@vectordevai/core/schema"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
@@ -642,9 +641,12 @@ const layer = Layer.effect(
         const model = input.model ?? (yield* provider.defaultModel())
         const resolved = yield* provider.getModel(model.providerID, model.modelID)
         const language = yield* provider.getLanguage(resolved)
-        const tracer = cfg.experimental?.openTelemetry
-          ? Option.getOrUndefined(yield* Effect.serviceOption(OtelTracer.OtelTracer))
-          : undefined
+        // The OpenTelemetry tracer package loads only when the experimental exporter is configured.
+        const tracer = yield* Effect.gen(function* () {
+          if (!cfg.experimental?.openTelemetry) return undefined
+          const { OtelTracer } = yield* Effect.promise(() => import("@effect/opentelemetry/Tracer"))
+          return Option.getOrUndefined(yield* Effect.serviceOption(OtelTracer))
+        })
 
         const system = [PROMPT_GENERATE]
         yield* plugin.trigger("experimental.chat.system.transform", { model: resolved }, { system })

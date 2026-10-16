@@ -1,13 +1,12 @@
 import "./init-projectors"
 
-import { NodeHttpServer } from "@effect/platform-node"
+import { NodeHttpServer } from "@vectordevai/core/effect/platform-node"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { ConfigProvider, Context, Effect, Exit, Layer, Scope } from "effect"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { OpenApi } from "effect/unstable/httpapi"
 import { createServer } from "node:http"
 import { connect } from "node:net"
-import { MDNS } from "./mdns"
 import { HttpApiApp } from "./routes/instance/httpapi/server"
 import { disposeMiddleware } from "./routes/instance/httpapi/lifecycle"
 import { WebSocketTracker } from "./routes/instance/httpapi/websocket-tracker"
@@ -210,6 +209,8 @@ function setupMdns(opts: ListenOptions, port: number, scope: Scope.Scope) {
     const publish =
       opts.mdns && port && opts.hostname !== "127.0.0.1" && opts.hostname !== "localhost" && opts.hostname !== "::1"
     if (publish) {
+      // Bonjour and its DNS packet codecs load only for a listener that is actually published.
+      const { MDNS } = yield* Effect.promise(() => import("./mdns"))
       const unpublish = yield* Effect.cached(Effect.sync(() => MDNS.unpublish()))
       yield* Effect.sync(() => MDNS.publish(port, opts.mdnsDomain))
       yield* Scope.addFinalizer(scope, unpublish)

@@ -1,4 +1,4 @@
-import { NodeFileSystem, NodePath } from "@effect/platform-node"
+import { NodeFileSystem, NodePath } from "./platform-node"
 import { LLMClient, RequestExecutor } from "@vectordevai/llm/route"
 import { FileSystem, Path } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"

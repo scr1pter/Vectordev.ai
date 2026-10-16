@@ -1,5 +1,6 @@
 import path from "path"
-import { Context, Duration, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
+import { Context, Deferred, Duration, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
+import type { FileSystem } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { ModelCatalog } from "@vectordevai/schema/model-catalog"
 import { Global } from "./global"
@@ -130,8 +131,30 @@ const layer = Layer.effect(
       )
     })
 
-    const loadFromDisk = fs.readJson(Flag.VECTOR_MODELS_PATH ?? filepath).pipe(
-      Effect.flatMap(decode),
+    // Whether any get() has started loading the catalog, and the cache file as it was when the cached catalog was
+    // decoded from it: together they tell a refresh whether the catalog it would load is the one already loaded, or
+    // the one about to be.
+    const loadStarted = yield* Ref.make(false)
+    const firstLoad = yield* Deferred.make<void>()
+    const decodedFrom = yield* Ref.make<string | undefined>(undefined)
+    const identity = (info: FileSystem.File.Info) =>
+      `${Option.getOrElse(info.mtime, () => new Date(0)).getTime()}:${info.size}`
+
+    const loadFromDisk = Effect.gen(function* () {
+      // Taken before the read, so a file replaced in between no longer matches when a refresh checks it.
+      const info = yield* fs.stat(Flag.VECTOR_MODELS_PATH ?? filepath)
+      const catalog = yield* fs.readJson(Flag.VECTOR_MODELS_PATH ?? filepath).pipe(Effect.flatMap(decode))
+      if (Flag.VECTOR_MODELS_PATH !== undefined) return catalog
+      // Every entry of the cached mirror text is one this build skips. Report it here, because a refresh that found the
+      // mirror unchanged before this load never decoded the text. Left unrecorded, so the next refresh takes the full
+      // path, which fails the same way without a second warning.
+      if (!Object.keys(catalog).length) {
+        yield* reportUnavailable(new Error("The model catalog mirror has no usable providers"))
+        return catalog
+      }
+      yield* Ref.set(decodedFrom, identity(info))
+      return catalog
+    }).pipe(
       Effect.catch(() => {
         if (Flag.VECTOR_MODELS_PATH === undefined) {
           return fs.remove(filepath, { force: true }).pipe(Effect.ignore, Effect.as(undefined))
@@ -145,8 +168,7 @@ const layer = Layer.effect(
       typeof VECTOR_MODEL_CATALOG === "undefined" ? Effect.succeed(undefined) : decode(VECTOR_MODEL_CATALOG),
     )
 
-    const fetchAndWrite = Effect.fn("ModelCatalog.fetchAndWrite")(function* () {
-      const response = yield* fetchApi()
+    const store = Effect.fn("ModelCatalog.store")(function* (response: string) {
       const catalog = yield* decodeJson(response).pipe(Effect.flatMap(decode))
       // Never replace a usable cache with a mirror whose every provider was skipped or refused.
       if (!Object.keys(catalog).length)
@@ -170,7 +192,27 @@ const layer = Layer.effect(
       return catalog
     })
 
+    // The mirror still serves the text in the cache file, and the cached catalog was decoded from that file as it still
+    // is, or nothing has loaded the catalog yet and the first get() will read that file: renew the file's age and keep
+    // the rest. Decoding, rewriting and reloading the same text gives the same catalog, at the cost of one or two more
+    // decodes and a rebuild of every catalog model, on most starts. Callers hold the catalog lock.
+    const unchanged = Effect.fnUntraced(function* (response: string) {
+      const decoded = yield* Ref.get(decodedFrom)
+      if (!decoded && (yield* Ref.get(loadStarted))) return false
+      const info = yield* fs.stat(filepath).pipe(Effect.option)
+      if (Option.isNone(info) || (decoded && identity(info.value) !== decoded)) return false
+      const text = yield* fs.readFileString(filepath).pipe(Effect.option)
+      if (Option.isNone(text) || text.value !== response) return false
+      const now = new Date()
+      const touched = yield* fs.utimes(filepath, now, now).pipe(Effect.andThen(fs.stat(filepath)), Effect.option)
+      if (Option.isNone(touched)) return false
+      if (decoded) yield* Ref.set(decodedFrom, identity(touched.value))
+      yield* Ref.set(unavailable, false)
+      return true
+    })
+
     const populate = Effect.gen(function* () {
+      yield* Ref.set(loadStarted, true)
       const fromDisk = yield* loadFromDisk
       if (fromDisk) return fromDisk
       const snapshot = yield* loadSnapshot
@@ -181,10 +223,14 @@ const layer = Layer.effect(
       return yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Flock.effect(lockKey)
-          return yield* fetchAndWrite()
+          return yield* store(yield* fetchApi())
         }),
       ).pipe(Effect.catch((error) => reportUnavailable(error).pipe(Effect.as({}))))
-    }).pipe(Effect.withSpan("ModelCatalog.populate"), Effect.orDie)
+    }).pipe(
+      Effect.ensuring(Deferred.succeed(firstLoad, undefined)),
+      Effect.withSpan("ModelCatalog.populate"),
+      Effect.orDie,
+    )
 
     const [cachedGet, invalidate] = yield* Effect.cachedInvalidateWithTTL(populate, Duration.infinity)
 
@@ -200,7 +246,11 @@ const layer = Layer.effect(
           // Re-check under the lock: another process may have refreshed between
           // our outer check and lock acquisition.
           if (!force && (yield* fresh())) return
-          yield* fetchAndWrite()
+          const response = yield* fetchApi()
+          if (yield* unchanged(response)) return
+          yield* store(response)
+          // The next get() decodes the new file and records it.
+          yield* Ref.set(decodedFrom, undefined)
           yield* invalidate
           yield* events.publish(Event.Refreshed, {})
         }),
@@ -213,8 +263,16 @@ const layer = Layer.effect(
       !Flag.VECTOR_DISABLE_MODELS_FETCH &&
       !process.argv.includes("--get-yargs-completions")
     ) {
+      // The first refresh waits for the first load, or ten seconds in a process that does not load the catalog, so it
+      // compares with the catalog that load decoded instead of racing it. Racing it cost a stale-cache start two more
+      // decodes of the whole catalog and a rebuild of every catalog model, though the mirror rarely changes.
       // Schedule.spaced runs the effect once, then waits between completions.
-      yield* Effect.forkScoped(refresh().pipe(Effect.repeat(Schedule.spaced("60 minutes")), Effect.ignore))
+      yield* Effect.forkScoped(
+        Effect.raceFirst(Deferred.await(firstLoad), Effect.sleep("10 seconds")).pipe(
+          Effect.andThen(refresh().pipe(Effect.repeat(Schedule.spaced("60 minutes")))),
+          Effect.ignore,
+        ),
+      )
     }
 
     return Service.of({ get, refresh })

@@ -260,9 +260,14 @@ export function compile<A, E, const Items extends Replacements = readonly []>(
         if (node.kind === "unbound") throw new Error(`Unbound layer node: ${node.name}`)
         const dependencies = node.dependencies.flatMap(flatten).map(context.visit)
         const implementation = node.implementation! as RuntimeLayer
-        return dependencies.length === 0
-          ? implementation
-          : implementation.pipe(Layer.provide(dependencies as [RuntimeLayer, ...RuntimeLayer[]]))
+        const layer =
+          dependencies.length === 0
+            ? implementation
+            : implementation.pipe(Layer.provide(dependencies as [RuntimeLayer, ...RuntimeLayer[]]))
+        // Layer.provide is not memoized, so without this a shared node rebuilt its whole dependency
+        // tree once per path through the graph: tens of thousands of scopes at startup, all held open
+        // until shutdown. Memoizing per memo map builds each node once and keeps Layer.fresh fresh.
+        return Layer.fromBuildMemo((memoMap, scope) => Layer.buildWithMemoMap(layer, memoMap, scope))
       },
       { cache, resolve: (node) => replacementMap.get(node.name) ?? node },
     )

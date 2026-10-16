@@ -1,6 +1,5 @@
 import path from "path"
 import { pathToFileURL, fileURLToPath } from "url"
-import { createMessageConnection, StreamMessageReader, StreamMessageWriter } from "vscode-jsonrpc/node"
 import type { Diagnostic as VSCodeDiagnostic } from "vscode-languageserver-types"
 import { Process } from "@/util/process"
 import { LANGUAGE_EXTENSIONS } from "./language"
@@ -127,6 +126,8 @@ export async function create(input: {
   directory: string
   instance: InstanceContext
 }) {
+  // The JSON-RPC transport is only needed once a language server starts.
+  const { createMessageConnection, StreamMessageReader, StreamMessageWriter } = await import("vscode-jsonrpc/node")
   const instance = input.instance
 
   const connection = createMessageConnection(

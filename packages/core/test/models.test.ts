@@ -1,5 +1,5 @@
 import { describe, expect, beforeAll, beforeEach, afterAll } from "bun:test"
-import { Deferred, Effect, Exit, Fiber, Layer, Logger, References, Ref } from "effect"
+import { Deferred, Effect, Exit, Fiber, Layer, Logger, References, Ref, Schedule } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNodePlatform } from "@vectordevai/core/effect/app-node-platform"
@@ -10,7 +10,7 @@ import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { InstallationChannel, InstallationVersion } from "@vectordevai/core/installation/version"
 import { Hash } from "@vectordevai/core/util/hash"
 import { it } from "./lib/effect"
-import { readFile, rm, writeFile, utimes, mkdir, mkdtemp } from "fs/promises"
+import { readFile, rm, stat, writeFile, utimes, mkdir, mkdtemp } from "fs/promises"
 import path from "path"
 import os from "os"
 
@@ -336,6 +336,165 @@ describe("ModelCatalog Service", () => {
       const final = yield* Ref.get(state)
       expect(final.calls.length).toBe(1)
       expect(after).toEqual(fixture2)
+    }),
+  )
+
+  it.live("a refresh that fetches the cached text renews the cache file and keeps the loaded catalog", () =>
+    Effect.gen(function* () {
+      Flag.VECTOR_MODELS_URL = mirror
+      const text = JSON.stringify(fixture)
+      yield* writeCacheText(text, Date.now() - 10 * 60 * 1000)
+      const state = yield* Ref.make({ ...initialState, body: text })
+      const result = yield* provided(
+        state,
+        Effect.gen(function* () {
+          const svc = yield* ModelCatalog.Service
+          const before = yield* svc.get()
+          yield* svc.refresh(false)
+          const after = yield* svc.get()
+          // Renewed: within the TTL again, so this one sends nothing.
+          yield* svc.refresh(false)
+          return { before, after }
+        }),
+        true,
+      )
+      expect(result.after).toBe(result.before)
+      expect(result.after).toEqual(fixture)
+      expect((yield* Ref.get(state)).calls.length).toBe(1)
+      expect(yield* Effect.promise(() => readFile(cacheFile(), "utf8"))).toBe(text)
+    }),
+  )
+
+  it.live("a refresh before the first load leaves an unchanged cache file for that load", () =>
+    Effect.gen(function* () {
+      Flag.VECTOR_MODELS_URL = mirror
+      const text = JSON.stringify(fixture)
+      yield* writeCacheText(text, Date.now() - 10 * 60 * 1000)
+      const inode = (yield* Effect.promise(() => stat(cacheFile()))).ino
+      const state = yield* Ref.make({ ...initialState, body: text })
+      const result = yield* provided(
+        state,
+        Effect.gen(function* () {
+          const svc = yield* ModelCatalog.Service
+          yield* svc.refresh(false)
+          const loaded = yield* svc.get()
+          yield* svc.refresh(false)
+          return loaded
+        }),
+        true,
+      )
+      expect(result).toEqual(fixture)
+      expect((yield* Ref.get(state)).calls.length).toBe(1)
+      // Renewed in place rather than rewritten.
+      const after = yield* Effect.promise(() => stat(cacheFile()))
+      expect(after.ino).toBe(inode)
+      expect(Date.now() - after.mtimeMs).toBeLessThan(60_000)
+    }),
+  )
+
+  it.live("a cache with no usable providers is reported once, though a refresh before the load kept it", () =>
+    Effect.gen(function* () {
+      Flag.VECTOR_MODELS_URL = mirror
+      // Saved by a build that bundles this SDK; this build skips the only provider.
+      const text = JSON.stringify({ lmstudio: { ...fixture.lmstudio, npm: "unreviewed-catalog-sdk" } })
+      yield* writeCacheText(text, Date.now() - 10 * 60 * 1000)
+      const messages: Array<{ level: string; message: unknown }> = []
+      const state = yield* Ref.make({ ...initialState, body: text })
+      const result = yield* provided(
+        state,
+        Effect.gen(function* () {
+          const svc = yield* ModelCatalog.Service
+          const warnings = () =>
+            messages.filter(
+              (entry) =>
+                entry.level === "Warn" && JSON.stringify(entry.message).includes("model catalog is unavailable"),
+            )
+          yield* svc.refresh(false)
+          const loaded = yield* svc.get()
+          // Renewed by the first refresh, so this one sends nothing; only the load can report the cache.
+          yield* svc.refresh(false)
+          const reported = warnings()
+          // A forced refresh fails the same way and stays quiet about it.
+          yield* svc.refresh(true)
+          return { loaded, reported, after: warnings() }
+        }),
+        true,
+      ).pipe(
+        Effect.provide(
+          Logger.layer([
+            Logger.make((options) => messages.push({ level: options.logLevel, message: options.message })),
+          ]),
+        ),
+      )
+      expect(result.loaded).toEqual({})
+      expect((yield* Ref.get(state)).calls).toHaveLength(2)
+      expect(result.reported).toHaveLength(1)
+      expect(Bun.inspect(result.reported[0].message)).toContain("The model catalog mirror has no usable providers")
+      expect(result.after).toHaveLength(1)
+    }),
+  )
+
+  it.live("the startup refresh waits for the first load and keeps it when the mirror is unchanged", () =>
+    Effect.gen(function* () {
+      Flag.VECTOR_MODELS_URL = mirror
+      const text = JSON.stringify(fixture)
+      yield* writeCacheText(text, Date.now() - 10 * 60 * 1000)
+      const inode = (yield* Effect.promise(() => stat(cacheFile()))).ino
+      const state = yield* Ref.make({ ...initialState, body: text })
+      // Built with fetching on, so the layer forks its startup refresh.
+      Flag.VECTOR_DISABLE_MODELS_FETCH = false
+      const result = yield* Effect.gen(function* () {
+        const context = yield* Layer.build(buildLayer(state))
+        return yield* Effect.gen(function* () {
+          const svc = yield* ModelCatalog.Service
+          yield* Effect.sleep("200 millis")
+          const beforeLoad = (yield* Ref.get(state)).calls.length
+          const first = yield* svc.get()
+          const renewed = yield* Effect.promise(() => stat(cacheFile())).pipe(
+            Effect.repeat({
+              schedule: Schedule.spaced("20 millis"),
+              until: (info) => Date.now() - info.mtimeMs < 60_000,
+            }),
+            Effect.timeout("5 seconds"),
+          )
+          return { beforeLoad, first, second: yield* svc.get(), renewed }
+        }).pipe(Effect.provide(context))
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            Flag.VECTOR_DISABLE_MODELS_FETCH = true
+          }),
+        ),
+      )
+      expect(result.beforeLoad).toBe(0)
+      expect((yield* Ref.get(state)).calls.length).toBe(1)
+      expect(result.second).toBe(result.first)
+      expect(result.renewed.ino).toBe(inode)
+    }),
+  )
+
+  it.live("a refresh reloads when the cache file changed after the catalog was read", () =>
+    Effect.gen(function* () {
+      Flag.VECTOR_MODELS_URL = mirror
+      yield* writeCache(fixture, Date.now() - 10 * 60 * 1000)
+      // The mirror serves the text this process read, but another process has since replaced the file.
+      const state = yield* Ref.make({ ...initialState, body: JSON.stringify(fixture) })
+      const result = yield* provided(
+        state,
+        Effect.gen(function* () {
+          const svc = yield* ModelCatalog.Service
+          const before = yield* svc.get()
+          yield* writeCache(fixture2, Date.now() - 10 * 60 * 1000)
+          yield* svc.refresh(false)
+          const after = yield* svc.get()
+          return { before, after }
+        }),
+        true,
+      )
+      expect(result.before).toEqual(fixture)
+      expect(result.after).toEqual(fixture)
+      expect(result.after).not.toBe(result.before)
+      expect(JSON.parse(yield* Effect.promise(() => readFile(cacheFile(), "utf8")))).toEqual(fixture)
     }),
   )
 

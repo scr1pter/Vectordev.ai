@@ -6,7 +6,6 @@ import { Truncate } from "./truncate"
 import { Config } from "@/config/config"
 import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import { collectBoundedResponseBody } from "@vectordevai/core/tool/http-body"
-import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
 import { isImageAttachment } from "@/util/media"
 
@@ -128,7 +127,9 @@ export const WebFetchTool = Tool.define(
           if (params.format === "html" || !contentType.includes("text/html"))
             return { output: content, title, metadata: {} }
           const page = yield* truncate.output(
-            params.format === "markdown" ? convertHTMLToMarkdown(content, params.url) : extractTextFromHTML(content),
+            params.format === "markdown"
+              ? yield* Effect.promise(() => convertHTMLToMarkdown(content, params.url))
+              : extractTextFromHTML(content),
             // A configured tool_output.max_bytes still decides, as it does for shell.
             { maxBytes: (yield* config.get()).tool_output?.max_bytes ?? MAX_PAGE_BYTES },
           )
@@ -166,7 +167,9 @@ function extractTextFromHTML(html: string) {
   return text.trim()
 }
 
-function convertHTMLToMarkdown(html: string, base: string): string {
+// Turndown brings a whole DOM implementation, so it loads on the first page converted to markdown.
+async function convertHTMLToMarkdown(html: string, base: string) {
+  const { default: TurndownService } = await import("turndown")
   const turndownService = new TurndownService({
     headingStyle: "atx",
     hr: "---",

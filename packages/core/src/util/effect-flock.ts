@@ -1,7 +1,7 @@
 import path from "path"
 import os from "os"
 import { randomUUID } from "crypto"
-import { Context, Effect, Function, Layer, Option, Schedule, Schema } from "effect"
+import { Clock, Context, Effect, Function, Layer, Option, Schedule, Schema, Semaphore } from "effect"
 import type { FileSystem, Scope } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { FSUtil } from "../fs-util"
@@ -49,7 +49,6 @@ export namespace EffectFlock {
   const retrySchedule = Schedule.exponential(BASE_DELAY_MS, 1.7).pipe(
     Schedule.either(Schedule.spaced(MAX_DELAY_MS)),
     Schedule.jittered,
-    Schedule.while((meta) => meta.elapsed < TIMEOUT_MS),
   )
 
   // ---------------------------------------------------------------------------
@@ -91,6 +90,40 @@ export namespace EffectFlock {
   }
 
   const mtimeMs = (info: FileSystem.File.Info) => Option.getOrElse(info.mtime, () => new Date(0)).getTime()
+
+  // Fibers of this process queue here for a lock file before they try it, so a fiber waiting on another fiber of the
+  // same process takes the lock as soon as it is released, instead of finding it held and polling with the backoff
+  // above (100 ms at least). The lock file still excludes other processes. Process-wide, so every service instance
+  // shares it; an entry is removed when no holder or waiter remains.
+  // Fairness across processes is the trade-off: the next fiber here takes the lock right after the last one removes
+  // it, while another process polls on the backoff, so a process with a steady queue for one lock can keep it from
+  // another process until that process times out. Every current lock is held briefly.
+  const local = new Map<string, { readonly semaphore: Semaphore.Semaphore; users: number }>()
+
+  const holdLocal = Effect.fnUntraced(function* (lockfile: string, key: string, deadline: number) {
+    const entry = local.get(lockfile) ?? { semaphore: Semaphore.makeUnsafe(1), users: 0 }
+    local.set(lockfile, entry)
+    entry.users++
+    const leave = Effect.sync(() => {
+      entry.users--
+      if (entry.users === 0) local.delete(lockfile)
+    })
+    // The wait stays interruptible and counts against the caller's deadline; once taken, the permit is released with
+    // the caller's scope.
+    const remaining = Math.max(0, deadline - (yield* Clock.currentTimeMillis))
+    yield* Effect.uninterruptibleMask((restore) =>
+      restore(
+        entry.semaphore
+          .take(1)
+          .pipe(
+            Effect.timeoutOrElse({ duration: remaining, orElse: () => Effect.fail(new LockTimeoutError({ key })) }),
+          ),
+      ).pipe(
+        Effect.onError(() => leave),
+        Effect.andThen(Effect.addFinalizer(() => entry.semaphore.release(1).pipe(Effect.andThen(leave)))),
+      ),
+    )
+  })
 
   const isPathGone = (e: PlatformError) => e.reason._tag === "NotFound" || e.reason._tag === "Unknown"
 
@@ -218,11 +251,11 @@ export namespace EffectFlock {
 
       // -- retry wrapper (preserves Handle type) --
 
-      const acquireHandle = (lockfile: string, key: string): Effect.Effect<Handle, LockError> =>
+      const acquireHandle = (lockfile: string, key: string, deadline: number): Effect.Effect<Handle, LockError> =>
         tryAcquireLockDir(lockfile, key).pipe(
           Effect.retry({
             while: (err) => err._tag === "NotAcquired",
-            schedule: retrySchedule,
+            schedule: retrySchedule.pipe(Schedule.while((meta) => meta.now < deadline)),
           }),
           Effect.catchTag("NotAcquired", () => Effect.fail(new LockTimeoutError({ key }))),
         )
@@ -255,9 +288,15 @@ export namespace EffectFlock {
         yield* ensureDir(lockDir)
 
         const lockfile = path.join(lockDir, Hash.fast(key) + ".lock")
+        // One deadline covers the wait behind this process's other fibers and the wait on the lock file, so a fiber
+        // still fails after TIMEOUT_MS in all when another process keeps the lock.
+        const deadline = (yield* Clock.currentTimeMillis) + TIMEOUT_MS
+
+        // Released after the lock file, so the next fiber in line finds the lock free.
+        yield* holdLocal(lockfile, key, deadline)
 
         // acquireRelease: acquire is uninterruptible, release is guaranteed
-        const handle = yield* Effect.acquireRelease(acquireHandle(lockfile, key), (handle) => release(handle))
+        const handle = yield* Effect.acquireRelease(acquireHandle(lockfile, key, deadline), (handle) => release(handle))
 
         // Heartbeat fiber — scoped, so it's interrupted before release runs
         yield* fs
