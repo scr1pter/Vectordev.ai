@@ -3,7 +3,7 @@ import { spawn } from "child_process"
 import fs from "fs/promises"
 import path from "path"
 import os from "os"
-import { Cause, Effect, Exit } from "effect"
+import { Cause, Effect, Exit, Fiber, Scope } from "effect"
 import { testEffect } from "../lib/effect"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -166,6 +166,64 @@ describe("util.effect-flock", () => {
         hit = true
       }).pipe(flock.withLock("eflock:pipe", dir))
       expect(hit).toBe(true)
+      yield* Effect.promise(() => fs.rm(tmp, { recursive: true, force: true }))
+    }),
+  )
+
+  it.effect(
+    "a fiber of the same process takes a released lock at once instead of polling for it",
+    Effect.gen(function* () {
+      const flock = yield* EffectFlock.Service
+      const tmp = yield* Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "eflock-test-")))
+      const dir = path.join(tmp, "locks")
+      const key = "eflock:local"
+      const order: string[] = []
+
+      const first = yield* Scope.make()
+      yield* flock.acquire(key, dir).pipe(Scope.provide(first))
+      const second = yield* flock
+        .withLock(
+          Effect.sync(() => order.push("second")),
+          key,
+          dir,
+        )
+        .pipe(Effect.forkChild)
+      // Real time, so the second fiber reaches the held lock before it is released.
+      yield* Effect.promise(() => sleep(50))
+      order.push("released")
+      yield* Scope.close(first, Exit.void)
+
+      // The test clock never moves, so a fiber retrying on the backoff schedule would never try the lock again.
+      const joined = yield* Fiber.join(second).pipe(
+        Effect.as(true),
+        Effect.raceFirst(Effect.promise(() => sleep(2_000)).pipe(Effect.as(false))),
+      )
+      expect(joined).toBe(true)
+      expect(order).toEqual(["released", "second"])
+      expect(yield* Effect.promise(() => exists(lock(dir, key)))).toBe(false)
+      yield* Effect.promise(() => fs.rm(tmp, { recursive: true, force: true }))
+    }),
+  )
+
+  it.effect(
+    "a fiber interrupted while it waits in the same process leaves the lock to the next one",
+    Effect.gen(function* () {
+      const flock = yield* EffectFlock.Service
+      const tmp = yield* Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "eflock-test-")))
+      const dir = path.join(tmp, "locks")
+      const key = "eflock:local-interrupt"
+
+      const first = yield* Scope.make()
+      yield* flock.acquire(key, dir).pipe(Scope.provide(first))
+      const waiting = yield* flock.withLock(Effect.void, key, dir).pipe(Effect.forkChild)
+      yield* Effect.promise(() => sleep(50))
+      yield* Fiber.interrupt(waiting)
+      yield* Scope.close(first, Exit.void)
+
+      const joined = yield* flock
+        .withLock(Effect.void, key, dir)
+        .pipe(Effect.as(true), Effect.raceFirst(Effect.promise(() => sleep(2_000)).pipe(Effect.as(false))))
+      expect(joined).toBe(true)
       yield* Effect.promise(() => fs.rm(tmp, { recursive: true, force: true }))
     }),
   )

@@ -1,7 +1,7 @@
 import path from "path"
 import os from "os"
 import { randomUUID } from "crypto"
-import { Context, Effect, Function, Layer, Option, Schedule, Schema } from "effect"
+import { Context, Effect, Function, Layer, Option, Schedule, Schema, Semaphore } from "effect"
 import type { FileSystem, Scope } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { FSUtil } from "../fs-util"
@@ -91,6 +91,36 @@ export namespace EffectFlock {
   }
 
   const mtimeMs = (info: FileSystem.File.Info) => Option.getOrElse(info.mtime, () => new Date(0)).getTime()
+
+  // Fibers of this process queue here for a lock file before they try it, so a fiber waiting on another fiber of the
+  // same process takes the lock as soon as it is released, instead of finding it held and polling with the backoff
+  // above (100 ms at least). The lock file still excludes other processes. Process-wide, so every service instance
+  // shares it; an entry is removed when no holder or waiter remains.
+  const local = new Map<string, { readonly semaphore: Semaphore.Semaphore; users: number }>()
+
+  const holdLocal = Effect.fnUntraced(function* (lockfile: string, key: string) {
+    const entry = local.get(lockfile) ?? { semaphore: Semaphore.makeUnsafe(1), users: 0 }
+    local.set(lockfile, entry)
+    entry.users++
+    const leave = Effect.sync(() => {
+      entry.users--
+      if (entry.users === 0) local.delete(lockfile)
+    })
+    // The wait stays interruptible and times out like a wait on the lock file; once taken, the permit is released
+    // with the caller's scope.
+    yield* Effect.uninterruptibleMask((restore) =>
+      restore(
+        entry.semaphore
+          .take(1)
+          .pipe(
+            Effect.timeoutOrElse({ duration: TIMEOUT_MS, orElse: () => Effect.fail(new LockTimeoutError({ key })) }),
+          ),
+      ).pipe(
+        Effect.onError(() => leave),
+        Effect.andThen(Effect.addFinalizer(() => entry.semaphore.release(1).pipe(Effect.andThen(leave)))),
+      ),
+    )
+  })
 
   const isPathGone = (e: PlatformError) => e.reason._tag === "NotFound" || e.reason._tag === "Unknown"
 
@@ -255,6 +285,9 @@ export namespace EffectFlock {
         yield* ensureDir(lockDir)
 
         const lockfile = path.join(lockDir, Hash.fast(key) + ".lock")
+
+        // Released after the lock file, so the next fiber in line finds the lock free.
+        yield* holdLocal(lockfile, key)
 
         // acquireRelease: acquire is uninterruptible, release is guaranteed
         const handle = yield* Effect.acquireRelease(acquireHandle(lockfile, key), (handle) => release(handle))
