@@ -1,3 +1,5 @@
+import { Option, Schema } from "effect"
+
 export type SwarmStrategy = "economy" | "balanced" | "quality"
 
 export type SwarmAgentRole = "explore" | "implement" | "debug" | "test" | "review" | "security" | "docs"
@@ -40,13 +42,7 @@ export function parseSwarmPlan(value: string, objective: string, maxTasks = 12):
   const objectText = firstBrace >= 0 && lastBrace > firstBrace ? value.slice(firstBrace, lastBrace + 1) : undefined
   const parsed = [fenced, objectText]
     .filter((item): item is string => Boolean(item?.trim()))
-    .map((item) => {
-      try {
-        return JSON.parse(item) as unknown
-      } catch {
-        return undefined
-      }
-    })
+    .map((item) => Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(item)))
     .find(isRecord)
 
   if (!parsed) throw new Error("The planning agent did not return a JSON task graph.")
