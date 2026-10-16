@@ -556,11 +556,26 @@ const trustCards = [
       const value = Math.sin(x * 12.9898 + y * 78.233 + seed * 37.719) * 43758.5453
       return value - Math.floor(value)
     }
+    // CSS ease-in-out, cubic-bezier(0.42, 0, 0.58, 1): find the curve parameter whose x is
+    // the progress, then return its y.
+    const easeInOut = (progress: number) => {
+      let low = 0
+      let high = 1
+      for (let i = 0; i < 18; i++) {
+        const mid = (low + high) / 2
+        const x = 3 * (1 - mid) ** 2 * mid * 0.42 + 3 * (1 - mid) * mid ** 2 * 0.58 + mid ** 3
+        if (x < progress) low = mid
+        else high = mid
+      }
+      const t = (low + high) / 2
+      return 3 * (1 - t) * t ** 2 + t ** 3
+    }
     const animate = !reducedMotion()
     let width = 1
     let height = 1
     let fontSize = 12
     let animationFrame = 0
+    let timer: ReturnType<typeof globalThis.setTimeout> | undefined
     let lastFrame = 0
     let pointerX = 0.5
     let pointerY = 0.5
@@ -635,6 +650,15 @@ const trustCards = [
       }
       const delta = Math.min(elapsed, 80) / 1000
       lastFrame = timestamp
+      if (animate) {
+        // The field's slow breathe: 16s each way, ease-in-out. Set here rather than as a CSS
+        // animation, because a running CSS animation makes the browser produce every display
+        // frame for the whole page; this way the layer changes only when the glyphs do.
+        const cycle = (timestamp / 16000) % 2
+        const eased = easeInOut(cycle > 1 ? 2 - cycle : cycle)
+        canvas.style.opacity = String(0.9 + eased * 0.1)
+        canvas.style.transform = `translate3d(${-4 + eased * 9}px, ${-2 + eased * 5}px, 0)`
+      }
       context.clearRect(0, 0, width, height)
       context.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, monospace`
       context.textAlign = "center"
@@ -644,10 +668,14 @@ const trustCards = [
       const tick = Math.floor(timestamp / 170)
       const lineHeight = fontSize * 1.18
 
+      // Thousands of glyphs a frame: one colour per pass with the alpha in
+      // globalAlpha draws the same pixels as an rgba() string per glyph, without
+      // building and parsing a colour string for each of them.
+      context.fillStyle = "rgb(164, 116, 255)"
       backdropCells.forEach((cell) => {
         const travel = animate ? (timestamp * cell.speed) / 1000 : 0
         const y = ((cell.y + travel) % (height + lineHeight * 2)) - lineHeight
-        context.fillStyle = `rgba(164, 116, 255, ${cell.alpha * 0.72})`
+        context.globalAlpha = cell.alpha * 0.72
         context.fillText(cell.glyph, cell.x + offsetX * cell.drift * 0.34, y + offsetY * cell.drift * 0.2)
       })
 
@@ -664,10 +692,8 @@ const trustCards = [
           )
           const alpha = Math.max(0.04, fade * fade * column.opacity * 0.78 * (1 - copyZone * 0.5))
           const glyphIndex = Math.abs(column.phase + columnIndex * 3 + tick - step * 2) % glyphs.length
-          context.fillStyle =
-            step === 0
-              ? `rgba(226, 215, 255, ${Math.min(0.94, alpha + 0.28)})`
-              : `rgba(164, 116, 255, ${alpha})`
+          context.fillStyle = step === 0 ? "rgb(226, 215, 255)" : "rgb(164, 116, 255)"
+          context.globalAlpha = step === 0 ? Math.min(0.94, alpha + 0.28) : alpha
           context.fillText(glyphs[glyphIndex], column.x + offsetX * fade, y + offsetY * fade)
         }
         if (column.y - column.trail * lineHeight <= height + lineHeight) return
@@ -676,8 +702,19 @@ const trustCards = [
         column.trail = 10 + Math.floor(Math.random() * 19)
         column.phase = Math.floor(Math.random() * glyphs.length)
       })
+      context.globalAlpha = 1
 
-      if (animate && !document.hidden) animationFrame = requestAnimationFrame(render)
+      if (animate && !document.hidden) schedule()
+    }
+
+    // The field draws about 30 times a second. Sleeping most of the gap on a
+    // timer, instead of asking for every display frame and skipping the early
+    // ones, keeps the main thread from waking two to four times per drawing.
+    const schedule = () => {
+      timer = globalThis.setTimeout(() => {
+        timer = undefined
+        animationFrame = requestAnimationFrame(render)
+      }, 20)
     }
 
     const resize = () => {
@@ -700,11 +737,13 @@ const trustCards = [
     const visibility = () => {
       if (document.hidden) {
         if (animationFrame) cancelAnimationFrame(animationFrame)
+        if (timer) globalThis.clearTimeout(timer)
         animationFrame = 0
+        timer = undefined
         return
       }
       lastFrame = 0
-      if (animate && !animationFrame) animationFrame = requestAnimationFrame(render)
+      if (animate && !animationFrame && !timer) animationFrame = requestAnimationFrame(render)
     }
 
     const resizeObserver = new ResizeObserver(resize)
@@ -719,6 +758,7 @@ const trustCards = [
       globalThis.removeEventListener("pointermove", move)
       document.removeEventListener("visibilitychange", visibility)
       if (animationFrame) cancelAnimationFrame(animationFrame)
+      if (timer) globalThis.clearTimeout(timer)
     }
   }
 
@@ -853,8 +893,8 @@ const trustCards = [
     width: 100%;
     height: 100%;
     pointer-events: none;
+    /* Its slow breathe is set from the drawing loop (initField). */
     opacity: 1;
-    animation: field-breathe 16s ease-in-out infinite alternate;
   }
 
   .sr-only {
@@ -1121,13 +1161,6 @@ const trustCards = [
     color: var(--ink-40);
   }
 
-  /* ---- keyframes ---- */
-
-  @keyframes field-breathe {
-    from { opacity: 0.9; transform: translate3d(-4px, -2px, 0); }
-    to { opacity: 1; transform: translate3d(5px, 3px, 0); }
-  }
-
   /* ---- responsive ---- */
 
   @media (max-width: 640px) {
@@ -1136,10 +1169,6 @@ const trustCards = [
     .headline { min-height: 4.6em; font-size: clamp(26px, 7.6vw, 32px); }
 
     .showcase { width: calc(100% - 24px); padding-top: 44px; }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .ascii-field { animation: none; transform: none; }
   }
 
   /* ── Simplified layout ───────────────────────────────────────────── */
