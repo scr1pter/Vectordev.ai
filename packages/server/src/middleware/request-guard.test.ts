@@ -40,7 +40,9 @@ describe("request transport guard", () => {
     expect((await run({ host, origin: "http://localhost:5173" })).status).toBe(403)
     expect((await run({ host, origin: "http://127.0.0.1:3000", upgrade: "websocket" })).status).toBe(403)
     expect((await run({ host, origin: "http://127.0.0.1:4096" })).status).toBe(204)
-    expect((await run({ host, origin: "https://vectordev.ai" })).status).toBe(204)
+    // Nor does any website, Vector's own included: a script there must not run commands on this computer.
+    expect((await run({ host, origin: "https://vectordev.ai" })).status).toBe(403)
+    expect((await run({ host, origin: "https://vectordev.ai", upgrade: "websocket" })).status).toBe(403)
     expect((await run({ host })).status).toBe(204)
     // Explicitly configured origins, or an explicit opt-in, still work.
     expect(
@@ -64,9 +66,17 @@ describe("request transport guard", () => {
           (await run({ host, origin, ...(site ? { "sec-fetch-site": site } : {}) }, true)).status,
           `${origin} ${site}`,
         ).toBe(403)
+    // Vector's website is another site too, unless the server lists it.
+    expect((await run({ host, origin: "https://vectordev.ai", "sec-fetch-site": "cross-site" }, true)).status).toBe(403)
+    expect(
+      (
+        await run({ host, origin: "https://vectordev.ai", "sec-fetch-site": "cross-site" }, true, "/probe", {
+          cors: ["https://vectordev.ai"],
+        })
+      ).status,
+    ).toBe(204)
     // The server's own pages, the app's origins, configured origins and clients outside a browser still work.
     expect((await run({ host, origin: "http://192.168.1.20:4096" }, true)).status).toBe(204)
-    expect((await run({ host, origin: "https://vectordev.ai", "sec-fetch-site": "cross-site" }, true)).status).toBe(204)
     expect((await run({ host, origin: "oc://renderer" }, true)).status).toBe(204)
     expect(
       (await run({ host, origin: "https://team.example" }, true, "/probe", { cors: ["https://team.example"] })).status,

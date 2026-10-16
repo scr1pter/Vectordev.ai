@@ -104,7 +104,8 @@ vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-
             plain HTTP carries the password in every request. Pass <code>--trusted-network</code> with a non-loopback
             <code>--hostname</code> for a container's bridge or a private LAN; from anywhere else, keep the server on
             loopback behind a TLS reverse proxy or tunnel. Without a password, a passwordless server answers only its
-            own page and the origins you list with <code>--cors</code>, so another page on your computer cannot drive it.
+            own page, Vector's desktop app and the origins you list with <code>--cors</code>, so another page on your
+            computer, or any website, including vectordev.ai, cannot drive it.
           </p>
           <p>
             <code>vector acp</code> starts an Agent Client Protocol server for compatible editors. For programmatic HTTP

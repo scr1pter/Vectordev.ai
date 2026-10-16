@@ -19,8 +19,9 @@ describe("browser origin policy", () => {
     expect(isAllowedCorsOrigin(origin)).toBe(false)
   })
 
-  test("accepts the deployed web client and explicitly configured origins", () => {
-    expect(isAllowedCorsOrigin("https://vectordev.ai")).toBe(true)
+  test("trusts no website by default, Vector's own included, only explicitly configured origins", () => {
+    expect(isAllowedCorsOrigin("https://vectordev.ai")).toBe(false)
+    expect(isAllowedCorsOrigin("https://vectordev.ai", { cors: ["https://vectordev.ai"] })).toBe(true)
     expect(isAllowedCorsOrigin("https://custom.example", { cors: ["https://custom.example"] })).toBe(true)
     expect(isAllowedCorsOrigin("https://custom.example.attacker.example", { cors: ["https://custom.example"] })).toBe(
       false,

@@ -26,7 +26,9 @@ export function isAllowedCorsOrigin(input: string | undefined, opts?: CorsOption
   if (input === "oc://renderer") return true
   if (input === "tauri://localhost" || input === "http://tauri.localhost" || input === "https://tauri.localhost")
     return true
-  if (input === "https://vectordev.ai") return true
+  // No website is trusted by default, Vector's own included: any script on it could otherwise drive a server that has
+  // no password, or replay credentials a browser cached for one that has. A hosted page that needs a server is added
+  // with --cors.
   return opts?.cors?.includes(input) ?? false
 }
 
