@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test"
 
-import { fallbackSwarmPlan, parseSwarmPlan, routeSwarmModels, selectSwarmPlannerModel } from "./swarm-plan"
+import {
+  fallbackSwarmPlan,
+  findSwarmPlan,
+  parseSwarmPlan,
+  routeSwarmModels,
+  selectSwarmPlannerModel,
+} from "./swarm-plan"
 
 describe("swarm plan", () => {
   test("parses a fenced dependency graph", () => {
@@ -72,6 +78,32 @@ describe("swarm plan", () => {
     expect(plan.tasks[1]?.prompt.indexOf("Implement the change")).toBeLessThan(
       plan.tasks[1]!.prompt.indexOf("Run all checks"),
     )
+    expect(plan.summary).toBe(
+      "Vector decomposed the objective into 2 coordinated tasks. The last 2 planned tasks run in order as one task to stay within the 2-task limit.",
+    )
+  })
+
+  test("a plan within the limit keeps the planner's summary unchanged", () => {
+    const plan = parseSwarmPlan(
+      JSON.stringify({ summary: "Two steps", tasks: [{ id: "inspect" }, { id: "build", dependsOn: ["inspect"] }] }),
+      "Objective",
+      2,
+    )
+    expect(plan.summary).toBe("Two steps")
+    expect(plan.tasks.map((task) => task.id)).toEqual(["inspect", "build"])
+  })
+
+  test("the newest valid planner answer wins and the newest rejection explains a fallback", () => {
+    const draft = JSON.stringify({ tasks: [{ id: "draft-a" }, { id: "draft-b" }] })
+    const final = JSON.stringify({ tasks: [{ id: "final-a" }, { id: "final-b", dependsOn: ["final-a"] }] })
+    const broken = JSON.stringify({ tasks: [{ id: "inspect" }, { id: "build", dependsOn: ["missing"] }] })
+
+    expect(findSwarmPlan([final, draft], "Objective").tasks.map((task) => task.id)).toEqual(["final-a", "final-b"])
+    expect(findSwarmPlan([broken, draft], "Objective").tasks.map((task) => task.id)).toEqual(["draft-a", "draft-b"])
+    expect(() => findSwarmPlan([broken, "Working on it."], "Objective")).toThrow(
+      "Task build depends on unknown task missing.",
+    )
+    expect(() => findSwarmPlan([], "Objective")).toThrow("The planning agent returned no answer.")
   })
 
   test.each([{ dependsOn: "inspect" }, { dependsOn: [null] }, { dependsOn: [1] }, { dependsOn: [""] }])(

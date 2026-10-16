@@ -1,3 +1,5 @@
+import { Option, Schema } from "effect"
+
 export type SwarmStrategy = "economy" | "balanced" | "quality"
 
 export type SwarmAgentRole = "explore" | "implement" | "debug" | "test" | "review" | "security" | "docs"
@@ -40,13 +42,7 @@ export function parseSwarmPlan(value: string, objective: string, maxTasks = 12):
   const objectText = firstBrace >= 0 && lastBrace > firstBrace ? value.slice(firstBrace, lastBrace + 1) : undefined
   const parsed = [fenced, objectText]
     .filter((item): item is string => Boolean(item?.trim()))
-    .map((item) => {
-      try {
-        return JSON.parse(item) as unknown
-      } catch {
-        return undefined
-      }
-    })
+    .map((item) => Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(item)))
     .find(isRecord)
 
   if (!parsed) throw new Error("The planning agent did not return a JSON task graph.")
@@ -107,6 +103,12 @@ export function parseSwarmPlan(value: string, objective: string, maxTasks = 12):
   })
 
   assertAcyclic(tasks)
+  if (tasks.length <= limit)
+    return {
+      summary: stringValue(root.summary) || `Vector decomposed the objective into ${tasks.length} coordinated tasks.`,
+      tasks,
+    }
+
   // Fold excess tasks into one serial assignment instead of dropping validation or dependency edges.
   const ordered: SwarmPlanTask[] = []
   const visited = new Set<string>()
@@ -119,27 +121,42 @@ export function parseSwarmPlan(value: string, objective: string, maxTasks = 12):
   tasks.forEach(visit)
   const retained = ordered.slice(0, limit - 1)
   const excess = ordered.slice(limit - 1)
-  const trimmed =
-    tasks.length <= limit
-      ? tasks
-      : [
-          ...retained,
-          {
-            ...excess[0],
-            title: excess.map((task) => task.title).join("; "),
-            prompt: `Complete every task below in order, including its validation.\n\n${excess.map((task, index) => `${index + 1}. ${task.title}\n${task.prompt}`).join("\n\n")}`,
-            role: excess.some((task) => !["explore", "review", "security", "docs"].includes(task.role))
-              ? ("implement" as const)
-              : excess[0].role,
-            modelTier: excess.some((task) => task.modelTier === "strong") ? ("strong" as const) : ("balanced" as const),
-            dependsOn: retained.map((task) => task.id),
-            fileHints: [...new Set(excess.flatMap((task) => task.fileHints))],
-          },
-        ]
   return {
-    summary: stringValue(root.summary) || `Vector decomposed the objective into ${tasks.length} coordinated tasks.`,
-    tasks: trimmed,
+    // The planner's own summary counts the tasks it wrote, so say what Vector changed.
+    summary: [
+      stringValue(root.summary) || `Vector decomposed the objective into ${limit} coordinated tasks.`,
+      `The last ${excess.length} planned tasks run in order as one task to stay within the ${limit}-task limit.`,
+    ].join(" "),
+    tasks: [
+      ...retained,
+      {
+        ...excess[0],
+        title: excess.map((task) => task.title).join("; "),
+        prompt: `Complete every task below in order, including its validation.\n\n${excess.map((task, index) => `${index + 1}. ${task.title}\n${task.prompt}`).join("\n\n")}`,
+        role: excess.some((task) => !["explore", "review", "security", "docs"].includes(task.role))
+          ? "implement"
+          : excess[0].role,
+        modelTier: excess.some((task) => task.modelTier === "strong") ? "strong" : "balanced",
+        dependsOn: retained.map((task) => task.id),
+        fileHints: [...new Set(excess.flatMap((task) => task.fileHints))],
+      },
+    ],
   }
+}
+
+// Messages come newest first, so the planner's final graph wins over its earlier drafts. When none is valid, the newest
+// rejection is the reason the run falls back, rather than a generic "could not validate".
+export function findSwarmPlan(messages: string[], objective: string, maxTasks = 12) {
+  const attempts = messages.map((message) => {
+    try {
+      return { plan: parseSwarmPlan(message, objective, maxTasks) }
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  const plan = attempts.find((attempt) => attempt.plan)?.plan
+  if (plan) return plan
+  throw new Error(attempts[0]?.error ?? "The planning agent returned no answer.")
 }
 
 export function fallbackSwarmPlan(objective: string, maxTasks = 4): SwarmPlan {

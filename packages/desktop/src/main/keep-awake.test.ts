@@ -2,21 +2,31 @@ import { describe, expect, test } from "bun:test"
 
 import {
   engineEventSource,
+  setDesktopWorkBlocker,
   startKeepAwake,
+  whileDesktopWorks,
   type KeepAwakeEvent,
   type KeepAwakeLocation,
   type KeepAwakeSource,
 } from "./keep-awake"
 
-// An engine with the global event stream and per-directory status route the desktop's keep-awake reads. Every
-// connection opens with server.connected, as the real one does.
+// An engine with the global event stream and per-directory status route the desktop's keep-awake reads, and the V2
+// runner's list of the sessions it drains. Every connection opens with server.connected, as the real one does.
 function engine() {
   const statuses = new Map<string, Record<string, { type: string }>>()
   const requests = new Map<string, { id: string; sessionID: string }[]>()
+  const drains = new Set<string>()
+  const prompts = new Map<string, { id: string; sessionID: string }[]>()
   const failing = new Set<string>()
   const streams: ReturnType<typeof stream>[] = []
   const asked: KeepAwakeLocation[] = []
-  const state = { refuse: false, unreadable: false }
+  const state = {
+    refuse: false,
+    unreadable: false,
+    drainsFail: false,
+    drainReads: 0,
+    gate: undefined as Promise<void> | undefined,
+  }
   const source: KeepAwakeSource = {
     events(signal) {
       if (state.refuse) return refused()
@@ -33,11 +43,24 @@ function engine() {
     async requests(location) {
       return requests.get(location.directory) ?? []
     },
+    // The list is read when the request reaches the runner; `gate` holds back the answer.
+    async drains() {
+      state.drainReads += 1
+      const listed = [...drains]
+      await state.gate
+      if (state.drainsFail) throw new Error("active route failed")
+      return listed
+    },
+    async prompts(sessionID) {
+      return prompts.get(sessionID) ?? []
+    },
   }
   return {
     source,
     statuses,
     requests,
+    drains,
+    prompts,
     failing,
     streams,
     asked,
@@ -347,6 +370,203 @@ describe("startKeepAwake", () => {
     keepAwake.stop()
   })
 
+  // Parallel workspaces, swarm planners and swarm workers run on the engine's V2 runner. Their sessions never report a
+  // session.status; only the runner's list of drains says they are working.
+  test("holds the blocker while the V2 runner drains a session and releases it once the drain ends", async () => {
+    const fake = engine()
+    const blocker = power()
+    const keepAwake = startKeepAwake({ source: fake.source, blocker: blocker.blocker, pollMs: 20 })
+    await until(() => fake.streams.length === 1)
+
+    fake.drains.add("ses_worker")
+    fake.current().push(fake.event("session.next.step.started", { sessionID: "ses_worker" }, "/swarm/worker"))
+    await until(() => blocker.active.size === 1)
+    // Between steps, while a tool runs, the drain says nothing at all.
+    await pause(100)
+    expect(blocker.active.size).toBe(1)
+
+    fake.drains.delete("ses_worker")
+    await until(() => blocker.active.size === 0)
+    expect(blocker.counts.started).toBe(1)
+    keepAwake.stop()
+  })
+
+  test("does not count a V2 session waiting on a permission or question prompt", async () => {
+    const fake = engine()
+    const blocker = power()
+    const keepAwake = startKeepAwake({ source: fake.source, blocker: blocker.blocker, pollMs: 20 })
+    await until(() => fake.streams.length === 1)
+    fake.drains.add("ses_worker")
+    fake.current().push(fake.event("session.next.step.started", { sessionID: "ses_worker" }))
+    await until(() => blocker.active.size === 1)
+
+    fake.current().push(fake.event("permission.v2.asked", { id: "per_1", sessionID: "ses_worker", action: "bash" }))
+    await until(() => blocker.active.size === 0)
+    fake
+      .current()
+      .push(fake.event("permission.v2.replied", { sessionID: "ses_worker", requestID: "per_1", reply: "once" }))
+    await until(() => blocker.active.size === 1)
+
+    fake.current().push(fake.event("question.v2.asked", { id: "que_1", sessionID: "ses_worker", questions: [] }))
+    await until(() => blocker.active.size === 0)
+    fake.current().push(fake.event("question.v2.rejected", { sessionID: "ses_worker", requestID: "que_1" }))
+    await until(() => blocker.active.size === 1)
+
+    // A prompt its drain ended without an answer to does not hide the session's next drain.
+    fake.current().push(fake.event("question.v2.asked", { id: "que_2", sessionID: "ses_worker", questions: [] }))
+    await until(() => blocker.active.size === 0)
+    fake.drains.delete("ses_worker")
+    const before = fake.state.drainReads
+    await until(() => fake.state.drainReads > before)
+    await pause(60)
+    fake.drains.add("ses_worker")
+    fake.current().push(fake.event("session.next.step.started", { sessionID: "ses_worker" }))
+    await until(() => blocker.active.size === 1)
+    keepAwake.stop()
+  })
+
+  test("reseeds V2 drains and the prompts they wait on when it reconnects", async () => {
+    const fake = engine()
+    const blocker = power()
+    const keepAwake = startKeepAwake({ source: fake.source, blocker: blocker.blocker, retryMs: 10, pollMs: 20 })
+    await until(() => fake.streams.length === 1)
+
+    // The drain started while the stream was down, so none of its events arrived.
+    fake.drains.add("ses_worker")
+    fake.current().end()
+    await until(() => fake.streams.length === 2)
+    await until(() => blocker.active.size === 1)
+
+    // It asked for a permission during the next drop.
+    fake.prompts.set("ses_worker", [{ id: "per_1", sessionID: "ses_worker" }])
+    fake.current().end()
+    await until(() => fake.streams.length === 3)
+    await until(() => blocker.active.size === 0)
+    keepAwake.stop()
+  })
+
+  test("a runner that cannot list its drains neither fails the connection nor holds the blocker on old news", async () => {
+    const fake = engine()
+    const blocker = power()
+    const keepAwake = startKeepAwake({ source: fake.source, blocker: blocker.blocker, retryMs: 10, pollMs: 20 })
+    await until(() => fake.streams.length === 1)
+    fake.drains.add("ses_worker")
+    fake.current().push(fake.event("session.next.step.started", { sessionID: "ses_worker" }))
+    await until(() => blocker.active.size === 1)
+
+    fake.state.drainsFail = true
+    await until(() => blocker.active.size === 0)
+    fake.current().end()
+    await until(() => fake.streams.length === 2)
+    fake.current().push(fake.status("ses_a", "busy"))
+    await until(() => blocker.active.size === 1)
+    await pause(60)
+    expect(fake.streams.length).toBe(2)
+    expect(fake.streams[1]!.signal.aborted).toBe(false)
+    keepAwake.stop()
+  })
+
+  test("a drain that starts while the runner is being read is counted from the read after", async () => {
+    const fake = engine()
+    const blocker = power()
+    const keepAwake = startKeepAwake({ source: fake.source, blocker: blocker.blocker, pollMs: 60_000 })
+    // The connection's seed has read the runner and finished.
+    await until(() => fake.state.drainReads === 1)
+    await pause(20)
+    const gate = Promise.withResolvers<void>()
+    fake.state.gate = gate.promise
+    fake.current().push(fake.event("session.next.prompt.admitted", { sessionID: "ses_worker" }))
+    await until(() => fake.state.drainReads === 2)
+
+    // The drain begins after that read reached the runner, and its only event arrives while the read is in flight.
+    fake.drains.add("ses_worker")
+    fake.current().push(fake.event("session.next.step.started", { sessionID: "ses_worker" }))
+    await pause(20)
+    fake.state.gate = undefined
+    gate.resolve()
+    await until(() => blocker.active.size === 1)
+    expect(fake.state.drainReads).toBe(3)
+    keepAwake.stop()
+  })
+
+  test("disposing a directory never forgets the prompt a V2 drain waits on", async () => {
+    const fake = engine()
+    const blocker = power()
+    const keepAwake = startKeepAwake({ source: fake.source, blocker: blocker.blocker, pollMs: 20, stalledMs: 50 })
+    await until(() => fake.streams.length === 1)
+    fake.drains.add("ses_worker")
+    fake.current().push(fake.event("session.next.step.started", { sessionID: "ses_worker" }, "/swarm/worker"))
+    await until(() => blocker.active.size === 1)
+    fake.current().push(fake.event("permission.v2.asked", { id: "per_1", sessionID: "ses_worker" }, "/swarm/worker"))
+    await until(() => blocker.active.size === 0)
+
+    // Connecting a provider or changing a setting disposes every directory; the runner keeps waiting on the user.
+    fake.current().push(fake.event("server.instance.disposed", { directory: "/other" }, "/other"))
+    fake.current().push(fake.event("server.instance.disposed", { directory: "/swarm/worker" }, "/swarm/worker"))
+    await pause(150)
+    expect(blocker.active.size).toBe(0)
+
+    fake.current().push(fake.event("permission.v2.replied", { sessionID: "ses_worker", requestID: "per_1" }))
+    await until(() => blocker.active.size === 1)
+    keepAwake.stop()
+  })
+
+  test("a drain whose prompts cannot be read on reconnect is counted without them, and the others keep theirs", async () => {
+    const fake = engine()
+    const blocker = power()
+    // ses_gone ended between the read of the drains and the read of its prompts.
+    const source: KeepAwakeSource = {
+      ...fake.source,
+      async prompts(sessionID, signal) {
+        if (sessionID === "ses_gone") throw new Error("The engine's route answered 404.")
+        return fake.source.prompts(sessionID, signal)
+      },
+    }
+    fake.drains.add("ses_waiting")
+    fake.drains.add("ses_gone")
+    fake.prompts.set("ses_waiting", [{ id: "per_1", sessionID: "ses_waiting" }])
+    const keepAwake = startKeepAwake({ source, blocker: blocker.blocker, pollMs: 20 })
+    await until(() => blocker.active.size === 1)
+
+    fake.drains.delete("ses_gone")
+    await until(() => blocker.active.size === 0)
+    keepAwake.stop()
+  })
+
+  test("a session the runner does not list reads the drains at most once per poll, and counts once its drain shows", async () => {
+    const fake = engine()
+    const blocker = power()
+    const keepAwake = startKeepAwake({ source: fake.source, blocker: blocker.blocker, pollMs: 1_000 })
+    await until(() => fake.state.drainReads === 1)
+    // A remote workspace's session relays its activity here but never runs on this runner.
+    for (let delta = 0; delta < 20; delta++) {
+      fake.current().push(fake.event("session.next.text.delta", { sessionID: "ses_remote", delta: "x" }))
+      await pause(2)
+    }
+    await pause(50)
+    expect(fake.state.drainReads).toBeLessThanOrEqual(3)
+    expect(blocker.active.size).toBe(0)
+
+    // Its drain shows on this runner after all: it is read for again once the poll interval has passed.
+    fake.drains.add("ses_remote")
+    fake.current().push(fake.event("session.next.text.delta", { sessionID: "ses_remote", delta: "x" }))
+    await until(() => blocker.active.size === 1, 5_000)
+    keepAwake.stop()
+  })
+
+  test("asks the V2 runner nothing while nothing runs on it", async () => {
+    const fake = engine()
+    const blocker = power()
+    const keepAwake = startKeepAwake({ source: fake.source, blocker: blocker.blocker, pollMs: 10 })
+    await until(() => fake.streams.length === 1)
+    fake.current().push(fake.status("ses_a", "busy"))
+    await until(() => blocker.active.size === 1)
+    await pause(100)
+    // Only the connection's seed asked.
+    expect(fake.state.drainReads).toBe(1)
+    keepAwake.stop()
+  })
+
   test("stop releases the blocker and closes the stream", async () => {
     const fake = engine()
     const blocker = power()
@@ -358,6 +578,53 @@ describe("startKeepAwake", () => {
     keepAwake.stop()
     expect(blocker.active.size).toBe(0)
     expect(fake.current().signal.aborted).toBe(true)
+  })
+})
+
+describe("whileDesktopWorks", () => {
+  test("holds one blocker across overlapping desktop work and releases it when the last piece ends", async () => {
+    const blocker = power()
+    setDesktopWorkBlocker(blocker.blocker)
+    const external = Promise.withResolvers<string>()
+    const checks = Promise.withResolvers<void>()
+
+    const running = whileDesktopWorks(() => external.promise)
+    const validating = whileDesktopWorks(() => checks.promise)
+    expect(blocker.active.size).toBe(1)
+    external.resolve("done")
+    expect(await running).toBe("done")
+    expect(blocker.active.size).toBe(1)
+    checks.reject(new Error("typecheck failed"))
+    await expect(validating).rejects.toThrow("typecheck failed")
+    await until(() => blocker.active.size === 0)
+    expect(blocker.counts.started).toBe(1)
+    setDesktopWorkBlocker(undefined)
+  })
+
+  test("work that throws before it starts still releases the blocker", async () => {
+    const blocker = power()
+    setDesktopWorkBlocker(blocker.blocker)
+    const failed = whileDesktopWorks((): Promise<void> => {
+      throw new Error("could not spawn the CLI")
+    })
+    expect(blocker.active.size).toBe(1)
+    await expect(failed).rejects.toThrow("could not spawn the CLI")
+    await until(() => blocker.active.size === 0)
+    setDesktopWorkBlocker(undefined)
+  })
+
+  test("clearing the blocker releases what desktop work holds", async () => {
+    const blocker = power()
+    setDesktopWorkBlocker(blocker.blocker)
+    const external = Promise.withResolvers<void>()
+    const running = whileDesktopWorks(() => external.promise)
+    expect(blocker.active.size).toBe(1)
+
+    setDesktopWorkBlocker(undefined)
+    expect(blocker.active.size).toBe(0)
+    external.resolve()
+    await running
+    expect(blocker.counts.started).toBe(1)
   })
 })
 
@@ -383,6 +650,7 @@ describe("engineEventSource", () => {
           directory: url.searchParams.get("directory"),
         })
         if (url.pathname === "/session/status") return Response.json({ ses_b: { type: "busy" } })
+        if (url.pathname === "/api/session/active") return Response.json({ data: {} })
         return new Response(
           new ReadableStream<Uint8Array>({
             start(controller) {
@@ -413,13 +681,44 @@ describe("engineEventSource", () => {
     await until(() => blocker.active.size === 0)
     keepAwake.stop()
 
-    expect(requests).toEqual([
-      {
-        path: "/global/event",
+    // The seed asks the V2 runner once; with nothing running on it, nothing polls it again.
+    expect(requests).toEqual(
+      ["/global/event", "/api/session/active"].map((path) => ({
+        path,
         authorization: `Basic ${Buffer.from("vector:placeholder-password").toString("base64")}`,
         directory: null,
+      })),
+    )
+  })
+
+  test("asks the V2 runner for the sessions it drains and the prompts each waits on", async () => {
+    const seen: { path: string; authorization: string | null }[] = []
+    using server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(request) {
+        const url = new URL(request.url)
+        seen.push({ path: url.pathname, authorization: request.headers.get("authorization") })
+        if (url.pathname === "/api/session/active") return Response.json({ data: { ses_worker: { type: "running" } } })
+        if (url.pathname === "/api/session/ses_worker/permission")
+          return Response.json({ data: [{ id: "per_1", sessionID: "ses_worker", action: "bash", resources: ["ls"] }] })
+        if (url.pathname === "/api/session/ses_worker/question")
+          return Response.json({ data: [{ id: "que_1", sessionID: "ses_worker", questions: [] }] })
+        return new Response("Unexpected request", { status: 404 })
       },
+    })
+    const source = engineEventSource({ url: server.url.href, username: "vector", password: "placeholder-password" })
+    expect(await source.drains(new AbortController().signal)).toEqual(["ses_worker"])
+    expect(await source.prompts("ses_worker", new AbortController().signal)).toEqual([
+      { id: "per_1", sessionID: "ses_worker" },
+      { id: "que_1", sessionID: "ses_worker" },
     ])
+    expect(seen).toEqual(
+      ["/api/session/active", "/api/session/ses_worker/permission", "/api/session/ses_worker/question"].map((path) => ({
+        path,
+        authorization: `Basic ${Buffer.from("vector:placeholder-password").toString("base64")}`,
+      })),
+    )
   })
 
   test("asks each known directory for its statuses and the prompts waiting on the user", async () => {

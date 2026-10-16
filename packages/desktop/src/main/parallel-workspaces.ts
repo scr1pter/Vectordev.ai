@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process"
 import { createHash, randomUUID } from "node:crypto"
 import { createReadStream } from "node:fs"
-import { cp, mkdir, readFile, readdir, rename, rm, stat, statfs, writeFile } from "node:fs/promises"
+import { cp, lstat, mkdir, readFile, readdir, rename, rm, stat, statfs, writeFile } from "node:fs/promises"
 import { availableParallelism } from "node:os"
 import { basename, dirname, join, relative } from "node:path"
 import { app } from "electron"
@@ -34,6 +34,7 @@ import { markTeamMessagesDelivered, pendingTeamMessages, postTeamMessage, teamFo
 import { formatDelivery, formatHandoff, type TeamMessage } from "./agent-team-model"
 import { priorFor, recordValidationRun } from "./failure-memory"
 import { formatValidationForRepair, validateWorkspace, type WorkspaceValidationReport } from "./workspace-guardrails"
+import { whileDesktopWorks } from "./keep-awake"
 import { parseUnifiedDiff, selectUnifiedDiff, type UnifiedDiffSelection } from "./unified-diff"
 import { scanChangedSecrets } from "./secret-scanner"
 import { spendLedger } from "./spend-limits"
@@ -152,6 +153,22 @@ export type ParallelWorkspaceRecord = {
   actualCost?: string
   finalSummary: string
   mergeState: "none" | "merged" | "discarded"
+  // Set just before a merge starts writing into the source. With mergeState still "none" it means Vector stopped
+  // part-way through those writes, so the source may already hold some of this workspace's changes.
+  mergeStartedAt?: string
+  // The checkpoint of the merge mergeStartedAt marks. Its folder holds every file that merge was about to write as it
+  // was before, and their names, so the merge can be undone (rollBackUnfinishedMerge).
+  mergeCheckpointPath?: string
+  // Why the last merge into the source failed, until the agent runs again. "conflict": the source holds other changes
+  // where this workspace's changes go, so the same changes would be refused again. "error": anything else, such as a
+  // write that failed. Either way the merge undoes what it wrote, and mergeStartedAt stays set only when it could not.
+  mergeFailure?: "conflict" | "error"
+  // A merged workspace whose isolated copy Vector had not finished removing, and the commit the user asked for that the
+  // merge had not made yet. A restart finishes the cleanup and reports the commit (finishInterruptedMerge).
+  cleanupPending?: boolean
+  pendingCommit?: string
+  // The agent's own summary of its work, kept when a merge replaces finalSummary with what the merge did.
+  summaryBeforeMerge?: string
   logs: string[]
   terminalOutput: string[]
   browserResults: string[]
@@ -439,6 +456,40 @@ async function engineRequest<T>(
   return (text ? JSON.parse(text) : undefined) as T
 }
 
+// Aborting a run's requests does not stop the model work the engine admitted, so Stop, Discard and a failed run
+// interrupt the session too. Each waits at most 5 seconds for the engine to confirm, so an engine that never answers
+// cannot hang them or a swarm waiting on its workers. The request itself is never cancelled: the engine's HTTP server
+// interrupts a handler whose client disconnects, so a slow interrupt would be dropped and the session would keep
+// spending after Stop. `note` hears when the engine did not confirm in time, and how the request ended.
+export async function interruptEngineSession(
+  engine: ParallelWorkspaceEngine,
+  sessionId: string,
+  note: (message: string) => void,
+) {
+  const answer = engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/interrupt`, {
+    method: "POST",
+  }).then(
+    () => "",
+    (error) =>
+      `The engine did not confirm the interrupt, so the session may still be running: ${error instanceof Error ? error.message : String(error)}`,
+  )
+  const expired = Promise.withResolvers<undefined>()
+  const timer = setTimeout(() => expired.resolve(undefined), 5_000)
+  const failure = await Promise.race([answer, expired.promise]).finally(() => clearTimeout(timer))
+  if (failure) note(failure)
+  if (failure !== undefined) return
+  note("The engine had not confirmed the interrupt after 5 seconds. Vector is still waiting for it.")
+  void answer.then((late) => note(late || "The engine confirmed the interrupt.")).catch(() => undefined)
+}
+
+// A workspace's interrupt notes go to its log, while the workspace still exists.
+function logTo(id: string) {
+  return (message: string) => {
+    if (!readRecords().some((record) => record.id === id)) return
+    updateRecord(id, (current) => ({ ...current, logs: [message, ...current.logs].slice(0, 120) }))
+  }
+}
+
 function collectText(value: unknown, output: string[] = []) {
   if (!value) return output
   if (typeof value === "string") return output
@@ -707,14 +758,18 @@ function rememberValidation(
 // the single chokepoint covers status, ls-files and diff --name-only together.
 const GIT_PATH_CONFIG = ["-c", "core.quotePath=false"]
 
-export function runGit(args: string[], cwd: string, options: { allowFailure?: boolean; input?: string } = {}) {
+export function runGit(
+  args: string[],
+  cwd: string,
+  options: { allowFailure?: boolean; input?: string; env?: NodeJS.ProcessEnv } = {},
+) {
   const allowFailure = options.allowFailure ?? false
   return withTimeout(
     new Promise<CommandResult>((resolve, reject) => {
       const child = execFile(
         "git",
         [...GIT_PATH_CONFIG, ...args],
-        { cwd, env: untrustedChildEnvironment(), maxBuffer: 96 * 1024 * 1024 },
+        { cwd, env: untrustedChildEnvironment(process.env, options.env), maxBuffer: 96 * 1024 * 1024 },
         (error, stdout, stderr) => {
           const result = { stdout: String(stdout), stderr: String(stderr), failed: Boolean(error) }
           if (error && !allowFailure) return reject(error)
@@ -1359,6 +1414,9 @@ export function listParallelWorkspaces(scope?: { sourcePath?: string; parentSess
     return interrupted
   })
   if (changed) writeRecords(next)
+  next
+    .filter((record) => record.cleanupPending && !finishingMerges.has(record.id))
+    .forEach((record) => void finishInterruptedMerge(record))
   if (!scope) return next
   return next.filter((record) => {
     if (scope.sourcePath && record.sourcePath !== scope.sourcePath) return false
@@ -2132,7 +2190,10 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     startTeamSweep(initial)
     if (initial.runtime !== "vector") {
       const prepared = await prepareParallelWorkspaceContext(initial)
-      await executeExternalParallelWorkspace(id, prepared, controller, runId, followUp, queuedRun?.externalAgentRunner)
+      // An external agent's CLI runs in this process, out of the engine's sight, so it keeps the computer awake itself.
+      await whileDesktopWorks(() =>
+        executeExternalParallelWorkspace(id, prepared, controller, runId, followUp, queuedRun?.externalAgentRunner),
+      )
       return
     }
 
@@ -2235,9 +2296,10 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     syncBackgroundTask(record, "Agent became idle. Running deterministic checks in the isolated workspace.")
 
     let refreshed = await refreshParallelWorkspace(id)
-    let validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, {
-      signal: controller.signal,
-    })
+    // The agent's session is idle now, so only this keeps the computer awake through the checks.
+    let validation = await whileDesktopWorks(() =>
+      validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, { signal: controller.signal }),
+    )
     await rememberValidation(refreshed, validation)
     controller.signal.throwIfAborted()
     record = updateRecord(id, (current) => ({
@@ -2293,9 +2355,9 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       if (repairFailure) throw new Error(repairFailure)
 
       refreshed = await refreshParallelWorkspace(id)
-      validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, {
-        signal: controller.signal,
-      })
+      validation = await whileDesktopWorks(() =>
+        validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, { signal: controller.signal }),
+      )
       // The agent's own account of this repair pass, so a check that now passes
       // records what actually fixed it rather than a bare list of edited files.
       const repairContext = await engineRequest<{ data?: unknown }>(
@@ -2374,11 +2436,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     // A failed or timed-out run must not leave the engine session running and
     // spending the user's API keys in the background.
     const active = activeRuns.get(id)
-    if (active?.sessionId && !stopped) {
-      await engineRequest(engine, `/api/session/${encodeURIComponent(active.sessionId)}/interrupt`, {
-        method: "POST",
-      }).catch(() => undefined)
-    }
+    if (active?.sessionId && !stopped) await interruptEngineSession(engine, active.sessionId, logTo(id))
     const detail = stopped
       ? "The parallel agent was stopped by the user."
       : error instanceof Error
@@ -2443,6 +2501,7 @@ export async function runParallelWorkspace(
         : "Queued for an agent slot",
     lastActivityAt: now(),
     error: undefined,
+    mergeFailure: undefined,
     logs: [`Run requested at ${now()}.`, ...record.logs].slice(0, 120),
   }))
   syncBackgroundTask(queued, `Parallel agent queued for ${runtimeLabel(queued.runtime)}.`)
@@ -2491,6 +2550,7 @@ export async function followUpParallelWorkspace(
     status: "queued",
     progress: 0,
     error: undefined,
+    mergeFailure: undefined,
     lastAction: activeRuns.size < maxConcurrentRuns ? "Sending your message to the agent" : "Queued for an agent slot",
     lastActivityAt: now(),
     turns: appendTurn(record.turns, {
@@ -2513,11 +2573,7 @@ export async function stopParallelWorkspace(id: string) {
   queuedRuns.delete(id)
   active?.controller.abort()
   queued?.controller.abort()
-  if (active?.sessionId) {
-    await engineRequest(active.engine, `/api/session/${encodeURIComponent(active.sessionId)}/interrupt`, {
-      method: "POST",
-    }).catch(() => undefined)
-  }
+  if (active?.sessionId) await interruptEngineSession(active.engine, active.sessionId, logTo(id))
   const current = readRecords().find((record) => record.id === id)
   if (!current) throw new Error("Parallel workspace was not found.")
   // Stopping is only meaningful for work in flight; settled records
@@ -2625,6 +2681,131 @@ async function cleanupIsolation(record: ParallelWorkspaceRecord) {
   await rm(dirname(record.isolatedPath), { recursive: true, force: true }).catch(() => undefined)
 }
 
+// Merges into the same folder run one at a time. Each checks the folder for conflicts before it writes, so two merges
+// interleaving there (sibling swarm workers finishing together into staging) could both pass, and the later write would
+// silently replace the earlier one's change to a file they share.
+const mergeQueues = new Map<string, Promise<void>>()
+
+function serializeMerge(sourcePath: string, merge: () => Promise<void>) {
+  const queued = (mergeQueues.get(sourcePath) ?? Promise.resolve()).catch(() => undefined).then(merge)
+  mergeQueues.set(sourcePath, queued)
+  return queued.finally(() => {
+    if (mergeQueues.get(sourcePath) === queued) mergeQueues.delete(sourcePath)
+  })
+}
+
+// A merge refused because the source holds other changes where this workspace's changes go. Merging the same changes
+// again would be refused the same way.
+class MergeConflict extends Error {}
+
+// `git apply --3way --check` passes a patch it can only apply with conflicts, and says so on stderr alone. Applying
+// it then writes conflict markers into the files, so that is a conflict as much as a failed check. LC_ALL=C keeps the
+// message in English whatever the user's locale.
+const CONFLICTED = /^Applied patch to '.*' with conflicts\.$/m
+
+async function checkPatch(patch: string, cwd: string) {
+  const check = await runGit(["apply", "--3way", "--check", "-"], cwd, {
+    allowFailure: true,
+    input: patch,
+    env: { LC_ALL: "C" },
+  })
+  return { clean: !check.failed && !CONFLICTED.test(check.stderr), detail: check.stderr.trim() }
+}
+
+const MERGE_FILES = "merge-files.json"
+
+// Called just before a merge's first write into the source, with every file the merge may write. Their current
+// contents go into the checkpoint first, because each write deletes or overwrites a file in the user's real project:
+// for a non-git project nothing else could restore it. The first attempt also names the files in the checkpoint and
+// records it with mergeStartedAt, so after a restart a merge Vector stopped part-way through can be told apart from one
+// that never began, and undone exactly. A retry keeps that record: only the first attempt's copies hold the files as
+// they were before any of this workspace's changes arrived. `indexed` are the files `git apply` also stages.
+async function recordMergeStarted(
+  record: ParallelWorkspaceRecord,
+  checkpointPath: string,
+  files: string[],
+  indexed: string[] = [],
+) {
+  await Promise.all(files.map((file) => backupBeforeOverwrite(checkpointPath, record.sourcePath, file)))
+  if (record.mergeStartedAt) return
+  await writeFile(join(dirname(checkpointPath), MERGE_FILES), JSON.stringify({ files, indexed }), "utf8")
+  updateRecord(record.id, (current) => ({
+    ...current,
+    mergeStartedAt: now(),
+    mergeCheckpointPath: checkpointPath,
+    lastActivityAt: now(),
+  }))
+}
+
+// Undoes a merge Vector stopped part-way through, so the workspace can be merged afresh, or its task run again on a
+// source that holds none of its changes. Finishing such a merge in place cannot work once `git apply` stopped between
+// files: the source then matches neither the patch nor the index, so the patch applies in neither direction. Every
+// file that merge was about to write goes back to how it was before the merge began, so nothing else may have merged
+// into the source since. Whatever a file held instead is kept in the checkpoint's `rolled-back` folder. A merge that
+// left no list of its files cannot be undone, and says so. Either way the workspace stops counting as mid-merge, so
+// nothing retries a merge that cannot finish forever.
+export async function rollBackUnfinishedMerge(id: string) {
+  const sourcePath = getParallelWorkspace(id)?.sourcePath
+  if (!sourcePath) return
+  await serializeMerge(sourcePath, () => undoUnfinishedMerge(id))
+}
+
+// The undo itself, for a caller that already holds the source's merge queue.
+async function undoUnfinishedMerge(id: string) {
+  // Read once the queue is ours: a merge of this workspace that ran in the meantime has already settled it.
+  const record = getParallelWorkspace(id)
+  if (!record?.mergeStartedAt || record.mergeState !== "none") return
+  const checkpoint = record.mergeCheckpointPath ? dirname(record.mergeCheckpointPath) : ""
+  const manifest = checkpoint
+    ? await readFile(join(checkpoint, MERGE_FILES), "utf8")
+        .then((text) => JSON.parse(text) as { files?: unknown; indexed?: unknown })
+        .catch(() => undefined)
+    : undefined
+  const files = Array.isArray(manifest?.files)
+    ? manifest.files.filter((file): file is string => typeof file === "string")
+    : []
+  const indexed = Array.isArray(manifest?.indexed)
+    ? manifest.indexed.filter((file): file is string => typeof file === "string")
+    : []
+  const restored = (
+    await Promise.all(
+      files.map(async (file) => ((await restoreBeforeMerge(record.sourcePath, checkpoint, file)) ? [file] : [])),
+    )
+  ).flat()
+  // `git apply --3way` staged the patch too. Before it ran, the index matched these files (it refuses otherwise), so
+  // staging them as restored puts the index back as well.
+  if (indexed.length)
+    await runGit(["update-index", "--add", "--remove", "--", ...indexed], record.sourcePath, { allowFailure: true })
+  const one = restored.length === 1
+  const detail = manifest
+    ? `Vector undid an unfinished merge into ${record.sourcePath}, putting ${restored.length} file${one ? "" : "s"} back as ${one ? "it was" : "they were"} before it began.${restored.length ? ` What ${one ? "it" : "they"} held instead is in ${join(checkpoint, "rolled-back")}.` : ""}`
+    : `Vector could not undo an unfinished merge into ${record.sourcePath}, because it left no list of the files it was writing. The source may still hold part of this workspace's changes.`
+  updateRecord(id, (current) => ({
+    ...current,
+    mergeStartedAt: undefined,
+    mergeCheckpointPath: undefined,
+    lastActivityAt: now(),
+    logs: [detail, ...current.logs].slice(0, 120),
+  }))
+}
+
+// Puts one file back as the merge found it: the copy the merge saved, or no file when there was none. Returns whether
+// the file had to change.
+async function restoreBeforeMerge(sourcePath: string, checkpoint: string, file: string) {
+  const before = join(checkpoint, "overwritten", file)
+  const target = join(sourcePath, file)
+  const existed = await lstat(before).catch(() => undefined)
+  const present = await lstat(target).catch(() => undefined)
+  if (existed ? present && (await fileContentsEqual(before, target)) : !present) return false
+  // backupBeforeOverwrite keeps its copy in `overwritten/` beside the path it is given.
+  await backupBeforeOverwrite(join(checkpoint, "rolled-back", "state"), sourcePath, file)
+  await rm(target, { recursive: true, force: true })
+  if (!existed) return true
+  await mkdir(dirname(target), { recursive: true })
+  await cp(before, target, { recursive: true, force: true, verbatimSymlinks: true })
+  return true
+}
+
 async function mergeGitWorktree(record: ParallelWorkspaceRecord, force: boolean, checkpointPath: string) {
   const patch = (
     await runGit(["diff", "--binary", record.baseCommit ?? "HEAD", "--"], record.isolatedPath, { allowFailure: true })
@@ -2646,27 +2827,48 @@ async function mergeGitWorktree(record: ParallelWorkspaceRecord, force: boolean,
     if (exists && !(await fileContentsEqual(join(record.isolatedPath, file), target))) collisions.push(file)
   }
   if (collisions.length && !force) {
-    throw new Error(
+    throw new MergeConflict(
       `Merge blocked: ${collisions.slice(0, 8).join(", ")} exist${collisions.length === 1 ? "s" : ""} in your main project with different content. Review or force-merge to overwrite (a backup copy is saved to the checkpoint).`,
     )
   }
 
-  if (patch.trim()) {
-    const check = await runGit(["apply", "--3way", "--check", "-"], record.sourcePath, {
+  // Finishing a merge Vector stopped part-way through: the patch may already be in the source, where it now applies
+  // only in reverse. Applying it again would fail, so only the untracked copies are redone.
+  const landed =
+    Boolean(record.mergeStartedAt && patch.trim()) &&
+    !(await runGit(["apply", "--reverse", "--check", "-"], record.sourcePath, { allowFailure: true, input: patch }))
+      .failed
+  const pending = patch.trim() && !landed ? patch : ""
+  // Forcing cannot get past this: git applies no patch its check refuses, and one it can only apply with conflicts
+  // would leave conflict markers in the source.
+  const check = pending ? await checkPatch(pending, record.sourcePath) : undefined
+  if (check && !check.clean) throw new MergeConflict(`Merge conflict detected.\n${check.detail}`)
+  // Every path the patch writes, both sides of a rename included.
+  const patched = pending
+    ? (
+        await runGit(["diff", "--name-only", "--no-renames", record.baseCommit ?? "HEAD", "--"], record.isolatedPath, {
+          allowFailure: true,
+        })
+      ).stdout
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : []
+  await recordMergeStarted(record, checkpointPath, [...new Set([...patched, ...untracked])], patched)
+  if (pending) {
+    const applied = await runGit(["apply", "--3way", "-"], record.sourcePath, {
       allowFailure: true,
-      input: patch,
+      input: pending,
+      env: { LC_ALL: "C" },
     })
-    if (check.failed && !force) {
-      throw new Error(`Merge conflict detected. Review before forcing merge.\n${check.stderr.trim()}`)
-    }
-    const applied = await runGit(["apply", "--3way", "-"], record.sourcePath, { allowFailure: true, input: patch })
+    // Conflicts here mean the source changed after the check, outside Vector.
+    if (applied.failed && CONFLICTED.test(applied.stderr)) throw new MergeConflict(applied.stderr)
     if (applied.failed) throw new Error(applied.stderr || "Git could not apply the workspace diff.")
   }
 
   for (const file of untracked) {
     const from = join(record.isolatedPath, file)
     const to = join(record.sourcePath, file)
-    await backupBeforeOverwrite(checkpointPath, record.sourcePath, file)
     await mkdir(dirname(to), { recursive: true })
     await cp(from, to, { recursive: true, force: true })
   }
@@ -2678,22 +2880,21 @@ async function mergeCopy(record: ParallelWorkspaceRecord, force: boolean, checkp
   for (const file of refreshed.changedFiles) {
     const sourceHash = await hashFile(join(record.sourcePath, file)).catch(() => "missing")
     const baselineHash = record.baselineHashes?.[file] ?? "missing"
-    if (sourceHash !== baselineHash) conflicts.push(file)
+    // A source file that already holds this workspace's version loses nothing when it is copied again. That is the
+    // case for every file a merge Vector stopped part-way through had already copied.
+    if (sourceHash === baselineHash) continue
+    if (sourceHash !== (await hashFile(join(record.isolatedPath, file)).catch(() => "missing"))) conflicts.push(file)
   }
   if (conflicts.length && !force) {
-    throw new Error(
+    throw new MergeConflict(
       `Merge conflict detected in ${conflicts.slice(0, 8).join(", ")}. Main project changed since workspace creation.`,
     )
   }
+  await recordMergeStarted(record, checkpointPath, refreshed.changedFiles)
   for (const file of refreshed.changedFiles) {
     const from = join(record.isolatedPath, file)
     const to = join(record.sourcePath, file)
     const fromStat = await stat(from).catch(() => undefined)
-    // Every path below either deletes or overwrites a file in the user's real
-    // project, so the current contents are copied into the checkpoint first.
-    // Without this a copy-mode merge destroyed untracked work with no way back:
-    // for a non-git project the checkpoint held only hashes.
-    await backupBeforeOverwrite(checkpointPath, record.sourcePath, file)
     if (!fromStat) {
       await rm(to, { force: true, recursive: true })
       continue
@@ -2724,7 +2925,7 @@ async function validateBeforeIntegration(record: ParallelWorkspaceRecord, allowS
       `Secret scan blocked integration. Review ${summary}. Vector never includes secret values in this report; explicitly confirm the force action only if these are intentional test credentials.`,
     )
   }
-  const validationReport = await validateWorkspace(record.isolatedPath, record.changedFiles)
+  const validationReport = await whileDesktopWorks(() => validateWorkspace(record.isolatedPath, record.changedFiles))
   const updated = updateRecord(record.id, (current) => ({
     ...current,
     validationReport,
@@ -2747,11 +2948,27 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
   if (refreshed.mergeState === "merged") return refreshed
   if (refreshed.mergeState === "discarded") throw new Error("Discarded workspaces cannot be merged.")
   if (!refreshed.changedFiles.length) throw new Error("There are no changes to merge.")
+  // A copy merge reads a missing file as one the agent deleted, so merging from a checkout that is gone would delete
+  // those files from the source.
+  if (!(await stat(refreshed.isolatedPath).catch(() => undefined)))
+    throw new Error("This workspace's isolated copy no longer exists, so its changes cannot be merged.")
   const record = await validateBeforeIntegration(refreshed, force)
   const checkpointPath = await createCheckpoint(record)
   try {
-    if (record.isolation === "git-worktree") await mergeGitWorktree(record, force, checkpointPath)
-    else await mergeCopy(record, force, checkpointPath)
+    await serializeMerge(record.sourcePath, () =>
+      (record.isolation === "git-worktree"
+        ? mergeGitWorktree(record, force, checkpointPath)
+        : mergeCopy(record, force, checkpointPath)
+      ).catch(async (error: unknown) => {
+        // A merge that fails part-way leaves the source holding some of these changes. They are undone while the queue
+        // is still this merge's, so no other merge into the folder has written there since. An undo that fails leaves
+        // mergeStartedAt set, so a swarm's Resume tries it again.
+        await undoUnfinishedMerge(id).catch((undo: unknown) =>
+          logTo(id)(`Vector could not undo what this merge wrote into ${record.sourcePath}: ${String(undo)}`),
+        )
+        throw error
+      }),
+    )
   } catch (error) {
     const failed = updateRecord(id, (current) => ({
       ...current,
@@ -2759,12 +2976,28 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
       lastAction: "Merge blocked",
       lastActivityAt: now(),
       checkpointPath,
+      mergeFailure: error instanceof MergeConflict ? "conflict" : "error",
       error: error instanceof Error ? error.message : String(error),
       logs: [`Merge blocked: ${error instanceof Error ? error.message : String(error)}`, ...current.logs].slice(0, 80),
     }))
     syncBackgroundTask(failed, "Merge was blocked by a conflict or failed patch.")
     return failed
   }
+  // Every change is in the source now. Record that before the cleanup, which can take seconds: Vector closing during it
+  // must not leave a workspace that looks unmerged, or a swarm would run its task again on top of its own changes. The
+  // record also says what is left to do, so a restart can finish the cleanup and report a commit it never made.
+  finishingMerges.add(id)
+  updateRecord(id, (current) => ({
+    ...current,
+    status: "merged",
+    mergeState: "merged",
+    checkpointPath,
+    cleanupPending: true,
+    pendingCommit: commit?.message?.trim() || undefined,
+    summaryBeforeMerge: current.summaryBeforeMerge ?? current.finalSummary,
+    lastAction: "Merged; removing the isolated copy",
+    lastActivityAt: now(),
+  }))
   await cleanupIsolation(record)
 
   // Optional real commit: the merge already landed in main's working tree
@@ -2792,19 +3025,22 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
     }
   }
 
+  // Closing the record compacted its file list away, so the summary counts from `record`.
   const merged = updateRecord(id, (current) => ({
     ...current,
     status: "merged",
     progress: 100,
     mergeState: "merged",
     checkpointPath,
+    cleanupPending: undefined,
+    pendingCommit: undefined,
     error: commitError || undefined,
     lastAction: commitNote.startsWith("Committed")
       ? "Merged and committed to the main project"
-      : "Merged into main project",
+      : `Merged into ${mergeTarget(record)}`,
     lastActivityAt: now(),
     finalSummary: [
-      `Merged ${current.changedFiles.length} changed file${current.changedFiles.length === 1 ? "" : "s"} into the main project.`,
+      `Merged ${record.changedFiles.length} changed file${record.changedFiles.length === 1 ? "" : "s"} into ${mergeTarget(record)}.`,
       commitNote,
       commitError,
     ]
@@ -2817,15 +3053,58 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
       ...current.logs,
     ].slice(0, 80),
   }))
+  finishingMerges.delete(id)
   syncBackgroundTask(
     merged,
     commitError
       ? "Merged into the main project, but the commit failed."
       : commitNote.startsWith("Committed")
         ? "Parallel workspace merged and committed to the main project."
-        : "Parallel workspace merged into the main project.",
+        : `Parallel workspace merged into ${mergeTarget(record)}.`,
   )
   return merged
+}
+
+// A swarm worker merges into the swarm's staging workspace; everything else merges into the project it came from.
+function mergeTarget(record: ParallelWorkspaceRecord) {
+  return record.swarmRole === "worker" ? "swarm staging" : "the main project"
+}
+
+// Merges in this process whose changes are in the source and that are still removing the isolated copy or committing.
+const finishingMerges = new Set<string>()
+
+// Finishes a merge Vector closed during, after its changes reached the source. The isolated copy and branch are
+// removed now. A commit the user asked for is reported instead of made: the source may have changed since Vector
+// closed, and committing everything in it would sweep those changes in.
+async function finishInterruptedMerge(record: ParallelWorkspaceRecord) {
+  finishingMerges.add(record.id)
+  await cleanupIsolation(record)
+  const skipped = record.pendingCommit
+    ? "Vector closed before it made the commit you asked for, so nothing was committed. Commit the merged changes yourself if you still want them committed."
+    : ""
+  if (readRecords().some((item) => item.id === record.id)) {
+    const finished = updateRecord(record.id, (current) => ({
+      ...current,
+      cleanupPending: undefined,
+      pendingCommit: undefined,
+      error: skipped || undefined,
+      lastAction: skipped ? "Merged; the requested commit was not made" : `Merged into ${mergeTarget(current)}`,
+      lastActivityAt: now(),
+      finalSummary: [
+        `Merged ${current.changedFilesCount} changed file${current.changedFilesCount === 1 ? "" : "s"} into ${mergeTarget(current)}.`,
+        skipped,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      logs: [
+        `Vector closed while this merge was removing the isolated copy; the cleanup finished at ${now()}.`,
+        ...(skipped ? [skipped] : []),
+        ...current.logs,
+      ].slice(0, 80),
+    }))
+    syncBackgroundTask(finished, skipped || `Parallel workspace merged into ${mergeTarget(finished)}.`)
+  }
+  finishingMerges.delete(record.id)
 }
 
 export async function openParallelWorkspacePullRequest(id: string) {
@@ -2901,13 +3180,9 @@ async function mergeSelectedGitChanges(
         `The selected diff is stale and can no longer be separated safely.\n${reverseCheck.stderr.trim()}`,
       )
     }
-    const sourceCheck = await runGit(["apply", "--3way", "--check", "-"], record.sourcePath, {
-      allowFailure: true,
-      input: selectedPatch,
-    })
-    if (sourceCheck.failed && !force) {
-      throw new Error(`Selected changes conflict with the main project.\n${sourceCheck.stderr.trim()}`)
-    }
+    // As in a full merge, forcing cannot get past a conflict without leaving conflict markers in the main project.
+    const sourceCheck = await checkPatch(selectedPatch, record.sourcePath)
+    if (!sourceCheck.clean) throw new Error(`Selected changes conflict with the main project.\n${sourceCheck.detail}`)
     const applied = await runGit(["apply", "--3way", "-"], record.sourcePath, {
       allowFailure: true,
       input: selectedPatch,
@@ -2989,8 +3264,11 @@ export async function mergeParallelWorkspaceSelection(id: string, selection: Uni
   const checkpointPath = await createCheckpoint(record)
 
   try {
-    if (record.isolation === "git-worktree") await mergeSelectedGitChanges(record, selection, force, checkpointPath)
-    else await mergeSelectedCopyChanges(record, selection, force, checkpointPath)
+    await serializeMerge(record.sourcePath, () =>
+      record.isolation === "git-worktree"
+        ? mergeSelectedGitChanges(record, selection, force, checkpointPath)
+        : mergeSelectedCopyChanges(record, selection, force, checkpointPath),
+    )
   } catch (error) {
     const failed = updateRecord(id, (current) => ({
       ...current,
@@ -3021,8 +3299,9 @@ export async function mergeParallelWorkspaceSelection(id: string, selection: Uni
     error: undefined,
     lastAction: complete ? "All approved changes merged" : "Approved changes merged; review remains",
     lastActivityAt: now(),
+    summaryBeforeMerge: current.summaryBeforeMerge ?? current.finalSummary,
     finalSummary: complete
-      ? "All approved changes were merged into the main project."
+      ? `All approved changes were merged into ${mergeTarget(current)}.`
       : `${current.changedFiles.length} changed file${current.changedFiles.length === 1 ? "" : "s"} remain in isolated review.`,
     logs: [
       `Merged ${acceptedCount} approved review item${acceptedCount === 1 ? "" : "s"} at ${now()}. Checkpoint: ${checkpointPath}`,
@@ -3044,11 +3323,7 @@ export async function discardParallelWorkspace(id: string) {
   queuedRuns.delete(id)
   active?.controller.abort()
   queued?.controller.abort()
-  if (active?.sessionId) {
-    await engineRequest(active.engine, `/api/session/${encodeURIComponent(active.sessionId)}/interrupt`, {
-      method: "POST",
-    }).catch(() => undefined)
-  }
+  if (active?.sessionId) await interruptEngineSession(active.engine, active.sessionId, logTo(id))
   await cleanupIsolation(record)
   const discarded = updateRecord(id, (current) => ({
     ...current,
