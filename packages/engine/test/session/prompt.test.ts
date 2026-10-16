@@ -4585,7 +4585,13 @@ const joinRun = Effect.fn("test.joinRun")(function* (
   const sessions = yield* Session.Service
   const id = MessageID.ascending()
   const fiber = yield* prompt
-    .prompt({ sessionID, messageID: id, agent: "build", parts: [{ type: "text", text }], ...(budget ? { budget } : {}) })
+    .prompt({
+      sessionID,
+      messageID: id,
+      agent: "build",
+      parts: [{ type: "text", text }],
+      ...(budget ? { budget } : {}),
+    })
     .pipe(Effect.forkChild)
   yield* pollWithTimeout(
     sessions
@@ -4609,10 +4615,7 @@ it.instance(
       const gate = yield* Deferred.make<void>()
       const chat = yield* guardedChat({ usd: 0.05 })
       yield* llm.push(
-        reply()
-          .wait(deferredAsPromise(gate))
-          .tool("first", { value: 1 })
-          .usage({ input: 100, output: 1000 }),
+        reply().wait(deferredAsPromise(gate)).tool("first", { value: 1 }).usage({ input: 100, output: 1000 }),
       )
       yield* llm.text("never requested")
 

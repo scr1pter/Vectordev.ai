@@ -238,9 +238,7 @@ function checkLoops(run: Run, step: Step, sessionID: SessionID): { run: Run; ver
   const calls = step.tools.reduce<{ ring: readonly Sig[]; stale: readonly Sig[]; repeated?: Sig }>(
     (acc, item) => {
       const sig = { tool: item.tool, input: item.input, output: item.output, error: item.error }
-      const stale = acc.ring.some((other) => sameCall(other, sig))
-        ? [...acc.stale, sig].slice(-LOOP_WINDOW)
-        : [sig]
+      const stale = acc.ring.some((other) => sameCall(other, sig)) ? [...acc.stale, sig].slice(-LOOP_WINDOW) : [sig]
       return {
         ring: [...acc.ring, sig].slice(-LOOP_WINDOW),
         stale,
@@ -289,10 +287,7 @@ function checkLoops(run: Run, step: Step, sessionID: SessionID): { run: Run; ver
 
 function sameCall(left: Sig, right: Sig) {
   return (
-    left.tool === right.tool &&
-    left.input === right.input &&
-    left.output === right.output &&
-    left.error === right.error
+    left.tool === right.tool && left.input === right.input && left.output === right.output && left.error === right.error
   )
 }
 

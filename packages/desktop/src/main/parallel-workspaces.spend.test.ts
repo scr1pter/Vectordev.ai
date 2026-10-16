@@ -41,8 +41,13 @@ mock.module("./store", () => ({
   removeStoreFileIfEmpty: () => undefined,
 }))
 
-const { createParallelWorkspace, getParallelWorkspace, listParallelWorkspaces, runParallelWorkspace, sweepTeamOutboxes } =
-  await import("./parallel-workspaces")
+const {
+  createParallelWorkspace,
+  getParallelWorkspace,
+  listParallelWorkspaces,
+  runParallelWorkspace,
+  sweepTeamOutboxes,
+} = await import("./parallel-workspaces")
 const { addTeamMember, createAgentTeam, postTeamMessage } = await import("./agent-teams")
 const { spendLedger } = await import("./spend-limits")
 

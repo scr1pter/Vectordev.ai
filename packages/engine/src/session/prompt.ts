@@ -1268,7 +1268,8 @@ const layer = Layer.effect(
       if (!joined || result.info.id > message.info.id) return result
       if (
         result.info.role === "assistant" &&
-        (SessionV1.AbortedError.isInstance(result.info.error) || SessionV1.BudgetStopError.isInstance(result.info.error))
+        (SessionV1.AbortedError.isInstance(result.info.error) ||
+          SessionV1.BudgetStopError.isInstance(result.info.error))
       )
         return result
       // The prompt's budget went to the run it joined, which has ended, so the run that answers it gets it again.
@@ -1311,7 +1312,8 @@ const layer = Layer.effect(
         yield* guard.unlink(sessionID)
       }
       if (session.parentID && !session.internal) {
-        if ((yield* guard.rootOf(sessionID)) === sessionID) yield* guard.link(sessionID, (yield* rootSession(session)).id)
+        if ((yield* guard.rootOf(sessionID)) === sessionID)
+          yield* guard.link(sessionID, (yield* rootSession(session)).id)
         return yield* steps
       }
       yield* guard.begin(sessionID, (yield* config.get()).budget?.run)
