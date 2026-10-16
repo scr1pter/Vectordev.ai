@@ -45,6 +45,8 @@ import {
 import { InvalidRequestError, PermissionNotFoundError, notFound } from "../errors"
 import * as SessionError from "./session-errors"
 import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
+import { ForbiddenError } from "@vectordevai/protocol/errors"
+import { isHelperName } from "@vectordevai/core/session/helper"
 import { allowsSessionID, allowsSessionLocation } from "./session-access"
 
 const tryParseJson = (text: string) =>
@@ -178,6 +180,21 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const create = Effect.fn("SessionHttpApi.create")(function* (ctx: { payload?: Session.CreateInput }) {
+      const principal = yield* RequestPrincipal
+      const internal = ctx.payload?.internal
+      // A helper session is left out of every session list, so only the owner's own clients may start one. Anything
+      // a guest runs stays where the owner can see it.
+      if (internal !== undefined && principal.kind !== "owner")
+        return yield* new ForbiddenError({ message: "Only the server owner can start Vector's helper sessions" })
+      if (internal !== undefined && !isHelperName(internal))
+        return yield* new InvalidRequestError({
+          message: "internal must name one of Vector's helpers",
+          field: "internal",
+        })
+      // A child's spend counts towards its parent, so a guest may attach work only to a session it can open.
+      const parentID = ctx.payload?.parentID
+      if (parentID !== undefined && !(yield* allowsSessionID(session, principal, parentID)))
+        return yield* new ForbiddenError({ message: "Guest credential is not scoped to the parent session" })
       return yield* shareSvc.create(ctx.payload)
     })
 

@@ -414,6 +414,96 @@ test("guest session lists and replay routes stay within canonical claims", async
   }
 }, 30_000)
 
+test("guests cannot hide sessions from the owner or charge work to sessions they cannot open", async () => {
+  await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false, share: "disabled" } })
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
+  const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
+  // Server.listen prefers port 4096, so a pooled keep-alive socket from an earlier test's server could swallow a request.
+  const post = (route: string, headers: Record<string, string>, body: Record<string, unknown>) =>
+    fetch(new URL(`${route}?directory=${encodeURIComponent(tmp.path)}`, listener.url), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      keepalive: false,
+    })
+  const created = async (response: Response) => {
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as { id?: string; data?: { id: string } }
+    return body.data?.id ?? body.id!
+  }
+  try {
+    const allowedParent = await created(
+      await post("/api/session", owner, { location: { directory: tmp.path, workspaceID: "wrk_allowed" } }),
+    )
+    const ownerParent = await created(
+      await post("/api/session", owner, { location: { directory: tmp.path, workspaceID: "wrk_denied" } }),
+    )
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+    const location = { directory: tmp.path, workspaceID: "wrk_allowed" }
+
+    // A helper session is out of every list, so a guest may not start one under any name.
+    for (const internal of ["codespace.autocomplete", "vectorscope.review", "anything"]) {
+      expect((await post("/session", guest, { internal })).status).toBe(403)
+      expect((await post("/api/session", guest, { location, internal })).status).toBe(403)
+    }
+    // Its spend would count towards the parent, so the parent must be a session the guest can open.
+    expect((await post("/session", guest, { parentID: ownerParent })).status).toBe(403)
+    expect((await post("/api/session", guest, { location, parentID: ownerParent })).status).toBe(403)
+    expect((await post("/api/session", guest, { location, parentID: SessionV2.ID.create() })).status).toBe(403)
+    const guestChild = await created(await post("/session", guest, { parentID: allowedParent }))
+    const guestV2Child = await created(await post("/api/session", guest, { location, parentID: allowedParent }))
+
+    // The owner's own helpers still start, but only under the names of Vector's helpers.
+    const invalid = await post("/session", owner, { internal: "true" })
+    expect(invalid.status).toBe(400)
+    expect(await invalid.text()).toContain("internal must name one of Vector's helpers")
+    expect((await post("/api/session", owner, { internal: "true" })).status).toBe(400)
+    expect((await post("/api/session", owner, { internal: "Vectorscope review" })).status).toBe(400)
+    const helper = await created(
+      await post("/session", owner, { internal: "codespace.autocomplete", parentID: ownerParent }),
+    )
+    const v2Helper = await created(await post("/api/session", owner, { internal: "vectorscope.verify" }))
+
+    const listed = await fetch(new URL(`/session?directory=${encodeURIComponent(tmp.path)}`, listener.url), {
+      headers: owner,
+      keepalive: false,
+    })
+    const ids = ((await listed.json()) as Array<{ id: string }>).map((item) => item.id)
+    expect(ids).toEqual(expect.arrayContaining([allowedParent, ownerParent, guestChild, guestV2Child]))
+    expect(ids).not.toContain(helper)
+    expect(ids).not.toContain(v2Helper)
+  } finally {
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 30_000)
+
 test("guests cannot run host commands or answer permission requests", async () => {
   await using outside = await tmpdir()
   const secret = path.join(outside.path, "host-secret.bin")

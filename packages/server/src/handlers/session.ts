@@ -15,6 +15,7 @@ import {
   UnknownError,
 } from "@vectordevai/protocol/errors"
 import { AbsolutePath } from "@vectordevai/core/schema"
+import { isHelperName } from "@vectordevai/core/session/helper"
 import {
   allowsSession,
   guestWorkspaceDirectory,
@@ -34,6 +35,15 @@ function allowsSessionLocation(principal: Principal, item: SessionV2.Info) {
 export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handlers) =>
   Effect.gen(function* () {
     const session = yield* SessionV2.Service
+
+    // Whether the principal may open a session by its ID; a session that cannot be read is never allowed.
+    const allowsSessionID = (principal: Principal, sessionID: SessionV2.ID) =>
+      allowsSession(principal, sessionID)
+        ? Effect.succeed(true)
+        : session.get(sessionID).pipe(
+            Effect.map((item) => allowsSessionLocation(principal, item)),
+            Effect.catch(() => Effect.succeed(false)),
+          )
 
     return handlers
       .handle(
@@ -123,6 +133,20 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.create",
         Effect.fn(function* (ctx) {
           const principal = yield* RequestPrincipal
+          const internal = ctx.payload.internal
+          // A helper session is left out of every session list, so only the owner's own clients may start one.
+          // Anything a guest runs stays where the owner can see it.
+          if (internal !== undefined && principal.kind !== "owner")
+            return yield* new ForbiddenError({ message: "Only the server owner can start Vector's helper sessions" })
+          if (internal !== undefined && !isHelperName(internal))
+            return yield* new InvalidRequestError({
+              message: "internal must name one of Vector's helpers",
+              field: "internal",
+            })
+          // A child's spend counts towards its parent, so a guest may attach work only to a session it can open.
+          const parentID = ctx.payload.parentID
+          if (parentID !== undefined && !(yield* allowsSessionID(principal, parentID)))
+            return yield* new ForbiddenError({ message: "Guest credential is not scoped to the parent session" })
           const requested = ctx.payload.location ?? { directory: AbsolutePath.make(process.cwd()) }
           const guestDirectory = guestWorkspaceDirectory(principal, requested.workspaceID)
           if (principal.kind === "guest" && guestDirectory === undefined)
@@ -138,8 +162,8 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
               model: ctx.payload.model,
               location,
               title: ctx.payload.title,
-              parentID: ctx.payload.parentID,
-              internal: ctx.payload.internal,
+              parentID,
+              internal,
             }),
           }
         }),
@@ -149,12 +173,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         Effect.fn(function* () {
           const principal = yield* RequestPrincipal
           const allowed = yield* Effect.filter(Array.from(yield* session.active), (sessionID) =>
-            allowsSession(principal, sessionID)
-              ? Effect.succeed(true)
-              : session.get(sessionID).pipe(
-                  Effect.map((item) => allowsSessionLocation(principal, item)),
-                  Effect.catch(() => Effect.succeed(false)),
-                ),
+            allowsSessionID(principal, sessionID),
           )
           return {
             data: Object.fromEntries(allowed.map((sessionID) => [sessionID, { type: "running" as const }])),
