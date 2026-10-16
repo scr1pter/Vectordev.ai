@@ -112,22 +112,27 @@ const face = [
 
 <style>
   /* The same frame as the hero's window always had. It is also the container
-     the stage measures itself against. */
+     the stage measures itself against.
+     The glass sits on an opaque underlay rather than a live backdrop blur: the
+     screen covers all but the frame and title bar, and there a 28px blur of the
+     dark page came out as one even colour, the one below. A live blur cost a GPU
+     pass on every frame the glyph field moved behind it. Isolation keeps the
+     window painted above the dark pool under the copy, as the blur's stacking
+     context did. */
   .shot-window {
     container: shot-window / inline-size;
+    isolation: isolate;
     margin: 0;
     overflow: hidden;
     padding: 7px;
     border: 1px solid rgba(235, 228, 255, 0.22);
     border-radius: 28px;
     outline: none;
-    background: var(--glass-fill-strong);
+    background: var(--glass-fill-strong), rgb(10 6.8 18.2);
     box-shadow:
       0 40px 120px rgba(0, 0, 0, 0.66),
       0 0 80px rgba(132, 86, 219, 0.12),
       inset 0 1px 0 rgba(255, 255, 255, 0.13);
-    -webkit-backdrop-filter: blur(28px) saturate(145%);
-    backdrop-filter: blur(28px) saturate(145%);
   }
 
   .shot-bar {
