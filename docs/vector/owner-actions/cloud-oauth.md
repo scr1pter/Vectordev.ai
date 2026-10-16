@@ -47,20 +47,24 @@ Vercel calls this a *connectable account integration*. Each sign-in installs it 
    | Webhook URL | Leave empty; Vector uses no webhooks |
    | Configuration URL | Leave empty |
 
-4. Under **API Scopes**, set exactly these. Anything not listed stays `None`.
+4. Under **Permissions** (called **API Scopes** in older consoles), set exactly these. These are the endpoints Vector's code calls (`packages/desktop/src/main/cloud-vercel-*.ts`, `cloud-connections.ts`, `cloud-provider-token.ts`, and the Vercel CLI that publishes). Anything not listed stays `None`.
 
-   | Scope | Level | Used for |
+   | Permission (scope ID) | Level | Endpoints Vector calls |
    | --- | --- | --- |
-   | `user` | Read | Account identity (`/v2/user`) |
-   | `team` | Read | The installed team's name (`/v2/teams`) |
-   | `project` | Read/Write | List, create, link and configure projects; promote, roll back; Protection Bypass for Automation; project domains |
-   | `deployment` | Read/Write | Deployment history, build events and runtime logs; publish, redeploy and cancel |
-   | `domain` | Read/Write | DNS configuration, verification and certificates. Vercel requires both `project` and `domain` write to change a project's domains. |
-   | `project-env-vars` | Read/Write | Variables Vector creates |
-   | `global-project-env-vars` | Read/Write | Variables created outside Vector, which Environment variables lists, compares, syncs and pulls |
-   | `integration-configuration` | Read/Write | Disconnect deletes Vector's installation, which revokes its token |
+   | Current User (`user`) | Read | `GET /v2/user`: account identity |
+   | Teams (`team`) | Read | `GET /v2/teams`, `GET /v2/teams/{teamId}`: the installed team's name |
+   | Projects (`project`) | Read/Write | `GET /v10/projects`, `POST /v11/projects`, `GET` and `PATCH /v9/projects/{id}`: list, create, link and configure projects. `POST /v10/projects/{id}/promote/{deploymentId}` and `POST /v1/projects/{id}/rollback/{deploymentId}`: Promote and Roll back. `GET`, `POST /v10` and `DELETE /v9/projects/{id}/domains…`: project domains |
+   | Project Protection Bypass | Read/Write | `PATCH /v1/projects/{id}/protection-bypass`: the **Protection Bypass for Automation** switch, which creates the secret Vector's release checks use to open protected deployments |
+   | Deployments (`deployment`) | Read/Write | `GET /v6/deployments`, `GET /v13/deployments/{id}`, `GET /v3/deployments/{id}/events`, `GET /v2/deployments/{id}/aliases` and `GET /v1/projects/{id}/deployments/{id}/runtime-logs`: history, build events and runtime logs. `POST /v13/deployments` and `PATCH /v12/deployments/{id}/cancel`: Redeploy and cancel. `vercel deploy` (file upload and deployment): publish |
+   | Project Environment Variables (`project-env-vars`) | Read/Write | `/v10/projects/{id}/env` and `/v9/projects/{id}/env/{envId}`: variables Vector creates |
+   | Global Project Environment Variables (`global-project-env-vars`) | Read/Write | The same endpoints for variables created outside Vector, which Environment variables lists, compares, syncs and pulls |
+   | Domains (`domain`) | Read/Write | `GET /v6/domains/{domain}/config`: DNS configuration. `POST /v9/projects/{id}/domains/{domain}/verify`: verification. Vercel requires both Projects and Domains write to change a project's domains |
+   | Integration Configuration (`integration-configuration`) | Read/Write | `DELETE /v1/integrations/configuration/{id}`: **Disconnect** deletes Vector's installation, which revokes its token |
+   | Deployment Checks (`deployment-check`) | None | Vector runs its own release checks and calls none of Vercel's Checks endpoints |
 
-   Vercel's scope table does not name the runtime-logs endpoint. Treat the **Logs** check in the verification below as the proof that `deployment` covers it.
+   Vercel's permission list for its newer tokens names **Project Protection Bypass** (Read and Write, "Manage project protection bypass rules") as a permission of its own, separate from Projects, and its older integration scope table lists the protection-bypass endpoint under no scope ([Scopes and Permissions](https://vercel.com/docs/sign-in-with-vercel/scopes-and-permissions), [integration scopes](https://vercel.com/docs/integrations/create-integration/vercel-api-integrations#scopes), both read 2026-10-16). Set it wherever the console offers it. Vercel's integration scope table also does not name the promote, rollback or runtime-logs endpoints; treat the **Promote**, **Roll back** and **Logs** checks in the verification below as the proof that Projects and Deployments cover them.
+
+   The owner's integration was set on 2026-10-16 to Deployments, Projects, Project Environment Variables, Global Project Environment Variables and Domains at Read/Write, Teams and Current User at Read, and Deployment Checks at None. That matches this table except for two lines: add **Project Protection Bypass: Read/Write**, or the Protection Bypass for Automation switch is refused, and **Integration Configuration: Read/Write**, or Disconnect cannot remove the installation (Vector then says Vercel did not confirm the revocation, and the installation has to be removed from the team's Integrations page).
 
 5. Accept the Vercel Integrations Marketplace Agreement and save. The integration gets the Community badge. Anyone can then install it from Vector without a marketplace listing.
 6. Copy the client (integration) ID and client secret from the integration's settings page (**Credentials**, at the bottom) into the variables in section 3.
@@ -71,21 +75,22 @@ If you add a scope to an integration that is already installed, every installati
 
 1. Open **OAuth Apps** in the settings of the Supabase organization that will own the app: `https://supabase.com/dashboard/org/_/apps`. Choose **Add application**.
 2. Enter Vector's name, website (`https://vectordev.ai`) and icon. Set the **redirect (callback) URL** to `https://vectordev.ai/api/cloud/oauth/callback-supabase`.
-3. Scopes are set on the app; Vector does not send a `scope` parameter. Enable:
+3. Scopes are set on the app; Vector does not send a `scope` parameter. Enable exactly these, which are what Vector's code calls (`packages/desktop/src/main/cloud-supabase-*.ts`, `cloud-migrations.ts`, `cloud-provision.ts`, `cloud-connections.ts` and `cloud-provider-token.ts`). Anything not listed stays off.
 
-   | Scope | Level | Used for |
+   | Scope | Level | Endpoints Vector calls |
    | --- | --- | --- |
-   | Organizations | Read | Account identity and choosing where to create a project |
-   | Projects | Read and Write | List, create, pause and restore projects; reset the database password |
-   | Database | Read and Write | SQL console, migrations, pooler settings for `DATABASE_URL`, schema types |
-   | Auth | Read and Write | Site URL, redirect URLs, email and Google, GitHub or Apple sign-in |
-   | Secrets | Read and Write | Project API keys (the public key for `.env`; the server key, kept in memory only, for users and buckets) and Edge Function secrets |
-   | Edge Functions | Read and Write | Deploy, list and delete functions |
-   | Storage | Read | Bucket discovery |
+   | Organizations | Read | `GET /v1/organizations`: account identity and choosing where to create a project |
+   | Projects | Read and Write | `GET /v1/projects`, `GET /v1/projects/{ref}` and `POST /v1/projects`: list, read and create projects. `POST …/pause` and `POST …/restore`: pause and restore. `PATCH …/database/password`: reset the database password |
+   | Database | Read and Write | `POST …/database/query`: SQL console, migrations and schema reads. `GET …/config/database/pooler`: the pooler settings for `DATABASE_URL` |
+   | Auth | Read and Write | `GET` and `PATCH …/config/auth`: Site URL, redirect URLs, email and Google, GitHub or Apple sign-in |
+   | Secrets | Read and Write | `GET …/api-keys?reveal=true`: the public key for `.env` and the server key, kept in memory only, for users and buckets. `GET`, `POST` and `DELETE …/secrets`: Edge Function secrets |
+   | Edge Functions | Read and Write | `GET …/functions`, `POST …/functions/deploy` and `DELETE …/functions/{slug}`: list, deploy and delete functions |
 
-   Supabase's scope list gives Organizations no write level (read 2026-10-15), so an OAuth app cannot create an organization. That is expected: a sign-in is always authorized for one organization. **Create organization** in Database, and the agent's `create_organization`, only appear for an account with no organization, which only an access-token connection can be.
+   Storage needs no scope: buckets are listed and changed through the project's own Storage API with the server key from Secrets, not through the Management API. Domains, Environment (branches) and Rest are not used.
 
-   Supabase's [scope list](https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration/oauth-scopes) does not name the logs endpoint (`/analytics/endpoints/logs`) or the security advisors (`/advisors/security`). If the form offers an Analytics or Advisors read scope, enable it. Either way, check **Database logs** and **Security** after connecting. When the advisors are not allowed, Security skips them and asks the user to reconnect.
+   Supabase's scope list gives Organizations no write level (read 2026-10-15), so an OAuth app cannot create an organization. That is expected: a sign-in is always authorized for one organization. **Create organization** in Database, and the agent's `create_organization` (`POST /v1/organizations`), only appear for an account with no organization, which only an access-token connection can be.
+
+   Supabase's [scope list](https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration/oauth-scopes) does not name pause, restore, the database password, the logs endpoint (`…/analytics/endpoints/logs`) or the security advisors (`…/advisors/security`) (read 2026-10-16). If the form offers an Analytics or Advisors read scope, enable it. Either way, check pause and restore, **Database logs** and **Security** after connecting. When the advisors are not allowed, Security skips them and asks the user to reconnect.
 
 4. Save the app. Copy its client ID and client secret into section 3. If the dashboard shows a publish or visibility control for the app, publish it so other organizations can authorize it.
 
@@ -121,6 +126,6 @@ Use disposable Vercel and Supabase projects and an installed desktop build. Reco
 - **Sign-in:** in Connections, **Connect Vercel**. On Vercel's screen, choose a test team. Vector must return as signed in, and the team picker must show only that team. Then **Connect Supabase**. A canceled sign-in must leave the earlier connection working.
 - **Token path:** **Use access token** must still connect each provider while sign-in is offered.
 - **Disconnect:** disconnect Vercel. Vector must say its access is revoked, and the installation must be gone from the team's Integrations page on Vercel. Disconnect Supabase. Vector must say its access is revoked, and the app must be gone from the organization's authorized apps.
-- **Vercel controls:** link a project and check that its deployment history appears. Check build and runtime logs, Redeploy, Promote and Roll back (failed required checks must stop a promotion), an environment variable change through its sync plan, a domain with its DNS records, and project settings. Stored secret values must not appear in agent replies, checks or logs.
-- **Supabase controls:** link an existing project. Check a read-only SQL query, a new migration written from Database and applied after reviewing its SQL, Auth settings, storage limits, Database logs and Security.
+- **Vercel controls:** link a project and check that its deployment history appears. Check build and runtime logs, Redeploy, Promote and Roll back (failed required checks must stop a promotion), an environment variable change through its sync plan, a domain with its DNS records, project settings, and the Protection Bypass for Automation switch. Stored secret values must not appear in agent replies, checks or logs.
+- **Supabase controls:** link an existing project. Check pause and restore, a read-only SQL query, a new migration written from Database and applied after reviewing its SQL, Auth settings, storage limits, Database logs and Security.
 - **Agent permissions:** with auto-accept on, ask the agent for a preview publish, a database change, an environment sync, a hosting change and a release-settings change. Each must show a prompt every time, with no Always allow, and rejecting it must change nothing. Only the migration dry run may run without a prompt.
