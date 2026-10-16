@@ -125,15 +125,14 @@ describe("ProviderTransform.options - setCacheKey", () => {
 })
 
 describe("ProviderTransform.reasoningContextBody", () => {
-  const openai = (id: string, npm = "@ai-sdk/openai") =>
-    ({ id, providerID: "openai", api: { id, url: "https://api.openai.com", npm } }) as any
-  const body = JSON.stringify({ model: "gpt-6.1-sol", input: [], reasoning: { effort: "medium", summary: "auto" } })
+  const body = (model: string) =>
+    JSON.stringify({ model, input: [], reasoning: { effort: "medium", summary: "auto" } })
 
   test("sets the documented field on a reasoning request to the GPT-5.6 family and GPT-6.1 Sol", () => {
     for (const id of ["gpt-6.1-sol", "openai/gpt-6.1-sol", "gpt-5.6", "gpt-5.6-terra", "gpt-5.6-codex"]) {
-      const sent = ProviderTransform.reasoningContextBody(openai(id), "all_turns", body)
+      const sent = ProviderTransform.reasoningContextBody("@ai-sdk/openai", "all_turns", body(id))
       expect(JSON.parse(sent!)).toEqual({
-        model: "gpt-6.1-sol",
+        model: id,
         input: [],
         reasoning: { effort: "medium", summary: "auto", context: "all_turns" },
       })
@@ -141,17 +140,26 @@ describe("ProviderTransform.reasoningContextBody", () => {
   })
 
   test("leaves the body alone without the flag, on an undocumented model, off the Responses SDK or without reasoning", () => {
-    expect(ProviderTransform.reasoningContextBody(openai("gpt-6.1-sol"), undefined, body)).toBeUndefined()
+    expect(ProviderTransform.reasoningContextBody("@ai-sdk/openai", undefined, body("gpt-6.1-sol"))).toBeUndefined()
     for (const id of ["gpt-5.5", "gpt-5.60", "gpt-4o", "gpt-6-astra", "gpt-6.1-luna", "gpt-6.2-sol"])
-      expect(ProviderTransform.reasoningContextBody(openai(id), "all_turns", body)).toBeUndefined()
+      expect(ProviderTransform.reasoningContextBody("@ai-sdk/openai", "all_turns", body(id))).toBeUndefined()
+    expect(ProviderTransform.reasoningContextBody("@ai-sdk/azure", "all_turns", body("gpt-6.1-sol"))).toBeUndefined()
     expect(
-      ProviderTransform.reasoningContextBody(openai("gpt-6.1-sol", "@ai-sdk/azure"), "all_turns", body),
+      ProviderTransform.reasoningContextBody(
+        "@ai-sdk/openai",
+        "all_turns",
+        JSON.stringify({ input: [], reasoning: { effort: "medium" } }),
+      ),
     ).toBeUndefined()
     expect(
-      ProviderTransform.reasoningContextBody(openai("gpt-6.1-sol"), "all_turns", JSON.stringify({ input: [] })),
+      ProviderTransform.reasoningContextBody(
+        "@ai-sdk/openai",
+        "all_turns",
+        JSON.stringify({ model: "gpt-6.1-sol", input: [] }),
+      ),
     ).toBeUndefined()
-    expect(ProviderTransform.reasoningContextBody(openai("gpt-6.1-sol"), "all_turns", "not json")).toBeUndefined()
-    expect(ProviderTransform.reasoningContextBody(openai("gpt-6.1-sol"), "all_turns", undefined)).toBeUndefined()
+    expect(ProviderTransform.reasoningContextBody("@ai-sdk/openai", "all_turns", "not json")).toBeUndefined()
+    expect(ProviderTransform.reasoningContextBody("@ai-sdk/openai", "all_turns", undefined)).toBeUndefined()
   })
 })
 

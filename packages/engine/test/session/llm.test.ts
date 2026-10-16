@@ -1118,6 +1118,80 @@ describe("session.llm.stream", () => {
     },
   )
 
+  // Every model on one provider shares the SDK, and its fetch, that the first model resolved built.
+  for (const order of [
+    ["gpt-5.5", "gpt-6.1-sol"],
+    ["gpt-6.1-sol", "gpt-5.5"],
+  ]) {
+    itReasoningContext.instance(
+      `decides reasoning.context by each request's model when ${order[0]} builds the shared OpenAI SDK`,
+      () =>
+        Effect.gen(function* () {
+          const sent = yield* Effect.forEach(order, (id) =>
+            Effect.gen(function* () {
+              const request = waitRequest(
+                "/responses",
+                createEventResponse([
+                  {
+                    type: "response.created",
+                    response: { id: `resp-${id}`, created_at: 1, model: id, service_tier: null },
+                  },
+                  {
+                    type: "response.completed",
+                    response: {
+                      incomplete_details: null,
+                      service_tier: null,
+                      usage: { input_tokens: 10, output_tokens: 1 },
+                    },
+                  },
+                ]),
+              )
+              const resolved = yield* Provider.use.getModel(ProviderV2.ID.openai, ModelV2.ID.make(id))
+              const sessionID = SessionID.make(`session-reasoning-context-${id}`)
+              const agent = { name: "test", mode: "primary", options: {}, permission: [] } satisfies Agent.Info
+              yield* LLM.Service.use((svc) =>
+                svc
+                  .stream({
+                    user: {
+                      id: MessageID.make(`msg_reasoning-context-${id}`),
+                      sessionID,
+                      role: "user",
+                      time: { created: 1 },
+                      agent: agent.name,
+                      model: { providerID: ProviderV2.ID.openai, modelID: resolved.id },
+                    },
+                    sessionID,
+                    model: resolved,
+                    agent,
+                    system: ["Test"],
+                    messages: [{ role: "user", content: "Hello" }],
+                    tools: {},
+                  })
+                  .pipe(Stream.runDrain),
+              )
+              return (yield* Effect.promise(() => request)).body
+            }),
+          )
+          expect(Object.fromEntries(sent.map((body) => [body.model, body.reasoning]))).toEqual({
+            "gpt-5.5": { effort: "medium", summary: "auto" },
+            "gpt-6.1-sol": { effort: "medium", summary: "auto", context: "all_turns" },
+          })
+        }),
+      {
+        trusted: true,
+        config: () => {
+          const config = openAIConfig(
+            { ...loadFixture("openai", "gpt-5.2").model, id: "gpt-6.1-sol" },
+            `${state.server!.url.origin}/v1`,
+          )
+          const models = config.provider!.openai.models!
+          models["gpt-5.5"] = { ...models["gpt-6.1-sol"], id: "gpt-5.5" }
+          return config
+        },
+      },
+    )
+  }
+
   const vivgridFixture = { providerID: "vivgrid", modelID: "gemini-3.1-pro-preview" }
   it.instance(
     "sends temperature, tokens, and reasoning options for openai-compatible models",

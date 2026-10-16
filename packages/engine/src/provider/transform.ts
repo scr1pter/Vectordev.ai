@@ -1279,18 +1279,21 @@ export function options(input: {
  * The bundled SDK has no option for it, so the opt-in VECTOR_EXPERIMENTAL_REASONING_CONTEXT flag sets it on the
  * serialized body, HTTP and WebSocket alike, for those models only, until a measured comparison shows whether it
  * should be the default.
+ *
+ * The model comes from the body's own `model` field, never from the model that built the SDK: every model on a
+ * provider shares one cached SDK and its fetch, so that model is only the first one resolved.
  */
 export function reasoningContextBody(
-  model: Provider.Model,
+  npm: string,
   context: RuntimeFlags.Info["experimentalReasoningContext"],
   body: unknown,
 ) {
-  if (!context || model.api.npm !== "@ai-sdk/openai") return
-  if (!/(?:^|\/)gpt-(?:5\.6|6\.1-sol)(?:-|$)/.test(model.api.id)) return
+  if (!context || npm !== "@ai-sdk/openai") return
   if (typeof body !== "string") return
   const parsed = Option.getOrUndefined(decodeJson(body))
   // Only a reasoning request carries the object; one without it is not a request the field applies to.
-  if (!isRecord(parsed) || !isRecord(parsed.reasoning)) return
+  if (!isRecord(parsed) || !isRecord(parsed.reasoning) || typeof parsed.model !== "string") return
+  if (!/(?:^|\/)gpt-(?:5\.6|6\.1-sol)(?:-|$)/.test(parsed.model)) return
   return JSON.stringify({ ...parsed, reasoning: { ...parsed.reasoning, context } })
 }
 

@@ -2089,7 +2089,7 @@ const layer = Layer.effect(
           const fetchFn = customFetch ?? fetch
           const opts = { ...init }
           const body = ProviderTransform.reasoningContextBody(
-            model,
+            model.api.npm,
             runtimeFlags.experimentalReasoningContext,
             init?.body,
           )
