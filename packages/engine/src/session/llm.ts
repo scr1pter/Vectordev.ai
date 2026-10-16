@@ -249,12 +249,11 @@ const live: Layer.Layer<
       }
 
       // The OpenTelemetry tracer package loads only when the experimental exporter is configured.
-      const tracer = cfg.experimental?.openTelemetry
-        ? yield* Effect.promise(() => import("@effect/opentelemetry/Tracer")).pipe(
-            Effect.flatMap((otel) => Effect.serviceOption(otel.OtelTracer)),
-            Effect.map(Option.getOrUndefined),
-          )
-        : undefined
+      const tracer = yield* Effect.gen(function* () {
+        if (!cfg.experimental?.openTelemetry) return undefined
+        const { OtelTracer } = yield* Effect.promise(() => import("@effect/opentelemetry/Tracer"))
+        return Option.getOrUndefined(yield* Effect.serviceOption(OtelTracer))
+      })
       const telemetryTracer = tracer
         ? new Proxy(tracer, {
             get(target, prop, receiver) {
