@@ -440,6 +440,15 @@ export function plan(input: { slug: string; time: { created: number } }, instanc
   return path.join(base, [input.time.created, input.slug].join("-") + ".md")
 }
 
+// The rates a request carrying `contextTokens` of context is billed at: the highest long-context tier it passes, else
+// the base rates.
+export const costAt = (cost: Provider.Model["cost"] | undefined, contextTokens: number) =>
+  cost?.tiers
+    ?.filter((item) => item.tier.type === "context" && contextTokens > item.tier.size)
+    .sort((a, b) => b.tier.size - a.tier.size)[0] ??
+  // experimentalOver200K is models.dev's 200K stand-in for the exact tiers, so it applies only without them.
+  (cost?.experimentalOver200K && !cost.tiers?.length && contextTokens > 200_000 ? cost.experimentalOver200K : cost)
+
 export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?: ProviderMetadata }) => {
   const safe = (value: number) => {
     if (!Number.isFinite(value)) return 0
@@ -483,15 +492,7 @@ export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?
     },
   }
 
-  const contextTokens = inputTokens
-  const costInfo =
-    input.model.cost?.tiers
-      ?.filter((item) => item.tier.type === "context" && contextTokens > item.tier.size)
-      .sort((a, b) => b.tier.size - a.tier.size)[0] ??
-    // experimentalOver200K is models.dev's 200K stand-in for the exact tiers, so it applies only without them.
-    (input.model.cost?.experimentalOver200K && !input.model.cost.tiers?.length && contextTokens > 200_000
-      ? input.model.cost.experimentalOver200K
-      : input.model.cost)
+  const costInfo = costAt(input.model.cost, inputTokens)
   const totalNanoAiu = input.metadata?.["copilot"]?.["totalNanoAiu"]
   // OpenRouter reports what it billed for each step. A model the catalog lists no price for, as an OpenRouter model
   // added by hand often is, takes that amount instead of reading as unpriced.

@@ -4317,6 +4317,50 @@ it.instance(
   30_000,
 )
 
+it.instance(
+  "run guard predicts the next step at the long-context rate its context will be billed at",
+  () =>
+    Effect.gen(function* () {
+      // Turn one sends 198k tokens at $1/M, $0.198. The next step carries 201k, past the 200K tier, where input costs
+      // $10/M: $2.01 against a $1.00 cap. At the base rate it would be $0.20 and the run would go on. Compaction is
+      // off, since by default a session compacts before it crosses a price tier.
+      const { llm } = yield* useServerConfig((url) => {
+        const base = pricedCfg({ input: 1, output: 0 })(url)
+        const model = base.provider.lmstudio.models["test-model"]
+        return {
+          ...base,
+          compaction: { auto: false },
+          provider: {
+            ...base.provider,
+            lmstudio: {
+              ...base.provider.lmstudio,
+              models: {
+                "test-model": {
+                  ...model,
+                  limit: { context: 1_000_000, output: 10_000 },
+                  cost: { input: 1, output: 0, context_over_200k: { input: 10, output: 0 } },
+                },
+              },
+            },
+          },
+        }
+      })
+      const prompt = yield* SessionPrompt.Service
+      const chat = yield* guardedChat({ usd: 1 })
+      yield* llm.push(reply().tool("first", { value: 1 }).usage({ input: 198_000, output: 0 }))
+      yield* llm.text("never requested")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+
+      const stop = budgetStop(result.info)
+      expect(stop?.reason).toBe("predicted")
+      expect(stop?.spentUsd).toBeCloseTo(0.198, 6)
+      expect(stop?.estimate?.lowUsd).toBeCloseTo(2.01, 6)
+      expect(yield* llm.pending).toBe(1)
+    }),
+  60_000,
+)
+
 unix(
   "run guard pauses the same bash call repeated across turns",
   () =>

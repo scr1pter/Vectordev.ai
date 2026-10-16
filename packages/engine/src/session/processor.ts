@@ -30,6 +30,7 @@ import { Usage, type LLMEvent } from "@vectordevai/llm"
 import { EffectBridge } from "@/effect/bridge"
 import { NativePatch } from "./llm/native-patch"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { NEXT_STEP_SLACK } from "@vectordevai/core/review/plan"
 import { providerCredentialAllowed, providerUsable } from "@vectordevai/core/provider-policy"
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { Auth } from "@/auth"
@@ -177,7 +178,6 @@ const layer = Layer.effect(
         ),
         Effect.forkIn(scope),
       )
-      const price = SpendGuard.priceOf(input.model.cost)
       const ctx: ProcessorContext = {
         assistantMessage: input.assistantMessage,
         sessionID: input.sessionID,
@@ -338,14 +338,17 @@ const layer = Layer.effect(
         const tools = ctx.stepTools
         ctx.stepTools = []
         const kind = (yield* result(costKind)) ?? "unknown"
+        const contextTokens = step.tokens.input + step.tokens.cache.read + step.tokens.cache.write
+        // The next step is estimated at the rates its context will be billed at, a long-context tier included.
+        const rates = Session.costAt(input.model.cost, contextTokens + NEXT_STEP_SLACK)
         const verdict = yield* guard.record(
           ctx.sessionID,
           {
             costUsd: step.costUsd,
             // A model the catalog lists no price for is still priced when its provider reported what the step cost.
             costKind: kind === "unknown" && step.costUsd > 0 && !step.unpriced ? "priced" : kind,
-            price,
-            contextTokens: step.tokens.input + step.tokens.cache.read + step.tokens.cache.write,
+            price: rates && SpendGuard.priceOf(rates),
+            contextTokens,
             cachedTokens: step.tokens.cache.read,
             continues: step.continues,
             tools: (yield* config.get()).budget?.loop?.enabled === false ? [] : tools,

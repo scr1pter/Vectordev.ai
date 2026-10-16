@@ -20,6 +20,7 @@ import { ProviderV2 } from "../../provider"
 import { SessionSchema } from "../schema"
 import { WorkspaceTrust } from "../../workspace-trust/workspace-trust"
 import { SpendGuard } from "../../spend-guard"
+import { NEXT_STEP_SLACK } from "../../review/plan"
 import { isFreeModel } from "@vectordevai/schema/free-model"
 
 export class ModelNotSelectedError extends Schema.TaggedErrorClass<ModelNotSelectedError>()(
@@ -132,10 +133,22 @@ export const contextTier = (model: Model) => {
   return sizes.length ? Math.min(...sizes) : undefined
 }
 
-// The catalog's base (untiered) rates, which the spend guard uses to estimate the next step.
-export const priceOf = (model: Model) => {
-  const cost = pricing.get(model)?.find((item) => item.tier === undefined)
+// The rates the spend guard estimates the next step at: those a request carrying `contextTokens` is billed at.
+export const priceOf = (model: Model, contextTokens: number) => {
+  const cost = costAt(model, contextTokens)
   return cost ? SpendGuard.priceOf(cost) : undefined
+}
+
+// The rates a request carrying `contextTokens` of context is billed at: the highest long-context tier it passes, else
+// the base rates.
+const costAt = (model: Model, contextTokens: number) => {
+  const costs = pricing.get(model) ?? []
+  return (
+    costs
+      .filter((item) => item.tier?.type === "context" && contextTokens > item.tier.size)
+      .sort((left, right) => (right.tier?.size ?? 0) - (left.tier?.size ?? 0))[0] ??
+    costs.find((item) => item.tier === undefined)
+  )
 }
 
 // Free models are exempt from the spend guard's dollar checks. An unpriced model is never free; a free-route one is.
@@ -157,7 +170,8 @@ export const spendStep = (
   step: { readonly continues: boolean; readonly patched: boolean },
 ): SpendGuard.Step => {
   const costUsd = calculateCost(model, settlement.tokens, settlement.providerMetadata)
-  const price = priceOf(model)
+  const contextTokens = settlement.tokens.input + settlement.tokens.cache.read + settlement.tokens.cache.write
+  const price = priceOf(model, contextTokens + NEXT_STEP_SLACK)
   return {
     costUsd,
     costKind: SpendGuard.costKindOf({
@@ -168,7 +182,7 @@ export const spendStep = (
         reportedUsd(model, settlement.providerMetadata) !== undefined || (costUsd !== undefined && price !== undefined),
     }),
     price,
-    contextTokens: settlement.tokens.input + settlement.tokens.cache.read + settlement.tokens.cache.write,
+    contextTokens,
     cachedTokens: settlement.tokens.cache.read,
     continues: step.continues,
     // V2 does not collect loop signatures yet.
@@ -181,14 +195,7 @@ export const calculateCost = (model: Model, tokens: Tokens, metadata?: ProviderM
   const reported = reportedUsd(model, metadata)
   if (reported !== undefined) return reported
 
-  const costs = pricing.get(model)
-  if (!costs?.length) return undefined
-  const context = tokens.input + tokens.cache.read + tokens.cache.write
-  const selected =
-    costs
-      .filter((item) => item.tier?.type === "context" && context > item.tier.size)
-      .sort((left, right) => (right.tier?.size ?? 0) - (left.tier?.size ?? 0))[0] ??
-    costs.find((item) => item.tier === undefined)
+  const selected = costAt(model, tokens.input + tokens.cache.read + tokens.cache.write)
   if (!selected) return undefined
   const cost =
     (tokens.input * selected.input +

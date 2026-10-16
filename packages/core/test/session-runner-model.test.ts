@@ -107,6 +107,31 @@ describe("SessionRunnerModel", () => {
     }),
   )
 
+  it.effect("prices the spend guard's next step at the tier its context will be billed at", () =>
+    Effect.gen(function* () {
+      const resolved = yield* SessionRunnerModel.fromCatalogModel(
+        ModelV2.Info.make({
+          ...model({ type: "aisdk", package: "@ai-sdk/openai", url: "https://openai.example/v1" }),
+          cost: [
+            { input: 1, output: 2, cache: { read: 0.1, write: 0.5 } },
+            { tier: { type: "context", size: 200_000 }, input: 3, output: 4, cache: { read: 0.3, write: 1.5 } },
+          ],
+        }),
+      )
+      const step = (input: number) =>
+        SessionRunnerModel.spendStep(
+          resolved,
+          { tokens: { input, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+          { continues: true, patched: false },
+        )
+
+      // 198k of context bills at the base rate, but the next step, 3k larger, crosses the 200K tier.
+      expect(step(150_000).price).toEqual({ input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.5 })
+      expect(step(198_000).price).toEqual({ input: 3, output: 4, cacheRead: 0.3, cacheWrite: 1.5 })
+      expect(step(198_000).costUsd).toBeCloseTo(0.198)
+    }),
+  )
+
   it.effect("distinguishes unknown pricing from known free pricing and honors billed Copilot usage", () =>
     Effect.gen(function* () {
       const unpriced = yield* SessionRunnerModel.fromCatalogModel(
