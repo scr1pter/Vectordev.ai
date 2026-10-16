@@ -10,7 +10,6 @@ Dependencies:
   - `packages/web/src/assets/lander/vector-workspaces-current.png`  (workspaces stage)
   - `packages/web/src/assets/lander/vector-browser-current.png`  (browser feature stage)
   - `packages/web/src/assets/lander/vector-editor-current.png`  (codespace duo card)
-  - `packages/web/src/assets/lander/vector-cloud-current.png`  (cloud duo card)
 - `packages/web/src/components/marketing/MarketingLayout.astro`  (html shell + global tokens)
 
 Context-selection note: `Lander.astro` is over the ~900-line threshold — line-range it: template/markup is roughly the first ~640 lines; design tokens sit at the top of the `<style>` block; per-section styles follow in labeled `/* ===== Section ===== */` groups.
