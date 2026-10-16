@@ -92,6 +92,8 @@ describe("account model plans", () => {
   })
 
   test("each offer shows typical tasks on the default model, never credits or token estimates", () => {
+    // As an older config answer carried it. 4321 is a made-up figure, not a real allowance.
+    const allowance = { credits: 4321 }
     const html = renderToStaticMarkup(
       createElement(ModelPlans, {
         accessToken: "",
@@ -100,7 +102,9 @@ describe("account model plans", () => {
             ...config,
             enabled: false,
             product: "Vector Codium",
-            plans: [{ ...config.plans[0]!, name: "Codium 10", available: false, tasks: [[60, 550], null] }],
+            plans: [
+              { ...config.plans[0]!, ...allowance, name: "Codium 10", available: false, tasks: [[60, 550], null] },
+            ],
             topups: [
               { id: "codium-topup-10", name: "Codium 10 top-up", price: 10, available: false, tasks: [[60, 550]] },
             ],
@@ -126,7 +130,7 @@ describe("account model plans", () => {
     expect(html).toContain("not a guarantee")
     expect(html).toContain('href="/legal/terms#codium"')
     expect(html).toContain("Cancel any time")
-    for (const leak of ["Codium credits /", "800", "tokens", "80% input", "markup"]) expect(html).not.toContain(leak)
+    for (const leak of ["Codium credits /", "4321", "tokens", "80% input", "markup"]) expect(html).not.toContain(leak)
   })
 
   test("monthly and purchased balances remain distinct, including unknown purchased usage", () => {
