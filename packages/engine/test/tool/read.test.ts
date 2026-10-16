@@ -2,6 +2,7 @@ import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { afterEach, describe, expect } from "bun:test"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Cause, Effect, Exit, Layer, Stream } from "effect"
+import fs from "fs/promises"
 import path from "path"
 import { Agent } from "../../src/agent/agent"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
@@ -308,6 +309,56 @@ describe("tool.read env file permissions", () => {
       }
     })
   }
+})
+
+describe("tool.read guarded files under another name", () => {
+  const readAsks = (dir: string, target: string) =>
+    provideInstance(dir)(
+      Effect.gen(function* () {
+        const info = yield* (yield* Agent.Service).get("explore")
+        let asked = false
+        const next = {
+          ...ctx,
+          ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+            Effect.sync(() => {
+              if (req.permission !== "read") return
+              asked ||= req.patterns.some(
+                (pattern) => Permission.evaluate(req.permission, pattern, info.permission).action === "ask",
+              )
+            }),
+        }
+        yield* run({ filePath: path.join(dir, target) }, next)
+        return asked
+      }),
+    )
+
+  it.live("a link to an environment file asks like the file itself", () =>
+    Effect.gen(function* () {
+      if (process.platform === "win32") return
+      const dir = yield* tmpdirScoped({ git: true })
+      yield* put(path.join(dir, ".env"), "FAKE_SECRET=1")
+      yield* Effect.promise(() => fs.symlink(".env", path.join(dir, "notes.txt")))
+      yield* Effect.promise(() => fs.mkdir(path.join(dir, "keys")))
+      yield* put(path.join(dir, "keys", "deploy.pem"), "FAKE_KEY")
+      yield* Effect.promise(() => fs.symlink("keys", path.join(dir, "docs")))
+      expect(yield* readAsks(dir, "notes.txt")).toBe(true)
+      expect(yield* readAsks(dir, "docs/deploy.pem")).toBe(true)
+      yield* put(path.join(dir, "readme.md"), "hello")
+      yield* Effect.promise(() => fs.symlink("readme.md", path.join(dir, "intro.md")))
+      expect(yield* readAsks(dir, "intro.md")).toBe(false)
+    }),
+  )
+
+  it.live("another case spelling asks on a disk that ignores case", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      yield* put(path.join(dir, ".env"), "FAKE_SECRET=1")
+      // Only a case-insensitive disk (the macOS and Windows default) opens .env for .ENV.
+      if (!(yield* Effect.promise(() => Bun.file(path.join(dir, ".ENV")).exists()))) return
+      expect(yield* readAsks(dir, ".ENV")).toBe(true)
+      expect(yield* readAsks(dir, ".Env")).toBe(true)
+    }),
+  )
 })
 
 describe("tool.read repeated reads", () => {

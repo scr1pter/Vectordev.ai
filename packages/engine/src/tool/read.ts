@@ -7,7 +7,7 @@ import { FSUtil } from "@vectordevai/core/fs-util"
 import { LSP } from "@/lsp/lsp"
 import DESCRIPTION from "./read.txt"
 import { InstanceState } from "@/effect/instance-state"
-import { assertExternalDirectoryEffect } from "./external-directory"
+import { assertExternalDirectoryEffect, readPatterns } from "./external-directory"
 import { Instruction } from "../session/instruction"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { isPdfAttachment, sniffAttachmentMime } from "@/util/media"
@@ -262,7 +262,7 @@ export const ReadTool = Tool.define<
 
       yield* ctx.ask({
         permission: "read",
-        patterns: [path.relative(instance.worktree, filepath)],
+        patterns: readPatterns(instance.worktree, filepath),
         always: ["*"],
         metadata: {},
       })
