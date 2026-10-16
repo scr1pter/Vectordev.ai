@@ -107,8 +107,9 @@ Options:
                                                                                             [string]
       --thinking     show thinking blocks                                                  [boolean]
   -i, --interactive  run in direct interactive split-footer mode          [boolean] [default: false]
-      --max-cost     stop this run within one step of spending this many US dollars, at catalog list
-                     prices                                                                 [number]
+      --max-cost     stop this run within one step per running agent of spending this many US
+                     dollars, counted at the charge the provider reported or else at catalog list
+                     price                                                                  [number]
       --max-steps    stop this run after this many model steps                              [number]
       --auto         auto-approve permissions that are not explicitly denied (dangerous!)
                                                                           [boolean] [default: false]"

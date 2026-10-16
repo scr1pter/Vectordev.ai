@@ -490,10 +490,12 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               modelID,
               {
                 ...model,
+                // The ChatGPT plan pays for these steps, not a per-token price.
                 cost: {
                   input: 0,
                   output: 0,
                   cache: { read: 0, write: 0 },
+                  plan: true,
                 },
                 limit: codexWindow(model.api.id)
                   ? {

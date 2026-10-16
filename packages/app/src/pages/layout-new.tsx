@@ -5453,7 +5453,8 @@ export default function NewLayout(props: ParentProps) {
                         </label>
                       </div>
                       <div class="rounded-[10px] border border-amber-300/15 bg-amber-300/[0.05] px-3 py-2 text-[11.5px] leading-5 text-amber-100/70">
-                        Each worker spends on your provider key. Set a per-run cap in Settings → Spend limits.
+                        Each worker runs on the selected model the way a chat does, so usage grows with every
+                        worker. Set a per-run cap in Settings → Spend limits.
                       </div>
                     </Show>
                     <div class="px-1 text-[11.5px] leading-5 text-white/45">

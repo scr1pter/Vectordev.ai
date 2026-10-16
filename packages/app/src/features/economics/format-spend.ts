@@ -10,12 +10,19 @@ import { isFreeModel } from "@vectordevai/schema/free-model"
 import { formatSessionCost } from "@/utils/session-cost"
 import { ratesFor, type ModelRates } from "./model-pricing"
 
-export type SpendKind = "free" | "unpriced" | "priced"
+// "plan" is a model whose steps the signed-in account's plan pays for, which the engine marks in the catalog it serves
+// while a ChatGPT sign-in is in use, and "codium" a Vector Codium model, billed in Codium credits at the amount Codium
+// reported for each step.
+export type SpendKind = "free" | "plan" | "unpriced" | "priced" | "codium"
 
 export type SpendCatalog = ReadonlyMap<
   string,
-  { models?: Record<string, { cost?: ModelRates; freeModel?: { source: string } } | undefined> }
+  {
+    models?: Record<string, { cost?: ModelRates & { plan?: boolean }; freeModel?: { source: string } } | undefined>
+  }
 >
+
+const CODIUM_PROVIDER_ID = "vector-plan"
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -32,7 +39,10 @@ export function spendKind(
   const model = providerID && modelID ? providers?.get(providerID)?.models?.[modelID] : undefined
   if (model?.freeModel) return "free"
   if (providerID && modelID && isFreeModel({ providerID, id: modelID, cost: model?.cost })) return "free"
+  // The engine zeroes a plan model's rates and marks them, so its zero rates are not an unknown price.
+  if (model?.cost?.plan) return "plan"
   if (!ratesFor(providers, providerID, modelID)) return "unpriced"
+  if (providerID === CODIUM_PROVIDER_ID) return "codium"
   return "priced"
 }
 
@@ -45,8 +55,8 @@ export function formatUsd(usd: number) {
 
 // What a session's total reads as, and the kind its tooltip explains. The backend's own count of unpriced steps comes
 // first. Tokens with no dollars on them take the catalog's word for the model the session last used: a free model
-// reads "free" and anything else "cost unknown", never "$0.00". Money spent always shows, even when the latest model is
-// free: the total covers every model the session used.
+// reads "free", a plan model "ChatGPT plan" and anything else "cost unknown", never "$0.00". Money spent always shows,
+// even when the latest model is free: the total covers every model the session used.
 export function sessionReading(input: {
   cost: number
   unpricedSteps: number
@@ -57,13 +67,16 @@ export function sessionReading(input: {
 }): { label: string; kind: SpendKind } {
   const kind: SpendKind =
     input.cost > 0
-      ? "priced"
+      ? input.kind === "codium"
+        ? "codium"
+        : "priced"
       : input.unpricedSteps > 0
         ? "unpriced"
-        : input.tokens === 0 || input.kind === "free"
+        : input.tokens === 0 || input.kind === "free" || input.kind === "plan"
           ? input.kind
           : "unpriced"
   if (kind === "free" && input.cost === 0 && input.tokens > 0) return { label: "free", kind }
+  if (kind === "plan" && input.cost === 0 && input.tokens > 0) return { label: "ChatGPT plan", kind }
   if (kind === "unpriced" && input.cost === 0 && input.tokens > 0)
     return { label: input.t("session.cost.unknown", { cost: input.format(0) }), kind }
   return { label: formatSessionCost(input), kind }
@@ -81,9 +94,10 @@ export function spendPill(input: {
   const session = input.session.label
   const kind = input.session.kind
   const capUsd = input.run?.capUsd
-  // A cap is a dollar figure, so it never follows "free" or "unpriced" for a run that spent nothing.
+  // A cap is a dollar figure, so it never follows "free", "ChatGPT plan" or "unpriced" for a run that spent nothing.
   if (!input.run || capUsd === undefined || !input.running) return { label: session, session, kind, warn: false }
-  if (!(input.run.spentUsd > 0) && kind !== "priced") return { label: session, session, kind, warn: false }
+  if (!(input.run.spentUsd > 0) && kind !== "priced" && kind !== "codium")
+    return { label: session, session, kind, warn: false }
   const run = `${formatUsd(input.run.spentUsd)} of ${formatUsd(capUsd)}`
   return { label: run, session, run, capUsd, kind, warn: input.run.state === "warn" }
 }
@@ -96,7 +110,10 @@ export function lastAssistantModel(messages: readonly { role: string; providerID
 }
 
 export const SPEND_TOOLTIP: Record<SpendKind, string> = {
-  priced: "Priced from the tokens your provider reported, at catalog list price. Billed to your own provider key.",
+  priced:
+    "Counted at the charge your provider reported for a step when it reports one, as OpenRouter does, and otherwise from the tokens it reported at catalog list price. Billed to your own provider account.",
+  codium: "Billed in Vector Codium credits, at the amount Vector Codium reported for each step.",
+  plan: "Covered by your ChatGPT plan, which is not billed per token, so Vector counts no dollars for it.",
   unpriced: "This model has no catalog price, so Vector cannot put a dollar figure on it.",
   free: "Free model. No per-token charge to your key.",
 }

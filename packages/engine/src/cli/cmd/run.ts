@@ -268,7 +268,7 @@ export const RunCommand = effectCmd({
       .option("max-cost", {
         type: "number",
         describe:
-          "stop this run within one step, for each agent running at the time, of spending this many US dollars, at catalog list prices",
+          "stop this run within one step per running agent of spending this many US dollars, counted at the charge the provider reported or else at catalog list price",
       })
       .option("max-steps", {
         type: "number",

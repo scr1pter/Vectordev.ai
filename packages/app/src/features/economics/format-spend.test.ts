@@ -8,6 +8,7 @@ import {
   spendKind,
   spendPill,
   type SpendCatalog,
+  type SpendKind,
 } from "./format-spend"
 
 const rates = (input: number, output: number) => ({ input, output, cache: { read: 0, write: 0 } })
@@ -31,6 +32,9 @@ const catalog: SpendCatalog = new Map([
     },
   ],
   ["vector", { models: { "big-pickle": { cost: rates(1, 2), freeModel: { source: "shared" } } } }],
+  // A ChatGPT sign-in, whose zeroed rates the engine marks as paid by the plan.
+  ["openai", { models: { "gpt-5.5": { cost: { ...rates(0, 0), plan: true } } } }],
+  ["vector-plan", { models: { "codium-coder": { cost: rates(0.5, 2) } } }],
 ])
 
 describe("spendKind", () => {
@@ -48,12 +52,20 @@ describe("spendKind", () => {
     expect(spendKind(catalog, "openrouter", "qwen/coder:free")).toBe("free")
     expect(spendKind(catalog, "vector", "big-pickle")).toBe("free")
   })
+
+  test("a model the plan pays for is plan, not unpriced", () => {
+    expect(spendKind(catalog, "openai", "gpt-5.5")).toBe("plan")
+  })
+
+  test("a Vector Codium model is billed in Codium credits", () => {
+    expect(spendKind(catalog, "vector-plan", "codium-coder")).toBe("codium")
+  })
 })
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
 const t = (key: "session.cost.unknown" | "session.cost.partial", params: { cost: string }) =>
   key === "session.cost.unknown" ? "Cost unknown" : `${params.cost} + unpriced`
-const read = (input: { cost: number; unpricedSteps?: number; tokens: number; kind: "free" | "unpriced" | "priced" }) =>
+const read = (input: { cost: number; unpricedSteps?: number; tokens: number; kind: SpendKind }) =>
   sessionReading({ unpricedSteps: 0, ...input, format: (value) => usd.format(value), t })
 
 describe("sessionReading", () => {
@@ -92,6 +104,28 @@ describe("sessionReading", () => {
   test("the tooltip for tokens nothing priced never says the key was billed", () => {
     expect(SPEND_TOOLTIP[read({ cost: 0, tokens: 45_000, kind: "priced" }).kind]).toBe(SPEND_TOOLTIP.unpriced)
   })
+
+  test("tokens a ChatGPT plan paid for read as the plan, not cost unknown or free", () => {
+    const reading = read({ cost: 0, tokens: 45_000, kind: "plan" })
+    expect(reading).toEqual({ label: "ChatGPT plan", kind: "plan" })
+    expect(SPEND_TOOLTIP[reading.kind]).toBe(
+      "Covered by your ChatGPT plan, which is not billed per token, so Vector counts no dollars for it.",
+    )
+  })
+
+  test("Codium spend reads in dollars and says it is billed in Codium credits", () => {
+    const reading = read({ cost: 1.25, tokens: 45_000, kind: "codium" })
+    expect(reading).toEqual({ label: "$1.25", kind: "codium" })
+    expect(SPEND_TOOLTIP[reading.kind]).toBe(
+      "Billed in Vector Codium credits, at the amount Vector Codium reported for each step.",
+    )
+  })
+
+  test("the priced tooltip names reported charges before catalog prices and never claims list price alone", () => {
+    expect(SPEND_TOOLTIP.priced).toBe(
+      "Counted at the charge your provider reported for a step when it reports one, as OpenRouter does, and otherwise from the tokens it reported at catalog list price. Billed to your own provider account.",
+    )
+  })
 })
 
 describe("spendPill", () => {
@@ -118,8 +152,17 @@ describe("spendPill", () => {
     expect(pill.capUsd).toBeUndefined()
   })
 
-  test("no cap follows free or cost unknown when the run spent nothing", () => {
+  test("a capped Codium run shows the guard's per-run figure like any priced run", () => {
+    expect(spendPill({ session: { label: "$1.25", kind: "codium" }, run: run(0), running: true }).label).toBe(
+      "$0.00 of $5.00",
+    )
+  })
+
+  test("no cap follows free, a plan or cost unknown when the run spent nothing", () => {
     expect(spendPill({ session: { label: "free", kind: "free" }, run: run(0), running: true }).label).toBe("free")
+    expect(spendPill({ session: { label: "ChatGPT plan", kind: "plan" }, run: run(0), running: true }).label).toBe(
+      "ChatGPT plan",
+    )
     expect(spendPill({ session: { label: "Cost unknown", kind: "unpriced" }, run: run(0), running: true }).label).toBe(
       "Cost unknown",
     )
