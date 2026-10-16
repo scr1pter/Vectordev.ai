@@ -189,7 +189,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
           <p>
             Codium requests, including the code and tool output a task sends, go through Vector and OpenRouter to a
             provider serving the model you picked. Vector asks OpenRouter to route them only to zero-data-retention
-            endpoints that don't collect data for training. Review the <a href="/legal/privacy">privacy policy</a>{" "}
+            endpoints that don't collect data for training. Review the <a href="/legal/privacy#codium">privacy policy</a>{" "}
             before sending code.
           </p>
         </React.Fragment>

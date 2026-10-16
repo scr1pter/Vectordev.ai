@@ -267,7 +267,7 @@ describe("Codium pricing page", () => {
     expect(answers).toContain("no overage charges and no automatic top-ups")
     for (const model of live.models ?? []) expect(html).toContain(`<strong>${model.name}</strong>`)
     expect(html).toContain('On your <a href="/account">account page</a>')
-    expect(html).toContain('<a href="/legal/privacy">privacy policy</a>')
+    expect(html).toContain('<a href="/legal/privacy#codium">privacy policy</a>')
     expect(answers).toContain("route them only to zero-data-retention endpoints")
   })
 

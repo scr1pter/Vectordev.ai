@@ -7,7 +7,7 @@ export const prerender = true
   eyebrow="Privacy"
   title="Privacy Policy"
   description="How Vector handles account information, local work, AI requests, connected services, diagnostics, and usage counts."
-  updated="October 15, 2026"
+  updated="October 16, 2026"
 >
   <section>
     <h2>1. Scope and contact</h2>
@@ -74,7 +74,8 @@ export const prerender = true
       or confidential information present in those sources.
     </p>
     <p>
-      Model requests use the provider you connect and its service and account. Vector no longer uses
+      Model requests use the provider you connect and its service and account, except for Vector Codium and
+      Vector's shared allowance for Models included with Vector, described below. Vector no longer uses
       the former third-party model gateway. Requests can pass through a configured gateway
       or proxy. Each recipient's retention, abuse-review, and model-training rules depend on the service and
       your agreement or settings with it. Vector does not promise that every provider offers zero retention
@@ -91,6 +92,25 @@ export const prerender = true
       The allowlist is on our <a href="/docs/models#free-models">Models and providers</a> page. This relies on the
       providers' published policies and OpenRouter's records, not an independent audit, and does not change your
       own OpenRouter account settings.
+    </p>
+    <p id="codium">
+      <strong>Vector Codium.</strong> When you choose a Vector Codium model, your request content goes from Vector
+      to Vector's gateway on vectordev.ai, which Vercel hosts. The gateway checks your sign-in, your Codium plan or
+      purchased credits and the credits held for your requests still running, then forwards the request to
+      OpenRouter on a key Vector holds for your account, not a key of your own. Each request asks OpenRouter to route
+      it only to providers OpenRouter records as zero data retention and to deny data collection; this relies on
+      OpenRouter's records and the providers' published policies, not an independent audit. The gateway passes
+      request content through without storing it. With each request it sends OpenRouter a one-way hash of your
+      Vector account identifier, not your email address or name, so that use can be attributed to one account.
+    </p>
+    <p>
+      For Codium, Vector keeps a billing record in its server-side data store: your Stripe customer, subscription
+      and billing-period identifiers, your top-up purchases, and the encrypted OpenRouter key for your account with
+      its credit limit. The credits held for a request in progress are kept for about eleven minutes at most. To
+      buy, Vector creates a Stripe customer with your email address and your Vector account identifier; Stripe
+      processes your payment details, which Vector never receives, and keeps the payment records. Deleting your
+      Vector account closes open Codium checkouts, cancels active Codium subscriptions and disables your Codium
+      keys; the billing record is kept, marked closed, as section 12 describes.
     </p>
   </section>
 
@@ -322,7 +342,7 @@ export const prerender = true
       abuse, secure the service, understand how much Vector is used through the aggregate counts in section 10,
       and meet legal obligations. Aggregated statistics that identify no one, described in section 10, may also
       be shared with investors, partners, and the public. Recipients include the account, email,
-      hosting, security, and diagnostic providers described above and the model and integration providers
+      hosting, payment, security, and diagnostic providers described above and the model and integration providers
       involved in your selected workflow.
     </p>
     <p>
@@ -353,8 +373,8 @@ export const prerender = true
     <p>
       Local data remains until removed through application controls or from the relevant files, subject to
       local cleanup and backups. Account records are retained while needed to provide access
-      and resolve account issues. Records of earlier purchases are retained as required by law, including for
-      tax, accounting, fraud, and dispute obligations. Payment records of those purchases are held by our
+      and resolve account issues. Records of earlier purchases, and the Codium billing records described in
+      section 4, are retained as required by law, including for tax, accounting, fraud, and dispute obligations. Payment records of those purchases are held by our
       payment processor, Stripe, and kept only as the law requires. Support records and diagnostic or operational logs are retained according to
       their troubleshooting and security purpose and applicable provider settings. Usage counts and download
       records are kept for about 13 months. We consider the type of
