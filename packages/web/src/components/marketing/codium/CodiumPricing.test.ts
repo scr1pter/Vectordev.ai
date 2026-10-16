@@ -106,20 +106,34 @@ describe("Codium pricing page", () => {
     expect(monthly).not.toMatch(/Codium 20(?!0)/)
   })
 
-  test("the first plan lists what every plan includes; later plans state their usage as a multiple and a range", () => {
+  test("every plan card states its typical tasks for each model, and later plans state their usage as a multiple", () => {
+    const pricing = codiumPricing(live)
     const plans = cards(part(render(live), "monthly")).map(text)
-    expect(plans[0]).toContain("Get started with: Codium credits for every Codium model, every month")
     expect(plans[0]).toContain(
-      "Models DeepSeek V4.1 Flash Xiaomi MiMo V2.6 Flash Claude Haiku 5.5 Zero-data-retention endpoints",
+      "Get started with: Codium credits for every Codium model, every month Typical tasks a month " +
+        "DeepSeek V4.1 Flash: 50–500 Xiaomi MiMo V2.6 Flash: 80–800 Claude Haiku 5.5: 30–300",
     )
-    expect(plans[0]).toContain("In Vector No provider keys needed Works in the desktop app and CLI")
-    for (const [index, multiple] of [5, 10, 20].entries()) {
-      expect(plans[index + 1]).toContain(`Everything in Codium 10, and: ${multiple}x more usage than Codium 10`)
-      expect(plans[index + 1]).toContain("Typical tasks a month")
-    }
+    // On phones the comparison table is hidden, so each card carries its own ranges.
+    for (const [index, offer] of pricing.monthly.entries())
+      for (const [row, model] of pricing.models.entries()) {
+        const tasks = offer.tasks[row]!
+        expect(plans[index]).toContain(
+          `${model.name}: ${tasks.map((value) => value.toLocaleString("en-US")).join("–")}`,
+        )
+      }
+    for (const [index, multiple] of [5, 10, 20].entries())
+      expect(plans[index + 1]).toContain(
+        `Everything in Codium ${[10, 50, 100][index]}, and: ${multiple}x more usage than Codium 10`,
+      )
     expect(plans[3]).toContain(
       "DeepSeek V4.1 Flash: 1,000–10,000 Xiaomi MiMo V2.6 Flash: 1,600–16,000 Claude Haiku 5.5: 600–6,000",
     )
+    // What all plans share is labelled as shared, so it never reads as something only that plan adds.
+    expect(plans[1]).toContain(
+      "Every plan includes Zero-data-retention endpoints No provider keys needed Works in the desktop app and CLI",
+    )
+    expect(plans[2]).toContain("In the free Vector workspace Parallel agents Subagents Vectorscope code reviews")
+    expect(plans[0]).not.toContain("Every plan includes")
     // A model without a reviewed range gets no line.
     const sample = cards(part(render(config), "monthly")).map(text)
     expect(sample[1]).toContain("Everyday Coder: 300–2,700")
@@ -134,8 +148,9 @@ describe("Codium pricing page", () => {
     // Each amount is a radio named as checkout names it, so a top-up never shares a plan's name.
     for (const [index, item] of (live.topups ?? []).entries()) {
       expect(item.name).toBe(`Codium ${item.price} top-up`)
+      // The accessible name starts with the amount the radio shows.
       expect(pack).toContain(
-        `aria-label="${item.name}" name="cx-topup"${index === 0 ? ' checked=""' : ""} value="${index}"/>`,
+        `aria-label="$${item.price}, ${item.name}" name="cx-topup"${index === 0 ? ' checked=""' : ""} value="${index}"/>`,
       )
       expect(pack).toContain(`<span>$${item.price}</span>`)
     }
@@ -144,6 +159,8 @@ describe("Codium pricing page", () => {
     expect(text(pack)).toContain("Codium credits that carry forward, with no subscription")
     expect(text(pack)).toContain("DeepSeek V4.1 Flash: 50–500 tasks")
     expect(text(pack)).toContain("Unused credits carry forward")
+    // The chosen top-up is named visibly, as checkout and the account page name it.
+    expect(text(pack)).toContain("*Codium 10 top-up: one-time purchase.")
     expect(text(pack)).not.toMatch(/never expire|no expiration|expiry/i)
     expect(plans).toContain('<span class="cx-amount cx-type-lg">$10–$200</span><span class="cx-per">/month</span>')
     expect(plans).toContain('<button class="cx-btn cx-btn--secondary" type="button">Compare plans</button>')
@@ -177,8 +194,7 @@ describe("Codium pricing page", () => {
 
   test("renewal terms sit in every plan card and in the note under the cards", async () => {
     const html = render(config)
-    for (const plan of cards(part(html, "monthly")))
-      expect(plan).toContain("*Renews monthly until you cancel. Credits reset each billing period.")
+    for (const plan of cards(part(html, "monthly"))) expect(plan).toContain("*Renews monthly until you cancel.")
     const note = text(html.slice(html.indexOf('<p class="cx-note')))
     expect(note).toContain("Plans renew monthly at the listed price until you cancel")
     expect(note).toContain("unused top-up credits carry forward separately from your subscription")
@@ -206,6 +222,13 @@ describe("Codium pricing page", () => {
       (match) => match[1],
     )
     expect(groups).toEqual(["Models", "Typical tasks a month", "Credits", "Included in the free Vector workspace"])
+    // Each group is its own row group, headed by a row group header, after the usage row's own body.
+    expect(table.match(/<tbody /g)).toHaveLength(groups.length + 1)
+    expect(table.match(/<th class="cx-compare-group" colSpan="5" scope="rowgroup">/g)).toHaveLength(groups.length)
+    // Below 1140px the table scrolls sideways inside a region that keyboard users can focus.
+    expect(table).toContain(
+      '<div class="cx-compare-scroll" role="region" aria-labelledby="cx-compare-heading" tabindex="0">',
+    )
     const rows = new Map(
       [...table.matchAll(/<tr><th scope="row">(.*?)<\/th>(.*?)<\/tr>/g)].map((match) => [
         match[1]!,
@@ -254,7 +277,7 @@ describe("Codium pricing page", () => {
         const html = render(value, mode) + questions(value)
         for (const word of ["markup", "margin", "per million", "M tokens", "%"]) expect(html).not.toContain(word)
         // Only purchase prices appear in dollars: no dollar value of credits and no model prices.
-        for (const amount of html.match(/\$[\d.,]+/g) ?? []) expect(["$10", "$50", "$100", "$200"]).toContain(amount)
+        for (const amount of html.match(/\$\d+(?:,\d{3})*(?:\.\d+)?/g) ?? []) expect(["$10", "$50", "$100", "$200"]).toContain(amount)
         expect(html).not.toMatch(/\d[\d,]* (Codium )?credits/)
       }
     }
@@ -267,8 +290,10 @@ describe("Codium pricing page", () => {
     expect(buttons).toHaveLength(9)
     for (const match of buttons) {
       expect(match[2]).toBe("false")
-      expect(html).toContain(`id="${match[3]}" role="region" aria-labelledby="${match[1]}"`)
+      expect(html).toContain(`<div class="cx-faq-region" id="${match[3]}">`)
     }
+    // Answers that can all be open at once are not landmarks.
+    expect(html).not.toContain('role="region"')
     expect(html.match(/data-state="closed"/g)).toHaveLength(9)
     expect([...html.matchAll(/aria-controls="[^"]+">(.*?)<svg/g)].map((match) => text(match[1]!).trim())).toEqual([
       "What is the right plan for me?",
@@ -336,6 +361,10 @@ describe("Codium pricing page", () => {
       expect(source).toContain(link)
     expect(source).toContain('<a class="cx-signin" href="/login">Sign in</a>')
     expect(source).toContain('<a class="cx-btn cx-btn--sm cx-download" href="/download">Download</a>')
+    expect(source).toContain('<a class="cx-skip cx-btn cx-btn--sm" href="#cx-main">Skip to content</a>')
+    expect(source).toContain('<main class="cx-main" id="cx-main" tabindex="-1">')
+    // The theme follows the system until a visitor picks one.
+    expect(source).toContain('theme = localStorage.getItem("vector-codium-theme") || "system";')
     expect(source).toContain("Get started with Vector.")
     expect([...source.matchAll(/title: "(\w+)"/g)].map((match) => match[1])).toEqual([
       "Product",
@@ -348,6 +377,19 @@ describe("Codium pricing page", () => {
     const css = await Bun.file(new URL("./codium-pricing.css", import.meta.url)).text()
     expect(css).toContain(".cx-page {\n  --cx-sec")
     expect(css.match(/font-family:/g)).toHaveLength(1)
+  })
+
+  test("the comparison table stays inside its scroller, and the menu only locks the page while it can be seen", async () => {
+    const css = await Bun.file(new URL("./codium-pricing.css", import.meta.url)).text()
+    // Positioned, so the cells' visually hidden labels are clipped by the scroller instead of widening the page.
+    expect(css).toContain(".cx-compare-scroll {\n  /* Positioned")
+    expect(css).toMatch(/\.cx-compare-scroll \{[^}]*position: relative;/)
+    // The header row is sticky at every width, as in the reference layout.
+    expect(css).toMatch(/^\.cx-compare thead th \{\n  position: sticky;\n  top: var\(--cx-header\);/m)
+    expect(css).toMatch(/@media \(max-width: 899\.98px\) \{\n  html\[data-cx-menu\] \{\n    overflow: hidden;/)
+    expect(css).not.toMatch(/^html\[data-cx-menu\] \{/m)
+    const source = await page()
+    expect(source).toContain('wide.addEventListener("change"')
   })
 
   test("/pricing sends visitors to the Codium page, which the deploy keeps", async () => {

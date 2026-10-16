@@ -22,6 +22,7 @@ html:has(.cx-page) {
   -webkit-text-size-adjust: none;
 }
 
+/* The light accent is darker than the reference's mapping so the 12px badge keeps AA contrast on its tint. */
 html[data-cx-theme="light"]:has(.cx-page) {
   --cx-bg: #f7f6f9;
   --cx-card: #f1f0f5;
@@ -30,12 +31,13 @@ html[data-cx-theme="light"]:has(.cx-page) {
   --cx-card-04: #e0dfe4;
   --cx-fg: #25242b;
   --cx-fg-02: #3a3940;
-  --cx-accent: #7c5cdb;
+  --cx-accent: #6646c4;
   color-scheme: light;
 }
 
+/* System is the default, so the light palette also applies before the theme script runs. */
 @media (prefers-color-scheme: light) {
-  html[data-cx-theme="system"]:has(.cx-page) {
+  html:not([data-cx-theme="dark"]):has(.cx-page) {
     --cx-bg: #f7f6f9;
     --cx-card: #f1f0f5;
     --cx-card-02: #eae9ee;
@@ -43,7 +45,7 @@ html[data-cx-theme="light"]:has(.cx-page) {
     --cx-card-04: #e0dfe4;
     --cx-fg: #25242b;
     --cx-fg-02: #3a3940;
-    --cx-accent: #7c5cdb;
+    --cx-accent: #6646c4;
     color-scheme: light;
   }
 }
@@ -223,6 +225,7 @@ body:has(.cx-page)::before {
 
 .cx-btn--secondary:hover {
   background: var(--cx-card-04);
+  border-color: var(--cx-border-01);
 }
 
 .cx-btn--ghost {
@@ -233,6 +236,7 @@ body:has(.cx-page)::before {
 
 .cx-btn--ghost:hover {
   background: var(--cx-card);
+  border-color: var(--cx-border-03);
 }
 
 .cx-btn--sm {
@@ -294,16 +298,37 @@ body:has(.cx-page)::before {
   justify-self: start;
 }
 
-.cx-logo img {
+.cx-logo-mark {
   width: 23.78px;
   height: 23.78px;
   flex: none;
 }
 
-.cx-logo svg {
+.cx-logo-word {
   width: 64px;
   height: 11.2px;
   flex: none;
+}
+
+/* Hidden until the first Tab reaches it; then a small light pill over the logo. */
+.cx-skip {
+  position: absolute;
+  top: 0.82rem;
+  left: -0.2rem;
+  z-index: 50;
+}
+
+.cx-skip:not(:focus) {
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+}
+
+.cx-page .cx-skip:focus-visible {
+  outline-offset: 2px;
 }
 
 .cx-nav {
@@ -341,7 +366,9 @@ body:has(.cx-page)::before {
   line-height: 1.5;
 }
 
-.cx-actions .cx-download {
+.cx-actions .cx-download,
+.cx-actions .cx-report,
+.cx-report-long {
   display: none;
 }
 
@@ -379,7 +406,21 @@ body:has(.cx-page)::before {
     grid-column: 3;
   }
 
+  .cx-actions .cx-report {
+    display: inline-flex;
+  }
+
   .cx-burger {
+    display: none;
+  }
+}
+
+@media (min-width: 1140px) {
+  .cx-report-long {
+    display: inline;
+  }
+
+  .cx-report-short {
     display: none;
   }
 }
@@ -396,18 +437,21 @@ body:has(.cx-page)::before {
   opacity: 0;
   visibility: hidden;
   transition:
-    opacity 0.14s,
+    opacity 0.14s cubic-bezier(0.25, 1, 0.5, 1),
     visibility 0s 0.14s;
 }
 
 html[data-cx-menu] .cx-menu {
   opacity: 1;
   visibility: visible;
-  transition: opacity 0.14s;
+  transition: opacity 0.14s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
-html[data-cx-menu] {
-  overflow: hidden;
+/* Only while the menu can be seen: from 900px it is hidden, and a locked page there would have no way to unlock. */
+@media (max-width: 899.98px) {
+  html[data-cx-menu] {
+    overflow: hidden;
+  }
 }
 
 .cx-menu-close {
@@ -502,6 +546,11 @@ html[data-cx-menu] {
   appearance: none;
   border-radius: inherit;
   cursor: pointer;
+}
+
+/* Focus follows the checked option, whose fill already marks it, so the radios draw no ring of their own. */
+.cx-seg input:focus-visible {
+  outline: none;
 }
 
 .cx-seg span {
@@ -725,7 +774,10 @@ html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
   text-wrap: balance;
 }
 
-.cx-note a,
+.cx-note a {
+  text-decoration: underline;
+}
+
 .cx-prose a {
   text-decoration: underline;
   text-decoration-thickness: 1px;
@@ -741,7 +793,11 @@ html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
   }
 }
 
-/* Comparison table: from 660px; scrolls sideways below 1140px, where its header stops sticking. */
+/*
+ * Comparison table: from 660px; scrolls sideways below 1140px. The header row is sticky at every width. Below 1140px
+ * the sideways scroller is its scroll container, so the row sits one header height lower there and covers the first
+ * row under it.
+ */
 .cx-compare {
   margin-top: calc(var(--cx-v) * 4);
   display: none;
@@ -759,6 +815,8 @@ html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
 }
 
 .cx-compare-scroll {
+  /* Positioned, so the cells' visually hidden labels are clipped by the scroller instead of widening the page. */
+  position: relative;
   margin-top: calc(var(--cx-v) * 2);
   overflow-x: auto;
 }
@@ -777,6 +835,9 @@ html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
 }
 
 .cx-compare thead th {
+  position: sticky;
+  top: var(--cx-header);
+  z-index: 20;
   padding: 0.75rem 0.5rem;
   background: var(--cx-bg);
   text-align: center;
@@ -792,12 +853,6 @@ html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
 @media (min-width: 1140px) {
   .cx-compare-scroll {
     overflow: visible;
-  }
-
-  .cx-compare thead th {
-    position: sticky;
-    top: var(--cx-header);
-    z-index: 20;
   }
 }
 
@@ -834,7 +889,7 @@ html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
   gap: 0.5rem;
 }
 
-.cx-compare-group svg {
+.cx-group-icon {
   width: 1rem;
   height: 1rem;
   flex: none;
@@ -943,6 +998,10 @@ html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
 
 .cx-faq-answer {
   padding-bottom: var(--cx-v);
+}
+
+.cx-prose {
+  letter-spacing: 0.005em;
 }
 
 .cx-prose p,
@@ -1059,8 +1118,7 @@ html[data-cx-theme="light"] .cx-theme-indicator {
   transform: translateX(100%);
 }
 
-html[data-cx-theme="dark"] .cx-theme-indicator,
-html:not([data-cx-theme]) .cx-theme-indicator {
+html[data-cx-theme="dark"] .cx-theme-indicator {
   transform: translateX(200%);
 }
 
@@ -1118,4 +1176,53 @@ html:not([data-cx-theme]) .cx-theme-indicator {
     font-size: 0.875rem;
     letter-spacing: 0.01em;
   }
+}
+
+/* The footer's theme switch and language pill. Vector's site is in English only, so the pill's list has one entry. */
+.cx-footer-tools {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--cx-g) * 1.5);
+}
+
+.cx-lang {
+  position: relative;
+  gap: calc(var(--cx-g) * 0.5);
+  font-size: 1rem;
+  letter-spacing: 0.005em;
+}
+
+@media (min-width: 660px) {
+  .cx-lang {
+    font-size: 0.875rem;
+    letter-spacing: 0.01em;
+  }
+}
+
+.cx-lang-globe {
+  width: 0.9386em;
+  height: 1em;
+}
+
+.cx-lang-chevron {
+  width: 0.7207em;
+  height: 1em;
+}
+
+.cx-lang select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  appearance: none;
+  border: 0;
+  border-radius: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.cx-lang:has(select:focus-visible) {
+  outline: 2px solid var(--cx-fg);
+  outline-offset: 0.3ch;
 }

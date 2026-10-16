@@ -1,5 +1,4 @@
 /** @jsxImportSource react */
-import { ChartColumn, Coins, Cpu, LayoutGrid } from "lucide-react"
 import React from "react"
 import type { CodiumOffer, CodiumPricingView } from "../../../lib/codium-pricing"
 import { modelPlanRedirect } from "../../../lib/model-plans"
@@ -17,15 +16,26 @@ const MODES = [
 ] as const
 // The plan marked "Most popular", by position: the second of the four.
 const POPULAR = 1
-// What every plan includes, listed on the first card; later plans differ only in how much usage they include.
-const INCLUDED = [
+// Plans differ only in usage. What they share is listed once, on the cards with room for it, under labels that say
+// it applies to every plan; the list lengths follow the reference layout's cards.
+const EVERY_PLAN = [
+  "Zero-data-retention endpoints",
   "No provider keys needed",
   "Works in the desktop app and CLI",
-  "Balance in Settings and your account",
-  "Top up any time",
   "No overage charges",
-  "Cancel any time",
 ]
+const WORKSPACE = [
+  "Parallel agents",
+  "Subagents",
+  "Vectorscope code reviews",
+  "Multiplayer sessions",
+  "Browser agent",
+  "Automations",
+  "Run Guard",
+]
+// The renewal terms sit in every plan card. The shorter one keeps to one line on the narrowest cards.
+const RENEWS = "*Renews monthly until you cancel."
+const RENEWS_RESET = "*Renews monthly until you cancel. Credits reset each billing period."
 
 /**
  * Codium's plan toggle, cards, the note under them and the plan comparison on /codium. Purchases go through the
@@ -122,7 +132,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
   const rows = [
     {
       group: "Models",
-      icon: Cpu,
+      icon: ModelsIcon,
       // The catalog lists the default model first.
       rows: models.map((model, index) => ({
         label: index === 0 ? `${model.name} (default)` : model.name,
@@ -133,7 +143,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
       ? [
           {
             group: "Typical tasks a month",
-            icon: ChartColumn,
+            icon: TasksIcon,
             rows: models.map((model, row) => ({
               label: model.name,
               values: plans.map((offer) => {
@@ -146,7 +156,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
       : []),
     {
       group: "Credits",
-      icon: Coins,
+      icon: CreditsIcon,
       rows: [
         "No provider keys needed",
         "No overage charges",
@@ -157,7 +167,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
     },
     {
       group: "Included in the free Vector workspace",
-      icon: LayoutGrid,
+      icon: WorkspaceIcon,
       rows: [
         "Desktop app and CLI",
         "Parallel agents",
@@ -190,7 +200,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
     lead: string
     big: string
     small: string
-    groups: { label?: string; items: string[] }[]
+    groups: { label?: string; icon?: () => React.ReactNode; items: string[] }[]
     footnote: string
   }) => (
     <article className="cx-card" key={content.key}>
@@ -219,7 +229,14 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
         </div>
         {content.groups.map((group, index) => (
           <div className="cx-group" key={group.label ?? index}>
-            {group.label ? <p className="cx-group-label cx-type-sm">{group.label}</p> : <hr className="cx-divider" />}
+            {group.label ? (
+              <p className="cx-group-label cx-type-sm">
+                {group.icon && <group.icon />}
+                {group.label}
+              </p>
+            ) : (
+              <hr className="cx-divider" />
+            )}
             <ul className="cx-list cx-type-sm">
               {group.items.map((feature) => (
                 <li key={feature}>
@@ -266,24 +283,13 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
                 per: "/month",
                 action: button(offer, "monthly", index === POPULAR),
                 offer: offer.id,
-                lead: index === 0 ? "Get started with:" : `Everything in ${plans[0]!.name}, and:`,
+                lead: index === 0 ? "Get started with:" : `Everything in ${plans[index - 1]!.name}, and:`,
                 big: index === 0 || !offer.multiple ? "Codium credits" : `${count.format(offer.multiple)}x`,
                 small: index === 0 ? "for every Codium model, every month" : `more usage than ${plans[0]!.name}`,
                 // Later plans differ only in credits, stated as a multiple of the first so they never read as adding up,
                 // and in the usage those credits buy on each model. Credit amounts never appear.
-                groups:
-                  index === 0
-                    ? [
-                        {
-                          label: "Models",
-                          items: [...models.map((model) => model.name), "Zero-data-retention endpoints"],
-                        },
-                        { label: "In Vector", items: INCLUDED },
-                      ]
-                    : [{ label: "Typical tasks a month", items: taskLines(offer, models) }].filter(
-                        (group) => group.items.length > 0,
-                      ),
-                footnote: "*Renews monthly until you cancel. Credits reset each billing period.",
+                groups: planGroups(index, taskLines(offer, models)),
+                footnote: index < 2 ? RENEWS : RENEWS_RESET,
               }),
             )}
           </div>
@@ -304,7 +310,8 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
                     options={topups.map((item, index) => ({
                       value: String(index),
                       label: usd.format(item.price),
-                      title: item.name,
+                      // The accessible name starts with the visible amount, then names the top-up as checkout does.
+                      title: `${usd.format(item.price)}, ${item.name}`,
                     }))}
                     value={String(pack)}
                     onChange={(value) => setPack(Number(value))}
@@ -328,14 +335,15 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
                       "No subscription needed",
                       "Unused credits carry forward",
                       "Spent after a plan's monthly credits",
-                      "Balance in Settings and your account",
+                      "Balance in Vector's Settings and your account page",
                       "Works in the desktop app and CLI",
                       "No provider keys needed",
                       "No overage charges or automatic top-ups",
                     ],
                   },
                 ],
-                footnote: "*One-time purchase. Typical tasks are estimates.",
+                // Names the chosen top-up as checkout and the account page do, such as "Codium 10 top-up".
+                footnote: `*${topup.name}: one-time purchase. Typical tasks estimated.`,
               })}
               {plans.length > 0 &&
                 card({
@@ -347,7 +355,15 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
                       : usd.format(plans[0]!.price),
                   per: "/month",
                   action: (
-                    <button className="cx-btn cx-btn--secondary" type="button" onClick={() => choose("monthly")}>
+                    <button
+                      className="cx-btn cx-btn--secondary"
+                      type="button"
+                      onClick={() => {
+                        choose("monthly")
+                        // This button disappears with its tab, so focus moves to the plan type it switched to.
+                        document.querySelector<HTMLInputElement>('input[name="cx-plan-type"][value="monthly"]')?.focus()
+                      }}
+                    >
                       Compare plans
                     </button>
                   ),
@@ -388,7 +404,8 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
           <h2 className="cx-type-lg" id="cx-compare-heading">
             Compare features across plans
           </h2>
-          <div className="cx-compare-scroll">
+          {/* Below 1140px the table scrolls sideways, so keyboard users can focus and scroll it. */}
+          <div className="cx-compare-scroll" role="region" aria-labelledby="cx-compare-heading" tabIndex={0}>
             <table>
               <thead>
                 <tr>
@@ -422,40 +439,40 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
                     </td>
                   ))}
                 </tr>
-                {rows.map((group) => (
-                  <React.Fragment key={group.group}>
-                    <tr>
-                      <th className="cx-compare-group" colSpan={plans.length + 1} scope="colgroup">
-                        <div>
-                          <group.icon aria-hidden="true" strokeWidth={1.75} />
-                          {group.group}
-                        </div>
-                      </th>
-                    </tr>
-                    {group.rows.map((row) => (
-                      <tr key={row.label}>
-                        <th scope="row">{row.label}</th>
-                        {row.values.map((value, index) => (
-                          <td key={plans[index]!.id}>
-                            {value === true ? (
-                              <span className="cx-mark cx-type-md">
-                                <Check />
-                                <span className="cx-visually-hidden">Included</span>
-                              </span>
-                            ) : value === false ? (
-                              <span className="cx-mark cx-mark--no cx-type-md">
-                                —<span className="cx-visually-hidden">Not included</span>
-                              </span>
-                            ) : (
-                              <span className="cx-compare-text">{value}</span>
-                            )}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </React.Fragment>
-                ))}
               </tbody>
+              {rows.map((group) => (
+                <tbody className="cx-type-sm" key={group.group}>
+                  <tr>
+                    <th className="cx-compare-group" colSpan={plans.length + 1} scope="rowgroup">
+                      <div>
+                        <group.icon />
+                        {group.group}
+                      </div>
+                    </th>
+                  </tr>
+                  {group.rows.map((row) => (
+                    <tr key={row.label}>
+                      <th scope="row">{row.label}</th>
+                      {row.values.map((value, index) => (
+                        <td key={plans[index]!.id}>
+                          {value === true ? (
+                            <span className="cx-mark cx-type-md">
+                              <Check />
+                              <span className="cx-visually-hidden">Included</span>
+                            </span>
+                          ) : value === false ? (
+                            <span className="cx-mark cx-mark--no cx-type-md">
+                              —<span className="cx-visually-hidden">Not included</span>
+                            </span>
+                          ) : (
+                            <span className="cx-compare-text">{value}</span>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              ))}
             </table>
           </div>
         </section>
@@ -633,8 +650,6 @@ export function CodiumQuestions(props: { models: CodiumPricingView["models"] }) 
                 <div
                   className="cx-faq-region"
                   id={`cx-faq-${item.id}`}
-                  role="region"
-                  aria-labelledby={`cx-faq-q-${item.id}`}
                   ref={(element) => {
                     if (element) regions.current.set(item.id, element)
                   }}
@@ -713,6 +728,21 @@ function taskLines(offer: CodiumOffer, models: CodiumPricingView["models"]) {
   })
 }
 
+/**
+ * A monthly plan card's lists. The first card shows only its usage; the second and third also carry what every plan
+ * shares, so the cards keep the reference layout's list lengths: the first is shortest and the third tallest.
+ */
+function planGroups(index: number, tasks: string[]) {
+  const usage = { label: "Typical tasks a month", items: tasks }
+  const groups =
+    index === 1
+      ? [usage, { label: "Every plan includes", icon: WorkspaceIcon, items: EVERY_PLAN }]
+      : index === 2
+        ? [{ label: "In the free Vector workspace", items: WORKSPACE }, { ...usage, icon: TasksIcon }]
+        : [usage]
+  return groups.filter((group) => group.items.length > 0)
+}
+
 /** A card list tick: a thin check centred in a 16px box. */
 function Tick() {
   return (
@@ -739,6 +769,50 @@ function Check() {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </svg>
+  )
+}
+
+/** The comparison table's and the cards' group marks: flat, filled 16px shapes in the text colour. */
+function ModelsIcon() {
+  return (
+    <svg className="cx-group-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        d="M5.3 3h5.4A2.3 2.3 0 0 1 13 5.3v5.4a2.3 2.3 0 0 1-2.3 2.3H5.3A2.3 2.3 0 0 1 3 10.7V5.3A2.3 2.3 0 0 1 5.3 3zm1.2 3.4a.1.1 0 0 0-.1.1v3a.1.1 0 0 0 .1.1h3a.1.1 0 0 0 .1-.1v-3a.1.1 0 0 0-.1-.1zM5.2 0h1.1v2.2H5.2zm2.25 0h1.1v2.2h-1.1zM9.7 0h1.1v2.2H9.7zM5.2 13.8h1.1V16H5.2zm2.25 0h1.1V16h-1.1zm2.25 0h1.1V16H9.7zM0 5.2h2.2v1.1H0zm0 2.25h2.2v1.1H0zM0 9.7h2.2v1.1H0zm13.8-4.5H16v1.1h-2.2zm0 2.25H16v1.1h-2.2zm0 2.25H16v1.1h-2.2z"
+      />
+    </svg>
+  )
+}
+
+function TasksIcon() {
+  return (
+    <svg className="cx-group-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <rect x="1.5" y="8.5" width="3.5" height="6" rx="1" />
+      <rect x="6.25" y="4.75" width="3.5" height="9.75" rx="1" />
+      <rect x="11" y="1.5" width="3.5" height="13" rx="1" />
+    </svg>
+  )
+}
+
+function CreditsIcon() {
+  return (
+    <svg className="cx-group-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        d="M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1zm0 2.1a4.9 4.9 0 1 0 0 9.8 4.9 4.9 0 0 0 0-9.8zM8 4.6a3.4 3.4 0 1 1 0 6.8 3.4 3.4 0 0 1 0-6.8z"
+      />
+    </svg>
+  )
+}
+
+function WorkspaceIcon() {
+  return (
+    <svg className="cx-group-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="5.75" height="5.75" rx="1.25" />
+      <rect x="8.75" y="1.5" width="5.75" height="5.75" rx="1.25" />
+      <rect x="1.5" y="8.75" width="5.75" height="5.75" rx="1.25" />
+      <rect x="8.75" y="8.75" width="5.75" height="5.75" rx="1.25" />
     </svg>
   )
 }

@@ -96,19 +96,32 @@ const themes = [
   (function () {
     var root = document.documentElement;
     root.dataset.codiumMode = new URLSearchParams(location.search).get("type") === "topups" ? "topup" : "monthly";
-    var theme = "dark";
+    var theme = "system";
     try {
-      theme = localStorage.getItem("vector-codium-theme") || "dark";
+      theme = localStorage.getItem("vector-codium-theme") || "system";
     } catch (error) {}
-    root.dataset.cxTheme = ["system", "light", "dark"].indexOf(theme) === -1 ? "dark" : theme;
+    root.dataset.cxTheme = ["system", "light", "dark"].indexOf(theme) === -1 ? "system" : theme;
   })();
 </script>
   <div class="cx-page">
     <header class="cx-header">
       <div class="cx-container cx-header-grid">
+        <a class="cx-skip cx-btn cx-btn--sm" href="#cx-main">Skip to content</a>
         <a class="cx-logo" href="/" aria-label="Vector home">
-          <img src="/vector-logo.png" alt="" width="24" height="24" />
-          <svg viewBox={`0 0 ${wordmarkWidth} 7`} fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">
+          <svg class="cx-logo-mark" viewBox="0 0 512 512" aria-hidden="true">
+            <mask id="cx-logo-cut">
+              <rect width="512" height="512" rx="78" fill="#fff"></rect>
+              <g fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="139" y="130" width="234" height="242" rx="52" stroke-width="30"></rect>
+                <rect x="213" y="210" width="86" height="86" rx="14" stroke-width="24"></rect>
+                <path
+                  d="M190 86v58M256 78v54M322 86v58M190 368v58M256 380v54M322 368v58M86 190h58M80 256h52M86 322h58M368 190h58M380 256h54M368 322h58"
+                  stroke-width="30"></path>
+              </g>
+            </mask>
+            <rect width="512" height="512" rx="78" fill="currentColor" mask="url(#cx-logo-cut)"></rect>
+          </svg>
+          <svg class="cx-logo-word" viewBox={`0 0 ${wordmarkWidth} 7`} fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">
             {wordmarkCells.map((cell) => <rect x={cell.x} y={cell.y} width="1" height="1" />)}
           </svg>
         </a>
@@ -123,6 +136,9 @@ const themes = [
         </nav>
         <div class="cx-actions">
           <a class="cx-signin" href="/login">Sign in</a>
+          <a class="cx-btn cx-btn--ghost cx-btn--sm cx-report" href="/support/report">
+            <span class="cx-report-long">Report issues</span><span class="cx-report-short">Support</span>
+          </a>
           <a class="cx-btn cx-btn--sm cx-download" href="/download">Download</a>
         </div>
         <button class="cx-burger" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="cx-menu">
@@ -154,7 +170,7 @@ const themes = [
       </div>
     </div>
 
-    <main class="cx-main">
+    <main class="cx-main" id="cx-main" tabindex="-1">
       <section class="cx-section cx-pricing">
         <div class="cx-container">
           <h1 class="cx-type-xl">Pricing</h1>
@@ -213,17 +229,33 @@ const themes = [
           <span>© 2026 Vector</span>
           <span>Local-first. Your repositories. Your accounts. Your models.</span>
         </div>
-        <div class="cx-theme" role="group" aria-label="Theme">
-          <div class="cx-theme-indicator" aria-hidden="true"></div>
-          {
-            themes.map(([value, label, path]) => (
-              <button type="button" data-theme={value} aria-label={label} aria-pressed={value === "dark" ? "true" : "false"}>
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d={path} />
-                </svg>
-              </button>
-            ))
-          }
+        <div class="cx-footer-tools">
+          <div class="cx-theme" role="group" aria-label="Theme">
+            <div class="cx-theme-indicator" aria-hidden="true"></div>
+            {
+              themes.map(([value, label, path]) => (
+                <button type="button" data-theme={value} aria-label={label} aria-pressed={value === "system" ? "true" : "false"}>
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d={path} />
+                  </svg>
+                </button>
+              ))
+            }
+          </div>
+          <div class="cx-lang cx-btn cx-btn--secondary cx-btn--sm">
+            <svg class="cx-lang-globe" viewBox="0 0 13 14" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true">
+              <circle cx="6.5" cy="7" r="5.6"></circle>
+              <path d="M0.9 7h11.2M6.5 1.4c-1.6 1.6-2.4 3.5-2.4 5.6s.8 4 2.4 5.6M6.5 1.4c1.6 1.6 2.4 3.5 2.4 5.6s-.8 4-2.4 5.6"></path>
+            </svg>
+            <span aria-hidden="true">English</span>
+            <svg class="cx-lang-chevron" viewBox="0 0 10 14" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M1.5 5.5 5 9l3.5-3.5"></path>
+            </svg>
+            {/* The site is in English only; the native list says so instead of offering languages it doesn't have. */}
+            <select aria-label="Language">
+              <option value="en" selected>English</option>
+            </select>
+          </div>
         </div>
       </div>
     </footer>
@@ -235,13 +267,23 @@ const themes = [
     var root = document.documentElement;
     var burger = document.querySelector(".cx-burger");
     var menu = document.getElementById("cx-menu");
+    var wide = matchMedia("(min-width: 900px)");
+    // While the menu covers the page, everything behind it is inert, so Tab stays inside the menu.
+    var behind = document.querySelectorAll(".cx-header, .cx-main, .cx-footer");
     var setMenu = function (open) {
       if (open) root.setAttribute("data-cx-menu", "");
       if (!open) root.removeAttribute("data-cx-menu");
+      behind.forEach(function (element) {
+        element.inert = open;
+      });
       burger.setAttribute("aria-expanded", String(open));
       if (open) menu.querySelector(".cx-menu-close").focus();
-      if (!open) burger.focus();
+      if (!open && !wide.matches) burger.focus();
     };
+    // The menu only exists below 900px; widening past it closes the menu instead of leaving the page locked.
+    wide.addEventListener("change", function () {
+      if (wide.matches && root.hasAttribute("data-cx-menu")) setMenu(false);
+    });
     burger.addEventListener("click", function () {
       setMenu(true);
     });
