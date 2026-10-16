@@ -743,7 +743,7 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
           directory,
           parentID: input.parentID,
           onSession: (sessionID) => input.onProgress?.({ type: "session", sessionID, costKind: model.costKind }),
-          title: `Vectorscope review · ${subject} · verify`,
+          title: `${REVIEW_SESSION_TITLE_PREFIX}${subject} · verify`,
           text: buildVerifyPrompt({
             trust: checkout.trust,
             head,
