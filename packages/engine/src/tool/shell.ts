@@ -223,7 +223,8 @@ function dynamic(text: string, ps: boolean) {
   if (text.startsWith("(") || text.startsWith("@(")) return true
   if (text.includes("$(") || text.includes("${") || text.includes("`")) return true
   if (ps) return /\$(?!env:)/i.test(text)
-  return text.includes("$")
+  // Left over from home(): bash expands `~root`, `~+` and `~-` to directories the scan does not know.
+  return text.includes("$") || text.startsWith("~")
 }
 
 function prefix(text: string) {
@@ -516,6 +517,26 @@ export const ShellTool = Tool.define(
       return yield* resolvePath(next, cwd, shell)
     })
 
+    // Whether git, started in cwd, finds a work tree that holds every path. check-ignore refuses a path outside the
+    // work tree, and a start with none, by the same test git diff uses before it compares two whole files. A path the
+    // scan could not resolve may point anywhere, and with none at all there is nothing to show inside. Nothing the
+    // repository configures runs before the command is approved.
+    const inWorkTree = Effect.fn("ShellTool.inWorkTree")(function* (paths: (string | undefined)[], cwd: string) {
+      const known = paths.filter((item): item is string => item !== undefined)
+      if (known.length === 0 || known.length < paths.length) return false
+      const code = yield* spawner
+        .exitCode(
+          ChildProcess.make("git", ["-c", "core.fsmonitor=false", "check-ignore", "--", ...known], {
+            cwd,
+            stdin: "ignore",
+            stdout: "ignore",
+            stderr: "ignore",
+          }),
+        )
+        .pipe(Effect.catch(() => Effect.succeed(128)))
+      return code === 0 || code === 1
+    })
+
     const collect = Effect.fn("ShellTool.collect")(function* (
       root: Node,
       cwd: string,
@@ -530,19 +551,27 @@ export const ShellTool = Tool.define(
         writes: new Set<string>(),
       }
       const shellKind = ShellID.toKind(Shell.name(shell))
-
-      for (const node of commands(root)) {
+      const list = commands(root).map((node) => {
         const command = parts(node)
         const tokens = command.map((item) => item.text)
-        const cmd = ps || shellKind === "cmd" ? tokens[0]?.toLowerCase() : tokens[0]
+        return { node, command, tokens, cmd: ps || shellKind === "cmd" ? tokens[0]?.toLowerCase() : tokens[0] }
+      })
+      // A directory change anywhere in the command leaves unknown where git diff starts looking for its work tree.
+      const moved = list.some((item) => item.cmd !== undefined && CWD.has(item.cmd))
+
+      for (const item of list) {
+        const tokens = item.tokens
+        const cmd = item.cmd
         // `git diff` prints any two files once one of them lies outside the work tree (`git diff /dev/null ~/.ssh/id_rsa`),
         // --no-index or not, so its arguments are paths as much as cat's. A revision resolves inside the workspace.
         const diff = cmd === "git" && tokens[1] === "diff"
+        const paths: (string | undefined)[] = []
 
         if (cmd && (FILES.has(cmd) || diff || (shellKind === "cmd" && CMD_FILES.has(cmd)))) {
-          for (const arg of pathArgs(diff ? command.slice(1) : command, ps, shellKind === "cmd")) {
+          for (const arg of pathArgs(diff ? item.command.slice(1) : item.command, ps, shellKind === "cmd")) {
             const resolved = yield* argPath(arg, cwd, ps, shell)
             yield* Effect.logInfo("resolved path", { arg, resolved })
+            paths.push(resolved)
             if (!resolved || containsPath(resolved, instance)) continue
             const dir = (yield* fs.isDir(resolved)) ? resolved : path.dirname(resolved)
             scan.dirs.add(dir)
@@ -550,12 +579,20 @@ export const ShellTool = Tool.define(
         }
 
         if (tokens.length && (!cmd || !CWD.has(cmd))) {
-          scan.patterns.add(source(node))
+          scan.patterns.add(source(item.node))
           scan.always.add(BashArity.prefix(tokens).join(" ") + " *")
         }
-        // Outside a git work tree `git diff a b` is `git diff --no-index a b` and prints both whole files, directories
-        // included, so it answers to the rules written for --no-index, such as the read-only specialists' deny.
-        if (diff && instance.project.vcs !== "git" && !tokens.includes("--no-index"))
+        // Outside a git work tree, or once one of its paths lies outside the work tree, `git diff a b` is
+        // `git diff --no-index a b` and prints both whole files, directories included, so it answers to the rules
+        // written for --no-index, such as the read-only specialists' deny. A path inside the project is not enough: a
+        // nested repository or submodule ends the work tree at its own root, and a .git directory has none.
+        // Without a path (`git diff`, `git diff --stat`) git only shows the work tree's own changes.
+        if (
+          diff &&
+          !tokens.includes("--no-index") &&
+          (instance.project.vcs !== "git" ||
+            ((paths.length > 0 || tokens.includes("--")) && (moved || !(yield* inWorkTree(paths, cwd)))))
+        )
           scan.patterns.add(["git", "diff", "--no-index", ...tokens.slice(2)].join(" "))
       }
 
