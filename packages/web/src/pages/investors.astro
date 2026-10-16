@@ -150,7 +150,7 @@ const groups = [
         cells: [
           ["p", "Hosted models; own keys for 5 providers"],
           ["p", "OpenAI models by default; Responses-compatible providers, Bedrock, Ollama or LM Studio"],
-          ["p", "Officially Claude models only; others unsupported, through an Anthropic-compatible URL"],
+          ["p", "Officially Claude models only; others through a gateway, without Anthropic support"],
           ["n", "No model picker documented"],
           ["p", "10 models; picking one needs a paid plan"],
         ],
@@ -331,7 +331,7 @@ const stack = [
     <div class="ip-section-head">
       <div class="ip-eyebrow">Where Vector is different</div>
       <h2 id="compare-title">Twelve capabilities, six products</h2>
-      <p>Each cell says how that product handles it today. Vector chose these rows because they are the jobs it is built for: it has {vectorFullMarks} of the {allRows.length} in full, and the closest, {closest.name}, has {Math.max(...fullMarks)}.</p>
+      <p>Each cell says how that product handles it today. Vector chose these rows because they are the jobs it is built for: it has {vectorFullMarks} of the {allRows.length} in full, and the closest in this grid, {closest.name}, has {Math.max(...fullMarks)}.</p>
     </div>
     <div class="ip-legend" aria-label="Legend">
       <span><i class="ip-sym ip-yes" aria-hidden="true">✓</i>Yes</span>
@@ -579,7 +579,7 @@ const stack = [
         <p>Vector's own coding model, planned at 300B+ parameters, designed for the loop Vector runs and offered beside every other provider.</p>
       </div>
     </div>
-    <p class="ip-footnote"><strong>Also on the way:</strong> live spend caps for interactive runs (built, not in any published release yet; scheduled agents already stop at $5 a run and $25 a day by default), signed installers, and one-click sign-in for Vercel and Supabase (waiting on app registration).</p>
+    <p class="ip-footnote"><strong>Also on the way:</strong> live spend caps for interactive runs (built, not in 1.99.106 or any earlier release; scheduled agents already stop at $5 a run and $25 a day by default), signed installers, and one-click sign-in for Vercel and Supabase (waiting on app registration).</p>
   </section>
 
   <section class="ip-split" aria-label="Business model and limitations">
@@ -606,20 +606,20 @@ const stack = [
       <ul class="ip-clean ip-limits">
         <li><strong>Very early.</strong> The first desktop previews shipped in July 2026, the app became free on 4 October 2026, and daily usage counts started on 10 October 2026, so there is no retention data yet.</li>
         <li><strong>Codex still wins on cost, speed and memory.</strong> In Vector's own matched live test (October 2026), Codex used less time, cost and memory per task. The next release cuts what Vector sends per request; no matched live re-run has been done yet.</li>
-        <li><strong>Claude Code is faster and lighter offline.</strong> In the archived later runs of the offline harness, Claude Code finished each scripted task in 0.4–1.0 seconds against Vector's 3.2–3.8, with about half the peak memory (326–350 MiB against 656–804). Vector ran from source there, the others as installed builds.</li>
+        <li><strong>Claude Code is faster and lighter offline.</strong> In the archived later runs of the offline harness, on the integrated code they measured, Claude Code finished each scripted task in 0.4–1.0 seconds against Vector's 3.0–3.8, with about half the peak memory (326–350 MiB against 656–804); Vector's baseline there was slower still. Vector ran from source there, the others as installed builds.</li>
         <li><strong>Velocity is a plan, not a model yet:</strong> no weights and no benchmarks.</li>
         <li><strong>Vectorscope reviews GitHub only,</strong> with no GitLab or Bitbucket review yet.</li>
         <li><strong>Unsigned installers.</strong> macOS and Windows show a warning on first launch until code signing is set up.</li>
         <li><strong>Windows and Linux trail macOS</strong> in testing and maturity.</li>
         <li><strong>No SOC 2, SSO or admin console</strong> for larger companies yet.</li>
-        <li><strong>Interactive Vector sessions have no spend cap in any published release,</strong> and parallel agents have none by default; only scheduled agents stop at a default cap. The live caps are built but not released. Vercel and Supabase connect with pasted tokens until hosted sign-in is approved.</li>
+        <li><strong>Through 1.99.106, interactive Vector sessions have no spend cap,</strong> and parallel agents have none by default; only scheduled agents stop at a default cap. Vercel and Supabase connect with pasted tokens until hosted sign-in is approved.</li>
         <li><strong>Built on open source.</strong> The agent core is adapted from an MIT-licensed open-source coding agent; the workspace, orchestration, cost and review layers are Vector's own.</li>
       </ul>
     </div>
   </section>
 
   <footer class="ip-foot">
-    <p class="ip-footnote"><strong>* Benchmark method.</strong> Vector's offline footprint benchmark (script/agent-eval/footprint.ts), run 9–10 October 2026 against Claude Code 2.1.215. Both agents perform identical scripted tool steps against a local fake model server; each request is priced at Claude Sonnet 4.5 list prices with Anthropic prompt-caching rules, and tokens are estimated as characters ÷ 4. It measures what each agent sends, not the quality of answers, live cache behaviour or speed. Later runs of the same harness, archived in Vector's repository, found request-cost gaps at least this large; this page quotes the smaller figures. Those runs also show Claude Code faster and lighter than Vector; see Limitations. Codex was not part of this run; Vector's live comparison with Codex is under Limitations.</p>
+    <p class="ip-footnote"><strong>* Benchmark method.</strong> Vector's offline footprint benchmark (script/agent-eval/footprint.ts), run 9–10 October 2026 against Claude Code 2.1.215. Both agents perform identical scripted tool steps against a local fake model server; each request is priced at Claude Sonnet 4.5 list prices with Anthropic prompt-caching rules, and tokens are estimated as characters ÷ 4. It measures what each agent sends, not the quality of answers, live cache behaviour or speed. Later runs of the same harness, archived in Vector's repository, found request-cost gaps at least this large; this page quotes the smaller figures. Those runs also show Claude Code and Codex faster and lighter than Vector; see Limitations. Codex was not part of this run; Vector's live comparison with Codex is under Limitations.</p>
     <p class="ip-footnote"><strong>1.</strong> Stack Overflow 2026 Developer Survey, published 6 October 2026.</p>
     <details class="ip-details ip-sources">
       <summary>Sources, checked 11–15 October 2026</summary>
