@@ -1146,6 +1146,12 @@ const layer = Layer.effect(
         },
         {
           onRedirect: async (url) => {
+            // The server's own OAuth metadata names this URL, and it goes to the system opener, which also launches
+            // file:, smb: and application links: only a web page may be opened.
+            if (url.protocol !== "https:" && url.protocol !== "http:")
+              throw new Error(
+                `MCP server ${mcpName} asked Vector to open a ${url.protocol} authorization link; only http and https links are opened`,
+              )
             capturedUrl = url
           },
         },
