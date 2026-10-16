@@ -136,10 +136,6 @@ describe("vector run budget flags", () => {
         const steps = yield* vector.spawn(["run", "--max-steps", "2.5", "hello"])
         expect(steps.exitCode).toBe(1)
         expect(steps.stderr).toContain("--max-steps must be a positive integer")
-
-        const command = yield* vector.spawn(["run", "--command", "init", "--max-steps", "3"])
-        expect(command.exitCode).toBe(1)
-        expect(command.stderr).toContain("--max-cost and --max-steps cannot be used with --command")
       }),
     30_000,
   )

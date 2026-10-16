@@ -361,11 +361,6 @@ export const RunCommand = effectCmd({
 
       const budget = budgetFrom(args)
 
-      // The command endpoint takes no budget, so a cap passed with --command would silently not apply.
-      if (budget && args.command) {
-        die("--max-cost and --max-steps cannot be used with --command")
-      }
-
       if (interactive && !process.stdout.isTTY) {
         die("--mini requires a TTY stdout")
       }
@@ -1081,6 +1076,7 @@ export const RunCommand = effectCmd({
               command: args.command,
               arguments: message,
               variant: args.variant,
+              budget,
             })
             if (result.error) {
               rejectRequest(result.error)

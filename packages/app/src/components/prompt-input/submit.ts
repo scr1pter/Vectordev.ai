@@ -148,6 +148,11 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
         return false
       }
 
+      // A command starts a run like a chat message does, so it gets the same per-run cap.
+      const budget = promptRunBudget({
+        configured: input.sync.data.config.budget?.run,
+        policy: await cachedSpendPolicy(),
+      })
       await input.client.session.command({
         sessionID: input.draft.sessionID,
         command: cmd,
@@ -156,6 +161,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
         model: `${input.draft.model.providerID}/${input.draft.model.modelID}`,
         variant: input.draft.variant,
         executionMode: input.draft.executionMode,
+        ...(budget ? { budget } : {}),
         parts: images.map((attachment) => ({
           id: Identifier.ascending("part"),
           type: "file" as const,

@@ -1927,6 +1927,7 @@ const layer = Layer.effect(
           parts,
           variant: input.variant,
           executionMode: input.executionMode,
+          budget: input.budget,
         },
         // @file references in an MCP prompt or a skill are not the user's choice; the user's own attachments are.
         { userFile: (url) => attached.has(url) || cmd.source === "command" },
@@ -2019,6 +2020,8 @@ export const CommandInput = Schema.Struct({
   command: Schema.String,
   variant: Schema.optional(Schema.String),
   executionMode: Schema.optional(Schema.Union([Schema.Literal("normal"), Schema.Literal("fast")])),
+  // The run budget for the run the command starts, as on PromptInput.
+  budget: Schema.optional(RunBudget.Info),
   // Inlined (no identifier annotation) to keep the original SDK output — the
   // PromptInput call site below references FilePartInput by ref via the
   // Schema export in message-v2.ts.

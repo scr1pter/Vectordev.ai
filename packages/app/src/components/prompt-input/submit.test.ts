@@ -643,6 +643,45 @@ describe("follow-up optimistic echo", () => {
     const steps = await send({}, [], { budget: { run: { usd: 20, steps: 60 } } })
     expect(steps.find((step) => step.kind === "request")?.budget).toBeUndefined()
   })
+
+  test("sends the interactive per-run cap with a slash command", async () => {
+    const { clearSpendPolicyCache } = await import("@/features/economics/spend-limits-api")
+    const { sendFollowupDraft } = await import("./submit")
+    const policy = { interactive: { perRun: { usd: 10, warnAt: 0.7 } }, unattended: {} }
+    const commands: unknown[] = []
+    clearSpendPolicyCache()
+    Object.assign(window, { api: { spendLimits: { limits: async () => policy } } })
+    try {
+      await sendFollowupDraft({
+        client: {
+          session: {
+            command: async (input: unknown) => {
+              commands.push(input)
+              return { data: undefined }
+            },
+          },
+        } as unknown as SendInput["client"],
+        serverSync: { session: { set: () => undefined } } as unknown as SendInput["serverSync"],
+        sync: {
+          data: { command: [{ name: "review" }], message: {}, config: { budget: { run: { usd: 20, steps: 60 } } } },
+        } as unknown as SendInput["sync"],
+        draft: {
+          sessionID: "session-1",
+          sessionDirectory: "/repo/main",
+          prompt: [{ type: "text", content: "/review src", start: 0, end: 11 }],
+          context: [],
+          agent: "build",
+          model: { providerID: "anthropic", modelID: "claude-sonnet-4-5" },
+        },
+      })
+      expect(commands).toMatchObject([
+        { command: "review", arguments: "src", budget: { usd: 10, steps: 60, warnAt: 0.7 } },
+      ])
+    } finally {
+      delete (window as { api?: unknown }).api
+      clearSpendPolicyCache()
+    }
+  })
 })
 
 describe("submission agent selection", () => {

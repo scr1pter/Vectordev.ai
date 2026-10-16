@@ -4257,6 +4257,38 @@ it.instance(
 )
 
 it.instance(
+  "run guard holds a slash command to the budget sent with it",
+  () =>
+    Effect.gen(function* () {
+      // The command's first turn costs $0.10 of output, past the $0.05 cap the command was sent with.
+      const { llm } = yield* useServerConfig(
+        pricedCfg({ input: 0, output: 100 }, { command: { probe: { template: "Probe the repository" } } }),
+      )
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* llm.push(reply().tool("first", { value: 1 }).usage({ input: 100, output: 1000 }))
+      yield* llm.text("never requested")
+
+      const result = yield* prompt.command({
+        sessionID: chat.id,
+        agent: "build",
+        command: "probe",
+        arguments: "",
+        budget: { usd: 0.05 },
+      })
+
+      expect(budgetStop(result.info)?.reason).toBe("cap")
+      expect(budgetStop(result.info)?.capUsd).toBe(0.05)
+      expect(yield* llm.pending).toBe(1)
+    }),
+  60_000,
+)
+
+it.instance(
   "run guard stops before a step it predicts would cross the config cap",
   () =>
     Effect.gen(function* () {
