@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 
 import { getStore } from "./store"
+import { createStoreCache } from "./store-cache"
 
 const STORE_NAME = "background-tasks"
 const STORE_KEY = "records"
@@ -100,14 +101,22 @@ export type UpdateBackgroundTaskInput = Partial<
 
 const now = () => new Date().toISOString()
 
+const cache = createStoreCache<BackgroundTaskRecord>()
+
 function readRecords(): BackgroundTaskRecord[] {
-  const raw = getStore(STORE_NAME).get(STORE_KEY)
-  if (!Array.isArray(raw)) return []
-  return raw.filter((item): item is BackgroundTaskRecord => typeof item?.id === "string")
+  const store = getStore(STORE_NAME)
+  return cache.read(store, () => {
+    const raw = store.get(STORE_KEY)
+    if (!Array.isArray(raw)) return []
+    return raw.filter((item): item is BackgroundTaskRecord => typeof item?.id === "string")
+  })
 }
 
 function writeRecords(records: BackgroundTaskRecord[]) {
-  getStore(STORE_NAME).set(STORE_KEY, records.slice(0, MAX_RECORDS))
+  const store = getStore(STORE_NAME)
+  const kept = records.slice(0, MAX_RECORDS)
+  store.set(STORE_KEY, kept)
+  cache.wrote(store, kept)
 }
 
 function elapsed(startedAt?: string, completedAt?: string) {

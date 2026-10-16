@@ -710,7 +710,7 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
       })
     }
     throw new Error(
-      `Vector could not finish this review: ${runs.find((run) => run.detail)?.detail ?? "no reviewer answered"}.${spentSoFar(runs, model)}`,
+      `Vector could not finish this review: ${(runs.find((run) => run.detail)?.detail ?? "no reviewer answered").replace(/[.\s]+$/, "")}.${spentSoFar(runs, model)}`,
     )
   }
 
@@ -743,7 +743,7 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
           directory,
           parentID: input.parentID,
           onSession: (sessionID) => input.onProgress?.({ type: "session", sessionID, costKind: model.costKind }),
-          title: `Vectorscope review · ${subject} · verify`,
+          title: `${REVIEW_SESSION_TITLE_PREFIX}${subject} · verify`,
           text: buildVerifyPrompt({
             trust: checkout.trust,
             head,
@@ -1151,13 +1151,16 @@ function estimateReview(input: {
 }
 
 // The reviewer sessions stay out of view, so a running review shows what it has spent in its progress line. Only a
-// listed price makes a cost: a subscription or an unlisted model reports tokens alone.
+// listed price makes a cost: a subscription or an unlisted model reports tokens alone. A reviewer whose history could
+// not be read spent an unknown amount, so the known totals are then floors, as the spend event says.
 function spentSoFar(runs: readonly { usage: Usage }[], model: ReviewModel) {
   const usage = measureUsage(runs.flatMap((run) => run.usage.messages))
   if (!usage) return ""
+  const unread = runs.some((run) => !run.usage.complete)
   const tokens = `${formatTokens(totalTokens(usage.usage))} tokens`
-  if (model.costKind !== "priced" || usage.costUsd === undefined || usage.mixedModels) return ` ${tokens} so far.`
-  return ` ${usage.partial ? "At least " : ""}${formatUsd(usage.costUsd)} and ${tokens} so far.`
+  if (model.costKind !== "priced" || usage.costUsd === undefined || usage.mixedModels)
+    return ` ${unread ? "At least " : ""}${tokens} so far.`
+  return ` ${usage.partial || unread ? "At least " : ""}${formatUsd(usage.costUsd)} and ${tokens} so far.`
 }
 
 // Every assistant step of the session, so the cost includes the finalize step.

@@ -156,6 +156,28 @@ describe("sending a follow-up to an external workspace", () => {
     expect(second.diff).toBe(first.diff)
   })
 
+  // The app polls a swarm's workers through this scope. A failed worker must still read as failed to the swarm
+  // waiting on it, however its checkout changed since its run ended.
+  test("listing a swarm's workers by their scope neither re-diffs nor rewrites them", async () => {
+    const seeded = await seed({
+      parentSessionId: "swarm:run-1",
+      status: "failed",
+      revision: 3,
+      baselineHashes: {},
+      changedFiles: [],
+      changedFilesCount: 0,
+    })
+    await Bun.write(join(seeded.isolatedPath, "a.ts"), "edited after the run failed")
+
+    const listed = listParallelWorkspaces({ parentSessionId: "swarm:run-1" })
+
+    expect(listed.map((record) => [record.id, record.status, record.revision, record.changedFilesCount])).toEqual([
+      [seeded.id, "failed", 3, 0],
+    ])
+    expect(listParallelWorkspaces({ parentSessionId: "swarm:run-2" })).toEqual([])
+    expect(getParallelWorkspace(seeded.id)?.status).toBe("failed")
+  })
+
   test("an empty message is refused before anything is queued", async () => {
     const seeded = await seed()
     await expect(followUpParallelWorkspace(seeded.id, engine, "   ")).rejects.toThrow("Type a message")

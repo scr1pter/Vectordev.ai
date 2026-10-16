@@ -23,6 +23,7 @@ import {
   type TaskDifficulty,
 } from "./context-budget"
 import { getStore } from "./store"
+import { createStoreCache } from "./store-cache"
 import { createPullRequest } from "./github"
 import {
   runExternalCodingAgent,
@@ -288,31 +289,35 @@ const runtimeLabel = (runtime: ParallelWorkspaceRuntime) =>
         ? "Cursor Agent"
         : "Vector"
 
+const cache = createStoreCache<ParallelWorkspaceRecord>()
+
 function readRecords(): ParallelWorkspaceRecord[] {
   const store = getStore(STORE_NAME)
-  const raw = store.get(STORE_KEY)
-  if (!Array.isArray(raw)) return []
-  const records = raw
-    .filter((item): item is ParallelWorkspaceRecord => typeof item?.id === "string")
-    .map(
-      (item): ParallelWorkspaceRecord => ({
-        ...item,
-        revision: item.revision ?? 0,
-        runtime:
-          item.runtime === "claude-code" || item.runtime === "codex" || item.runtime === "cursor"
-            ? item.runtime
-            : "vector",
-      }),
-    )
-  const compacted = records.map(compactClosedParallelWorkspace)
-  // Closed workspaces have no checkout left and cannot be run or reviewed
-  // again. Older versions nevertheless retained their full binary diff,
-  // baseline hash table and every changed filename. One real history file had
-  // reached 48 MB, so each streamed agent event synchronously serialized that
-  // whole file and pinned Electron's main thread. Migrate it on the first read;
-  // identity is preserved for already-compact records, so this writes once.
-  if (compacted.some((record, index) => record !== records[index])) store.set(STORE_KEY, compacted)
-  return compacted
+  return cache.read(store, () => {
+    const raw = store.get(STORE_KEY)
+    if (!Array.isArray(raw)) return []
+    const records = raw
+      .filter((item): item is ParallelWorkspaceRecord => typeof item?.id === "string")
+      .map(
+        (item): ParallelWorkspaceRecord => ({
+          ...item,
+          revision: item.revision ?? 0,
+          runtime:
+            item.runtime === "claude-code" || item.runtime === "codex" || item.runtime === "cursor"
+              ? item.runtime
+              : "vector",
+        }),
+      )
+    const compacted = records.map(compactClosedParallelWorkspace)
+    // Closed workspaces have no checkout left and cannot be run or reviewed
+    // again. Older versions nevertheless retained their full binary diff,
+    // baseline hash table and every changed filename. One real history file had
+    // reached 48 MB, so each streamed agent event synchronously serialized that
+    // whole file and pinned Electron's main thread. Migrate it on the first read;
+    // identity is preserved for already-compact records, so this writes once.
+    if (compacted.some((record, index) => record !== records[index])) store.set(STORE_KEY, compacted)
+    return compacted
+  })
 }
 
 export function compactClosedParallelWorkspace(record: ParallelWorkspaceRecord) {
@@ -334,7 +339,9 @@ export function compactClosedParallelWorkspace(record: ParallelWorkspaceRecord) 
 }
 
 function writeRecords(records: ParallelWorkspaceRecord[]) {
-  getStore(STORE_NAME).set(STORE_KEY, records)
+  const store = getStore(STORE_NAME)
+  store.set(STORE_KEY, records)
+  cache.wrote(store, records)
 }
 
 function updateRecord(id: string, update: (record: ParallelWorkspaceRecord) => ParallelWorkspaceRecord) {

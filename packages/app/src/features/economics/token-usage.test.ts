@@ -307,7 +307,14 @@ describe("measureUsage", () => {
   test("a refused retry after streamed content keeps the cost partial", () => {
     const paid = { role: "assistant", providerID: "p", modelID: "m", cost: 0.04, tokens: { input: 1_000 } }
     const dropped = { ...paid, cost: 0, tokens: {}, error: { name: "APIError", data: { statusCode: 429 } } }
-    for (const parts of [undefined, [{ type: "text" }], [{ type: "reasoning" }], [{ type: "tool" }]]) {
+    for (const parts of [
+      undefined,
+      [{ type: "text" }],
+      [{ type: "reasoning" }],
+      [{ type: "tool" }],
+      // A stream that began and dropped before its first token.
+      [{ type: "step-start" }],
+    ]) {
       expect(measureUsage([paid, { ...dropped, parts }])?.partial).toBe(true)
     }
   })

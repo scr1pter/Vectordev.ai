@@ -2,8 +2,9 @@
 //
 // The engine is an in-memory fake behind the real SDK client. The script emits the events the engine emits for each
 // step, and every event goes through the same handlers the app runs: the session cache, the directory reducer (whose
-// refresh queue re-bootstraps a directory) and the economics recorder. Set VECTOR_TRAFFIC_REPORT=1 to print the
-// counts, and VECTOR_TRAFFIC_PROVIDER_BODY to serve a real /provider body for byte counts.
+// refresh queue re-bootstraps a directory), the economics recorder and the layout's status reconciliation. Set
+// VECTOR_TRAFFIC_REPORT=1 to print the counts, and VECTOR_TRAFFIC_PROVIDER_BODY to serve a real /provider body for
+// byte counts.
 import { expect, test } from "bun:test"
 import { QueryClient } from "@tanstack/solid-query"
 import { createStore } from "solid-js/store"
@@ -144,20 +145,28 @@ function createApp(engine: ReturnType<typeof createEngine>) {
     session,
     saved,
     bootstrap,
-    emit(details: unknown) {
-      // The same order as the app: the server-sync listener is registered before the layout's.
-      session.apply(details as Event)
-      applyDirectoryEvent({
-        event: details as Event,
-        directory,
-        store,
-        setStore,
-        push: queue.push,
-        sessionContent: false,
-        permission: session.data.permission,
-        loadLsp() {},
-      })
-      economics.handle({ name: directory, details: details as Event })
+    // One flush of the app's event queue: every event goes through the listeners in the app's order (server-sync's is
+    // registered before the layout's), then the layout's status effect reconciles, as it does after the batch.
+    emit(...events: unknown[]) {
+      for (const details of events) {
+        session.apply(details as Event)
+        applyDirectoryEvent({
+          event: details as Event,
+          directory,
+          store,
+          setStore,
+          push: queue.push,
+          sessionContent: false,
+          permission: session.data.permission,
+          loadLsp() {},
+        })
+        economics.handle({ name: directory, details: details as Event })
+      }
+      economics.reconcile(
+        Object.keys(session.data.session_status)
+          .map((id) => session.get(id))
+          .filter((info): info is NonNullable<typeof info> => Boolean(info)),
+      )
     },
     dispose() {
       queue.dispose()
@@ -203,8 +212,11 @@ function createScript(engine: ReturnType<typeof createEngine>, app: ReturnType<t
   const status = (sessionID: string, type: "busy" | "idle") => {
     if (type === "busy") engine.status[sessionID] = { type }
     if (type === "idle") delete engine.status[sessionID]
-    app.emit({ type: "session.status", properties: { sessionID, status: { type } } })
-    if (type === "idle") app.emit({ type: "session.idle", properties: { sessionID } })
+    // The engine publishes idle right after the idle status, so both land in one flush of the app's event queue.
+    app.emit(
+      { type: "session.status", properties: { sessionID, status: { type } } },
+      ...(type === "idle" ? [{ type: "session.idle", properties: { sessionID } }] : []),
+    )
   }
   // A step takes seconds, so whatever the handlers started for it has finished before the next one.
   const step = async (

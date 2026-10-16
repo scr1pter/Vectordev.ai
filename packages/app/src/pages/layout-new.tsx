@@ -20,6 +20,7 @@ import { usePlanMode } from "@/context/plan-mode"
 import { usePlatform } from "@/context/platform"
 import { useUpdaterAction } from "@/components/updater-action"
 import { pathKey } from "@/utils/path-key"
+import { listSwarmWorkers } from "@/utils/swarm-workers"
 import { samePolledRecords, sameWorkspaceRevisions } from "@/utils/workspace-revisions"
 import { modelDisplayName } from "@/utils/provider-brand"
 import { bestOwnFreeModel } from "@/utils/free-model"
@@ -1705,20 +1706,8 @@ export default function NewLayout(props: ParentProps) {
       return [] as ParallelWorkspaceRecord[]
     })
     const runs = await loadSwarmRuns(scope)
-    const workerIDs = [
-      ...new Set(
-        runs.flatMap((run) => run.tasks.map((task) => task.workspaceId).filter((id): id is string => Boolean(id))),
-      ),
-    ]
-    const workers = await Promise.all(
-      workerIDs
-        .filter((id) => !records.some((record) => record.id === id))
-        .map((id) => api.refresh(id).catch(() => undefined)),
-    )
-    const allRecords = [
-      ...records,
-      ...workers.filter((record): record is ParallelWorkspaceRecord => Boolean(record)),
-    ].filter((record) => parallelRecordMatchesScope(record, scope))
+    const workers = await listSwarmWorkers({ runs, listed: records, list: (workerScope) => api.list(workerScope) })
+    const allRecords = [...records, ...workers].filter((record) => parallelRecordMatchesScope(record, scope))
     const current = activeWorkspaceScope()
     if (current.sourcePath !== scope.sourcePath || current.parentSessionId !== scope.parentSessionId) return
     setParallelRecords(allRecords)
