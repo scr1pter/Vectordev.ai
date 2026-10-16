@@ -1,0 +1,1035 @@
+{
+  "models": {
+    "anthropic": "claude-sonnet-4-5",
+    "openai": "gpt-6.1-sol",
+    "codex": "gpt-6.1-sol"
+  },
+  "rates": {
+    "messages": {
+      "input": 3,
+      "cacheWrite": 3.75,
+      "cacheRead": 0.3,
+      "output": 15
+    },
+    "responses": {
+      "input": 2,
+      "cacheWrite": 0,
+      "cacheRead": 0.1,
+      "output": 10
+    }
+  },
+  "sessions": 2,
+  "websocket": false,
+  "engineRoot": "/private/tmp/claude-503/-Users-Krishna-Vectordev-ai/82c740c0-7c7a-4353-9c97-5f74368e9da6/scratchpad/co/fi",
+  "memorySamplingMs": 100,
+  "payloadEncoding": "utf8",
+  "scenarios": [
+    {
+      "scenario": "solo-fix",
+      "runtime": "vector",
+      "session": 1,
+      "model": "claude-sonnet-4-5",
+      "exitCode": 0,
+      "unplayed": 0,
+      "performance": {
+        "wallMs": 2402.351584,
+        "timeToFirstRequestMs": 1440.0127499999999,
+        "requestTimesMs": [
+          1440.0127499999999,
+          1533.1338329999999,
+          1647.258625,
+          1775.762541,
+          2008.910333
+        ],
+        "postTerminalMs": 393.44125099999997,
+        "sampledPeakProcessTreeRssKiB": 785088,
+        "samples": [
+          {
+            "atMs": 124.731542,
+            "phase": "startup",
+            "rssKiB": 103856
+          },
+          {
+            "atMs": 224.981334,
+            "phase": "startup",
+            "rssKiB": 147552
+          },
+          {
+            "atMs": 326.551042,
+            "phase": "startup",
+            "rssKiB": 172464
+          },
+          {
+            "atMs": 429.227167,
+            "phase": "startup",
+            "rssKiB": 206352
+          },
+          {
+            "atMs": 531.1376670000001,
+            "phase": "startup",
+            "rssKiB": 274240
+          },
+          {
+            "atMs": 632.9150000000001,
+            "phase": "startup",
+            "rssKiB": 285888
+          },
+          {
+            "atMs": 737.522459,
+            "phase": "startup",
+            "rssKiB": 369184
+          },
+          {
+            "atMs": 840.475667,
+            "phase": "startup",
+            "rssKiB": 421136
+          },
+          {
+            "atMs": 941.0422920000001,
+            "phase": "startup",
+            "rssKiB": 548128
+          },
+          {
+            "atMs": 1042.358125,
+            "phase": "startup",
+            "rssKiB": 592320
+          },
+          {
+            "atMs": 1143.9795000000001,
+            "phase": "startup",
+            "rssKiB": 595072
+          },
+          {
+            "atMs": 1247.0173750000001,
+            "phase": "startup",
+            "rssKiB": 609952
+          },
+          {
+            "atMs": 1349.088584,
+            "phase": "startup",
+            "rssKiB": 619712
+          },
+          {
+            "atMs": 1450.84825,
+            "phase": "active",
+            "rssKiB": 622688
+          },
+          {
+            "atMs": 1550.811709,
+            "phase": "active",
+            "rssKiB": 653296
+          },
+          {
+            "atMs": 1651.8725,
+            "phase": "active",
+            "rssKiB": 656464
+          },
+          {
+            "atMs": 1752.772875,
+            "phase": "active",
+            "rssKiB": 659600
+          },
+          {
+            "atMs": 1855.617042,
+            "phase": "active",
+            "rssKiB": 666192
+          },
+          {
+            "atMs": 1956.406125,
+            "phase": "active",
+            "rssKiB": 673344
+          },
+          {
+            "atMs": 2057.653125,
+            "phase": "tail",
+            "rssKiB": 670080
+          },
+          {
+            "atMs": 2160.089125,
+            "phase": "tail",
+            "rssKiB": 669808
+          },
+          {
+            "atMs": 2262.1051669999997,
+            "phase": "tail",
+            "rssKiB": 672160
+          },
+          {
+            "atMs": 2365.1775,
+            "phase": "tail",
+            "rssKiB": 785088
+          }
+        ]
+      },
+      "verification": {
+        "exitCode": 0,
+        "output": "bun test v1.3.14 (0d9b296a)\n\n 3 pass\n 0 fail\n 3 expect() calls\nRan 3 tests across 1 file. [11.00ms]\n"
+      },
+      "requests": [
+        {
+          "index": 1,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5598,
+          "messageTokens": 98,
+          "inputTokens": 9183,
+          "cacheRead": 0,
+          "cacheWrite": 9183,
+          "uncached": 0,
+          "outputTokens": 15,
+          "sentBytes": 36956,
+          "costUsd": 0.034661,
+          "uncachedCostUsd": 0.027774
+        },
+        {
+          "index": 2,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5598,
+          "messageTokens": 390,
+          "inputTokens": 9475,
+          "cacheRead": 9183,
+          "cacheWrite": 292,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 38159,
+          "costUsd": 0.004255,
+          "uncachedCostUsd": 0.02883
+        },
+        {
+          "index": 3,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5598,
+          "messageTokens": 638,
+          "inputTokens": 9723,
+          "cacheRead": 9475,
+          "cacheWrite": 248,
+          "uncached": 0,
+          "outputTokens": 74,
+          "sentBytes": 39150,
+          "costUsd": 0.004883,
+          "uncachedCostUsd": 0.030279
+        },
+        {
+          "index": 4,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5598,
+          "messageTokens": 764,
+          "inputTokens": 9849,
+          "cacheRead": 9723,
+          "cacheWrite": 126,
+          "uncached": 0,
+          "outputTokens": 15,
+          "sentBytes": 39651,
+          "costUsd": 0.003614,
+          "uncachedCostUsd": 0.029772
+        },
+        {
+          "index": 5,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5598,
+          "messageTokens": 850,
+          "inputTokens": 9935,
+          "cacheRead": 9849,
+          "cacheWrite": 86,
+          "uncached": 0,
+          "outputTokens": 21,
+          "sentBytes": 39993,
+          "costUsd": 0.003592,
+          "uncachedCostUsd": 0.03012
+        }
+      ],
+      "totals": {
+        "requests": 5,
+        "subagentRequests": 0,
+        "sideRequests": 0,
+        "warmupRequests": 0,
+        "inputTokens": 48165,
+        "cacheRead": 38230,
+        "cacheWrite": 9935,
+        "uncached": 0,
+        "outputTokens": 152,
+        "sentBytes": 193909,
+        "cacheReadShare": 0.794,
+        "fixedTokensPerRequest": 9085,
+        "firstRequest": {
+          "inputTokens": 9183,
+          "cacheRead": 0,
+          "uncached": 0,
+          "costUsd": 0.034661
+        },
+        "costUsd": 0.051005,
+        "uncachedCostUsd": 0.146775
+      },
+      "toolDefinitions": {
+        "agent": {
+          "task": 1685,
+          "bash": 940,
+          "todowrite": 618,
+          "edit": 490,
+          "read": 467,
+          "grep": 369,
+          "webfetch": 324,
+          "glob": 279,
+          "write": 257,
+          "skill": 169
+        },
+        "subagent": {}
+      }
+    },
+    {
+      "scenario": "solo-fix",
+      "runtime": "vector",
+      "session": 2,
+      "model": "claude-sonnet-4-5",
+      "exitCode": 0,
+      "unplayed": 0,
+      "performance": {
+        "wallMs": 2155.577208,
+        "timeToFirstRequestMs": 1201.696417,
+        "requestTimesMs": [
+          1201.696417,
+          1282.261375,
+          1393.7348340000003,
+          1529.4541670000003,
+          1758.679917
+        ],
+        "postTerminalMs": 396.8972910000002,
+        "sampledPeakProcessTreeRssKiB": 773536,
+        "samples": [
+          {
+            "atMs": 122.07299999999987,
+            "phase": "startup",
+            "rssKiB": 124992
+          },
+          {
+            "atMs": 222.175166,
+            "phase": "startup",
+            "rssKiB": 163952
+          },
+          {
+            "atMs": 324.36479099999997,
+            "phase": "startup",
+            "rssKiB": 197952
+          },
+          {
+            "atMs": 428.9537909999999,
+            "phase": "startup",
+            "rssKiB": 267504
+          },
+          {
+            "atMs": 531.712583,
+            "phase": "startup",
+            "rssKiB": 287312
+          },
+          {
+            "atMs": 635.117416,
+            "phase": "startup",
+            "rssKiB": 398160
+          },
+          {
+            "atMs": 737.2388329999999,
+            "phase": "startup",
+            "rssKiB": 478544
+          },
+          {
+            "atMs": 839.4841660000002,
+            "phase": "startup",
+            "rssKiB": 560208
+          },
+          {
+            "atMs": 940.4859999999999,
+            "phase": "startup",
+            "rssKiB": 578336
+          },
+          {
+            "atMs": 1042.3505,
+            "phase": "startup",
+            "rssKiB": 603456
+          },
+          {
+            "atMs": 1145.6042080000002,
+            "phase": "startup",
+            "rssKiB": 612544
+          },
+          {
+            "atMs": 1246.056791,
+            "phase": "active",
+            "rssKiB": 636704
+          },
+          {
+            "atMs": 1346.500666,
+            "phase": "active",
+            "rssKiB": 645072
+          },
+          {
+            "atMs": 1447.6195000000002,
+            "phase": "active",
+            "rssKiB": 659408
+          },
+          {
+            "atMs": 1547.724791,
+            "phase": "active",
+            "rssKiB": 658048
+          },
+          {
+            "atMs": 1649.9561660000004,
+            "phase": "active",
+            "rssKiB": 663360
+          },
+          {
+            "atMs": 1753.0596250000003,
+            "phase": "active",
+            "rssKiB": 674144
+          },
+          {
+            "atMs": 1853.9160829999996,
+            "phase": "tail",
+            "rssKiB": 665568
+          },
+          {
+            "atMs": 1956.2409160000002,
+            "phase": "tail",
+            "rssKiB": 672272
+          },
+          {
+            "atMs": 2060.24725,
+            "phase": "tail",
+            "rssKiB": 674096
+          },
+          {
+            "atMs": 2161.217166,
+            "phase": "tail",
+            "rssKiB": 773536
+          }
+        ]
+      },
+      "verification": {
+        "exitCode": 0,
+        "output": "bun test v1.3.14 (0d9b296a)\n\n 3 pass\n 0 fail\n 3 expect() calls\nRan 3 tests across 1 file. [11.00ms]\n"
+      },
+      "requests": [
+        {
+          "index": 1,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5598,
+          "messageTokens": 98,
+          "inputTokens": 9183,
+          "cacheRead": 8806,
+          "cacheWrite": 377,
+          "uncached": 0,
+          "outputTokens": 15,
+          "sentBytes": 36956,
+          "costUsd": 0.004281,
+          "uncachedCostUsd": 0.027774
+        },
+        {
+          "index": 2,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5598,
+          "messageTokens": 390,
+          "inputTokens": 9475,
+          "cacheRead": 9183,
+          "cacheWrite": 292,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 38159,
+          "costUsd": 0.004255,
+          "uncachedCostUsd": 0.02883
+        },
+        {
+          "index": 3,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5598,
+          "messageTokens": 638,
+          "inputTokens": 9723,
+          "cacheRead": 9475,
+          "cacheWrite": 248,
+          "uncached": 0,
+          "outputTokens": 74,
+          "sentBytes": 39150,
+          "costUsd": 0.004883,
+          "uncachedCostUsd": 0.030279
+        },
+        {
+          "index": 4,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5598,
+          "messageTokens": 764,
+          "inputTokens": 9849,
+          "cacheRead": 9723,
+          "cacheWrite": 126,
+          "uncached": 0,
+          "outputTokens": 15,
+          "sentBytes": 39651,
+          "costUsd": 0.003614,
+          "uncachedCostUsd": 0.029772
+        },
+        {
+          "index": 5,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5598,
+          "messageTokens": 850,
+          "inputTokens": 9935,
+          "cacheRead": 9849,
+          "cacheWrite": 86,
+          "uncached": 0,
+          "outputTokens": 21,
+          "sentBytes": 39993,
+          "costUsd": 0.003592,
+          "uncachedCostUsd": 0.03012
+        }
+      ],
+      "totals": {
+        "requests": 5,
+        "subagentRequests": 0,
+        "sideRequests": 0,
+        "warmupRequests": 0,
+        "inputTokens": 48165,
+        "cacheRead": 47036,
+        "cacheWrite": 1129,
+        "uncached": 0,
+        "outputTokens": 152,
+        "sentBytes": 193909,
+        "cacheReadShare": 0.977,
+        "fixedTokensPerRequest": 9085,
+        "firstRequest": {
+          "inputTokens": 9183,
+          "cacheRead": 8806,
+          "uncached": 0,
+          "costUsd": 0.004281
+        },
+        "costUsd": 0.020625,
+        "uncachedCostUsd": 0.146775
+      },
+      "toolDefinitions": {
+        "agent": {
+          "task": 1685,
+          "bash": 940,
+          "todowrite": 618,
+          "edit": 490,
+          "read": 467,
+          "grep": 369,
+          "webfetch": 324,
+          "glob": 279,
+          "write": 257,
+          "skill": 169
+        },
+        "subagent": {}
+      }
+    },
+    {
+      "scenario": "solo-fix",
+      "runtime": "vector-openai",
+      "session": 1,
+      "model": "gpt-6.1-sol",
+      "exitCode": 0,
+      "unplayed": 0,
+      "performance": {
+        "wallMs": 2151.305125,
+        "timeToFirstRequestMs": 1207.2440410000008,
+        "requestTimesMs": [
+          1207.2440410000008,
+          1294.4015830000008,
+          1411.5189580000006,
+          1551.9363750000002,
+          1771.6708330000001
+        ],
+        "postTerminalMs": 379.63429199999973,
+        "sampledPeakProcessTreeRssKiB": 692976,
+        "samples": [
+          {
+            "atMs": 120.31124999999975,
+            "phase": "startup",
+            "rssKiB": 116448
+          },
+          {
+            "atMs": 222.5124169999999,
+            "phase": "startup",
+            "rssKiB": 163392
+          },
+          {
+            "atMs": 324.720292,
+            "phase": "startup",
+            "rssKiB": 193888
+          },
+          {
+            "atMs": 430.09850000000006,
+            "phase": "startup",
+            "rssKiB": 268176
+          },
+          {
+            "atMs": 529.937167,
+            "phase": "startup",
+            "rssKiB": 284080
+          },
+          {
+            "atMs": 633.1939590000002,
+            "phase": "startup",
+            "rssKiB": 407696
+          },
+          {
+            "atMs": 739.7884999999997,
+            "phase": "startup",
+            "rssKiB": 461616
+          },
+          {
+            "atMs": 837.0814169999994,
+            "phase": "startup",
+            "rssKiB": 574432
+          },
+          {
+            "atMs": 937.4964169999994,
+            "phase": "startup",
+            "rssKiB": 591952
+          },
+          {
+            "atMs": 1039.5905839999996,
+            "phase": "startup",
+            "rssKiB": 620672
+          },
+          {
+            "atMs": 1141.8176669999993,
+            "phase": "startup",
+            "rssKiB": 631408
+          },
+          {
+            "atMs": 1245.4076669999995,
+            "phase": "active",
+            "rssKiB": 633264
+          },
+          {
+            "atMs": 1345.8022089999995,
+            "phase": "active",
+            "rssKiB": 674176
+          },
+          {
+            "atMs": 1446.327625,
+            "phase": "active",
+            "rssKiB": 670000
+          },
+          {
+            "atMs": 1546.7730839999995,
+            "phase": "active",
+            "rssKiB": 673264
+          },
+          {
+            "atMs": 1648.1267090000001,
+            "phase": "active",
+            "rssKiB": 681680
+          },
+          {
+            "atMs": 1751.371959,
+            "phase": "active",
+            "rssKiB": 683088
+          },
+          {
+            "atMs": 1853.1369589999995,
+            "phase": "tail",
+            "rssKiB": 692976
+          },
+          {
+            "atMs": 1954.8994589999993,
+            "phase": "tail",
+            "rssKiB": 690160
+          },
+          {
+            "atMs": 2063.26425,
+            "phase": "tail",
+            "rssKiB": 689792
+          },
+          {
+            "atMs": 2159.8130839999994,
+            "phase": "tail",
+            "rssKiB": 0
+          }
+        ]
+      },
+      "verification": {
+        "exitCode": 0,
+        "output": "bun test v1.3.14 (0d9b296a)\n\n 3 pass\n 0 fail\n 3 expect() calls\nRan 3 tests across 1 file. [11.00ms]\n"
+      },
+      "requests": [
+        {
+          "index": 1,
+          "who": "agent",
+          "tools": 9,
+          "systemTokens": 0,
+          "toolTokens": 5077,
+          "messageTokens": 3271,
+          "inputTokens": 8348,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "uncached": 8348,
+          "outputTokens": 15,
+          "sentBytes": 33650,
+          "costUsd": 0.016846,
+          "uncachedCostUsd": 0.016846
+        },
+        {
+          "index": 2,
+          "who": "agent",
+          "tools": 9,
+          "systemTokens": 0,
+          "toolTokens": 5077,
+          "messageTokens": 3888,
+          "inputTokens": 8965,
+          "cacheRead": 8320,
+          "cacheWrite": 0,
+          "uncached": 645,
+          "outputTokens": 27,
+          "sentBytes": 36116,
+          "costUsd": 0.002392,
+          "uncachedCostUsd": 0.0182
+        },
+        {
+          "index": 3,
+          "who": "agent",
+          "tools": 9,
+          "systemTokens": 0,
+          "toolTokens": 5077,
+          "messageTokens": 4460,
+          "inputTokens": 9537,
+          "cacheRead": 8960,
+          "cacheWrite": 0,
+          "uncached": 577,
+          "outputTokens": 62,
+          "sentBytes": 38403,
+          "costUsd": 0.00267,
+          "uncachedCostUsd": 0.019694
+        },
+        {
+          "index": 4,
+          "who": "agent",
+          "tools": 9,
+          "systemTokens": 0,
+          "toolTokens": 5077,
+          "messageTokens": 4908,
+          "inputTokens": 9985,
+          "cacheRead": 9472,
+          "cacheWrite": 0,
+          "uncached": 513,
+          "outputTokens": 15,
+          "sentBytes": 40193,
+          "costUsd": 0.002123,
+          "uncachedCostUsd": 0.02012
+        },
+        {
+          "index": 5,
+          "who": "agent",
+          "tools": 9,
+          "systemTokens": 0,
+          "toolTokens": 5077,
+          "messageTokens": 5319,
+          "inputTokens": 10396,
+          "cacheRead": 9984,
+          "cacheWrite": 0,
+          "uncached": 412,
+          "outputTokens": 21,
+          "sentBytes": 41835,
+          "costUsd": 0.002032,
+          "uncachedCostUsd": 0.021002
+        }
+      ],
+      "totals": {
+        "requests": 5,
+        "subagentRequests": 0,
+        "sideRequests": 0,
+        "warmupRequests": 0,
+        "inputTokens": 47231,
+        "cacheRead": 36736,
+        "cacheWrite": 0,
+        "uncached": 10495,
+        "outputTokens": 140,
+        "sentBytes": 190197,
+        "cacheReadShare": 0.778,
+        "fixedTokensPerRequest": 5077,
+        "firstRequest": {
+          "inputTokens": 8348,
+          "cacheRead": 0,
+          "uncached": 8348,
+          "costUsd": 0.016846
+        },
+        "costUsd": 0.026063,
+        "uncachedCostUsd": 0.095862
+      },
+      "toolDefinitions": {
+        "agent": {
+          "task": 1665,
+          "bash": 907,
+          "todowrite": 605,
+          "read": 434,
+          "apply_patch": 385,
+          "grep": 355,
+          "webfetch": 305,
+          "glob": 265,
+          "skill": 156
+        },
+        "subagent": {}
+      }
+    },
+    {
+      "scenario": "solo-fix",
+      "runtime": "vector-openai",
+      "session": 2,
+      "model": "gpt-6.1-sol",
+      "exitCode": 0,
+      "unplayed": 0,
+      "performance": {
+        "wallMs": 2131.790333000001,
+        "timeToFirstRequestMs": 1202.876791999999,
+        "requestTimesMs": [
+          1202.876791999999,
+          1286.8086249999997,
+          1402.0412080000006,
+          1536.5800419999996,
+          1756.5952080000006
+        ],
+        "postTerminalMs": 375.1951250000002,
+        "sampledPeakProcessTreeRssKiB": 742080,
+        "samples": [
+          {
+            "atMs": 121.30712500000027,
+            "phase": "startup",
+            "rssKiB": 115088
+          },
+          {
+            "atMs": 222.85262500000044,
+            "phase": "startup",
+            "rssKiB": 162096
+          },
+          {
+            "atMs": 325.2429579999998,
+            "phase": "startup",
+            "rssKiB": 191168
+          },
+          {
+            "atMs": 429.93375000000015,
+            "phase": "startup",
+            "rssKiB": 266240
+          },
+          {
+            "atMs": 533.4538330000005,
+            "phase": "startup",
+            "rssKiB": 286128
+          },
+          {
+            "atMs": 635.8263750000006,
+            "phase": "startup",
+            "rssKiB": 400560
+          },
+          {
+            "atMs": 740.0800829999998,
+            "phase": "startup",
+            "rssKiB": 475696
+          },
+          {
+            "atMs": 839.8566250000003,
+            "phase": "startup",
+            "rssKiB": 590160
+          },
+          {
+            "atMs": 941.4838330000002,
+            "phase": "startup",
+            "rssKiB": 606320
+          },
+          {
+            "atMs": 1043.654958,
+            "phase": "startup",
+            "rssKiB": 636192
+          },
+          {
+            "atMs": 1145.433083,
+            "phase": "startup",
+            "rssKiB": 652800
+          },
+          {
+            "atMs": 1247.913125000001,
+            "phase": "active",
+            "rssKiB": 659920
+          },
+          {
+            "atMs": 1348.6648750000004,
+            "phase": "active",
+            "rssKiB": 680032
+          },
+          {
+            "atMs": 1450.4769579999993,
+            "phase": "active",
+            "rssKiB": 693408
+          },
+          {
+            "atMs": 1550.9890419999992,
+            "phase": "active",
+            "rssKiB": 697712
+          },
+          {
+            "atMs": 1653.0540419999998,
+            "phase": "active",
+            "rssKiB": 698992
+          },
+          {
+            "atMs": 1756.1993330000005,
+            "phase": "active",
+            "rssKiB": 725680
+          },
+          {
+            "atMs": 1857.7339169999996,
+            "phase": "tail",
+            "rssKiB": 708464
+          },
+          {
+            "atMs": 1958.357833,
+            "phase": "tail",
+            "rssKiB": 705088
+          },
+          {
+            "atMs": 2060.8712080000005,
+            "phase": "tail",
+            "rssKiB": 742080
+          }
+        ]
+      },
+      "verification": {
+        "exitCode": 0,
+        "output": "bun test v1.3.14 (0d9b296a)\n\n 3 pass\n 0 fail\n 3 expect() calls\nRan 3 tests across 1 file. [11.00ms]\n"
+      },
+      "requests": [
+        {
+          "index": 1,
+          "who": "agent",
+          "tools": 9,
+          "systemTokens": 0,
+          "toolTokens": 5077,
+          "messageTokens": 3271,
+          "inputTokens": 8348,
+          "cacheRead": 7936,
+          "cacheWrite": 0,
+          "uncached": 412,
+          "outputTokens": 15,
+          "sentBytes": 33650,
+          "costUsd": 0.001768,
+          "uncachedCostUsd": 0.016846
+        },
+        {
+          "index": 2,
+          "who": "agent",
+          "tools": 9,
+          "systemTokens": 0,
+          "toolTokens": 5077,
+          "messageTokens": 3888,
+          "inputTokens": 8965,
+          "cacheRead": 8320,
+          "cacheWrite": 0,
+          "uncached": 645,
+          "outputTokens": 27,
+          "sentBytes": 36116,
+          "costUsd": 0.002392,
+          "uncachedCostUsd": 0.0182
+        },
+        {
+          "index": 3,
+          "who": "agent",
+          "tools": 9,
+          "systemTokens": 0,
+          "toolTokens": 5077,
+          "messageTokens": 4460,
+          "inputTokens": 9537,
+          "cacheRead": 8960,
+          "cacheWrite": 0,
+          "uncached": 577,
+          "outputTokens": 62,
+          "sentBytes": 38403,
+          "costUsd": 0.00267,
+          "uncachedCostUsd": 0.019694
+        },
+        {
+          "index": 4,
+          "who": "agent",
+          "tools": 9,
+          "systemTokens": 0,
+          "toolTokens": 5077,
+          "messageTokens": 4908,
+          "inputTokens": 9985,
+          "cacheRead": 9472,
+          "cacheWrite": 0,
+          "uncached": 513,
+          "outputTokens": 15,
+          "sentBytes": 40193,
+          "costUsd": 0.002123,
+          "uncachedCostUsd": 0.02012
+        },
+        {
+          "index": 5,
+          "who": "agent",
+          "tools": 9,
+          "systemTokens": 0,
+          "toolTokens": 5077,
+          "messageTokens": 5319,
+          "inputTokens": 10396,
+          "cacheRead": 9984,
+          "cacheWrite": 0,
+          "uncached": 412,
+          "outputTokens": 21,
+          "sentBytes": 41835,
+          "costUsd": 0.002032,
+          "uncachedCostUsd": 0.021002
+        }
+      ],
+      "totals": {
+        "requests": 5,
+        "subagentRequests": 0,
+        "sideRequests": 0,
+        "warmupRequests": 0,
+        "inputTokens": 47231,
+        "cacheRead": 44672,
+        "cacheWrite": 0,
+        "uncached": 2559,
+        "outputTokens": 140,
+        "sentBytes": 190197,
+        "cacheReadShare": 0.946,
+        "fixedTokensPerRequest": 5077,
+        "firstRequest": {
+          "inputTokens": 8348,
+          "cacheRead": 7936,
+          "uncached": 412,
+          "costUsd": 0.001768
+        },
+        "costUsd": 0.010985,
+        "uncachedCostUsd": 0.095862
+      },
+      "toolDefinitions": {
+        "agent": {
+          "task": 1665,
+          "bash": 907,
+          "todowrite": 605,
+          "read": 434,
+          "apply_patch": 385,
+          "grep": 355,
+          "webfetch": 305,
+          "glob": 265,
+          "skill": 156
+        },
+        "subagent": {}
+      }
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+{
+ "kind": "offline-scripted-replay",
+ "decisiveLiveClaimPermitted": false,
+ "harness": "script/agent-eval/footprint.ts, unchanged from harness revision 2bc9c6224cb8b78d8905c26fd97ebf85dfdea1d6",
+ "command": "bun --no-env-file script/agent-eval/footprint.ts --engine-root <checkout> --runtime vector,vector-openai --scenario solo-fix --openai-model gpt-6.1-sol --sessions 2 --out <report>",
+ "order": "each repetition runs the three revisions once, rotating the order: baseline, integrated, speed-memory; then integrated, speed-memory, baseline; then speed-memory, baseline, integrated",
+ "machine": {
+  "os": "macOS 27.0.1 arm64",
+  "cpus": 8,
+  "bun": "1.3.14"
+ },
+ "reports": [
+  {
+   "file": "baseline-1.json",
+   "sha256": "10b8de583c3371c90f64573454d5ff6fff6ada7a8339701ebc782223a612de79",
+   "state": "baseline",
+   "revision": "c46b66efabb67ee5cb00d18391fb7a401fd8154b",
+   "repetition": 1,
+   "startedAt": "2026-10-16T16:13:36Z",
+   "loadAverage1mStart": 2.83,
+   "harnessExit": 0
+  },
+  {
+   "file": "integrated-1.json",
+   "sha256": "f22db76096f87cea86699fdb134814495b1e73eecc39c4a4f2798f7940f5d8bb",
+   "state": "integrated",
+   "revision": "a077cd0fca690dfca166714e0d125a4bd9f39ecf",
+   "repetition": 1,
+   "startedAt": "2026-10-16T16:13:48Z",
+   "loadAverage1mStart": 3.01,
+   "harnessExit": 0
+  },
+  {
+   "file": "speed-memory-1.json",
+   "sha256": "2e02af5de36dbe9eb59c46398e38a070bc6a05e2d1011897790a678e2f12cd33",
+   "state": "speed-memory",
+   "revision": "4f8f5708a59f60387bd22ddfb82006e7668f72dc",
+   "repetition": 1,
+   "startedAt": "2026-10-16T16:13:57Z",
+   "loadAverage1mStart": 3.31,
+   "harnessExit": 0
+  },
+  {
+   "file": "integrated-2.json",
+   "sha256": "f35eb60a9b1ee021046d1d5984a9ee426f42bf1c0d3c9233e94e6272edd70fc7",
+   "state": "integrated",
+   "revision": "a077cd0fca690dfca166714e0d125a4bd9f39ecf",
+   "repetition": 2,
+   "startedAt": "2026-10-16T16:14:09Z",
+   "loadAverage1mStart": 3.48,
+   "harnessExit": 0
+  },
+  {
+   "file": "speed-memory-2.json",
+   "sha256": "ecdd06d55852ec15518757f67323debdc9128979d0f43c935028398fd4e0d0b7",
+   "state": "speed-memory",
+   "revision": "4f8f5708a59f60387bd22ddfb82006e7668f72dc",
+   "repetition": 2,
+   "startedAt": "2026-10-16T16:14:19Z",
+   "loadAverage1mStart": 3.44,
+   "harnessExit": 0
+  },
+  {
+   "file": "baseline-2.json",
+   "sha256": "d93f899126359b5a20b4d71fb6aafc7a3d4f52bec54f28a7eda7d2b08e55cd7a",
+   "state": "baseline",
+   "revision": "c46b66efabb67ee5cb00d18391fb7a401fd8154b",
+   "repetition": 2,
+   "startedAt": "2026-10-16T16:14:26Z",
+   "loadAverage1mStart": 3.83,
+   "harnessExit": 0
+  },
+  {
+   "file": "speed-memory-3.json",
+   "sha256": "588a048c106df7a812fe1079d537b6a68436d38fc4f1141044f1f20f88b29e84",
+   "state": "speed-memory",
+   "revision": "4f8f5708a59f60387bd22ddfb82006e7668f72dc",
+   "repetition": 3,
+   "startedAt": "2026-10-16T16:14:37Z",
+   "loadAverage1mStart": 3.85,
+   "harnessExit": 0
+  },
+  {
+   "file": "baseline-3.json",
+   "sha256": "d54999a7d449755eca9b04d889ec5fd4a6325ef34667a768902deca826f40b7f",
+   "state": "baseline",
+   "revision": "c46b66efabb67ee5cb00d18391fb7a401fd8154b",
+   "repetition": 3,
+   "startedAt": "2026-10-16T16:14:45Z",
+   "loadAverage1mStart": 3.8,
+   "harnessExit": 0
+  },
+  {
+   "file": "integrated-3.json",
+   "sha256": "9a14eb4eb293732c4f1b09bac70bf4095302fe05a943e8de6b1c720b82cd864e",
+   "state": "integrated",
+   "revision": "a077cd0fca690dfca166714e0d125a4bd9f39ecf",
+   "repetition": 3,
+   "startedAt": "2026-10-16T16:14:56Z",
+   "loadAverage1mStart": 4.13,
+   "harnessExit": 0
+  }
+ ]
+}
