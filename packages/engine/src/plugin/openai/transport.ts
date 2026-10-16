@@ -42,7 +42,17 @@ export type Diagnostic = {
   status?: number
   model?: string
   reasoningEffort?: string
+  // The `reasoning.context` the request asked for, and on a WebSocket terminal record the mode the response reports it
+  // ran with, so a signed-in run shows the model's default without a separate experiment.
+  reasoningContext?: ReasoningContext
+  effectiveReasoningContext?: ReasoningContext
   patchToolType?: "custom" | "function" | "absent" | "other"
+}
+
+type ReasoningContext = "auto" | "current_turn" | "all_turns"
+
+export function reasoningContext(value: unknown) {
+  return value === "auto" || value === "current_turn" || value === "all_turns" ? value : undefined
 }
 
 export function createTrace(input: {
@@ -69,10 +79,14 @@ export function createTrace(input: {
     typeof effort === "string" && ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"].includes(effort)
       ? effort
       : undefined
+  const context = isRecord(body) && isRecord(body.reasoning) ? reasoningContext(body.reasoning.context) : undefined
   const patch = patchToolType(body)
   return (
     phase: Diagnostic["phase"],
-    details?: Pick<Diagnostic, "reused" | "reason" | "terminal" | "status" | "continuation" | "bytes">,
+    details?: Pick<
+      Diagnostic,
+      "reused" | "reason" | "terminal" | "status" | "continuation" | "bytes" | "effectiveReasoningContext"
+    >,
   ) => {
     input.report?.({
       requestID,
@@ -81,6 +95,7 @@ export function createTrace(input: {
       phase,
       model,
       reasoningEffort,
+      reasoningContext: context,
       patchToolType: patch,
       elapsedMs: Math.round((performance.now() - startedAt) * 1000) / 1000,
       ...details,

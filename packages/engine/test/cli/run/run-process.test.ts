@@ -74,6 +74,19 @@ describe("vector run (non-interactive subprocess)", () => {
   )
 
   cliIt.concurrent(
+    "sends the prompt to the model as typed, without added quotation marks",
+    ({ llm, vector }) =>
+      Effect.gen(function* () {
+        yield* llm.text("done")
+        const result = yield* vector.run('fix the "auth" bug')
+        vector.expectExit(result, 0)
+        const hits = yield* llm.hits
+        expect(lastUserText(hits[0].body)).toBe('fix the "auth" bug')
+      }),
+    60_000,
+  )
+
+  cliIt.concurrent(
     "names its session after the prompt instead of sending a title request",
     ({ llm, vector }) =>
       Effect.gen(function* () {

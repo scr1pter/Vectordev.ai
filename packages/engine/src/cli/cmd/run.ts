@@ -295,9 +295,13 @@ export const RunCommand = effectCmd({
         throw error
       }
 
-      let message = [...args.message, ...(args["--"] || [])]
-        .map((arg) => (arg.includes(" ") ? `"${arg.replace(/"/g, '\\"')}"` : arg))
-        .join(" ")
+      // A command's arguments are quoted so its $1, $2 placeholders keep their boundaries. A prompt reaches the model
+      // as typed, not wrapped in quotation marks with its own quotes escaped.
+      let message = args.command
+        ? [...args.message, ...(args["--"] || [])]
+            .map((arg) => (arg.includes(" ") ? `"${arg.replace(/"/g, '\\"')}"` : arg))
+            .join(" ")
+        : rawMessage
 
       if (interactive && args.command) {
         die("--mini cannot be used with --command")

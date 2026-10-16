@@ -3,7 +3,12 @@ import { mergeDeep, unique } from "remeda"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import type * as Provider from "./provider"
 import type { ModelCatalog } from "@vectordevai/core/model-catalog"
+import { Option, Schema } from "effect"
+import type { RuntimeFlags } from "@/effect/runtime-flags"
 import { iife } from "@/util/iife"
+import { isRecord } from "@/util/record"
+
+const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 
 type Modality = NonNullable<ModelCatalog.Model["modalities"]>["input"][number]
 
@@ -1265,6 +1270,31 @@ export function options(input: {
   }
 
   return result
+}
+
+/**
+ * The request body with `reasoning.context` set, or undefined to send the body unchanged. OpenAI's reasoning guide
+ * documents the field ("auto", "current_turn" or "all_turns") and names the GPT-5.6 family, which already defaults to
+ * "all_turns", and GPT-6.1 Sol as the models that support "all_turns"; the Codex CLI sends "all_turns" for GPT-6.1 Sol.
+ * The bundled SDK has no option for it, so the opt-in VECTOR_EXPERIMENTAL_REASONING_CONTEXT flag sets it on the
+ * serialized body, HTTP and WebSocket alike, for those models only, until a measured comparison shows whether it
+ * should be the default.
+ *
+ * The model comes from the body's own `model` field, never from the model that built the SDK: every model on a
+ * provider shares one cached SDK and its fetch, so that model is only the first one resolved.
+ */
+export function reasoningContextBody(
+  npm: string,
+  context: RuntimeFlags.Info["experimentalReasoningContext"],
+  body: unknown,
+) {
+  if (!context || npm !== "@ai-sdk/openai") return
+  if (typeof body !== "string") return
+  const parsed = Option.getOrUndefined(decodeJson(body))
+  // Only a reasoning request carries the object; one without it is not a request the field applies to.
+  if (!isRecord(parsed) || !isRecord(parsed.reasoning) || typeof parsed.model !== "string") return
+  if (!/(?:^|\/)gpt-(?:5\.6|6\.1-sol)(?:-|$)/.test(parsed.model)) return
+  return JSON.stringify({ ...parsed, reasoning: { ...parsed.reasoning, context } })
 }
 
 export function smallOptions(model: Provider.Model) {

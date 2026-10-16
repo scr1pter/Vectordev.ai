@@ -223,6 +223,44 @@ describe("plugin.openai.ws-pool", () => {
     fetch.close()
   })
 
+  test("records the reasoning context a request asks for and the one its response reports", async () => {
+    const events: OpenAITransport.Diagnostic[] = []
+    await using server = await createWebSocketServer((socket) => {
+      socket.on("message", () => {
+        socket.send(JSON.stringify({ type: "response.created", response: { id: "resp-context" } }))
+        socket.send(
+          JSON.stringify({
+            type: "response.completed",
+            response: { id: "resp-context", reasoning: { effort: "medium", context: "all_turns" } },
+          }),
+        )
+      })
+    })
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch({ onDiagnostic: (event) => events.push(event) })
+    for (const context of ["current_turn", "private-context"]) {
+      const response = await fetch(server.url, {
+        ...streamRequest({ [OpenAITransport.REQUEST_ID_HEADER]: context }),
+        body: JSON.stringify({
+          stream: true,
+          model: "gpt-6.1-sol",
+          reasoning: { effort: "medium", context },
+          input: [],
+        }),
+      })
+      expect(await response.text()).toContain("[DONE]")
+    }
+    const sent = events.filter((event) => event.requestID === "current_turn")
+    expect(sent.every((event) => event.reasoningContext === "current_turn")).toBe(true)
+    expect(sent.filter((event) => event.effectiveReasoningContext)).toEqual([
+      expect.objectContaining({ phase: "terminal", effectiveReasoningContext: "all_turns" }),
+    ])
+    // A value outside the documented three is not recorded.
+    const other = events.filter((event) => event.requestID === "private-context")
+    expect(other.length).toBeGreaterThan(0)
+    expect(other.every((event) => event.reasoningContext === undefined)).toBe(true)
+    fetch.close()
+  })
+
   test.each(["authorization", "chatgpt-account-id", "openai-organization", "openai-project"])(
     "rotates authenticated sockets when %s changes",
     async (header) => {

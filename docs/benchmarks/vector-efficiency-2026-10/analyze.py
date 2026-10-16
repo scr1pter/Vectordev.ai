@@ -1,6 +1,7 @@
 """Recompute per-cell medians from the offline raw reports; no network or model calls."""
 
 import json
+import sys
 from pathlib import Path
 from statistics import median
 
@@ -15,8 +16,12 @@ def phase_rss(trials, phase):
     }
 
 
-root = Path(__file__).resolve().parent
-payloads = json.loads((root / "payload-sizes.json").read_text())["reports"]
+# With no arguments this rebuilds the canonical archive. A follow-up study passes its own directory (holding raw/) and
+# its two state names; without a payload-sizes.json there, each request's size is the report's own UTF-8 measurement.
+root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(__file__).resolve().parent
+states = (sys.argv[2], sys.argv[3]) if len(sys.argv) > 3 else ("baseline", "integrated")
+sizes = root / "payload-sizes.json"
+payloads = json.loads(sizes.read_text())["reports"] if sizes.exists() else None
 rows = []
 for transport in ("http", "ws"):
     expected = {
@@ -25,7 +30,7 @@ for transport in ("http", "ws"):
         for scenario in (("solo-fix", "delegate-explore", "delegate-general", "long-loop") if transport == "http" else ("long-loop",))
         for session in (1, 2)
     }
-    for state in ("baseline", "integrated"):
+    for state in states:
         reports = [(path.name, json.loads(path.read_text())) for path in sorted((root / "raw").glob(f"{state}-{transport}-[123].json"))]
         if len(reports) != 3:
             raise ValueError(f"Expected three reports: {state}, {transport}")
@@ -35,10 +40,14 @@ for transport in ("http", "ws"):
                 raise ValueError(f"Missing, repeated, or unexpected cells: {state}, {transport}")
             for trial in report["scenarios"]:
                 key = (trial["runtime"], trial["scenario"], trial["session"])
-                sizes = payloads[name]["-".join(str(part) for part in key)]
-                if len(sizes) != len(trial["requests"]):
+                measured = (
+                    payloads[name]["-".join(str(part) for part in key)]
+                    if payloads
+                    else [request["sentBytes"] for request in trial["requests"]]
+                )
+                if len(measured) != len(trial["requests"]):
                     raise ValueError(f"Payload size count mismatch: {name}, {key}")
-                cells.setdefault(key, []).append({**trial, "payloadBytes": sum(sizes), "payloadEncoding": report.get("payloadEncoding", "utf16-code-units")})
+                cells.setdefault(key, []).append({**trial, "payloadBytes": sum(measured), "payloadEncoding": report.get("payloadEncoding", "utf16-code-units")})
         for (runtime, scenario, session), trials in cells.items():
             if len(trials) != 3:
                 raise ValueError(f"Expected three repetitions: {state}, {transport}, {runtime}, {scenario}, {session}")

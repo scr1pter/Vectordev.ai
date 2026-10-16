@@ -124,6 +124,45 @@ describe("ProviderTransform.options - setCacheKey", () => {
   })
 })
 
+describe("ProviderTransform.reasoningContextBody", () => {
+  const body = (model: string) =>
+    JSON.stringify({ model, input: [], reasoning: { effort: "medium", summary: "auto" } })
+
+  test("sets the documented field on a reasoning request to the GPT-5.6 family and GPT-6.1 Sol", () => {
+    for (const id of ["gpt-6.1-sol", "openai/gpt-6.1-sol", "gpt-5.6", "gpt-5.6-terra", "gpt-5.6-codex"]) {
+      const sent = ProviderTransform.reasoningContextBody("@ai-sdk/openai", "all_turns", body(id))
+      expect(JSON.parse(sent!)).toEqual({
+        model: id,
+        input: [],
+        reasoning: { effort: "medium", summary: "auto", context: "all_turns" },
+      })
+    }
+  })
+
+  test("leaves the body alone without the flag, on an undocumented model, off the Responses SDK or without reasoning", () => {
+    expect(ProviderTransform.reasoningContextBody("@ai-sdk/openai", undefined, body("gpt-6.1-sol"))).toBeUndefined()
+    for (const id of ["gpt-5.5", "gpt-5.60", "gpt-4o", "gpt-6-astra", "gpt-6.1-luna", "gpt-6.2-sol"])
+      expect(ProviderTransform.reasoningContextBody("@ai-sdk/openai", "all_turns", body(id))).toBeUndefined()
+    expect(ProviderTransform.reasoningContextBody("@ai-sdk/azure", "all_turns", body("gpt-6.1-sol"))).toBeUndefined()
+    expect(
+      ProviderTransform.reasoningContextBody(
+        "@ai-sdk/openai",
+        "all_turns",
+        JSON.stringify({ input: [], reasoning: { effort: "medium" } }),
+      ),
+    ).toBeUndefined()
+    expect(
+      ProviderTransform.reasoningContextBody(
+        "@ai-sdk/openai",
+        "all_turns",
+        JSON.stringify({ model: "gpt-6.1-sol", input: [] }),
+      ),
+    ).toBeUndefined()
+    expect(ProviderTransform.reasoningContextBody("@ai-sdk/openai", "all_turns", "not json")).toBeUndefined()
+    expect(ProviderTransform.reasoningContextBody("@ai-sdk/openai", "all_turns", undefined)).toBeUndefined()
+  })
+})
+
 describe("ProviderTransform.options - zai/zhipuai thinking", () => {
   const sessionID = "test-session-123"
 

@@ -102,7 +102,7 @@ exports[`tool parameters JSON Schema (wire shape) grep 1`] = `
       "type": "string",
     },
     "path": {
-      "description": "Existing literal file or directory to search. Relative paths use the current working directory, which is also the default. No glob expansion; use include for file globs.",
+      "description": "Existing literal file or directory to search. Relative paths use the current working directory, which is also the default. No shell or glob expansion; use include for file globs.",
       "type": "string",
     },
     "pattern": {

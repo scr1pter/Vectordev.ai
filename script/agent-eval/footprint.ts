@@ -573,6 +573,11 @@ function vectorEnv(runtime: Runtime, home: string, base: string, dir: string) {
     // isolated environment and makes WS runs exercise the real API-key fetch wrapper.
     VECTOR_AUTH_CONTENT:
       flags.ws && runtime === "vector-openai" ? JSON.stringify({ openai: { type: "api", key: "bench" } }) : "{}",
+    // The opt-in request-body experiment reaches Vector when the harness itself is given it, so its wire shape can be
+    // checked offline on both transports.
+    ...(process.env.VECTOR_EXPERIMENTAL_REASONING_CONTEXT
+      ? { VECTOR_EXPERIMENTAL_REASONING_CONTEXT: process.env.VECTOR_EXPERIMENTAL_REASONING_CONTEXT }
+      : {}),
   }
 }
 

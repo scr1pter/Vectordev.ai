@@ -183,6 +183,10 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
                 : event.type === "response.failed"
                   ? "failed"
                   : "error",
+            effectiveReasoningContext:
+              isRecord(event.response) && isRecord(event.response.reasoning)
+                ? OpenAITransport.reasoningContext(event.response.reasoning.context)
+                : undefined,
           })
           entry.busy = false
           entry.lastUsedAt = Date.now()

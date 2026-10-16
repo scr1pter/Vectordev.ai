@@ -116,10 +116,69 @@ For transport measurements, use `--runtime vector-openai,codex --scenario long-l
 
 ## Remaining live and behavior checks
 
-[The owner-run guide](../../../script/agent-eval/live-efficiency.md) supplies the matched nine-runs-per-runtime comparison, cache-key A/B, HTTP/WebSocket controls, and transport log collection. Those commands use the owner's normal sign-in and spend credits; they were not run here. `reasoning.context: "all_turns"` has no supported option in this runtime, so the guide explicitly requires a reviewed body-hook experiment before that A/B can be run.
+[The owner-run guide](../../../script/agent-eval/live-efficiency.md) supplies the matched nine-runs-per-runtime comparison, cache-key A/B, HTTP/WebSocket controls, and transport log collection. Those commands use the owner's normal sign-in and spend credits; they were not run here. `reasoning.context` had no supported option in the runtime measured above. The [follow-up](#follow-up-tokenomics-final-2026-10-15) adds an opt-in body hook for it, off by default, and the guide now gives the offline wire check plus the two-prompt comparison that could show an effect; no result exists for it yet.
 
 The exact historical `behavior-evaluation-v12` 18-scenario evaluator was recovered from the owner's private benchmark archive, including its scenarios, collector, gate, fixtures, and completion record. Its recorded 15/18 result has not been superseded. The owner-run guide documents the recovered evaluator separately from the nine-task matched comparison. Prompt-seam, ordering, cancellation, and fixture checks passed, but fixed scripted replay cannot replace live agent behavior evaluation.
 
 The [derived checkpoint adapter](../../../script/agent-eval/behavior-v12/README.md) preserves the original scenarios and rubric while using each checkout's native runtime with fresh source and dependency bindings. Its 36 offline paired episodes and six multi-turn rehearsals passed capture, source, shell, and durable-consumption checks; every synthetic episode keeps `behavioralPass: null`. The adapter uses HTTP in place of the historical collector's WebSocket path and therefore cannot establish a transport or speed comparison. Prepare a fresh study from the final clean checkout, complete its offline checks, and obtain the owner's live-provider approval before running either live block. No paid behavior rerun was performed.
 
 The App traffic fixture is a separate measurement: its corrected integrated count is 10 requests / 39,002 bytes (two history reads and eight metadata reads, no directory bootstrap), compared with the earlier 83-request / 6.52 MB baseline. The Vectorscope fixture has zero added refresh requests. Those counts test refresh behavior, not actual provider tokens or end-to-end application speed.
+
+## Follow-up: tokenomics-final (2026-10-15)
+
+Branch `tokenomics-final` adds four engine commits to `a077cd0fc` (the integration measured above plus the terminal asset fix), then two review fixes, `00db9a4a7` and `2d8e04241`, described under each change below. Its measurements are in [`followup-2026-10-15/`](followup-2026-10-15/): twelve raw reports, `summary.json` and `manifest.json`. They are offline scripted replays like the tables above and carry the same limits; nothing here was measured against a live provider.
+
+### What changed
+
+- `4110a1b41` drops description lines that restate the tool's own parameter descriptions: grep's path and include bullets, read's offset bullet, three repeated webfetch bullets and its format list, and skill's closing sentence. The removed grep path bullet also said the path does not expand shell patterns, which the path parameter did not say, so `2d8e04241` changes that parameter's "No glob expansion" to "No shell or glob expansion"; with it, every fact and instruction remains in the definition the model receives. At `f28b8168c`, which the tables below measure, each request that offers all four tools is 606 description characters shorter (Responses tool JSON 20,622 → 19,997 characters, counted as Python's default `json.dumps` of the `tools` array). At the branch head it is 597 shorter (20,622 → 20,006): an offline `solo-fix` re-run shows grep's definition 2 estimated tokens larger than in the tables, on Messages and Responses alike.
+- `d11c951fa` sends a `vector run` prompt as typed. Every argument containing a space was wrapped in quotation marks with its inner quotes escaped, so a benchmarked task reached the model as `"\"...\""`, and the headless title carried the quotes. The live archive's Vector build (`d3ae064a2`) has the same code, so its benchmarked prompts arrived quoted too. A `--command`'s arguments keep the quoting their `$1`/`$2` placeholders need.
+- `d602efa27` and `f28b8168c` add `VECTOR_EXPERIMENTAL_REASONING_CONTEXT`, which sets the documented `reasoning.context` field on OpenAI Responses reasoning requests to the GPT-5.6 family and GPT-6.1 Sol only. It is off by default. Each `openai transport` diagnostic records the requested mode, and a WebSocket terminal record the mode the response reports, so the owner's ordinary signed-in runs show gpt-6.1-sol's default. Offline wire check with the flag set: all five HTTP and all five WebSocket requests of a `solo-fix` session carried `reasoning.context: "all_turns"`, and the four WebSocket requests after the first still carried `previous_response_id`. At `f28b8168c` the model check used the model that built the provider's shared SDK, so in a process that resolved two OpenAI models the first one decided for both; `00db9a4a7` reads the model named in each request body instead, with tests for both build orders. The wire check above, repeated at `00db9a4a7`, gives the same result, and the same `solo-fix` session with `--openai-model gpt-5.5` sent its five reasoning requests without the field. No result for the field exists; see the [owner-run guide](../../../script/agent-eval/live-efficiency.md#reasoning-context-experiment).
+
+### Method
+
+`before` is `a077cd0fc` and `after` is `f28b8168c`. Both ran through the harness at `f28b8168c`, whose `footprint.ts` differs from the canonical runs' only by forwarding `VECTOR_EXPERIMENTAL_REASONING_CONTEXT` when it is set; it was unset, since every run used `env -i` and a throwaway HOME. Runs alternated before and after: three HTTP repetitions of four runtimes, four scenarios and two sessions (192 cells), then three WebSocket repetitions of `long-loop` for Vector Responses and Codex (24 cells). All twelve reports exited 0, every cell played its whole script, and all 144 HTTP final fixture checks passed. One-minute load at run starts ranged from 7.0 to 36.4. An earlier attempt that day, under load up to 170 and interrupted after three reports, is not used. Recompute the medians with `python3 docs/benchmarks/vector-efficiency-2026-10/analyze.py docs/benchmarks/vector-efficiency-2026-10/followup-2026-10-15 before after`.
+
+Request-body review of the private captures, after normalizing temporary paths and IDs: Vector's bodies differ only in the four tool descriptions and the unquoted prompt, with the same request counts, offered tools, system text, instructions and parameters. Within every Vector cell, each request extends the previous request of the same agent unchanged, with two exceptions that are part of the protocol: on the Messages API the `cache_control` breakpoints, which mark the last two messages, move to the newest two, and over the WebSocket each later request adds `previous_response_id` and sends only the new input. Apart from those, no bytes vary from request to request; across sessions, the first difference is the working directory in the environment block. Codex and Claude Code bodies differ only in run-specific identifiers and hashes and in the output their scripted commands returned (test timings, search result order).
+
+### Results, warm session
+
+| API       | Scenario         | Requests | UTF-8 payload bytes       | Modeled USD                   | First primary input tokens |
+| --------- | ---------------- | -------: | ------------------------- | ----------------------------- | -------------------------: |
+| Messages  | solo-fix         |        5 | 192,940 → 189,791 (−1.6%) | $0.019991 → $0.019745 (−1.2%) |              9,161 → 9,003 |
+| Messages  | delegate-explore |        8 | 227,473 → 222,684 (−2.1%) | $0.024918 → $0.024552 (−1.5%) |              9,161 → 9,003 |
+| Messages  | delegate-general |        8 | 210,225 → 205,212 (−2.4%) | $0.024083 → $0.023697 (−1.6%) |              9,161 → 9,003 |
+| Messages  | long-loop        |       12 | 484,583 → 477,026 (−1.6%) | $0.045504 → $0.044933 (−1.3%) |              9,172 → 9,014 |
+| Responses | solo-fix         |        5 | 189,312 → 186,167 (−1.7%) | $0.010922 → $0.011034 (+1.0%) |              8,326 → 8,167 |
+| Responses | delegate-explore |        8 | 226,337 → 221,548 (−2.1%) | $0.014961 → $0.014731 (−1.5%) |              8,326 → 8,167 |
+| Responses | delegate-general |        8 | 207,332 → 202,314 (−2.4%) | $0.014669 → $0.014568 (−0.7%) |              8,326 → 8,167 |
+| Responses | long-loop        |       12 | 530,032 → 522,484 (−1.4%) | $0.026929 → $0.026760 (−0.6%) |              8,337 → 8,178 |
+| Responses | long-loop, WS    |       12 | 264,851 → 257,347 (−2.8%) | $0.026645 → $0.027207 (+2.1%) |              8,337 → 8,178 |
+
+Session 1 moves the same way and is in `summary.json`. Request counts are unchanged, and the unchanged Codex and Claude Code references stay within 110 bytes and $0.0001 of their before values.
+
+Each Vector primary request sends 158 or 159 fewer estimated input tokens, and each explore subagent request 138 fewer. Modeled Messages cost, priced with declared breakpoints, falls in every cell. The Responses cache model, like OpenAI's prompt cache, counts cached tokens in 128-token steps, so a primary request's cached part shrinks by one step (its uncached part falls by 31 tokens) or by two (it rises by 97), depending on where its shared prefix ended. Averaged over arbitrary alignments that step contributes nothing, but these fixed scripts hit the +97 case in 48 of 198 HTTP and 36 of 72 WebSocket Responses requests. The +1.0% and +2.1% cells are that alignment, not more uncached content, and a different conversation length can reverse them. The smaller prefix is the only change in what is sent.
+
+Wall time and peak RSS varied in both directions for unchanged CLIs as well as Vector and are not claims; per-run values are in `summary.json`.
+
+### Tool definitions in these fixtures
+
+Estimated tokens (characters / 4) of the primary agent's tool definitions on every request:
+
+| Runtime          | Before |  After |
+| ---------------- | -----: | -----: |
+| Vector Messages  |  5,598 |  5,441 |
+| Vector Responses |  5,077 |  4,919 |
+| Codex            |  6,182 |  6,182 |
+| Claude Code      | 20,791 | 20,791 |
+
+After is `f28b8168c`. At the branch head both Vector rows are 2 larger (5,443 and 4,921), from `2d8e04241`.
+
+The live archive's 23,344-against-9,510-character comparison used an earlier Codex build. Codex CLI 0.162.0-alpha.17.2 sends its tools for gpt-6.1-sol as an `additional_tools` input item of 25,347 characters, against Vector Responses' 19,997 at `f28b8168c` (20,006 at the branch head). This is a count of what the fixtures offer, not a cost or quality comparison. The remaining Vector text (task delegation rules, shell, todo and patch guidance, and the cross-referenced editing and batching guidance in the system prompt) is behavioral instruction rather than repetition; trimming it further would need the live behavior gate, so this follow-up does not.
+
+The same captures show Codex sending `reasoning.effort: "low"` for gpt-6.1-sol when none is configured, while Vector sends `medium` by default. The matched live archive configured `medium` for both, so this default is not part of its measured gap. Whether Vector's default should change is a cost and quality decision for the owner; nothing here changes it.
+
+### What this harness cannot show
+
+The fake model's outputs are scripted, so the archive's remaining live gaps (output length, requests per task, and whether the model now sends an edit and its check in one response) cannot move here. Their fixes on the integrated branch (final-reply guidance, ordered edit-and-check execution, shorter task and shell descriptions) are covered by source tests, and their live effect needs the owner's matched comparison.
+
+The recovered behavior gate's standalone freeze and evidence proofs (`script/agent-eval/behavior-v12/offline-proof.py`, 9 tests) pass on `f28b8168c`. Its 36-episode seeded preflight and rehearsal need the recovered E12 archive, which is stored under the owner's private Codex directory; this work may not read that directory, so they were not run. The recorded 15/18 result stands, and no paid behavior run was made.
