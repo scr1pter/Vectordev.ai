@@ -42,12 +42,14 @@ import {
 import { rotateDatabasePassword, writeDatabaseUrl } from "./cloud-supabase-keys"
 import { isLogService, LOG_SERVICES, readSupabaseLogs } from "./cloud-supabase-logs"
 import {
+  createSupabaseOrganization,
   createSupabaseProject,
   linkSupabaseProject,
   listSupabaseProjects,
   pauseSupabaseProject,
   restoreSupabaseProject,
   SUPABASE_REGIONS,
+  supabaseOrganizationName,
   unlinkSupabaseProject,
 } from "./cloud-supabase-projects"
 import { securityCheck } from "./cloud-supabase-security"
@@ -77,6 +79,7 @@ const READS = [
 ] as const
 
 const CHANGES = [
+  "create_organization",
   "create_project",
   "link_database",
   "unlink_database",
@@ -166,6 +169,9 @@ async function run(
   const agent = options.caller === "agent"
   if (command === "supabase_projects") return listSupabaseProjects(project, options)
   if (command === "regions") return { regions: SUPABASE_REGIONS }
+  if (command === "create_organization") {
+    return createSupabaseOrganization({ name: required(input, "organizationName") }, options)
+  }
   if (command === "create_project") {
     return createSupabaseProject(
       { ...project, organizationId: text(input, "organizationId"), region: text(input, "region") },
@@ -403,9 +409,17 @@ export async function describeSupabaseCommand(
   const project = { projectPath: scope.projectPath, taskId: text(input, "taskId") }
   const database = getDatabase(project.projectPath, project.taskId)
   const name = database ? (database.projectName ?? database.projectRef ?? database.url) : ""
-  const describe = (summary: string, extra: { project?: string; statements?: Statement[]; approved?: Input } = {}) => ({
+  const describe = (
+    summary: string,
+    extra: { project?: string; environment?: string; statements?: Statement[]; approved?: Input } = {},
+  ) => ({
     ok: true,
-    scope: { provider: "Supabase", project: extra.project ?? name, environment: "production", summary },
+    scope: {
+      provider: "Supabase",
+      project: extra.project ?? name,
+      environment: extra.environment ?? "production",
+      summary,
+    },
     statements: extra.statements,
     approved: extra.approved,
   })
@@ -431,6 +445,13 @@ export async function describeSupabaseCommand(
       return describe(
         `Link the Supabase project ${ref} to this repository and write its public URL and publishable key to .env.${replaces}`,
         { project: ref },
+      )
+    }
+    if (command === "create_organization") {
+      const organization = supabaseOrganizationName(required(input, "organizationName"))
+      return describe(
+        `Create a Supabase organization named ${organization} on the connected Supabase account. Projects created in it are billed to it.`,
+        { project: `organization ${organization}`, environment: "account" },
       )
     }
     if (command === "create_project") {

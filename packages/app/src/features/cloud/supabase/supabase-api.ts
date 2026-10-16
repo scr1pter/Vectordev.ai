@@ -147,6 +147,10 @@ export function supabaseClient(
   return {
     subscribe: (cb: (event: SupabaseProgress) => void) => bridge()?.subscribe(cb) ?? (() => undefined),
     projects: () => run<SupabaseProjects>("supabase_projects"),
+    createOrganization: (name: string) =>
+      run<{ organization: SupabaseOrganization; createdNow: boolean; detail: string }>("create_organization", {
+        organizationName: name,
+      }),
     createProject: (organizationId?: string, region?: string) =>
       run<{ createdNow: boolean; needsChoice: boolean; organizations: SupabaseOrganization[]; waitedMs: number }>(
         "create_project",

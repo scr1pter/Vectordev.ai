@@ -444,7 +444,8 @@ async function provision(
       ok: false,
       needsSetup: true,
       error: "This Supabase account has no organizations, so there is nothing to create a project in.",
-      nextStep: "Ask the user to create an organization at supabase.com/dashboard, then run create_database again.",
+      nextStep:
+        "Ask the user what to name one and create it with create_organization (the user approves it, or creates it in Vector Cloud > Database), then run create_database again.",
     }
   }
   const chosen = input.organizationId

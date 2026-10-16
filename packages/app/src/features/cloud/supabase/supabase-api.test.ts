@@ -35,6 +35,18 @@ describe("Supabase console client", () => {
     ])
   })
 
+  test("creates an organization through the command the agent's create_organization runs", async () => {
+    const recorded = recordingBridge(() => ({ organization: { id: "org-1", name: "Ada Labs" }, createdNow: true }))
+    const client = supabaseClient(
+      () => ({ projectPath: "/work/shop" }),
+      () => recorded.bridge,
+    )
+    expect((await client.createOrganization("Ada Labs")).organization).toEqual({ id: "org-1", name: "Ada Labs" })
+    expect(recorded.sent).toEqual([
+      { command: "create_organization", input: { projectPath: "/work/shop", organizationName: "Ada Labs" } },
+    ])
+  })
+
   test("writes a new migration with its down SQL through the agent's command", async () => {
     const recorded = recordingBridge(() => ({ file: "supabase/migrations/20261015000000_add_profiles.sql" }))
     const client = supabaseClient(

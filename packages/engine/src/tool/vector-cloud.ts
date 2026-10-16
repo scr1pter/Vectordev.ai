@@ -34,6 +34,7 @@ const Action = Schema.Literals([
   "set_release_settings",
   ...VERCEL_ACTIONS,
   "supabase_projects",
+  "create_organization",
   "link_database",
   "unlink_database",
   "pause_database",
@@ -67,6 +68,7 @@ type Action = Schema.Schema.Type<typeof Action>
 // asks under vector_cloud_database after the desktop describes it; the desktop
 // marks destructive, billed or credential-bearing ones as never "always".
 const SUPABASE_CHANGES = new Set<Action>([
+  "create_organization",
   "link_database",
   "unlink_database",
   "pause_database",
@@ -157,6 +159,10 @@ export const Parameters = Schema.Struct({
   }),
   projectRef: Schema.optional(Schema.String).annotate({
     description: "For link_database, the reference of a Supabase project from supabase_projects.",
+  }),
+  organizationName: Schema.optional(Schema.String).annotate({
+    description:
+      "For create_organization, the name of the new Supabase organization, as the user chose it (at most 100 characters).",
   }),
   migrationName: Schema.optional(Schema.String).annotate({
     description:
@@ -614,6 +620,7 @@ function formatSupabase(action: Action, report: CloudReport) {
 function supabaseFields(params: Schema.Schema.Type<typeof Parameters>) {
   return {
     projectRef: params.projectRef,
+    organizationName: params.organizationName,
     name: params.migrationName,
     sql: params.sql,
     downSql: params.downSql,
@@ -650,8 +657,8 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
   Effect.succeed({
     description: [
       "Controls Vector Cloud for the active project. Vector Cloud has exactly two providers: Vercel hosts the app and Supabase stores its data. There is no other host or database; never offer or switch to one. Inspect cloud_connections before provider work.",
-      "Databases: before building authentication, accounts, persistence or other database-backed features, call database_status. When a database is connected, run prepare_database (or prepare_auth for sign-in) and build against it. When none is connected, do not stop and do not just send the user to a dashboard: offer create_database, which creates a new Supabase project on the user's connected Supabase account and wires it in, or link the user's existing Supabase project: find it with supabase_projects and link it with link_database (the user can also link it in Vector Cloud > Database). Never create a second database for a project that already has one unless the user asks. create_database is billed to the user's Supabase organization: when it lists several organizations, ask which one and call it again with that organizationId; when it reports a plan or quota limit, relay Supabase's own words instead of retrying. After writing or changing a .sql migration file, run apply_migrations (call it with dryRun first to see what would run). Use supabase_services to inspect storage and Edge Functions.",
-      "Supabase control for the linked project: supabase_projects lists organizations and projects; link_database and unlink_database; pause_database and restore_database; write_database_url writes a server-only DATABASE_URL, only when the user wants one; rotate_database_password resets the password and can rewrite DATABASE_URL and push it to Vercel. Database: migration_status; create_migration writes a timestamped file (pass downSql so it can be rolled back); apply_migrations; rollback_migration undoes only the latest applied migration and only with its down migration; run_sql runs read-only unless allowWrite, and hides cells in columns named like passwords, tokens or secrets. Auth: auth_config; update_auth for the site URL, redirect URLs (addVercelUrls adds the linked Vercel production and preview addresses), email sign-in and Google, GitHub or Apple sign-in; auth_users, invite_user, delete_user. Storage: create_bucket, update_bucket, delete_bucket. Edge Functions: deploy_function from supabase/functions/<name>, delete_function, function_secrets (names only), set_function_secrets from names of stored environment variables, delete_function_secrets. supabase_logs reads api, postgres, auth, storage or functions logs, so check them when a Supabase-backed feature fails. security_check runs Supabase's security advisors and a scan for leaked server keys; production only moves to a release while it passes, as long as Secret scan is a required release check, which it is by default.",
+      "Databases: before building authentication, accounts, persistence or other database-backed features, call database_status. When a database is connected, run prepare_database (or prepare_auth for sign-in) and build against it. When none is connected, do not stop and do not just send the user to a dashboard: offer create_database, which creates a new Supabase project on the user's connected Supabase account and wires it in, or link the user's existing Supabase project: find it with supabase_projects and link it with link_database (the user can also link it in Vector Cloud > Database). Never create a second database for a project that already has one unless the user asks. create_database is billed to the user's Supabase organization: when it lists several organizations, ask which one and call it again with that organizationId; when the account has none, ask the user what to name one, create it with create_organization and pass its organizationId; when it reports a plan or quota limit, relay Supabase's own words instead of retrying. After writing or changing a .sql migration file, run apply_migrations (call it with dryRun first to see what would run). Use supabase_services to inspect storage and Edge Functions.",
+      "Supabase control for the linked project: supabase_projects lists organizations and projects; create_organization creates an organization, only when the user wants one; link_database and unlink_database; pause_database and restore_database; write_database_url writes a server-only DATABASE_URL, only when the user wants one; rotate_database_password resets the password and can rewrite DATABASE_URL and push it to Vercel. Database: migration_status; create_migration writes a timestamped file (pass downSql so it can be rolled back); apply_migrations; rollback_migration undoes only the latest applied migration and only with its down migration; run_sql runs read-only unless allowWrite, and hides cells in columns named like passwords, tokens or secrets. Auth: auth_config; update_auth for the site URL, redirect URLs (addVercelUrls adds the linked Vercel production and preview addresses), email sign-in and Google, GitHub or Apple sign-in; auth_users, invite_user, delete_user. Storage: create_bucket, update_bucket, delete_bucket. Edge Functions: deploy_function from supabase/functions/<name>, delete_function, function_secrets (names only), set_function_secrets from names of stored environment variables, delete_function_secrets. supabase_logs reads api, postgres, auth, storage or functions logs, so check them when a Supabase-backed feature fails. security_check runs Supabase's security advisors and a scan for leaked server keys; production only moves to a release while it passes, as long as Secret scan is a required release check, which it is by default.",
       "Publishing: publish deploys this project to the Vercel project linked to it. It publishes a preview by default and leaves production unchanged; pass production: true only when the user asked for a production release, and say which Vercel project before calling. Vector then builds production, runs the release checks and promotes it only if they pass. Report the URL and the check results. When a publish fails, the result lists the failed checks with the end of their output: fix the cause in the project and publish a preview again. Do not tell the user to reconnect an account unless the result says setup is needed. When a live production release is broken, first offer rollback (with no deploymentId it returns production to the last deployment that served it and passed Vector's checks), then read its logs with the logs action before guessing at a cause or asking the user to paste an error.",
       VERCEL_GUIDANCE,
       "Vector's release checks: status shows the saved build settings and which checks are required before production. check_health probes every release Vector published (or the one deploymentId names) and reports its HTTP status and response time; rerun_checks re-runs Vector's release checks on one release; set_release_settings changes the install, test and build commands, output directory, health path and the required checks (requiredChecks), and asks first.",

@@ -464,14 +464,17 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
     }
   }
   if (input.command === "create_database") {
-    return createCloudDatabase({
-      projectPath: input.projectPath,
-      taskId: input.taskId,
-      directory: scope.directory,
-      organizationId: input.organizationId,
-      region: input.region,
-      force: input.force,
-    })
+    return createCloudDatabase(
+      {
+        projectPath: input.projectPath,
+        taskId: input.taskId,
+        directory: scope.directory,
+        organizationId: input.organizationId,
+        region: input.region,
+        force: input.force,
+      },
+      { request: options.request },
+    )
   }
   if (input.command === "prepare_database" || input.command === "prepare_auth") {
     if (!database) {

@@ -342,6 +342,16 @@ describe("vector_cloud bridge", () => {
           ),
         },
         {
+          params: { action: "create_organization", organizationName: "Ada Labs" } as const,
+          permission: "vector_cloud_database",
+          scope: scope(
+            "Supabase",
+            "organization Ada Labs",
+            "account",
+            "Create a Supabase organization named Ada Labs on the connected Supabase account.",
+          ),
+        },
+        {
           params: { action: "apply_migrations" } as const,
           permission: "vector_cloud_database",
           scope: scope("Supabase", "shop-db", "production", "Apply this project's pending migrations to shop-db."),
@@ -384,6 +394,9 @@ describe("vector_cloud bridge", () => {
         ])
         expect(requests.map((request) => request.command)).toEqual(["describe", item.params.action])
         expect(requests[0]).toMatchObject({ action: item.params.action })
+        if ("organizationName" in item.params) {
+          expect(requests[1]).toMatchObject({ organizationName: item.params.organizationName })
+        }
       }
     }),
   )

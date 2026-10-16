@@ -20,6 +20,7 @@ export function SupabaseDatabase(
   const [mode, setMode] = createSignal<"link" | "create">("link")
   const [selection, setSelection] = createSignal("")
   const [organization, setOrganization] = createSignal("")
+  const [organizationName, setOrganizationName] = createSignal("")
   const [region, setRegion] = createSignal("us-east-1")
   const [busy, setBusy] = createSignal("")
   const [progress, setProgress] = createSignal<SupabaseProgress[]>([])
@@ -50,6 +51,8 @@ export function SupabaseDatabase(
       regions: report.regions ?? [],
     })
     if (!organization() && report.organizations?.length === 1) setOrganization(report.organizations[0].id)
+    // With nothing to link, the only way forward is creating a project.
+    if (!report.projects?.length) setMode("create")
   }
 
   const loadMigrations = async () => {
@@ -97,6 +100,16 @@ export function SupabaseDatabase(
           report.client?.created ? ` and created ${report.client.path}` : ""
         }.${report.nextStep ? ` ${report.nextStep}` : ""}`,
       })
+    })
+
+  const createOrganization = () =>
+    act("organization", async () => {
+      const report = await props.client.createOrganization(organizationName())
+      if (failed(props.notice, report)) return
+      setOrganizationName("")
+      await loadProjects()
+      if (report.organization) setOrganization(report.organization.id)
+      props.notice({ tone: "success", text: report.detail ?? "Created the Supabase organization." })
     })
 
   const create = (organizationId?: string, regionId?: string) =>
@@ -300,7 +313,36 @@ export function SupabaseDatabase(
                   </button>
                 </div>
               </Show>
-              <Show when={mode() === "create"}>
+              <Show when={mode() === "create" && projects()?.organizations.length === 0}>
+                <p class="cloud-muted text-[12px] mt-3">
+                  This Supabase account has no organization yet. Supabase projects belong to one, and it is billed for
+                  them. Name one and Vector creates it.
+                </p>
+                <div class="sb-actions mt-2">
+                  <input
+                    class="cloud-input"
+                    aria-label="New organization name"
+                    placeholder="Organization name"
+                    maxLength={100}
+                    value={organizationName()}
+                    onInput={(event) => setOrganizationName(event.currentTarget.value)}
+                  />
+                  <button
+                    class="cloud-button"
+                    data-variant="primary"
+                    type="button"
+                    disabled={!organizationName().trim() || Boolean(busy())}
+                    onClick={() => confirm.ask("organization", () => void createOrganization())}
+                  >
+                    {busy() === "organization"
+                      ? "Creating…"
+                      : confirm.armed() === "organization"
+                        ? `Create ${organizationName().trim()}?`
+                        : "Create organization"}
+                  </button>
+                </div>
+              </Show>
+              <Show when={mode() === "create" && projects()?.organizations.length}>
                 <div class="sb-grid mt-3">
                   <label class="sb-field">
                     <span>Organization (billed for the project)</span>

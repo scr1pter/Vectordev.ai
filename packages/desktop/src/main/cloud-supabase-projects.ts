@@ -111,6 +111,39 @@ function summarizeProject(item: unknown): SupabaseProjectSummary | undefined {
   }
 }
 
+// An account with no organization has nowhere to create a project, so Vector
+// creates the organization itself instead of sending the user to Supabase's
+// dashboard. It is the call the Supabase command-line tool's `orgs create`
+// makes: https://supabase.com/docs/reference/api/v1-create-an-organization.
+// A retry after an interruption finds the organization by its exact name
+// instead of creating a second one.
+export async function createSupabaseOrganization(input: { name: string }, options: SupabaseOptions = {}) {
+  const name = supabaseOrganizationName(input.name)
+  const context = await accountContext(options)
+  const existing = responseArray(await management(context, "/organizations")).find(
+    (item) => stringField(item, "name") === name,
+  )
+  const created = existing ?? (await management(context, "/organizations", { method: "POST", json: { name } }))
+  const id = stringField(created, "id") ?? stringField(created, "slug")
+  if (!id) throw new Error("Supabase did not return the new organization.")
+  return {
+    organization: { id, name: stringField(created, "name") ?? name, plan: stringField(created, "plan") },
+    createdNow: !existing,
+    detail: existing
+      ? `The Supabase organization ${name} already exists, so Vector did not create another.`
+      : `Created the Supabase organization ${name}.`,
+  }
+}
+
+// Checked before the permission prompt shows the name and again before it is sent.
+export function supabaseOrganizationName(value: string) {
+  const name = value.trim()
+  if (!name || name.length > 100 || /[\u0000-\u001f\u007f]/.test(name)) {
+    throw new Error("Name the organization with up to 100 characters on one line.")
+  }
+  return name
+}
+
 // The same creation the agent's create_database runs: one organization chosen
 // by the user, a project that resumes instead of duplicating after an
 // interruption, and Supabase's own words for a plan or quota refusal.

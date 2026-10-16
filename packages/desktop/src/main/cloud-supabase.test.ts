@@ -246,6 +246,40 @@ describe("projects", () => {
     expectNoSecrets(created, fake.state.password ?? "")
   })
 
+  test("an account with no organization creates one in Vector, once, then a project in it", async () => {
+    connect()
+    fake.state.organizations = []
+    expect(await run("create_organization", { organizationName: " \n " })).toMatchObject({
+      ok: false,
+      error: "organizationName is required.",
+    })
+    expect(await run("create_organization", { organizationName: "a\u0007b" })).toMatchObject({
+      ok: false,
+      error: "Name the organization with up to 100 characters on one line.",
+    })
+    expect(fake.calls.filter((call) => call.method === "POST")).toEqual([])
+
+    expect(await run("create_organization", { organizationName: "  Ada Labs " })).toEqual({
+      ok: true,
+      organization: { id: "org-1", name: "Ada Labs" },
+      createdNow: true,
+      detail: "Created the Supabase organization Ada Labs.",
+    })
+    // A retry after an interruption finds it instead of creating a second one.
+    expect(await run("create_organization", { organizationName: "Ada Labs" })).toMatchObject({
+      ok: true,
+      organization: { id: "org-1" },
+      createdNow: false,
+    })
+    expect(fake.calls.filter((call) => call.method === "POST").map((call) => [call.path, call.body])).toEqual([
+      ["/v1/organizations", { name: "Ada Labs" }],
+    ])
+
+    expect(await run("supabase_projects")).toMatchObject({ organizations: [{ id: "org-1", name: "Ada Labs" }] })
+    expect(await run("create_project", { organizationId: "org-1" })).toMatchObject({ ok: true, createdNow: true })
+    expect(fake.state.projects.at(-1)).toMatchObject({ ref: "newprojectref01", organization_id: "org-1" })
+  })
+
   test("pauses and restores the linked project", async () => {
     connect()
     linkDatabase()
@@ -1233,6 +1267,43 @@ describe("agent bridge", () => {
           "Delete the user ada@example.com (00000000-0000-0000-0000-000000000001) from shop-db. This cannot be undone.",
       },
     })
+  })
+
+  test("the agent creates an organization for an account with none, after a prompt that names it", async () => {
+    connect()
+    fake.state.organizations = []
+    expect(await bridgeCommand({ command: "create_database" })).toMatchObject({
+      ok: false,
+      needsSetup: true,
+      nextStep: expect.stringContaining("create_organization"),
+    })
+    expect(
+      await bridgeCommand({ command: "describe", action: "create_organization", organizationName: "Ada Labs" }),
+    ).toEqual({
+      ok: true,
+      scope: {
+        provider: "Supabase",
+        project: "organization Ada Labs",
+        environment: "account",
+        summary:
+          "Create a Supabase organization named Ada Labs on the connected Supabase account. Projects created in it are billed to it.",
+      },
+    })
+    expect(
+      await bridgeCommand({ command: "describe", action: "create_organization", organizationName: "x".repeat(101) }),
+    ).toMatchObject({ ok: false, error: "Name the organization with up to 100 characters on one line." })
+    expect(fake.calls.filter((call) => call.method === "POST")).toEqual([])
+
+    expect(await bridgeCommand({ command: "create_organization", organizationName: "Ada Labs" })).toMatchObject({
+      ok: true,
+      organization: { id: "org-1", name: "Ada Labs" },
+      createdNow: true,
+    })
+    expect(await bridgeCommand({ command: "create_database", organizationId: "org-1" })).toMatchObject({
+      ok: true,
+      createdNow: true,
+    })
+    expect(fake.state.projects.at(-1)).toMatchObject({ organization_id: "org-1" })
   })
 
   test("runs Supabase commands as the agent, with the agent's limits", async () => {
