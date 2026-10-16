@@ -159,6 +159,10 @@ export type ParallelWorkspaceRecord = {
   // The checkpoint of the merge mergeStartedAt marks. Its folder holds every file that merge was about to write as it
   // was before, and their names, so the merge can be undone (rollBackUnfinishedMerge).
   mergeCheckpointPath?: string
+  // A merged workspace whose isolated copy Vector had not finished removing, and the commit the user asked for that the
+  // merge had not made yet. A restart finishes the cleanup and reports the commit (finishInterruptedMerge).
+  cleanupPending?: boolean
+  pendingCommit?: string
   // The agent's own summary of its work, kept when a merge replaces finalSummary with what the merge did.
   summaryBeforeMerge?: string
   logs: string[]
@@ -1402,6 +1406,9 @@ export function listParallelWorkspaces(scope?: { sourcePath?: string; parentSess
     return interrupted
   })
   if (changed) writeRecords(next)
+  next
+    .filter((record) => record.cleanupPending && !finishingMerges.has(record.id))
+    .forEach((record) => void finishInterruptedMerge(record))
   if (!scope) return next
   return next.filter((record) => {
     if (scope.sourcePath && record.sourcePath !== scope.sourcePath) return false
@@ -2935,12 +2942,16 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
     return failed
   }
   // Every change is in the source now. Record that before the cleanup, which can take seconds: Vector closing during it
-  // must not leave a workspace that looks unmerged, or a swarm would run its task again on top of its own changes.
+  // must not leave a workspace that looks unmerged, or a swarm would run its task again on top of its own changes. The
+  // record also says what is left to do, so a restart can finish the cleanup and report a commit it never made.
+  finishingMerges.add(id)
   updateRecord(id, (current) => ({
     ...current,
     status: "merged",
     mergeState: "merged",
     checkpointPath,
+    cleanupPending: true,
+    pendingCommit: commit?.message?.trim() || undefined,
     summaryBeforeMerge: current.summaryBeforeMerge ?? current.finalSummary,
     lastAction: "Merged; removing the isolated copy",
     lastActivityAt: now(),
@@ -2979,6 +2990,8 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
     progress: 100,
     mergeState: "merged",
     checkpointPath,
+    cleanupPending: undefined,
+    pendingCommit: undefined,
     error: commitError || undefined,
     lastAction: commitNote.startsWith("Committed")
       ? "Merged and committed to the main project"
@@ -2998,6 +3011,7 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
       ...current.logs,
     ].slice(0, 80),
   }))
+  finishingMerges.delete(id)
   syncBackgroundTask(
     merged,
     commitError
@@ -3012,6 +3026,43 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
 // A swarm worker merges into the swarm's staging workspace; everything else merges into the project it came from.
 function mergeTarget(record: ParallelWorkspaceRecord) {
   return record.swarmRole === "worker" ? "swarm staging" : "the main project"
+}
+
+// Merges in this process whose changes are in the source and that are still removing the isolated copy or committing.
+const finishingMerges = new Set<string>()
+
+// Finishes a merge Vector closed during, after its changes reached the source. The isolated copy and branch are
+// removed now. A commit the user asked for is reported instead of made: the source may have changed since Vector
+// closed, and committing everything in it would sweep those changes in.
+async function finishInterruptedMerge(record: ParallelWorkspaceRecord) {
+  finishingMerges.add(record.id)
+  await cleanupIsolation(record)
+  const skipped = record.pendingCommit
+    ? "Vector closed before it made the commit you asked for, so nothing was committed. Commit the merged changes yourself if you still want them committed."
+    : ""
+  if (readRecords().some((item) => item.id === record.id)) {
+    const finished = updateRecord(record.id, (current) => ({
+      ...current,
+      cleanupPending: undefined,
+      pendingCommit: undefined,
+      error: skipped || undefined,
+      lastAction: skipped ? "Merged; the requested commit was not made" : `Merged into ${mergeTarget(current)}`,
+      lastActivityAt: now(),
+      finalSummary: [
+        `Merged ${current.changedFilesCount} changed file${current.changedFilesCount === 1 ? "" : "s"} into ${mergeTarget(current)}.`,
+        skipped,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      logs: [
+        `Vector closed while this merge was removing the isolated copy; the cleanup finished at ${now()}.`,
+        ...(skipped ? [skipped] : []),
+        ...current.logs,
+      ].slice(0, 80),
+    }))
+    syncBackgroundTask(finished, skipped || `Parallel workspace merged into ${mergeTarget(finished)}.`)
+  }
+  finishingMerges.delete(record.id)
 }
 
 export async function openParallelWorkspacePullRequest(id: string) {

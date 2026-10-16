@@ -6,6 +6,7 @@ import type { ParallelWorkspaceRecord } from "./parallel-workspaces"
 
 let userDataPath = ""
 const store = new Map<string, Map<string, unknown>>()
+let onWrite = (_name: string, _value: unknown) => {}
 // parallel-workspaces pulls in the cloud and publish modules transitively, so
 // the stub has to cover every electron export they touch at module load.
 const electronMock = {
@@ -32,7 +33,10 @@ mock.module("./store", () => ({
     const bucket = store.get(name)!
     return {
       get: (key: string) => bucket.get(key),
-      set: (key: string, value: unknown) => bucket.set(key, value),
+      set: (key: string, value: unknown) => {
+        bucket.set(key, value)
+        onWrite(name, value)
+      },
       delete: (key: string) => bucket.delete(key),
       path: join(userDataPath, `${name}.json`),
     }
@@ -44,6 +48,7 @@ const {
   createParallelWorkspace,
   getParallelWorkspace,
   interruptEngineSession,
+  listParallelWorkspaces,
   mergeParallelWorkspace,
   refreshParallelWorkspace,
   rollBackUnfinishedMerge,
@@ -219,6 +224,36 @@ describe("merging a workspace Vector closed part-way through", () => {
     expect(results.map((result) => result.status)).toEqual(["merged", "merged"])
     expect(await Bun.file(join(sourcePath, "a.txt")).text()).toBe("first\n")
     expect(await Bun.file(join(sourcePath, "b.txt")).text()).toBe("second\n")
+  })
+
+  test("a restart during the cleanup after a merge removes the copy and reports the commit it never made", async () => {
+    await writeFile(join(sourcePath, "a.txt"), "before\n")
+    const created = await workspace(sourcePath)
+    await writeFile(join(created.isolatedPath, "a.txt"), "after\n")
+    // What Vector has written when it closes as the merge starts removing the isolated copy.
+    let snapshot: unknown
+    onWrite = (name, value) => {
+      const record = (value as ParallelWorkspaceRecord[]).find((item) => item.id === created.id)
+      if (!snapshot && name === "parallel-workspaces-state" && record?.cleanupPending) snapshot = structuredClone(value)
+    }
+    await mergeParallelWorkspace(created.id, false, { message: "Ship it" })
+    onWrite = () => {}
+    store.get("parallel-workspaces-state")!.set("records", snapshot)
+    await mkdir(created.isolatedPath, { recursive: true })
+    await writeFile(join(created.isolatedPath, "a.txt"), "after\n")
+
+    expect(listParallelWorkspaces().find((record) => record.id === created.id)?.cleanupPending).toBe(true)
+    const deadline = Date.now() + 5_000
+    while (getParallelWorkspace(created.id)?.cleanupPending && Date.now() < deadline) await Bun.sleep(20)
+    const finished = getParallelWorkspace(created.id)!
+
+    expect(finished.cleanupPending).toBeUndefined()
+    expect(finished.mergeState).toBe("merged")
+    expect(finished.lastAction).toBe("Merged; the requested commit was not made")
+    expect(finished.error).toContain("nothing was committed")
+    expect(finished.finalSummary).toContain("Merged 1 changed file into the main project.")
+    expect(await stat(dirname(created.isolatedPath)).catch(() => undefined)).toBeUndefined()
+    expect(await Bun.file(join(sourcePath, "a.txt")).text()).toBe("after\n")
   })
 })
 
