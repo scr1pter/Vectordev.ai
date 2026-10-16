@@ -32,6 +32,9 @@ const Action = Schema.Literals([
   "check_health",
   "rerun_checks",
   "set_release_settings",
+  "stored_env",
+  "write_env_file",
+  "remove_stored_env",
   ...VERCEL_ACTIONS,
   "supabase_projects",
   "create_organization",
@@ -290,6 +293,9 @@ type CloudReport = {
   deployments?: unknown[]
   connections?: unknown[]
   links?: unknown[]
+  /** stored_env: { key, visibility } per variable; remove_stored_env: the names still stored. */
+  variables?: unknown[]
+  removed?: string
   services?: unknown
   sync?: unknown
   url?: string
@@ -363,6 +369,8 @@ function toolTitle(action: Action) {
   if (action === "logs") return "Read deployment logs"
   if (action === "apply_migrations") return "Apply database migrations"
   if (action === "create_database") return "Create a database"
+  if (action === "stored_env" || action === "write_env_file" || action === "remove_stored_env")
+    return "Environment variables"
   return "Vector Cloud"
 }
 
@@ -539,6 +547,25 @@ function formatReport(action: Action, report: CloudReport) {
       .filter((line): line is string => Boolean(line))
       .join("\n")
   }
+  if (action === "stored_env") {
+    const variables = (report.variables ?? []).filter(
+      (item): item is { key: string; visibility?: string } =>
+        typeof item === "object" && item !== null && typeof Reflect.get(item, "key") === "string",
+    )
+    return variables.length
+      ? `Variables Vector stores for this project (names only; values never reach you): ${variables
+          .map((item) => `${item.key} (${item.visibility === "public" ? "public" : "server-only"})`)
+          .join(", ")}`
+      : "Vector stores no environment variables for this project. The user adds them in Vector Cloud > Environment variables."
+  }
+  if (action === "write_env_file") {
+    return `Wrote the stored variables to .env: ${JSON.stringify(report.applied)}. Do not read .env or print its values.`
+  }
+  if (action === "remove_stored_env") {
+    return `Removed ${report.removed} from the variables Vector stores for this project. Still stored: ${nameList(
+      (report.variables ?? []).filter((item): item is string => typeof item === "string"),
+    )}. Write .env again (write_env_file) or sync Vercel to drop older copies.`
+  }
   if (action === "cloud_connections") {
     return `Vector Cloud connections:\n${JSON.stringify({ connections: report.connections, links: report.links }, null, 2)}`
   }
@@ -662,8 +689,8 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
       "Publishing: publish deploys this project to the Vercel project linked to it. It publishes a preview by default and leaves production unchanged; pass production: true only when the user asked for a production release, and say which Vercel project before calling. Vector then builds production, runs the release checks and promotes it only if they pass. Report the URL and the check results. When a publish fails, the result lists the failed checks with the end of their output: fix the cause in the project and publish a preview again. Do not tell the user to reconnect an account unless the result says setup is needed. When a live production release is broken, first offer rollback (with no deploymentId it returns production to the last deployment that served it and passed Vector's checks), then read its logs with the logs action before guessing at a cause or asking the user to paste an error.",
       VERCEL_GUIDANCE,
       "Vector's release checks: status shows the saved build settings and which checks are required before production. check_health probes every release Vector published (or the one deploymentId names) and reports its HTTP status and response time; rerun_checks re-runs Vector's release checks on one release; set_release_settings changes the install, test and build commands, output directory, health path and the required checks (requiredChecks), and asks first.",
-      "Secrets: results carry names, never values. Never ask the user to paste a token, key or password into the chat. Name what is needed and where to add it: Vector Cloud > Environment variables for the app's settings (set_env without a value copies the stored one to Vercel), Vector Cloud > Connections for the Vercel and Supabase accounts (the user signs in there; only the user can connect or disconnect an account). OAuth client secrets and function secret values are also entered by the user in Vector Cloud.",
-      "Every action that publishes or moves production, creates or changes a database, or writes hosting settings, domains or host variables asks the user first, every time, naming the provider, project and environment. Auto-accept, permission rules and earlier approvals never answer these prompts, so expect one for each such call and do not batch unrelated changes into one. A rejected prompt means nothing changed. Hosting and database usage follow the connected accounts' billing. Never claim a resource was created unless this tool reports it.",
+      "Secrets: results carry names, never values. Never ask the user to paste a token, key or password into the chat. Name what is needed and where to add it: Vector Cloud > Environment variables for the app's settings (stored_env lists the names stored there; write_env_file writes them to the project's .env; remove_stored_env removes one; set_env without a value copies a stored one to Vercel), Vector Cloud > Connections for the Vercel and Supabase accounts (the user signs in there; only the user can connect or disconnect an account). OAuth client secrets and function secret values are also entered by the user in Vector Cloud.",
+      "Every action that publishes or moves production, creates or changes a database, or writes hosting settings, domains, host variables, Vector's stored variables or .env asks the user first, every time, naming the provider, project and environment. Auto-accept, permission rules and earlier approvals never answer these prompts, so expect one for each such call and do not batch unrelated changes into one. A rejected prompt means nothing changed. Hosting and database usage follow the connected accounts' billing. Never claim a resource was created unless this tool reports it.",
     ].join(" "),
     parameters: Parameters,
     execute: (params, ctx) =>
@@ -760,7 +787,9 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
             ? "vector_cloud_publish"
             : params.action === "set_release_settings"
               ? "vector_cloud_hosting"
-              : params.action === "sync_environment"
+              : params.action === "sync_environment" ||
+                  params.action === "write_env_file" ||
+                  params.action === "remove_stored_env"
                 ? "vector_cloud_environment"
                 : params.action === "apply_migrations" && params.dryRun === true
                   ? "vector_cloud_inspect"

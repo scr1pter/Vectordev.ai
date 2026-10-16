@@ -891,6 +891,52 @@ describe("vector_cloud Vercel actions", () => {
     }),
   )
 
+  it.instance("lists, writes and removes Vector's stored variables, asking before each change", () =>
+    Effect.gen(function* () {
+      const listed = yield* bridge({
+        ok: true,
+        variables: [
+          { key: "STRIPE_SECRET_KEY", visibility: "server" },
+          { key: "VITE_SITE_NAME", visibility: "public" },
+        ],
+      })
+      const reads = recordAsks()
+      const names = yield* execute({ action: "stored_env" }, reads.ask)
+      expect(reads.permissions).toEqual([])
+      expect(listed.map((item) => item.command)).toEqual(["stored_env"])
+      expect(names.output).toBe(
+        "Variables Vector stores for this project (names only; values never reach you): STRIPE_SECRET_KEY (server-only), VITE_SITE_NAME (public)",
+      )
+
+      const written = yield* bridge(
+        { ok: true, applied: { written: ".env", gitignoreUpdated: true } },
+        200,
+        scope("Vector", "shop", "local .env", "Write this project's 2 stored environment variables to .env."),
+      )
+      const writes = recordAsks()
+      const wrote = yield* execute({ action: "write_env_file" }, writes.ask)
+      expect(writes.permissions).toMatchObject([
+        { permission: "vector_cloud_environment", patterns: ["vector/shop/local .env/write_env_file"], always: [] },
+      ])
+      expect(written.map((item) => item.command)).toEqual(["describe", "write_env_file"])
+      expect(wrote.output).toContain('"gitignoreUpdated":true')
+      expect(wrote.output).toContain("Do not read .env")
+
+      const removed = yield* bridge(
+        { ok: true, removed: "VITE_SITE_NAME", variables: ["STRIPE_SECRET_KEY"] },
+        200,
+        scope("Vector", "shop", "stored variables", "Remove VITE_SITE_NAME from the variables Vector stores."),
+      )
+      const removes = recordAsks()
+      const gone = yield* execute({ action: "remove_stored_env", key: "VITE_SITE_NAME" }, removes.ask)
+      expect(removes.permissions.map((item) => [item.permission, item.always])).toEqual([
+        ["vector_cloud_environment", []],
+      ])
+      expect(removed[1]).toMatchObject({ command: "remove_stored_env", key: "VITE_SITE_NAME" })
+      expect(gone.output).toContain("Still stored: STRIPE_SECRET_KEY")
+    }),
+  )
+
   it.instance("reads Vercel state without asking", () =>
     Effect.gen(function* () {
       for (const action of ["list_env", "vercel_projects", "list_domains", "env_plan", "inspect_deployment"] as const) {

@@ -165,7 +165,8 @@ limit it to the variables the integration created. See
 
 The agent's `vector_cloud` tool asks before it publishes or moves production
 (`vector_cloud_publish`), creates, prepares, changes or migrates a database
-(`vector_cloud_database`), writes a host's environment variables
+(`vector_cloud_database`), writes a host's environment variables, the
+project's `.env` or the variables Vector stores for it
 (`vector_cloud_environment`) or changes a Vercel project, its protection or its
 domains (`vector_cloud_hosting`). Each prompt names the provider, the
 provider-side project and the environment the action touches, and shows any SQL

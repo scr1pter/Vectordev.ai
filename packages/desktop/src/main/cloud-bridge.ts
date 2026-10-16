@@ -1,7 +1,16 @@
 import { randomUUID } from "node:crypto"
 import { createServer, type Server } from "node:http"
+import { basename } from "node:path"
 
-import { applyEnv, detectBuildSettings, getBuildSettings, getDatabase, listDeployments, listEnv } from "./cloud-console"
+import {
+  applyEnv,
+  detectBuildSettings,
+  getBuildSettings,
+  getDatabase,
+  listDeployments,
+  listEnv,
+  removeEnv,
+} from "./cloud-console"
 import {
   cachedCloudProviderConnection,
   getCloudProviderProjectLink,
@@ -53,6 +62,9 @@ const COMMANDS = [
   "list_deployments",
   "logs",
   "apply_migrations",
+  "stored_env",
+  "write_env_file",
+  "remove_stored_env",
   "describe",
   ...VERCEL_COMMANDS,
   ...RELEASE_COMMANDS,
@@ -69,6 +81,8 @@ const DESCRIBABLE = [
   "prepare_auth",
   "apply_migrations",
   "set_release_settings",
+  "write_env_file",
+  "remove_stored_env",
   ...VERCEL_DESCRIBABLE,
 ] as const
 
@@ -262,10 +276,46 @@ function configuredPublishTargets(input: CloudCommandInput) {
 async function describeCloudAction(input: CloudCommandInput, workspace: CloudScope, request?: VercelFetch) {
   // Vector's local Supabase and publish descriptions are below; every Vercel
   // action, including the environment sync, describes itself.
-  const scope = (provider: "Vercel" | "Supabase", project: string, environment: string, summary: string) => ({
+  const scope = (
+    provider: "Vector" | "Vercel" | "Supabase",
+    project: string,
+    environment: string,
+    summary: string,
+  ) => ({
     ok: true,
     scope: { provider, project, environment, summary },
   })
+  // The variables Vector keeps for the project, as Vector Cloud > Environment
+  // variables shows them: the prompt names them, never their values.
+  const stored = () => listEnv(input.projectPath, input.taskId).map((item) => item.key)
+  const where = workspace.directory !== workspace.projectPath ? "this agent workspace" : "this project"
+  if (input.action === "write_env_file") {
+    const keys = stored()
+    return scope(
+      "Vector",
+      basename(input.projectPath),
+      "local .env",
+      keys.length
+        ? `Write this project's ${keys.length} stored environment ${keys.length === 1 ? "variable" : "variables"} (${keys.join(", ")}) to the .env of ${where}. Values are not shown.`
+        : `Clear Vector's managed block from the .env of ${where}: no variables are stored for this project.`,
+    )
+  }
+  if (input.action === "remove_stored_env") {
+    const key = input.key?.trim()
+    if (!key || !stored().includes(key)) {
+      return {
+        ok: false,
+        error: key ? `${key} is not stored for this project.` : "Name the stored variable to remove.",
+        nextStep: "stored_env lists the variables Vector stores for this project.",
+      }
+    }
+    return scope(
+      "Vector",
+      basename(input.projectPath),
+      "stored variables",
+      `Remove ${key} from the variables Vector stores for this project. A .env or Vercel copy stays until .env is written again or the environment is synced.`,
+    )
+  }
   if (input.action === "publish") {
     const target = configuredPublishTargets(input)[0]
     if (!target) return publishSetup()
@@ -495,6 +545,29 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
       database: { connected: true, provider: database.provider, host: new URL(database.url).hostname },
       applied: await applyEnv(input.projectPath, input.taskId, scope.directory),
       purpose: input.command === "prepare_auth" ? "authentication" : "database",
+    }
+  }
+  if (input.command === "stored_env") {
+    return {
+      ok: true,
+      variables: listEnv(input.projectPath, input.taskId).map((item) => ({
+        key: item.key,
+        visibility: item.visibility,
+      })),
+    }
+  }
+  if (input.command === "write_env_file") {
+    return { ok: true, applied: await applyEnv(input.projectPath, input.taskId, scope.directory) }
+  }
+  if (input.command === "remove_stored_env") {
+    const key = input.key?.trim() ?? ""
+    if (!listEnv(input.projectPath, input.taskId).some((item) => item.key === key)) {
+      return { ok: false, error: `${key || "That variable"} is not stored for this project.` }
+    }
+    return {
+      ok: true,
+      removed: key,
+      variables: removeEnv(input.projectPath, input.taskId, key).map((item) => item.key),
     }
   }
   if (input.command === "cloud_connections") {

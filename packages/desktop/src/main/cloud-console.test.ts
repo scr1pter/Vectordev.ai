@@ -386,6 +386,50 @@ describe("cloud bridge publish destination", () => {
     expect(published).toEqual([])
   })
 
+  test("lets the agent list, write and remove the stored variables without seeing a value", async () => {
+    setEnv(project, undefined, "STRIPE_SECRET_KEY", "fixture-server-secret", "server")
+    setEnv(project, undefined, "VITE_SITE_NAME", "fixture-public-name", "public")
+    const bridge = await startCloudBridge()
+    const command = async (input: Record<string, unknown>) => (await bridgeCommand(bridge, input)).json()
+    const listed = await command({ command: "stored_env" })
+    expect(listed).toEqual({
+      ok: true,
+      variables: [
+        { key: "STRIPE_SECRET_KEY", visibility: "server" },
+        { key: "VITE_SITE_NAME", visibility: "public" },
+      ],
+    })
+    const write = await command({ command: "describe", action: "write_env_file" })
+    expect(write.scope).toMatchObject({
+      provider: "Vector",
+      environment: "local .env",
+      summary:
+        "Write this project's 2 stored environment variables (STRIPE_SECRET_KEY, VITE_SITE_NAME) to the .env of this project. Values are not shown.",
+    })
+    expect(await command({ command: "write_env_file" })).toEqual({
+      ok: true,
+      applied: { written: ".env", gitignoreUpdated: true },
+    })
+    expect(await readFile(join(project, ".env"), "utf8")).toContain("STRIPE_SECRET_KEY=fixture-server-secret")
+    expect(await command({ command: "describe", action: "remove_stored_env", key: "MISSING" })).toMatchObject({
+      ok: false,
+      error: "MISSING is not stored for this project.",
+    })
+    expect(
+      (await command({ command: "describe", action: "remove_stored_env", key: "VITE_SITE_NAME" })).scope,
+    ).toMatchObject({
+      provider: "Vector",
+      environment: "stored variables",
+    })
+    expect(await command({ command: "remove_stored_env", key: "VITE_SITE_NAME" })).toEqual({
+      ok: true,
+      removed: "VITE_SITE_NAME",
+      variables: ["STRIPE_SECRET_KEY"],
+    })
+    expect(listEnv(project).map((item) => item.key)).toEqual(["STRIPE_SECRET_KEY"])
+    expect(JSON.stringify([listed, write])).not.toContain("fixture-")
+  })
+
   test("describes what each changing action would touch for the permission prompt", async () => {
     seedHost("vercel")
     setEnv(project, undefined, "API_URL", "https://api.fixture.invalid")

@@ -79,7 +79,9 @@ export const VercelParameters = {
     description:
       "For update_project_settings: 24.x or 22.x. Vercel no longer builds new deployments with 20.x or 18.x. For set_release_settings: the Node version Vector builds with locally.",
   }),
-  key: Schema.optional(Schema.String).annotate({ description: "For set_env and remove_env: the variable name." }),
+  key: Schema.optional(Schema.String).annotate({
+    description: "For set_env, remove_env and remove_stored_env: the variable name.",
+  }),
   value: Schema.optional(Schema.String).annotate({
     description:
       "For set_env: a non-secret value. Omit it to copy the value stored for this key in the project's Vector environment; that is how secrets reach Vercel. Never ask for a secret in chat: the user adds it in Vector Cloud > Environment variables. Tool output never repeats a value.",
