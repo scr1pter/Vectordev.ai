@@ -232,6 +232,15 @@ stays off by default because it confines every shell command to the workspace,
 is unavailable on Windows, and asks before running unconfined where the host
 cannot apply it; turning it on by default is a separate decision.
 
+Known limit: Git pushes. For a Vercel project connected to a Git repository,
+a push to its production branch (`git push origin main`) makes Vercel build and
+release production on its own. That release never passes Vector's release
+checks or a `vector_cloud_publish` prompt: the cloud check does not classify
+`git` commands, and `git push` asks only as other shell commands do, which the
+default allow rule answers. To hold pushes for approval, add a rule such as
+`"permission": { "bash": { "git push *": "ask" } }`. Vector Cloud's deployment
+list still shows those releases, since it reads Vercel's own history.
+
 Vercel's and Supabase's own MCP servers act on the same accounts with the
 server's own login: a hosted server at `mcp.vercel.com` or `mcp.supabase.com`
 (directly or through a local bridge such as `mcp-remote`), or the

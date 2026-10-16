@@ -132,7 +132,10 @@ export const prerender = true
     (VECTOR_SHELL_SANDBOX=1, off by default), which hides those stored logins from the agent's commands, closes that
     route. Vercel's and Supabase's own MCP servers, added from Plugins or by hand, follow the same rule: a tool that
     changes the account, runs SQL or returns keys asks every time and shows its input, while plain list and read tools
-    do not. The Plugins Supabase entry starts its server read-only.
+    do not. The Plugins Supabase entry starts its server read-only. One route stays outside these prompts: for a
+    Vercel project connected to Git, a git push to its production branch releases production through Vercel's own Git
+    integration, without Vector's release checks. Add a permission rule that asks for git push if pushes must wait for
+    you.
     A new migration file asks like any other edit, showing both the migration and its down file. OAuth client secrets, function secret values and the database password are entered
     in Vector Cloud, never in chat, and the agent can only refer to variables already stored there. Query results
     reach the agent as the query returns them, except cells in columns named like passwords, tokens or secrets, which
