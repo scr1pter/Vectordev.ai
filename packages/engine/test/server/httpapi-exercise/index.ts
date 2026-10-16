@@ -1117,6 +1117,18 @@ const scenarios: Scenario[] = [
     }))
     .json(200, data(object)),
   http.protected
+    .get("/api/session/{sessionID}/spend", "v2.session.spend.unguarded")
+    .seeded((ctx) => ctx.session({ title: "Session spend" }))
+    .at((ctx) => ({
+      path: route("/api/session/{sessionID}/spend", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+    }))
+    // A session no run guard has seen in this process answers no snapshot, never a zero one.
+    .json(200, (body) => {
+      object(body)
+      check(body.data === undefined, "expected no spend snapshot for an unguarded session")
+    }),
+  http.protected
     .post("/api/session/{sessionID}/agent", "v2.session.switchAgent")
     .seeded((ctx) => ctx.session({ title: "Switch agent" }))
     .at((ctx) => ({
