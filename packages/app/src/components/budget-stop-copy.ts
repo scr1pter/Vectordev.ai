@@ -11,6 +11,8 @@ export type BudgetStopNotice = {
 
 export const BUDGET_STOP_CONTINUE_PROMPT = "Continue from where you stopped."
 export const BUDGET_STOP_FOOTNOTE = "Continuing starts a new run with its own cap."
+export const BUDGET_STOP_SUBAGENT_NOTE =
+  "A subagent spends under its main session's run, so it continues from there: a new message or Continue in the main session starts a new run under its own limits."
 
 // What the timeline hands the Budget stop card: the stop itself and the model
 // and agent a continuation should run with.
@@ -26,8 +28,10 @@ export function budgetStopNotice(message: AssistantMessage | undefined): BudgetS
 }
 
 // Everything the Budget stop card says, derived from the engine's error alone
-// so the wording can be tested without rendering.
-export function budgetStopCopy(error: BudgetStopError["data"]) {
+// so the wording can be tested without rendering. A subagent's steps count
+// against its main session's run, which stays stopped until the main session
+// runs again, so a Continue sent to the subagent itself would stop at once.
+export function budgetStopCopy(error: BudgetStopError["data"], options: { subagent?: boolean } = {}) {
   const loop = error.reason === "loop"
   return {
     title: loop ? "Loop paused" : "Budget stop",
@@ -37,11 +41,11 @@ export function budgetStopCopy(error: BudgetStopError["data"]) {
     estimate: error.estimate
       ? `Next step estimated at ${formatUsd(error.estimate.lowUsd)}–${formatUsd(error.estimate.highUsd)}`
       : undefined,
-    continueLabel: continueLabel(error),
+    continueLabel: options.subagent ? undefined : continueLabel(error),
     // A continuation renews the stopped run's cap at the same size; the card
     // builds the rest of the budget from the user's configured limits.
     capUsd: error.capUsd,
-    footnote: BUDGET_STOP_FOOTNOTE,
+    footnote: options.subagent ? BUDGET_STOP_SUBAGENT_NOTE : BUDGET_STOP_FOOTNOTE,
   }
 }
 

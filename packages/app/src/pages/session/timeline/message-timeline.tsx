@@ -1352,7 +1352,11 @@ export function MessageTimeline(props: {
                   <FreeModelsLimit sessionID={sessionID()!} limit={errorRow().freeLimit!} />
                 </Match>
                 <Match when={errorRow().budgetStop && sessionID()}>
-                  <BudgetStop sessionID={sessionID()!} stop={errorRow().budgetStop!} />
+                  <BudgetStop
+                    sessionID={sessionID()!}
+                    stop={errorRow().budgetStop!}
+                    openParent={parentID() ? navigateParent : undefined}
+                  />
                 </Match>
               </Switch>
             </div>

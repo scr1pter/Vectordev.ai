@@ -117,4 +117,21 @@ describe("budgetStopCopy", () => {
     expect(copy.capUsd).toBe(5)
     expect(copy.spent).toBe("$1.10 of $5.00 spent")
   })
+
+  test("a subagent's stop offers no Continue and points to its main session", () => {
+    // Its steps count against the main session's stopped run, so a Continue sent to it would stop at once.
+    const stops = [
+      { reason: "cap" as const, message: "Spend cap reached", spentUsd: 5.02, capUsd: 5 },
+      { reason: "loop" as const, message: "Paused a repeating loop" },
+      { reason: "steps" as const, message: "Step limit reached: 60 of 60 steps used for this run." },
+    ]
+    expect(stops.map((stop) => budgetStopCopy(stop, { subagent: true }))).toMatchObject([
+      { title: "Budget stop", body: "Spend cap reached", spent: "$5.02 of $5.00 spent", continueLabel: undefined },
+      { title: "Loop paused", continueLabel: undefined },
+      { title: "Budget stop", continueLabel: undefined },
+    ])
+    expect(budgetStopCopy(stops[0], { subagent: true }).footnote).toBe(
+      "A subagent spends under its main session's run, so it continues from there: a new message or Continue in the main session starts a new run under its own limits.",
+    )
+  })
 })

@@ -12,12 +12,14 @@ import { BUDGET_STOP_CONTINUE_PROMPT, budgetStopCopy, type BudgetStopNotice } fr
 
 // Shown in place of the plain error card when the run guard stopped a run.
 // Continuing is a new prompt under a fresh cap, not a resume of the stopped run.
-export function BudgetStop(props: { sessionID: string; stop: BudgetStopNotice }) {
+// `openParent` is set on a subagent's session, which continues only from its
+// main session, so the card points there instead of offering Continue.
+export function BudgetStop(props: { sessionID: string; stop: BudgetStopNotice; openParent?: () => void }) {
   const sdk = useSDK()
   const sync = useSync()
   const platform = usePlatform()
   const dialog = useDialog()
-  const copy = () => budgetStopCopy(props.stop.error)
+  const copy = () => budgetStopCopy(props.stop.error, { subagent: props.openParent !== undefined })
   const [state, setState] = createStore({ busy: false, error: "", continued: false })
 
   const resume = async () => {
@@ -74,13 +76,18 @@ export function BudgetStop(props: { sessionID: string; stop: BudgetStopNotice })
               </Button>
             )}
           </Show>
+          <Show when={props.openParent}>
+            <Button variant="ghost" onClick={() => props.openParent?.()}>
+              Open parent session
+            </Button>
+          </Show>
           <Show when={platform.platform === "desktop" && spendLimitsApi()}>
             <Button variant="ghost" onClick={openLimits}>
               Change limits
             </Button>
           </Show>
         </div>
-        <Show when={copy().continueLabel}>
+        <Show when={copy().continueLabel || props.openParent}>
           <p>{copy().footnote}</p>
         </Show>
       </div>

@@ -52,7 +52,7 @@ export const runGuardRows = [
   ],
   [
     "A way to continue",
-    "The stop card says why the run stopped and what it spent. Continue starts a new run with a new cap of the same size, or with a new step limit, and the stopped turn stays in the history so the agent picks up where it was.",
+    "The stop card says why the run stopped and what it spent. Continue starts a new run with a new cap of the same size, or with a new step limit, and the stopped turn stays in the history so the agent picks up where it was. A subagent spends under its main session's run, so its stop card points to the main session, where a new message or Continue starts the new run.",
   ],
   [
     "Made for scripts",
