@@ -392,6 +392,48 @@ describe("ModelCatalog Service", () => {
     }),
   )
 
+  it.live("a cache with no usable providers is reported once, though a refresh before the load kept it", () =>
+    Effect.gen(function* () {
+      Flag.VECTOR_MODELS_URL = mirror
+      // Saved by a build that bundles this SDK; this build skips the only provider.
+      const text = JSON.stringify({ lmstudio: { ...fixture.lmstudio, npm: "unreviewed-catalog-sdk" } })
+      yield* writeCacheText(text, Date.now() - 10 * 60 * 1000)
+      const messages: Array<{ level: string; message: unknown }> = []
+      const state = yield* Ref.make({ ...initialState, body: text })
+      const result = yield* provided(
+        state,
+        Effect.gen(function* () {
+          const svc = yield* ModelCatalog.Service
+          const warnings = () =>
+            messages.filter(
+              (entry) =>
+                entry.level === "Warn" && JSON.stringify(entry.message).includes("model catalog is unavailable"),
+            )
+          yield* svc.refresh(false)
+          const loaded = yield* svc.get()
+          // Renewed by the first refresh, so this one sends nothing; only the load can report the cache.
+          yield* svc.refresh(false)
+          const reported = warnings()
+          // A forced refresh fails the same way and stays quiet about it.
+          yield* svc.refresh(true)
+          return { loaded, reported, after: warnings() }
+        }),
+        true,
+      ).pipe(
+        Effect.provide(
+          Logger.layer([
+            Logger.make((options) => messages.push({ level: options.logLevel, message: options.message })),
+          ]),
+        ),
+      )
+      expect(result.loaded).toEqual({})
+      expect((yield* Ref.get(state)).calls).toHaveLength(2)
+      expect(result.reported).toHaveLength(1)
+      expect(Bun.inspect(result.reported[0].message)).toContain("The model catalog mirror has no usable providers")
+      expect(result.after).toHaveLength(1)
+    }),
+  )
+
   it.live("the startup refresh waits for the first load and keeps it when the mirror is unchanged", () =>
     Effect.gen(function* () {
       Flag.VECTOR_MODELS_URL = mirror

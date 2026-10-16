@@ -144,9 +144,15 @@ const layer = Layer.effect(
       // Taken before the read, so a file replaced in between no longer matches when a refresh checks it.
       const info = yield* fs.stat(Flag.VECTOR_MODELS_PATH ?? filepath)
       const catalog = yield* fs.readJson(Flag.VECTOR_MODELS_PATH ?? filepath).pipe(Effect.flatMap(decode))
-      // An empty catalog (every entry skipped) keeps the full refresh, which reports a mirror with no usable providers.
-      if (Flag.VECTOR_MODELS_PATH === undefined && Object.keys(catalog).length)
-        yield* Ref.set(decodedFrom, identity(info))
+      if (Flag.VECTOR_MODELS_PATH !== undefined) return catalog
+      // Every entry of the cached mirror text is one this build skips. Report it here, because a refresh that found the
+      // mirror unchanged before this load never decoded the text. Left unrecorded, so the next refresh takes the full
+      // path, which fails the same way without a second warning.
+      if (!Object.keys(catalog).length) {
+        yield* reportUnavailable(new Error("The model catalog mirror has no usable providers"))
+        return catalog
+      }
+      yield* Ref.set(decodedFrom, identity(info))
       return catalog
     }).pipe(
       Effect.catch(() => {
