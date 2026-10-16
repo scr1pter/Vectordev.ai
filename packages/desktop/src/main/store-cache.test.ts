@@ -45,14 +45,15 @@ function fakeStore(name: string, values = new Map<string, unknown>()) {
   return entry
 }
 
-const { getParallelWorkspace, listParallelWorkspaces, recordParallelWorkspacePreview, refreshParallelWorkspace } =
-  await import("./parallel-workspaces")
+const { getParallelWorkspace, listParallelWorkspaces, recordParallelWorkspacePreview } = await import(
+  "./parallel-workspaces"
+)
 const { listSwarmRuns } = await import("./swarm-orchestrator")
 const { createBackgroundTask, listBackgroundTasks, updateBackgroundTask } = await import("./background-tasks")
 
 const STORE = "parallel-workspaces-state"
 
-function record(id: string, sourcePath: string) {
+function record(id: string, sourcePath: string, parentSessionId = "ses_task") {
   return {
     id,
     revision: 3,
@@ -62,8 +63,7 @@ function record(id: string, sourcePath: string) {
     provider: "openai",
     model: "gpt-6.1",
     sourcePath,
-    parentSessionId: "ses_task",
-    // No checkout on disk, so a refresh returns the record without diffing.
+    parentSessionId,
     isolatedPath: join(userDataPath, "missing", id),
     isolation: "copy",
     status: "needs review",
@@ -125,8 +125,12 @@ afterEach(async () => {
   await rm(userDataPath, { recursive: true, force: true })
 })
 
-test("a minute of task-route polling reads each store file once", async () => {
-  const workspaces = open([record("ws-listed", userDataPath), record("ws-worker", join(userDataPath, "elsewhere"))])
+test("a minute of task-route polling reads each store file once", () => {
+  const workspaces = open([
+    record("ws-listed", userDataPath),
+    // A swarm worker belongs to its swarm and works in a copy of the swarm's staging checkout.
+    record("ws-worker", join(userDataPath, "staging"), "swarm:swarm-1"),
+  ])
   const runs = fakeStore("swarm-orchestrator-state", new Map([["runs", [swarm("ws-worker")]]]))
   const tasks = fakeStore("background-tasks")
   createBackgroundTask({
@@ -136,12 +140,12 @@ test("a minute of task-route polling reads each store file once", async () => {
     name: "Background task",
   })
   const scope = { sourcePath: userDataPath, parentSessionId: "ses_task" }
-  // The layout polls every 1.5 s: the scoped workspaces, the swarm runs, a refresh of the swarm worker the list
-  // leaves out, then the background tasks.
+  // The layout polls every 1.5 s: the scoped workspaces, the swarm runs, the workers of each swarm the list leaves
+  // out, then the background tasks.
   for (let poll = 0; poll < 40; poll++) {
     expect(listParallelWorkspaces(scope)).toHaveLength(1)
     expect(listSwarmRuns(scope)).toHaveLength(1)
-    expect((await refreshParallelWorkspace("ws-worker")).revision).toBe(3)
+    expect(listParallelWorkspaces({ parentSessionId: "swarm:swarm-1" }).map((item) => item.id)).toEqual(["ws-worker"])
     expect(listBackgroundTasks({ projectPath: userDataPath, taskId: "ses_task" })).toHaveLength(1)
   }
   expect([workspaces.reads, runs.reads, tasks.reads]).toEqual([1, 1, 1])
