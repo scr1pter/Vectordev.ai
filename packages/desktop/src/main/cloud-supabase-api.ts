@@ -68,7 +68,7 @@ export async function supabaseContext(
   if (!database?.projectRef) {
     throw new SupabaseSetupError(
       "No Supabase project is linked to this project.",
-      "Create one with create_database or link an existing project in Vector Cloud > Database.",
+      "Create one or link an existing Supabase project in Vector Cloud > Database (the agent uses create_database or link_database).",
     )
   }
   const token = await managementToken(options)

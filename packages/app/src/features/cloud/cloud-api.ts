@@ -176,7 +176,7 @@ export type CloudApi = {
     list: () => Promise<CloudProviderConnection[]>
     connect: (provider: CloudProviderId) => Promise<CloudProviderConnection>
     connectWithToken: (provider: CloudProviderId, token: string) => Promise<CloudProviderConnection>
-    disconnect: (provider: CloudProviderId) => Promise<void>
+    disconnect: (provider: CloudProviderId) => Promise<{ revoked: boolean; detail: string }>
   }
   providers: {
     resources: (provider: CloudProviderId) => Promise<CloudProviderResource[]>
@@ -199,7 +199,7 @@ export type CloudApi = {
       visibility?: CloudEnvVisibility,
     ) => Promise<CloudEnvVar[]>
     remove: (projectPath: string, taskId: string | undefined, key: string) => Promise<CloudEnvVar[]>
-    apply: (projectPath: string, taskId?: string) => Promise<{ written: string }>
+    apply: (projectPath: string, taskId?: string) => Promise<{ written: string; gitignoreUpdated: boolean }>
   }
   database: {
     get: (projectPath: string, taskId?: string) => Promise<CloudDatabaseConnection>

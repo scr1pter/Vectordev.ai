@@ -37,7 +37,9 @@ mock.module("./store", () => ({
   removeStoreFileIfEmpty: () => undefined,
 }))
 
-const { createCloudDatabase, supabaseProjectName, uniqueProjectName } = await import("./cloud-provision")
+const { createCloudDatabase, pendingProvision, supabaseProjectName, uniqueProjectName } = await import(
+  "./cloud-provision"
+)
 const { cloudProjectScopeKey, getDatabase } = await import("./cloud-console")
 const { decryptCloudCredential, encryptCloudCredential } = await import("./cloud-credential-vault")
 
@@ -253,7 +255,7 @@ describe("createCloudDatabase", () => {
       host: "newprojectref01.supabase.co",
       projectRef: "newprojectref01",
     })
-    expect(report.applied).toEqual({ written: ".env" })
+    expect(report.applied).toEqual({ written: ".env", gitignoreUpdated: true })
     // The name the directory implies, made unique against the organization.
     expect(api.created[0]).toMatchObject({
       name: "my-cool-app-2",
@@ -437,6 +439,27 @@ describe("createCloudDatabase", () => {
     expect(getDatabase(project)).toMatchObject({ projectRef: "newprojectref01" })
   })
 
+  test("stops resuming a project Supabase gave up on, so the next run can make a working one", async () => {
+    seedConnection()
+    const failing = supabaseApi({ statuses: ["COMING_UP", "INIT_FAILED"] })
+
+    const report = await createCloudDatabase({ projectPath: project }, { request: failing.request, ...noWait })
+
+    expect(report.ok).toBe(false)
+    expect(report.error).toContain("INIT_FAILED")
+    expect(report.nextStep).toContain("Link another existing project in Vector Cloud > Database")
+    expect(report.nextStep).not.toContain("supabase.com")
+    expect(getDatabase(project)).toBeNull()
+    // Nothing is left for Finish setup or create_database to resume.
+    expect(pendingProvision(project)).toBeUndefined()
+
+    const fresh = supabaseApi()
+    const next = await createCloudDatabase({ projectPath: project }, { request: fresh.request, ...noWait })
+    expect(next).toMatchObject({ ok: true, createdNow: true })
+    expect(fresh.creates()).toBe(1)
+    expect(next.database).not.toHaveProperty("dashboardUrl")
+  })
+
   test("creates a fresh project when the linked one was disconnected on purpose", async () => {
     seedConnection()
     const first = supabaseApi()
@@ -482,6 +505,7 @@ describe("createCloudDatabase", () => {
     expect(report.error).toContain("was created, but Vector could not finish connecting it")
     expect(report.nextStep).toContain("newprojectref01")
     expect(report.nextStep).toContain("Do not create another project")
+    expect(report.nextStep).not.toContain("supabase.com")
   })
 
   test("treats a rejected saved token as a reconnect, not a crash", async () => {
@@ -580,6 +604,56 @@ test("desktop readiness advertises its versioned encrypted relay to the actual b
   try {
     await listCloudProviderConnections()
     expect(requests).toEqual(["/api/cloud/oauth/status?relay=v1"])
+  } finally {
+    if (previous === undefined) delete process.env.VECTOR_OAUTH_BROKER_URL
+    else process.env.VECTOR_OAUTH_BROKER_URL = previous
+    await server.stop(true)
+  }
+})
+
+test("disconnecting a Supabase sign-in revokes it through the broker and says when revoking failed", async () => {
+  const { disconnectCloudProvider } = await import("./cloud-connections")
+  const revocations: unknown[] = []
+  let answer = 200
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      revocations.push({ path: new URL(request.url).pathname, body: await request.json() })
+      return Response.json(answer === 200 ? { ok: true } : { ok: false, error: "provider unavailable" }, {
+        status: answer,
+      })
+    },
+  })
+  const previous = process.env.VECTOR_OAUTH_BROKER_URL
+  process.env.VECTOR_OAUTH_BROKER_URL = new URL("/api/cloud/oauth", server.url).toString()
+  const signIn = () =>
+    seed("cloud-provider-connections", "records", [
+      {
+        provider: "supabase",
+        accessToken: encryptCloudCredential("fixture-access-token"),
+        refreshToken: encryptCloudCredential("fixture-refresh-token"),
+        connectedAt: "2026-10-01T00:00:00.000Z",
+      },
+    ])
+  try {
+    signIn()
+    expect(await disconnectCloudProvider("supabase")).toEqual({
+      revoked: true,
+      detail: "Supabase disconnected, and Vector's access on Supabase is revoked.",
+    })
+    expect(revocations).toEqual([
+      { path: "/api/cloud/oauth/revoke", body: { provider: "supabase", refreshToken: "fixture-refresh-token" } },
+    ])
+    expect(store.get("cloud-provider-connections")?.get("records")).toEqual([])
+
+    signIn()
+    answer = 502
+    const failed = await disconnectCloudProvider("supabase")
+    expect(failed.revoked).toBe(false)
+    expect(failed.detail).toContain("still has access until you remove Vector")
+    expect(JSON.stringify(failed)).not.toContain("fixture-")
+    expect(store.get("cloud-provider-connections")?.get("records")).toEqual([])
   } finally {
     if (previous === undefined) delete process.env.VECTOR_OAUTH_BROKER_URL
     else process.env.VECTOR_OAUTH_BROKER_URL = previous

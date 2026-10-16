@@ -8,6 +8,7 @@ import { fallbackBinDirectories, getUserShell, loadShellEnv, pathDelimiter, unio
 import { getStore } from "./store"
 import { DEFAULT_SERVER_URL_KEY } from "./store-keys"
 import { VECTOR_AGENT_RUNTIME_ENV } from "./agent-runtime"
+import { sidecarEnvironment } from "./sidecar-environment"
 
 export type HealthCheck = { wait: Promise<void> }
 
@@ -89,9 +90,10 @@ export async function spawnLocalServer(
   options: SpawnLocalServerOptions,
 ) {
   const sidecar = join(dirname(fileURLToPath(import.meta.url)), "sidecar.js")
+  const environment = sidecarEnvironment(process.env)
   const child = utilityProcess.fork(sidecar, [], {
     cwd: process.cwd(),
-    env: createSidecarEnv(),
+    env: createSidecarEnv(environment.launch),
     serviceName: SIDECAR_SERVICE_NAME,
     stdio: "pipe",
   })
@@ -163,6 +165,7 @@ export async function spawnLocalServer(
       port,
       password,
       userDataPath: options.userDataPath,
+      environment: environment.secrets,
     })
   }).catch((error) => {
     if (!exited) child.kill()
@@ -237,10 +240,8 @@ export async function checkHealth(url: string, password?: string | null): Promis
   }
 }
 
-function createSidecarEnv(): Record<string, string> {
-  const env = Object.fromEntries(
-    Object.entries(process.env).flatMap(([key, value]) => (value === undefined ? [] : [[key, String(value)]])),
-  )
+function createSidecarEnv(launch: Record<string, string>): Record<string, string> {
+  const env = { ...launch }
   delete env.DEBUG
   if (process.platform === "linux") delete env.LD_PRELOAD
   if (!app.isPackaged) Object.assign(env, { VECTOR_DISABLE_CHANNEL_DB: "1" })

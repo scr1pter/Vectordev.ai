@@ -414,7 +414,8 @@ export const dict = {
   "toast.workspace.disabled.description": "側邊欄只顯示主工作樹",
 
   "toast.permissions.autoaccept.on.title": "正在自動接受權限",
-  "toast.permissions.autoaccept.on.description": "權限請求將被自動批准",
+  "toast.permissions.autoaccept.on.description":
+    "權限請求將被自動批准。Vector Cloud 帳戶變更、敏感的瀏覽器操作、電腦操作和重複的工具呼叫仍會請求確認。",
   "toast.permissions.autoaccept.off.title": "已停止自動接受權限",
   "toast.permissions.autoaccept.off.description": "權限請求將需要批准",
 

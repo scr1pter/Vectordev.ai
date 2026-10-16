@@ -1,4 +1,5 @@
 import { BrowserWindow, WebContentsView, session, type IpcMainInvokeEvent, type WebContents } from "electron"
+import { clickTargetLabel } from "./browser-click-target"
 import { isCredentialField } from "./browser-credential-field"
 import { CredentialFocusChangedError, sendGuardedCharacters } from "./browser-credential-input"
 import {
@@ -827,6 +828,7 @@ async function runBrowserAgentInContext(
   let screenshotDataUrl = ""
   let computedStyles: BrowserAgentComputedStyle[] | undefined
   let pageHtml: string | undefined
+  let target: BrowserAutomationRun["target"]
 
   try {
     if (input.command === "setVisible") {
@@ -919,6 +921,15 @@ async function runBrowserAgentInContext(
         clearLogs()
         break
       case "inspectDom":
+        // With a selector, the engine is about to click it and needs the name of what it would press.
+        if (input.selector) {
+          target = await runScript<NonNullable<BrowserAutomationRun["target"]>>(`(() => {
+            const clickTargetLabel = ${clickTargetLabel.toString()};
+            const el = document.querySelector(${JSON.stringify(input.selector)});
+            return el ? { found: true, label: clickTargetLabel(el) } : { found: false, label: "" };
+          })()`)
+        }
+        break
       default:
         break
     }
@@ -978,6 +989,7 @@ async function runBrowserAgentInContext(
     pageErrors: context.pageErrors.slice(-30),
     networkErrors: context.networkErrors.slice(-30),
     domSummary: dom,
+    target,
     computedStyles,
     pageHtml,
     diagnostics: {

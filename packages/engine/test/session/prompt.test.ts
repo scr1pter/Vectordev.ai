@@ -15,6 +15,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { afterAll, expect, test } from "bun:test"
 import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import path from "path"
+import { dynamicTool, jsonSchema, type Tool } from "ai"
 import { fileURLToPath, pathToFileURL } from "url"
 import { NamedError } from "@vectordevai/core/util/error"
 import { Agent as AgentSvc } from "../../src/agent/agent"
@@ -23,6 +24,7 @@ import { Command } from "../../src/command"
 import { Config } from "@/config/config"
 import { LSP } from "@/lsp/lsp"
 import { MCP } from "../../src/mcp"
+import { McpCloud } from "../../src/mcp/cloud"
 import { Permission } from "../../src/permission"
 import { Plugin } from "../../src/plugin"
 import { Provider as ProviderSvc } from "@/provider/provider"
@@ -120,14 +122,22 @@ function errorTool(parts: SessionV1.Part[]) {
   return part?.state.status === "error" ? (part as ErrorToolPart) : undefined
 }
 
-function makeMcp(instructions: MCP.ServerInstructions[] = []) {
+type McpFake = {
+  instructions?: MCP.ServerInstructions[]
+  tools?: () => Record<string, Tool>
+  cloudTools?: Record<string, McpCloud.Request>
+}
+
+function makeMcp(input: McpFake = {}) {
   return Layer.succeed(
     MCP.Service,
     MCP.Service.of({
       status: () => Effect.succeed({}),
       clients: () => Effect.succeed({}),
-      instructions: () => Effect.succeed(instructions),
-      tools: () => Effect.succeed({}),
+      instructions: () => Effect.succeed(input.instructions ?? []),
+      // Fresh tools per call: the session overwrites each tool's execute with its permission wrapper.
+      tools: () => Effect.sync(() => input.tools?.() ?? {}),
+      cloudTools: () => Effect.succeed(input.cloudTools ?? {}),
       prompts: () => Effect.succeed({}),
       resources: () => Effect.succeed({}),
       resourceTemplates: () => Effect.succeed({}),
@@ -225,7 +235,7 @@ function makePrompt(input?: { mcpInstructions?: MCP.ServerInstructions[]; proces
   const replacements = [
     [SessionSummary.node, summary],
     [LSP.node, lsp],
-    [MCP.node, makeMcp(input?.mcpInstructions)],
+    [MCP.node, makeMcp({ instructions: input?.mcpInstructions })],
     [RuntimeFlags.node, runtimeFlags],
   ] as const
   if (input?.processor === "blocking") {
@@ -234,12 +244,12 @@ function makePrompt(input?: { mcpInstructions?: MCP.ServerInstructions[]; proces
   return LayerNode.compile(promptRoot, replacements)
 }
 
-function makeHttp(input?: { mcpInstructions?: MCP.ServerInstructions[]; processor?: "blocking" }) {
+function makeHttp(input?: { mcpInstructions?: MCP.ServerInstructions[]; mcp?: McpFake; processor?: "blocking" }) {
   const root = LayerNode.group([promptRoot, testLLMServerNode])
   const replacements = [
     [SessionSummary.node, summary],
     [LSP.node, lsp],
-    [MCP.node, makeMcp(input?.mcpInstructions)],
+    [MCP.node, makeMcp({ instructions: input?.mcpInstructions, ...input?.mcp })],
     [RuntimeFlags.node, runtimeFlags],
   ] as const
   if (input?.processor === "blocking") {
@@ -366,6 +376,32 @@ const withMcpInstructions = testEffect(
         tools: ["guide-server_lookup"],
       },
     ],
+  }),
+)
+// A Supabase MCP server's execute_sql, as the catalog's server lists it.
+const supabaseSqlRuns: unknown[] = []
+const withSupabaseMcp = testEffect(
+  makeHttp({
+    mcp: {
+      tools: () => ({
+        supabase_execute_sql: dynamicTool({
+          description: "Run SQL on the linked Supabase project",
+          inputSchema: jsonSchema({ type: "object", properties: { query: { type: "string" } } }),
+          execute: async (args) => {
+            supabaseSqlRuns.push(args)
+            return { content: [{ type: "text", text: "[]" }] }
+          },
+        }),
+      }),
+      cloudTools: {
+        supabase_execute_sql: {
+          permission: "vector_cloud_database",
+          provider: "Supabase",
+          server: "supabase",
+          tool: "execute_sql",
+        },
+      },
+    },
   }),
 )
 const unix = process.platform !== "win32" ? it.instance : it.instance.skip
@@ -1013,6 +1049,43 @@ withMcpInstructions.instance(
       yield* Fiber.interrupt(fiber)
     }),
   15_000,
+)
+
+withSupabaseMcp.instance(
+  "a Supabase MCP server's SQL asks under vector_cloud_database even when every tool is allowed",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const permission = yield* Permission.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Supabase MCP",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* user(chat.id, "count the users")
+      yield* llm.tool("supabase_execute_sql", { query: "select count(*) from auth.users" })
+      yield* llm.text("done")
+
+      const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+      const request = yield* pollWithTimeout(
+        Effect.gen(function* () {
+          return (yield* permission.list()).find((item) => item.permission === "vector_cloud_database")
+        }),
+        "the Supabase MCP tool did not ask under vector_cloud_database",
+        "15 seconds",
+      )
+      expect(request).toMatchObject({
+        patterns: ["supabase/mcp/supabase/execute_sql"],
+        always: [],
+        metadata: { provider: "Supabase", action: "execute_sql" },
+      })
+      expect(JSON.stringify(request.metadata.statements)).toContain("select count(*) from auth.users")
+      yield* permission.reply({ requestID: request.id, reply: "reject" })
+      yield* Fiber.await(fiber)
+      expect(supabaseSqlRuns).toEqual([])
+    }),
+  30_000,
 )
 
 // Runs one turn as `agent` and returns the first model request body, which carries the system prompt.

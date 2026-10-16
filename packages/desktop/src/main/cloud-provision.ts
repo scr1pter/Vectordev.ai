@@ -2,13 +2,7 @@ import { VECTOR_USER_AGENT } from "./user-agent"
 import { randomBytes } from "node:crypto"
 import { basename } from "node:path"
 
-import {
-  applyEnv,
-  cloudProjectScopeKey,
-  connectDatabase,
-  getDatabase,
-  type CloudDatabaseConnection,
-} from "./cloud-console"
+import { cloudProjectScopeKey, connectDatabase, getDatabase, type CloudDatabaseConnection } from "./cloud-console"
 import { getSupabaseManagementToken } from "./cloud-connections"
 import { encryptCloudCredential } from "./cloud-credential-vault"
 import { getStore } from "./store"
@@ -35,7 +29,6 @@ export type CloudProvisionDatabase = {
   projectRef?: string
   projectName?: string
   region?: string
-  dashboardUrl?: string
 }
 
 export type CloudProvisionReport = {
@@ -47,7 +40,7 @@ export type CloudProvisionReport = {
   nextStep?: string
   database?: CloudProvisionDatabase
   organizations?: SupabaseOrganization[]
-  applied?: { written: string }
+  applied?: { written: string; gitignoreUpdated: boolean }
   waitedMs?: number
 }
 
@@ -233,9 +226,6 @@ function databaseSummary(connection: NonNullable<CloudDatabaseConnection>, regio
     projectRef: connection.projectRef,
     projectName: connection.projectName,
     region,
-    dashboardUrl: connection.projectRef
-      ? `https://supabase.com/dashboard/project/${encodeURIComponent(connection.projectRef)}`
-      : undefined,
   }
 }
 
@@ -365,7 +355,7 @@ async function linkCreatedProject(
     ok: true,
     createdNow: true,
     database: databaseSummary(connection, poll.region ?? record.region),
-    applied: await applyEnv(input.projectPath, input.taskId, input.directory),
+    applied: connection.env,
     nextStep:
       "The database is live and wired into .env. Write the schema as a .sql file and run apply_migrations to create the tables this feature needs.",
   }
@@ -439,7 +429,7 @@ async function provision(
         nextStep: "It was probably deleted in the dashboard. Run create_database again to create a new one.",
       }
     }
-    return notHealthyReport(pending, resumed, intervalMs)
+    return notHealthyReport(input.projectPath, pending, resumed, intervalMs)
   }
 
   const organizations = await listOrganizations(token, request)
@@ -448,7 +438,8 @@ async function provision(
       ok: false,
       needsSetup: true,
       error: "This Supabase account has no organizations, so there is nothing to create a project in.",
-      nextStep: "Ask the user to create an organization at supabase.com/dashboard, then run create_database again.",
+      nextStep:
+        "Ask the user what to name one and create it with create_organization (the user approves it, or creates it in Vector Cloud > Database), then run create_database again.",
     }
   }
   const chosen = input.organizationId
@@ -510,12 +501,21 @@ async function provision(
     tolerateMissing: true,
     progress: options.progress,
   })
-  if (!poll.healthy) return notHealthyReport(record, poll, intervalMs)
+  if (!poll.healthy) return notHealthyReport(input.projectPath, record, poll, intervalMs)
   return linkCreatedProject(input, token, record, poll, request, options.progress)
 }
 
-function notHealthyReport(record: ProvisionRecord, poll: PollResult, intervalMs: number): CloudProvisionReport {
+function notHealthyReport(
+  projectPath: string,
+  record: ProvisionRecord,
+  poll: PollResult,
+  intervalMs: number,
+): CloudProvisionReport {
   const failed = Boolean(poll.status && FAILED_STATUSES.has(poll.status))
+  // A project Supabase gave up on can never be finished. Kept as the pending
+  // job, it would make every later create_database and the Database screen's
+  // Finish setup resume it again, so neither could ever make a working one.
+  if (failed) clearProvisionRecord(projectPath)
   const waitedMs = poll.attempts * intervalMs
   // The timeout is not a failure of the project, only of the wait, so it says
   // what exists and how to finish it — never "try creating one again".
@@ -529,7 +529,7 @@ function notHealthyReport(record: ProvisionRecord, poll: PollResult, intervalMs:
         ? `${record.projectName} was created, but Supabase is not listing it on the account yet.`
         : `${record.projectName} was created but is still ${poll.status ?? "starting"} after ${Math.round(waitedMs / 1000)}s.`,
     nextStep: failed
-      ? `Ask the user to check ${record.projectName} at https://supabase.com/dashboard/project/${record.projectRef}. Nothing is connected to this project yet.`
+      ? `Nothing is connected to this project, and Vector no longer tries to finish ${record.projectName}. Link another existing project in Vector Cloud > Database (supabase_projects, then link_database), or create a new one, which Supabase bills as another project.`
       : resume,
   }
 }
@@ -568,7 +568,7 @@ export async function createCloudDatabase(
       return {
         ok: false,
         error: `The Supabase project was created, but Vector could not finish connecting it: ${message}`,
-        nextStep: `Run create_database again to finish linking ${created}, or ask the user to check https://supabase.com/dashboard/project/${created}. Do not create another project.`,
+        nextStep: `Run create_database again to finish linking ${created}; it resumes that same project. Do not create another project.`,
       }
     }
     // Free organizations cap how many projects they may hold, and a card on
@@ -580,7 +580,7 @@ export async function createCloudDatabase(
       error: `Supabase would not create the project: ${message}`,
       nextStep: limited
         ? "Supabase declined this request because of an account or plan limit. Link an existing project in Vector Cloud > Database, or wait until the provider confirms capacity is available. Do not upgrade a plan or retry in another organization automatically."
-        : "Report this to the user as Supabase reported it, and offer to link an existing Supabase project in Vector Cloud > Database instead.",
+        : "Report this to the user as Supabase reported it, and offer to link an existing Supabase project instead (supabase_projects, then link_database).",
     }
   }
 }

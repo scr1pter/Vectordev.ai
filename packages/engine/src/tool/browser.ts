@@ -51,6 +51,8 @@ type BrowserReport = {
     interactives: { tag: string; text: string; selector: string; role?: string; type?: string }[]
     inputs: { tag: string; selector: string; placeholder?: string; type?: string; name?: string }[]
   }
+  /** The element an inspected selector matches, named as a click there would press it. */
+  target?: { found: boolean; label: string }
   diagnostics?: {
     consoleCount: number
     runtimeErrorCount: number
@@ -192,23 +194,65 @@ function safeReportUrl(value: string) {
   return url.toString()
 }
 
+// Includes what the Vercel and Supabase dashboards call the actions vector_cloud
+// asks for every time (Promote, Instant Rollback, Run in the SQL editor, Save on
+// a variable), so the browser is not a way around those prompts.
 const SENSITIVE_ACTION =
-  /\b(approve|authorize|book|buy|checkout|confirm|create|delete|deploy|discard|merge|message|pay|publish|purchase|remove|reserve|send|submit|transfer|upgrade)\b/i
+  /\b(add|approve|authorize|book|buy|checkout|confirm|create|delete|deploy|disconnect|discard|invite|merge|message|pause|pay|promote|publish|purchase|redeploy|remove|reserve|reset|restore|revoke|roll ?back|rotate|run|save|send|submit|transfer|uninstall|upgrade)\b/i
+
+// Keys that press the focused button or submit the active form, alone or with
+// a modifier (`Control+Enter` runs a query in the Supabase SQL editor).
+const ACTIVATING_KEYS = new Set(["enter", "return", "numpadenter", "space", "spacebar", " "])
 
 export function describeSensitiveBrowserAction(
-  params: Pick<Schema.Schema.Type<typeof Parameters>, "action" | "key" | "selector">,
+  params: Pick<Schema.Schema.Type<typeof Parameters>, "action" | "key" | "selector" | "text">,
   report: BrowserReport | undefined,
 ) {
-  if (params.action === "press" && params.key?.toLowerCase() === "enter") {
-    return "Press Enter on an external page, which may submit the active form"
+  const dashboard = cloudDashboard(report?.finalUrl)
+  if (params.action === "press" && params.key) {
+    const key = params.key.trim() || "Space"
+    if (ACTIVATING_KEYS.has(params.key.toLowerCase().split("+").at(-1) ?? "")) {
+      return `Press ${key} on an external page, which may submit the active form or press the focused button`
+    }
+    if (dashboard)
+      return `Press ${key} on the ${dashboard} dashboard, where a key can confirm a release or settings action`
+    return
+  }
+  // Typing a line break presses Enter (sendInputEvent), which submits a form like a press does.
+  if (params.action === "type" && /[\r\n]/.test(params.text ?? "")) {
+    return "Type text with a line break on an external page, which presses Enter and may submit the active form"
   }
   if (params.action !== "click" || !params.selector) return
   const target = report?.domSummary?.interactives.find(
     (item) => item.selector === params.selector || item.selector.includes(params.selector!),
   )
-  const label = [target?.text, target?.role, target?.type, params.selector].filter(Boolean).join(" ")
-  if (!SENSITIVE_ACTION.test(label)) return
-  return `Click ${target?.text?.trim() || params.selector} on an external page`
+  // The page's own name for the element the selector matches, so a positional
+  // selector (`div[role=dialog] button:last-child`) is judged by what it presses.
+  const resolved = report?.target?.found ? report.target.label : undefined
+  const label = [target?.text, target?.role, target?.type, resolved, params.selector].filter(Boolean).join(" ")
+  const name = target?.text?.trim() || resolved?.slice(0, 80) || params.selector
+  if (SENSITIVE_ACTION.test(label)) return `Click ${name} on an external page`
+  // On the Vercel and Supabase dashboards almost any button can change the
+  // account the vector_cloud prompts protect, so every click there asks.
+  if (dashboard) {
+    return `Click ${name} on the ${dashboard} dashboard, where a click can deploy, promote, roll back or change the project`
+  }
+}
+
+// The Vercel and Supabase dashboards, not their docs or marketing pages.
+const VERCEL_PUBLIC_PATHS =
+  /^\/(docs|guides|blog|changelog|templates|pricing|legal|kb|contact|customers|enterprise|home|solutions|products)(\/|$)/
+
+function cloudDashboard(url?: string) {
+  if (!url || !URL.canParse(url)) return
+  const parsed = new URL(url)
+  const host = parsed.hostname.toLowerCase()
+  if (host === "app.supabase.com" || (host === "supabase.com" && parsed.pathname.startsWith("/dashboard"))) {
+    return "Supabase"
+  }
+  if ((host === "vercel.com" || host === "www.vercel.com") && !VERCEL_PUBLIC_PATHS.test(parsed.pathname)) {
+    return "Vercel"
+  }
 }
 
 export const BrowserTool = Tool.define<typeof Parameters, Metadata, never>(
@@ -222,7 +266,16 @@ export const BrowserTool = Tool.define<typeof Parameters, Metadata, never>(
         const current =
           params.action === "open_url" || params.action === "close"
             ? undefined
-            : yield* Effect.promise(() => bridgeRequest({ contextId: ctx.sessionID, command: "inspectDom" }, ctx.abort))
+            : yield* Effect.promise(() =>
+                bridgeRequest(
+                  {
+                    contextId: ctx.sessionID,
+                    command: "inspectDom",
+                    selector: params.action === "click" ? params.selector : undefined,
+                  },
+                  ctx.abort,
+                ),
+              )
         const targetUrl = params.action === "open_url" ? params.url : current?.finalUrl
         const external = Boolean(targetUrl && !isLocalUrl(targetUrl))
         if (external) {

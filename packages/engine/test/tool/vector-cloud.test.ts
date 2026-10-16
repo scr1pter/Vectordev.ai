@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { Cause, Effect, Exit, Schema } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { MessageID, SessionID } from "../../src/session/schema"
@@ -142,9 +143,9 @@ describe("vector_cloud bridge", () => {
       expect(asks.permissions).toEqual([
         expect.objectContaining({
           permission: "vector_cloud_publish",
-          // The approval names its action, so "always" here never covers another one.
+          // The pattern names the action; a publish asks every time, so nothing can be remembered.
           patterns: ["vercel/website/preview/publish"],
-          always: ["vercel/website/preview/publish"],
+          always: [],
           metadata: expect.objectContaining({
             provider: "Vercel",
             project: "website",
@@ -269,7 +270,7 @@ describe("vector_cloud bridge", () => {
       yield* bridge({ ok: false, needsSetup: true, error: "Supabase rejected the saved access token." })
       const setup = yield* execute({ action: "supabase_services" })
       expect(setup.output).toContain("Supabase rejected the saved access token.")
-      expect(setup.output).toContain("Vector Cloud > Connections with an access token")
+      expect(setup.output).toContain("connect Vercel or Supabase in Vector Cloud > Connections")
     }),
   )
 
@@ -298,6 +299,14 @@ describe("vector_cloud bridge", () => {
         expect(text).not.toMatch(/Netlify|AWS|Cloud Services|Integrations/)
       }
       expect(tool.description).toContain("publishes a preview by default")
+      // The shell asks for these too (CloudCli), but skips Vector's release checks.
+      expect(VECTOR_CLOUD_POLICY).toContain("not with the vercel or supabase command-line tools in the shell")
+      // One rule for every account change: it asks each time, whatever auto-accept or earlier approvals say.
+      expect(tool.description).toContain("asks the user first, every time")
+      expect(tool.description).not.toContain("allowed that kind of action always")
+      // Values Vector writes to .env are secrets the model must not read.
+      expect(tool.description).not.toContain("which you can read")
+      expect(VECTOR_CLOUD_POLICY).toContain("do not read .env files")
       expect(VECTOR_CLOUD_POLICY).toContain("Publish previews by default")
     }),
   )
@@ -336,6 +345,16 @@ describe("vector_cloud bridge", () => {
           ),
         },
         {
+          params: { action: "create_organization", organizationName: "Ada Labs" } as const,
+          permission: "vector_cloud_database",
+          scope: scope(
+            "Supabase",
+            "organization Ada Labs",
+            "account",
+            "Create a Supabase organization named Ada Labs on the connected Supabase account.",
+          ),
+        },
+        {
           params: { action: "apply_migrations" } as const,
           permission: "vector_cloud_database",
           scope: scope("Supabase", "shop-db", "production", "Apply this project's pending migrations to shop-db."),
@@ -361,14 +380,26 @@ describe("vector_cloud bridge", () => {
         const asks = recordAsks()
         yield* execute(item.params, asks.ask)
         const described = item.scope.report as { scope: Record<string, string> }
+        const pattern = [
+          described.scope.provider.toLowerCase(),
+          described.scope.project,
+          described.scope.environment,
+          item.params.action,
+        ].join("/")
         expect(asks.permissions).toEqual([
           expect.objectContaining({
             permission: item.permission,
+            patterns: [pattern],
+            // Only the read-only dry run may be remembered; every account change asks each time.
+            always: item.permission === "vector_cloud_inspect" ? [pattern] : [],
             metadata: expect.objectContaining(described.scope),
           }),
         ])
         expect(requests.map((request) => request.command)).toEqual(["describe", item.params.action])
         expect(requests[0]).toMatchObject({ action: item.params.action })
+        if ("organizationName" in item.params) {
+          expect(requests[1]).toMatchObject({ organizationName: item.params.organizationName })
+        }
       }
     }),
   )
@@ -403,17 +434,15 @@ describe("vector_cloud bridge", () => {
     }),
   )
 
-  it.instance("asks per Supabase action, never offers always for destructive ones, and maps its fields", () =>
+  it.instance("asks every time for each Supabase change and maps its fields", () =>
     Effect.gen(function* () {
       const cases = [
         {
           params: { action: "run_sql", sql: "delete from sessions", allowWrite: true } as const,
-          repeatable: false,
           sent: { sql: "delete from sessions", write: true },
         },
         {
           params: { action: "create_bucket", bucket: "avatars", publicBucket: false } as const,
-          repeatable: true,
           sent: { bucket: "avatars", public: false },
         },
         {
@@ -424,7 +453,6 @@ describe("vector_cloud bridge", () => {
             clientId: "google-client",
             redirectUrls: ["https://shop.example.com/**"],
           } as const,
-          repeatable: true,
           sent: {
             providers: { google: { enabled: true, clientId: "google-client" } },
             redirectUrls: ["https://shop.example.com/**"],
@@ -432,23 +460,19 @@ describe("vector_cloud bridge", () => {
         },
         {
           params: { action: "delete_user", userId: "00000000-0000-0000-0000-000000000000" } as const,
-          repeatable: false,
           sent: { userId: "00000000-0000-0000-0000-000000000000" },
         },
       ]
       for (const item of cases) {
         const described = scope("Supabase", "shop-db", "production", `Change shop-db with ${item.params.action}.`)
-        const requests = yield* bridge({ ok: true }, 200, {
-          report: { ...(described.report as object), repeatable: item.repeatable },
-        })
+        const requests = yield* bridge({ ok: true }, 200, described)
         const asks = recordAsks()
         yield* execute(item.params, asks.ask)
-        const pattern = `supabase/shop-db/production/${item.params.action}${item.repeatable ? "" : "/each-time"}`
         expect(asks.permissions).toEqual([
           expect.objectContaining({
             permission: "vector_cloud_database",
-            patterns: [pattern],
-            always: item.repeatable ? [pattern] : [],
+            patterns: [`supabase/shop-db/production/${item.params.action}`],
+            always: [],
             metadata: expect.objectContaining({ provider: "Supabase", project: "shop-db", action: item.params.action }),
           }),
         ])
@@ -536,7 +560,6 @@ describe("vector_cloud bridge", () => {
       const requests = yield* bridge({ ok: true }, 200, {
         report: {
           ok: true,
-          repeatable: false,
           scope: {
             provider: "Supabase",
             project: "shop-db",
@@ -573,7 +596,6 @@ describe("vector_cloud bridge", () => {
       const requests = yield* bridge({ ok: true, rolledBack: "20261010120000_add_profiles.sql" }, 200, {
         report: {
           ok: true,
-          repeatable: false,
           scope: {
             provider: "Supabase",
             project: "shop-db",
@@ -675,7 +697,7 @@ describe("vector_cloud bridge", () => {
         described,
       )
       const hidden = yield* execute({ action: "run_sql", sql: "select id, encrypted_password from auth.users" })
-      expect(hidden.output).toContain("Hidden because they hold sign-in credentials: encrypted_password.")
+      expect(hidden.output).toContain("Hidden because they hold or may hold sign-in credentials: encrypted_password.")
 
       yield* bridge(
         {
@@ -718,8 +740,64 @@ describe("vector_cloud bridge", () => {
   )
 })
 
+describe("vector_cloud release checks", () => {
+  it.instance("probes and re-runs release checks without asking, and relays the bridge's words", () =>
+    Effect.gen(function* () {
+      for (const params of [
+        { action: "check_health" },
+        { action: "check_health", deploymentId: "dpl_live" },
+        { action: "rerun_checks", deploymentId: "dpl_live" },
+      ] as const) {
+        const requests = yield* bridge({ ok: true, text: "https://shop.vercel.app (dpl_live) · ready · HTTP 200" })
+        const asks = recordAsks()
+        const result = yield* execute(params, asks.ask)
+        expect(asks.permissions).toEqual([])
+        expect(requests).toEqual([
+          expect.objectContaining({
+            command: params.action,
+            ...("deploymentId" in params ? { deploymentId: params.deploymentId } : {}),
+          }),
+        ])
+        expect(result.title).toBe("Release checks")
+        expect(result.output).toBe("https://shop.vercel.app (dpl_live) · ready · HTTP 200")
+      }
+    }),
+  )
+
+  it.instance("asks under hosting settings, every time, before changing the required checks", () =>
+    Effect.gen(function* () {
+      const requests = yield* bridge(
+        { ok: true, text: "Saved Vector's release settings: Secret scan no longer blocks a production release." },
+        200,
+        scope(
+          "Vector Cloud",
+          "shop",
+          "release checks",
+          "Change the release settings Vector uses before it publishes: Secret scan no longer blocks a production release.",
+        ),
+      )
+      const asks = recordAsks()
+      const result = yield* execute(
+        { action: "set_release_settings", requiredChecks: { secrets: false }, testCommand: "bun test" },
+        asks.ask,
+      )
+      expect(asks.permissions).toEqual([
+        expect.objectContaining({
+          permission: "vector_cloud_hosting",
+          patterns: ["vector cloud/shop/release checks/set_release_settings"],
+          always: [],
+          metadata: expect.objectContaining({ summary: expect.stringContaining("Secret scan no longer blocks") }),
+        }),
+      ])
+      expect(requests.map((item) => item.command)).toEqual(["describe", "set_release_settings"])
+      expect(requests[1]).toMatchObject({ requiredChecks: { secrets: false }, testCommand: "bun test" })
+      expect(result.output).toContain("Secret scan no longer blocks")
+    }),
+  )
+})
+
 describe("vector_cloud Vercel actions", () => {
-  it.instance("asks before moving production, naming the action in what 'always' approves", () =>
+  it.instance("asks before moving production, naming the action, and offers no 'always'", () =>
     Effect.gen(function* () {
       const requests = yield* bridge(
         { ok: true, text: "Production now serves https://shop-abc.vercel.app (dpl_abc).", url: "https://shop.example" },
@@ -732,7 +810,7 @@ describe("vector_cloud Vercel actions", () => {
         expect.objectContaining({
           permission: "vector_cloud_publish",
           patterns: ["vercel/shop/production/promote"],
-          always: ["vercel/shop/production/promote"],
+          always: [],
           metadata: expect.objectContaining({
             provider: "Vercel",
             project: "shop",
@@ -816,6 +894,52 @@ describe("vector_cloud Vercel actions", () => {
     }),
   )
 
+  it.instance("lists, writes and removes Vector's stored variables, asking before each change", () =>
+    Effect.gen(function* () {
+      const listed = yield* bridge({
+        ok: true,
+        variables: [
+          { key: "STRIPE_SECRET_KEY", visibility: "server" },
+          { key: "VITE_SITE_NAME", visibility: "public" },
+        ],
+      })
+      const reads = recordAsks()
+      const names = yield* execute({ action: "stored_env" }, reads.ask)
+      expect(reads.permissions).toEqual([])
+      expect(listed.map((item) => item.command)).toEqual(["stored_env"])
+      expect(names.output).toBe(
+        "Variables Vector stores for this project (names only; values never reach you): STRIPE_SECRET_KEY (server-only), VITE_SITE_NAME (public)",
+      )
+
+      const written = yield* bridge(
+        { ok: true, applied: { written: ".env", gitignoreUpdated: true } },
+        200,
+        scope("Vector", "shop", "local .env", "Write this project's 2 stored environment variables to .env."),
+      )
+      const writes = recordAsks()
+      const wrote = yield* execute({ action: "write_env_file" }, writes.ask)
+      expect(writes.permissions).toMatchObject([
+        { permission: "vector_cloud_environment", patterns: ["vector/shop/local .env/write_env_file"], always: [] },
+      ])
+      expect(written.map((item) => item.command)).toEqual(["describe", "write_env_file"])
+      expect(wrote.output).toContain('"gitignoreUpdated":true')
+      expect(wrote.output).toContain("Do not read .env")
+
+      const removed = yield* bridge(
+        { ok: true, removed: "VITE_SITE_NAME", variables: ["STRIPE_SECRET_KEY"] },
+        200,
+        scope("Vector", "shop", "stored variables", "Remove VITE_SITE_NAME from the variables Vector stores."),
+      )
+      const removes = recordAsks()
+      const gone = yield* execute({ action: "remove_stored_env", key: "VITE_SITE_NAME" }, removes.ask)
+      expect(removes.permissions.map((item) => [item.permission, item.always])).toEqual([
+        ["vector_cloud_environment", []],
+      ])
+      expect(removed[1]).toMatchObject({ command: "remove_stored_env", key: "VITE_SITE_NAME" })
+      expect(gone.output).toContain("Still stored: STRIPE_SECRET_KEY")
+    }),
+  )
+
   it.instance("reads Vercel state without asking", () =>
     Effect.gen(function* () {
       for (const action of ["list_env", "vercel_projects", "list_domains", "env_plan", "inspect_deployment"] as const) {
@@ -884,6 +1008,135 @@ describe("vector_cloud Vercel actions", () => {
       expect(requests[0]).toMatchObject({ command: "logs", source: "runtime" })
       expect(result.output).toContain("Source: Vercel runtime logs.")
       expect(result.output).toContain("GET /cart 500")
+    }),
+  )
+})
+
+type CloudAction = Schema.Schema.Type<typeof Parameters>["action"]
+
+type AccountPermission =
+  | "vector_cloud_publish"
+  | "vector_cloud_environment"
+  | "vector_cloud_hosting"
+  | "vector_cloud_database"
+
+// What every vector_cloud action does before it runs. A Record over the tool's
+// own action list, so a new action does not compile until it is classified
+// here, and the test below then holds it to that class.
+const ACTION_PERMISSION: Record<CloudAction, "read" | "edit" | AccountPermission> = {
+  status: "read",
+  detect_build: "read",
+  database_status: "read",
+  cloud_connections: "read",
+  supabase_services: "read",
+  list_deployments: "read",
+  logs: "read",
+  check_health: "read",
+  rerun_checks: "read",
+  stored_env: "read",
+  vercel_scopes: "read",
+  vercel_projects: "read",
+  vercel_project: "read",
+  inspect_deployment: "read",
+  list_env: "read",
+  env_diff: "read",
+  env_plan: "read",
+  list_domains: "read",
+  supabase_projects: "read",
+  migration_status: "read",
+  auth_config: "read",
+  auth_users: "read",
+  function_secrets: "read",
+  supabase_logs: "read",
+  security_check: "read",
+  create_migration: "edit",
+  publish: "vector_cloud_publish",
+  promote: "vector_cloud_publish",
+  rollback: "vector_cloud_publish",
+  redeploy: "vector_cloud_publish",
+  cancel_deployment: "vector_cloud_publish",
+  sync_environment: "vector_cloud_environment",
+  write_env_file: "vector_cloud_environment",
+  remove_stored_env: "vector_cloud_environment",
+  set_env: "vector_cloud_environment",
+  remove_env: "vector_cloud_environment",
+  pull_env: "vector_cloud_environment",
+  set_release_settings: "vector_cloud_hosting",
+  create_project: "vector_cloud_hosting",
+  link_project: "vector_cloud_hosting",
+  unlink_project: "vector_cloud_hosting",
+  update_project_settings: "vector_cloud_hosting",
+  enable_protection_bypass: "vector_cloud_hosting",
+  add_domain: "vector_cloud_hosting",
+  verify_domain: "vector_cloud_hosting",
+  remove_domain: "vector_cloud_hosting",
+  create_database: "vector_cloud_database",
+  prepare_database: "vector_cloud_database",
+  prepare_auth: "vector_cloud_database",
+  apply_migrations: "vector_cloud_database",
+  create_organization: "vector_cloud_database",
+  link_database: "vector_cloud_database",
+  unlink_database: "vector_cloud_database",
+  pause_database: "vector_cloud_database",
+  restore_database: "vector_cloud_database",
+  write_database_url: "vector_cloud_database",
+  rotate_database_password: "vector_cloud_database",
+  rollback_migration: "vector_cloud_database",
+  run_sql: "vector_cloud_database",
+  update_auth: "vector_cloud_database",
+  invite_user: "vector_cloud_database",
+  delete_user: "vector_cloud_database",
+  create_bucket: "vector_cloud_database",
+  update_bucket: "vector_cloud_database",
+  delete_bucket: "vector_cloud_database",
+  deploy_function: "vector_cloud_database",
+  delete_function: "vector_cloud_database",
+  set_function_secrets: "vector_cloud_database",
+  delete_function_secrets: "vector_cloud_database",
+}
+
+describe("vector_cloud permissions for every action", () => {
+  it.instance("classifies exactly the tool's actions", () =>
+    Effect.sync(() => {
+      expect(Object.keys(ACTION_PERMISSION).toSorted()).toEqual([...Parameters.fields.action.literals].toSorted())
+    }),
+  )
+
+  it.instance("reads run unasked, and every account change asks each time with no Always, even under auto-accept", () =>
+    Effect.gen(function* () {
+      const requests = yield* bridge({ ok: true }, 200, {
+        report: {
+          ok: true,
+          scope: { provider: "Vercel", project: "shop", environment: "production", summary: "Change shop." },
+          files: ["supabase/migrations/20261016000000_add_profiles.sql"],
+        },
+      })
+      for (const [action, expected] of Object.entries(ACTION_PERMISSION) as [CloudAction, string][]) {
+        requests.length = 0
+        const asks = recordAsks()
+        yield* execute({ action }, asks.ask)
+        if (expected === "read") {
+          expect({ action, asks: asks.permissions, commands: requests.map((item) => item.command) }).toEqual({
+            action,
+            asks: [],
+            commands: [action],
+          })
+          continue
+        }
+        expect({ action, commands: requests.map((item) => item.command) }).toEqual({
+          action,
+          commands: ["describe", action],
+        })
+        expect(asks.permissions).toHaveLength(1)
+        const asked = asks.permissions[0]
+        expect({ action, permission: asked.permission }).toEqual({ action, permission: expected })
+        if (expected === "edit") continue
+        // The same policy the clients' auto-accept, the permission rules and
+        // "Always allow" consult: none of them may answer an account change.
+        expect({ action, always: asked.always }).toEqual({ action, always: [] })
+        expect(PermissionPolicy.canAutoApprove(asked.permission, asked.always)).toBe(false)
+        expect(PermissionPolicy.canAlwaysApprove(asked.permission, asked.patterns)).toBe(false)
+      }
     }),
   )
 })

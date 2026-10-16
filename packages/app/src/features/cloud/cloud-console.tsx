@@ -35,25 +35,17 @@ import { SupabaseDatabase } from "./supabase/supabase-database"
 import { SupabaseFunctions } from "./supabase/supabase-functions"
 import { SupabaseLogs, SupabaseSecurity } from "./supabase/supabase-observe"
 import { SupabaseStorage } from "./supabase/supabase-storage"
-import { deployRepairPrompt, publishPlan, publishRan, uncommittedNote, type DeployEvidence } from "./cloud-handoff"
+import {
+  deployRepairPrompt,
+  publishPlan,
+  publishRan,
+  uncommittedNote,
+  type CloudSection,
+  type DeployEvidence,
+} from "./cloud-handoff"
 import { createCloudOverview } from "./cloud-overview"
 import "./cloud-console.css"
 
-export type CloudSection =
-  | "overview"
-  | "connections"
-  | "deployments"
-  | "logs"
-  | "observability"
-  | "domains"
-  | "environment"
-  | "database"
-  | "authentication"
-  | "storage"
-  | "functions"
-  | "data-logs"
-  | "security"
-  | "settings"
 type Notice = { tone: "info" | "success" | "error"; text: string }
 type BuildDraft = Omit<CloudBuildSettings, "source" | "updatedAt">
 
@@ -738,7 +730,7 @@ export function CloudConsole(props: {
     if (!api) return
     setProviderBusy(provider)
     try {
-      await api.connections.disconnect(provider)
+      const result = await api.connections.disconnect(provider)
       setConnections((items) =>
         items.map((item) =>
           item.provider === provider
@@ -748,7 +740,7 @@ export function CloudConsole(props: {
       )
       setProviderResources((current) => ({ ...current, [provider]: [] }))
       cancelManualToken()
-      setNotice({ tone: "info", text: `${providerLabel(provider)} disconnected from Vector.` })
+      setNotice({ tone: result.revoked ? "success" : "info", text: result.detail })
     } catch (error) {
       setNotice({
         tone: "error",
@@ -1007,7 +999,14 @@ export function CloudConsole(props: {
                                 : (connection()?.detail ?? "Checking provider availability…")}
                           </p>
 
-                          <Show when={manualTokenProvider() === provider && connectionMode() === "token"}>
+                          {/* With sign-in available, a token is still offered: it can reach every team the
+                              user picks, where a Vercel sign-in reaches the one it was installed on. */}
+                          <Show
+                            when={
+                              manualTokenProvider() === provider &&
+                              (connectionMode() === "token" || connectionMode() === "oauth")
+                            }
+                          >
                             <form
                               class="cloud-token-form"
                               onSubmit={(event) => {
@@ -1123,6 +1122,16 @@ export function CloudConsole(props: {
                                     ? "Waiting for sign-in…"
                                     : `Connect ${providerLabel(provider)}`}
                                 </button>
+                                <Show when={manualTokenProvider() !== provider}>
+                                  <button
+                                    class="cloud-button"
+                                    type="button"
+                                    disabled={providerBusy() === provider}
+                                    onClick={() => openManualToken(provider)}
+                                  >
+                                    Use access token
+                                  </button>
+                                </Show>
                               </Show>
                             }
                           >
@@ -1415,6 +1424,16 @@ export function CloudConsole(props: {
                         ? "Connect Vercel and link this repository's project in Connections."
                         : "Open a project to read its deployment logs."}
                     </p>
+                    <Show when={props.projectPath}>
+                      <button
+                        class="cloud-button mt-4"
+                        data-variant="primary"
+                        type="button"
+                        onClick={() => setSection("connections")}
+                      >
+                        Open Connections
+                      </button>
+                    </Show>
                   </div>
                 }
               >
@@ -1422,6 +1441,7 @@ export function CloudConsole(props: {
                   projectPath={props.projectPath}
                   notice={setNotice}
                   onOpenConnections={() => setSection("connections")}
+                  onDiagnose={props.onRepair}
                 />
               </Show>
             </Show>
@@ -1447,6 +1467,14 @@ export function CloudConsole(props: {
                     </svg>
                     <strong>No deployments to monitor</strong>
                     <p>Publish a preview or production release first.</p>
+                    <button
+                      class="cloud-button mt-4"
+                      data-variant="primary"
+                      type="button"
+                      onClick={() => setSection("deployments")}
+                    >
+                      Open Deployments
+                    </button>
                   </div>
                 }
               >
@@ -1570,6 +1598,16 @@ export function CloudConsole(props: {
                         ? "Connect Vercel and link this repository's project in Connections."
                         : "Open a project to connect a custom domain to it."}
                     </p>
+                    <Show when={props.projectPath}>
+                      <button
+                        class="cloud-button mt-4"
+                        data-variant="primary"
+                        type="button"
+                        onClick={() => setSection("connections")}
+                      >
+                        Open Connections
+                      </button>
+                    </Show>
                   </div>
                 }
               >
@@ -1632,6 +1670,16 @@ export function CloudConsole(props: {
                       class="cloud-input flex-1"
                       value={environment.state.value}
                       onInput={(event) => environment.setValue(event.currentTarget.value)}
+                      onPaste={(event) => {
+                        // An input drops line breaks, which would silently store
+                        // a broken PEM key; .env cannot hold them either.
+                        if (!/[\r\n]/.test(event.clipboardData?.getData("text").trimEnd() ?? "")) return
+                        event.preventDefault()
+                        setNotice({
+                          tone: "error",
+                          text: "That value has line breaks, which .env cannot hold. Add it in the On Vercel panel below, which sends it to the linked Vercel project with its line breaks.",
+                        })
+                      }}
                       placeholder="value"
                       aria-label="Variable value"
                       type="password"
@@ -1762,7 +1810,6 @@ export function CloudConsole(props: {
                       openManualToken("supabase")
                   }}
                   onDatabaseChange={refreshDatabase}
-                  openLink={(url) => platform.openLink(url)}
                 />
               </Show>
             </Show>
@@ -1808,7 +1855,7 @@ export function CloudConsole(props: {
                   <p>Recent logs from the API gateway, Postgres, Auth, Storage and Edge Functions.</p>
                 </div>
               </div>
-              <SupabaseLogs {...supabasePanel} icon={sectionIcon("logs")} />
+              <SupabaseLogs {...supabasePanel} icon={sectionIcon("logs")} onDiagnose={props.onRepair} />
             </Show>
 
             <Show when={section() === "security"}>
@@ -1819,7 +1866,7 @@ export function CloudConsole(props: {
                   <p>Supabase's security advisors and a scan for server keys in what Vector would publish.</p>
                 </div>
               </div>
-              <SupabaseSecurity {...supabasePanel} icon={sectionIcon("authentication")} />
+              <SupabaseSecurity {...supabasePanel} icon={sectionIcon("authentication")} onFix={props.onRepair} />
             </Show>
 
             {/* Build and runtime */}

@@ -19,6 +19,8 @@ type StartCommand = {
   port: number
   password: string
   userDataPath: string
+  /** Vector's own secrets, kept out of this process's launch environment (see sidecar-environment.ts). */
+  environment: Record<string, string>
 }
 
 type StopCommand = { type: "stop" }
@@ -53,7 +55,7 @@ parentPort.on("message", (event) => {
 
 async function start(command: StartCommand) {
   try {
-    prepareSidecarEnv(command.password, command.userDataPath)
+    prepareSidecarEnv(command)
     ensureLoopbackNoProxy()
     useSystemCertificates()
     useEnvProxy()
@@ -83,19 +85,20 @@ async function stop() {
   }
 }
 
-function prepareSidecarEnv(password: string, userDataPath: string) {
-  const configDir = join(userDataPath, "config", "vector")
-  const dataHome = join(userDataPath, "xdg-data")
-  const xdgConfigHome = join(userDataPath, "xdg-config")
-  const cacheHome = join(userDataPath, "xdg-cache")
-  const stateHome = join(userDataPath, "xdg-state")
+function prepareSidecarEnv(command: StartCommand) {
+  const configDir = join(command.userDataPath, "config", "vector")
+  const dataHome = join(command.userDataPath, "xdg-data")
+  const xdgConfigHome = join(command.userDataPath, "xdg-config")
+  const cacheHome = join(command.userDataPath, "xdg-cache")
+  const stateHome = join(command.userDataPath, "xdg-state")
   for (const dir of [configDir, dataHome, xdgConfigHome, cacheHome, stateHome]) {
     mkdirSync(dir, { recursive: true })
   }
   Object.assign(process.env, {
+    ...command.environment,
     ...VECTOR_AGENT_RUNTIME_ENV,
     VECTOR_SERVER_USERNAME: "vector",
-    VECTOR_SERVER_PASSWORD: password,
+    VECTOR_SERVER_PASSWORD: command.password,
     VECTOR_AGENT_CONFIG_DIR: configDir,
 
     VECTOR_APP_NAMESPACE: "vector",
@@ -154,12 +157,16 @@ function parseCommand(value: unknown): SidecarCommand | undefined {
   if (typeof command.port !== "number") return
   if (typeof command.password !== "string") return
   if (typeof command.userDataPath !== "string") return
+  const environment = command.environment
+  if (!environment || typeof environment !== "object") return
+  if (Object.values(environment).some((value) => typeof value !== "string")) return
   return {
     type: "start",
     hostname: command.hostname,
     port: command.port,
     password: command.password,
     userDataPath: command.userDataPath,
+    environment,
   }
 }
 

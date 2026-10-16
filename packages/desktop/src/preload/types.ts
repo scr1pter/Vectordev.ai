@@ -408,6 +408,8 @@ export type BrowserAutomationRun = {
     interactives: BrowserAutomationRun["interactives"]
     inputs: BrowserAutomationRun["inputs"]
   }
+  /** For an inspectDom with a selector: the element it matches and the name of what a click there would press. */
+  target?: { found: boolean; label: string }
   computedStyles?: {
     tag: string
     selector: string
@@ -867,7 +869,7 @@ export type ElectronAPI = {
       list: () => Promise<CloudProviderConnection[]>
       connect: (provider: CloudProviderId) => Promise<CloudProviderConnection>
       connectWithToken: (provider: CloudProviderId, token: string) => Promise<CloudProviderConnection>
-      disconnect: (provider: CloudProviderId) => Promise<void>
+      disconnect: (provider: CloudProviderId) => Promise<{ revoked: boolean; detail: string }>
     }
     providers: {
       resources: (provider: CloudProviderId) => Promise<CloudProviderResource[]>
@@ -891,7 +893,7 @@ export type ElectronAPI = {
         visibility?: CloudEnvVisibility,
       ) => Promise<CloudEnvVar[]>
       remove: (projectPath: string, taskId: string | undefined, key: string) => Promise<CloudEnvVar[]>
-      apply: (projectPath: string, taskId?: string) => Promise<{ written: string }>
+      apply: (projectPath: string, taskId?: string) => Promise<{ written: string; gitignoreUpdated: boolean }>
     }
     database: {
       get: (projectPath: string, taskId?: string) => Promise<CloudDatabaseConnection>

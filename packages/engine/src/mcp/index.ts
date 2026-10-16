@@ -24,6 +24,7 @@ import {
 import { Config } from "@/config/config"
 import { Global } from "@vectordevai/core/global"
 import { ConfigMCPV1 } from "@vectordevai/core/v1/config/mcp"
+import { McpCloud } from "./cloud"
 import { NamedError } from "@vectordevai/core/util/error"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { withTimeout } from "@/util/timeout"
@@ -277,6 +278,8 @@ export interface Interface {
   readonly clients: () => Effect.Effect<Record<string, MCPClient>>
   readonly instructions: () => Effect.Effect<ServerInstructions[]>
   readonly tools: () => Effect.Effect<Record<string, Tool>>
+  /** Tools of Vercel's and Supabase's own MCP servers that ask under a vector_cloud permission, by tool key. */
+  readonly cloudTools: () => Effect.Effect<Record<string, McpCloud.Request>>
   readonly prompts: () => Effect.Effect<Record<string, PromptInfo & { client: string }>>
   readonly resources: (clientName?: string) => Effect.Effect<Record<string, ResourceInfo & { client: string }>>
   readonly resourceTemplates: (
@@ -994,6 +997,22 @@ const layer = Layer.effect(
       return result
     })
 
+    const cloudTools = Effect.fn("MCP.cloudTools")(function* () {
+      const s = yield* InstanceState.get(state)
+      const result: Record<string, McpCloud.Request> = {}
+      for (const clientName of Object.keys(s.clients)) {
+        if (s.status[clientName]?.status !== "connected") continue
+        const entry = yield* getMcpConfig(clientName)
+        const provider = entry ? McpCloud.provider(entry) : undefined
+        if (!provider) continue
+        for (const mcpTool of s.defs[clientName] ?? []) {
+          const request = McpCloud.request(provider, clientName, mcpTool.name)
+          if (request) result[McpCatalog.toolName(clientName, mcpTool.name)] = request
+        }
+      }
+      return result
+    })
+
     function collectFromConnected<T extends { name: string }>(
       s: State,
       listFn: (c: Client, timeout?: number) => Promise<T[]>,
@@ -1307,6 +1326,7 @@ const layer = Layer.effect(
       clients,
       instructions,
       tools,
+      cloudTools,
       prompts,
       resources,
       resourceTemplates,

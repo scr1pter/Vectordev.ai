@@ -1,7 +1,16 @@
 import { randomUUID } from "node:crypto"
 import { createServer, type Server } from "node:http"
+import { basename } from "node:path"
 
-import { applyEnv, detectBuildSettings, getBuildSettings, getDatabase, listDeployments } from "./cloud-console"
+import {
+  applyEnv,
+  detectBuildSettings,
+  getBuildSettings,
+  getDatabase,
+  listDeployments,
+  listEnv,
+  removeEnv,
+} from "./cloud-console"
 import {
   cachedCloudProviderConnection,
   getCloudProviderProjectLink,
@@ -12,6 +21,14 @@ import { fetchCloudLogs } from "./cloud-logs"
 import { applyCloudMigrations } from "./cloud-migrations"
 import { recordPublishAttempt } from "./cloud-overview"
 import { createCloudDatabase } from "./cloud-provision"
+import {
+  describeReleaseSettings,
+  isReleaseCommand,
+  parseReleaseFields,
+  RELEASE_COMMANDS,
+  runReleaseCommand,
+  type ReleaseSettingsFields,
+} from "./cloud-release-commands"
 import { resolveCloudScope, type CloudScope, type CloudWorkspace } from "./cloud-scope"
 import { describeSupabaseCommand, isSupabaseCommand, runSupabaseCommand } from "./cloud-supabase"
 import type { CloudFetch } from "./cloud-supabase-api"
@@ -45,8 +62,12 @@ const COMMANDS = [
   "list_deployments",
   "logs",
   "apply_migrations",
+  "stored_env",
+  "write_env_file",
+  "remove_stored_env",
   "describe",
   ...VERCEL_COMMANDS,
+  ...RELEASE_COMMANDS,
 ] as const
 
 // The actions that change something in the user's cloud accounts or project.
@@ -59,6 +80,9 @@ const DESCRIBABLE = [
   "prepare_database",
   "prepare_auth",
   "apply_migrations",
+  "set_release_settings",
+  "write_env_file",
+  "remove_stored_env",
   ...VERCEL_DESCRIBABLE,
 ] as const
 
@@ -66,6 +90,7 @@ type CloudCommand = (typeof COMMANDS)[number]
 type CloudAction = (typeof DESCRIBABLE)[number]
 
 type CloudCommandInput = VercelCommandFields & {
+  release: ReleaseSettingsFields
   command: CloudCommand
   action?: CloudAction
   projectPath: string
@@ -219,6 +244,7 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
   if (source !== undefined && source !== "build" && source !== "runtime") throw new Error("Invalid log source.")
   return {
     ...parseVercelFields(value),
+    release: parseReleaseFields(value),
     approvalID,
     source,
     command: known,
@@ -250,10 +276,46 @@ function configuredPublishTargets(input: CloudCommandInput) {
 async function describeCloudAction(input: CloudCommandInput, workspace: CloudScope, request?: VercelFetch) {
   // Vector's local Supabase and publish descriptions are below; every Vercel
   // action, including the environment sync, describes itself.
-  const scope = (provider: "Vercel" | "Supabase", project: string, environment: string, summary: string) => ({
+  const scope = (
+    provider: "Vector" | "Vercel" | "Supabase",
+    project: string,
+    environment: string,
+    summary: string,
+  ) => ({
     ok: true,
     scope: { provider, project, environment, summary },
   })
+  // The variables Vector keeps for the project, as Vector Cloud > Environment
+  // variables shows them: the prompt names them, never their values.
+  const stored = () => listEnv(input.projectPath, input.taskId).map((item) => item.key)
+  const where = workspace.directory !== workspace.projectPath ? "this agent workspace" : "this project"
+  if (input.action === "write_env_file") {
+    const keys = stored()
+    return scope(
+      "Vector",
+      basename(input.projectPath),
+      "local .env",
+      keys.length
+        ? `Write this project's ${keys.length} stored environment ${keys.length === 1 ? "variable" : "variables"} (${keys.join(", ")}) to the .env of ${where}. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.`
+        : `Clear Vector's managed block from the .env of ${where}: no variables are stored for this project.`,
+    )
+  }
+  if (input.action === "remove_stored_env") {
+    const key = input.key?.trim()
+    if (!key || !stored().includes(key)) {
+      return {
+        ok: false,
+        error: key ? `${key} is not stored for this project.` : "Name the stored variable to remove.",
+        nextStep: "stored_env lists the variables Vector stores for this project.",
+      }
+    }
+    return scope(
+      "Vector",
+      basename(input.projectPath),
+      "stored variables",
+      `Remove ${key} from the variables Vector stores for this project. A .env or Vercel copy stays until .env is written again or the environment is synced.`,
+    )
+  }
   if (input.action === "publish") {
     const target = configuredPublishTargets(input)[0]
     if (!target) return publishSetup()
@@ -336,7 +398,7 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
       needsSetup: true,
       error: "No Vector Cloud database is connected.",
       nextStep:
-        "Run create_database to create one on the user's connected Supabase account, or ask them to link an existing project in Vector Cloud > Database.",
+        "Run create_database to create one on the user's connected Supabase account, or link the user's existing project with link_database (supabase_projects lists them).",
     }
   }
   if (input.action === "apply_migrations") {
@@ -361,11 +423,15 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
       approved: { approvalID: plan.approvalID },
     }
   }
+  // prepare_database and prepare_auth rewrite the whole managed block of .env,
+  // so the prompt names every stored variable that lands there, not only the
+  // Supabase settings.
+  const keys = listEnv(input.projectPath, input.taskId).map((item) => item.key)
   return scope(
     "Supabase",
     name,
     "local .env",
-    `Write the Supabase project ${name}'s public client settings to this project's .env.`,
+    `Write this project's ${keys.length} stored environment ${keys.length === 1 ? "variable" : "variables"} (${keys.join(", ")}) to the .env of ${workspace.directory !== workspace.projectPath ? "this agent workspace" : "this project"}, including the Supabase project ${name}'s public client settings. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.`,
   )
 }
 
@@ -385,11 +451,15 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
   const scope = await resolveCloudScope(request.projectPath, (await options.workspaces?.()) ?? [])
   const input = { ...request, projectPath: scope.projectPath }
   if (input.command === "describe") {
-    const described =
-      input.action === "sync_environment" || VERCEL_DESCRIBABLE.some((item) => item === input.action)
-        ? await describeVercelAction(input, scope, options.vercel)
-        : await describeCloudAction(input, scope, options.request ?? options.vercel?.request)
-    return askEveryTime(input, described)
+    if (input.action === "set_release_settings") {
+      return describeReleaseSettings({ ...input.release, ...input, directory: scope.directory })
+    }
+    return input.action === "sync_environment" || VERCEL_DESCRIBABLE.some((item) => item === input.action)
+      ? describeVercelAction(input, scope, options.vercel)
+      : describeCloudAction(input, scope, options.request ?? options.vercel?.request)
+  }
+  if (isReleaseCommand(input.command)) {
+    return runReleaseCommand({ ...input.release, ...input, directory: scope.directory })
   }
   if (
     VERCEL_COMMANDS.some((item) => item === input.command) ||
@@ -444,18 +514,21 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
         : { connected: false },
       nextStep: database
         ? "The project database is ready through Vector Cloud."
-        : "No database is connected. Offer to create one with create_database, which creates a real Supabase project on the user's connected Supabase account; if the user already has a Supabase project for this app, ask them to link it in Vector Cloud > Database instead.",
+        : "No database is connected. Offer to create one with create_database, which creates a real Supabase project on the user's connected Supabase account; if the user already has a Supabase project for this app, find it with supabase_projects and link it with link_database (the user approves both).",
     }
   }
   if (input.command === "create_database") {
-    return createCloudDatabase({
-      projectPath: input.projectPath,
-      taskId: input.taskId,
-      directory: scope.directory,
-      organizationId: input.organizationId,
-      region: input.region,
-      force: input.force,
-    })
+    return createCloudDatabase(
+      {
+        projectPath: input.projectPath,
+        taskId: input.taskId,
+        directory: scope.directory,
+        organizationId: input.organizationId,
+        region: input.region,
+        force: input.force,
+      },
+      { request: options.request },
+    )
   }
   if (input.command === "prepare_database" || input.command === "prepare_auth") {
     if (!database) {
@@ -464,7 +537,7 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
         needsSetup: true,
         error: "No Vector Cloud database is connected.",
         nextStep:
-          "Run create_database to create one on the user's connected Supabase account, or ask them to link an existing project in Vector Cloud > Database.",
+          "Run create_database to create one on the user's connected Supabase account, or link the user's existing project with link_database (supabase_projects lists them).",
       }
     }
     return {
@@ -472,6 +545,29 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
       database: { connected: true, provider: database.provider, host: new URL(database.url).hostname },
       applied: await applyEnv(input.projectPath, input.taskId, scope.directory),
       purpose: input.command === "prepare_auth" ? "authentication" : "database",
+    }
+  }
+  if (input.command === "stored_env") {
+    return {
+      ok: true,
+      variables: listEnv(input.projectPath, input.taskId).map((item) => ({
+        key: item.key,
+        visibility: item.visibility,
+      })),
+    }
+  }
+  if (input.command === "write_env_file") {
+    return { ok: true, applied: await applyEnv(input.projectPath, input.taskId, scope.directory) }
+  }
+  if (input.command === "remove_stored_env") {
+    const key = input.key?.trim() ?? ""
+    if (!listEnv(input.projectPath, input.taskId).some((item) => item.key === key)) {
+      return { ok: false, error: `${key || "That variable"} is not stored for this project.` }
+    }
+    return {
+      ok: true,
+      removed: key,
+      variables: removeEnv(input.projectPath, input.taskId, key).map((item) => item.key),
     }
   }
   if (input.command === "cloud_connections") {
@@ -531,32 +627,6 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
 }
 
 const SETUP_CODES = ["not_connected", "not_linked", "no_node", "token_rejected"]
-
-// Moving production or what it serves, creating something the user is billed
-// for, changing the production database's schema, and handing over a
-// credential or variable values ask every time, as Supabase's own risky
-// commands do: an earlier "always" for the same kind of action never covers
-// them. (The app's auto-accept answers none of these either.)
-const EACH_TIME = [
-  "create_database",
-  "promote",
-  "rollback",
-  "add_domain",
-  "remove_domain",
-  "enable_protection_bypass",
-  "set_env",
-  "pull_env",
-  "sync_environment",
-]
-
-function askEveryTime<T extends object>(input: CloudCommandInput, described: T) {
-  const scope = Reflect.get(described, "scope")
-  if (Reflect.get(described, "ok") !== true || !scope || typeof scope !== "object") return described
-  const production = input.action === "publish" && Reflect.get(scope, "environment") === "production"
-  const migration = input.action === "apply_migrations" && input.dryRun !== true
-  if (!production && !migration && !EACH_TIME.includes(input.action ?? "")) return described
-  return { ...described, repeatable: false }
-}
 
 function publishNextStep(result: PublishResult, isolated: boolean) {
   if (result.ok) {

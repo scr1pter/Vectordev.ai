@@ -566,7 +566,8 @@ export const dict = {
   "toast.workspace.disabled.description": "Only the main worktree is shown in the sidebar",
 
   "toast.permissions.autoaccept.on.title": "Auto-accepting permissions",
-  "toast.permissions.autoaccept.on.description": "Permission requests will be automatically approved",
+  "toast.permissions.autoaccept.on.description":
+    "Permission requests are approved automatically. Vector Cloud account changes, sensitive browser actions, computer use and repeated tool calls still ask.",
   "toast.permissions.autoaccept.off.title": "Stopped auto-accepting permissions",
   "toast.permissions.autoaccept.off.description": "Permission requests will require approval",
 
@@ -1101,12 +1102,12 @@ export const dict = {
   "settings.permissions.tool.vector_cloud_database.title": "Supabase",
   "settings.permissions.tool.vector_cloud_database.description":
     "Create, link or change your Supabase project: schema, SQL, auth, storage, Edge Functions and secrets",
-  "settings.permissions.tool.vector_cloud_environment.title": "Host environment",
+  "settings.permissions.tool.vector_cloud_environment.title": "Environment variables",
   "settings.permissions.tool.vector_cloud_environment.description":
-    "Change your Vercel project's environment variables, or pull its development values into .env",
+    "Change your Vercel project's variables, remove a variable Vector stores for a project, or write the stored variables or Vercel's development values into .env",
   "settings.permissions.tool.vector_cloud_hosting.title": "Hosting settings",
   "settings.permissions.tool.vector_cloud_hosting.description":
-    "Create, link or configure your Vercel project, its deployment protection and its domains",
+    "Create, link or configure your Vercel project, its deployment protection, its domains and Vector's release checks",
   "settings.permissions.tool.vector_cloud_inspect.title": "Inspect database",
   "settings.permissions.tool.vector_cloud_inspect.description":
     "Read which migrations your Supabase database has applied",

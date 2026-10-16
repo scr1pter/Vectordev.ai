@@ -2,11 +2,12 @@
 
 ## Current availability
 
-The Cloud completion changes described here are prepared for **1.99.99** and
-are not a published desktop release. Provider application registration, hosted
-configuration and a real browser-to-desktop consent check are separate release
-steps. No Vercel or Supabase registration has been confirmed complete
-for this checkpoint. Do not infer readiness from a successful build or test.
+The Cloud changes described here are on the integration branch and are not in a
+published desktop release yet. Provider application registration, hosted
+configuration and a real browser-to-desktop consent check are separate owner
+steps, listed in [owner-actions/cloud-oauth.md](owner-actions/cloud-oauth.md).
+No Vercel or Supabase registration has been confirmed complete. Do not infer
+readiness from a successful build or test.
 
 Vector Cloud supports two providers: Vercel for hosting and Supabase for data.
 Vector connects accounts and resources that belong to the user. Provider
@@ -70,14 +71,14 @@ the desktop's required relay capability are present, not that registration,
 permissions or live consent have been verified. Supabase readiness is unchanged:
 desktop 1.99.8 already supports its S256 PKCE flow.
 
-Desktop **Vector Cloud → Connections** offers hosted sign-in when configured.
-If hosted OAuth is unavailable and this desktop supports manual tokens, it
-instead offers the provider's personal-access-token flow with local encrypted
-storage. Older unsupported desktops show an unavailable state. The Database
-panel routes users to this same connection setup, including manual Supabase
-access when available.
+Desktop **Vector Cloud → Connections** offers hosted sign-in (**Connect**)
+when configured, and the provider's personal-access-token flow (**Use access
+token**) beside it, with local encrypted storage. When hosted sign-in is
+unavailable, only the token flow is offered. Older unsupported desktops show an
+unavailable state. The Database panel routes users to this same connection
+setup.
 
-## Callback URLs and identity access
+## Callback URLs and scopes
 
 Register these exact HTTPS callback URLs:
 
@@ -86,24 +87,13 @@ https://vectordev.ai/api/cloud/oauth/callback-vercel
 https://vectordev.ai/api/cloud/oauth/callback-supabase
 ```
 
-Grant only the management access required for the selected operations:
-
-- Vercel: user identity (`/v2/user`, including User read), selected team/project
-  listing, deployment, environment variables and project domains.
-- Supabase: the OAuth app's scopes must cover every control in Vector Cloud
-  and the agent's tool
-  ([scope list](https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration/oauth-scopes)):
-  Organizations read; Projects read and write (create, pause, restore);
-  Database read and write (SQL, migrations, pooler, password rotation); Secrets
-  read and write (API keys, Edge Function secrets); Auth read and write; Edge
-  Functions read and write; Storage read; and Analytics read for logs and the
-  security advisors where the dashboard offers it. Users who connected before
-  a scope was added must reconnect for it to apply. A personal access token
-  already carries the account's full access.
-
-Do not request billing or destructive account-wide permissions. Provider
+The scopes each provider app needs, and what each one is used for, are listed
+once, in [owner-actions/cloud-oauth.md](owner-actions/cloud-oauth.md). Do not
+request billing or destructive account-wide permissions. Provider
 configuration must support the identity checks: a token exchange alone is not
-a completed connection.
+a completed connection. A personal access token already carries the account's
+full access. A Vercel sign-in is an integration installed on one personal
+account or team, and Vector lists and uses only that scope.
 
 ## Project variables and Supabase client keys
 
@@ -126,14 +116,29 @@ removal. It preserves content above Vector's managed marker. A successful load
 is required before an empty list can be applied. The writer rejects a symbolic
 link or non-regular `.env`, stages a private file and replaces the directory
 entry atomically; new files use mode `0600` where POSIX modes apply. It does
-not encrypt the project's `.env` contents.
+not encrypt the project's `.env` contents. Every write, from the screen, the
+agent or Supabase setup, first adds `.env` to `.gitignore` when git does not
+already ignore it, and refuses to put a server-only value into a `.env` that
+git tracks, naming the variables and leaving the file unchanged.
+
+Once values are in `.env`, the agent can read them. Approving a write keeps the
+values out of the prompt and the tool result, not out of the agent's reach:
+the read tool asks before it reads `.env` (`*.env`, `*.env.*`), shell commands
+that name such a file as an argument or an input redirect (`cat .env`, `source
+.env`, `< .env.local`) ask under the same `read` permission
+(`packages/engine/src/tool/shell.ts`), and auto-accept answers both. A program
+the agent runs can still open the file without a prompt, the shell sandbox
+does not hide the project's own `.env`, and the model is only instructed not to
+read it. Keep server-only values out of `.env` unless the app needs them on
+this machine.
 
 For projects positively identified as Vite by their saved framework or a Vite
 dependency, serialization preserves literal dollars and backslashes through
 Vite's environment parser. Enter literal values, not variable-expansion
 expressions. Multiline values and quote combinations that cannot be represented
-literally are rejected before replacing `.env`; use the hosting provider's
-environment settings for such values. Other project types retain their existing
+literally are rejected before replacing `.env`; set such values on the linked
+Vercel project in the **On Vercel** panel, whose value field keeps line breaks
+(Shift+Enter), instead. Other project types retain their existing
 serialization, so this is not a guarantee about every framework's parser.
 
 Supabase connection writes the project URL and publishable (or legacy
@@ -162,25 +167,123 @@ provider project. It is separate from writing local `.env`. Removing a local
 variable is not proof that a previously synchronized remote value was deleted;
 manage remote deletion explicitly.
 
-Vercel's `project-env-vars` read/write scope manages variables owned by the
-integration. Existing variables created outside that integration may require
-direct management in Vercel; local variable listing, `.env` application and
-project listing remain available. See [Vercel's integration scopes](https://vercel.com/docs/integrations/create-integration/vercel-api-integrations#project-environmental-variables).
+A Vercel sign-in manages variables created outside Vector through the
+`global-project-env-vars` scope; with only `project-env-vars`, Vercel would
+limit it to the variables the integration created. See
+[Vercel's integration scopes](https://vercel.com/docs/integrations/create-integration/vercel-api-integrations#scopes).
 
 ## Agent permissions
 
 The agent's `vector_cloud` tool asks before it publishes or moves production
 (`vector_cloud_publish`), creates, prepares, changes or migrates a database
-(`vector_cloud_database`), writes a host's environment variables
+(`vector_cloud_database`), writes a host's environment variables, the
+project's `.env` or the variables Vector stores for it
 (`vector_cloud_environment`) or changes a Vercel project, its protection or its
 domains (`vector_cloud_hosting`). Each prompt names the provider, the
-provider-side project and the environment the action touches. All four default
-to ask for every agent; a wildcard `"*": "allow"` does not approve them, only a
-rule that names them. The app's auto-accept never answers them either, nor any
-other Vector Cloud request that asks every time (one with no "always" pattern);
-the list is `ALWAYS_ASK` in `packages/app/src/context/permission-auto-respond.ts`.
-A migration dry run only reads, so it uses `vector_cloud_inspect`, which is
-allowed by default and which auto-accept may answer.
+provider-side project and the environment the action touches, and shows any SQL
+it would run.
+
+These four ask every time. Auto-accept, `vector run --auto`, a configured
+`allow` rule (a wildcard or one that names them) and an earlier "Always allow"
+never answer them, and no Vector client offers "Always allow" for them; a
+`deny` rule still blocks them. The rule is `PermissionPolicy` in
+`packages/schema/src/permission-policy.ts`. The app, the TUI, `vector run`, the
+ACP bridge and both permission runtimes use it, and it also keeps `doom_loop`,
+`browser_sensitive` and `computer_*` prompts manual. A migration dry run only
+reads, so it uses `vector_cloud_inspect`, which is allowed by default and which
+auto-accept may answer. A new migration file is a repository edit and asks
+under `edit`.
+
+Connecting or disconnecting a Vercel or Supabase account is never an agent
+action: only the user can do it, in Vector Cloud → Connections.
+
+The agent reaches Vector Cloud only through this tool. The desktop's cloud
+bridge token is kept out of the agent's shell environment and out of the
+engine's launch environment, which other processes of the same user can read,
+so a shell command cannot call the bridge and skip these prompts.
+
+The same work typed into the shell, on the Vercel or Supabase command-line
+tool's own login, asks under the same four permissions, every time
+(`packages/engine/src/tool/shell/cloud-cli.ts`): a deploy, promote, rollback,
+removal or alias change asks under `vector_cloud_publish`; `vercel env` changes
+and pulls under `vector_cloud_environment`; other Vercel project, domain and
+account commands under `vector_cloud_hosting`; and Supabase commands that change
+the linked project or account, or read its data or keys (`db push`,
+`db dump`, `projects api-keys`, `secrets set`, `functions deploy`, `link`),
+under `vector_cloud_database`, as does `supabase test db` against the linked
+database (`--linked`, `--db-url`). `vercel dev` and `vercel build --yes` ask
+under `vector_cloud_environment`, since they download the project's variables.
+Local work (`vercel build` without `--yes`, `supabase start`, `supabase db
+reset` without `--linked`), plain reads (`vercel ls`, `vercel env ls`), help
+(`--help`) and lookups (`command -v vercel`) only ask as shell commands do.
+
+This is a best-effort check on direct calls, not a boundary. It sees the CLI
+behind package runners and their options (`npx vercel`, `pnpm --filter web exec
+vercel`, `yarn run vercel`, `npm --prefix web exec vercel`), behind wrappers
+(`env`, `sudo`, `doas`, `timeout`, `nice`, `ionice`, `xargs`, `caffeinate`,
+`stdbuf`, `chronic`, `unbuffer`, `setsid`, `find -exec`), and in command lines
+run from a string (`sh -c`, `bash -lc`, `zsh -c`, `eval`, `watch`, `env -S`,
+`npx -c`), which the shell parses and checks command by command. It does not
+see a call inside a project script (`npm run deploy`), behind a variable
+(`$CLI --prod`), or in a program that reads the CLI's stored login or calls the
+provider's API itself. Only the shell sandbox (`VECTOR_SHELL_SANDBOX=1`) closes
+that route: sandboxed commands cannot read the CLIs' stored logins. The sandbox
+stays off by default because it confines every shell command to the workspace,
+is unavailable on Windows, and asks before running unconfined where the host
+cannot apply it; turning it on by default is a separate decision.
+
+Known limit: Git pushes. For a Vercel project connected to a Git repository,
+a push to its production branch (`git push origin main`) makes Vercel build and
+release production on its own. That release never passes Vector's release
+checks or a `vector_cloud_publish` prompt: the cloud check does not classify
+`git` commands, and `git push` asks only as other shell commands do, which the
+default allow rule answers. To hold pushes for approval, add a rule such as
+`"permission": { "bash": { "git push *": "ask" } }`. Vector Cloud's deployment
+list still shows those releases, since it reads Vercel's own history.
+
+Vercel's and Supabase's own MCP servers act on the same accounts with the
+server's own login: a hosted server at `mcp.vercel.com` or `mcp.supabase.com`
+(directly or through a local bridge such as `mcp-remote`), or the
+`@supabase/mcp-server-supabase` package, whether added from Plugins or by
+hand. Vector keeps both Plugins entries and holds their tools to the same rule
+(`packages/engine/src/mcp/cloud.ts`). A tool that only lists or reads
+(`list_*`, `get_*`, `search_*`, and Supabase's `query_logs` and
+`generate_typescript_types`) asks as other MCP tools do, unless its name
+mentions keys, secrets, tokens, access or variables. Every other tool asks
+again, every time, with its input shown: under `vector_cloud_database` for
+Supabase (`execute_sql`, `apply_migration`, `deploy_edge_function`,
+`create_project`, `get_publishable_keys` and any tool the server adds later),
+and under `vector_cloud_publish`, `vector_cloud_environment` or
+`vector_cloud_hosting` for Vercel, by what the tool's name says it does. The
+Plugins Supabase server starts with `--read-only`, so its SQL runs as a
+read-only Postgres user and its mutating tools are left out; it cannot be
+installed until its package is pinned to a reviewed version. A server Vector
+does not recognise, such as a community wrapper around either API, is not
+covered.
+
+In Vector's own browser, every click and key press on the Vercel and Supabase
+dashboards asks under `browser_sensitive`, which nothing answers but the user
+(`packages/engine/src/tool/browser.ts`). On any external page so do Enter,
+Return, Space and modifier+Enter, text typed with a line break, and a click
+whose target reads like a release, payment or settings action. The target is
+judged by the name the page gives the element the selector matches, so a
+positional selector such as `div[role=dialog] button:last-child` is judged by
+the button it presses.
+
+`run_sql` results reach the agent as model context, so its copy hides
+credentials (`packages/desktop/src/main/cloud-supabase-database.ts`): cells in
+columns named like passwords, tokens or secrets, values under such keys at any
+depth of a JSON cell (`row_to_json`, `json_agg`), and bcrypt or Argon2 password
+hashes in any cell. A query that reads Supabase's credential tables
+(`auth.users`, `auth.refresh_tokens`, `auth.one_time_tokens`,
+`auth.mfa_factors`, `auth.mfa_challenges`, `auth.flow_state`, `vault.secrets`,
+`vault.decrypted_secrets`, `pgsodium.key`, `pgsodium.decrypted_key`) shows the
+agent only their known non-credential columns, named as they are, so
+`encrypted_password as h` or `select u from auth.users u` comes back hidden.
+Limits: a credential read through a view, a function, or another
+`search_path` is not recognised, and a token in a column with an ordinary name
+in an app's own table is shown. Each `run_sql` still asks with its SQL shown.
+The console, which the user reads, shows every cell.
 
 ## Repository migrations
 
@@ -205,6 +308,16 @@ worktree, and publishes only a preview: production moves after the work is
 merged. This does not establish a provider's current
 billing state or authorize a charge.
 
+Known limit: the upload runs the pinned Vercel CLI through `npx`, with the
+user's Vercel token in its `VERCEL_TOKEN` environment variable
+(`runVercel` in `packages/desktop/src/main/publish.ts`). While a deploy runs,
+another process of the same user, an agent's shell command among them, can
+read that environment (`ps eww`), and the CLI itself lives in the
+user-writable npx cache. The token never enters a tool result, a log or the
+renderer, but a hostile shell command running alongside a publish could take
+it. Closing this means deploying through Vercel's REST API from the desktop
+process (file upload and deployment creation), so the token never leaves it.
+
 Before claiming live OAuth or release acceptance:
 
 1. Verify server-only configuration and exact provider callback registration.
@@ -216,10 +329,17 @@ Before claiming live OAuth or release acceptance:
    and a verified acceptable billing boundary. Fixtures do not prove a live
    account's costs or provider permissions.
 5. Verify Supabase renewal without requiring a previously linked database.
-   Disconnect removes the local credential and attempts remote revocation;
-   confirm revocation with the provider when it matters rather than inferring
-   it from local removal.
+   Disconnect removes the local credential and revokes a sign-in connection:
+   it deletes Vector's Vercel integration installation
+   (`DELETE /v1/integrations/configuration/{id}`, which needs the
+   integration-configuration read/write scope) and revokes the Supabase grant
+   through the broker. Vector reports when the provider did not confirm it.
+   A pasted personal access token is the user's own and stays valid until the
+   user deletes it.
 
 Local automated tests cover callback security, readiness, environment writes,
-public-key selection and project scoping. They do not register provider apps,
-complete live consent or publish desktop artifacts.
+public-key selection and project scoping. `packages/desktop/src/main/cloud-signin.test.ts`
+runs both one-click sign-ins end to end: the broker's route code on 127.0.0.1
+with placeholder registrations, the desktop's Connect flow and deep-link
+handling, and fake Vercel and Supabase APIs. They do not register provider
+apps, complete live consent or publish desktop artifacts.

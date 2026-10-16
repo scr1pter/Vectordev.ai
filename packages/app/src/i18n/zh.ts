@@ -429,7 +429,8 @@ export const dict = {
   "toast.workspace.disabled.title": "工作区已禁用",
   "toast.workspace.disabled.description": "侧边栏只显示主工作树",
   "toast.permissions.autoaccept.on.title": "正在自动接受权限",
-  "toast.permissions.autoaccept.on.description": "权限请求将被自动批准",
+  "toast.permissions.autoaccept.on.description":
+    "权限请求将被自动批准。Vector Cloud 账户更改、敏感的浏览器操作、电脑操作和重复的工具调用仍会请求确认。",
   "toast.permissions.autoaccept.off.title": "已停止自动接受权限",
   "toast.permissions.autoaccept.off.description": "权限请求将需要批准",
   "toast.model.none.title": "未选择模型",

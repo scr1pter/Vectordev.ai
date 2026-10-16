@@ -383,7 +383,8 @@ export const dict = {
   "toast.workspace.disabled.title": "Przestrzenie robocze wyłączone",
   "toast.workspace.disabled.description": "Tylko główny worktree jest wyświetlany na pasku bocznym",
   "toast.permissions.autoaccept.on.title": "Automatyczne akceptowanie uprawnień",
-  "toast.permissions.autoaccept.on.description": "Żądania uprawnień będą automatycznie zatwierdzane",
+  "toast.permissions.autoaccept.on.description":
+    "Żądania uprawnień są zatwierdzane automatycznie. Zmiany kont Vector Cloud, wrażliwe działania w przeglądarce, sterowanie komputerem i powtarzane wywołania narzędzi nadal wymagają zgody.",
   "toast.permissions.autoaccept.off.title": "Zatrzymano automatyczne akceptowanie uprawnień",
   "toast.permissions.autoaccept.off.description": "Żądania uprawnień będą wymagały zatwierdzenia",
   "toast.model.none.title": "Nie wybrano modelu",

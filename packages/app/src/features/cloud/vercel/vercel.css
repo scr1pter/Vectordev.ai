@@ -116,6 +116,15 @@
 .vercel-env-form .vercel-actions {
   grid-column: 1 / -1;
 }
+.vercel-env-value {
+  height: auto;
+  min-height: 38px;
+  max-height: 160px;
+  padding: 9px 12px;
+  line-height: 18px;
+  resize: vertical;
+  -webkit-text-security: disc;
+}
 .vercel-targets {
   display: flex;
   flex-wrap: wrap;

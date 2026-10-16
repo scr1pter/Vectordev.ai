@@ -492,6 +492,122 @@ describe("tool.shell permissions", () => {
     )
   }
 
+  each("asks every time under Vector Cloud's permission before a cloud CLI changes an account", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const err = new Error("cloud prompt rejected")
+          const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          // Rejecting the cloud prompt stops the command, so no real CLI runs.
+          const rejectCloud = {
+            ...ctx,
+            ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+              Effect.sync(() => {
+                requests.push(req)
+                if (req.permission.startsWith("vector_cloud_")) throw err
+              }),
+          }
+          expect(yield* fail({ command: "echo ready && npx --yes vercel@59.26.0 --prod" }, rejectCloud)).toMatchObject({
+            message: err.message,
+          })
+          expect(requests.map((item) => item.permission)).toEqual(["bash", "vector_cloud_publish"])
+          expect(requests[1]).toMatchObject({
+            patterns: [`vercel/${path.basename(tmp)}/production/shell deploy`],
+            always: [],
+            metadata: { provider: "Vercel", environment: "production", action: "deploy" },
+          })
+          expect(String(requests[1].metadata.summary)).toContain("npx --yes vercel@59.26.0 --prod")
+        }),
+      )
+    }),
+  )
+
+  each("asks for a cloud CLI behind eval, xargs, wrappers and a shell's -c string", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const err = new Error("cloud prompt rejected")
+          const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          const rejectCloud = {
+            ...ctx,
+            ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+              Effect.sync(() => {
+                requests.push(req)
+                if (req.permission.startsWith("vector_cloud_")) throw err
+              }),
+          }
+          // `false &&` keeps a real CLI from running if the check missed one:
+          // the scan reads every command, the shell runs none after `false`.
+          const cases = [
+            ["false && eval vercel --prod", "vector_cloud_publish"],
+            ["false && nice -n 5 vercel --prod", "vector_cloud_publish"],
+            ["false && echo x | xargs vercel --prod", "vector_cloud_publish"],
+            ["false && sh -c 'vercel --prod'", "vector_cloud_publish"],
+            [`false && bash -lc "cd web && vercel deploy --prod"`, "vector_cloud_publish"],
+            [`false && timeout 60 bash -c 'eval "supabase db push"'`, "vector_cloud_database"],
+          ] as const
+          for (const [command, permission] of cases) {
+            requests.length = 0
+            expect({ command, error: (yield* fail({ command }, rejectCloud)).message }).toEqual({
+              command,
+              error: err.message,
+            })
+            expect({ command, asked: requests.map((item) => item.permission) }).toEqual({
+              command,
+              asked: ["bash", permission],
+            })
+            expect(requests[1].always).toEqual([])
+          }
+        }),
+      )
+    }),
+  )
+
+  each("asks under read, as the read tool does, before a command reads an environment file", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped({ git: true })
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const err = new Error("read prompt rejected")
+          const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          const rejectRead = {
+            ...ctx,
+            ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+              Effect.sync(() => {
+                requests.push(req)
+                if (req.permission === "read") throw err
+              }),
+          }
+          const cases = [
+            ["cat .env", ".env"],
+            ["grep STRIPE apps/web/.env.local", path.join("apps", "web", ".env.local")],
+            ["source ./.env", ".env"],
+            ["while read line; do echo $line; done < .env.production", ".env.production"],
+          ] as const
+          for (const [command, file] of cases) {
+            requests.length = 0
+            expect({ command, error: (yield* fail({ command }, rejectRead)).message }).toEqual({
+              command,
+              error: err.message,
+            })
+            expect({ command, read: requests.find((item) => item.permission === "read")?.patterns }).toEqual({
+              command,
+              read: [file],
+            })
+          }
+          requests.length = 0
+          yield* run({ command: "cat .env.example .envrc 2>/dev/null; true" }, rejectRead)
+          expect(requests.map((item) => item.permission)).not.toContain("read")
+        }),
+      )
+    }),
+  )
+
   each("asks for edit permission for the files a redirect writes", () =>
     Effect.gen(function* () {
       const outside = yield* tmpdirScoped()
@@ -1365,7 +1481,11 @@ describe("tool.shell read-only allowlist", () => {
             Effect.gen(function* () {
               const explore = yield* Agent.Service.use((svc) => svc.get("explore"))
               const ruleset = explore!.permission
-              const decide = (requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">>) => ({
+              // The person approves only the prompts a case names; any other prompt fails the test.
+              const decide = (
+                requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">>,
+                approve: readonly string[] = [],
+              ) => ({
                 ...ctx,
                 agent: "explore",
                 ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
@@ -1373,7 +1493,7 @@ describe("tool.shell read-only allowlist", () => {
                     requests.push(req)
                     const rules = req.patterns.map((pattern) => Permission.evaluate(req.permission, pattern, ruleset))
                     if (rules.some((rule) => rule.action === "deny")) throw new PermissionV1.DeniedError({ ruleset })
-                    if (rules.some((rule) => rule.action === "ask"))
+                    if (rules.some((rule) => rule.action === "ask") && !req.patterns.every((p) => approve.includes(p)))
                       throw new Error(`unexpected prompt: ${req.patterns}`)
                   }),
               })
@@ -1405,17 +1525,19 @@ describe("tool.shell read-only allowlist", () => {
                   requests.find((r) => r.permission === "bash")?.patterns.some((p) => p.includes("--no-index")),
                 ).toBe(true)
               }
-              // Paths git sees inside its work tree still diff without a prompt, a nested repository's own included.
-              for (const [command, workdir] of [
-                ["git diff", undefined],
-                ["git diff HEAD -- README.md", undefined],
-                [`git diff ${readme} .env`, undefined],
-                ["git diff n.txt", nested],
+              // Paths git sees inside its work tree still diff without a --no-index prompt, a nested repository's own
+              // included. Naming .env still asks under read, as `cat .env` does.
+              for (const [command, workdir, approve] of [
+                ["git diff", undefined, []],
+                ["git diff HEAD -- README.md", undefined, []],
+                [`git diff ${readme} .env`, undefined, [".env"]],
+                ["git diff n.txt", nested, []],
               ] as const) {
                 const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
-                const result = yield* run({ command, workdir }, decide(requests))
+                const result = yield* run({ command, workdir }, decide(requests, approve))
                 expect(result.output).not.toContain("PLACEHOLDER_SECRET")
                 expect(requests.flatMap((r) => r.patterns).some((p) => p.includes("--no-index"))).toBe(false)
+                expect(requests.filter((r) => r.permission === "read").flatMap((r) => r.patterns)).toEqual([...approve])
               }
             }),
           )

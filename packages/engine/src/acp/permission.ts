@@ -7,6 +7,7 @@ import type {
   ToolCallUpdate,
 } from "@agentclientprotocol/sdk"
 import type { Event, VectorClient } from "@vectordevai/sdk/v2"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { applyPatch } from "diff"
 import { exists, readText } from "@/util/filesystem"
 import type { ACPSession } from "./session"
@@ -66,7 +67,11 @@ export class Handler {
           toolName: permission.permission,
           input: permission.metadata,
         }),
-        options: permissionOptions,
+        // The same rule every Vector client follows: account, browser-sensitive and computer actions offer no
+        // "always", and the server would answer one as "once" anyway.
+        options: PermissionPolicy.canAlwaysApprove(permission.permission, permission.always)
+          ? permissionOptions
+          : permissionOptions.filter((option) => option.optionId !== "always"),
       })
       .catch(async () => {
         await this.reply(permission.id, "reject", session.cwd)

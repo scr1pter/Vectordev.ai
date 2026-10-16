@@ -383,7 +383,8 @@ export const dict = {
   "toast.workspace.disabled.title": "ワークスペースが無効になりました",
   "toast.workspace.disabled.description": "サイドバーにはメインのワークツリーのみが表示されます",
   "toast.permissions.autoaccept.on.title": "権限を自動承認しています",
-  "toast.permissions.autoaccept.on.description": "権限の要求は自動的に承認されます",
+  "toast.permissions.autoaccept.on.description":
+    "権限の要求は自動的に承認されます。Vector Cloud のアカウント変更、ブラウザーでの機密性の高い操作、コンピューター操作、繰り返されるツール呼び出しは引き続き確認を求めます。",
   "toast.permissions.autoaccept.off.title": "権限の自動承認を停止しました",
   "toast.permissions.autoaccept.off.description": "権限の要求には承認が必要になります",
   "toast.model.none.title": "モデルが選択されていません",

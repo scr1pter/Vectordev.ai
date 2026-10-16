@@ -138,6 +138,15 @@ export async function startSupabaseFake(overrides: Partial<FakeState> = {}) {
       return Response.json({ message: "Unauthorized" }, { status: 401 })
     }
     const path = call.path.replace(/^\/v1/, "")
+    // https://supabase.com/docs/reference/api/v1-create-an-organization
+    if (path === "/organizations" && call.method === "POST") {
+      const created = {
+        id: `org-${state.organizations.length + 1}`,
+        name: String((call.body as { name?: unknown }).name),
+      }
+      state.organizations.push({ ...created, plan: "free" })
+      return Response.json(created, { status: 201 })
+    }
     if (path === "/organizations") return Response.json(state.organizations)
     if (path === "/projects" && call.method === "GET") return Response.json(state.projects)
     // https://supabase.com/docs/reference/api/v1-create-a-project

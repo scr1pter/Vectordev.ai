@@ -37,10 +37,11 @@ mock.module("./store", () => ({
 }))
 
 const { encryptCloudCredential } = await import("./cloud-credential-vault")
-const { cloudProjectScopeKey, listDeployments, listEnv, recordDeployment, setEnv, updateDeployment } = await import(
-  "./cloud-console"
+const { cloudProjectScopeKey, getBuildSettings, listDeployments, listEnv, recordDeployment, setEnv, updateDeployment } =
+  await import("./cloud-console")
+const { disconnectCloudProvider, getCloudProviderProjectLink, getCloudProviderRuntimeAuth } = await import(
+  "./cloud-connections"
 )
-const { getCloudProviderProjectLink, getCloudProviderRuntimeAuth } = await import("./cloud-connections")
 const { VercelError, VERCEL_TOKEN_REJECTED } = await import("./cloud-vercel-api")
 const projects = await import("./cloud-vercel-projects")
 const deployments = await import("./cloud-vercel-deployments")
@@ -119,6 +120,18 @@ describe("Vercel connection and scope", () => {
     expect((await projects.selectVercelScope(null)).selected).toBeUndefined()
   })
 
+  test("a sign-in lists and keeps only the scope its integration was installed on", async () => {
+    connect("team_2")
+    const records = stores.get("cloud-provider-connections")!.get("records") as Record<string, unknown>[]
+    records[0].configurationId = "icfg_2"
+    expect((await projects.listVercelScopes()).scopes).toEqual([
+      { kind: "team", teamId: "team_2", slug: "globex", name: "Globex" },
+    ])
+    await expect(projects.selectVercelScope("team_1")).rejects.toThrow("not available to the connected token")
+    await expect(projects.selectVercelScope(null)).rejects.toThrow("installed on one team only")
+    expect((await projects.selectVercelScope("team_2")).selected).toBe("team_2")
+  })
+
   test("a rejected token reads as a reconnect step and never repeats the token", async () => {
     connect()
     api.state.rejectToken = true
@@ -132,6 +145,52 @@ describe("Vercel connection and scope", () => {
   test("without a connection every action asks for one", async () => {
     await expect(projects.listVercelProjects()).rejects.toMatchObject({ code: "not_connected" })
     await expect(deployments.listVercelDeployments(project)).rejects.toMatchObject({ code: "not_linked" })
+  })
+
+  test("disconnecting a sign-in removes Vector's Vercel integration, which revokes its token", async () => {
+    connect("team_1")
+    const records = stores.get("cloud-provider-connections")!.get("records") as Record<string, unknown>[]
+    records[0].configurationId = "icfg_1"
+    api.state.configurations.set("icfg_1", "team_1")
+    expect(await disconnectCloudProvider("vercel")).toEqual({
+      revoked: true,
+      detail: "Vercel disconnected, and Vector's access on Vercel is revoked.",
+    })
+    expect(api.state.requests.at(-1)).toMatchObject({
+      method: "DELETE",
+      path: "/v1/integrations/configuration/icfg_1",
+      query: { teamId: "team_1" },
+    })
+    expect(api.state.configurations.has("icfg_1")).toBe(false)
+    expect(stores.get("cloud-provider-connections")!.get("records")).toEqual([])
+    await expect(projects.listVercelProjects()).rejects.toMatchObject({ code: "not_connected" })
+  })
+
+  test("a failed uninstall still removes the credential and says Vercel kept access", async () => {
+    connect("team_1")
+    const records = stores.get("cloud-provider-connections")!.get("records") as Record<string, unknown>[]
+    records[0].configurationId = "icfg_missing_scope"
+    // Not installed on that team as far as the fake knows, but answer as a scope error would.
+    api.state.configurations.set("icfg_missing_scope", "team_2")
+    const result = await disconnectCloudProvider("vercel", async (input, init) => {
+      const response = await fetch(input, init)
+      return response.status === 404 ? Response.json({ error: { code: "forbidden" } }, { status: 403 }) : response
+    })
+    expect(result.revoked).toBe(false)
+    expect(result.detail).toContain("still has access until you remove Vector")
+    expect(stores.get("cloud-provider-connections")!.get("records")).toEqual([])
+  })
+
+  test("disconnecting a pasted token deletes only Vector's copy and says the token still works", async () => {
+    connect()
+    const result = await disconnectCloudProvider("vercel")
+    expect(result).toEqual({
+      revoked: false,
+      detail:
+        "Vercel disconnected. Vector deleted its copy of your access token; the token itself stays valid until you delete it in Vercel's token settings.",
+    })
+    expect(api.state.requests).toEqual([])
+    expect(JSON.stringify(result)).not.toContain(api.token)
   })
 })
 
@@ -623,6 +682,11 @@ describe("Vercel environment variables", () => {
       env.setVercelEnv(project, { key: "BRANCHED", value: "x", targets: ["production"], gitBranch: "dev" }),
     ).rejects.toThrow("only target preview")
     await env.setVercelEnv(project, { key: "BRANCHED", value: "x", targets: ["preview"], gitBranch: "dev" })
+    // A PEM key keeps its line breaks: .env cannot hold it, so this is how it reaches Vercel from Vector.
+    const pem = "-----BEGIN PRIVATE KEY-----\nfixture-line-one\nfixture-line-two\n-----END PRIVATE KEY-----"
+    await env.setVercelEnv(project, { key: "SIGNING_KEY", value: pem, targets: ["production"] })
+    expect(api.state.env.find((item) => item.key === "SIGNING_KEY")?.value).toBe(pem)
+    await env.removeVercelEnv(project, { key: "SIGNING_KEY" })
 
     await env.removeVercelEnv(project, { key: "API_URL", targets: ["preview"] })
     expect(api.state.env.filter((item) => item.key === "API_URL").map((item) => item.target)).toEqual([["development"]])
@@ -936,10 +1000,9 @@ describe("vector_cloud Vercel actions over the bridge", () => {
   test("describes production moves with provider, project and environment before asking", async () => {
     seed()
     const command = await bridge()
-    // Moving production, or what it serves, asks every time.
+    // Moving production, or what it serves, names the deployment it moves to.
     expect(await command({ command: "describe", action: "promote", deploymentId: "dpl_old" })).toMatchObject({
       ok: true,
-      repeatable: false,
       scope: {
         provider: "Vercel",
         project: "shop",
@@ -949,24 +1012,23 @@ describe("vector_cloud Vercel actions over the bridge", () => {
     })
     // The rollback target is resolved before asking, and the approved run uses it.
     expect(await command({ command: "describe", action: "rollback" })).toMatchObject({
-      repeatable: false,
       scope: { environment: "production", summary: expect.stringContaining("(dpl_old)") },
       carry: { deploymentId: "dpl_old" },
     })
-    // A production rebuild does not move production, so it may be remembered.
+    // A production rebuild says that production does not move.
     const redeploy = await command({ command: "describe", action: "redeploy", deploymentId: "dpl_live" })
     expect(redeploy).toMatchObject({
       scope: { environment: "production", summary: expect.stringContaining("production does not move") },
     })
-    expect(redeploy).not.toHaveProperty("repeatable")
     expect(await command({ command: "describe", action: "add_domain", domain: "shop.example" })).toMatchObject({
-      repeatable: false,
       scope: { environment: "production" },
     })
-    // Handing over a credential or variable values asks every time too.
-    expect(await command({ command: "describe", action: "enable_protection_bypass" })).toMatchObject({
-      repeatable: false,
-    })
+    // Every account action asks each time (PermissionPolicy), so no describe carries an approval tier.
+    for (const action of ["promote", "rollback", "redeploy", "add_domain", "enable_protection_bypass"]) {
+      expect(
+        await command({ command: "describe", action, deploymentId: "dpl_old", domain: "shop.example" }),
+      ).not.toHaveProperty("repeatable")
+    }
     expect(
       await command({
         command: "describe",
@@ -975,7 +1037,7 @@ describe("vector_cloud Vercel actions over the bridge", () => {
         value: "https://api.example",
         targets: ["preview"],
       }),
-    ).toMatchObject({ ok: true, repeatable: false })
+    ).toMatchObject({ ok: true, scope: { environment: "preview" } })
     expect(await command({ command: "describe", action: "promote" })).toMatchObject({ ok: false })
   })
 
@@ -1144,6 +1206,85 @@ describe("vector_cloud Vercel actions over the bridge", () => {
     expect(JSON.stringify([described, set])).not.toContain("sk_live_stored_fixture")
   })
 
+  test("checks health, re-runs release checks and changes the required checks from the agent", async () => {
+    seed()
+    const site = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("ok") })
+    try {
+      recordDeployment({
+        projectPath: project,
+        slug: "shop",
+        url: site.url.origin,
+        name: "shop",
+        target: "vercel",
+        environment: "preview",
+        providerDeploymentId: "dpl_site",
+        checks: [],
+      })
+      const command = await bridge()
+      // The prompt names exactly which gate stops blocking production.
+      const described = await command({
+        command: "describe",
+        action: "set_release_settings",
+        requiredChecks: { browser: false },
+        testCommand: "bun test",
+      })
+      expect(described.scope.summary).toBe(
+        "Change the release settings Vector uses before it publishes: test command bun test; Browser render no longer blocks a production release.",
+      )
+      expect(described).toMatchObject({
+        ok: true,
+        noop: false,
+        scope: { provider: "Vector Cloud", project: "shop", environment: "release checks" },
+      })
+      const saved = await command({
+        command: "set_release_settings",
+        requiredChecks: { browser: false },
+        testCommand: "bun test",
+      })
+      expect(saved.text).toContain("Required before production: Secret scan, Health probe.")
+      expect(getBuildSettings(project)).toMatchObject({
+        testCommand: "bun test",
+        requiredChecks: { test: false, secrets: true, health: true, browser: false },
+      })
+      expect(
+        await command({ command: "describe", action: "set_release_settings", testCommand: "bun test" }),
+      ).toMatchObject({ ok: true, noop: true })
+      // A path that resolves to another host would carry the bypass secret there,
+      // so it is refused before the prompt and again when saved.
+      for (const healthPath of ["//evil.example/collect", "/\\evil.example/collect", "/\t/evil.example"]) {
+        for (const request of [
+          { command: "describe", action: "set_release_settings", healthPath },
+          { command: "set_release_settings", healthPath },
+        ]) {
+          expect({ healthPath, result: await command(request) }).toMatchObject({
+            healthPath,
+            result: { ok: false, error: expect.stringContaining("own address") },
+          })
+        }
+      }
+      expect(getBuildSettings(project)?.healthPath).toBe("/")
+
+      const health = await command({ command: "check_health" })
+      expect(health).toMatchObject({ ok: true, text: expect.stringContaining("(dpl_site) · ready · HTTP 200") })
+      expect(await command({ command: "check_health", deploymentId: "dpl_site" })).toMatchObject({
+        ok: true,
+        url: `${site.url.origin}/`,
+        text: expect.stringContaining("ready · HTTP 200"),
+      })
+      const rerun = await command({ command: "rerun_checks", deploymentId: "dpl_site" })
+      expect(rerun.text).toContain("passed · Health check / (required): HTTP 200")
+      expect(rerun.text).toContain("skipped · Browser smoke test")
+      expect(rerun.text).toContain("No required check failed.")
+      expect(await command({ command: "rerun_checks", deploymentId: "dpl_live" })).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("Vector did not publish dpl_live"),
+      })
+      expect(await command({ command: "rerun_checks" })).toMatchObject({ ok: false })
+    } finally {
+      await site.stop(true)
+    }
+  })
+
   test("sets a variable, manages domains and creates a project from the agent", async () => {
     seed()
     const command = await bridge()
@@ -1182,5 +1323,98 @@ describe("vector_cloud Vercel actions over the bridge", () => {
     expect((await command({ command: "vercel_project" })).text).toContain("Linked Vercel project: shop-two")
     expect((await command({ command: "vercel_scopes" })).text).toContain("Acme (teamId team_1, slug acme)")
     expect((await command({ command: "vercel_projects", teamId: "team_1" })).text).toContain("shop-two (projectId")
+  })
+
+  test("inspects, cancels, edits settings, removes and pulls variables and verifies a domain from the agent", async () => {
+    const seeded = seed()
+    const building = api.addDeployment({
+      projectId: seeded.remote.id,
+      uid: "dpl_building",
+      target: "preview",
+      readyState: "BUILDING",
+      created: 3_000,
+    })
+    api.addEnv(seeded.remote.id, { key: "API_URL", value: "https://api.shop", type: "plain", target: ["preview"] })
+    api.addEnv(seeded.remote.id, {
+      key: "DEV_TOKEN",
+      value: "dev_token_fixture_value",
+      type: "encrypted",
+      target: ["development"],
+    })
+    setEnv(project, undefined, "LOCAL_ONLY", "local_fixture_value")
+    const command = await bridge()
+
+    expect(await command({ command: "inspect_deployment", deploymentId: "dpl_live" })).toMatchObject({
+      ok: true,
+      text: expect.stringContaining("dpl_live"),
+    })
+
+    expect(
+      await command({ command: "describe", action: "cancel_deployment", deploymentId: building.uid }),
+    ).toMatchObject({
+      ok: true,
+      scope: { project: "shop", environment: "preview", summary: expect.stringContaining("Cancel the") },
+    })
+    expect(await command({ command: "cancel_deployment", deploymentId: building.uid })).toMatchObject({
+      ok: true,
+      text: `Canceled ${building.uid}.`,
+    })
+    expect(building.readyState).toBe("CANCELED")
+
+    expect(
+      await command({ command: "describe", action: "update_project_settings", buildCommand: "bun run build" }),
+    ).toMatchObject({ ok: true, scope: { summary: expect.stringContaining("buildCommand = bun run build") } })
+    expect(await command({ command: "update_project_settings", buildCommand: "bun run build" })).toMatchObject({
+      ok: true,
+      text: expect.stringContaining("build bun run build"),
+    })
+
+    expect(
+      await command({ command: "describe", action: "remove_env", key: "API_URL", targets: ["preview"] }),
+    ).toMatchObject({ ok: true, scope: { environment: "preview" } })
+    expect(await command({ command: "remove_env", key: "API_URL", targets: ["preview"] })).toMatchObject({
+      ok: true,
+      text: "Removed API_URL from shop for preview.",
+    })
+    expect(api.state.env.map((item) => item.key)).not.toContain("API_URL")
+
+    // env_plan shows what a sync would write without writing it.
+    const planned = await command({ command: "env_plan", targets: ["preview"] })
+    expect(planned).toMatchObject({ ok: true, text: expect.stringContaining("LOCAL_ONLY") })
+    expect(api.state.env.map((item) => item.key)).not.toContain("LOCAL_ONLY")
+
+    // pull_env writes only the plan its prompt showed.
+    expect(await command({ command: "pull_env" })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("prompt"),
+    })
+    const pull = await command({ command: "describe", action: "pull_env" })
+    const carry = structuredClone(pull.carry)
+    expect(pull).toMatchObject({ ok: true, scope: { summary: expect.stringContaining("DEV_TOKEN (add)") } })
+    expect(await command({ command: "pull_env", ...carry })).toMatchObject({
+      ok: true,
+      text: expect.stringContaining("DEV_TOKEN"),
+    })
+    expect(await readFile(join(project, ".env"), "utf8")).toContain("DEV_TOKEN=dev_token_fixture_value")
+
+    await command({ command: "add_domain", domain: "www.shop.example" })
+    expect(await command({ command: "describe", action: "verify_domain", domain: "www.shop.example" })).toMatchObject({
+      ok: true,
+      scope: { environment: "production" },
+    })
+    expect(await command({ command: "verify_domain", domain: "www.shop.example" })).toMatchObject({
+      ok: true,
+      text: expect.stringContaining("Checked on shop:\n- www.shop.example: needs verification"),
+    })
+
+    const connections = await command({ command: "cloud_connections" })
+    expect(connections).toMatchObject({ ok: true, links: [{ provider: "vercel", projectName: "shop" }] })
+    expect(await command({ command: "database_status" })).toMatchObject({ ok: true, database: { connected: false } })
+
+    // No answer the model sees carries a stored or pulled value, or the token.
+    expect(JSON.stringify([planned, pull, connections])).not.toMatch(
+      /dev_token_fixture_value|local_fixture_value|api\.shop/,
+    )
+    expect(JSON.stringify(connections)).not.toContain(api.token)
   })
 })

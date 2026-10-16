@@ -16,6 +16,7 @@ import { Shell } from "@vectordevai/core/shell"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { ShellID } from "./shell/id"
 import { Sandbox } from "./shell/sandbox"
+import { CloudCli } from "./shell/cloud-cli"
 
 import * as Truncate from "./truncate"
 import { Plugin } from "@/plugin"
@@ -77,6 +78,10 @@ type Scan = {
   patterns: Set<string>
   always: Set<string>
   writes: Set<string>
+  /** Environment files a command names or reads from, relative to the worktree. */
+  reads: Set<string>
+  /** Vercel and Supabase CLI calls that act on a cloud account, by permission pattern. */
+  cloud: Map<string, CloudCli.Request & { command: string }>
 }
 
 type Chunk = {
@@ -91,6 +96,25 @@ const resolveWasm = (asset: string) => {
   return fileURLToPath(url)
 }
 
+// A command's name and arguments. Numbers and expansions are arguments too:
+// without them `timeout 60 vercel` would read as `timeout vercel`, and the
+// word after a wrapper's duration would be taken for the duration.
+const ARGUMENTS = new Set([
+  "command_name",
+  "command_name_expr",
+  "word",
+  "string",
+  "raw_string",
+  "concatenation",
+  "number",
+  "simple_expansion",
+  "expansion",
+  "command_substitution",
+  "arithmetic_expansion",
+  "ansi_c_string",
+  "translated_string",
+])
+
 function parts(node: Node) {
   const out: Part[] = []
   for (let i = 0; i < node.childCount; i++) {
@@ -104,16 +128,7 @@ function parts(node: Node) {
       }
       continue
     }
-    if (
-      child.type !== "command_name" &&
-      child.type !== "command_name_expr" &&
-      child.type !== "word" &&
-      child.type !== "string" &&
-      child.type !== "raw_string" &&
-      child.type !== "concatenation"
-    ) {
-      continue
-    }
+    if (!ARGUMENTS.has(child.type)) continue
     out.push({ type: child.type, text: child.text })
   }
   return out
@@ -171,6 +186,26 @@ function redirects(node: Node, ps: boolean) {
       })
   return targets.filter((target) => target && !DEVICES.has(target.toLowerCase()))
 }
+
+// Bash input redirects (`< .env`). PowerShell has no input redirect operator.
+function inputRedirects(node: Node, ps: boolean) {
+  if (ps) return []
+  return node.descendantsOfType("file_redirect").flatMap((item) => {
+    const children = item?.children.filter((child): child is Node => Boolean(child)) ?? []
+    const index = children.findIndex((child) => child.type === "<")
+    if (index === -1) return []
+    return [
+      children
+        .slice(index + 1)
+        .map((child) => child.text)
+        .join(""),
+    ]
+  })
+}
+
+// The environment files the read tool asks for by default (`*.env`, `*.env.*`,
+// but not `*.env.example`), so a shell command that names one asks the same way.
+const ENV_FILE = /\.env(\.(?!example$)[^/\\]*)?$/
 
 function unquote(text: string) {
   if (text.length < 2) return text
@@ -350,6 +385,28 @@ const parse = Effect.fn("ShellTool.parse")(function* (command: string, ps: boole
   return tree
 })
 
+// The Vercel and Supabase CLI calls a command makes, including those in a
+// command line it runs from a string (`sh -c "vercel --prod"`, `eval ...`),
+// which is parsed as bash and checked command by command. Each level is a
+// strictly shorter string; the depth limit only bounds pathological nesting.
+const cloudRequests = Effect.fn("ShellTool.cloudRequests")(function* (
+  tokens: string[],
+  depth: number,
+): Effect.fn.Return<CloudCli.Request[]> {
+  const found = CloudCli.request(tokens)
+  if (found) return [found]
+  const inner = CloudCli.script(tokens)
+  if (!inner?.trim() || depth >= 8) return []
+  const tree = yield* parse(inner, false)
+  const nested = yield* Effect.forEach(commands(tree.rootNode), (node) =>
+    cloudRequests(
+      parts(node).map((item) => item.text),
+      depth + 1,
+    ),
+  )
+  return nested.flat()
+})
+
 const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan, input: { command: string }) {
   if (scan.dirs.size > 0) {
     const directories = Array.from(scan.dirs)
@@ -391,6 +448,38 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
       command: input.command,
     },
   })
+
+  // The read tool's permission and patterns, so the read rules that ask for
+  // `.env` files (and a session that may not read them) apply to the shell too.
+  if (scan.reads.size > 0) {
+    yield* ctx.ask({
+      permission: "read",
+      patterns: Array.from(scan.reads),
+      always: Array.from(scan.reads),
+      metadata: {
+        command: input.command,
+        files: Array.from(scan.reads),
+      },
+    })
+  }
+
+  // After the shell's own permission, so a session that may not run the command
+  // is refused without a cloud prompt. These ask every time, as vector_cloud's
+  // own actions do: auto-accept and allow rules never answer them.
+  for (const [pattern, item] of scan.cloud) {
+    yield* ctx.ask({
+      permission: item.permission,
+      patterns: [pattern],
+      always: [],
+      metadata: {
+        command: input.command,
+        provider: item.provider,
+        environment: item.environment,
+        action: item.action,
+        summary: `Run \`${item.command}\` in the shell. It would ${item.summary} with the ${item.provider} command-line tool's own login, outside Vector Cloud.`,
+      },
+    })
+  }
 })
 
 const cmd = Effect.fn("ShellTool.cmd")(function* (
@@ -549,6 +638,8 @@ export const ShellTool = Tool.define(
         patterns: new Set<string>(),
         always: new Set<string>(),
         writes: new Set<string>(),
+        reads: new Set<string>(),
+        cloud: new Map(),
       }
       const shellKind = ShellID.toKind(Shell.name(shell))
       const list = commands(root).map((node) => {
@@ -594,6 +685,29 @@ export const ShellTool = Tool.define(
             ((paths.length > 0 || tokens.includes("--")) && (moved || !(yield* inWorkTree(paths, cwd)))))
         )
           scan.patterns.add(["git", "diff", "--no-index", ...tokens.slice(2)].join(" "))
+
+        // `cat .env`, `grep KEY .env.local` or `source .env` read the same
+        // secrets the read tool asks for, so they ask under read too.
+        for (const arg of item.command.slice(1)) {
+          if (!ENV_FILE.test(path.basename(unquote(arg.text)))) continue
+          const resolved = yield* argPath(arg.text, cwd, ps, shell)
+          if (resolved) scan.reads.add(path.relative(instance.worktree, resolved))
+        }
+
+        for (const cloud of yield* cloudRequests(tokens, 0)) {
+          const text = source(item.node)
+          scan.cloud.set(
+            [cloud.provider.toLowerCase(), path.basename(cwd), cloud.environment, `shell ${cloud.action}`].join("/"),
+            { ...cloud, command: text.length > 200 ? `${text.slice(0, 200)}…` : text },
+          )
+        }
+      }
+
+      // `while read line; do ...; done < .env`
+      for (const source of inputRedirects(root, ps)) {
+        if (!ENV_FILE.test(path.basename(unquote(source)))) continue
+        const resolved = yield* argPath(source, cwd, ps, shell)
+        if (resolved) scan.reads.add(path.relative(instance.worktree, resolved))
       }
 
       // A target that cannot be resolved (`> "$OUT"`) is asked for as written, so a rule that denies edits denies it.

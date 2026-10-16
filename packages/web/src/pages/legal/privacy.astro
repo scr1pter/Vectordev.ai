@@ -7,7 +7,7 @@ export const prerender = true
   eyebrow="Privacy"
   title="Privacy Policy"
   description="How Vector handles account information, local work, AI requests, connected services, diagnostics, and usage counts."
-  updated="October 10, 2026"
+  updated="October 15, 2026"
 >
   <section>
     <h2>1. Scope and contact</h2>
@@ -143,11 +143,13 @@ export const prerender = true
       confined to your device throughout every connection flow.
     </p>
     <p>
-      If you publish through a Vector-hosted publishing feature, the selected files and deployment metadata
-      are uploaded to the hosting infrastructure; public site files may be stored in Vercel Blob and served
-      to anyone with access to their URLs. Publishing can disclose content publicly. Remove private data and
-      secrets before uploading. Local deletion, sign-out, or account deletion does not itself remove
-      a hosted deployment; use the hosting provider's controls or contact support about Vector-hosted content.
+      When you publish, Vector uploads the project's files and deployment settings from your device to the
+      Vercel account and project you connected and linked; Vector does not host the site. A published
+      deployment can be reached by anyone with its URL unless Vercel's deployment protection covers it, so
+      publishing can disclose content publicly. Remove private data and secrets before publishing. Local
+      deletion, sign-out, or account deletion does not itself remove a deployment from your Vercel account;
+      remove it there. For content published through Vector's earlier hosted publishing service, which has
+      been retired, contact support to have it removed.
     </p>
     <p>
       <strong>Vector-hosted public sessions.</strong> Where this optional service is available, publishing a

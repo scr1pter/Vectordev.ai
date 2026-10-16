@@ -205,15 +205,26 @@ export function VercelEnvironment(props: {
             disabled={state.draft.editing}
             onInput={(event) => setState("draft", "key", event.currentTarget.value)}
           />
-          <input
-            class="cloud-input"
-            type="password"
-            placeholder={state.draft.editing ? "new value" : "value"}
+          {/* A textarea, masked like a password field, so a value with line
+              breaks such as a PEM key reaches Vercel intact: an input strips
+              them. Enter saves as it does in the name field; Shift+Enter adds
+              a line. */}
+          <textarea
+            class="cloud-input vercel-env-value"
+            rows={1}
+            placeholder={
+              state.draft.editing ? "new value (Shift+Enter for a new line)" : "value (Shift+Enter for a new line)"
+            }
             aria-label="Variable value"
             autocomplete="off"
             spellcheck={false}
             value={state.draft.value}
             onInput={(event) => setState("draft", "value", event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.shiftKey || event.isComposing) return
+              event.preventDefault()
+              event.currentTarget.form?.requestSubmit()
+            }}
           />
           <div class="vercel-targets" role="group" aria-label="Environments">
             <For each={VERCEL_ENV_TARGETS}>

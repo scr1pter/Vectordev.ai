@@ -228,6 +228,29 @@ test.skipIf(!darwin)("package-manager credential files are masked inside writabl
   expect(denied.output).not.toContain("secret")
 })
 
+test.skipIf(!darwin)("the Vercel and Supabase command-line logins stay out of a sandboxed command", () => {
+  const root = workspace()
+  const fakeHome = workspace("sandbox-home-")
+  const logins = [
+    "Library/Application Support/com.vercel.cli/auth.json",
+    ".local/share/com.vercel.cli/auth.json",
+    ".vercel/auth.json",
+    ".supabase/access-token",
+  ]
+  logins.forEach((entry) => {
+    const file = path.join(fakeHome, entry)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, "fixture-cli-login")
+  })
+  const denied = sandboxed({
+    command: `cat ${logins.map((entry) => JSON.stringify(path.join(fakeHome, entry))).join(" ")}`,
+    workspaceRoot: root,
+    home: fakeHome,
+  })
+  expect(denied.status).not.toBe(0)
+  expect(denied.output).not.toContain("fixture-cli-login")
+})
+
 test("credential stores cover the data directory, the CLI default, the earlier product and the desktop vault", () => {
   const fakeHome = workspace("sandbox-home-")
   // The desktop layout: the engine's data directory lives under the app's user data.

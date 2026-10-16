@@ -12,6 +12,7 @@ import { cloudProjectScopeKey } from "./cloud-console"
 import { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import { validateCloudProviderToken, type CloudProviderId } from "./cloud-provider-token"
+import { vercelApiBase } from "./cloud-vercel-api"
 
 export { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
 export type { CloudProviderId } from "./cloud-provider-token"
@@ -327,7 +328,7 @@ async function providerJson(
   return body
 }
 
-async function finishOAuthDeepLink(url: URL): Promise<void> {
+async function finishOAuthDeepLink(url: URL, request: CloudFetch): Promise<void> {
   const providerValue = url.searchParams.get("provider")
   if (!isProvider(providerValue)) return
   const flow = activeFlows.get(providerValue)
@@ -340,19 +341,23 @@ async function finishOAuthDeepLink(url: URL): Promise<void> {
     refreshToken?: string
     expiresIn?: number
     teamId?: string
-  }>("/exchange", {
-    method: "POST",
-    body: JSON.stringify({
-      provider: providerValue,
-      code: authorization,
-      state: returnedState,
-      codeVerifier: flow.codeVerifier,
-    }),
-  })
+  }>(
+    "/exchange",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        provider: providerValue,
+        code: authorization,
+        state: returnedState,
+        codeVerifier: flow.codeVerifier,
+      }),
+    },
+    request,
+  )
   const teamId = token.teamId ?? url.searchParams.get("teamId") ?? undefined
   if (!token.accessToken) throw new Error(`${connectionLabel(providerValue)} did not return an access token.`)
 
-  const identity = await validateCloudProviderToken(providerValue, token.accessToken, fetch, teamId)
+  const identity = await validateCloudProviderToken(providerValue, token.accessToken, request, teamId)
   const connectedAt = now()
   saveConnection({
     provider: providerValue,
@@ -379,7 +384,7 @@ async function finishOAuthDeepLink(url: URL): Promise<void> {
   })
 }
 
-export async function handleCloudOAuthDeepLinks(urls: string[]): Promise<string[]> {
+export async function handleCloudOAuthDeepLinks(urls: string[], request: CloudFetch = fetch): Promise<string[]> {
   const remaining: string[] = []
   for (const value of urls) {
     let url: URL
@@ -398,7 +403,7 @@ export async function handleCloudOAuthDeepLinks(urls: string[]): Promise<string[
     // An unrelated protocol invocation must not cancel a pending approval.
     if (!flow || !matchesCloudOAuthState(flow.state, url.searchParams.get("state") ?? "")) continue
     try {
-      await finishOAuthDeepLink(url)
+      await finishOAuthDeepLink(url, request)
     } catch (error) {
       if (isProvider(provider)) {
         const flow = activeFlows.get(provider)
@@ -413,19 +418,80 @@ export async function handleCloudOAuthDeepLinks(urls: string[]): Promise<string[
   return remaining
 }
 
-export async function disconnectCloudProvider(provider: CloudProviderId): Promise<void> {
+// Removes Vector's credential and, for a sign-in connection, revokes it on the
+// provider too: Supabase's OAuth grant through the broker, and Vercel's
+// integration installation, which is what its token belongs to. A personal
+// access token the user pasted is theirs, so only Vector's copy is deleted.
+// The local credential goes even when revoking fails, and `detail` says which.
+export async function disconnectCloudProvider(
+  provider: CloudProviderId,
+  request: CloudFetch = fetch,
+): Promise<{ revoked: boolean; detail: string }> {
   cancelFlow(provider, new Error(`${connectionLabel(provider)} connection was cancelled.`))
   const connection = storedConnection(provider)
-  if (provider === "supabase" && connection?.refreshToken) {
-    const refreshToken = decryptCloudCredential(connection.refreshToken)
-    await brokerRequest("/revoke", {
-      method: "POST",
-      body: JSON.stringify({ provider, refreshToken }),
-    }).catch(() => undefined)
-  }
+  const label = connectionLabel(provider)
+  const revoked = connection ? await revokeConnection(connection, request) : undefined
   const records = readConnections().filter((item) => item.provider !== provider)
   writeConnections(records)
   await removeStoreFileIfEmpty(CONNECTION_STORE)
+  if (revoked === true)
+    return { revoked: true, detail: `${label} disconnected, and Vector's access on ${label} is revoked.` }
+  if (revoked === false) {
+    return {
+      revoked: false,
+      detail:
+        provider === "vercel"
+          ? "Vercel disconnected from Vector, but Vercel did not confirm removing Vector's integration. It still has access until you remove Vector under your Vercel team's Integrations."
+          : "Supabase disconnected from Vector, but Supabase did not confirm revoking Vector's access. It still has access until you remove Vector under your Supabase organization's OAuth Apps.",
+    }
+  }
+  return {
+    revoked: false,
+    detail: connection
+      ? `${label} disconnected. Vector deleted its copy of your access token; the token itself stays valid until you delete it in ${label}'s token settings.`
+      : `${label} is not connected.`,
+  }
+}
+
+// true when the provider confirmed the revocation, false when it was tried and
+// failed, undefined when there is nothing for Vector to revoke.
+async function revokeConnection(connection: StoredConnection, request: CloudFetch) {
+  if (connection.provider === "supabase") {
+    if (!connection.refreshToken) return undefined
+    const refreshToken = decryptCloudCredential(connection.refreshToken)
+    return brokerRequest("/revoke", {
+      method: "POST",
+      body: JSON.stringify({ provider: "supabase", refreshToken }),
+    }).then(
+      () => true,
+      () => false,
+    )
+  }
+  if (!connection.configurationId) return undefined
+  // https://vercel.com/docs/rest-api/reference/endpoints/integrations/delete-an-integration-configuration
+  const url = new URL(
+    `${vercelApiBase()}/v1/integrations/configuration/${encodeURIComponent(connection.configurationId)}`,
+  )
+  if (connection.teamId) url.searchParams.set("teamId", connection.teamId)
+  return request(url, {
+    method: "DELETE",
+    headers: {
+      authorization: `Bearer ${decryptCloudCredential(connection.accessToken)}`,
+      "user-agent": VECTOR_USER_AGENT,
+    },
+    signal: AbortSignal.timeout(20_000),
+  }).then(
+    async (response) =>
+      // Already removed on Vercel, or the token no longer works: Vector has no access left either way.
+      response.ok ||
+      response.status === 404 ||
+      ((response.status === 401 || response.status === 403) &&
+        (await response
+          .json()
+          .then((body: unknown) => Reflect.get(Reflect.get(Object(body), "error") ?? {}, "invalidToken") === true)
+          .catch(() => false))),
+    () => false,
+  )
 }
 
 async function accessToken(
@@ -479,7 +545,7 @@ export async function getSupabaseManagementToken(request: CloudFetch = fetch): P
 
 export async function getCloudProviderRuntimeAuth(
   provider: Exclude<CloudProviderId, "supabase">,
-): Promise<{ token?: string; account?: string; accountId?: string; teamId?: string }> {
+): Promise<{ token?: string; account?: string; accountId?: string; teamId?: string; installation?: boolean }> {
   const record = storedConnection(provider)
   if (!record) return {}
   return {
@@ -487,14 +553,23 @@ export async function getCloudProviderRuntimeAuth(
     account: record.account,
     accountId: record.accountId,
     teamId: record.teamId,
+    // A sign-in is a Vercel integration installed on one scope, and its token
+    // reaches that scope only; a pasted token reaches every team it can.
+    installation: Boolean(record.configurationId),
   }
 }
 
 // The team a Vercel token lists projects in until a project link names its own.
-// Undefined selects the personal account.
+// Undefined selects the personal account. A sign-in stays on the scope it was
+// installed on.
 export function setCloudProviderDefaultTeam(provider: Exclude<CloudProviderId, "supabase">, teamId?: string): void {
   const record = storedConnection(provider)
   if (!record) throw new Error(`Connect ${connectionLabel(provider)} in Vector Cloud first.`)
+  if (record.configurationId && record.teamId !== teamId) {
+    throw new Error(
+      `This ${connectionLabel(provider)} sign-in is installed on one ${record.teamId ? "team" : "personal account"} only. To use another, disconnect and sign in again choosing it on Vercel's install screen, or connect with an access token.`,
+    )
+  }
   saveConnection({ ...record, teamId })
 }
 

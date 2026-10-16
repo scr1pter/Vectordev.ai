@@ -1,11 +1,18 @@
 import { createEffect, For, on, Show } from "solid-js"
 import { createStore } from "solid-js/store"
+import { vercelLogsPrompt } from "../cloud-handoff"
 import { vercelApi, vercelErrorText, type VercelDeployment } from "./vercel-api"
 import { formatWhen, VercelLinkRequired, type VercelNotice } from "./vercel-ui"
 
 // Build output and the running app's logs for any deployment of the linked
-// Vercel project, the same reads the agent's logs action makes.
-export function VercelLogs(props: { projectPath: string; notice: VercelNotice; onOpenConnections?: () => void }) {
+// Vercel project, the same reads the agent's logs action makes, and the agent
+// started on them.
+export function VercelLogs(props: {
+  projectPath: string
+  notice: VercelNotice
+  onOpenConnections?: () => void
+  onDiagnose?: (prompt: string) => void
+}) {
   const api = vercelApi()
   const [state, setState] = createStore({
     linked: true,
@@ -13,6 +20,9 @@ export function VercelLogs(props: { projectPath: string; notice: VercelNotice; o
     selected: "",
     source: "runtime" as "build" | "runtime",
     output: "",
+    // The deployment and source the shown output was read from, which the
+    // pickers above can move away from before the agent is started.
+    shown: { id: "", source: "runtime" as "build" | "runtime", lines: false },
     fetchedAt: "",
     loading: false,
   })
@@ -42,6 +52,7 @@ export function VercelLogs(props: { projectPath: string; notice: VercelNotice; o
       const result = await api.logs(props.projectPath, state.selected, state.source, 300)
       setState({
         fetchedAt: result.fetchedAt,
+        shown: { id: state.selected, source: state.source, lines: Boolean(result.log) },
         output:
           result.log ||
           (state.source === "runtime"
@@ -54,6 +65,18 @@ export function VercelLogs(props: { projectPath: string; notice: VercelNotice; o
     } finally {
       setState("loading", false)
     }
+  }
+
+  const diagnose = () => {
+    const deployment = state.deployments.find((item) => item.id === state.shown.id)
+    if (!deployment) return
+    props.onDiagnose?.(
+      vercelLogsPrompt({
+        deploymentId: deployment.id,
+        source: state.shown.source,
+        label: `${deployment.current ? "serving production" : deployment.target}${deployment.branch ? `, branch ${deployment.branch}` : ""}, ${deployment.state.toLowerCase()}`,
+      }),
+    )
   }
 
   return (
@@ -98,12 +121,19 @@ export function VercelLogs(props: { projectPath: string; notice: VercelNotice; o
           </button>
         </div>
         <Show when={state.output}>
-          <p class="cloud-muted mt-3 text-[11px]">
-            {state.source === "runtime"
-              ? "Requests, errors and console output of the running app"
-              : "What the build printed"}{" "}
-            · read {formatWhen(state.fetchedAt)}
-          </p>
+          <div class="mt-3 flex items-center justify-between gap-3">
+            <p class="cloud-muted text-[11px]">
+              {state.shown.source === "runtime"
+                ? "Requests, errors and console output of the running app"
+                : "What the build printed"}{" "}
+              · read {formatWhen(state.fetchedAt)}
+            </p>
+            <Show when={props.onDiagnose && state.shown.lines}>
+              <button class="cloud-button" type="button" onClick={diagnose}>
+                Diagnose with the agent
+              </button>
+            </Show>
+          </div>
           <pre class="cloud-log mt-2">{state.output}</pre>
         </Show>
       </div>

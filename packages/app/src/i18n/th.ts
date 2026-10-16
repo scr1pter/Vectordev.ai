@@ -417,7 +417,8 @@ export const dict = {
   "toast.workspace.disabled.description": "จะแสดงเฉพาะ worktree หลักในแถบด้านข้าง",
 
   "toast.permissions.autoaccept.on.title": "กำลังยอมรับสิทธิ์โดยอัตโนมัติ",
-  "toast.permissions.autoaccept.on.description": "คำขอสิทธิ์จะได้รับการอนุมัติโดยอัตโนมัติ",
+  "toast.permissions.autoaccept.on.description":
+    "คำขอสิทธิ์จะได้รับการอนุมัติโดยอัตโนมัติ การเปลี่ยนแปลงบัญชี Vector Cloud การดำเนินการที่ละเอียดอ่อนในเบราว์เซอร์ การใช้คอมพิวเตอร์ และการเรียกเครื่องมือซ้ำ ๆ จะยังคงขออนุญาต",
   "toast.permissions.autoaccept.off.title": "หยุดยอมรับสิทธิ์โดยอัตโนมัติแล้ว",
   "toast.permissions.autoaccept.off.description": "คำขอสิทธิ์จะต้องได้รับการอนุมัติ",
 

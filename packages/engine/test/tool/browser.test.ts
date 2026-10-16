@@ -36,6 +36,100 @@ describe("browser sensitive action detection", () => {
     ).toContain("Deploy project")
   })
 
+  test("requires approval for the cloud dashboard actions vector_cloud asks for every time", () => {
+    for (const text of [
+      "Promote to Production",
+      "Instant Rollback",
+      "Roll Back",
+      "Redeploy",
+      "Save",
+      "Add Environment Variable",
+      "Run",
+      "Pause project",
+      "Restore project",
+      "Reset database password",
+      "Rotate key",
+      "Revoke access",
+      "Invite user",
+      "Uninstall",
+      "Disconnect",
+    ]) {
+      const report = {
+        ok: true,
+        finalUrl: "https://vercel.com/team/shop",
+        title: "",
+        description: "",
+        screenshotDataUrl: "",
+        console: [],
+        pageErrors: [],
+        domSummary: { textSample: "", inputs: [], interactives: [{ tag: "button", text, selector: "#action" }] },
+      }
+      expect({ text, asked: describeSensitiveBrowserAction({ action: "click", selector: "#action" }, report) }).toEqual(
+        {
+          text,
+          asked: `Click ${text} on an external page`,
+        },
+      )
+    }
+  })
+
+  test("requires approval for every key that presses a button or submits a form", () => {
+    for (const key of ["Return", "NumpadEnter", "Space", " ", "Control+Enter", "Meta+Return", "Shift+Space"]) {
+      expect({
+        key,
+        asked: describeSensitiveBrowserAction({ action: "press", key }, page("https://example.com")),
+      }).toEqual({ key, asked: expect.stringContaining("press the focused button") })
+    }
+    expect(describeSensitiveBrowserAction({ action: "press", key: "Tab" }, page("https://example.com"))).toBeUndefined()
+    expect(
+      describeSensitiveBrowserAction(
+        { action: "type", selector: "#q", text: "drop table x\n" },
+        page("https://example.com"),
+      ),
+    ).toContain("line break")
+    expect(
+      describeSensitiveBrowserAction({ action: "type", selector: "#q", text: "shoes" }, page("https://example.com")),
+    ).toBeUndefined()
+  })
+
+  test("judges a positional selector by the name of the element it matches", () => {
+    for (const [selector, label] of [
+      ["div[role=dialog] button:last-child", "Promote"],
+      ["button.bg-primary", "Instant Rollback"],
+    ]) {
+      const report = { ...page("https://example.com"), target: { found: true, label } }
+      expect(describeSensitiveBrowserAction({ action: "click", selector }, report)).toBe(
+        `Click ${label} on an external page`,
+      )
+    }
+    const missing = { ...page("https://example.com"), target: { found: false, label: "" } }
+    expect(describeSensitiveBrowserAction({ action: "click", selector: "button.bg-primary" }, missing)).toBeUndefined()
+  })
+
+  test("requires approval for every click and key press on the Vercel and Supabase dashboards", () => {
+    for (const url of [
+      "https://vercel.com/team-a/shop/deployments",
+      "https://supabase.com/dashboard/project/abc/settings/api",
+    ]) {
+      const report = { ...page(url), target: { found: true, label: "Overview" } }
+      expect({ url, asked: describeSensitiveBrowserAction({ action: "click", selector: "#tab" }, report) }).toEqual({
+        url,
+        asked: expect.stringContaining("dashboard"),
+      })
+      expect({ url, asked: describeSensitiveBrowserAction({ action: "press", key: "Tab" }, report) }).toEqual({
+        url,
+        asked: expect.stringContaining("dashboard"),
+      })
+    }
+    for (const url of ["https://vercel.com/docs/deployments", "https://supabase.com/docs/guides/database"]) {
+      const report = { ...page(url), target: { found: true, label: "Overview" } }
+      expect({ url, asked: describeSensitiveBrowserAction({ action: "click", selector: "#tab" }, report) }).toEqual({
+        url,
+        asked: undefined,
+      })
+    }
+  })
+
   test("does not interrupt harmless navigation clicks", () => {
     expect(
       describeSensitiveBrowserAction(
@@ -58,3 +152,16 @@ describe("browser sensitive action detection", () => {
     ).toBeUndefined()
   })
 })
+
+function page(finalUrl: string) {
+  return {
+    ok: true,
+    finalUrl,
+    title: "",
+    description: "",
+    screenshotDataUrl: "",
+    console: [],
+    pageErrors: [],
+    domSummary: { textSample: "", inputs: [], interactives: [] },
+  }
+}

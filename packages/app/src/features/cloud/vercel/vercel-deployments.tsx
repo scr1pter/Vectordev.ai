@@ -1,6 +1,5 @@
 import { createEffect, createMemo, For, on, Show } from "solid-js"
 import { createStore } from "solid-js/store"
-import { usePlatform } from "@/context/platform"
 import { cloudApi, type CloudDeployment } from "../cloud-api"
 import { deployRepairPrompt } from "../cloud-handoff"
 import { vercelApi, vercelErrorText, type VercelDeployment, type VercelProjectStatus } from "./vercel-api"
@@ -21,7 +20,6 @@ export function VercelDeployments(props: {
 }) {
   const api = vercelApi()
   const cloud = cloudApi()
-  const platform = usePlatform()
   const confirm = createConfirm()
   const [state, setState] = createStore({
     status: undefined as VercelProjectStatus | undefined,
@@ -295,13 +293,6 @@ export function VercelDeployments(props: {
                               )}
                             </For>
                           </p>
-                        </Show>
-                        <Show when={deployment.inspectorUrl}>
-                          {(url) => (
-                            <button class="vercel-text-button" type="button" onClick={() => platform.openLink(url())}>
-                              Open in Vercel
-                            </button>
-                          )}
                         </Show>
                         <Show when={release()}>
                           {(item) => (

@@ -246,6 +246,40 @@ describe("projects", () => {
     expectNoSecrets(created, fake.state.password ?? "")
   })
 
+  test("an account with no organization creates one in Vector, once, then a project in it", async () => {
+    connect()
+    fake.state.organizations = []
+    expect(await run("create_organization", { organizationName: " \n " })).toMatchObject({
+      ok: false,
+      error: "organizationName is required.",
+    })
+    expect(await run("create_organization", { organizationName: "a\u0007b" })).toMatchObject({
+      ok: false,
+      error: "Name the organization with up to 100 characters on one line.",
+    })
+    expect(fake.calls.filter((call) => call.method === "POST")).toEqual([])
+
+    expect(await run("create_organization", { organizationName: "  Ada Labs " })).toEqual({
+      ok: true,
+      organization: { id: "org-1", name: "Ada Labs" },
+      createdNow: true,
+      detail: "Created the Supabase organization Ada Labs.",
+    })
+    // A retry after an interruption finds it instead of creating a second one.
+    expect(await run("create_organization", { organizationName: "Ada Labs" })).toMatchObject({
+      ok: true,
+      organization: { id: "org-1" },
+      createdNow: false,
+    })
+    expect(fake.calls.filter((call) => call.method === "POST").map((call) => [call.path, call.body])).toEqual([
+      ["/v1/organizations", { name: "Ada Labs" }],
+    ])
+
+    expect(await run("supabase_projects")).toMatchObject({ organizations: [{ id: "org-1", name: "Ada Labs" }] })
+    expect(await run("create_project", { organizationId: "org-1" })).toMatchObject({ ok: true, createdNow: true })
+    expect(fake.state.projects.at(-1)).toMatchObject({ ref: "newprojectref01", organization_id: "org-1" })
+  })
+
   test("pauses and restores the linked project", async () => {
     connect()
     linkDatabase()
@@ -503,7 +537,6 @@ describe("migrations", () => {
     })) as Report
     expect(described).toMatchObject({
       ok: true,
-      repeatable: false,
       scope: { summary: expect.stringContaining(`Roll back ${name}`) },
       statements: [{ label: expect.stringContaining(".down.sql"), sql: "drop table profiles;" }],
       approved: { name, downChecksum: sha("drop table profiles;\n") },
@@ -673,6 +706,50 @@ describe("SQL console", () => {
     expect(console.result.hiddenColumns).toBeUndefined()
   })
 
+  test("the agent gets no credential behind an alias, a row constructor or a JSON key", async () => {
+    connect()
+    linkDatabase()
+    const hash = `$2a$10$${"N".repeat(53)}`
+    const answers: Record<string, unknown[]> = {
+      "select encrypted_password as h, email as e from auth.users": [{ h: hash, e: "a@example.com" }],
+      "select row_to_json(u) from auth.users u": [
+        { row_to_json: { id: 1, encrypted_password: hash, recovery_token: "fixture-recovery-token" } },
+      ],
+      "select id, email, count(*) from auth.users group by 1, 2": [{ id: 1, email: "a@example.com", count: 1 }],
+      "select row_to_json(p) as profile from profiles p": [
+        { profile: { id: 1, api_token: "fixture-api-token", logins: [{ password: "fixture-password" }], plan: "pro" } },
+      ],
+      "select pw as h from accounts": [{ h: hash }],
+    }
+    fake.state.sql = (sql) => answers[sql] ?? []
+    const run_ = (sql: string) => run("run_sql", { sql }, "agent")
+
+    const aliased = await run_("select encrypted_password as h, email as e from auth.users")
+    expect(aliased.result).toMatchObject({ rows: [["[hidden]", "[hidden]"]], hiddenColumns: ["h", "e"] })
+    const row = await run_("select row_to_json(u) from auth.users u")
+    expect(row.result).toMatchObject({ rows: [["[hidden]"]], hiddenColumns: ["row_to_json"] })
+    // Named non-credential columns of auth.users still come through.
+    const named = await run_("select id, email, count(*) from auth.users group by 1, 2")
+    expect(named.result).toMatchObject({ rows: [[1, "a@example.com", 1]] })
+    expect(named.result.hiddenColumns).toBeUndefined()
+    const json = await run_("select row_to_json(p) as profile from profiles p")
+    // Keys named like credentials lose their values at any depth; the rest stays readable.
+    const profile = JSON.parse(json.result.rows[0][0])
+    expect(profile).toMatchObject({ id: 1, plan: "pro" })
+    expect([profile.api_token, profile.logins[0].password].every((item) => /^\[(hidden|REDACTED)\]$/.test(item))).toBe(
+      true,
+    )
+    const renamed = await run_("select pw as h from accounts")
+    expect(renamed.result.rows).toEqual([["[hidden]"]])
+    expectNoSecrets(
+      [aliased, row, json, renamed],
+      hash,
+      "fixture-recovery-token",
+      "fixture-api-token",
+      "fixture-password",
+    )
+  })
+
   test("the agent's results are bounded and scrubbed of credentials and stored values", async () => {
     connect()
     linkDatabase()
@@ -769,44 +846,27 @@ describe("authentication", () => {
       request: fake.request,
     })
     expect(described).toMatchObject({
-      repeatable: true,
       scope: {
         summary:
           "Change Supabase Auth on shop-db: allow redirects to https://shop.vercel.app/**, https://*-krishnas-projects.vercel.app/**.",
       },
     })
-    // Turning a method off or removing an address can lock users out.
-    for (const narrowing of [
-      { emailEnabled: false },
-      { removeRedirectUrls: ["http://localhost:3000/**"] },
-      { providers: { github: { enabled: false } } },
-    ]) {
-      expect(await describeSupabaseCommand("update_auth", { projectPath: project, ...narrowing }, [])).toMatchObject({
-        repeatable: false,
+    // Turning a method off or removing an address can lock users out, and a
+    // new site URL or redirect is somewhere sign-in can hand over a session:
+    // the prompt names each change. Every one asks each time (PermissionPolicy).
+    for (const [change, named] of [
+      [{ emailEnabled: false }, "turn email sign-in off"],
+      [{ removeRedirectUrls: ["http://localhost:3000/**"] }, "stop allowing http://localhost:3000/**"],
+      [{ providers: { github: { enabled: false } } }, "turn github sign-in off"],
+      [{ siteUrl: "https://shop.example.com" }, "set the site URL to https://shop.example.com"],
+      [{ redirectUrls: ["https://attacker.example/**"] }, "allow redirects to https://attacker.example/**"],
+    ] as const) {
+      const prompt = await describeSupabaseCommand("update_auth", { projectPath: project, ...change }, [], {
+        request: fake.request,
       })
+      expect(prompt).toMatchObject({ ok: true, scope: { summary: expect.stringContaining(named) } })
+      expect(prompt).not.toHaveProperty("repeatable")
     }
-    // A new site URL, or an address that is not one of the linked Vercel ones,
-    // is somewhere sign-in can hand over a session, so an earlier "always"
-    // for the Vercel addresses never covers it.
-    for (const widening of [
-      { siteUrl: "https://shop.example.com" },
-      { redirectUrls: ["https://attacker.example/**"] },
-      { redirectUrls: ["https://shop.vercel.app/**", "https://attacker.example/**"] },
-    ]) {
-      expect(
-        await describeSupabaseCommand("update_auth", { projectPath: project, ...widening }, [], {
-          request: fake.request,
-        }),
-      ).toMatchObject({ repeatable: false })
-    }
-    expect(
-      await describeSupabaseCommand(
-        "update_auth",
-        { projectPath: project, redirectUrls: ["https://shop.vercel.app/**"] },
-        [],
-        { request: fake.request },
-      ),
-    ).toMatchObject({ repeatable: true })
     expect(
       await describeSupabaseCommand(
         "update_auth",
@@ -1168,7 +1228,7 @@ describe("agent bridge", () => {
     return (await response.json()) as Report
   }
 
-  test("describes changes for the permission prompt, with destructive ones never always-allowed", async () => {
+  test("describes each change for the permission prompt, naming what it would do", async () => {
     connect()
     linkDatabase()
     // Every query asks, and the prompt shows it.
@@ -1176,7 +1236,6 @@ describe("agent bridge", () => {
       await bridgeCommand({ command: "describe", action: "run_sql", sql: "select token from auth.refresh_tokens" }),
     ).toEqual({
       ok: true,
-      repeatable: false,
       scope: {
         provider: "Supabase",
         project: "shop-db",
@@ -1206,17 +1265,15 @@ describe("agent bridge", () => {
     ] as const) {
       expect(await bridgeCommand({ command: "describe", action, ...extra })).toMatchObject({
         ok: true,
-        repeatable: false,
+        scope: { provider: "Supabase", project: "shop-db", environment: "production" },
       })
     }
     expect(
       (await bridgeCommand({ command: "describe", action: "deploy_function", functionName: "open" })).scope.summary,
     ).toContain("verify_jwt = false for it, so anyone on the internet can call it")
     expect(
-      await bridgeCommand({ command: "describe", action: "deploy_function", functionName: "hello" }),
-    ).toMatchObject({
-      repeatable: true,
-    })
+      (await bridgeCommand({ command: "describe", action: "deploy_function", functionName: "hello" })).scope.summary,
+    ).toBe("Deploy supabase/functions/hello to shop-db as a live Edge Function.")
     expect(
       (
         await bridgeCommand({
@@ -1249,12 +1306,48 @@ describe("agent bridge", () => {
         userId: "00000000-0000-0000-0000-000000000001",
       }),
     ).toMatchObject({
-      repeatable: false,
       scope: {
         summary:
           "Delete the user ada@example.com (00000000-0000-0000-0000-000000000001) from shop-db. This cannot be undone.",
       },
     })
+  })
+
+  test("the agent creates an organization for an account with none, after a prompt that names it", async () => {
+    connect()
+    fake.state.organizations = []
+    expect(await bridgeCommand({ command: "create_database" })).toMatchObject({
+      ok: false,
+      needsSetup: true,
+      nextStep: expect.stringContaining("create_organization"),
+    })
+    expect(
+      await bridgeCommand({ command: "describe", action: "create_organization", organizationName: "Ada Labs" }),
+    ).toEqual({
+      ok: true,
+      scope: {
+        provider: "Supabase",
+        project: "organization Ada Labs",
+        environment: "account",
+        summary:
+          "Create a Supabase organization named Ada Labs on the connected Supabase account. Projects created in it are billed to it.",
+      },
+    })
+    expect(
+      await bridgeCommand({ command: "describe", action: "create_organization", organizationName: "x".repeat(101) }),
+    ).toMatchObject({ ok: false, error: "Name the organization with up to 100 characters on one line." })
+    expect(fake.calls.filter((call) => call.method === "POST")).toEqual([])
+
+    expect(await bridgeCommand({ command: "create_organization", organizationName: "Ada Labs" })).toMatchObject({
+      ok: true,
+      organization: { id: "org-1", name: "Ada Labs" },
+      createdNow: true,
+    })
+    expect(await bridgeCommand({ command: "create_database", organizationId: "org-1" })).toMatchObject({
+      ok: true,
+      createdNow: true,
+    })
+    expect(fake.state.projects.at(-1)).toMatchObject({ organization_id: "org-1" })
   })
 
   test("runs Supabase commands as the agent, with the agent's limits", async () => {

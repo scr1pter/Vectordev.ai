@@ -19,6 +19,11 @@ describe("plugin supply-chain policy", () => {
     expect(() => assertPluginInstallable(config!)).toThrow("not pinned")
   })
 
+  test("starts the Supabase server read-only", () => {
+    const config = PLUGIN_CATALOG.find((item) => item.id === "supabase")?.build?.({ SUPABASE_ACCESS_TOKEN: "sbp_test" })
+    expect(config?.type === "local" ? config.command : []).toContain("--read-only")
+  })
+
   test("allows only credential-free HTTPS remote plugin endpoints", () => {
     expect(isSecurePluginRemoteUrl("https://mcp.example.test/path")).toBe(true)
     expect(isSecurePluginRemoteUrl("http://mcp.example.test/path")).toBe(false)

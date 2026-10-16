@@ -113,16 +113,20 @@ export async function listVercelScopes(request?: VercelFetch): Promise<{ scopes:
   const user = objectField(userBody, "user") ?? userBody
   const username = stringField(user, "username") ?? stringField(user, "email") ?? "personal"
   const runtime = await getCloudProviderRuntimeAuth("vercel")
+  const scopes: VercelScope[] = [
+    { kind: "personal", slug: username, name: stringField(user, "name") ?? username },
+    ...teams.flatMap((team): VercelScope[] => {
+      const teamId = stringField(team, "id")
+      const slug = stringField(team, "slug")
+      if (!teamId || !slug) return []
+      return [{ kind: "team", teamId, slug, name: stringField(team, "name") ?? slug }]
+    }),
+  ]
   return {
-    scopes: [
-      { kind: "personal", slug: username, name: stringField(user, "name") ?? username },
-      ...teams.flatMap((team): VercelScope[] => {
-        const teamId = stringField(team, "id")
-        const slug = stringField(team, "slug")
-        if (!teamId || !slug) return []
-        return [{ kind: "team", teamId, slug, name: stringField(team, "name") ?? slug }]
-      }),
-    ],
+    // A sign-in's token reaches only the scope its integration was installed on.
+    scopes: runtime.installation
+      ? scopes.filter((scope) => (runtime.teamId ? scope.teamId === runtime.teamId : scope.kind === "personal"))
+      : scopes,
     selected: runtime.teamId,
   }
 }

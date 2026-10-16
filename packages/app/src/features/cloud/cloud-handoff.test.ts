@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { CloudOverview } from "./cloud-api"
 import {
+  CLOUD_SECTIONS,
   cloudHref,
   cloudStatus,
   composerTakes,
@@ -8,11 +9,15 @@ import {
   deployRepairPrompt,
   holdsHandoff,
   onComposerPrompt,
+  parseCloudSection,
   promoteFailed,
   publishPlan,
   publishRan,
   requestComposerPrompt,
+  securityFixPrompt,
+  supabaseLogsPrompt,
   uncommittedNote,
+  vercelLogsPrompt,
   type ComposerPrompt,
 } from "./cloud-handoff"
 
@@ -43,6 +48,17 @@ describe("cloud links", () => {
     expect(new URLSearchParams(cloudHref("/work/my shop", "database").split("?")[1]).get("project")).toBe(
       "/work/my shop",
     )
+  })
+
+  test("open every Cloud screen a link names, including Database logs and Security", () => {
+    for (const section of CLOUD_SECTIONS) {
+      const search = new URLSearchParams(cloudHref("/work/shop", section).split("?")[1])
+      expect(parseCloudSection(search.get("section"))).toBe(section)
+    }
+    expect(parseCloudSection("security")).toBe("security")
+    expect(parseCloudSection("data-logs")).toBe("data-logs")
+    expect(parseCloudSection("aws")).toBeUndefined()
+    expect(parseCloudSection(null)).toBeUndefined()
   })
 })
 
@@ -177,7 +193,7 @@ describe("publish plan", () => {
     })
     expect(publishPlan(overview().hosting)).toEqual({
       ready: false,
-      reason: "Connect Vercel in Vector Cloud > Connections with an access token.",
+      reason: "Connect Vercel in Vector Cloud > Connections.",
       connect: true,
     })
     // The agent publishes only through the connected account, so a machine
@@ -261,6 +277,59 @@ describe("cloud status", () => {
     // A release published after the failure is the newer state.
     expect(cloudStatus(overview({ latest: release, failure: { ...failure, at: "2026-10-10T09:00:00.000Z" } }))).toEqual(
       { tone: "success", label: "Preview published" },
+    )
+  })
+})
+
+describe("securityFixPrompt", () => {
+  test("hands the agent every finding by name and asks for reviewed migrations, never a value", () => {
+    const prompt = securityFixPrompt("shop-db", {
+      environment: [{ where: "VITE_SUPABASE_SERVICE_KEY", reason: "is public but holds a secret key", level: "ERROR" }],
+      bundle: [{ where: "dist/assets/index.js", reason: "ships a secret key", level: "ERROR" }],
+      advisors: [
+        {
+          name: "rls_disabled_in_public",
+          title: "RLS Disabled in Public",
+          level: "ERROR",
+          entity: "public.profiles",
+          remediation: "https://supabase.com/docs/guides/database/database-linter?lint=0013_rls_disabled_in_public",
+        },
+        { name: "info_only", title: "Informational", level: "INFO" },
+      ],
+    })
+    expect(prompt).toContain("Supabase project shop-db")
+    expect(prompt).toContain("ERROR · the variable VITE_SUPABASE_SERVICE_KEY is public but holds a secret key")
+    expect(prompt).toContain("ERROR · the built file dist/assets/index.js ships a secret key")
+    expect(prompt).toContain("ERROR · RLS Disabled in Public · public.profiles")
+    expect(prompt).not.toContain("Informational")
+    expect(prompt).toContain("create_migration")
+    expect(prompt).toContain("security_check again")
+    expect(prompt).toContain("never print its value")
+  })
+})
+
+describe("log diagnosis prompts", () => {
+  test("point the agent at the logs the user read, by the arguments its log actions take", () => {
+    const vercel = vercelLogsPrompt({ deploymentId: "dpl_live", source: "runtime", label: "serving production, ready" })
+    expect(vercel).toContain("runtime logs of the Vercel deployment dpl_live (serving production, ready)")
+    expect(vercel).toContain("vector_cloud logs (deploymentId dpl_live, source runtime)")
+    expect(vercel).toContain("Do not publish to production unless I ask")
+    expect(vercel).toContain("never ask me to paste its value")
+
+    const supabase = supabaseLogsPrompt({
+      project: "shop-db",
+      service: "postgres",
+      label: "Postgres",
+      minutes: 360,
+      search: "permission denied",
+    })
+    expect(supabase).toContain(
+      'Postgres logs of the Supabase project shop-db from the last 360 minutes, filtered to "permission denied"',
+    )
+    expect(supabase).toContain('vector_cloud supabase_logs (service postgres, minutes 360, search "permission denied")')
+    expect(supabase).toContain("create_migration")
+    expect(supabaseLogsPrompt({ project: "shop-db", service: "api", label: "API", minutes: 60 })).not.toContain(
+      "search",
     )
   })
 })

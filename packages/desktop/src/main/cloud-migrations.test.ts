@@ -413,7 +413,6 @@ describe("applyCloudMigrations", () => {
     expect(typeof approvalID).toBe("string")
     expect(plan).toMatchObject({
       ok: true,
-      repeatable: false,
       statements: [{ sql: "create table posts ();", truncated: false }],
       approved: { approvalID: expect.any(String) },
     })

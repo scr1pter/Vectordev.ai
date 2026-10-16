@@ -35,6 +35,43 @@ describe("Supabase console client", () => {
     ])
   })
 
+  test("creates an organization through the command the agent's create_organization runs", async () => {
+    const recorded = recordingBridge(() => ({ organization: { id: "org-1", name: "Ada Labs" }, createdNow: true }))
+    const client = supabaseClient(
+      () => ({ projectPath: "/work/shop" }),
+      () => recorded.bridge,
+    )
+    expect((await client.createOrganization("Ada Labs")).organization).toEqual({ id: "org-1", name: "Ada Labs" })
+    expect(recorded.sent).toEqual([
+      { command: "create_organization", input: { projectPath: "/work/shop", organizationName: "Ada Labs" } },
+    ])
+  })
+
+  test("writes a new migration with its down SQL through the agent's command", async () => {
+    const recorded = recordingBridge(() => ({ file: "supabase/migrations/20261015000000_add_profiles.sql" }))
+    const client = supabaseClient(
+      () => ({ projectPath: "/work/shop" }),
+      () => recorded.bridge,
+    )
+    const report = await client.createMigration({
+      name: "add_profiles",
+      sql: "create table profiles (id uuid primary key);",
+      downSql: "drop table profiles;",
+    })
+    expect(report.file).toBe("supabase/migrations/20261015000000_add_profiles.sql")
+    expect(recorded.sent).toEqual([
+      {
+        command: "create_migration",
+        input: {
+          projectPath: "/work/shop",
+          name: "add_profiles",
+          sql: "create table profiles (id uuid primary key);",
+          downSql: "drop table profiles;",
+        },
+      },
+    ])
+  })
+
   test("sends each control as the shared command, in the open project's scope", async () => {
     const { bridge, sent } = recordingBridge()
     const client = supabaseClient(

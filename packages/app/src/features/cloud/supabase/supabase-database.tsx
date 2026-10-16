@@ -12,7 +12,6 @@ export function SupabaseDatabase(
     connected: boolean
     onOpenConnections: () => void
     onDatabaseChange: () => Promise<void>
-    openLink: (url: string) => void
   },
 ) {
   const confirm = createConfirm()
@@ -21,6 +20,7 @@ export function SupabaseDatabase(
   const [mode, setMode] = createSignal<"link" | "create">("link")
   const [selection, setSelection] = createSignal("")
   const [organization, setOrganization] = createSignal("")
+  const [organizationName, setOrganizationName] = createSignal("")
   const [region, setRegion] = createSignal("us-east-1")
   const [busy, setBusy] = createSignal("")
   const [progress, setProgress] = createSignal<SupabaseProgress[]>([])
@@ -31,6 +31,7 @@ export function SupabaseDatabase(
   const [sql, setSql] = createSignal("select * from information_schema.tables where table_schema = 'public' limit 50;")
   const [result, setResult] = createSignal<SqlResult>()
   const [pendingWrite, setPendingWrite] = createSignal("")
+  const [draft, setDraft] = createStore({ open: false, name: "", sql: "", downSql: "" })
 
   onCleanup(props.client.subscribe((event) => setProgress((items) => [...items, event].slice(-12))))
 
@@ -50,6 +51,8 @@ export function SupabaseDatabase(
       regions: report.regions ?? [],
     })
     if (!organization() && report.organizations?.length === 1) setOrganization(report.organizations[0].id)
+    // With nothing to link, the only way forward is creating a project.
+    if (!report.projects?.length) setMode("create")
   }
 
   const loadMigrations = async () => {
@@ -97,6 +100,16 @@ export function SupabaseDatabase(
           report.client?.created ? ` and created ${report.client.path}` : ""
         }.${report.nextStep ? ` ${report.nextStep}` : ""}`,
       })
+    })
+
+  const createOrganization = () =>
+    act("organization", async () => {
+      const report = await props.client.createOrganization(organizationName())
+      if (failed(props.notice, report)) return
+      setOrganizationName("")
+      await loadProjects()
+      if (report.organization) setOrganization(report.organization.id)
+      props.notice({ tone: "success", text: report.detail ?? "Created the Supabase organization." })
     })
 
   const create = (organizationId?: string, regionId?: string) =>
@@ -177,6 +190,22 @@ export function SupabaseDatabase(
           ? { tone: "error", text: `${outcome.failed.name} failed: ${outcome.failed.error}` }
           : { tone: "success", text: `Applied ${outcome?.applied.length ?? 0} migration(s).` },
       )
+      await loadMigrations()
+    })
+
+  const createMigration = () =>
+    act("new-migration", async () => {
+      const report = await props.client.createMigration({
+        name: draft.name.trim(),
+        sql: draft.sql,
+        downSql: draft.downSql.trim() || undefined,
+      })
+      if (failed(props.notice, report)) return
+      setDraft({ open: false, name: "", sql: "", downSql: "" })
+      props.notice({
+        tone: "success",
+        text: `Wrote ${report.file}${report.downFile ? ` and ${report.downFile}` : ""}. Review pending SQL to apply it.`,
+      })
       await loadMigrations()
     })
 
@@ -284,7 +313,36 @@ export function SupabaseDatabase(
                   </button>
                 </div>
               </Show>
-              <Show when={mode() === "create"}>
+              <Show when={mode() === "create" && projects()?.organizations.length === 0}>
+                <p class="cloud-muted text-[12px] mt-3">
+                  This Supabase account has no organization yet. Supabase projects belong to one, and it is billed for
+                  them. Name one and Vector creates it.
+                </p>
+                <div class="sb-actions mt-2">
+                  <input
+                    class="cloud-input"
+                    aria-label="New organization name"
+                    placeholder="Organization name"
+                    maxLength={100}
+                    value={organizationName()}
+                    onInput={(event) => setOrganizationName(event.currentTarget.value)}
+                  />
+                  <button
+                    class="cloud-button"
+                    data-variant="primary"
+                    type="button"
+                    disabled={!organizationName().trim() || Boolean(busy())}
+                    onClick={() => confirm.ask("organization", () => void createOrganization())}
+                  >
+                    {busy() === "organization"
+                      ? "Creating…"
+                      : confirm.armed() === "organization"
+                        ? `Create ${organizationName().trim()}?`
+                        : "Create organization"}
+                  </button>
+                </div>
+              </Show>
+              <Show when={mode() === "create" && projects()?.organizations.length}>
                 <div class="sb-grid mt-3">
                   <label class="sb-field">
                     <span>Organization (billed for the project)</span>
@@ -356,17 +414,6 @@ export function SupabaseDatabase(
                 linkedProject()?.status ? ` · ${linkedProject()?.status?.toLowerCase().replaceAll("_", " ")}` : ""
               }`}
             >
-              <button
-                class="cloud-button"
-                type="button"
-                onClick={() =>
-                  props.openLink(
-                    `https://supabase.com/dashboard/project/${encodeURIComponent(projects()?.linked?.ref ?? "")}`,
-                  )
-                }
-              >
-                Open in Supabase
-              </button>
               <button
                 class="cloud-button"
                 type="button"
@@ -461,7 +508,7 @@ export function SupabaseDatabase(
               detail={
                 migrations()?.migrations
                   ? `${migrations()?.migrations?.directory} · ${migrations()?.migrations?.alreadyApplied.length} applied · ${migrations()?.migrations?.pending.length} pending`
-                  : "Write .sql files in supabase/migrations (or ask the agent to), then apply them here."
+                  : "Write a migration here, or as a .sql file in supabase/migrations, then apply it here."
               }
             >
               <button
@@ -471,6 +518,14 @@ export function SupabaseDatabase(
                 onClick={() => void loadMigrations()}
               >
                 Refresh
+              </button>
+              <button
+                class="cloud-button"
+                type="button"
+                disabled={Boolean(busy())}
+                onClick={() => setDraft("open", !draft.open)}
+              >
+                {draft.open ? "Close" : "New migration"}
               </button>
               <Show when={migrations()?.migrations?.pending.length}>
                 <button
@@ -497,6 +552,57 @@ export function SupabaseDatabase(
                 )}
               </Show>
             </PanelHead>
+            <Show when={draft.open}>
+              <form
+                class="sb-section"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void createMigration()
+                }}
+              >
+                <label class="cloud-token-field">
+                  <span>Name</span>
+                  <input
+                    class="cloud-input"
+                    placeholder="add_profiles"
+                    spellcheck={false}
+                    value={draft.name}
+                    onInput={(event) => setDraft("name", event.currentTarget.value)}
+                  />
+                </label>
+                <label class="cloud-token-field mt-3">
+                  <span>SQL</span>
+                  <textarea
+                    class="sb-textarea"
+                    spellcheck={false}
+                    value={draft.sql}
+                    onInput={(event) => setDraft("sql", event.currentTarget.value)}
+                  />
+                </label>
+                <label class="cloud-token-field mt-3">
+                  <span>Down SQL (undoes it; without it Vector cannot roll it back)</span>
+                  <textarea
+                    class="sb-textarea"
+                    spellcheck={false}
+                    value={draft.downSql}
+                    onInput={(event) => setDraft("downSql", event.currentTarget.value)}
+                  />
+                </label>
+                <div class="sb-actions mt-3">
+                  <button
+                    class="cloud-button"
+                    data-variant="primary"
+                    type="submit"
+                    disabled={Boolean(busy()) || !draft.name.trim() || !draft.sql.trim()}
+                  >
+                    {busy() === "new-migration" ? "Writing…" : "Write migration file"}
+                  </button>
+                  <span class="cloud-muted text-[12px]">
+                    Vector writes the file into this repository; nothing reaches the database until you apply it.
+                  </span>
+                </div>
+              </form>
+            </Show>
             <Show when={migrationReview.plan}>
               {(plan) => (
                 <div class="sb-section">

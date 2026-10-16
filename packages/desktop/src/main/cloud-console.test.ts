@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { lstat, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -86,9 +87,33 @@ describe("managed cloud environment", () => {
 
   test("creates a private environment file without disclosing values in its result", async () => {
     setEnv(project, undefined, "SECRET", "fixture-only-secret")
-    expect(await applyEnv(project)).toEqual({ written: ".env" })
+    expect(await applyEnv(project)).toEqual({ written: ".env", gitignoreUpdated: true })
     expect(await readFile(join(project, ".env"), "utf8")).toContain("SECRET=fixture-only-secret")
     if (process.platform !== "win32") expect((await lstat(join(project, ".env"))).mode & 0o777).toBe(0o600)
+  })
+
+  test("never puts a server-only value into a .env that git tracks", async () => {
+    execFileSync("git", ["init", "-q"], { cwd: project })
+    await writeFile(join(project, ".env"), "KEEP=yes\n")
+    execFileSync("git", ["add", ".env"], { cwd: project })
+    setEnv(project, undefined, "VITE_SUPABASE_URL", "https://fixture.supabase.co", "public")
+    expect(await applyEnv(project)).toEqual({ written: ".env", gitignoreUpdated: false })
+    expect(await readFile(join(project, ".env"), "utf8")).toContain("VITE_SUPABASE_URL=")
+    setEnv(project, undefined, "STRIPE_SECRET_KEY", "fixture-server-secret", "server")
+    const before = await readFile(join(project, ".env"), "utf8")
+    await expect(applyEnv(project)).rejects.toThrow(
+      "commits it to git and it would hold the server-only value STRIPE_SECRET_KEY. Stop tracking it with `git rm --cached .env`",
+    )
+    expect(await readFile(join(project, ".env"), "utf8")).toBe(before)
+    expect(await Bun.file(join(project, ".gitignore")).exists()).toBe(false)
+  })
+
+  test("keeps an untracked .env out of git before writing a value into it", async () => {
+    execFileSync("git", ["init", "-q"], { cwd: project })
+    setEnv(project, undefined, "SECRET", "fixture-only-secret")
+    expect(await applyEnv(project)).toEqual({ written: ".env", gitignoreUpdated: true })
+    execFileSync("git", ["check-ignore", "-q", ".env"], { cwd: project })
+    expect(await applyEnv(project)).toEqual({ written: ".env", gitignoreUpdated: false })
   })
 
   test("rejects a symlink without touching its target", async () => {
@@ -361,6 +386,50 @@ describe("cloud bridge publish destination", () => {
     expect(published).toEqual([])
   })
 
+  test("lets the agent list, write and remove the stored variables without seeing a value", async () => {
+    setEnv(project, undefined, "STRIPE_SECRET_KEY", "fixture-server-secret", "server")
+    setEnv(project, undefined, "VITE_SITE_NAME", "fixture-public-name", "public")
+    const bridge = await startCloudBridge()
+    const command = async (input: Record<string, unknown>) => (await bridgeCommand(bridge, input)).json()
+    const listed = await command({ command: "stored_env" })
+    expect(listed).toEqual({
+      ok: true,
+      variables: [
+        { key: "STRIPE_SECRET_KEY", visibility: "server" },
+        { key: "VITE_SITE_NAME", visibility: "public" },
+      ],
+    })
+    const write = await command({ command: "describe", action: "write_env_file" })
+    expect(write.scope).toMatchObject({
+      provider: "Vector",
+      environment: "local .env",
+      summary:
+        "Write this project's 2 stored environment variables (STRIPE_SECRET_KEY, VITE_SITE_NAME) to the .env of this project. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.",
+    })
+    expect(await command({ command: "write_env_file" })).toEqual({
+      ok: true,
+      applied: { written: ".env", gitignoreUpdated: true },
+    })
+    expect(await readFile(join(project, ".env"), "utf8")).toContain("STRIPE_SECRET_KEY=fixture-server-secret")
+    expect(await command({ command: "describe", action: "remove_stored_env", key: "MISSING" })).toMatchObject({
+      ok: false,
+      error: "MISSING is not stored for this project.",
+    })
+    expect(
+      (await command({ command: "describe", action: "remove_stored_env", key: "VITE_SITE_NAME" })).scope,
+    ).toMatchObject({
+      provider: "Vector",
+      environment: "stored variables",
+    })
+    expect(await command({ command: "remove_stored_env", key: "VITE_SITE_NAME" })).toEqual({
+      ok: true,
+      removed: "VITE_SITE_NAME",
+      variables: ["STRIPE_SECRET_KEY"],
+    })
+    expect(listEnv(project).map((item) => item.key)).toEqual(["STRIPE_SECRET_KEY"])
+    expect(JSON.stringify([listed, write])).not.toContain("fixture-")
+  })
+
   test("describes what each changing action would touch for the permission prompt", async () => {
     seedHost("vercel")
     setEnv(project, undefined, "API_URL", "https://api.fixture.invalid")
@@ -383,15 +452,14 @@ describe("cloud bridge publish destination", () => {
       environment: "production",
       summary: expect.stringContaining("Production traffic moves to it only if they pass"),
     })
-    // Moving production asks every time; a preview may be remembered.
-    expect(production.repeatable).toBe(false)
+    // Every account action asks each time (PermissionPolicy), so describe carries no approval tier.
+    expect(production).not.toHaveProperty("repeatable")
     for (const action of ["prepare_database", "prepare_auth", "apply_migrations"]) {
       expect(await describe({ action })).toMatchObject({ ok: false, needsSetup: true })
     }
-    // Creating something the user is billed for asks every time.
+    // Creating something the user is billed for names who pays.
     expect(await describe({ action: "create_database", organizationId: "org_1", region: "eu-west-2" })).toMatchObject({
       ok: true,
-      repeatable: false,
       scope: {
         provider: "Supabase",
         project: "a new project",
@@ -406,13 +474,23 @@ describe("cloud bridge publish destination", () => {
       projectRef: "fixtureref",
       projectName: "shop-db",
     })
-    // A schema change on the production database asks every time; reading the plan does not.
+    // A schema change on the production database asks; reading the plan is its own read-only permission.
     // An approval requires actual pending SQL for review.
     expect(await describe({ action: "apply_migrations" })).toMatchObject({ ok: false, needsSetup: true })
     const dryRun = await describe({ action: "apply_migrations", dryRun: true })
     expect(dryRun.scope.summary).toContain("Nothing changes")
     expect(dryRun).not.toHaveProperty("repeatable")
     expect((await describe({ action: "create_database" })).scope.summary).toContain("nothing new is created")
+    // prepare rewrites the whole managed block, so the prompt names every stored variable, never a value.
+    const prepare = await describe({ action: "prepare_database" })
+    expect(prepare.scope).toEqual({
+      provider: "Supabase",
+      project: "shop-db",
+      environment: "local .env",
+      summary:
+        "Write this project's 3 stored environment variables (API_URL, SUPABASE_URL, SUPABASE_ANON_KEY) to the .env of this project, including the Supabase project shop-db's public client settings. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.",
+    })
+    expect(JSON.stringify(prepare)).not.toContain("api.fixture.invalid")
     const missing = await bridgeCommand(bridge, { command: "describe" })
     expect(missing.status).toBe(400)
     expect(await (await bridgeCommand(bridge, { command: "describe", action: "status" })).json()).toEqual({

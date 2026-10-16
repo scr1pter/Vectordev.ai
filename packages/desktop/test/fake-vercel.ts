@@ -82,6 +82,8 @@ export function fakeVercel(options: { token?: string } = {}) {
     domainConfig: new Map<string, object>(),
     verifiable: new Set<string>(),
     requests: [] as FakeRequest[],
+    /** Integration installations (configurationId to the team it was installed on). */
+    configurations: new Map<string, string | undefined>(),
     pageSize: undefined as number | undefined,
   }
   let sequence = 0
@@ -118,6 +120,14 @@ export function fakeVercel(options: { token?: string } = {}) {
 
     // https://vercel.com/docs/rest-api/user/get-the-user
     if (method === "GET" && path === "/v2/user") return Response.json({ user: state.user })
+    // https://vercel.com/docs/rest-api/reference/endpoints/integrations/delete-an-integration-configuration
+    if (method === "DELETE" && parts[0] === "v1" && parts[1] === "integrations" && parts[2] === "configuration") {
+      if (!state.configurations.has(parts[3]) || state.configurations.get(parts[3]) !== scopeOf()) return notFound()
+      state.configurations.delete(parts[3])
+      // Removing the installation revokes its token.
+      state.rejectToken = true
+      return new Response(null, { status: 204 })
+    }
     // https://vercel.com/docs/rest-api/teams/list-all-teams (pagination by `until`)
     if (method === "GET" && path === "/v2/teams") {
       return Response.json(paged("teams", state.teams, (team) => team.createdAt, query))

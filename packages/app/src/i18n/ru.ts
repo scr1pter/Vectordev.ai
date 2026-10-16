@@ -415,7 +415,8 @@ export const dict = {
   "toast.scheme.title": "Цветовая схема",
 
   "toast.permissions.autoaccept.on.title": "Разрешения принимаются автоматически",
-  "toast.permissions.autoaccept.on.description": "Запросы на разрешения будут одобряться автоматически",
+  "toast.permissions.autoaccept.on.description":
+    "Запросы на разрешения одобряются автоматически. Изменения аккаунтов Vector Cloud, чувствительные действия в браузере, управление компьютером и повторяющиеся вызовы инструментов по-прежнему требуют подтверждения.",
   "toast.permissions.autoaccept.off.title": "Автоматическое принятие разрешений остановлено",
   "toast.permissions.autoaccept.off.description": "Запросы на разрешения будут требовать одобрения",
 

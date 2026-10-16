@@ -147,6 +147,10 @@ export function supabaseClient(
   return {
     subscribe: (cb: (event: SupabaseProgress) => void) => bridge()?.subscribe(cb) ?? (() => undefined),
     projects: () => run<SupabaseProjects>("supabase_projects"),
+    createOrganization: (name: string) =>
+      run<{ organization: SupabaseOrganization; createdNow: boolean; detail: string }>("create_organization", {
+        organizationName: name,
+      }),
     createProject: (organizationId?: string, region?: string) =>
       run<{ createdNow: boolean; needsChoice: boolean; organizations: SupabaseOrganization[]; waitedMs: number }>(
         "create_project",
@@ -167,6 +171,10 @@ export function supabaseClient(
         input,
       ),
     migrationStatus: () => run<MigrationState>("migration_status"),
+    // Writes supabase/migrations/<timestamp>_<name>.sql (and its down file) in
+    // the repository; applying it is a separate, reviewed step.
+    createMigration: (input: { name: string; sql: string; downSql?: string }) =>
+      run<{ file: string; downFile?: string; nextStep: string }>("create_migration", input),
     planMigrations: () => run<MigrationState & MigrationReview>("plan_migrations"),
     applyMigrations: (approvalID: string) => run<MigrationState>("apply_migrations", { approvalID }),
     rollback: (name: string) => run<{ rolledBack: string; nextStep: string }>("rollback_migration", { name }),
