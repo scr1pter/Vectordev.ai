@@ -16,7 +16,7 @@ export const spendRows = [
   ],
   [
     "Your keys, your bill",
-    "Connect your own provider account to start. From 1.99.99, guarded personal OpenRouter free access works independently of Vector's shared allowance, which remains off. Keep that account free: no credit purchase, payment method, automatic top-ups, paid upstream BYOK credentials, or default or enforced paid plugins. When free limits or eligible endpoints are unavailable, wait; the guarded route does not switch to paid models or providers. Other provider connections have their own pricing.",
+    "Connect your own provider account to start. From 1.99.99, guarded personal OpenRouter free access works independently of Vector's shared allowance, which serves the same models to a signed-in Vector account only while Vector's service has it switched on. Keep that account free: no credit purchase, payment method, automatic top-ups, paid upstream BYOK credentials, or default or enforced paid plugins. When free limits or eligible endpoints are unavailable, wait; the guarded route does not switch to paid models or providers. Other provider connections have their own pricing.",
   ],
 ]
 
@@ -344,7 +344,7 @@ export const faqs = [
   {
     question: "Do I need an API key?",
     answer:
-      "Connect a provider account or API key to start. From 1.99.99, Vector adds eligible tool-capable OpenRouter free models through your own free account, independently of the disabled shared allowance. Releases before 1.99.99, such as desktop 1.99.8, do not include this guarded setup. Do not buy credits, add a payment method, enable automatic top-ups, attach paid upstream BYOK keys, or enable default or enforced paid plugins on that account. Free limits or unavailable eligible endpoints stop the request without a paid fallback. The selection is limited to online, tool-capable, zero-price endpoints for the models and providers on Vector's allowlist. Those providers may keep prompts and outputs under their own policies. Every request asks OpenRouter to deny data collection, which excludes endpoints OpenRouter records as training on prompts; these routing controls do not cover local history or account logging. Use a saved provider connection or OPENROUTER_API_KEY, since a project-only provider.options.apiKey does not enable guarded free access.",
+      "Connect a provider account or API key to start. From 1.99.99, Vector adds eligible tool-capable OpenRouter free models through your own free account, independently of Vector's shared allowance. Releases before 1.99.99, such as desktop 1.99.8, do not include this guarded setup. Do not buy credits, add a payment method, enable automatic top-ups, attach paid upstream BYOK keys, or enable default or enforced paid plugins on that account. Free limits or unavailable eligible endpoints stop the request without a paid fallback. The selection is limited to online, tool-capable, zero-price endpoints for the models and providers on Vector's allowlist. Those providers may keep prompts and outputs under their own policies. Every request asks OpenRouter to deny data collection, which excludes endpoints OpenRouter records as training on prompts; these routing controls do not cover local history or account logging. Use a saved provider connection or OPENROUTER_API_KEY, since a project-only provider.options.apiKey does not enable guarded free access.",
   },
   {
     question: "Is Vector free?",

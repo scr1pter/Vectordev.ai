@@ -142,7 +142,7 @@ const groups = [
           ["p", "Credits per message, credit limits"],
           ["p", "Monthly credits, not dollars"],
         ],
-        vector: ["y", "Every Vector session priced, subagents included, with model advice"],
+        vector: ["y", "Sessions priced from provider-reported tokens wherever the model has a price, subagents included, with model advice"],
       },
       {
         cap: "Any model, any provider",
@@ -245,7 +245,7 @@ const stack = [
   {
     job: "Agent cost tracking",
     today: "Helicone $79 Pro · Langfuse $29 Core, $199 Pro",
-    vector: "Tokenomics prices every Vector session and model from provider-reported tokens, subagents included, and recommends models from measured runs.",
+    vector: "Tokenomics prices Vector sessions from provider-reported tokens wherever the model has a price, subagents included, labels free, ChatGPT plan, Codium and unpriced steps instead, and recommends models from measured runs.",
     fit: "Covers coding agents",
   },
   {
@@ -288,7 +288,7 @@ const stack = [
   <section class="ip-thesis" aria-labelledby="thesis-title">
     <div class="ip-eyebrow">For teams that build with AI agents</div>
     <h1 id="thesis-title">The control room for AI <em>coding agents</em>.</h1>
-    <p class="ip-lede">Teams now use several coding agents, such as Claude Code, Codex and Cursor, then pay for a review bot, an orchestration app and a cost tracker on top, often per seat. Vector puts that stack in one free workspace: its own agent beside Claude Code, Codex and Cursor Agent, any model, code review, browser testing, deploys and a price on every Vector session. Next, it plans to build <strong>Vector Velocity</strong>, its own large coding model for that loop.</p>
+    <p class="ip-lede">Teams now use several coding agents, such as Claude Code, Codex and Cursor, then pay for a review bot, an orchestration app and a cost tracker on top, often per seat. Vector puts that stack in one free workspace: its own agent beside Claude Code, Codex and Cursor Agent, any model, code review, browser testing, deploys and a price on each Vector session whose model has one. Next, it plans to build <strong>Vector Velocity</strong>, its own large coding model for that loop.</p>
     <div class="ip-facts">
       <div class="ip-fact"><strong class="ip-num">219</strong><span>providers in the model catalog, plus local and free models</span></div>
       <div class="ip-fact"><strong class="ip-num">3</strong><span>outside agents run inside Vector: Claude Code, Codex, Cursor Agent</span></div>
@@ -320,10 +320,10 @@ const stack = [
         <div class="ip-cap"><h3>Any model</h3><p>8,184 models from 219 providers in Vector's catalog, connected with your own key or sign-in, plus any OpenAI-compatible or local endpoint and free models through OpenRouter.</p></div>
         <div class="ip-cap"><h3>Vectorscope review</h3><p>Pull-request review on GitHub, desktop and CLI, with a verify pass that re-checks blocking findings and drops the ones it cannot confirm. An issue comment becomes a branch and a PR listing the commands it ran and their results.</p></div>
         <div class="ip-cap"><h3>Specialist subagents</h3><p>Explore, Review, Judge, Security, Debug, Test, Performance and Migration specialists run in the background and report back.</p></div>
-        <div class="ip-cap"><h3>Tokenomics</h3><p>Every Vector session is priced from the tokens the provider reported, subagents included, and Vector recommends models once a task type has three measured runs.</p></div>
+        <div class="ip-cap"><h3>Tokenomics</h3><p>Vector prices each session from the tokens the provider reported wherever the model has a price, subagents included. Free models, ChatGPT plan, Codium and unpriced steps are labelled instead of priced. Vector recommends models once a task type has three measured runs.</p></div>
         <div class="ip-cap"><h3>Test and ship from the task</h3><p>A browser agent tests the running app. Environment variables, Supabase migrations with a dry run, and Vercel publishing with health and browser checks.</p></div>
       </div>
-      <p class="ip-footnote"><strong>In the next release (1.99.107, built, installers not published yet):</strong> fuller Vercel and Supabase controls, with approval for every account change and the exact SQL shown for database changes; models included with a free Vector account; Codium plans, with sales marked Coming soon until payments are connected; and helper sessions such as reviews kept out of the session list while their tokens and cost stay visible.</p>
+      <p class="ip-footnote"><strong>In the next release (1.99.107, built, installers not published yet):</strong> fuller Vercel and Supabase controls, with approval for every account change and the exact SQL shown for database changes; Models included with Vector under a no-training policy, through your own free OpenRouter account or, while Vector's service has it on, Vector's shared allowance for a free Vector account; Codium plans, with sales marked Coming soon until payments are connected; and helper sessions such as reviews kept out of the session list while their tokens and cost stay visible.</p>
     </div>
   </section>
 
@@ -376,7 +376,7 @@ const stack = [
         </tfoot>
       </table>
     </div>
-    <p class="ip-footnote"><strong>Where Vector matches the field:</strong> parallel agents in worktrees, subagents, AI pull-request review, issue-to-PR, browser testing and local repos. Cursor, Codex and Claude Code have these too, and Lovable and Base44 lead on live collaboration and built-in hosting. Orchestrators such as Conductor and Superset, not in this grid, also run Claude Code, Codex and other agents side by side in isolated workspaces. Vector's edge is running them beside its own agent, on any model, with a price on each Vector session. Competitor details come from each company's official docs and pricing pages, checked 15 October 2026; sources are listed at the end.</p>
+    <p class="ip-footnote"><strong>Where Vector matches the field:</strong> parallel agents in worktrees, subagents, AI pull-request review, issue-to-PR, browser testing and local repos. Cursor, Codex and Claude Code have these too, and Lovable and Base44 lead on live collaboration and built-in hosting. Orchestrators such as Conductor and Superset, not in this grid, also run Claude Code, Codex and other agents side by side in isolated workspaces. Vector's edge is running them beside its own agent, on any model, with a price on each Vector session whose model has one. Competitor details come from each company's official docs and pricing pages, checked 15 October 2026; sources are listed at the end.</p>
   </section>
 
   <section class="ip-section" aria-labelledby="stack-title">
@@ -486,7 +486,7 @@ const stack = [
         <p>Vector's own coding model. At its planned size it would sit among the largest disclosed coding-tuned models, and, as far as public information shows, the first designed for a workspace that runs several vendors' agents on any model.</p>
         <ul class="ip-clean">
           <li><strong>Designed for Vector's loop:</strong> planning, tool calls, edits, checks and verification, across the specialists and the review pass.</li>
-          <li><strong>Planned to sell in the open:</strong> one choice in the picker beside 219 providers, priced by the same tokenomics, so it would have to win on measured cost.</li>
+          <li><strong>Planned to sell in the open:</strong> one choice in the picker beside 219 providers, measured by the same tokenomics. Through Codium its steps would count in tokens and Codium credits, like every Codium model's, not in dollars, so it would have to win on measured results.</li>
           <li><strong>Planned to run through Codium,</strong> so model spend that goes to other labs today could go to Vector's own model.</li>
           <li><strong>Not trained on customers' code.</strong> There are no weights or benchmarks yet, so this page makes no performance claims for it.</li>
         </ul>
@@ -494,7 +494,7 @@ const stack = [
       <div class="ip-why-us">
         <div class="ip-eyebrow">Why Vector can build it</div>
         <div class="ip-why-item"><h4>It controls the harness</h4><p>Vector maintains its agent, its tools and its eight specialists, so the loop the model is trained for is known, not a guess about someone else's product. Cursor and Cognition took the same route: their own models, trained inside their own agents.</p></div>
-        <div class="ip-why-item"><h4>It already measures cost per task</h4><p>Every Vector session is priced from provider-reported tokens, and an offline benchmark prices every request. Velocity would be measured with the same tools as every other model.</p></div>
+        <div class="ip-why-item"><h4>It already measures cost per task</h4><p>Vector prices each session from provider-reported tokens wherever the model has a price, and an offline benchmark prices every request. Velocity would be measured with the same tools as every other model.</p></div>
         <div class="ip-why-item"><h4>It has the channel</h4><p>Velocity would ship into a free workspace on desktop and in the terminal, and sell through Codium, with no new product for anyone to adopt.</p></div>
       </div>
     </div>
