@@ -544,19 +544,23 @@ async function engineTurnFailure(
   engine: ParallelWorkspaceEngine,
   signal: AbortSignal,
 ): Promise<string | undefined> {
+  const last = await lastEngineAssistant(sessionId, engine, signal)
+  if (!last) return undefined
+  if (last.finish !== "error" && !last.error) return undefined
+  if (typeof last.error === "string") return last.error
+  return last.error?.data?.message ?? last.error?.message ?? "The agent's turn ended with an error."
+}
+
+async function lastEngineAssistant(sessionId: string, engine: ParallelWorkspaceEngine, signal: AbortSignal) {
   const raw = await engineRequest<{ data?: EngineTurnMessage[] } | undefined>(
     engine,
     `/api/session/${encodeURIComponent(sessionId)}/message?limit=20`,
     { signal },
   ).catch(() => undefined)
-  const assistants = (raw?.data ?? [])
+  return (raw?.data ?? [])
     .map((item) => (item.info?.role === "assistant" ? item.info : item.type === "assistant" ? item : undefined))
     .filter(Boolean)
-  const last = assistants.at(-1)
-  if (!last) return undefined
-  if (last.finish !== "error" && !last.error) return undefined
-  if (typeof last.error === "string") return last.error
-  return last.error?.data?.message ?? last.error?.message ?? "The agent's turn ended with an error."
+    .at(-1)
 }
 
 async function waitForEngineSessionIdle(
@@ -2463,10 +2467,13 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
   }
 }
 
-// Adds a finished drain's guard reading to the run. A guard stop ends the run
-// here, before its checks or a repair pass can start another drain. A reading
-// already counted means the drain has not begun yet, as when the idle wait
-// gave up waiting for it, so it stays pending for the finally to read.
+// Adds a finished drain's guard reading to the run. A guard stop that cut the
+// agent's turn short ends the run here, before its checks or a repair pass can
+// start another drain. A final answer that crossed the cap also leaves the
+// guard stopped, but the turn finished, so its checks and diff are collected
+// like any other. A reading already counted means the drain has not begun
+// yet, as when the idle wait gave up waiting for it, so it stays pending for
+// the finally to read.
 async function measureDrain(active: ActiveParallelRun, engine: ParallelWorkspaceEngine, sessionId: string) {
   if (!active.spend) return
   const snapshot = newSpend(active.spend.counted, await readSpend((path) => engineRequest(engine, path), sessionId))
@@ -2474,9 +2481,16 @@ async function measureDrain(active: ActiveParallelRun, engine: ParallelWorkspace
   active.spend.measured = combineSpend(active.spend.measured, snapshot)
   active.spend.counted = snapshot
   active.spend.draining = false
-  if (snapshot.state === "stopped") {
-    throw new Error(`Stopped by spend guard: ${snapshot.message ?? "the run reached its spend limit."}`)
-  }
+  if (snapshot.state !== "stopped") return
+  if (answered(await lastEngineAssistant(sessionId, engine, active.controller.signal))) return
+  throw new Error(`Stopped by spend guard: ${snapshot.message ?? "the run reached its spend limit."}`)
+}
+
+// Whether a turn's last assistant message is a finished answer: no error, and
+// a finish that does not ask for another step.
+function answered(message: { finish?: string; error?: unknown } | undefined) {
+  if (!message || message.error) return false
+  return message.finish !== undefined && message.finish !== "tool-calls" && message.finish !== "error"
 }
 
 // Records a Vector-runtime run's measured cost in the ledger and on its card.

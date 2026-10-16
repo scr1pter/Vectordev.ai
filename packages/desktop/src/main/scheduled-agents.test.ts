@@ -232,6 +232,8 @@ function harness(options: {
   // so a reading can differ before and after the run.
   spend?: (sessionId: string, prompted: boolean) => unknown
   promptFailure?: string
+  // How the turn's last assistant message finished, "stop" unless set.
+  finish?: string
 }) {
   const clock = { at: options.at }
   const persisted = { value: JSON.parse(JSON.stringify(options.records ?? [])) as unknown }
@@ -357,7 +359,7 @@ function harness(options: {
       // envelope, which is precisely why every run being recorded as failed
       // went unnoticed here while failing against a real engine.
       if (options.legacyShape) return { data: [{ info: { id: "msg_0002", role: "assistant", error } }] }
-      return { data: [{ id: "msg_0002", type: "assistant", finish: "stop", error }] }
+      return { data: [{ id: "msg_0002", type: "assistant", finish: options.finish ?? "stop", error }] }
     },
   })
 
@@ -733,35 +735,53 @@ describe("unattended spend limits", () => {
     expect(harnessed.reserved.size).toBe(0)
   })
 
-  test("a run the spend guard stopped fails with the guard's message and records its measured cost", async () => {
+  const guardReading = (sessionId: string, message: string) => ({
+    data: {
+      sessionID: sessionId,
+      state: "stopped",
+      reason: "cap",
+      message,
+      budget: { usd: 5 },
+      spentUsd: 5.02,
+      steps: 12,
+      unpricedSteps: 0,
+      costKind: "priced",
+    },
+  })
+
+  test("a run the spend guard cut short fails with the guard's message and records its measured cost", async () => {
     const message =
       "Spend cap reached: $5.02 spent against a $5.00 cap for this run. Vector stopped after the step that crossed it."
     const harnessed = harness({
       at: new Date(2026, 7, 19, 9, 0, 0, 0),
       records: [scheduledRecord({})],
       allowance: { allowed: true, state: "ok", remainingUsd: 5 },
-      spend: (sessionId, prompted) =>
-        prompted
-          ? {
-              data: {
-                sessionID: sessionId,
-                state: "stopped",
-                reason: "cap",
-                message,
-                budget: { usd: 5 },
-                spentUsd: 5.02,
-                steps: 12,
-                unpricedSteps: 0,
-                costKind: "priced",
-              },
-            }
-          : {},
+      spend: (sessionId, prompted) => (prompted ? guardReading(sessionId, message) : {}),
+      // The stopped turn's last step asked for another one.
+      finish: "tool-calls",
     })
 
     await harnessed.runtime.tick()
 
     expect(harnessed.record()?.status).toBe("failed")
     expect(harnessed.record()?.results?.[0]?.error).toBe(message)
+    expect(harnessed.spendRecords[0]?.totalCostUsd).toBe(5.02)
+  })
+
+  test("a run whose final answer crossed the cap completes and records its measured cost", async () => {
+    const message =
+      "Spend cap reached: $5.02 spent against a $5.00 cap for this run, on a step that ended its turn. Its answer stands, and Vector starts no further step under this cap."
+    const harnessed = harness({
+      at: new Date(2026, 7, 19, 9, 0, 0, 0),
+      records: [scheduledRecord({})],
+      allowance: { allowed: true, state: "ok", remainingUsd: 5 },
+      spend: (sessionId, prompted) => (prompted ? guardReading(sessionId, message) : {}),
+    })
+
+    await harnessed.runtime.tick()
+
+    expect(harnessed.record()?.status).toBe("completed")
+    expect(harnessed.record()?.results?.[0]?.error).toBeUndefined()
     expect(harnessed.spendRecords[0]?.totalCostUsd).toBe(5.02)
   })
 

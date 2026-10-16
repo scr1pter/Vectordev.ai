@@ -4811,7 +4811,11 @@ it.instance(
       if (result.info.role !== "assistant") return
       expect(result.info.error).toBeUndefined()
       expect(result.info.structured).toEqual({ answer: 4 })
-      expect((yield* guard.snapshot(chat.id))?.stopped?.reason).toBe("cap")
+      expect((yield* guard.snapshot(chat.id))?.stopped).toEqual({
+        reason: "cap",
+        message:
+          "Spend cap reached: $2.00 spent against a $1.00 cap for this run, on a step that ended its turn. Its answer stands, and Vector starts no further step under this cap.",
+      })
     }),
   30_000,
 )

@@ -114,6 +114,9 @@ export type Verdict =
 export type StopDetail = {
   readonly estimate?: Estimate
   readonly loop?: { readonly tool: string; readonly kind: "repeat" | "error" }
+  // The root's own step that crossed the cap ended its turn, so its answer stands and nothing was cut short. A
+  // subagent's final step is not: the root it answers to is cut short at its next step.
+  readonly final?: boolean
 }
 
 export function start(rootID: SessionID, budget: RunBudget.Info, loopRules = true): Run {
@@ -141,7 +144,7 @@ export function afterStep(run: Run, step: Step, sessionID = run.rootID): { run: 
     costKind: step.costKind,
   }
   if (run.stopped) return { run: counted, verdict: { state: "stopped", ...run.stopped } }
-  const limits = checkLimits(counted, step)
+  const limits = checkLimits(counted, step, sessionID)
   if (limits.state === "stopped") return stop(counted, limits)
   const loops = counted.loopRules
     ? checkLoops(counted, step, sessionID)
@@ -154,6 +157,8 @@ export function afterStep(run: Run, step: Step, sessionID = run.rootID): { run: 
 // The text a stopped run shows everywhere: the CLI, the TUI, the app and desktop logs.
 export function stopMessage(reason: RunBudget.StopReason, run: Run, detail: StopDetail = {}): string {
   const cap = formatUsd(run.budget.usd ?? 0)
+  if (reason === "cap" && detail.final)
+    return `Spend cap reached: ${formatUsd(run.spentUsd)} spent against a ${cap} cap for this run, on a step that ended its turn. Its answer stands, and Vector starts no further step under this cap.`
   if (reason === "cap")
     return `Spend cap reached: ${formatUsd(run.spentUsd)} spent against a ${cap} cap for this run. Vector stopped after the step that crossed it.`
   if (reason === "predicted")
@@ -192,13 +197,20 @@ function stop(run: Run, verdict: Stop & Verdict) {
 }
 
 // Step and dollar limits. Dollars are checked only with a dollar cap and a priced or unpriced model: plan and free
-// models are not billed per token. The next step is predicted from this step's context, like Vectorscope does.
-function checkLimits(run: Run, step: Step): Verdict {
+// models are not billed per token. The next step is predicted from this step's context, like Vectorscope does. A
+// final answer that reaches a limit still stops the run, so no other session of it starts another step, but the
+// answer itself stands: callers end a turn early only for a step that continues.
+function checkLimits(run: Run, step: Step, sessionID: SessionID): Verdict {
   if (run.budget.steps !== undefined && run.steps >= run.budget.steps)
     return { state: "stopped", reason: "steps", message: stopMessage("steps", run) }
   const usd = run.budget.usd
   if (usd === undefined || (step.costKind !== "priced" && step.costKind !== "unknown")) return { state: "ok" }
-  if (run.spentUsd >= usd) return { state: "stopped", reason: "cap", message: stopMessage("cap", run) }
+  if (run.spentUsd >= usd)
+    return {
+      state: "stopped",
+      reason: "cap",
+      message: stopMessage("cap", run, { final: !step.continues && sessionID === run.rootID }),
+    }
   if (step.costKind === "unknown" && run.unpricedSteps >= (run.budget.unpricedSteps ?? UNPRICED_STEPS))
     return { state: "stopped", reason: "unpriced", message: stopMessage("unpriced", run) }
   const estimate =

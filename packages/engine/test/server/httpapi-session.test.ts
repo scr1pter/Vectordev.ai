@@ -676,7 +676,7 @@ describe("session HttpApi", () => {
             state: "stopped",
             reason: "cap",
             message:
-              "Spend cap reached: $1.15 spent against a $1.00 cap for this run. Vector stopped after the step that crossed it.",
+              "Spend cap reached: $1.15 spent against a $1.00 cap for this run, on a step that ended its turn. Its answer stands, and Vector starts no further step under this cap.",
             budget: { usd: 1 },
             spentUsd: 1.15,
             steps: 3,

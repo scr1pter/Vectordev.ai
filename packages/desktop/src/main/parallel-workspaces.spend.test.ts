@@ -53,6 +53,8 @@ const engineState = {
   activePolls: 0,
   activeFails: false,
   spend: (_sessionId: string): unknown => ({}),
+  // The session's messages, none unless set.
+  messages: (_sessionId: string): unknown[] => [],
 }
 let sessionCount = 0
 const server = Bun.serve({
@@ -90,7 +92,7 @@ const server = Bun.serve({
       return Response.json({ data: { id: "msg_0001" } })
     }
     if (match?.[2] === "spend") return Response.json(engineState.spend(sessionId))
-    if (match?.[2] === "message") return Response.json({ data: [] })
+    if (match?.[2] === "message") return Response.json({ data: engineState.messages(sessionId) })
     return Response.json({})
   },
 })
@@ -126,6 +128,7 @@ beforeEach(() => {
   engineState.activePolls = 0
   engineState.activeFails = false
   engineState.spend = () => ({})
+  engineState.messages = () => []
 })
 
 async function launch(name: string) {
@@ -185,6 +188,28 @@ describe("a Vector-runtime parallel agent's spend", () => {
     expect(events).toHaveLength(1)
     expect(events[0]).toMatchObject({ costUsd: 0.42, tokens: 120, provider: "provider-test", source: "parallel" })
     expect(await headroomSeenByAnotherRun()).toBeCloseTo(headroom - 0.42)
+  })
+
+  test("a guard stop on a final answer leaves the run to its checks", async () => {
+    engineState.spend = (sessionId) =>
+      engineState.prompted.has(sessionId)
+        ? {
+            data: {
+              ...stoppedSnapshot(sessionId).data,
+              message:
+                "Spend cap reached: $0.42 spent against a $0.40 cap for this run, on a step that ended its turn. Its answer stands, and Vector starts no further step under this cap.",
+            },
+          }
+        : {}
+    engineState.messages = (sessionId) =>
+      engineState.prompted.has(sessionId) ? [{ type: "assistant", id: "msg_0002", finish: "stop" }] : []
+    const created = await launch("final-answer")
+
+    const record = await settle(created.id)
+
+    expect(record.status).not.toBe("failed")
+    expect(record.logs.join("\n")).not.toContain("Stopped by spend guard")
+    expect(record.actualCost).toBe("$0.42")
   })
 
   test("a finished run's card shows its measured cost, not an estimate", async () => {

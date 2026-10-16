@@ -251,7 +251,7 @@ function assistantFailure(response: EngineMessageResponse, afterMessageId?: stri
     // A projected V2 assistant without a finish reason is an in-progress turn,
     // even if the process-local active registry briefly has not observed it.
     if (item?.type === "assistant" && !item.finish) return { settled: false as const }
-    return { settled: true as const }
+    return { settled: true as const, finish: assistant.finish }
   }
   if (typeof assistant.error === "string") return { settled: true as const, error: assistant.error }
   return {
@@ -408,7 +408,7 @@ export function createScheduledAgents(
       const record = readRecords().find((item) => item.id === recordId)
       if (!record || record.status === "canceled") {
         await abortEngineSession(engine, sessionId)
-        return "canceled" as const
+        return { status: "canceled" as const }
       }
 
       // Scheduled agents run on the V2 session engine. Active sessions are
@@ -428,7 +428,9 @@ export function createScheduledAgents(
           continue
         }
         if (outcome.error) throw new Error(outcome.error)
-        return "completed" as const
+        // A turn whose last step asked for another one was cut short at a
+        // step boundary, as a spend guard stop does.
+        return { status: "completed" as const, answered: outcome.finish !== "tool-calls" }
       }
       await delay(COMPLETION_POLL_MS)
     }
@@ -508,8 +510,7 @@ export function createScheduledAgents(
     const execution =
       "error" in admission
         ? admission
-        : await waitForSessionCompletion(engine, id, sessionId, admission.admitted?.data?.id).then(
-            (status) => ({ status }),
+        : await waitForSessionCompletion(engine, id, sessionId, admission.admitted?.data?.id).catch(
             (error: unknown) => ({ error }),
           )
     const after = await request<EngineSessionResponse | undefined>(
@@ -532,9 +533,13 @@ export function createScheduledAgents(
       })
       .catch(() => undefined)
     if ("status" in execution && execution.status === "canceled") return execution.status
-    // A guard stop fails this target even when the turn itself settled cleanly,
-    // and its message says exactly why the run ended.
-    if (snapshot?.state === "stopped") throw new Error(snapshot.message ?? "Vector's spend guard stopped this run.")
+    // A guard stop that cut the turn short fails this target, even when the
+    // turn settled without an error, and its message says exactly why the run
+    // ended. A final answer that crossed the cap also leaves the guard
+    // stopped, but the turn finished and its answer stands, so it completes.
+    const answered = "status" in execution && execution.status === "completed" && execution.answered
+    if (snapshot?.state === "stopped" && !answered)
+      throw new Error(snapshot.message ?? "Vector's spend guard stopped this run.")
     if ("error" in execution) throw execution.error
     return execution.status
   }

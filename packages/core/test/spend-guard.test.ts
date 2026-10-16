@@ -77,7 +77,7 @@ describe("SpendGuard.afterStep", () => {
   })
 
   test("stops with cap on the step that crosses it", () => {
-    const result = play({ usd: 5 }, [step({ costUsd: 4.1 }), step({ costUsd: 0.92 })])
+    const result = play({ usd: 5 }, [step({ costUsd: 4.1 }), step({ costUsd: 0.92, continues: true })])
     expect(result.verdicts[1]).toEqual({
       state: "stopped",
       reason: "cap",
@@ -85,6 +85,28 @@ describe("SpendGuard.afterStep", () => {
         "Spend cap reached: $5.02 spent against a $5.00 cap for this run. Vector stopped after the step that crossed it.",
     })
     expect(result.run.stopped?.reason).toBe("cap")
+  })
+
+  test("says a final answer that crosses the cap stands", () => {
+    const result = play({ usd: 5 }, [step({ costUsd: 4.1 }), step({ costUsd: 0.92 })])
+    expect(result.verdicts[1]).toEqual({
+      state: "stopped",
+      reason: "cap",
+      message:
+        "Spend cap reached: $5.02 spent against a $5.00 cap for this run, on a step that ended its turn. Its answer stands, and Vector starts no further step under this cap.",
+    })
+    expect(result.run.stopped?.reason).toBe("cap")
+  })
+
+  test("says the run stopped after a subagent's final answer that crosses the cap", () => {
+    // The subagent's answer goes back to its root, whose next step is then cut short.
+    const result = play({ usd: 5 }, [step({ costUsd: 4.1 }), step({ costUsd: 0.92 })], [root, child])
+    expect(result.verdicts[1]).toEqual({
+      state: "stopped",
+      reason: "cap",
+      message:
+        "Spend cap reached: $5.02 spent against a $5.00 cap for this run. Vector stopped after the step that crossed it.",
+    })
   })
 
   test("stops before a next step estimated to cross the cap", () => {

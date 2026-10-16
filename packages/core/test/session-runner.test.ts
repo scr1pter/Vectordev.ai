@@ -3677,7 +3677,7 @@ describe("SessionRunnerLLM", () => {
         stopped: {
           reason: "cap",
           message:
-            "Spend cap reached: $0.50 spent against a $0.10 cap for this run. Vector stopped after the step that crossed it.",
+            "Spend cap reached: $0.50 spent against a $0.10 cap for this run, on a step that ended its turn. Its answer stands, and Vector starts no further step under this cap.",
         },
       })
       const context = yield* session.context(sessionID)
