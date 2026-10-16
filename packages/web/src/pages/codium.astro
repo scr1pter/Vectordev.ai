@@ -2,6 +2,7 @@
 import { publicModelPlans } from "../../../../api/_lib/model-plan-config"
 import { CodiumPricing } from "../components/marketing/codium/CodiumPricing"
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import vectorMark from "../assets/vector-mark.webp"
 import { codiumPricing } from "../lib/codium-pricing"
 import { readModelPlanConfig } from "../lib/model-plans"
 import { wordmarkCells, wordmarkWidth } from "../lib/wordmark"
@@ -59,7 +60,7 @@ const columns = [
   <div class="cx-page">
     <header class="cx-bar">
       <a class="cx-brand" href="/" aria-label="Vector home">
-        <img src="/vector-logo.png" alt="" width="28" height="28" />
+        <img src={vectorMark.src} alt="" width="28" height="28" />
         <svg viewBox={`0 0 ${wordmarkWidth} 7`} fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">
           {wordmarkCells.map((cell) => <rect x={cell.x} y={cell.y} width="1" height="1" />)}
         </svg>
@@ -107,7 +108,7 @@ const columns = [
     <footer class="cx-footer">
       <div class="cx-footer-inner">
         <a class="cx-footer-brand" href="/" aria-label="Vector home">
-          <img src="/vector-logo.png" alt="" width="32" height="32" />
+          <img src={vectorMark.src} alt="" width="32" height="32" />
         </a>
         <div class="cx-footer-columns">
           {

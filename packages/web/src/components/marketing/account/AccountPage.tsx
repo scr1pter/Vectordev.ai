@@ -1,6 +1,7 @@
 /** @jsxImportSource react */
 import { LoaderCircle } from "lucide-react"
 import { useEffect, useState } from "react"
+import vectorMark from "../../../assets/vector-mark.webp"
 import { readAccountApiResponse, takeAccountReturnPath, vectorAccountClient } from "../../../lib/account-client"
 import { FreeDownload } from "../download/FreeDownload"
 import { CliLaunchPanel } from "./CliLaunchPanel"
@@ -122,7 +123,7 @@ export function AccountPage(props: { preview?: AccountState }) {
       <header className="acct-header">
         <div className="acct-header-inner">
           <a className="acct-brand" href="/" aria-label="Vector home">
-            <img src="/vector-logo.png" alt="" />
+            <img src={vectorMark.src} alt="" />
             <span>Vector</span>
           </a>
           <nav aria-label="Account navigation">
