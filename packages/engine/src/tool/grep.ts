@@ -11,7 +11,7 @@ export const Parameters = Schema.Struct({
   pattern: Schema.String.annotate({ description: "The regex pattern to search for in file contents" }),
   path: Schema.optional(Schema.String).annotate({
     description:
-      "Existing literal file or directory to search. Relative paths use the current working directory, which is also the default. No glob expansion; use include for file globs.",
+      "Existing literal file or directory to search. Relative paths use the current working directory, which is also the default. No shell or glob expansion; use include for file globs.",
   }),
   include: Schema.optional(Schema.String).annotate({
     description: 'File pattern to include in the search (e.g. "*.js", "*.{ts,tsx}")',
