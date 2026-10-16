@@ -907,6 +907,28 @@ describe("model plan HTTP inference", () => {
     expect(chats()).toHaveLength(4)
   })
 
+  test("an answer that breaks off keeps its largest cost held, since the provider may still bill it", async () => {
+    await paid()
+    const pool = "vector:model-plans:held:hash_fixture1"
+    const members = async () => (await redis(["ZRANGE", pool, 0, -1])) as string[]
+    state.charge = 0.001
+    state.streamMode = "truncated"
+    const broken = await chat()
+    expect(await broken.text()).toContain('"code":"MODEL_PLAN_STREAM"')
+    state.streamMode = "normal"
+    expect((await chat()).status).toBe(200)
+    // The finished answer settles to its charge just after it ends.
+    for (let tries = 0; tries < 100 && !(await members()).some((member) => member.endsWith(":0.001")); tries++)
+      await Bun.sleep(10)
+    const current = await members()
+    expect(current).toHaveLength(2)
+    const kept = current.find((member) => !member.endsWith(":0.001"))
+    if (!kept) throw new Error("Expected the broken answer's hold")
+    // Still the request's largest cost, held until it lapses 11 minutes after the request started, not 30 seconds.
+    expect(Number(kept.split(":")[1])).toBeGreaterThan(0.004)
+    expect(Number(await redis(["ZSCORE", pool, kept]))).toBeGreaterThan(Date.now() + 600_000)
+  })
+
   test("normalizes upstream capacity and busy failures without leaking credentials or retrying", async () => {
     await paid()
     for (const status of [402, 429, 500]) {

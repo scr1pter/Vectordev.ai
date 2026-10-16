@@ -591,7 +591,8 @@ export async function modelPlanCredential(
 }
 
 // Each hold is one member of the pool's sorted set, "<ticket>:<credits>", scored by when it lapses, so a hold whose
-// request never settles (a function killed at its time limit) frees itself once the request could no longer run.
+// request never settles (an answer that broke off or was cancelled, or a function killed at its time limit) frees
+// itself once the request could no longer run.
 const HOLD =
   "redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1]) local held = 0 for _, member in ipairs(redis.call('ZRANGE', KEYS[1], 0, -1)) do held = held + (tonumber(string.match(member, ':([^:]+)$')) or 0) end if tonumber(ARGV[2]) - held < tonumber(ARGV[3]) then return 0 end redis.call('ZADD', KEYS[1], ARGV[4], ARGV[5]) redis.call('PEXPIRE', KEYS[1], ARGV[6]) return 1"
 const SETTLE = "redis.call('ZREM', KEYS[1], ARGV[1]) redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3]) return 1"

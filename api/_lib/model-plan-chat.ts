@@ -140,7 +140,10 @@ export function requireModelPlanContext<T extends { max_tokens: number }>(body: 
   return inputTokens
 }
 
-/** Streams the provider's answer to Vector and returns what the provider charged for it, when it said. */
+/**
+ * Streams the provider's answer to Vector. Once the answer finishes it returns what the provider said it charged; when
+ * Vector goes away first it returns nothing, since the provider may still be producing, and billing, the answer.
+ */
 export async function streamModelPlanResponse(upstream: Response, response: ApiResponse) {
   if (upstream.status === 402 || upstream.status === 429) {
     const retry = upstream.headers.get("retry-after")
@@ -192,7 +195,7 @@ export async function streamModelPlanResponse(upstream: Response, response: ApiR
           .join("\n")
         if (data === "[DONE]") {
           response.end("data: [DONE]\n\n")
-          return state.charge
+          return { charge: state.charge }
         }
         if (!data) continue
         const parsed = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(data)
@@ -211,7 +214,7 @@ export async function streamModelPlanResponse(upstream: Response, response: ApiR
       }
       if (part.done) throw new ApiError(503, "MODEL_PLAN_STREAM", "The model response ended before completion.")
     }
-    return state.charge
+    return undefined
   } finally {
     response.off("close", cancel)
     await reader.cancel().catch(() => undefined)
@@ -248,13 +251,13 @@ function contextRefused(body: string) {
 export async function handleModelPlanChat(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {
   const controller = new AbortController()
   const close = () => controller.abort()
-  // The credits held for this request until it settles: its charge once the provider streamed an answer, which may be
-  // billed even when the stream later breaks, or nothing when no answer came.
+  // The credits held for this request until it settles, and how its answer went: whether the provider began one, and
+  // what it charged once the answer finished.
   const hold = {
     release: async (_charge?: number) => {},
     required: 0,
     streamed: false,
-    charge: undefined as number | undefined,
+    finished: undefined as { charge?: number } | undefined,
   }
   response.once("close", close)
   try {
@@ -289,7 +292,7 @@ export async function handleModelPlanChat(request: ApiRequest, response: ApiResp
       body: JSON.stringify({ ...body, user: createHash("sha256").update(account.id).digest("hex") }),
     })
     hold.streamed = upstream.ok
-    hold.charge = await streamModelPlanResponse(upstream, response)
+    hold.finished = await streamModelPlanResponse(upstream, response)
   } catch (error) {
     if (response.destroyed) return
     const payload = {
@@ -312,7 +315,12 @@ export async function handleModelPlanChat(request: ApiRequest, response: ApiResp
     request.resume()
     response.off("close", close)
     controller.abort()
-    // An unreleased hold lapses on its own once the request could no longer be running.
-    await hold.release(hold.streamed ? (hold.charge ?? hold.required) : undefined).catch(() => undefined)
+    // A request the provider never answered frees its hold at once, and one whose answer finished keeps only its charge,
+    // or its largest cost when the provider named none, until the key's usage shows it. An answer that broke off or
+    // that Vector cancelled may still be billed when the provider finishes, so its hold stays until it lapses.
+    if (!hold.streamed || hold.finished)
+      await hold
+        .release(hold.finished ? (hold.finished.charge ?? hold.required) : undefined)
+        .catch(() => undefined)
   }
 }
