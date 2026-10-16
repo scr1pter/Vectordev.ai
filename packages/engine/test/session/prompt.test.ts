@@ -4676,6 +4676,60 @@ it.instance(
 )
 
 it.instance(
+  "run guard decides a reused helper session's run each time it runs",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const guard = yield* SpendGuard.Service
+      const root = yield* sessions.create({ title: "Root" })
+      const helper = yield* sessions.create({
+        title: "Autocomplete",
+        parentID: root.id,
+        internal: "codespace.autocomplete",
+      })
+      const crossed = {
+        costUsd: 2,
+        costKind: "priced",
+        contextTokens: 0,
+        cachedTokens: 0,
+        continues: false,
+        tools: [],
+        patched: false,
+      } satisfies SpendGuard.Step
+
+      // During the root's run the helper counts there; the run then crosses its cap and ends.
+      yield* guard.begin(root.id, { usd: 1 })
+      yield* user(helper.id, "complete one")
+      yield* llm.text("one")
+      yield* prompt.loop({ sessionID: helper.id })
+      expect(yield* guard.rootOf(helper.id)).toBe(root.id)
+      yield* guard.record(root.id, crossed)
+      yield* guard.end(root.id)
+
+      // After that run, the same helper session runs under its own limits.
+      yield* user(helper.id, "complete two")
+      yield* llm.text("two")
+      const after = yield* prompt.loop({ sessionID: helper.id })
+      expect(budgetStop(after.info)).toBeUndefined()
+      expect(yield* llm.calls).toBe(2)
+      expect(yield* guard.rootOf(helper.id)).toBe(helper.id)
+      expect((yield* guard.snapshot(root.id))?.steps).toBe(2)
+
+      // The root's next run takes it back.
+      yield* guard.begin(root.id, { usd: 5 })
+      yield* user(helper.id, "complete three")
+      yield* llm.text("three")
+      yield* prompt.loop({ sessionID: helper.id })
+      expect(yield* guard.rootOf(helper.id)).toBe(root.id)
+      expect((yield* guard.snapshot(root.id))?.steps).toBe(1)
+      yield* guard.end(root.id)
+    }),
+  120_000,
+)
+
+it.instance(
   "run guard marks the root's subtask turn stopped when its subagent crosses the cap",
   () =>
     Effect.gen(function* () {

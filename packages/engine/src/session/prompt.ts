@@ -1298,14 +1298,21 @@ const layer = Layer.effect(
         // Stop waits for queued snapshots so immediate undo sees all changes from completed steps.
         Effect.ensuring(processor.settle(sessionID)),
       )
-      if (session.parentID) {
-        const rootID = (yield* guard.rootOf(sessionID)) === sessionID ? (yield* rootSession(session)).id : undefined
-        // A helper started outside a run, such as a review the user asked for after the run ended, is a run of its
-        // own with its own limits, so an earlier run's stop does not block it. Started inside a run, it counts there.
-        if (!session.internal || !rootID || (yield* guard.running(rootID))) {
-          if (rootID) yield* guard.link(sessionID, rootID)
+      // A helper decides each time it runs, since one helper session can serve many runs, such as autocomplete or the
+      // Browser Agent's planner. Inside its session's run it counts there. Outside one, such as a review the user
+      // asked for after the run ended, it is a run of its own with its own limits, so an earlier run's stop does not
+      // block it. A subagent stays linked: one still running after its root's run ended counts against that run.
+      if (session.parentID && session.internal) {
+        const rootID = (yield* rootSession(session)).id
+        if (rootID !== sessionID && (yield* guard.running(rootID))) {
+          yield* guard.link(sessionID, rootID)
           return yield* steps
         }
+        yield* guard.unlink(sessionID)
+      }
+      if (session.parentID && !session.internal) {
+        if ((yield* guard.rootOf(sessionID)) === sessionID) yield* guard.link(sessionID, (yield* rootSession(session)).id)
+        return yield* steps
       }
       yield* guard.begin(sessionID, (yield* config.get()).budget?.run)
       return yield* steps.pipe(Effect.ensuring(guard.end(sessionID)))

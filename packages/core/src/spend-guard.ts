@@ -294,6 +294,9 @@ export interface Interface {
   // every stop it gets. Spend, step and cap checks still apply, in its own run or the run it is linked to.
   readonly ignoreLoops: (sessionID: SessionID) => Effect.Effect<void>
   readonly link: (childID: SessionID, parentID: SessionID) => Effect.Effect<void>
+  // Drops a session's link to its root, so its next run is a run of its own, such as a helper started after the run
+  // it once counted against has ended.
+  readonly unlink: (sessionID: SessionID) => Effect.Effect<void>
   readonly rootOf: (sessionID: SessionID) => Effect.Effect<SessionID>
   // Whether the root of `sessionID` has a run going.
   readonly running: (sessionID: SessionID) => Effect.Effect<boolean>
@@ -379,6 +382,14 @@ const layer = Layer.effect(
           ...current,
           roots: new Map(current.roots).set(childID, rootIn(current, parentID)),
         }))
+      }),
+      unlink: Effect.fn("SpendGuard.unlink")(function* (sessionID) {
+        yield* Ref.update(state, (current) => {
+          if (!current.roots.has(sessionID)) return current
+          const roots = new Map(current.roots)
+          roots.delete(sessionID)
+          return { ...current, roots }
+        })
       }),
       rootOf: Effect.fn("SpendGuard.rootOf")(function* (sessionID) {
         return rootIn(yield* Ref.get(state), sessionID)

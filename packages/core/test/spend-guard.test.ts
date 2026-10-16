@@ -412,6 +412,28 @@ describe("SpendGuard service", () => {
     }),
   )
 
+  it.effect("unlinks a session so its steps count against a run of its own", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const owner = SessionID.make("ses_unlink_root")
+      const helper = SessionID.make("ses_unlink_helper")
+      yield* guard.begin(owner, { usd: 1 })
+      yield* guard.link(helper, owner)
+      yield* guard.record(owner, step({ costUsd: 2 }))
+      yield* guard.end(owner)
+      expect((yield* guard.stopped(helper))?.reason).toBe("cap")
+
+      yield* guard.unlink(helper)
+      expect(yield* guard.rootOf(helper)).toBe(helper)
+      expect(yield* guard.stopped(helper)).toBeUndefined()
+      yield* guard.begin(helper, { usd: 3 })
+      expect((yield* guard.record(helper, step({ costUsd: 0.5 }))).state).toBe("ok")
+      expect((yield* guard.snapshot(helper))?.spentUsd).toBe(0.5)
+      expect((yield* guard.snapshot(owner))?.spentUsd).toBe(2)
+      yield* guard.end(helper)
+    }),
+  )
+
   it.effect("turns the loop rules off for a root marked before or during its run", () =>
     Effect.gen(function* () {
       const guard = yield* SpendGuard.Service
