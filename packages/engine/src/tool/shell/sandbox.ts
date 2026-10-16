@@ -68,6 +68,14 @@ const SECRETS = [
   "Library/Application Support/BraveSoftware",
   "Library/Application Support/Microsoft Edge",
   "Library/Application Support/Arc",
+  // The Vercel and Supabase command-line logins. With them an agent could
+  // deploy, promote or change a database outside vector_cloud, whose prompts
+  // auto-accept never answers. Vector's own publish runs in the desktop with
+  // its own token, outside this sandbox.
+  "Library/Application Support/com.vercel.cli",
+  ".local/share/com.vercel.cli",
+  ".vercel",
+  ".supabase",
 ]
 
 // Vector's own credential stores inside a data directory. A CLI user without the
