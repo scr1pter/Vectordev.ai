@@ -230,6 +230,16 @@ worktree, and publishes only a preview: production moves after the work is
 merged. This does not establish a provider's current
 billing state or authorize a charge.
 
+Known limit: the upload runs the pinned Vercel CLI through `npx`, with the
+user's Vercel token in its `VERCEL_TOKEN` environment variable
+(`runVercel` in `packages/desktop/src/main/publish.ts`). While a deploy runs,
+another process of the same user, an agent's shell command among them, can
+read that environment (`ps eww`), and the CLI itself lives in the
+user-writable npx cache. The token never enters a tool result, a log or the
+renderer, but a hostile shell command running alongside a publish could take
+it. Closing this means deploying through Vercel's REST API from the desktop
+process (file upload and deployment creation), so the token never leaves it.
+
 Before claiming live OAuth or release acceptance:
 
 1. Verify server-only configuration and exact provider callback registration.
