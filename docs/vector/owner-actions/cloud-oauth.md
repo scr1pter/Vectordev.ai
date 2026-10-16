@@ -83,6 +83,8 @@ If you add a scope to an integration that is already installed, every installati
    | Edge Functions | Read and Write | Deploy, list and delete functions |
    | Storage | Read | Bucket discovery |
 
+   Supabase's scope list gives Organizations no write level (read 2026-10-15), so an OAuth app cannot create an organization. That is expected: a sign-in is always authorized for one organization. **Create organization** in Database, and the agent's `create_organization`, only appear for an account with no organization, which only an access-token connection can be.
+
    Supabase's [scope list](https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration/oauth-scopes) does not name the logs endpoint (`/analytics/endpoints/logs`) or the security advisors (`/advisors/security`). If the form offers an Analytics or Advisors read scope, enable it. Either way, check **Database logs** and **Security** after connecting. When the advisors are not allowed, Security skips them and asks the user to reconnect.
 
 4. Save the app. Copy its client ID and client secret into section 3. If the dashboard shows a publish or visibility control for the app, publish it so other organizations can authorize it.
