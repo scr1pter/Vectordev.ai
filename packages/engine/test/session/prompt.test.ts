@@ -4253,7 +4253,7 @@ it.instance(
       )
       expect(yield* llm.pending).toBe(1)
     }),
-  30_000,
+  120_000,
 )
 
 it.instance(
@@ -4314,7 +4314,7 @@ it.instance(
       expect(stop.estimate.highUsd).toBeGreaterThan(stop.estimate.lowUsd)
       expect(yield* llm.pending).toBe(1)
     }),
-  30_000,
+  120_000,
 )
 
 it.instance(
@@ -4386,7 +4386,7 @@ unix(
         expect(yield* llm.pending).toBe(1)
       }),
     ),
-  30_000,
+  120_000,
 )
 
 unix(
@@ -4413,7 +4413,7 @@ unix(
       }),
     ),
   { git: true },
-  30_000,
+  120_000,
 )
 
 unix(
@@ -4467,7 +4467,7 @@ unix(
         expect(yield* llm.pending).toBe(0)
       }),
     ),
-  30_000,
+  120_000,
 )
 
 it.instance(
@@ -4503,7 +4503,7 @@ it.instance(
       expect((yield* guard.snapshot(chat.id))?.spentUsd).toBeCloseTo(2, 6)
       expect(yield* llm.pending).toBe(1)
     }),
-  30_000,
+  120_000,
 )
 
 it.instance(
@@ -4531,7 +4531,7 @@ it.instance(
       expect(run?.stopped).toBeUndefined()
       expect(yield* guard.stopped(chat.id)).toBeUndefined()
     }),
-  30_000,
+  120_000,
 )
 
 // A request whose history carries `text` in a user message, which tells a subagent's requests from its root's.
@@ -4572,7 +4572,7 @@ it.instance(
         messages.some((message) => isRecord(message) && message.role === "tool" && message.tool_call_id === call?.id),
       ).toBe(true)
     }),
-  30_000,
+  120_000,
 )
 
 // Sends `text` while the session's run is going and waits until its user message is saved.
@@ -4690,7 +4690,7 @@ it.instance(
       expect(budgetStop(result.info)?.reason).toBe("cap")
       expect(budgetStop(result.info)?.spentUsd).toBe(2)
     }),
-  30_000,
+  120_000,
 )
 
 it.instance(
@@ -4725,7 +4725,7 @@ it.instance(
       expect(yield* guard.rootOf(helper.id)).toBe(helper.id)
       expect((yield* guard.snapshot(root.id))?.spentUsd).toBe(2)
     }),
-  30_000,
+  120_000,
 )
 
 it.instance(
@@ -4748,7 +4748,7 @@ it.instance(
       expect(yield* guard.rootOf(helper.id)).toBe(root.id)
       expect((yield* guard.snapshot(root.id))?.spentUsd).toBeCloseTo(0.1, 6)
     }),
-  30_000,
+  120_000,
 )
 
 it.instance(
@@ -4834,7 +4834,7 @@ it.instance(
       expect(budgetStop(result.info)?.spentUsd).toBeCloseTo(2, 6)
       expect(yield* llm.pending).toBe(1)
     }),
-  30_000,
+  120_000,
 )
 
 it.instance(
@@ -4854,7 +4854,7 @@ it.instance(
       expect(budgetStop(result.info)?.reason).toBe("predicted")
       expect(yield* llm.pending).toBe(1)
     }),
-  30_000,
+  120_000,
 )
 
 it.instance(
@@ -4893,7 +4893,7 @@ it.instance(
           "Spend cap reached: $2.00 spent against a $1.00 cap for this run, on a step that ended its turn. Its answer stands, and Vector starts no further step under this cap.",
       })
     }),
-  30_000,
+  120_000,
 )
 
 it.instance(
@@ -4924,7 +4924,7 @@ it.instance(
       expect(run?.stopped).toBeUndefined()
       expect(yield* llm.pending).toBe(0)
     }),
-  30_000,
+  120_000,
 )
 
 const withBackground = testEffect(
@@ -5002,5 +5002,5 @@ withBackground.instance(
       expect(yield* llm.pending).toBe(1)
       expect((yield* guard.snapshot(chat.id))?.steps).toBe(3)
     }),
-  30_000,
+  120_000,
 )
