@@ -35,8 +35,8 @@ export const runGuardRows = [
     "Spend from subagents, and from Vector's own helpers such as a Vectorscope review started during the run, counts against the same cap as the task that launched them. A helper you start after the run has ended runs under its own limits.",
   ],
   [
-    "Automations hold while they run",
-    "An automation gets the headroom left in your limits as its live cap, and automations that run at the same time share that headroom instead of each spending all of it.",
+    "Automations and parallel agents hold while they run",
+    "An automation or a parallel agent gets the headroom left in your limits as its live cap, up to the per-run limit. With no per-run limit it holds half of that headroom, so a run that starts beside it is not shut out, and runs going at the same time share the headroom instead of each spending all of it.",
   ],
   [
     "Unpriced is not free",
