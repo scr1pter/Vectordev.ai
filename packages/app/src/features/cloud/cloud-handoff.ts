@@ -1,10 +1,34 @@
 import type { CloudDeployment, CloudOverview, PublishTarget } from "./cloud-api"
-import type { CloudSection } from "./cloud-console"
 import type { SecurityReport } from "./supabase/supabase-api"
 
 // How the rest of Vector hands work to Vector Cloud and back: deep links into
 // the Cloud screens, prompts that start the agent on a cloud task, and the
 // readiness a publish needs.
+
+/** Every Vector Cloud screen a link can open. */
+export const CLOUD_SECTIONS = [
+  "overview",
+  "deployments",
+  "logs",
+  "observability",
+  "domains",
+  "environment",
+  "database",
+  "authentication",
+  "storage",
+  "functions",
+  "data-logs",
+  "security",
+  "connections",
+  "settings",
+] as const
+
+export type CloudSection = (typeof CLOUD_SECTIONS)[number]
+
+/** The screen a /cloud link names, or undefined when it names none Vector Cloud has. */
+export function parseCloudSection(value: string | null) {
+  return CLOUD_SECTIONS.find((item) => item === value)
+}
 
 /** A link into Vector Cloud for one project, optionally opened at one section. */
 export function cloudHref(projectPath?: string, section?: CloudSection) {

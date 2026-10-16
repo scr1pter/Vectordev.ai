@@ -35,25 +35,17 @@ import { SupabaseDatabase } from "./supabase/supabase-database"
 import { SupabaseFunctions } from "./supabase/supabase-functions"
 import { SupabaseLogs, SupabaseSecurity } from "./supabase/supabase-observe"
 import { SupabaseStorage } from "./supabase/supabase-storage"
-import { deployRepairPrompt, publishPlan, publishRan, uncommittedNote, type DeployEvidence } from "./cloud-handoff"
+import {
+  deployRepairPrompt,
+  publishPlan,
+  publishRan,
+  uncommittedNote,
+  type CloudSection,
+  type DeployEvidence,
+} from "./cloud-handoff"
 import { createCloudOverview } from "./cloud-overview"
 import "./cloud-console.css"
 
-export type CloudSection =
-  | "overview"
-  | "connections"
-  | "deployments"
-  | "logs"
-  | "observability"
-  | "domains"
-  | "environment"
-  | "database"
-  | "authentication"
-  | "storage"
-  | "functions"
-  | "data-logs"
-  | "security"
-  | "settings"
 type Notice = { tone: "info" | "success" | "error"; text: string }
 type BuildDraft = Omit<CloudBuildSettings, "source" | "updatedAt">
 
@@ -1432,6 +1424,16 @@ export function CloudConsole(props: {
                         ? "Connect Vercel and link this repository's project in Connections."
                         : "Open a project to read its deployment logs."}
                     </p>
+                    <Show when={props.projectPath}>
+                      <button
+                        class="cloud-button mt-4"
+                        data-variant="primary"
+                        type="button"
+                        onClick={() => setSection("connections")}
+                      >
+                        Open Connections
+                      </button>
+                    </Show>
                   </div>
                 }
               >
@@ -1465,6 +1467,14 @@ export function CloudConsole(props: {
                     </svg>
                     <strong>No deployments to monitor</strong>
                     <p>Publish a preview or production release first.</p>
+                    <button
+                      class="cloud-button mt-4"
+                      data-variant="primary"
+                      type="button"
+                      onClick={() => setSection("deployments")}
+                    >
+                      Open Deployments
+                    </button>
                   </div>
                 }
               >
@@ -1588,6 +1598,16 @@ export function CloudConsole(props: {
                         ? "Connect Vercel and link this repository's project in Connections."
                         : "Open a project to connect a custom domain to it."}
                     </p>
+                    <Show when={props.projectPath}>
+                      <button
+                        class="cloud-button mt-4"
+                        data-variant="primary"
+                        type="button"
+                        onClick={() => setSection("connections")}
+                      >
+                        Open Connections
+                      </button>
+                    </Show>
                   </div>
                 }
               >

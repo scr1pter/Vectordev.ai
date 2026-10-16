@@ -4,7 +4,8 @@ import { useLayout } from "@/context/layout"
 import { useServer } from "@/context/server"
 import { useTabs } from "@/context/tabs"
 import { VectorAsciiField } from "@/components/vector-ascii-field"
-import { CloudConsole, type CloudSection } from "./cloud-console"
+import { CloudConsole } from "./cloud-console"
+import { parseCloudSection } from "./cloud-handoff"
 
 type CloudProject = {
   id: string
@@ -14,26 +15,6 @@ type CloudProject = {
 }
 
 const basename = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) || path
-
-function parseCloudSection(value: string | null): CloudSection | undefined {
-  switch (value) {
-    case "overview":
-    case "connections":
-    case "deployments":
-    case "logs":
-    case "observability":
-    case "domains":
-    case "environment":
-    case "database":
-    case "authentication":
-    case "storage":
-    case "functions":
-    case "settings":
-      return value
-    default:
-      return undefined
-  }
-}
 
 export function CloudHome() {
   const navigate = useNavigate()

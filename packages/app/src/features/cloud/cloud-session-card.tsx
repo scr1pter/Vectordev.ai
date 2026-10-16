@@ -10,13 +10,13 @@ import { cloudApi, type CloudReleaseSummary } from "./cloud-api"
 import {
   cloudHref,
   cloudStatus,
+  type CloudSection,
   currentFailure,
   DATABASE_SETUP_PROMPT,
   deploymentEvidence,
   deployRepairPrompt,
   requestComposerPrompt,
 } from "./cloud-handoff"
-import type { CloudSection } from "./cloud-console"
 import { createCloudOverview } from "./cloud-overview"
 
 const RELEASE_LABELS: Record<CloudReleaseSummary["releaseStatus"], string> = {

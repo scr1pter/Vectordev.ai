@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { CloudOverview } from "./cloud-api"
 import {
+  CLOUD_SECTIONS,
   cloudHref,
   cloudStatus,
   composerTakes,
@@ -8,6 +9,7 @@ import {
   deployRepairPrompt,
   holdsHandoff,
   onComposerPrompt,
+  parseCloudSection,
   promoteFailed,
   publishPlan,
   publishRan,
@@ -46,6 +48,17 @@ describe("cloud links", () => {
     expect(new URLSearchParams(cloudHref("/work/my shop", "database").split("?")[1]).get("project")).toBe(
       "/work/my shop",
     )
+  })
+
+  test("open every Cloud screen a link names, including Database logs and Security", () => {
+    for (const section of CLOUD_SECTIONS) {
+      const search = new URLSearchParams(cloudHref("/work/shop", section).split("?")[1])
+      expect(parseCloudSection(search.get("section"))).toBe(section)
+    }
+    expect(parseCloudSection("security")).toBe("security")
+    expect(parseCloudSection("data-logs")).toBe("data-logs")
+    expect(parseCloudSection("aws")).toBeUndefined()
+    expect(parseCloudSection(null)).toBeUndefined()
   })
 })
 
