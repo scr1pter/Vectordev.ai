@@ -1098,9 +1098,9 @@ export const dict = {
   "settings.permissions.tool.vector_cloud_database.title": "Supabase",
   "settings.permissions.tool.vector_cloud_database.description":
     "Create, link or change your Supabase project: schema, SQL, auth, storage, Edge Functions and secrets",
-  "settings.permissions.tool.vector_cloud_environment.title": "Host environment",
+  "settings.permissions.tool.vector_cloud_environment.title": "Environment variables",
   "settings.permissions.tool.vector_cloud_environment.description":
-    "Change your Vercel project's environment variables, or pull its development values into .env",
+    "Change your Vercel project's variables, remove a variable Vector stores for a project, or write the stored variables or Vercel's development values into .env",
   "settings.permissions.tool.vector_cloud_hosting.title": "Hosting settings",
   "settings.permissions.tool.vector_cloud_hosting.description":
     "Create, link or configure your Vercel project, its deployment protection, its domains and Vector's release checks",
