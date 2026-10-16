@@ -51,6 +51,11 @@ describe("server authentication", () => {
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/global/dispose")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("GET", "/project/:projectID/directories")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("PATCH", "/project/:projectID")).toBe(true)
+    // A new worktree runs startup commands; removing or resetting one discards work outside the guest's workspace.
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/experimental/worktree")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("DELETE", "/experimental/worktree")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/experimental/worktree/reset")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("GET", "/experimental/worktree")).toBe(false)
     // A guest still prompts, reads its own pending requests and answers its own questions.
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/session/:sessionID/message")).toBe(false)
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/session/:sessionID/prompt_async")).toBe(false)

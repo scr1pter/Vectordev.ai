@@ -789,6 +789,9 @@ test("guests cannot reach owner-only routes by spelling the path another way", a
       { method: "PATCH", route: "/config", body: {} },
       { method: "PATCH", route: "/global/config", body: {} },
       { method: "PUT", route: "/auth/probe-provider", body: { type: "api", key: "placeholder-key" } },
+      { method: "POST", route: "/experimental/worktree", body: { startCommand: "echo SPELLING-PROBE" } },
+      { method: "DELETE", route: "/experimental/worktree", body: { directory: tmp.path } },
+      { method: "POST", route: "/experimental/worktree/reset", body: { directory: tmp.path } },
     ]
     const spellings = (route: string) => [
       route,
@@ -886,6 +889,13 @@ test("guests load the app's bootstrap routes, narrowed to their workspace", asyn
     const ownerList = (await (await call("/project", { headers: owner })).json()) as Array<{ worktree: string }>
     expect(ownerList.map((item) => item.worktree)).toContain(other.path)
     expect((await call(`/project/${project.id}/directories`, { headers: guest })).status).toBe(403)
+    // The experimental list spans every project for the owner, and only the guest's workspace for a guest.
+    const sessions = async (headers: Record<string, string>) =>
+      ((await (await call("/experimental/session", { headers })).json()) as Array<{ directory: string }>).map(
+        (item) => item.directory,
+      )
+    expect(await sessions(owner)).toContain(other.path)
+    expect(await sessions(guest)).not.toContain(other.path)
 
     // The live stream carries the guest's workspace and nothing from the owner's other project.
     await call(`/session?directory=${encodeURIComponent(other.path)}`, { method: "POST", headers: owner, body: "{}" })

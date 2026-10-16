@@ -181,6 +181,9 @@ export function isOwnerOnlyRoute(method: string, route: string) {
   if (route.startsWith("/api/permission/request") || route.startsWith("/api/question/request")) return true
   if (route.startsWith("/api/credential") || route.startsWith("/api/permission/saved")) return true
   if (route.startsWith("/experimental/project/") && route.includes("/copy")) return true
+  // Creating a worktree runs the project's start command and an extra startup command from the request, and removing
+  // or resetting one discards the owner's work in a directory outside the guest's workspace.
+  if (route.startsWith("/experimental/worktree")) return method !== "GET" && method !== "HEAD"
   if (
     route.startsWith("/global/") ||
     route === "/experimental/console" ||

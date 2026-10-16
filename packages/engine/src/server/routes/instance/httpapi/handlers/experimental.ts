@@ -14,6 +14,7 @@ import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { SessionListQuery, ToolListQuery, WorktreeApiError } from "../groups/experimental"
+import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 
 function mapWorktreeError<A, R>(self: Effect.Effect<A, Worktree.Error, R>) {
   return self.pipe(
@@ -82,7 +83,10 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
 
     const session = Effect.fn("ExperimentalHttpApi.session")(function* (ctx: { query: typeof SessionListQuery.Type }) {
       const limit = ctx.query.limit ?? 100
-      const directory = ctx.query.directory ? yield* InstanceState.directory : undefined
+      // This list spans every project on the server; a guest's is narrowed to the workspace it was invited to, where
+      // the routing already placed this request.
+      const scoped = ctx.query.directory || (yield* RequestPrincipal).kind !== "owner"
+      const directory = scoped ? yield* InstanceState.directory : undefined
       const all = yield* sessions.listGlobal({
         directory,
         roots: ctx.query.roots,
