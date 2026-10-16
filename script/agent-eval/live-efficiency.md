@@ -6,7 +6,7 @@ These commands consume your provider allowance or credits. Run them yourself onl
 
 ## Prepare the exact final revision
 
-From a clean checkout of the released main commit, record the revision and installed CLI versions. The source launcher below uses that checkout's engine, so an older globally installed Vector cannot silently enter the comparison. Install dependencies first with `bun install --frozen-lockfile` if needed.
+From a clean checkout of the released main commit, record the revision and installed CLI versions. The `vector-source` launcher this block creates, used by the reasoning context experiment and the nine-task suite below, runs that checkout's engine, so an older globally installed Vector cannot silently enter the comparison. Nothing in this block calls a model. Install dependencies first with `bun install --frozen-lockfile` if needed.
 
 ```sh
 git rev-parse HEAD
@@ -15,6 +15,11 @@ bun --version
 export VECTOR_BENCH_SOURCE="$PWD"
 export VECTOR_BENCH_WORK="$(mktemp -d -t vector-live-efficiency)"
 cp docs/benchmarks/vector-codex-2026-10/harness/{runner.ts,tasks.ts,score.ts,meter.ts,runner-self-test.ts,extra-behavior.test.ts} "$VECTOR_BENCH_WORK/"
+cat > "$VECTOR_BENCH_WORK/vector-source" <<'SH'
+#!/bin/sh
+exec bun run --conditions=browser "$VECTOR_BENCH_SOURCE/packages/engine/src/index.ts" "$@"
+SH
+chmod 700 "$VECTOR_BENCH_WORK/vector-source"
 ```
 
 Connect Vector to OpenAI using **Sign in with ChatGPT** in its normal UI. Confirm the normal Codex CLI is signed in too. Both sides use `gpt-6.1-sol`, medium effort. Live runs intentionally inherit normal account configuration for sign-in, unlike the isolated offline harness. Record and hold user settings, plugins, custom agent rules and enabled tools constant; do not call these pristine environments. Do not run a paid probe merely to check setup. The runners report unavailable authentication, quota and model failures separately; retain those failures and do not replace them with selectively successful attempts.
@@ -82,7 +87,7 @@ The shipped code restores `prompt_cache_key` by default, with `setCacheKey: fals
 
 ## Reasoning context experiment
 
-OpenAI's reasoning guide documents `reasoning.context` with three values: `auto` (the model's default, the same as omitting it), `current_turn` (earlier turns' reasoning is not rendered into the next sample) and `all_turns` (available, compatible reasoning from earlier turns is rendered). It names the GPT-5.6 family, which already defaults to `all_turns`, and GPT-6.1 Sol as the models that support `all_turns`; it does not state GPT-6.1 Sol's default. The captured Codex CLI request for gpt-6.1-sol sends `all_turns`. The bundled SDK has no option for it, so Vector sends the field only when `VECTOR_EXPERIMENTAL_REASONING_CONTEXT` is set to one of those three values, and then only on OpenAI Responses reasoning requests to the GPT-5.6 family or GPT-6.1 Sol, over HTTP and the WebSocket alike. It is **off by default**; nothing in this release enables it, and no result for it exists yet.
+OpenAI's reasoning guide documents `reasoning.context` with three values: `auto` (the model's default, the same as omitting it), `current_turn` (earlier turns' reasoning is not rendered into the next sample) and `all_turns` (available, compatible reasoning from earlier turns is rendered). It names the GPT-5.6 family, which already defaults to `all_turns`, and GPT-6.1 Sol as the models that support `all_turns`; it does not state GPT-6.1 Sol's default. The captured Codex CLI request for gpt-6.1-sol sends `all_turns`. The bundled SDK has no option for it, so Vector sends the field only when `VECTOR_EXPERIMENTAL_REASONING_CONTEXT` is set to one of those three values, and then only on OpenAI Responses reasoning requests to the GPT-5.6 family or GPT-6.1 Sol, over HTTP and the WebSocket alike. Each request is judged by the model its own body names, so a title or helper request to another model in the same process carries no field. It is **off by default**; nothing in this release enables it, and no result for it exists yet.
 
 The guide also says each response reports the mode it ran with. Over the sign-in WebSocket, every `openai transport` `terminal` record now carries it as `effectiveReasoningContext`, next to the requested `reasoningContext` when one was sent. Read it first from the ordinary runs above, which cost nothing extra: if gpt-6.1-sol already reports `all_turns` without the flag, setting it changes nothing for that model and the paid comparison below is unnecessary. HTTP records do not parse the response stream and carry no effective mode.
 
@@ -93,11 +98,13 @@ VECTOR_EXPERIMENTAL_REASONING_CONTEXT=all_turns bun --no-env-file script/agent-e
   --runtime vector-openai --scenario solo-fix --openai-model gpt-6.1-sol --dump "$VECTOR_BENCH_WORK/context-http"
 VECTOR_EXPERIMENTAL_REASONING_CONTEXT=all_turns bun --no-env-file script/agent-eval/footprint.ts \
   --runtime vector-openai --scenario solo-fix --openai-model gpt-6.1-sol --ws --dump "$VECTOR_BENCH_WORK/context-ws"
+VECTOR_EXPERIMENTAL_REASONING_CONTEXT=all_turns bun --no-env-file script/agent-eval/footprint.ts \
+  --runtime vector-openai --scenario solo-fix --openai-model gpt-5.5 --dump "$VECTOR_BENCH_WORK/context-other-model"
 ```
 
-Every dumped request should show `reasoning.context: "all_turns"`, and the WebSocket requests after the first should still carry `previous_response_id`.
+Every request in the first two dumps should show `reasoning.context: "all_turns"`, and the WebSocket requests after the first should still carry `previous_response_id`. No request in the `gpt-5.5` dump should carry the field.
 
-The field changes only what is rendered from earlier **user turns**, and each archived task is a single prompt, so `context-on.json` in the nine-run matrix is a regression check (pass rate, cost, time), not the test of the hypothesis. That test needs a follow-up prompt in the same session. Run each arm the same number of times, each from its own fresh clone, using the `vector-source` launcher defined under "Behavioral gate" below:
+The field changes only what is rendered from earlier **user turns**, and each archived task is a single prompt, so `context-on.json` in the nine-run matrix is a regression check (pass rate, cost, time), not the test of the hypothesis. That test needs a follow-up prompt in the same session. Run each arm the same number of times, each from its own fresh clone, using the `vector-source` launcher created under "Prepare the exact final revision" above:
 
 ```sh
 for context in off all_turns; do
@@ -146,15 +153,10 @@ Prepare from the clean final `VECTOR_BENCH_SOURCE` commit, and review all declar
 
 The archived broker also implements `--check` (frozen integrity only), `--preflight <fresh-run-id>` (36 scripted loopback episodes) and `--rehearse-first-block <fresh-run-id>` (six synthetic WebSocket episodes). Their non-live branches do not read the configured real credentials or contact the provider, but they still target historical sources; preflight/rehearsal write artifacts. Use the derived adapter's separate commands for final-code preparation, offline checks and owner-run live blocks through the normal runtime. Passing synthetic responses cannot establish the 18/18 model-behavior gate. The archive itself was inspected read-only during this integration; none of these commands was executed.
 
-The current repository's separate nine-task objective suite can be run manually as an additional paid check (it does not replace the historical 18-scenario gate):
+The current repository's separate nine-task objective suite can be run manually as an additional paid check (it does not replace the historical 18-scenario gate), with the `vector-source` launcher from the preparation step:
 
 ```sh
 cd "$VECTOR_BENCH_SOURCE"
-cat > "$VECTOR_BENCH_WORK/vector-source" <<'SH'
-#!/bin/sh
-exec bun run --conditions=browser "$VECTOR_BENCH_SOURCE/packages/engine/src/index.ts" "$@"
-SH
-chmod 700 "$VECTOR_BENCH_WORK/vector-source"
 VECTOR_EVAL_ENGINE="$VECTOR_BENCH_WORK/vector-source" bun script/agent-eval/run.ts --runtime vector --model openai/gpt-6.1-sol --tasks all --repeat 2 --keep --out "$VECTOR_BENCH_WORK/current-behavior.json"
 ```
 
