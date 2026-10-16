@@ -12,6 +12,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { InvalidRequestError } from "../errors"
 import { realpath } from "@/tool/external-directory"
+import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 
 export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handlers) =>
   Effect.gen(function* () {
@@ -133,6 +134,16 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       // write goes through it to the rest of the disk.
       if (!FSUtil.contains(directory, target) || !FSUtil.contains(realpath(directory), realpath(target))) {
         return yield* new InvalidRequestError({ message: "Path escapes the workspace.", field: "path" })
+      }
+      // git runs the programs its own directory names (hooks, config) as the owner, so a guest writing there would be
+      // running a command. Judged on both the requested and the real path, in any case.
+      if (
+        (yield* RequestPrincipal).kind !== "owner" &&
+        [path.relative(directory, target), path.relative(realpath(directory), realpath(target))].some((item) =>
+          item.split(/[\\/]/).some((segment) => segment.toLowerCase() === ".git"),
+        )
+      ) {
+        return yield* new InvalidRequestError({ message: "Only the server owner can write git's files.", field: "path" })
       }
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(target, ctx.payload.content).pipe(

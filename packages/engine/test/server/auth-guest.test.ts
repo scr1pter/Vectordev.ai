@@ -828,6 +828,98 @@ test("guests cannot reach owner-only routes by spelling the path another way", a
   }
 }, 30_000)
 
+test("guests cannot plant or run the repository's git hooks", async () => {
+  await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
+  const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
+  const directory = `directory=${encodeURIComponent(tmp.path)}`
+  const send = (headers: Record<string, string>, method: string, route: string, body: unknown) =>
+    fetch(`${new URL(listener.url).origin}${route}?${directory}`, {
+      method,
+      headers,
+      body: JSON.stringify(body),
+      keepalive: false,
+    })
+  const marker = path.join(tmp.path, "hook-ran")
+  const hook = `#!/bin/sh\ntouch "${marker}"\n`
+  try {
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+    // A hook runs as the owner the next time anyone commits, so writing one is running a command.
+    await fs.symlink(path.join(tmp.path, ".git", "hooks"), path.join(tmp.path, "hooks-link"))
+    const plants = [
+      ".git/hooks/pre-commit",
+      ".GIT/hooks/pre-commit",
+      "./.git/hooks/post-checkout",
+      "src/../.git/config",
+      "hooks-link/pre-commit",
+      "nested/.git",
+    ]
+    const planted = await Promise.all(
+      plants.map(async (file) => ({
+        file,
+        status: (await send(guest, "POST", "/file/write", { path: file, content: hook })).status,
+      })),
+    )
+    expect(planted).toEqual(plants.map((file) => ({ file, status: 400 })))
+    expect(await fs.readdir(path.join(tmp.path, ".git", "hooks"))).not.toContain("pre-commit")
+    expect(await Bun.file(path.join(tmp.path, ".git", "config")).text()).not.toContain("touch")
+    expect((await send(guest, "POST", "/file/write", { path: "notes.txt", content: "guest notes" })).status).toBe(200)
+
+    // A hook the repository already has, such as one a hook manager installed, runs on commit and branch switch.
+    await fs.writeFile(path.join(tmp.path, ".git", "hooks", "pre-commit"), hook, { mode: 0o755 })
+    await fs.writeFile(path.join(tmp.path, ".git", "hooks", "post-checkout"), hook, { mode: 0o755 })
+    const spellings = (route: string) => [route, route.toUpperCase(), `${route}/`, `${route};x`, `/${route}`]
+    const attempts = [
+      ...spellings("/vcs/commit").map((route) => ({ route, body: { message: "guest commit" } })),
+      ...spellings("/vcs/switch").map((route) => ({ route, body: { branch: "guest-branch", create: true } })),
+    ]
+    const results = await Promise.all(
+      attempts.map(async (item) => ({
+        route: item.route,
+        status: (await send(guest, "POST", item.route, item.body)).status,
+      })),
+    )
+    expect(results).toEqual(attempts.map((item) => ({ route: item.route, status: 403 })))
+    expect(await Bun.file(marker).exists()).toBe(false)
+
+    // The owner still writes, commits and switches as before, hooks included.
+    expect((await send(owner, "POST", "/file/write", { path: "owner.txt", content: "owner" })).status).toBe(200)
+    const committed = await send(owner, "POST", "/vcs/commit", { message: "owner commit" })
+    expect(committed.status).toBe(200)
+    expect(((await committed.json()) as { committed: boolean }).committed).toBe(true)
+    expect(await Bun.file(marker).exists()).toBe(true)
+  } finally {
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 30_000)
+
 test("guests load the app's bootstrap routes, narrowed to their workspace", async () => {
   await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
   await using other = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })

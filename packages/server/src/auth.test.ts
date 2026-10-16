@@ -56,6 +56,10 @@ describe("server authentication", () => {
     expect(ServerAuth.isOwnerOnlyRoute("DELETE", "/experimental/worktree")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/experimental/worktree/reset")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("GET", "/experimental/worktree")).toBe(false)
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/vcs/commit")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/vcs/switch")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/vcs/apply")).toBe(false)
+    expect(ServerAuth.isOwnerOnlyRoute("GET", "/vcs/status")).toBe(false)
     // A guest still prompts, reads its own pending requests and answers its own questions.
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/session/:sessionID/message")).toBe(false)
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/session/:sessionID/prompt_async")).toBe(false)

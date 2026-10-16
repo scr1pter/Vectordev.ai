@@ -184,6 +184,8 @@ export function isOwnerOnlyRoute(method: string, route: string) {
   // Creating a worktree runs the project's start command and an extra startup command from the request, and removing
   // or resetting one discards the owner's work in a directory outside the guest's workspace.
   if (route.startsWith("/experimental/worktree")) return method !== "GET" && method !== "HEAD"
+  // Committing and switching branches run the repository's git hooks, programs that run as the owner.
+  if (route === "/vcs/commit" || route === "/vcs/switch") return true
   if (
     route.startsWith("/global/") ||
     route === "/experimental/console" ||
