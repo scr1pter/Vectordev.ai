@@ -193,10 +193,23 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const create = Effect.fn("SessionHttpApi.create")(function* (ctx: { payload?: Session.CreateInput }) {
       yield* requireOwnerToAllow({ permission: ctx.payload?.permission })
-      // A helper session is left out of the owner's lists, so a guest's work could not be seen there.
-      if (ctx.payload?.internal !== undefined && (yield* RequestPrincipal).kind !== "owner")
-        return yield* new ForbiddenError({ message: "Only the server owner can start helper sessions" })
+      yield* requireGuestParent({ parentID: ctx.payload?.parentID, internal: ctx.payload?.internal })
       return yield* shareSvc.create(ctx.payload)
+    })
+
+    // A guest's session may hang only under a session the guest may open. A helper session is left out of every
+    // list, so a guest's helper needs such a parent: its spend then shows in a session the owner sees.
+    const requireGuestParent = Effect.fn("SessionHttpApi.requireGuestParent")(function* (input: {
+      readonly parentID?: SessionID
+      readonly internal?: string
+    }) {
+      const principal = yield* RequestPrincipal
+      if (principal.kind === "owner") return
+      if (input.parentID === undefined && input.internal === undefined) return
+      if (input.parentID === undefined)
+        return yield* new ForbiddenError({ message: "A guest's helper session must belong to one of its sessions" })
+      if (yield* allowsSessionID(session, principal, input.parentID)) return
+      return yield* new ForbiddenError({ message: "The parent session is outside the guest's workspace" })
     })
 
     const createRaw = Effect.fn("SessionHttpApi.createRaw")(function* (ctx: {

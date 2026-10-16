@@ -347,21 +347,38 @@ test("guest session lists and replay routes stay within canonical claims", async
     expect(await adopted.text()).not.toContain("wrk_denied")
     expect((await guestCreate({ id: escaped, location })).status).toBe(403)
     expect((await guestCreate({ id: allowed, location })).status).toBe(200)
+    // A guest's helper (Codespace edit and autocomplete, Browser Agent) belongs to a session the guest may open, whose
+    // spend the owner sees. Without one, or under a session outside the guest's claims, it is refused.
     expect((await guestCreate({ location, internal: "vectorscope" })).status).toBe(403)
+    expect((await guestCreate({ location, internal: "codespace.edit", parentID: denied })).status).toBe(403)
+    expect((await guestCreate({ location, internal: "codespace.edit", parentID: escaped })).status).toBe(403)
+    expect((await guestCreate({ location, parentID: escaped })).status).toBe(403)
+    const helper = await guestCreate({ location, internal: "codespace.edit", parentID: allowed })
+    expect(helper.status).toBe(200)
+    const helperInfo = ((await helper.json()) as { data: { id: string; parentID?: string } }).data
+    expect(helperInfo.parentID).toBe(allowed)
+    expect((await guestCreate({ location, internal: "codespace.autocomplete", parentID: claimed })).status).toBe(200)
+    const helperList = await fetch(new URL("/api/session", listener.url), { headers: guest })
+    expect(((await helperList.json()) as { data: Array<{ id: string }> }).data.map((item) => item.id)).not.toContain(
+      helperInfo.id,
+    )
 
     await events.return(undefined)
     events = undefined
     Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
 
-    expect(
-      (
-        await fetch(new URL("/session", listener.url), {
-          method: "POST",
-          headers: { ...guest, "content-type": "application/json" },
-          body: JSON.stringify({ internal: "vectorscope" }),
-        })
-      ).status,
-    ).toBe(403)
+    const legacyCreate = (body: unknown) =>
+      fetch(new URL("/session", listener.url), {
+        method: "POST",
+        headers: { ...guest, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      })
+    expect((await legacyCreate({ internal: "vectorscope" })).status).toBe(403)
+    expect((await legacyCreate({ internal: "codespace.edit", parentID: escaped })).status).toBe(403)
+    expect((await legacyCreate({ parentID: denied })).status).toBe(403)
+    const legacyHelper = await legacyCreate({ internal: "codespace.edit", parentID: allowed })
+    expect(legacyHelper.status).toBe(200)
+    expect(((await legacyHelper.json()) as { parentID?: string }).parentID).toBe(allowed)
 
     const legacyList = await fetch(new URL("/session", listener.url), { headers: guest })
     expect(legacyList.status).toBe(200)
