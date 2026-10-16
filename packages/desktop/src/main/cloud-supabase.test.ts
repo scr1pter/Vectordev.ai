@@ -706,6 +706,50 @@ describe("SQL console", () => {
     expect(console.result.hiddenColumns).toBeUndefined()
   })
 
+  test("the agent gets no credential behind an alias, a row constructor or a JSON key", async () => {
+    connect()
+    linkDatabase()
+    const hash = `$2a$10$${"N".repeat(53)}`
+    const answers: Record<string, unknown[]> = {
+      "select encrypted_password as h, email as e from auth.users": [{ h: hash, e: "a@example.com" }],
+      "select row_to_json(u) from auth.users u": [
+        { row_to_json: { id: 1, encrypted_password: hash, recovery_token: "fixture-recovery-token" } },
+      ],
+      "select id, email, count(*) from auth.users group by 1, 2": [{ id: 1, email: "a@example.com", count: 1 }],
+      "select row_to_json(p) as profile from profiles p": [
+        { profile: { id: 1, api_token: "fixture-api-token", logins: [{ password: "fixture-password" }], plan: "pro" } },
+      ],
+      "select pw as h from accounts": [{ h: hash }],
+    }
+    fake.state.sql = (sql) => answers[sql] ?? []
+    const run_ = (sql: string) => run("run_sql", { sql }, "agent")
+
+    const aliased = await run_("select encrypted_password as h, email as e from auth.users")
+    expect(aliased.result).toMatchObject({ rows: [["[hidden]", "[hidden]"]], hiddenColumns: ["h", "e"] })
+    const row = await run_("select row_to_json(u) from auth.users u")
+    expect(row.result).toMatchObject({ rows: [["[hidden]"]], hiddenColumns: ["row_to_json"] })
+    // Named non-credential columns of auth.users still come through.
+    const named = await run_("select id, email, count(*) from auth.users group by 1, 2")
+    expect(named.result).toMatchObject({ rows: [[1, "a@example.com", 1]] })
+    expect(named.result.hiddenColumns).toBeUndefined()
+    const json = await run_("select row_to_json(p) as profile from profiles p")
+    // Keys named like credentials lose their values at any depth; the rest stays readable.
+    const profile = JSON.parse(json.result.rows[0][0])
+    expect(profile).toMatchObject({ id: 1, plan: "pro" })
+    expect([profile.api_token, profile.logins[0].password].every((item) => /^\[(hidden|REDACTED)\]$/.test(item))).toBe(
+      true,
+    )
+    const renamed = await run_("select pw as h from accounts")
+    expect(renamed.result.rows).toEqual([["[hidden]"]])
+    expectNoSecrets(
+      [aliased, row, json, renamed],
+      hash,
+      "fixture-recovery-token",
+      "fixture-api-token",
+      "fixture-password",
+    )
+  })
+
   test("the agent's results are bounded and scrubbed of credentials and stored values", async () => {
     connect()
     linkDatabase()

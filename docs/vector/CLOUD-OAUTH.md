@@ -270,6 +270,21 @@ judged by the name the page gives the element the selector matches, so a
 positional selector such as `div[role=dialog] button:last-child` is judged by
 the button it presses.
 
+`run_sql` results reach the agent as model context, so its copy hides
+credentials (`packages/desktop/src/main/cloud-supabase-database.ts`): cells in
+columns named like passwords, tokens or secrets, values under such keys at any
+depth of a JSON cell (`row_to_json`, `json_agg`), and bcrypt or Argon2 password
+hashes in any cell. A query that reads Supabase's credential tables
+(`auth.users`, `auth.refresh_tokens`, `auth.one_time_tokens`,
+`auth.mfa_factors`, `auth.mfa_challenges`, `auth.flow_state`, `vault.secrets`,
+`vault.decrypted_secrets`, `pgsodium.key`, `pgsodium.decrypted_key`) shows the
+agent only their known non-credential columns, named as they are, so
+`encrypted_password as h` or `select u from auth.users u` comes back hidden.
+Limits: a credential read through a view, a function, or another
+`search_path` is not recognised, and a token in a column with an ordinary name
+in an app's own table is shown. Each `run_sql` still asks with its SQL shown.
+The console, which the user reads, shows every cell.
+
 ## Repository migrations
 
 `apply_migrations` runs the repository's `.sql` files against the linked

@@ -37,8 +37,86 @@ const READ_ONLY_VIOLATION = /read-only transaction|read only transaction/i
 // vault.decrypted_secrets.decrypted_secret) and the names apps give their own.
 // The agent never gets these cells; the console, which the user reads, does.
 const CREDENTIAL_COLUMN = /(?:^|_)(?:password|token|secret|token_hash|api_key|private_key)$/i
+// Supabase's tables that hold sign-in credentials or key material. A query
+// that reads one can return a credential under any name (`encrypted_password
+// as h`, `row_to_json(u)`, `select u from auth.users u`), so the agent then
+// gets only the columns those tables hold that are known not to be
+// credentials, named as they are. Reading them through a view, a function or
+// another search_path is not seen here.
+const CREDENTIAL_TABLE =
+  /\b(?:auth\s*\.\s*"?(?:users|refresh_tokens|one_time_tokens|mfa_factors|mfa_challenges|flow_state)|vault\s*\.\s*"?(?:secrets|decrypted_secrets)|pgsodium\s*\.\s*"?(?:key|decrypted_key))\b/i
+const CREDENTIAL_TABLE_SAFE_COLUMNS = new Set([
+  // auth.users
+  "instance_id",
+  "id",
+  "aud",
+  "role",
+  "email",
+  "email_confirmed_at",
+  "invited_at",
+  "confirmation_sent_at",
+  "recovery_sent_at",
+  "email_change",
+  "email_change_sent_at",
+  "email_change_confirm_status",
+  "last_sign_in_at",
+  "raw_app_meta_data",
+  "raw_user_meta_data",
+  "is_super_admin",
+  "created_at",
+  "updated_at",
+  "phone",
+  "phone_confirmed_at",
+  "phone_change",
+  "phone_change_sent_at",
+  "confirmed_at",
+  "banned_until",
+  "reauthentication_sent_at",
+  "is_sso_user",
+  "is_anonymous",
+  "deleted_at",
+  // auth.refresh_tokens, one_time_tokens, mfa_factors, mfa_challenges, flow_state
+  "user_id",
+  "session_id",
+  "revoked",
+  "token_type",
+  "relates_to",
+  "factor_id",
+  "factor_type",
+  "friendly_name",
+  "status",
+  "verified_at",
+  "last_challenged_at",
+  "ip_address",
+  "provider_type",
+  "authentication_method",
+  "code_challenge_method",
+  "auth_code_issued_at",
+  // vault.secrets and decrypted_secrets
+  "name",
+  "description",
+  "key_id",
+  // aggregates
+  "count",
+  "exists",
+])
+// Password hashes, whatever the column or JSON key is called.
+const PASSWORD_HASH = /\$2[abxy]?\$\d{2}\$[./A-Za-z0-9]{53}|\$argon2(?:id|i|d)\$[^\s"',)]+/g
 
 type Caller = "console" | "agent"
+
+// A JSON value with every credential-named key hidden, at any depth:
+// `row_to_json(u)` or `json_agg(t)` carry a table's columns as keys.
+function withoutCredentialKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutCredentialKeys)
+  if (!value || typeof value !== "object") return value
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      CREDENTIAL_COLUMN.test(key) ? "[hidden]" : withoutCredentialKeys(item),
+    ]),
+  )
+}
 
 // What the Management API's applied history says about the files in the
 // repository, plus which applied migration a rollback would undo.
@@ -300,12 +378,21 @@ export async function runSql(
   )
   // Every cell is scrubbed: a table can hold tokens and keys, and the agent's
   // copy is model context the user cannot take back.
-  const hidden = input.caller === "agent" ? columns.filter((column) => CREDENTIAL_COLUMN.test(column)) : []
+  const agent = input.caller === "agent"
+  const credentialTables = agent && CREDENTIAL_TABLE.test(sql)
+  const hidden = agent
+    ? columns.filter(
+        (column) =>
+          CREDENTIAL_COLUMN.test(column) ||
+          (credentialTables && !CREDENTIAL_TABLE_SAFE_COLUMNS.has(column.toLowerCase())),
+      )
+    : []
   const cell = (value: unknown, column: string): string | number | boolean | null => {
     if (value === null || value === undefined) return null
     if (hidden.includes(column)) return "[hidden]"
     if (typeof value === "number" || typeof value === "boolean") return value
-    const text = scrub(context, typeof value === "string" ? value : JSON.stringify(value))
+    const raw = typeof value === "string" ? value : JSON.stringify(agent ? withoutCredentialKeys(value) : value)
+    const text = scrub(context, agent ? raw.replace(PASSWORD_HASH, "[hidden]") : raw)
     return text.length > limits.cell ? `${text.slice(0, limits.cell)}…` : text
   }
   return {

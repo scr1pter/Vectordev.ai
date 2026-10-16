@@ -604,7 +604,7 @@ function formatSupabase(action: Action, report: CloudReport) {
     return lines(
       `${result.readOnly ? "Read-only query" : "Write"} on Supabase project ${project?.name ?? ""}: ${result.rows.length} of ${result.rowCount} row(s)${result.truncated ? " (truncated)" : ""}.`,
       result.hiddenColumns?.length
-        ? `Hidden because they hold sign-in credentials: ${result.hiddenColumns.join(", ")}. The user can see them in Vector Cloud > Database.`
+        ? `Hidden because they hold or may hold sign-in credentials: ${result.hiddenColumns.join(", ")}. A query that reads Supabase's auth, vault or pgsodium tables shows only their known non-credential columns, named as they are. The user can see them in Vector Cloud > Database.`
         : undefined,
       result.columns.length ? result.columns.join(" | ") : undefined,
       ...result.rows.map((row) => row.map((cell) => (cell === null ? "null" : String(cell))).join(" | ")),

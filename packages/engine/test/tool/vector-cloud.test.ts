@@ -697,7 +697,7 @@ describe("vector_cloud bridge", () => {
         described,
       )
       const hidden = yield* execute({ action: "run_sql", sql: "select id, encrypted_password from auth.users" })
-      expect(hidden.output).toContain("Hidden because they hold sign-in credentials: encrypted_password.")
+      expect(hidden.output).toContain("Hidden because they hold or may hold sign-in credentials: encrypted_password.")
 
       yield* bridge(
         {

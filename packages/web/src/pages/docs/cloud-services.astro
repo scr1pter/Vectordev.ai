@@ -138,8 +138,11 @@ export const prerender = true
     you.
     A new migration file asks like any other edit, showing both the migration and its down file. OAuth client secrets, function secret values and the database password are entered
     in Vector Cloud, never in chat, and the agent can only refer to variables already stored there. Query results
-    reach the agent as the query returns them, except cells in columns named like passwords, tokens or secrets, which
-    are hidden.
+    reach the agent as the query returns them, except cells in columns named like passwords, tokens or secrets, values
+    under such names inside JSON, and password hashes, which are hidden. A query that reads Supabase's own credential
+    tables, such as auth.users, shows the agent only their known non-credential columns, named as they are, so a
+    renamed column or a whole row comes back hidden. A credential read through a view or a function the query calls is
+    not recognised.
     Publishing goes to the Vercel project linked to the repository, as a preview unless you ask for production;
     without a linked project, the tool returns setup guidance. A failed publish reaches the agent with its failed
     checks and log lines, so it can fix the cause. A failed Vercel deployment never triggers a deployment somewhere
