@@ -1,3 +1,4 @@
+import type { Session } from "@vectordevai/sdk/v2"
 import { publicShareError } from "@vectordevai/schema/public-share"
 import { DialogConfirm } from "../ui/dialog-confirm"
 import { useDialog } from "../ui/dialog"
@@ -20,6 +21,7 @@ import { errorMessage } from "../util/error"
 import { DialogSessionDeleteFailed } from "./dialog-session-delete-failed"
 import { useCommandShortcut } from "../keymap"
 import { useEvent } from "../context/event"
+import { isInternalSession } from "../util/session"
 
 type SessionListFilter = { scope?: "project"; path?: string }
 
@@ -33,13 +35,14 @@ export function createDialogSessionListQuery(input: { search?: string; filter: S
   }
 }
 
-export function loadDialogSessionList<T>(input: {
+export function loadDialogSessionList<T extends Pick<Session, "internal" | "title">>(input: {
   search?: string
   filter: SessionListFilter
   list: (query: ReturnType<typeof createDialogSessionListQuery>) => Promise<{ data?: T[] }>
 }) {
   return input.list(createDialogSessionListQuery(input)).then(
-    (result) => result.data,
+    // An engine that predates the helper marker lists Vector's helpers; they are known by the titles Vector gave them.
+    (result) => result.data?.filter((session) => !isInternalSession(session)),
     () => undefined,
   )
 }

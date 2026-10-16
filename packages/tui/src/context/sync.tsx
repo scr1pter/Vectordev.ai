@@ -32,6 +32,7 @@ import path from "path"
 import { useKV } from "./kv"
 import { usePermission } from "./permission"
 import { canAutoApprovePermission } from "../util/permission"
+import { isInternalSession } from "../util/session"
 
 function search<T>(items: T[], target: string, key: (item: T) => string) {
   let left = 0
@@ -155,9 +156,16 @@ export const {
     }
 
     function listSessions() {
-      return sdk.client.session
-        .list({ start: Date.now() - 30 * 24 * 60 * 60 * 1000, ...sessionListQuery() })
-        .then((x) => (x.data ?? []).toSorted((a, b) => a.id.localeCompare(b.id)))
+      return (
+        sdk.client.session
+          .list({ start: Date.now() - 30 * 24 * 60 * 60 * 1000, ...sessionListQuery() })
+          // An engine that predates the helper marker lists Vector's helpers; they are known by the titles Vector gave them.
+          .then((x) =>
+            (x.data ?? [])
+              .filter((session) => !isInternalSession(session))
+              .toSorted((a, b) => a.id.localeCompare(b.id)),
+          )
+      )
     }
 
     event.subscribe((event, { directory, workspace }) => {
@@ -273,7 +281,7 @@ export const {
           const result = search(store.session, event.properties.info.id, (s) => s.id)
           // Vector's helper sessions (a Vectorscope review, autocomplete) report to the surface that launched them and
           // never enter the session list; their spend shows in the launching session's totals.
-          if (event.properties.info.internal) {
+          if (isInternalSession(event.properties.info)) {
             if (result.found)
               setStore(
                 "session",
