@@ -452,9 +452,14 @@ export function noteMonthUnknown(input: { maxUsd: number; error: string }): stri
   return `Automatic reviews are paused: Vector could not read this month's review spending for the repository${reason ? ` (${reason})` : ""}, and a monthly limit of ${formatUsd(input.maxUsd)} is set. Comment \`/vector review\` to run one anyway.`
 }
 
-export function noteFailed(error: string): string {
+// A review that failed still spent what its reviewers used before it stopped, so the note says so.
+export function noteFailed(error: string, cost?: ReviewCost): string {
   const reason = sanitizeProse(clip(oneLine(error), MAX_ERROR), undefined).replace(/[.\s]+$/, "") || "an unknown error"
-  return `Vector could not finish this review: ${reason}. Comment \`/vector review\` to try again.`
+  return `Vector could not finish this review: ${reason}.${cost ? ` ${failedSpend(cost)}` : ""} Comment \`/vector review\` to try again.`
+}
+
+export function failedSpend(cost: ReviewCost): string {
+  return `Used before it stopped: ${costWording(cost)}.`
 }
 
 export function noteAlreadyReviewed(head: string): string {

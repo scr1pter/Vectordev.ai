@@ -1194,7 +1194,7 @@ describe("vector github review against a fake GitHub", () => {
       const { result } = await job(w, failed)
       expect(result.exitCode).toBe(0)
       expect(sticky(w)!.body).toContain(
-        "Vector could not finish this review: HTTP 500 from the provider. Comment `/vector review` to try again.",
+        "Vector could not finish this review: HTTP 500 from the provider. Used before it stopped: anthropic/claude-sonnet-4-5 · $0.21 (48.2k in, 31.0k of it cached / 3.1k out). Comment `/vector review` to try again.",
       )
       expect(state(w)).toMatchObject({ failed: true, costUsd: 0.21 })
       expect(state(w)?.head).toBeUndefined()

@@ -112,6 +112,46 @@ describe("tui sync", () => {
     }
   })
 
+  test("knows the helpers of an engine without the helper marker by the titles Vector gave them", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const info = (id: string, title = id) => ({
+      id,
+      slug: id,
+      projectID: "proj_test",
+      directory: tmp.path,
+      title,
+      version: "test",
+      time: { created: 1, updated: 1 },
+    })
+    const listed = [
+      info("ses_own"),
+      info("ses_autocomplete", "Vector Tool · Autocomplete"),
+      info("ses_early", "Vector review · #12 · review"),
+    ]
+    const { app, emit, sync } = await mount((url) => (url.pathname === "/session" ? json(listed) : undefined), tmp.path)
+    const updated = (session: ReturnType<typeof info>): GlobalEvent =>
+      ({
+        directory: tmp.path,
+        project: "proj_test",
+        payload: {
+          id: `evt_${session.id}`,
+          type: "session.updated",
+          properties: { sessionID: session.id, info: session },
+        },
+      }) as GlobalEvent
+
+    try {
+      await wait(() => sync.data.session.some((session) => session.id === "ses_own"))
+      emit(updated(info("ses_review", "Vectorscope review · 1a2b3c4 · review")))
+      emit(updated(info("ses_next")))
+      await wait(() => sync.data.session.some((session) => session.id === "ses_next"))
+      expect(sync.data.session.map((session) => session.id)).toEqual(["ses_next", "ses_own"])
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
   test("vcs branch updates only apply for the active workspace", async () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")

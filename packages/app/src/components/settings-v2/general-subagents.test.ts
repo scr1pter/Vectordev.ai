@@ -1,26 +1,55 @@
 import { describe, expect, test } from "bun:test"
 import type { Config } from "@vectordevai/sdk/v2/client"
-import {
-  generalSubagentsEnabled,
-  generalSubagentsPatch,
-  runningSessions,
-  stopWorkDescription,
-} from "./general-subagents"
+import { generalSubagentsEnabled, generalSubagentsPatch, runningWork, stopWorkDescription } from "./general-subagents"
 
-describe("runningSessions", () => {
+describe("runningWork", () => {
+  const helpers: Record<string, string> = {
+    review: "Vectorscope review",
+    security: "Vectorscope review",
+    type: "Autocomplete",
+  }
+  const helperOf = (sessionID: string) => helpers[sessionID]
+
   test("counts every session that is not idle", () => {
-    expect(runningSessions({})).toBe(0)
-    expect(runningSessions({ a: { type: "idle" } })).toBe(0)
-    expect(runningSessions({ a: { type: "idle" }, b: { type: "busy" }, c: { type: "retry" }, d: undefined })).toBe(2)
+    expect(runningWork({}, helperOf)).toEqual({ sessions: 0, helpers: [] })
+    expect(runningWork({ a: { type: "idle" } }, helperOf)).toEqual({ sessions: 0, helpers: [] })
+    expect(
+      runningWork({ a: { type: "idle" }, b: { type: "busy" }, c: { type: "retry" }, d: undefined }, helperOf),
+    ).toEqual({ sessions: 2, helpers: [] })
+  })
+
+  test("names Vector's running helpers instead of counting them as sessions", () => {
+    expect(
+      runningWork(
+        { b: { type: "busy" }, review: { type: "busy" }, security: { type: "busy" }, type: { type: "idle" } },
+        helperOf,
+      ),
+    ).toEqual({ sessions: 1, helpers: ["Vectorscope review"] })
   })
 })
 
 describe("stopWorkDescription", () => {
   test("says how many sessions the change stops", () => {
-    expect(stopWorkDescription(1)).toContain("1 session is working right now")
-    expect(stopWorkDescription(1)).toContain("stops it")
-    expect(stopWorkDescription(4)).toContain("4 sessions are working right now, subagents included")
-    expect(stopWorkDescription(4)).toContain("stops all of them")
+    expect(stopWorkDescription({ sessions: 1, helpers: [] })).toContain("1 session is working right now")
+    expect(stopWorkDescription({ sessions: 1, helpers: [] })).toContain("stops it")
+    expect(stopWorkDescription({ sessions: 4, helpers: [] })).toContain(
+      "4 sessions are working right now, subagents included",
+    )
+    expect(stopWorkDescription({ sessions: 4, helpers: [] })).toContain("stops all of them")
+  })
+
+  test("says which of Vector's helpers stop, never calling them sessions", () => {
+    const helpersOnly = stopWorkDescription({ sessions: 0, helpers: ["Vectorscope review"] })
+    expect(helpersOnly).toBe(
+      "One of Vector's helpers is working right now (Vectorscope review). Changing this setting stops it, and the new setting applies from your next message.",
+    )
+    expect(helpersOnly).not.toContain("session")
+    expect(stopWorkDescription({ sessions: 0, helpers: ["Vectorscope review", "Autocomplete"] })).toBe(
+      "Vector's helpers are working right now (Vectorscope review, Autocomplete). Changing this setting stops all of them, and the new setting applies from your next message.",
+    )
+    expect(stopWorkDescription({ sessions: 1, helpers: ["Vectorscope review", "Autocomplete"] })).toBe(
+      "1 session is working right now. Vector's helpers are working too (Vectorscope review, Autocomplete). Changing this setting stops all of them, and the new setting applies from your next message.",
+    )
   })
 })
 

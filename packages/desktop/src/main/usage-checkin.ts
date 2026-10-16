@@ -7,12 +7,14 @@ const DAY = 24 * 60 * 60 * 1000
 const MAX_COUNT = 100_000
 // The last tick before UTC midnight lands this far ahead of it, so the end of a day is still sent as part of that day.
 const DAY_END_MARGIN = 5 * 60 * 1000
-// Reading the usage summary scans every message on the local engine's event loop, so while the day's counts stay the
-// same it is read at most this often.
+// Reading the usage summary scans every message on the local engine's event loop, so while the day's counts (and the
+// number of Vector's helpers started that day) stay the same it is read at most this often.
 const USAGE_READ_INTERVAL = 6 * 60 * 60 * 1000
 const INSTALL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-// Only the parent link is read; titles, directories and everything else in a row are ignored.
-const SessionRows = Schema.Array(Schema.Struct({ parentID: Schema.optional(Schema.String) }))
+// Only the parent link and the helper marker are read; titles, directories and everything else in a row are ignored.
+const SessionRows = Schema.Array(
+  Schema.Struct({ parentID: Schema.optional(Schema.String), internal: Schema.optional(Schema.String) }),
+)
 // The counts the server last accepted and the UTC day they belong to, with the lifetime tokens and model responses of
 // the last usage report it accepted that day.
 const Sent = Schema.Struct({
@@ -47,19 +49,22 @@ type Dependencies = {
  * Reports a random install ID, the account token when signed in, the app version, OS, CPU architecture, how many
  * sessions and subagent sessions were active in the current UTC day, and, when signed in, the usage report behind
  * Settings > Usage & streaks (token totals, cost, models and their token shares, effort levels, chats, streaks, task
- * timing). Nothing those sessions contain is sent.
+ * timing). Nothing those sessions contain is sent. Vector's helpers (a Vectorscope review, autocomplete, an inline edit)
+ * are not sessions the user started, so neither count includes them; what they spent is part of the usage report.
  *
  * The first check-in of a day marks the install active; later ones send again whenever a count has gone up or the
  * report shows more tokens or model responses, and the server keeps the largest values it receives for an install and
- * day. The report is read with the first check-in of a day and whenever a count went up, otherwise at most every six
- * hours. When the report cannot be read, the check-in goes without it.
+ * day. The report is read with the first check-in of a day and whenever a count went up or Vector started another
+ * helper that day, otherwise at most every six hours. When the report cannot be read, the check-in goes without it.
  */
 export function createUsageCheckin(deps: Dependencies) {
   const state: {
     running?: Promise<boolean>
     timer?: ReturnType<typeof setTimeout>
     usageReadAt: number
-  } = { usageReadAt: Number.NEGATIVE_INFINITY }
+    // How many helpers had been started that UTC day when the report was last read.
+    helpersRead: { day: string; helpers: number }
+  } = { usageReadAt: Number.NEGATIVE_INFINITY, helpersRead: { day: "", helpers: 0 } }
 
   const checkin = async () => {
     if (!deps.endpoint || !deps.enabled()) return false
@@ -79,14 +84,21 @@ export function createUsageCheckin(deps: Dependencies) {
         onSome: (value) => ({ sessions: value.sessions, subagentSessions: value.subagentSessions }),
       })
     const token = await deps.token().catch(() => undefined)
+    // A helper's spend reaches the server only in the report, so a helper started since the last read gets it read
+    // again, just as a new session does, instead of waiting out the six hours.
+    const helpers = counted?.helpers ?? 0
     // The server keeps model use only from a signed-in install, so a signed-out one neither reads nor sends it.
     const read =
       Boolean(token) &&
       (Option.isNone(sent) ||
         counts.sessions > sent.value.sessions ||
         counts.subagentSessions > sent.value.subagentSessions ||
+        helpers > (state.helpersRead.day === day ? state.helpersRead.helpers : 0) ||
         now - state.usageReadAt >= (deps.usageInterval ?? USAGE_READ_INTERVAL))
-    if (read) state.usageReadAt = now
+    if (read) {
+      state.usageReadAt = now
+      state.helpersRead = { day, helpers }
+    }
     const usage = read ? await readUsage(deps).catch(() => undefined) : undefined
     // A day's counts and a report's totals only grow (unless sessions are deleted), so nothing needs sending until one
     // of them goes up.
@@ -124,7 +136,8 @@ export function createUsageCheckin(deps: Dependencies) {
     const responses = usage?.modelResponses ?? Option.getOrUndefined(sent)?.responses
     deps.store.set("sent", {
       day,
-      ...counts,
+      sessions: counts.sessions,
+      subagentSessions: counts.subagentSessions,
       ...(tokens === undefined ? {} : { tokens }),
       ...(responses === undefined ? {} : { responses }),
     })
@@ -182,13 +195,14 @@ async function countSessions(
   deps: Pick<Dependencies, "engine" | "fetch">,
   start: number,
   cursor?: string,
-  counted: Counts = { sessions: 0, subagentSessions: 0 },
-): Promise<Counts> {
+  counted: Counts & { helpers: number } = { sessions: 0, subagentSessions: 0, helpers: 0 },
+): Promise<Counts & { helpers: number }> {
   const url = new URL("/experimental/session", deps.engine.url)
   url.search = new URLSearchParams({
     start: String(start),
     archived: "true",
-    // Vector's helper sessions are out of session lists but still part of the day's usage.
+    // The engine leaves Vector's helper sessions (Vectorscope, autocomplete, inline edit) out unless asked. They are
+    // counted apart: they are not sessions the user started, and only tell when the usage report needs reading again.
     internal: "true",
     limit: "500",
     ...(cursor ? { cursor } : {}),
@@ -201,14 +215,16 @@ async function countSessions(
   if (!response.ok) throw new Error(`The local server could not list sessions (${response.status}).`)
   const rows = Schema.decodeUnknownOption(SessionRows)(await response.json())
   if (Option.isNone(rows)) throw new Error("The local server returned an unexpected session list.")
-  const subagents = rows.value.filter((row) => row.parentID).length
+  const helpers = rows.value.filter((row) => row.internal).length
+  const subagents = rows.value.filter((row) => row.parentID && !row.internal).length
   const next = {
-    sessions: Math.min(MAX_COUNT, counted.sessions + rows.value.length - subagents),
+    sessions: Math.min(MAX_COUNT, counted.sessions + rows.value.length - helpers - subagents),
     subagentSessions: Math.min(MAX_COUNT, counted.subagentSessions + subagents),
+    helpers: Math.min(MAX_COUNT, counted.helpers + helpers),
   }
   const nextCursor = response.headers.get("x-next-cursor")
   if (!nextCursor || rows.value.length === 0) return next
-  if (next.sessions === MAX_COUNT && next.subagentSessions === MAX_COUNT) return next
+  if (next.sessions === MAX_COUNT && next.subagentSessions === MAX_COUNT && next.helpers === MAX_COUNT) return next
   return countSessions(deps, start, nextCursor, next)
 }
 

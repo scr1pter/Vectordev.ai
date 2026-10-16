@@ -41,6 +41,34 @@ describe("session usage", () => {
     expect(result.days).toHaveLength(3)
   })
 
+  test("keeps helper spend in the totals but out of task timing and counts", () => {
+    const today = new Date()
+    today.setHours(12, 0, 0, 0)
+    const start = today.getTime()
+    const helpers = new Map([["ses_review", "vectorscope.review"]])
+
+    const result = summarizeUsage(
+      [
+        assistant(start, 100, 0.02, 4_000),
+        assistant(start + 10, 60, 0.03, 2_000),
+        assistant(start + 20, 900, 0.4, 90_000, { sessionID: "ses_review" }),
+      ],
+      [],
+      helpers,
+    )
+
+    expect(result.lifetimeTokens).toBe(1_060)
+    expect(result.lifetimeCost).toBeCloseTo(0.45)
+    expect(result.modelResponses).toBe(3)
+    expect(result.longestTaskMs).toBe(4_000)
+    expect(result.longestTaskTokens).toBe(100)
+    expect(result.averageTaskMs).toBe(3_000)
+    expect(result.completedChats).toBe(2)
+    expect(result.conversations).toBe(1)
+    expect(result.days[0]?.tasks).toBe(2)
+    expect(result.helpers).toEqual([{ id: "vectorscope.review", sessions: 1, responses: 1, tokens: 900, cost: 0.4 }])
+  })
+
   test("returns an empty summary before the first model response", () => {
     expect(summarizeUsage([])).toEqual({
       lifetimeTokens: 0,
@@ -228,11 +256,11 @@ function assistant(
   tokens: number,
   cost: number,
   duration: number,
-  options?: { providerID?: string; modelID?: string; variant?: string },
+  options?: { providerID?: string; modelID?: string; variant?: string; sessionID?: string },
 ) {
   return {
     id: `message-${created}`,
-    sessionID: "session-usage",
+    sessionID: options?.sessionID ?? "session-usage",
     role: "assistant",
     time: { created, completed: created + duration },
     parentID: `parent-${created}`,

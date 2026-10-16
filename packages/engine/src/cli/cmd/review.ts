@@ -19,6 +19,7 @@ import { parseUnifiedDiff, renderPatch, type DiffFile } from "@vectordevai/core/
 import {
   buildReviewBody,
   buildSummaryBody,
+  failedSpend,
   formatUsd,
   noteMoved,
   noteNothingToReview,
@@ -412,10 +413,14 @@ export function executeLocalReview<RunR, ModelR>(
     })
     const reviewers = reviewed.specialists.filter((entry) => entry.name !== "verify")
     if (!reviewers.some((entry) => entry.status !== "failed")) {
-      const detail = reviewers.find((entry) => entry.detail)?.detail ?? "the model returned no report"
+      const detail = (reviewers.find((entry) => entry.detail)?.detail ?? "the model returned no report").replace(
+        /[.\s]+$/,
+        "",
+      )
       return {
         exitCode: 2,
-        error: `Vector could not finish this review: ${detail}`,
+        // The reviewers' sessions are hidden, so this is where what they spent before failing shows.
+        error: `Vector could not finish this review: ${detail}${reviewed.cost ? `. ${failedSpend(reviewed.cost)}` : ""}`,
         target,
         outcome: reviewed,
       } satisfies LocalReviewResult

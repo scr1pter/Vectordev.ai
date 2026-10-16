@@ -20,15 +20,28 @@ describe("dialog session list", () => {
   })
 
   test("keeps the cache usable while the root request is pending", async () => {
-    let resolve!: (result: { data: string[] }) => void
-    const pending = loadDialogSessionList<string>({
+    let resolve!: (result: { data: { title: string }[] }) => void
+    const pending = loadDialogSessionList<{ title: string }>({
       filter: {},
       list: () => new Promise((done) => (resolve = done)),
     })
 
     expect(await Promise.race([pending, Promise.resolve("pending")])).toBe("pending")
-    resolve({ data: ["root"] })
-    expect(await pending).toEqual(["root"])
+    resolve({ data: [{ title: "root" }] })
+    expect(await pending).toEqual([{ title: "root" }])
+  })
+
+  test("leaves out Vector's helpers, also from an engine that predates the helper marker", async () => {
+    const sessions = [
+      { title: "fix the login form" },
+      { title: "Autocomplete", internal: "codespace.autocomplete" },
+      { title: "Vector Tool · Autocomplete" },
+      { title: "Vectorscope review · 1a2b3c4 · review" },
+      { title: "Vector review · #12 · review" },
+    ]
+    expect(await loadDialogSessionList({ filter: {}, list: async () => ({ data: sessions }) })).toEqual([
+      { title: "fix the login form" },
+    ])
   })
 
   test("falls back when the root request returns an error response", async () => {

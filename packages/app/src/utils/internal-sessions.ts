@@ -5,12 +5,17 @@
 export const REVIEW_SESSION_TITLE_PREFIX = "Vectorscope review · "
 
 const LEGACY_TITLE_PREFIXES = ["Vector Tool · ", "Vectorscope review · "]
+// Before Vectorscope had its name, the desktop titled reviewers "Vector review · #12 · review" (1.99.8) or "Vecbot
+// review · #12 · review", and `vector review` put the seven-character commit in the middle. Only that middle counts,
+// so a session the user titled "Vector review · login · review" stays visible.
+const EARLY_REVIEW_TITLE = /^(Vector|Vecbot) review · (#\d+|[0-9a-f]{7}) · (review|security|verify)$/
 
 export function isInternalSession(session: { internal?: string; title?: string | null } | undefined | null) {
   if (!session) return false
   if (session.internal) return true
   // An engine that predates the marker only knows these sessions by the titles Vector gave them.
-  return LEGACY_TITLE_PREFIXES.some((prefix) => session.title?.startsWith(prefix) ?? false)
+  const title = session.title ?? ""
+  return LEGACY_TITLE_PREFIXES.some((prefix) => title.startsWith(prefix)) || EARLY_REVIEW_TITLE.test(title)
 }
 
 const HELPER_LABELS: Record<string, string> = {

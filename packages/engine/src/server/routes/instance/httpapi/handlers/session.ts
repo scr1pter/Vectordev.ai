@@ -46,6 +46,7 @@ import { InvalidRequestError, PermissionNotFoundError, notFound } from "../error
 import * as SessionError from "./session-errors"
 import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 import { ForbiddenError } from "@vectordevai/protocol/errors"
+import { isHelperName } from "@vectordevai/core/session/helper"
 import { allowsSessionID, allowsSessionLocation } from "./session-access"
 
 const tryParseJson = (text: string) =>
@@ -194,6 +195,13 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const create = Effect.fn("SessionHttpApi.create")(function* (ctx: { payload?: Session.CreateInput }) {
       yield* requireOwnerToAllow({ permission: ctx.payload?.permission })
       yield* requireGuestParent({ parentID: ctx.payload?.parentID, internal: ctx.payload?.internal })
+      // Every list leaves out a session whose `internal` is set, so a session may hide only under a helper's name.
+      const internal = ctx.payload?.internal
+      if (internal !== undefined && !isHelperName(internal))
+        return yield* new InvalidRequestError({
+          message: "internal must name one of Vector's helpers",
+          field: "internal",
+        })
       return yield* shareSvc.create(ctx.payload)
     })
 

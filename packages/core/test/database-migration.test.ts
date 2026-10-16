@@ -25,6 +25,7 @@ import { SessionSchema } from "@vectordevai/core/session/schema"
 import { SessionTable } from "@vectordevai/core/session/sql"
 import sessionMetadataMigration from "@vectordevai/core/database/migration/20260511173437_session-metadata"
 import sessionInternalHelpersMigration from "@vectordevai/core/database/migration/20261011044552_session_internal_helpers"
+import classifyEarlyReviewHelpersMigration from "@vectordevai/core/database/migration/20261015171500_classify_early_review_helpers"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 import { Database } from "@vectordevai/core/database/database"
 import { SessionProjector } from "@vectordevai/core/session/projector"
@@ -467,6 +468,54 @@ describe("DatabaseMigration", () => {
           { id: "security", internal: "vectorscope.security", cost: 1.5 },
           { id: "swarm", internal: "swarm.planner", cost: 1.5 },
           { id: "verify", internal: "vectorscope.verify", cost: 1.5 },
+        ])
+      }),
+    )
+  })
+
+  test("classifies the reviewer sessions titled before Vectorscope had its name", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(
+          sql`CREATE TABLE session (id text PRIMARY KEY, title text NOT NULL, cost real NOT NULL, internal text)`,
+        )
+        const rows = [
+          ["desktop", "Vector review · #12 · review"],
+          ["desktop-security", "Vector review · #12 · security"],
+          ["cli", "Vector review · 1a2b3c4 · review"],
+          ["cli-verify", "Vector review · 1a2b3c4 · verify"],
+          ["vecbot", "Vecbot review · #7 · security"],
+          ["vecbot-cli", "Vecbot review · 0f9e8d7 · review"],
+          ["own", "Vector review · notes for the team"],
+          ["own-prefix", "Vector review of the login flow · review"],
+          ["own-suffix", "Vector review · login · review"],
+          ["own-number", "Vector review · #12 login · review"],
+          ["own-more", "Vector review · #12 · review · notes"],
+          ["own-word", "Vecbot review · abcdefg · verify"],
+        ]
+        for (const [id, title] of rows)
+          yield* db.run(sql`INSERT INTO session (id, title, cost) VALUES (${id}, ${title}, 0.75)`)
+        yield* db.run(
+          sql`INSERT INTO session (id, title, cost, internal) VALUES ('marked', 'Vector review · #3 · review', 0.5, 'codespace.edit')`,
+        )
+
+        yield* DatabaseMigration.applyOnly(db, [classifyEarlyReviewHelpersMigration])
+
+        expect(yield* db.all(sql`SELECT id, internal, cost FROM session ORDER BY id`)).toEqual([
+          { id: "cli", internal: "vectorscope.review", cost: 0.75 },
+          { id: "cli-verify", internal: "vectorscope.verify", cost: 0.75 },
+          { id: "desktop", internal: "vectorscope.review", cost: 0.75 },
+          { id: "desktop-security", internal: "vectorscope.security", cost: 0.75 },
+          { id: "marked", internal: "codespace.edit", cost: 0.5 },
+          { id: "own", internal: null, cost: 0.75 },
+          { id: "own-more", internal: null, cost: 0.75 },
+          { id: "own-number", internal: null, cost: 0.75 },
+          { id: "own-prefix", internal: null, cost: 0.75 },
+          { id: "own-suffix", internal: null, cost: 0.75 },
+          { id: "own-word", internal: null, cost: 0.75 },
+          { id: "vecbot", internal: "vectorscope.security", cost: 0.75 },
+          { id: "vecbot-cli", internal: "vectorscope.review", cost: 0.75 },
         ])
       }),
     )

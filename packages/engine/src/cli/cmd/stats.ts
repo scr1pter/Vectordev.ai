@@ -45,6 +45,10 @@ interface SessionStats {
   costPerDay: number
   tokensPerSession: number
   medianTokensPerSession: number
+  // What Vector's hidden helpers (a Vectorscope review, autocomplete) spent. It is part of the cost and token totals
+  // above, but the helpers are not sessions of the user's, so they are left out of the session and message counts and
+  // the per-session figures.
+  helpers: { cost: number; tokens: number }
 }
 
 export const StatsCommand = effectCmd({
@@ -146,6 +150,7 @@ export const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* 
     costPerDay: 0,
     tokensPerSession: 0,
     medianTokensPerSession: 0,
+    helpers: { cost: 0, tokens: 0 },
   }
 
   if (filteredSessions.length > 1000) {
@@ -256,6 +261,7 @@ export const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* 
         return {
           // Updates such as a share or a rename also bump a session, so a window counts only sessions with messages in it.
           active: cutoffTime === 0 || messages.length > 0 || v2Steps.length > 0,
+          helper: session.internal !== undefined,
           messageCount: messages.length + v2Steps.length,
           sessionCost,
           sessionTokens,
@@ -275,13 +281,21 @@ export const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* 
   )
 
   const active = results.filter((result) => result.active)
-  stats.totalSessions = active.length
+  const sessionCount = active.filter((result) => !result.helper).length
+  stats.totalSessions = sessionCount
   for (const result of active) {
     earliestTime = Math.min(earliestTime, result.earliestTime)
     latestTime = Math.max(latestTime, result.latestTime)
-    sessionTotalTokens.push(result.sessionTotalTokens)
+    if (result.helper) {
+      stats.helpers.cost += result.sessionCost
+      stats.helpers.tokens += result.sessionTotalTokens
+    }
+    // A helper's replies are Vector's own, not messages in the user's sessions.
+    if (!result.helper) {
+      sessionTotalTokens.push(result.sessionTotalTokens)
+      stats.totalMessages += result.messageCount
+    }
 
-    stats.totalMessages += result.messageCount
     stats.totalCost += result.sessionCost
     stats.totalTokens.input += result.sessionTokens.input
     stats.totalTokens.output += result.sessionTokens.output
@@ -318,13 +332,9 @@ export const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* 
   }
   stats.days = effectiveDays
   stats.costPerDay = stats.totalCost / effectiveDays
-  const totalTokens =
-    stats.totalTokens.input +
-    stats.totalTokens.output +
-    stats.totalTokens.reasoning +
-    stats.totalTokens.cache.read +
-    stats.totalTokens.cache.write
-  stats.tokensPerSession = active.length > 0 ? totalTokens / active.length : 0
+  // The average and the median both cover the user's sessions only; what the helpers used is in stats.helpers.
+  stats.tokensPerSession =
+    sessionCount > 0 ? sessionTotalTokens.reduce((sum, tokens) => sum + tokens, 0) / sessionCount : 0
   sessionTotalTokens.sort((a, b) => a - b)
   const mid = Math.floor(sessionTotalTokens.length / 2)
   stats.medianTokensPerSession =
@@ -365,6 +375,13 @@ export function displayStats(stats: SessionStats, toolLimit?: number, modelLimit
   const costPerDay = isNaN(stats.costPerDay) ? 0 : stats.costPerDay
   const tokensPerSession = isNaN(stats.tokensPerSession) ? 0 : stats.tokensPerSession
   console.log(renderRow("Total Cost", `$${cost.toFixed(2)}`))
+  if (stats.helpers.cost > 0 || stats.helpers.tokens > 0)
+    console.log(
+      renderRow(
+        "  of which Vector's helpers",
+        `$${stats.helpers.cost.toFixed(2)} · ${formatNumber(stats.helpers.tokens)} tokens`,
+      ),
+    )
   console.log(renderRow("Avg Cost/Day", `$${costPerDay.toFixed(2)}`))
   console.log(renderRow("Avg Tokens/Session", formatNumber(Math.round(tokensPerSession))))
   const medianTokensPerSession = isNaN(stats.medianTokensPerSession) ? 0 : stats.medianTokensPerSession

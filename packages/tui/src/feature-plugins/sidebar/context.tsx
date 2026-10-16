@@ -1,8 +1,9 @@
 import type { AssistantMessage } from "@vectordevai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi } from "@vectordevai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
-import { createMemo, Show } from "solid-js"
+import { createMemo, createResource, For } from "solid-js"
 import { Locale } from "../../util/locale"
+import { delegatedSpendLines } from "../../util/session"
 
 const id = "internal:sidebar-context"
 
@@ -15,10 +16,27 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
     const value = Locale.spend(total.cost, total.unpriced)
     return total.unpriced && !total.cost ? value : `${value} spent`
   })
+  // The delegated total includes what Vector's hidden helpers (a Vectorscope review, autocomplete) spent for the
+  // session. Helpers are in no list, so the session's children are read to split it, again whenever the total as shown
+  // changes; a subagent's every step moves the exact figures.
+  const revision = createMemo(() => {
+    const value = session()
+    const total = delegatedSpendLines(value, undefined)[0]
+    if (!value || !total) return
+    return `${value.id} ${total}`
+  })
+  const [children] = createResource(revision, (key) => {
+    const sessionID = key.split(" ")[0] ?? ""
+    return props.api.client.session.children({ sessionID }).then(
+      (result) => ({ sessionID, sessions: result.data ?? [] }),
+      () => undefined,
+    )
+  })
   const delegated = createMemo(() =>
-    session()?.subagentCost || session()?.subagentUnpricedSteps
-      ? `${Locale.spend(session()?.subagentCost, session()?.subagentUnpricedSteps)} by subagents`
-      : undefined,
+    delegatedSpendLines(
+      session(),
+      children.latest?.sessionID === props.session_id ? children.latest.sessions : undefined,
+    ),
   )
 
   const state = createMemo(() => {
@@ -47,7 +65,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       <text fg={theme().textMuted}>{state().tokens.toLocaleString()} tokens</text>
       <text fg={theme().textMuted}>{state().percent ?? 0}% used</text>
       <text fg={theme().textMuted}>{spent()}</text>
-      <Show when={delegated()}>{(value) => <text fg={theme().textMuted}>{value()}</text>}</Show>
+      <For each={delegated()}>{(line) => <text fg={theme().textMuted}>{line}</text>}</For>
     </box>
   )
 }

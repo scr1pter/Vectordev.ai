@@ -11,10 +11,10 @@ import { useSync } from "@/context/sync"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
 import { useSDK } from "@/context/sdk"
-import { getSessionContext, getSessionTokenTotal } from "@/components/session/session-context-metrics"
+import { getSessionContext } from "@/components/session/session-context-metrics"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
-import { formatSessionCost, sessionSpend } from "@/utils/session-cost"
+import { formatSessionCost, sessionSpend, sessionTokens } from "@/utils/session-cost"
 
 interface SessionContextUsageProps {
   variant?: "button" | "indicator"
@@ -70,7 +70,9 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
   )
 
   const context = createMemo(() => getSessionContext(messages(), [...providers.all().values()]))
-  const tokens = createMemo(() => info()?.tokens)
+  // The same task totals as the cost beside it: the session's own tokens plus what its subagents and Vector's helpers
+  // used for it.
+  const tokens = createMemo(() => sessionTokens(info()))
   const cost = createMemo(() =>
     formatSessionCost({
       ...sessionSpend(info()),
@@ -130,10 +132,7 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
     <div class="flex w-[120px] flex-col gap-2">
       <ContextTooltipRow name={language.t("context.usage.cost")} value={cost()} />
       <ContextTooltipRow name={language.t("context.usage.usage")} value={`${context()?.usage ?? 0}%`} />
-      <ContextTooltipRow
-        name={language.t("context.usage.tokens")}
-        value={getSessionTokenTotal(tokens())?.toLocaleString(language.intl()) ?? "0"}
-      />
+      <ContextTooltipRow name={language.t("context.usage.tokens")} value={tokens().toLocaleString(language.intl())} />
     </div>
   )
 

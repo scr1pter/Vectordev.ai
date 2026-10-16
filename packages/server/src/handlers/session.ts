@@ -15,6 +15,7 @@ import {
   UnknownError,
 } from "@vectordevai/protocol/errors"
 import { AbsolutePath } from "@vectordevai/core/schema"
+import { isHelperName } from "@vectordevai/core/session/helper"
 import {
   allowsSession,
   guestWorkspaceDirectory,
@@ -34,6 +35,8 @@ function allowsSessionLocation(principal: Principal, item: SessionV2.Info) {
 export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handlers) =>
   Effect.gen(function* () {
     const session = yield* SessionV2.Service
+
+    // Whether the principal may open a session by its ID; a session that cannot be read is never allowed.
     const allowsSessionID = (principal: Principal, sessionID: SessionV2.ID) =>
       allowsSession(principal, sessionID)
         ? Effect.succeed(true)
@@ -136,10 +139,16 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
             return yield* new ForbiddenError({ message: "Guest sessions require an allowed workspace" })
           // A guest's session may hang only under a session the guest may open. A helper session is left out of every
           // list, so a guest's helper needs such a parent: its spend then shows in a session the owner sees.
-          if (principal.kind === "guest" && ctx.payload.parentID === undefined && ctx.payload.internal !== undefined)
+          if (principal.kind !== "owner" && ctx.payload.parentID === undefined && ctx.payload.internal !== undefined)
             return yield* new ForbiddenError({ message: "A guest's helper session must belong to one of its sessions" })
           if (ctx.payload.parentID !== undefined && !(yield* allowsSessionID(principal, ctx.payload.parentID)))
             return yield* new ForbiddenError({ message: "The parent session is outside the guest's workspace" })
+          // Every list leaves out a session whose `internal` is set, so a session may hide only under a helper's name.
+          if (ctx.payload.internal !== undefined && !isHelperName(ctx.payload.internal))
+            return yield* new InvalidRequestError({
+              message: "internal must name one of Vector's helpers",
+              field: "internal",
+            })
           const location =
             principal.kind === "guest"
               ? Location.Ref.make({ directory: AbsolutePath.make(guestDirectory!), workspaceID: requested.workspaceID })

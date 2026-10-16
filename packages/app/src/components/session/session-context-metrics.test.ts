@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Message } from "@vectordevai/sdk/v2/client"
-import { getSessionContext, getSessionTokenTotal } from "./session-context-metrics"
+import { getSessionContext } from "./session-context-metrics"
 
 const assistant = (
   id: string,
@@ -104,16 +104,5 @@ describe("getSessionContext", () => {
     const ctx = getSessionContext(undefined, undefined)
 
     expect(ctx).toBeUndefined()
-  })
-
-  test("computes stored session token totals", () => {
-    expect(
-      getSessionTokenTotal({
-        input: 10,
-        output: 20,
-        reasoning: 30,
-        cache: { read: 40, write: 50 },
-      }),
-    ).toBe(150)
   })
 })

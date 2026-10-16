@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Session } from "@vectordevai/sdk/v2"
-import { notifyVisibleSession } from "../../../../src/util/session"
+import { isInternalSession, notifyVisibleSession } from "../../../../src/util/session"
 
 const session = (internal?: string, parentID?: string): Session => ({
   id: "session",
@@ -12,6 +12,18 @@ const session = (internal?: string, parentID?: string): Session => ({
   time: { created: 1, updated: 1 },
   ...(internal ? { internal } : {}),
   ...(parentID ? { parentID } : {}),
+})
+
+describe("helper recognition", () => {
+  test("knows helpers from an engine that predates the marker by the titles Vector gave them", () => {
+    expect(isInternalSession({ ...session(), title: "Vector Tool · Autocomplete" })).toBe(true)
+    expect(isInternalSession({ ...session(), title: "Vectorscope review · 1a2b3c4 · review" })).toBe(true)
+    expect(isInternalSession({ ...session(), title: "Vector review · #12 · security" })).toBe(true)
+    expect(isInternalSession({ ...session(), title: "Vecbot review · 0f9e8d7 · verify" })).toBe(true)
+    expect(isInternalSession({ ...session(), title: "Vector review · notes for the launch" })).toBe(false)
+    expect(isInternalSession({ ...session(), title: "Vector review · login · review" })).toBe(false)
+    expect(isInternalSession(session())).toBe(false)
+  })
 })
 
 describe("session attention visibility", () => {

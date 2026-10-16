@@ -24,7 +24,7 @@ function fixture(
     token: TOKEN as string | undefined,
     listStatus: input.listStatus,
     checkinStatus: input.checkinStatus ?? 204,
-    sessions: [] as Array<{ id: string; parentID?: string; updated: number }>,
+    sessions: [] as Array<{ id: string; parentID?: string; internal?: string; updated: number }>,
     // The engine's local usage summary; undefined answers 404, as an engine without the route would.
     usage: undefined as unknown,
     usageStatus: 200,
@@ -40,12 +40,13 @@ function fixture(
       if (url.pathname === "/experimental/session") {
         lists.push({ query: url.searchParams, authorization: request.headers.get("authorization") })
         if (state.listStatus) return new Response("unavailable", { status: state.listStatus })
-        // Stands in for the engine's list: newest first, updated at or after `start` and before `cursor`, one page at a
-        // time with the next cursor in a header.
+        // Stands in for the engine's list: newest first, updated at or after `start` and before `cursor`, helpers only
+        // when asked for, one page at a time with the next cursor in a header.
         const start = Number(url.searchParams.get("start"))
         const cursor = url.searchParams.has("cursor") ? Number(url.searchParams.get("cursor")) : Infinity
         const limit = Math.min(input.pageSize ?? Infinity, Number(url.searchParams.get("limit")))
         const rows = state.sessions
+          .filter((session) => !session.internal || url.searchParams.get("internal") === "true")
           .filter((session) => session.updated >= start && session.updated < cursor)
           .sort((a, b) => b.updated - a.updated)
         const page = rows.slice(0, limit)
@@ -53,6 +54,7 @@ function fixture(
           page.map((session) => ({
             id: session.id,
             parentID: session.parentID,
+            internal: session.internal,
             title: "private title",
             directory: "/private/repo",
             time: { updated: session.updated },
@@ -138,14 +140,22 @@ test("sends the root and subagent sessions updated since UTC midnight, across ev
     { id: "ses_c", updated: at(11) },
     { id: "ses_d", parentID: "ses_c", updated: at(12) },
     { id: "ses_e", parentID: "ses_c", updated: at(13) },
+    // Vector's helpers (an autocomplete run under ses_a, a Vectorscope review outside any session) are not sessions.
+    { id: "ses_autocomplete", parentID: "ses_a", internal: "codespace.autocomplete", updated: at(10, 30) },
+    { id: "ses_review", internal: "vectorscope.review", updated: at(11, 30) },
   )
 
   expect(await app.usage.checkin()).toBe(true)
 
-  expect(app.lists.map((list) => list.query.get("start"))).toEqual(Array(3).fill(String(at(0))))
-  expect(app.lists.map((list) => list.query.get("cursor"))).toEqual([null, String(at(12)), String(at(10))])
+  expect(app.lists.map((list) => list.query.get("start"))).toEqual(Array(4).fill(String(at(0))))
+  expect(app.lists.map((list) => list.query.get("cursor"))).toEqual([
+    null,
+    String(at(12)),
+    String(at(11)),
+    String(at(10)),
+  ])
   expect(app.lists[0].query.get("archived")).toBe("true")
-  // Vector's helper sessions are out of session lists but still part of the day's usage.
+  // Helpers are listed only to tell when the usage report needs reading; they add to neither count.
   expect(app.lists.every((list) => list.query.get("internal") === "true")).toBe(true)
   expect(app.lists[0].authorization).toBe(`Basic ${Buffer.from("vector:placeholder-password").toString("base64")}`)
   expect(app.checkins).toHaveLength(1)
@@ -361,6 +371,51 @@ test("reads the summary with the day's first check-in and when a count grows, ot
   app.state.now = at(24, 30)
   expect(await app.usage.checkin()).toBe(true)
   expect(app.usageReads).toHaveLength(4)
+})
+
+test("reads the summary again when Vector starts a helper, without counting the helper as a session", async () => {
+  const app = fixture()
+  app.state.now = at(1)
+  app.state.usage = summary()
+  app.state.sessions.push({ id: "ses_a", updated: at(0, 30) })
+  expect(await app.usage.checkin()).toBe(true)
+  expect(app.usageReads).toHaveLength(1)
+
+  // A Vectorscope review's spend reaches the server only in the report, so it is read within the hour, not six hours on.
+  app.state.now = at(2)
+  app.state.sessions.push({ id: "ses_review", internal: "vectorscope.review", updated: at(1, 30) })
+  app.state.usage = summary({ lifetimeTokens: 1_300_000 })
+  expect(await app.usage.checkin()).toBe(true)
+  expect(app.usageReads).toHaveLength(2)
+  expect(app.checkins.at(-1)?.body).toMatchObject({
+    sessions: 1,
+    subagentSessions: 0,
+    usage: { lifetimeTokens: 1_300_000 },
+  })
+
+  // The same helper still at work an hour later is no reason to read it again.
+  app.state.now = at(3)
+  app.state.sessions[1].updated = at(2, 30)
+  app.state.usage = summary({ lifetimeTokens: 1_310_000 })
+  expect(await app.usage.checkin()).toBe(false)
+  expect(app.usageReads).toHaveLength(2)
+
+  // An autocomplete run under the session is a helper too, not a subagent session.
+  app.state.now = at(4)
+  app.state.sessions.push({
+    id: "ses_autocomplete",
+    parentID: "ses_a",
+    internal: "codespace.autocomplete",
+    updated: at(3, 30),
+  })
+  app.state.usage = summary({ lifetimeTokens: 1_350_000 })
+  expect(await app.usage.checkin()).toBe(true)
+  expect(app.usageReads).toHaveLength(3)
+  expect(app.checkins.at(-1)?.body).toMatchObject({
+    sessions: 1,
+    subagentSessions: 0,
+    usage: { lifetimeTokens: 1_350_000 },
+  })
 })
 
 test("a failed count reports the install once with zero counts and the next working count replaces them", async () => {
