@@ -41,8 +41,9 @@ import { iife } from "@/util/iife"
 import { Global } from "@vectordevai/core/global"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context, Schema, Types } from "effect"
+import { Effect, Layer, Context, Schema, Stream, Types } from "effect"
 import { EffectBridge } from "@/effect/bridge"
+import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectPromise } from "@/effect/promise"
 import { FSUtil } from "@vectordevai/core/fs-util"
@@ -1475,6 +1476,7 @@ const layer = Layer.effect(
     const freeModels = yield* FreeModels.Service
     const modelPlans = yield* ModelPlans.Service
     const freeCredentials = yield* FreeModels.CredentialsService
+    const events = yield* EventV2Bridge.Service
     const runtimeBridge = yield* EffectBridge.make()
     const planID = ProviderV2.ID.make(ModelPlans.PROVIDER_ID)
 
@@ -1942,6 +1944,15 @@ const layer = Layer.effect(
           varsLoaders,
         }
       }),
+    )
+
+    // The catalog's startup refresh runs after its first load, which building this state usually performs, so a
+    // changed mirror arrives after the state was built from the cached copy, and an hourly refresh can change it at any
+    // time. Rebuild each instance's state on its next read, as an instance reload would. A refresh that finds the
+    // mirror unchanged publishes nothing.
+    yield* events.subscribe(ModelCatalog.Event.Refreshed).pipe(
+      Stream.runForEach(() => InstanceState.invalidateAll(state)),
+      Effect.forkScoped({ startImmediately: true }),
     )
 
     // A plan bought, a sign-in or a sign-out must not require restarting the local engine.
@@ -2486,6 +2497,7 @@ export const node = LayerNode.make({
     FreeModels.node,
     ModelPlans.node,
     FreeModels.credentialsNode,
+    EventV2Bridge.node,
   ],
 })
 

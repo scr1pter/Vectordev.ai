@@ -69,4 +69,7 @@ export const invalidate = <A, E, R>(self: InstanceState<A, E, R>) =>
     return yield* ScopedCache.invalidate(self.cache, yield* directory)
   })
 
+/** Every instance builds its value again on its next read, for state derived from process-wide data that changed. */
+export const invalidateAll = <A, E, R>(self: InstanceState<A, E, R>) => ScopedCache.invalidateAll(self.cache)
+
 export * as InstanceState from "./instance-state"
