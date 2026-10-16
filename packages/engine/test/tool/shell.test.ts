@@ -1373,7 +1373,8 @@ describe("tool.shell read-only allowlist", () => {
                     requests.push(req)
                     const rules = req.patterns.map((pattern) => Permission.evaluate(req.permission, pattern, ruleset))
                     if (rules.some((rule) => rule.action === "deny")) throw new PermissionV1.DeniedError({ ruleset })
-                    if (rules.some((rule) => rule.action === "ask")) throw new Error(`unexpected prompt: ${req.patterns}`)
+                    if (rules.some((rule) => rule.action === "ask"))
+                      throw new Error(`unexpected prompt: ${req.patterns}`)
                   }),
               })
               const env = path.join(tmp, ".env")
@@ -1400,9 +1401,9 @@ describe("tool.shell read-only allowlist", () => {
                   throw new Error(
                     `${command} (workdir ${workdir ?? "-"}) was not denied: ${Exit.isSuccess(exit) ? exit.value.output : String(err)}`,
                   )
-                expect(requests.find((r) => r.permission === "bash")?.patterns.some((p) => p.includes("--no-index"))).toBe(
-                  true,
-                )
+                expect(
+                  requests.find((r) => r.permission === "bash")?.patterns.some((p) => p.includes("--no-index")),
+                ).toBe(true)
               }
               // Paths git sees inside its work tree still diff without a prompt, a nested repository's own included.
               for (const [command, workdir] of [
