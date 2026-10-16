@@ -716,6 +716,31 @@
       },
       "additionalProperties": false
     },
+    "RunBudget": {
+      "type": "object",
+      "properties": {
+        "usd": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "steps": {
+          "exclusiveMinimum": 0,
+          "type": "integer",
+          "maximum": 9007199254740991
+        },
+        "warnAt": {
+          "minimum": 0,
+          "maximum": 1,
+          "type": "number"
+        },
+        "unpricedSteps": {
+          "exclusiveMinimum": 0,
+          "type": "integer",
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
     "Policy.Effect": {
       "type": "string",
       "enum": [
@@ -1238,6 +1263,26 @@
             }
           },
           "additionalProperties": false
+        },
+        "budget": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/RunBudget"
+            },
+            "loop": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Stop runs that repeat the same tool call or error (default: true)"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false,
+          "description": "Spend and runaway limits applied to every run in this project. A prompt's own budget overrides run."
         },
         "experimental": {
           "type": "object",
