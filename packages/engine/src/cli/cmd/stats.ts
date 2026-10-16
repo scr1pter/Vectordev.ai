@@ -45,8 +45,9 @@ interface SessionStats {
   costPerDay: number
   tokensPerSession: number
   medianTokensPerSession: number
-  // What Vector's hidden helpers (a Vectorscope review, autocomplete) spent. It is part of the totals above, but the
-  // helpers are not sessions of the user's, so they are left out of the session count and the per-session figures.
+  // What Vector's hidden helpers (a Vectorscope review, autocomplete) spent. It is part of the cost and token totals
+  // above, but the helpers are not sessions of the user's, so they are left out of the session and message counts and
+  // the per-session figures.
   helpers: { cost: number; tokens: number }
 }
 
@@ -289,9 +290,12 @@ export const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* 
       stats.helpers.cost += result.sessionCost
       stats.helpers.tokens += result.sessionTotalTokens
     }
-    if (!result.helper) sessionTotalTokens.push(result.sessionTotalTokens)
+    // A helper's replies are Vector's own, not messages in the user's sessions.
+    if (!result.helper) {
+      sessionTotalTokens.push(result.sessionTotalTokens)
+      stats.totalMessages += result.messageCount
+    }
 
-    stats.totalMessages += result.messageCount
     stats.totalCost += result.sessionCost
     stats.totalTokens.input += result.sessionTokens.input
     stats.totalTokens.output += result.sessionTokens.output
@@ -328,13 +332,9 @@ export const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* 
   }
   stats.days = effectiveDays
   stats.costPerDay = stats.totalCost / effectiveDays
-  const totalTokens =
-    stats.totalTokens.input +
-    stats.totalTokens.output +
-    stats.totalTokens.reasoning +
-    stats.totalTokens.cache.read +
-    stats.totalTokens.cache.write
-  stats.tokensPerSession = sessionCount > 0 ? totalTokens / sessionCount : 0
+  // The average and the median both cover the user's sessions only; what the helpers used is in stats.helpers.
+  stats.tokensPerSession =
+    sessionCount > 0 ? sessionTotalTokens.reduce((sum, tokens) => sum + tokens, 0) / sessionCount : 0
   sessionTotalTokens.sort((a, b) => a - b)
   const mid = Math.floor(sessionTotalTokens.length / 2)
   stats.medianTokensPerSession =

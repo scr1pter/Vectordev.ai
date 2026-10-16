@@ -102,6 +102,15 @@ describe("vector stats", () => {
       expect(after.totalTokens.input - before.totalTokens.input).toBe(3_000)
       expect(after.helpers.cost - before.helpers.cost).toBeCloseTo(0.26)
       expect(after.helpers.tokens - before.helpers.tokens).toBe(2_200)
+      // Only the task's reply is a message of the user's, and the average divides only the user's tokens.
+      expect(after.totalMessages - before.totalMessages).toBe(1)
+      const tokens = (stats: typeof after) =>
+        stats.totalTokens.input +
+        stats.totalTokens.output +
+        stats.totalTokens.reasoning +
+        stats.totalTokens.cache.read +
+        stats.totalTokens.cache.write
+      expect(after.tokensPerSession * after.totalSessions).toBeCloseTo(tokens(after) - after.helpers.tokens)
       yield* session.remove(autocomplete.id)
       yield* session.remove(task.id)
     }),
