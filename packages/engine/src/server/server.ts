@@ -1,6 +1,6 @@
 import "./init-projectors"
 
-import { NodeHttpServer } from "@effect/platform-node"
+import { NodeHttpServer } from "@vectordevai/core/effect/platform-node"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { ConfigProvider, Context, Effect, Exit, Layer, Scope } from "effect"
 import { HttpRouter, HttpServer } from "effect/unstable/http"

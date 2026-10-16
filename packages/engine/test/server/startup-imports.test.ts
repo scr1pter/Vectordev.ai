@@ -18,6 +18,8 @@ const FEATURE_ONLY = [
   "gitlab-ai-provider",
   // the experimental OpenTelemetry exporter
   "@effect/opentelemetry",
+  // Redis, which Vector never uses: only the "@effect/platform-node" index loads it, with cluster and worker support
+  "ioredis",
 ]
 
 test("the server module graph loads without feature-only packages", async () => {
