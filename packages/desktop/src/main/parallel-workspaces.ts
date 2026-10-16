@@ -1101,10 +1101,7 @@ async function admitVectorPrompt(
   const team = teamForWorkspace(record.id)
   const pending = team ? nextVectorTeammateDelivery(pendingTeamMessages(team.id, record.id)) : []
   if (!prompt && !pending.length && !required) return false
-  const budgetUsd =
-    active.spend?.budgetUsd === undefined
-      ? undefined
-      : active.spend.budgetUsd - (await spentSoFar(active.spend, active, active.sessionId))
+  const budgetUsd = await promptBudgetUsd(active, active.sessionId)
   if (budgetUsd !== undefined && budgetUsd <= 0) {
     // A teammate note can wait for a run that still has money; this one has none.
     if (!required) return false
@@ -2544,11 +2541,35 @@ async function recordVectorRunSpend(
   syncBackgroundTask(measured)
 }
 
+// The cap a prompt is admitted with, none when the run has no headroom limit.
+// A teammate note that joins a drain still running keeps that drain's cap,
+// which the engine replaces with the one sent: the drain's guard run already
+// counts what it has spent, so taking that spend off the headroom as well
+// would count it twice and stop the agent early. Any other prompt starts a
+// drain, and a guard run, of its own with the headroom left, and so does a
+// note sent while a stopped drain winds down, since the run after it starts
+// under the cap sent here.
+async function promptBudgetUsd(active: ActiveParallelRun, sessionId: string) {
+  const spend = active.spend
+  if (spend?.budgetUsd === undefined) return undefined
+  const signal = active.controller.signal
+  const live =
+    spend.draining &&
+    (await engineRequest<unknown>(active.engine, "/api/session/active", { signal })
+      .then((raw) => Boolean(activeSessionMap(raw)[sessionId]))
+      .catch(() => false))
+  // The engine answers with the session's run in progress, ahead of any finished one.
+  const reading = live
+    ? newSpend(spend.counted, await readSpend((path) => engineRequest(active.engine, path, { signal }), sessionId))
+    : undefined
+  if (reading?.budget.usd !== undefined && reading.state !== "stopped") return reading.budget.usd
+  return spend.budgetUsd - (await spentSoFar(spend, active, sessionId))
+}
+
 // What a run has spent before the prompt it is about to admit. The drain
 // readings miss one that ended after the last idle check, which a teammate
 // note admitted in that gap would otherwise be handed again, so the session's
-// own cost since the run began is the floor. Mid-drain that floor includes the
-// drain the prompt joins, so the budget errs strict rather than loose.
+// own cost since the run began is the floor.
 async function spentSoFar(spend: ParallelRunSpend, active: ActiveParallelRun, sessionId: string) {
   const now = await engineRequest<EngineSessionResponse | undefined>(
     active.engine,

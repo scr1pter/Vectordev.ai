@@ -41,20 +41,27 @@ mock.module("./store", () => ({
   removeStoreFileIfEmpty: () => undefined,
 }))
 
-const { createParallelWorkspace, listParallelWorkspaces, runParallelWorkspace } = await import("./parallel-workspaces")
+const { createParallelWorkspace, getParallelWorkspace, listParallelWorkspaces, runParallelWorkspace, sweepTeamOutboxes } =
+  await import("./parallel-workspaces")
+const { addTeamMember, createAgentTeam, postTeamMessage } = await import("./agent-teams")
 const { spendLedger } = await import("./spend-limits")
 
 // A stand-in for the engine's HTTP API: a session costs $0.42 once prompted,
 // is busy for one poll and then idle, and answers the spend route with
 // whatever the test says.
+type PromptBody = { prompt: { text: string }; budget?: { usd?: number } }
 const engineState = {
-  prompts: [] as { sessionId: string; body: unknown }[],
+  prompts: [] as { sessionId: string; body: PromptBody }[],
   prompted: new Set<string>(),
   activePolls: 0,
   activeFails: false,
   spend: (_sessionId: string): unknown => ({}),
   // The session's messages, none unless set.
   messages: (_sessionId: string): unknown[] => [],
+  // Whether a prompted session is busy, else busy for the first poll only.
+  busy: undefined as (() => boolean) | undefined,
+  // What a prompted session has cost.
+  cost: 0.42,
 }
 let sessionCount = 0
 const server = Bun.serve({
@@ -69,7 +76,7 @@ const server = Bun.serve({
     if (path === "/api/session/active") {
       if (engineState.activeFails) return new Response("engine wedged", { status: 500 })
       engineState.activePolls += 1
-      const busy = engineState.activePolls === 1
+      const busy = engineState.busy?.() ?? engineState.activePolls === 1
       return Response.json({
         data: Object.fromEntries([...engineState.prompted].filter(() => busy).map((id) => [id, {}])),
       })
@@ -80,14 +87,14 @@ const server = Bun.serve({
       const prompted = engineState.prompted.has(sessionId)
       return Response.json({
         data: {
-          cost: prompted ? 0.42 : 0,
+          cost: prompted ? engineState.cost : 0,
           tokens: { input: prompted ? 100 : 0, output: prompted ? 20 : 0 },
           model: { providerID: "provider-test", id: "model-test" },
         },
       })
     }
     if (match?.[2] === "prompt") {
-      engineState.prompts.push({ sessionId, body: await request.json() })
+      engineState.prompts.push({ sessionId, body: (await request.json()) as PromptBody })
       engineState.prompted.add(sessionId)
       return Response.json({ data: { id: "msg_0001" } })
     }
@@ -129,6 +136,8 @@ beforeEach(() => {
   engineState.activeFails = false
   engineState.spend = () => ({})
   engineState.messages = () => []
+  engineState.busy = undefined
+  engineState.cost = 0.42
 })
 
 async function launch(name: string) {
@@ -225,6 +234,61 @@ describe("a Vector-runtime parallel agent's spend", () => {
     expect(record.status).not.toBe("failed")
     expect(record.actualCost).toBe("$0.42")
     expect((await ledgerEventsFor(created.id)).map((event) => event.costUsd)).toEqual([0.42])
+  })
+
+  test("a teammate note sent mid-drain keeps the drain's cap instead of counting its spend twice", async () => {
+    const sourcePath = join(userDataPath, "mid-drain")
+    await mkdir(sourcePath, { recursive: true })
+    await writeFile(join(sourcePath, "README.md"), "# Spend\n", "utf8")
+    const team = createAgentTeam({ name: "spend team", topology: "isolated", sourcePath })
+    const created = await createParallelWorkspace({
+      name: "mid-drain",
+      taskPrompt: "Read README.md and report its title.",
+      runtime: "vector",
+      parentSessionId: "session-spend",
+      sourcePath,
+      teamId: team.id,
+    })
+    addTeamMember(team.id, created.id)
+    // The drain runs under the cap its prompt was sent with and has spent $0.30 of it so far.
+    let busy = true
+    engineState.busy = () => busy
+    engineState.cost = 0.3
+    engineState.spend = (sessionId) =>
+      engineState.prompted.has(sessionId)
+        ? {
+            data: {
+              sessionID: sessionId,
+              state: "ok",
+              budget: { usd: engineState.prompts[0]?.body.budget?.usd },
+              spentUsd: 0.3,
+              steps: 2,
+              unpricedSteps: 0,
+              costKind: "priced",
+            },
+          }
+        : {}
+    await runParallelWorkspace(created.id, engine)
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if (getParallelWorkspace(created.id)?.logs.some((log) => log.startsWith("Task admitted"))) break
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+
+    postTeamMessage({
+      teamId: team.id,
+      fromWorkspaceId: "ws-lead",
+      fromName: "Lead",
+      toWorkspaceId: created.id,
+      text: "The auth module moved to src/auth.",
+    })
+    await sweepTeamOutboxes(team.id)
+    busy = false
+    await settle(created.id)
+
+    const cap = engineState.prompts[0]?.body.budget?.usd
+    expect(cap).toBeGreaterThan(0.3)
+    const note = engineState.prompts.find((item) => item.body.prompt.text.includes("The auth module moved"))
+    expect(note?.body.budget).toEqual({ usd: cap })
   })
 
   test("a run that fails mid-drain is still measured in the finally and gives back its hold", async () => {
