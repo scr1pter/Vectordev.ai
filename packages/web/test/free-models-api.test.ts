@@ -15,7 +15,7 @@ import {
 import { handleFreeModelsChat } from "../../../api/_lib/free-models-chat"
 import modelsHandler from "../../../api/free-models/models"
 import refreshHandler from "../../../api/free-models/refresh"
-import type { FreeModelInfo } from "../../schema/src/free-model"
+import { NO_TRAINING_RETENTION, type FreeModelInfo } from "../../schema/src/free-model"
 
 // This integration suite executes the production Lua against real Redis/Valkey.
 // CI may supply VECTOR_TEST_REDIS_URL; local runs supply the two executable paths.
@@ -54,29 +54,36 @@ async function redis(command: readonly (string | number)[]): Promise<unknown> {
   return JSON.parse(output)
 }
 
-const model = (id: string, provider = "Cohere") => ({
+// Public OpenRouter /models and per-model /endpoints captured on 15 October 2026, when no tool-capable
+// free endpoint was on the ZDR list. /models/user is simulated as an account that allows every model.
+const fixture: {
+  capturedAt: number
+  models: { id: string }[]
+  endpoints: Record<string, Record<string, unknown>[]>
+} = await Bun.file(new URL("../../core/test/fixture/free-model-public.json", import.meta.url)).json()
+const catalogModels: FreeModelInfo[] = [
+  {
+    id: "cohere/north-mini-code:free",
+    name: "Cohere: North Mini Code",
+    contextLength: 256000,
+    maxOutputTokens: 64000,
+    providers: [{ id: "cohere", name: "Cohere", retention: NO_TRAINING_RETENTION }],
+  },
+  {
+    id: "dots-studio/dots-3-note-preview:free",
+    name: "Dots Studio: Dots3-Note Preview",
+    contextLength: 512000,
+    maxOutputTokens: 460800,
+    providers: [{ id: "atlas-cloud/fp8", name: "AtlasCloud", retention: NO_TRAINING_RETENTION }],
+  },
+]
+const synthetic = (id: string, change: Record<string, unknown> = {}) => ({
+  ...fixture.models.find((item) => item.id === "cohere/north-mini-code:free"),
   id,
   name: id.replace(":free", " (free)"),
-  context_length: 8192,
-  pricing: { prompt: "0", completion: "0" },
-  supported_parameters: ["tools", "tool_choice"],
-  top_provider: { max_completion_tokens: 2048 },
-  provider,
+  ...change,
 })
-const candidates = [
-  model("cohere/fixture:free"),
-  model("poolside/fixture:free", "Poolside"),
-  model("qwen/fixture:free", "ModelRun"),
-]
-const catalogModels: FreeModelInfo[] = candidates.map((item) => ({
-  id: item.id,
-  name: item.name,
-  contextLength: 8192,
-  maxOutputTokens: 2048,
-  providers: [{ id: item.provider.toLowerCase(), name: item.provider, retention: "Fixture only" }],
-}))
-const state = {
-  origin: "",
+const initial = () => ({
   unavailable: false,
   remaining: 50,
   upstreamStatus: 200,
@@ -85,10 +92,14 @@ const state = {
   delayed: false,
   keyInvalid: false,
   keyCalls: 0,
-  models: [...candidates],
-  training: false,
-  userModels: candidates.map((item) => item.id),
-}
+  models: [...fixture.models] as { id: string }[],
+  endpoints: { ...fixture.endpoints },
+  userModels: fixture.models.map((item) => item.id),
+  // Replaces OpenRouter's answer for one catalog path, such as an endpoint list that is rate limited.
+  catalogReplies: {} as Record<string, () => Response>,
+  catalogReads: [] as string[],
+})
+const state = { origin: "", ...initial() }
 const chats: { headers: Headers; body: Record<string, unknown> }[] = []
 const upstream = Bun.serve({
   hostname: "127.0.0.1",
@@ -103,45 +114,21 @@ const upstream = Bun.serve({
         throw new Error("Invalid Redis command")
       return Response.json({ result: await redis(command) })
     }
+    if (url.pathname.startsWith("/api/v1/models")) state.catalogReads.push(url.pathname)
+    const reply = state.catalogReplies[url.pathname]
+    if (reply) return reply()
     if (url.pathname === "/api/v1/models") return Response.json({ data: state.models })
     if (url.pathname === "/api/v1/models/user") {
       expect(request.headers.get("authorization")).toBe("Bearer fixture-openrouter-key")
       return Response.json({ data: state.userModels.map((id) => ({ id })) })
     }
-    if (url.pathname === "/api/v1/endpoints/zdr")
-      return Response.json({
-        data: state.training
-          ? []
-          : state.models.map((model) => ({
-              model_id: model.id,
-              provider_name: model.provider,
-              tag: model.provider.toLowerCase(),
-              context_length: model.context_length,
-              max_completion_tokens: model.top_provider.max_completion_tokens,
-              pricing: model.pricing,
-              supported_parameters: model.supported_parameters,
-              status: 0,
-            })),
-      })
-    if (url.pathname.endsWith("/endpoints")) {
-      const id = decodeURIComponent(url.pathname.slice("/api/v1/models/".length, -"/endpoints".length))
-      const found = state.models.find((item) => item.id === id)
-      if (!found) throw new Error("Unknown fixture model")
-      return Response.json({
-        data: {
-          endpoints: [
-            {
-              provider_name: found.provider,
-              tag: found.provider.toLowerCase(),
-              context_length: 8192,
-              max_completion_tokens: 2048,
-              pricing: found.pricing,
-              supported_parameters: found.supported_parameters,
-              status: 0,
-            },
-          ],
-        },
-      })
+    const listed = /^\/api\/v1\/models\/(.+)\/endpoints$/.exec(url.pathname)?.[1]
+    if (listed) {
+      // Endpoint lists are public metadata; the Vector account key is never sent with them.
+      expect(request.headers.get("authorization")).toBeNull()
+      const endpoints = state.endpoints[listed]
+      if (!endpoints) return Response.json({ error: { message: "Not Found", code: 404 } }, { status: 404 })
+      return Response.json({ data: { id: listed, endpoints } })
     }
     if (url.pathname === "/api/v1/key") {
       state.keyCalls++
@@ -233,19 +220,7 @@ beforeEach(async () => {
   delete process.env.VERCEL_ENV
   delete process.env.UPSTASH_REDIS_REST_URL
   delete process.env.UPSTASH_REDIS_REST_TOKEN
-  Object.assign(state, {
-    unavailable: false,
-    remaining: 50,
-    upstreamStatus: 200,
-    streamError: 0,
-    truncated: false,
-    delayed: false,
-    keyInvalid: false,
-    keyCalls: 0,
-    models: [...candidates],
-    training: false,
-    userModels: candidates.map((item) => item.id),
-  })
+  Object.assign(state, initial())
   chats.length = 0
   await redis([
     "SET",
@@ -282,7 +257,7 @@ function account(id = "11111111-1111-4111-8111-111111111111") {
   return mintCliToken({ id, email: "fixture@example.test" }).token
 }
 async function chat(
-  body: unknown = { model: candidates[0].id, messages: [{ role: "user", content: "fixture prompt" }] },
+  body: unknown = { model: catalogModels[0].id, messages: [{ role: "user", content: "fixture prompt" }] },
   token = account(),
   headers: Record<string, string> = {},
 ) {
@@ -303,25 +278,105 @@ describe("curated free catalog", () => {
     expect((await chat()).status).toBe(503)
     expect(chats).toHaveLength(0)
   })
-  test("curates live prices, tools, expiry, endpoint policies and account availability into real KV", async () => {
-    state.models.push(
-      { ...model("cohere/paid:free"), pricing: { prompt: "1", completion: "0" } },
-      model("google/training:free"),
-      model("nvidia/trial:free"),
-      model("liquid/training:free"),
-      { ...model("cohere/no-tools:free"), supported_parameters: ["tools"] },
-      { ...model("cohere/expired:free"), expiration_date: new Date(Date.now() + 86400000).toISOString() } as ReturnType<
-        typeof model
-      >,
-    )
-    state.userModels = state.models.map((item) => item.id).filter((id) => id !== candidates[2].id)
-    const catalog = await refreshFreeModelCatalog(fetcher)
-    expect(catalog.models.map((item) => item.id)).toEqual([candidates[0].id, candidates[1].id])
-    expect(catalog.models.every((item) => !item.name.endsWith("(free)"))).toBe(true)
-    expect(await currentFreeModelCatalog(fetcher)).toEqual(catalog)
+  test("curates today's public OpenRouter data into a no-training catalog in real KV", async () => {
+    const catalog = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
+    // Poolside's Laguna endpoints pass every other check, but its free use may train on inputs.
+    expect(catalog).toEqual({ enabled: true, updatedAt: fixture.capturedAt, models: catalogModels })
+    expect(await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000)).toEqual(catalog)
     expect(Number(await redis(["TTL", FREE_MODELS_CATALOG_KEY]))).toBeGreaterThan(100000)
-    state.training = true
-    expect((await refreshFreeModelCatalog(fetcher)).models).toEqual([])
+    expect(FREE_MODELS_CATALOG_KEY).toBe("vector:free-models:catalog:v3:no-training")
+    // Only allowlisted, eligible candidates get an endpoint lookup; the ZDR feed is never read.
+    expect(state.catalogReads.slice(2).sort()).toEqual([
+      "/api/v1/models/cohere/north-mini-code:free/endpoints",
+      "/api/v1/models/dots-studio/dots-3-note-preview:free/endpoints",
+    ])
+    expect(JSON.stringify(catalog)).not.toMatch(/zero data retention|ZDR/i)
+  })
+  test("curates live prices, tools, expiry, author exclusions, providers and account availability", async () => {
+    const cohere = "cohere/north-mini-code:free"
+    const [endpoint] = fixture.endpoints[cohere]
+    const scenarios: { name: string; model?: object; endpoint?: object; hidden?: boolean }[] = [
+      { name: "paid", model: { pricing: { prompt: "1", completion: "0" } } },
+      { name: "no tool choice", model: { supported_parameters: ["tools"] } },
+      { name: "expiring", model: { expiration_date: new Date(fixture.capturedAt + 86400000).toISOString() } },
+      { name: "hidden from the account", hidden: true },
+      { name: "offline", endpoint: { status: -1 } },
+      { name: "priced endpoint", endpoint: { pricing: { prompt: "0", completion: "0", request: "0.01" } } },
+      { name: "unknown provider", endpoint: { provider_name: "Unknown", tag: "unknown" } },
+      { name: "provider not allowlisted for it", endpoint: { provider_name: "AtlasCloud", tag: "atlas-cloud/fp8" } },
+    ]
+    for (const scenario of scenarios) {
+      Object.assign(state, initial())
+      state.models = state.models.map((item) => (item.id === cohere ? { ...item, ...scenario.model } : item))
+      state.endpoints[cohere] = [{ ...endpoint, ...scenario.endpoint }]
+      if (scenario.hidden) state.userModels = state.userModels.filter((id) => id !== cohere)
+      const catalog = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
+      expect({ name: scenario.name, models: catalog.models.map((item) => item.id) }).toEqual({
+        name: scenario.name,
+        models: ["dots-studio/dots-3-note-preview:free"],
+      })
+      // Model and account checks refuse before any endpoint lookup; endpoint checks refuse after it.
+      expect(state.catalogReads.includes(`/api/v1/models/${cohere}/endpoints`)).toBe(!!scenario.endpoint)
+    }
+  })
+  test("never looks up endpoints for models off the allowlist or from excluded authors", async () => {
+    state.models.push(
+      synthetic("cohere/north-code-next:free"),
+      synthetic("google/north-mini-code:free"),
+      synthetic("nvidia/north-mini-code:free"),
+    )
+    state.userModels = state.models.map((item) => item.id)
+    const catalog = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
+    expect(catalog.models).toEqual(catalogModels)
+    expect(catalog.models.every((item) => !item.name.endsWith("(free)"))).toBe(true)
+    expect(state.catalogReads.filter((path) => /north-code-next|google|nvidia/.test(path))).toEqual([])
+  })
+  test("one unreadable endpoint list drops only that model and the rest still publish", async () => {
+    const dots = "dots-studio/dots-3-note-preview:free"
+    for (const [failure, reply] of [
+      ["429", () => Response.json({ error: { message: "Rate limited", code: 429 } }, { status: 429 })],
+      ["404", () => Response.json({ error: { message: "Not Found", code: 404 } }, { status: 404 })],
+      ["undecodable", () => Response.json({ data: { endpoints: "unexpected" } })],
+      ["not JSON", () => new Response("<html>")],
+    ] as const) {
+      Object.assign(state, initial())
+      state.catalogReplies[`/api/v1/models/${dots}/endpoints`] = reply
+      const catalog = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
+      expect({ failure, catalog }).toEqual({
+        failure,
+        catalog: { enabled: true, updatedAt: fixture.capturedAt, models: [catalogModels[0]] },
+      })
+      expect(await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000)).toEqual(catalog)
+    }
+  })
+  test("a failed model list or account list still aborts the whole refresh and keeps the stored catalog", async () => {
+    const stored = await redis(["GET", FREE_MODELS_CATALOG_KEY])
+    for (const path of ["/api/v1/models", "/api/v1/models/user"]) {
+      Object.assign(state, initial())
+      state.catalogReplies[path] = () => Response.json({ error: { code: 429 } }, { status: 429 })
+      await expect(refreshFreeModelCatalog(fetcher, fixture.capturedAt)).rejects.toMatchObject({
+        statusCode: 503,
+        code: "FREE_MODELS_CATALOG_UNAVAILABLE",
+      })
+      expect(await redis(["GET", FREE_MODELS_CATALOG_KEY])).toBe(stored)
+    }
+  })
+  test("publishes OFF when nothing qualifies and serves it as a clean empty catalog", async () => {
+    for (const scenario of ["no free models listed", "every endpoint list empty"]) {
+      Object.assign(state, initial())
+      if (scenario === "no free models listed") state.models = []
+      if (scenario === "every endpoint list empty")
+        state.endpoints = Object.fromEntries(fixture.models.map((item) => [item.id, []]))
+      const catalog = await refreshFreeModelCatalog(fetcher)
+      expect(catalog).toMatchObject({ enabled: false, models: [] })
+      const response = await fetch(state.origin + "/models")
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ enabled: false, updatedAt: catalog.updatedAt, models: [] })
+      const refused = await chat()
+      expect(refused.status).toBe(503)
+      expect((await refused.json()).error.message).toContain("temporarily unavailable")
+      expect(chats).toHaveLength(0)
+    }
   })
   test("refuses stale catalogs and unauthenticated cron refreshes", async () => {
     await redis([
@@ -336,6 +391,10 @@ describe("curated free catalog", () => {
     for (const change of [
       { providers: [] },
       { providers: [{ id: "unknown", name: "Unknown", retention: "Unknown" }] },
+      { providers: [{ id: "poolside/fp4", name: "Poolside", retention: NO_TRAINING_RETENTION }] },
+      { providers: [{ id: "atlas-cloud/fp8", name: "AtlasCloud", retention: NO_TRAINING_RETENTION }] },
+      { id: "cohere/north-code-next:free" },
+      { id: "nvidia/nemotron-3.5-super-vl:free" },
       { maxOutputTokens: -1 },
       { id: "cohere/paid" },
     ]) {
@@ -384,9 +443,9 @@ describe("shared free inference", () => {
   })
   test("streams split CRLF frames, hashes the account, pins all routes to free prices and strips routing overrides", async () => {
     const response = await chat({
-      model: candidates[0].id,
+      model: catalogModels[0].id,
       messages: [{ role: "user", content: "fixture" }],
-      provider: { data_collection: "allow" },
+      provider: { data_collection: "allow", zdr: false, allow_fallbacks: true, only: ["paid-provider"] },
       models: ["paid/model"],
       user: "attacker",
       web_search_options: {},
@@ -399,12 +458,13 @@ describe("shared free inference", () => {
     expect(chats[0].headers.get("authorization")).toBe("Bearer fixture-openrouter-key")
     expect(chats[0].headers.get("http-referer")).toBe("https://vectordev.ai/")
     expect(chats[0].headers.get("x-openrouter-title")).toBe("Vector")
-    expect(chats[0].body.models).toEqual(candidates.map((item) => item.id))
+    expect(chats[0].body.models).toEqual(catalogModels.map((item) => item.id))
+    // No-training routing: zdr is not requested, data collection is denied, and the allowlisted provider
+    // list plus a zero price ceiling leave no paid endpoint to fall back to.
     expect(chats[0].body.provider).toEqual({
       data_collection: "deny",
-      zdr: true,
       require_parameters: true,
-      only: ["cohere", "poolside", "modelrun"],
+      only: ["cohere", "atlas-cloud/fp8"],
       max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
     })
     expect(chats[0].body.user).toMatch(/^[a-f0-9]{64}$/)
@@ -414,17 +474,17 @@ describe("shared free inference", () => {
   test("rejects paid IDs, plugins, unsupported media, foreign origins and contexts above 4.5 MB before inference", async () => {
     expect((await chat({ model: "paid/model", messages: [{}] })).status).toBe(400)
     expect(
-      (await chat({ model: candidates[0].id, messages: [{ role: "user", content: "x" }], plugins: [{ id: "web" }] }))
+      (await chat({ model: catalogModels[0].id, messages: [{ role: "user", content: "x" }], plugins: [{ id: "web" }] }))
         .status,
     ).toBe(400)
     expect(
-      (await chat({ model: candidates[0].id, messages: [{ role: "user", content: [{ type: "file", file: {} }] }] }))
+      (await chat({ model: catalogModels[0].id, messages: [{ role: "user", content: [{ type: "file", file: {} }] }] }))
         .status,
     ).toBe(400)
     expect((await chat(undefined, account(), { origin: "https://foreign.example" })).status).toBe(403)
     const large = await new Promise<{ status?: number; body: string }>((resolve, reject) => {
       const body = JSON.stringify({
-        model: candidates[0].id,
+        model: catalogModels[0].id,
         messages: [{ role: "user", content: "x".repeat(4500000) }],
       })
       const incoming = request(
@@ -523,6 +583,26 @@ describe("shared free inference", () => {
       expect(body).toContain('"content":"fixture"')
       expect(body).toContain('"type":"free_models_limit"')
       expect(body).not.toContain("fixture-openrouter-key")
+      expect(chats).toHaveLength(2)
+    })
+  for (const status of [400, 403, 404, 502])
+    test(`shows a ${status} provider refusal as temporarily unavailable without retrying elsewhere`, async () => {
+      state.upstreamStatus = status
+      const refused = await chat()
+      expect(refused.status).toBe(503)
+      const text = await refused.text()
+      expect(JSON.parse(text).error).toEqual({
+        code: "FREE_MODELS_UPSTREAM_UNAVAILABLE",
+        message: "This free model is temporarily unavailable. Try another free model or connect OpenRouter.",
+      })
+      expect(text).not.toContain("fixture-openrouter-key")
+      expect(chats).toHaveLength(1)
+      expect(chats[0].body.provider).toMatchObject({ max_price: { prompt: 0, completion: 0, request: 0, image: 0 } })
+      expect(chats[0].body.provider).not.toHaveProperty("zdr")
+      state.upstreamStatus = 200
+      state.streamError = status
+      const during = await chat()
+      expect(await during.text()).toContain("This free model is temporarily unavailable.")
       expect(chats).toHaveLength(2)
     })
   test("treats a truncated stream as a recoverable failure", async () => {

@@ -32,6 +32,24 @@ test("disables account-default plugins and preserves the safeguards through shar
   )
 })
 
+test("routes to no-training, zero-price allowlisted endpoints only, without requiring zero data retention", () => {
+  const request = freeModelRequest(
+    {
+      model: FREE_MODEL_FALLBACKS[0].id,
+      messages: [{ role: "user", content: "hello" }],
+      provider: { data_collection: "allow", zdr: false, allow_fallbacks: true, sort: "price" },
+    },
+    FREE_MODEL_FALLBACKS,
+  )
+  expect(request.provider).toEqual({
+    data_collection: "deny",
+    require_parameters: true,
+    only: ["cohere", "atlas-cloud"],
+    max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
+  })
+  expect(request.models).toEqual(FREE_MODEL_FALLBACKS.map((model) => model.id))
+})
+
 test("rejects active, unknown and configured plugin overrides before either inference route", () => {
   for (const plugins of [
     null,

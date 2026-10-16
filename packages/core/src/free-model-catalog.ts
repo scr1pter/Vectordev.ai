@@ -1,5 +1,5 @@
 import { Option, Schema } from "effect"
-import type { FreeModelInfo } from "@vectordevai/schema/free-model"
+import { NO_TRAINING_RETENTION, type FreeModelInfo } from "@vectordevai/schema/free-model"
 
 export const FreeProviderPolicy = Schema.Struct({
   name: Schema.String,
@@ -35,6 +35,19 @@ export const FreeEndpointMetadata = Schema.Struct({
   status: Schema.Number,
 })
 
+// OpenRouter's public endpoint data has no training flag, and provider-level policy records do not describe free
+// endpoints reliably: they recorded Poolside as not training while its free Laguna pages say free use may train.
+// So the no-training selection allowlists each model with the provider slugs that may serve it, and a new free
+// model is never offered until it is added here. Every request also asks OpenRouter to deny data collection.
+// The dated evidence and the owner confirmations each pair needs are in docs/vector/owner-actions/openrouter.md.
+export const NO_TRAINING_ENDPOINTS = new Map([
+  ["cohere/north-mini-code:free", ["cohere"]],
+  ["dots-studio/dots-3-note-preview:free", ["atlas-cloud"]],
+])
+
+// Free variants from these authors log or may train on prompts, or their free tier is unreviewed.
+const EXCLUDED_AUTHORS = /^(?:nvidia|stealth|thinkingmachines|liquid|google)\//i
+
 // Router aliases and stacked variants can introduce paid routing or services.
 export function isFreeModelID(id: string) {
   return id.trim() === id && /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*:free$/i.test(id) && !/^openrouter\//i.test(id)
@@ -60,11 +73,26 @@ export function eligibleFreeModel(model: typeof FreeModelMetadata.Type, now: num
   )
 }
 
+/** Included and personal no-training catalogs share the allowlist, author exclusions and a 7-day expiry buffer. */
+export function includedFreeModel(model: typeof FreeModelMetadata.Type, now: number) {
+  return (
+    NO_TRAINING_ENDPOINTS.has(model.id) && !excludedFreeModel(model.id) && eligibleFreeModel(model, now + 7 * 86400000)
+  )
+}
+
+export function excludedFreeModel(id: string) {
+  return EXCLUDED_AUTHORS.test(id)
+}
+
+export function noTrainingEndpoint(modelID: string, tag: string) {
+  return !!NO_TRAINING_ENDPOINTS.get(modelID)?.includes(tag.split("/")[0] ?? "")
+}
+
 /** Shared and personal catalogs use the same price, capability and endpoint policy checks. */
 export function freeModelInfo(
   model: typeof FreeModelMetadata.Type,
   endpoints: readonly unknown[],
-  selection: { policies: readonly (typeof FreeProviderPolicy.Type)[] } | { zdr: true },
+  selection: { policies: readonly (typeof FreeProviderPolicy.Type)[] } | { zdr: true } | { noTraining: true },
 ): FreeModelInfo | undefined {
   const eligible = endpoints.flatMap((item) => {
     const parsed = Schema.decodeUnknownOption(FreeEndpointMetadata)(item)
@@ -76,7 +104,8 @@ export function freeModelInfo(
             (item) => item.name === endpoint.provider_name && endpoint.tag.split("/")[0] === item.slug,
           )
         : undefined
-    if ("zdr" in selection && endpoint.model_id !== model.id) return []
+    if (("zdr" in selection || "noTraining" in selection) && endpoint.model_id !== model.id) return []
+    if ("noTraining" in selection && !noTrainingEndpoint(model.id, endpoint.tag)) return []
     if (
       ("policies" in selection &&
         (!provider ||
@@ -115,13 +144,16 @@ export function freeModelInfo(
       // Preserve the endpoint tag when supplied; a bare slug still selects that provider.
       id: endpoint.tag,
       name: provider?.displayName ?? endpoint.provider_name,
-      retention: !provider
-        ? "OpenRouter lists this endpoint as zero data retention; no-training routing is required."
-        : !provider.dataPolicy.retainsPrompts
-          ? "No prompt retention or training according to OpenRouter's provider policy."
-          : provider.dataPolicy.retentionDays !== undefined
-            ? `Up to ${provider.dataPolicy.retentionDays} days; no training according to OpenRouter's provider policy.`
-            : "Prompts retained; duration not specified. No training according to OpenRouter's provider policy.",
+      retention:
+        "noTraining" in selection
+          ? NO_TRAINING_RETENTION
+          : !provider
+            ? "OpenRouter lists this endpoint as zero data retention; no-training routing is required."
+            : !provider.dataPolicy.retainsPrompts
+              ? "No prompt retention or training according to OpenRouter's provider policy."
+              : provider.dataPolicy.retentionDays !== undefined
+                ? `Up to ${provider.dataPolicy.retentionDays} days; no training according to OpenRouter's provider policy.`
+                : "Prompts retained; duration not specified. No training according to OpenRouter's provider policy.",
     })),
   }
 }

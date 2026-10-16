@@ -17,7 +17,7 @@ import { Flag } from "./flag/flag"
 import { Global } from "./global"
 import { VectorAccount } from "./vector-account"
 import { makeGlobalNode } from "./effect/app-node"
-import { FreeModelMetadata, eligibleFreeModel, freeModelInfo, isFreeModelID } from "./free-model-catalog"
+import { FreeModelMetadata, freeModelInfo, includedFreeModel, isFreeModelID } from "./free-model-catalog"
 
 export const CATALOG_URL = "https://vectordev.ai/api/free-models/models"
 export const SHARED_CHAT_URL = "https://vectordev.ai/api/free-models/chat"
@@ -27,6 +27,7 @@ const OFF: FreeModelCatalog = { enabled: false, updatedAt: 0, models: [] }
 const TTL = 5 * 60_000
 
 const MetadataList = Schema.Struct({ data: Schema.Array(Schema.Unknown) })
+const EndpointList = Schema.Struct({ data: Schema.Struct({ endpoints: Schema.Array(Schema.Unknown) }) })
 
 export function createClient(
   input: {
@@ -133,21 +134,24 @@ export function createClient(
         ? Option.getOrUndefined(Schema.decodeUnknownOption(schema)(await response.json().catch(() => undefined)))
         : undefined
     }
-    const [available, endpoints] = await Promise.all([
-      read(`${OPENROUTER_ROOT}/models/user`, MetadataList, true),
-      read(`${OPENROUTER_ROOT}/endpoints/zdr`, MetadataList),
-    ])
-    // A rejected key or changed price/privacy policy must never revive stale models.
-    if (!available || !endpoints) {
+    const available = await read(`${OPENROUTER_ROOT}/models/user`, MetadataList, true)
+    const candidates = (available?.data ?? []).flatMap((value) => {
+      const model = Schema.decodeUnknownOption(FreeModelMetadata)(value)
+      return Option.isSome(model) && includedFreeModel(model.value, now()) ? [model.value] : []
+    })
+    // Personal accounts follow the included-model policy: allowlisted model and provider pairs only, read from
+    // each model's public endpoint list, and every request asks OpenRouter to deny data collection.
+    const endpoints = await Promise.all(
+      candidates.map((model) => read(`${OPENROUTER_ROOT}/models/${model.id}/endpoints`, EndpointList)),
+    )
+    // A rejected key must never revive stale models.
+    if (!available) {
       users.delete(digest)
       return []
     }
-    const candidates = available.data.flatMap((value) => {
-      const model = Schema.decodeUnknownOption(FreeModelMetadata)(value)
-      return Option.isSome(model) && eligibleFreeModel(model.value, now()) ? [model.value] : []
-    })
+    // An unreadable endpoint list leaves that model without endpoints, which drops only that model.
     const models = candidates
-      .map((model) => freeModelInfo(model, endpoints.data, { zdr: true }))
+      .map((model, index) => freeModelInfo(model, endpoints[index]?.data.endpoints ?? [], { noTraining: true }))
       .filter((model): model is FreeModelInfo => model !== undefined)
       .sort((a, b) => b.contextLength - a.contextLength || a.id.localeCompare(b.id))
     users.set(digest, { expires: now() + TTL, models })

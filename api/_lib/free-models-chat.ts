@@ -112,10 +112,11 @@ export async function streamFreeModelResponse(upstream: Response, response: ApiR
           if (isRecord(value.error)) {
             const status = Number(value.error.code ?? value.error.status)
             if (status === 429 || status === 402) throw new Limit(upstreamLimit(upstream, status, now))
+            // A provider refusal can arrive as a stream error; it is never retried on another endpoint.
             throw new ApiError(
               503,
               "FREE_MODELS_UPSTREAM_UNAVAILABLE",
-              "This free model stopped responding. Try another free model or connect OpenRouter.",
+              "This free model is temporarily unavailable. Try another free model or connect OpenRouter.",
             )
           }
           if (!response.write(`data: ${JSON.stringify(value)}\n\n`))
@@ -170,11 +171,17 @@ export async function handleFreeModelsChat(
     const account = verifyCliToken(token ?? "", now)
     await requireUnrevokedAccount(account.id, fetcher)
     const catalog = await currentFreeModelCatalog(fetcher, now)
+    if (!catalog.enabled)
+      throw new ApiError(
+        503,
+        "FREE_MODELS_UNAVAILABLE",
+        "Models included with Vector are temporarily unavailable. Connect OpenRouter to use your own account.",
+      )
     const body = await readJson(request, MAX_BYTES)
     const input = (() => {
       try {
         return {
-          ...freeModelRequest(body, catalog.models, true),
+          ...freeModelRequest(body, catalog.models),
           user: createHash("sha256").update(account.id).digest("hex"),
         }
       } catch (error) {

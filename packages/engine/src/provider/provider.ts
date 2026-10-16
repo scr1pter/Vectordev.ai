@@ -2038,7 +2038,7 @@ const layer = Layer.effect(
                     "X-OpenRouter-Title": "Vector",
                   },
                   body: serializeFreeModelRequest(
-                    freeModelRequest({ ...body, model: model.id }, route.models, route.source === "openrouter"),
+                    freeModelRequest({ ...body, model: model.id }, route.models),
                     route.url === FreeModels.SHARED_CHAT_URL,
                   ),
                 }).then(FreeModels.preserveLimit)

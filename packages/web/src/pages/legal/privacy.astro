@@ -80,6 +80,18 @@ export const prerender = true
       your agreement or settings with it. Vector does not promise that every provider offers zero retention
       or excludes all request content from training.
     </p>
+    <p id="included-models">
+      <strong>Models included with Vector and OpenRouter.</strong> When you choose one of the Models included
+      with Vector, through Vector's shared allowance or your own OpenRouter account, your request content goes to
+      OpenRouter and to the model provider serving that model. The shared allowance passes through Vector's
+      server to check your account and limits. These providers may retain prompts and outputs under their own
+      policies; they are not zero data retention services. Vector requests that your prompts and outputs are
+      not used for training: each request asks OpenRouter to deny data collection, which excludes endpoints
+      OpenRouter records as training on prompts, and is limited to the models and providers on Vector's allowlist.
+      The allowlist is on our <a href="/docs/models#free-models">Models and providers</a> page. This relies on the
+      providers' published policies and OpenRouter's records, not an independent audit, and does not change your
+      own OpenRouter account settings.
+    </p>
   </section>
 
   <section>
