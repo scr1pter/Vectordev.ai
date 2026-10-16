@@ -260,8 +260,12 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.prompt",
         Effect.fn(function* (ctx) {
-          // The budget is armed in memory before admission, so the drain that promotes this input runs under it.
-          if (ctx.payload.budget) yield* guard.arm(ctx.params.sessionID, ctx.payload.budget)
+          // The budget is armed in memory before admission, so the drain that promotes this input runs under it. A guest's
+          // budget can only tighten the limits the owner's run has.
+          if (ctx.payload.budget)
+            yield* (yield* RequestPrincipal).kind === "owner"
+              ? guard.arm(ctx.params.sessionID, ctx.payload.budget)
+              : guard.tighten(ctx.params.sessionID, ctx.payload.budget)
           return {
             data: yield* session
               .prompt({

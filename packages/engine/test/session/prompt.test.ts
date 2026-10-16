@@ -4808,6 +4808,36 @@ it.instance(
 )
 
 it.instance(
+  "run guard holds a subagent prompted while its root has no run to the config budget",
+  () =>
+    Effect.gen(function* () {
+      // No run of the root ever began in this process, as after a restart. The config allows one step.
+      const { llm } = yield* useServerConfig((url) => ({ ...providerCfg(url), budget: { run: { steps: 1 } } }))
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const guard = yield* SpendGuard.Service
+      const root = yield* sessions.create({ title: "Root" })
+      const child = yield* sessions.create({
+        title: "Child",
+        parentID: root.id,
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* user(child.id, "hello")
+      yield* llm.tool("first", { value: 1 })
+      yield* llm.text("never requested")
+
+      const result = yield* prompt.loop({ sessionID: child.id })
+
+      expect(budgetStop(result.info)?.reason).toBe("steps")
+      expect(yield* llm.calls).toBe(1)
+      expect((yield* guard.snapshot(child.id))?.budget).toEqual({ steps: 1 })
+      // The run was the subagent's own, so the root's next run is not cut short by it.
+      expect(yield* guard.snapshot(root.id)).toBeUndefined()
+    }),
+  120_000,
+)
+
+it.instance(
   "run guard runs a helper started after its session's run stopped under its own limits",
   () =>
     Effect.gen(function* () {

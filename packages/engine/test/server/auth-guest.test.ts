@@ -14,6 +14,7 @@ import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, TestInstance, tmpdir } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { httpApiLayer, requestInDirectory } from "./httpapi-layer"
+import { testProviderConfig } from "../lib/test-provider"
 import { Server } from "../../src/server/server"
 import { Flag } from "@vectordevai/core/flag/flag"
 import { SessionV2 } from "@vectordevai/core/session"
@@ -844,6 +845,95 @@ test("guests cannot allow tools in their own sessions", async () => {
     }
   }
 }, 30_000)
+
+test("a guest's prompt budget can only tighten the owner's run limits", async () => {
+  // The provider never answers, so each run begins under its budget and then ends on a connection error.
+  await using tmp = await tmpdir({
+    trusted: true,
+    config: { ...testProviderConfig("http://127.0.0.1:9/v1"), budget: { run: { usd: 2, steps: 50 } } },
+  })
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
+  const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
+  const call = (url: URL, init: RequestInit = {}) => fetch(url, { ...init, keepalive: false })
+  const at = (route: string) => new URL(`${route}?directory=${encodeURIComponent(tmp.path)}`, listener.url)
+  const send = (route: string, headers: Record<string, string>, body: unknown) =>
+    call(at(route), { method: "POST", headers, body: JSON.stringify(body) })
+  const prompt = (sessionID: string, headers: Record<string, string>, budget?: object) =>
+    send(`/session/${sessionID}/prompt_async`, headers, {
+      model: { providerID: "lmstudio", modelID: "test-model" },
+      parts: [{ type: "text", text: "hello" }],
+      ...(budget ? { budget } : {}),
+    })
+  // The run's budget, read by the owner once the run has begun.
+  const budgetOf = async (sessionID: string) => {
+    const deadline = Date.now() + 15_000
+    while (Date.now() < deadline) {
+      const spend = (await (await call(at(`/api/session/${sessionID}/spend`), { headers: owner })).json()) as {
+        data?: { budget: object }
+      }
+      if (spend.data) return spend.data.budget
+      await Bun.sleep(50)
+    }
+    return undefined
+  }
+  const session = async (headers: Record<string, string>) =>
+    ((await (await send("/session", headers, {})).json()) as { id: string }).id
+  try {
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+    // A looser budget leaves the configured limits in place; a stricter limit still applies.
+    const raised = await session(guest)
+    expect((await prompt(raised, guest, { usd: 1_000, steps: 1_000, warnAt: 1 })).status).toBe(204)
+    expect(await budgetOf(raised)).toEqual({ usd: 2, steps: 50, warnAt: 0.8 })
+    const lowered = await session(guest)
+    expect((await prompt(lowered, guest, { usd: 1, steps: 1_000 })).status).toBe(204)
+    expect(await budgetOf(lowered)).toEqual({ usd: 1, steps: 50 })
+
+    // An empty budget armed through the v2 route lifts nothing either.
+    const emptied = await session(guest)
+    const admitted = await send(`/api/session/${emptied}/prompt`, guest, {
+      prompt: { text: "hello" },
+      budget: {},
+      resume: false,
+    })
+    expect(admitted.status).toBe(200)
+    expect((await prompt(emptied, guest)).status).toBe(204)
+    expect(await budgetOf(emptied)).toEqual({ usd: 2, steps: 50 })
+
+    // The owner's own budget still replaces the configured one.
+    const own = await session(owner)
+    expect((await prompt(own, owner, { usd: 1_000 })).status).toBe(204)
+    expect(await budgetOf(own)).toEqual({ usd: 1_000 })
+  } finally {
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 60_000)
 
 test("guests cannot reach owner-only routes by spelling the path another way", async () => {
   await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })

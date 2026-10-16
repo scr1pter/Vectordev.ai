@@ -1245,8 +1245,11 @@ const layer = Layer.effect(
       // Read before the message exists: a prompt sent while a run is going joins that run.
       const joined = (yield* status.get(input.sessionID)).type !== "idle"
       yield* revert.cleanup(session)
-      // The budget lives in the guard's memory for this process, not on the user message.
-      if (input.budget) yield* guard.arm(input.sessionID, input.budget)
+      // The budget lives in the guard's memory for this process, not on the user message. A sender who may not raise
+      // the owner's limits only tightens them.
+      const arm = (budget: RunBudget.Info) =>
+        options?.tightenBudget ? guard.tighten(input.sessionID, budget) : guard.arm(input.sessionID, budget)
+      if (input.budget) yield* arm(input.budget)
       const message = yield* createUserMessage(input, options)
       yield* sessions.touch(input.sessionID)
 
@@ -1273,7 +1276,7 @@ const layer = Layer.effect(
       )
         return result
       // The prompt's budget went to the run it joined, which has ended, so the run that answers it gets it again.
-      if (input.budget) yield* guard.arm(input.sessionID, input.budget)
+      if (input.budget) yield* arm(input.budget)
       return yield* loop({ sessionID: input.sessionID })
     })
 
@@ -1314,7 +1317,15 @@ const layer = Layer.effect(
       if (session.parentID && !session.internal) {
         if ((yield* guard.rootOf(sessionID)) === sessionID)
           yield* guard.link(sessionID, (yield* rootSession(session)).id)
-        return yield* steps
+        if (yield* guard.snapshot(sessionID)) return yield* steps
+        // Its root has no run going and no finished one, as for a subagent prompted after a restart. It counts against
+        // its parent's run when the parent has one of its own, else it is a run of its own under the config budget,
+        // so its steps are never left unguarded.
+        if (yield* guard.running(session.parentID)) {
+          yield* guard.link(sessionID, session.parentID)
+          return yield* steps
+        }
+        yield* guard.unlink(sessionID)
       }
       yield* guard.begin(sessionID, (yield* config.get()).budget?.run)
       return yield* steps.pipe(Effect.ensuring(guard.end(sessionID)))
@@ -1998,6 +2009,11 @@ export type PromptOptions = {
    * omitted, goes through the Read tool's workspace boundary and read permission.
    */
   readonly userFile?: (url: string) => boolean
+  /**
+   * Whether the prompt's budget may only tighten the run's limits, for a sender who may not raise the owner's, such as
+   * an invited guest. Otherwise it replaces them, as the owner's own budget does.
+   */
+  readonly tightenBudget?: boolean
 }
 
 export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput")({
