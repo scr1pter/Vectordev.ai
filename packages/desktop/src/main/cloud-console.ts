@@ -699,12 +699,21 @@ export function setBuildSettings(
   return settings
 }
 
-function normalizeHealthPath(value: string): string {
+// The release check sends the project's Protection Bypass secret to the health
+// URL, so the path must stay on the release's own address: `//host/x`, `/\host`
+// and a path with a tab or newline the URL parser drops all resolve elsewhere.
+const HEALTH_BASE = "https://release.invalid"
+
+export function normalizeHealthPath(value: string): string {
   const path = (value ?? "").trim() || "/"
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) {
     throw new Error("Health checks use a path such as / or /api/health, not a full URL.")
   }
-  return path.startsWith("/") ? path : `/${path}`
+  const normalized = path.startsWith("/") ? path : `/${path}`
+  if (/[\\\s]/.test(normalized) || new URL(normalized, HEALTH_BASE).origin !== HEALTH_BASE) {
+    throw new Error("Health checks use a path on the release's own address, such as / or /api/health.")
+  }
+  return normalized
 }
 
 // ---- Environment variables ------------------------------------------------

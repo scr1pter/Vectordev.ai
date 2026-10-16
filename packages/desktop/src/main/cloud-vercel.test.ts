@@ -1249,6 +1249,20 @@ describe("vector_cloud Vercel actions over the bridge", () => {
       expect(
         await command({ command: "describe", action: "set_release_settings", testCommand: "bun test" }),
       ).toMatchObject({ ok: true, noop: true })
+      // A path that resolves to another host would carry the bypass secret there,
+      // so it is refused before the prompt and again when saved.
+      for (const healthPath of ["//evil.example/collect", "/\\evil.example/collect", "/\t/evil.example"]) {
+        for (const request of [
+          { command: "describe", action: "set_release_settings", healthPath },
+          { command: "set_release_settings", healthPath },
+        ]) {
+          expect({ healthPath, result: await command(request) }).toMatchObject({
+            healthPath,
+            result: { ok: false, error: expect.stringContaining("own address") },
+          })
+        }
+      }
+      expect(getBuildSettings(project)?.healthPath).toBe("/")
 
       const health = await command({ command: "check_health" })
       expect(health).toMatchObject({ ok: true, text: expect.stringContaining("(dpl_site) · ready · HTTP 200") })

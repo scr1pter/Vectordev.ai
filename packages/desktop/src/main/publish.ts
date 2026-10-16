@@ -532,9 +532,26 @@ const PROTECTED_DETAIL =
 
 // One probe of the release's health path, as the release check and
 // Observability both run it.
-function probeHealth(settings: CloudBuildSettings | null, access: CheckAccess, url: string, options: PublishOptions) {
-  return probeVercelUrl(new URL(settings?.healthPath ?? "/", url).toString(), {
+// The bypass secret goes only to the release's own origin. A stored path that
+// resolves to another host (`//host/x`, saved before paths were checked) is
+// refused rather than probed.
+async function probeHealth(
+  settings: CloudBuildSettings | null,
+  access: CheckAccess,
+  url: string,
+  options: PublishOptions,
+): Promise<VercelProbe> {
+  const target = new URL(settings?.healthPath ?? "/", url)
+  if (target.origin !== new URL(url).origin) {
+    return {
+      kind: "failed",
+      error: `The health path ${settings?.healthPath} leaves the release's address, so Vector did not request it. Set a path such as /api/health in Vector Cloud > Project settings.`,
+      latencyMs: 0,
+    }
+  }
+  return probeVercelUrl(target.toString(), {
     bypass: access.bypass,
+    bypassOrigin: url,
     projectProtected: access.protectedUrl,
     request: options.request,
   })

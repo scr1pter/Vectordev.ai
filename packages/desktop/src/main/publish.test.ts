@@ -546,6 +546,50 @@ describe.skipIf(process.platform === "win32")("publishing a project", () => {
     expect(all[0].checks).toEqual(releaseChecks)
   })
 
+  test("never sends the bypass secret to a host a stored health path points at", async () => {
+    const remote = linkProject(undefined, {
+      name: "shop",
+      ssoProtection: { deploymentType: "all" },
+      protectionBypass: {
+        bypassfixture0000000000000000000000: { createdAt: 1, createdBy: "user_1", scope: "automation-bypass" },
+      },
+    })
+    api.addDeployment({ projectId: remote.id, uid: "dpl_first", target: "production" })
+    remote.productionId = "dpl_first"
+    const preview = api.addDeployment({ projectId: remote.id, uid: "dpl_p", url: "shop-p.vercel.app" })
+    checks({ health: true, browser: false })
+    const sent: Array<{ host: string; bypass: string | null }> = []
+    const site = routed((url, headers) => {
+      sent.push({ host: url.hostname, bypass: headers.get("x-vercel-protection-bypass") })
+      return new Response("ok")
+    })
+    const published = await publishProject({ projectPath: project, target: "vercel" }, undefined, {
+      command: [await fakeDeployCli(`https://${preview.url}`)],
+      request: site,
+    })
+    expect(published).toMatchObject({ ok: true })
+    // A path saved before paths were checked, as a hand-edited settings file could hold.
+    const saved = [...stores.values()].flatMap((bucket) => {
+      const data = bucket.get(cloudProjectScopeKey(project))
+      return data && typeof data === "object" && "build" in data ? [data as { build: { healthPath: string } }] : []
+    })
+    expect(saved).toHaveLength(1)
+    saved[0].build.healthPath = "//evil.example/collect"
+    sent.length = 0
+    const checked = await checkDeploymentHealth(
+      { projectPath: project, id: published.deploymentId! },
+      { request: site },
+    )
+    expect(checked).toMatchObject({
+      probe: "failed",
+      healthError: expect.stringContaining("leaves the release's address"),
+    })
+    expect(sent.filter((item) => item.host === "evil.example")).toEqual([])
+    expect(() =>
+      setBuildSettings(project, undefined, { ...saved[0].build, healthPath: "//evil.example/collect" } as never),
+    ).toThrow("own address")
+  })
+
   test("uses the project's bypass secret to check a protected preview", async () => {
     const remote = linkProject(undefined, {
       name: "shop",

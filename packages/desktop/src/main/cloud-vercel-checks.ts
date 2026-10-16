@@ -44,7 +44,14 @@ export function protectsDeployment(protection: VercelProtection | undefined, tar
 
 export async function probeVercelUrl(
   url: string,
-  options: { bypass?: string; projectProtected?: boolean; request?: VercelFetch; timeoutMs?: number } = {},
+  options: {
+    bypass?: string
+    /** The release address the bypass secret belongs to; the probed URL's own origin when omitted. */
+    bypassOrigin?: string
+    projectProtected?: boolean
+    request?: VercelFetch
+    timeoutMs?: number
+  } = {},
 ): Promise<VercelProbe> {
   const startedAt = Date.now()
   const elapsed = () => Date.now() - startedAt
@@ -57,7 +64,7 @@ export async function probeVercelUrl(
       redirect: "manual",
       headers: {
         "user-agent": VECTOR_USER_AGENT,
-        ...bypassHeadersFor(current, url, protectionBypassHeaders(options.bypass)),
+        ...bypassHeadersFor(current, options.bypassOrigin ?? url, protectionBypassHeaders(options.bypass)),
       },
       signal: AbortSignal.timeout(options.timeoutMs ?? 12_000),
     })

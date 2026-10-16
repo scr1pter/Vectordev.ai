@@ -4,6 +4,7 @@ import {
   detectBuildSettings,
   getBuildSettings,
   listDeployments,
+  normalizeHealthPath,
   setBuildSettings,
   type CloudBuildSettings,
   type CloudDeployment,
@@ -108,6 +109,8 @@ export function parseReleaseFields(value: object): ReleaseSettingsFields {
 export async function describeReleaseSettings(input: ReleaseInput) {
   const current = await currentSettings(input)
   const next = mergeSettings(current, input)
+  // Refuse a health path off the release's address before anyone is asked to approve it.
+  normalizeHealthPath(next.healthPath)
   const changes = settingChanges(current, next)
   const project = getCloudProviderProjectLink(input.projectPath, input.taskId, "vercel")?.projectName
   return {
