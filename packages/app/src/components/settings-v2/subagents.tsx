@@ -10,12 +10,8 @@ import { SUBAGENT_IDENTITIES, SubagentAvatar } from "@/features/agents/identitie
 import { useLanguage } from "@/context/language"
 import { useServerSync } from "@/context/server-sync"
 import { showToast } from "@/utils/toast"
-import {
-  generalSubagentsEnabled,
-  generalSubagentsPatch,
-  runningSessions,
-  stopWorkDescription,
-} from "./general-subagents"
+import { helperLabel, isInternalSession } from "@/utils/internal-sessions"
+import { generalSubagentsEnabled, generalSubagentsPatch, runningWork, stopWorkDescription } from "./general-subagents"
 
 // Vector hands work to two kinds of subagent, and this page explains both.
 // Subagents are the engine's general-purpose `general` agent, which the main
@@ -66,12 +62,16 @@ const LEGEND = [
 
 // Saving the switch reloads the engine's state, which stops every running
 // session, so the page asks first whenever something is working.
-function DialogStopRunningWork(props: { count: number; enable: boolean; onConfirm: () => void }) {
+function DialogStopRunningWork(props: {
+  work: ReturnType<typeof runningWork>
+  enable: boolean
+  onConfirm: () => void
+}) {
   const dialog = useDialog()
   return (
     <Dialog
       title={props.enable ? "Turn general subagents on?" : "Turn general subagents off?"}
-      description={stopWorkDescription(props.count)}
+      description={stopWorkDescription(props.work)}
       fit
     >
       <div class="flex flex-col gap-4 pl-6 pr-2.5 pb-3">
@@ -131,9 +131,12 @@ export function SettingsSubagentsV2() {
   }
   const setEnabled = (next: boolean) => {
     if (next === enabled()) return
-    const count = runningSessions(serverSync().session.data.session_status)
-    if (count === 0) return save(next)
-    void dialog.show(() => <DialogStopRunningWork count={count} enable={next} onConfirm={() => save(next)} />)
+    const work = runningWork(serverSync().session.data.session_status, (sessionID) => {
+      const session = serverSync().session.get(sessionID)
+      return isInternalSession(session) ? helperLabel(session?.internal ?? "") : undefined
+    })
+    if (work.sessions === 0 && work.helpers.length === 0) return save(next)
+    void dialog.show(() => <DialogStopRunningWork work={work} enable={next} onConfirm={() => save(next)} />)
   }
 
   return (

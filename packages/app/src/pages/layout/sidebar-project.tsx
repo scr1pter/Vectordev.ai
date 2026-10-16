@@ -12,6 +12,7 @@ import { useLanguage } from "@/context/language"
 import { useNotification } from "@/context/notification"
 import { ProjectIcon, SessionItem, type SessionItemProps } from "./sidebar-items"
 import { displayName, sortedRootSessions } from "./helpers"
+import { isInternalSession } from "@/utils/internal-sessions"
 
 export type ProjectSidebarContext = {
   currentDir: Accessor<string>
@@ -305,7 +306,9 @@ export const SortableProject = (props: {
   const isWorking = createMemo(() =>
     dirs().some((directory) => {
       return Object.keys(serverSync().session.data.session_status).some((id) => {
-        if (serverSync().session.get(id)?.directory !== directory) return false
+        const session = serverSync().session.get(id)
+        // A helper (a Vectorscope review, autocomplete) is in no list here, so it would spin with nothing to open.
+        if (session?.directory !== directory || isInternalSession(session)) return false
         return serverSync().session.data.session_working(id)
       })
     }),

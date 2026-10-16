@@ -15,11 +15,31 @@ export const generalSubagentsPatch = (enabled: boolean): Config => ({ agent: { g
 
 // Saving the switch makes the engine reload its state, which stops every
 // session working at that moment, in every project, subagents included. The
-// page asks before it does that, and these say how much would stop.
-export const runningSessions = (status: Record<string, { type: string } | undefined>) =>
-  Object.values(status).filter((item) => item !== undefined && item.type !== "idle").length
+// page asks before it does that, and these say how much would stop. Vector's
+// helpers (a Vectorscope review, autocomplete) stop too, but they are in no
+// list the user can open, so they are named instead of counted as sessions.
+// `helperOf` gives the helper's name for a helper session.
+export const runningWork = (
+  status: Record<string, { type: string } | undefined>,
+  helperOf: (sessionID: string) => string | undefined,
+) => {
+  const busy = Object.entries(status).flatMap(([sessionID, item]) =>
+    item !== undefined && item.type !== "idle" ? [sessionID] : [],
+  )
+  const helpers = busy.flatMap((sessionID) => helperOf(sessionID) ?? [])
+  return { sessions: busy.length - helpers.length, helpers: [...new Set(helpers)] }
+}
 
-export const stopWorkDescription = (count: number) =>
-  count === 1
-    ? "1 session is working right now. Changing this setting stops it, and the new setting applies from your next message."
-    : `${count} sessions are working right now, subagents included. Changing this setting stops all of them, and the new setting applies from your next message.`
+export const stopWorkDescription = (work: { sessions: number; helpers: readonly string[] }) => {
+  const sessions =
+    work.sessions === 1
+      ? "1 session is working right now."
+      : `${work.sessions} sessions are working right now, subagents included.`
+  const helpers = `${work.helpers.length === 1 ? "One of Vector's helpers is" : "Vector's helpers are"} working ${work.sessions > 0 ? "too" : "right now"} (${work.helpers.join(", ")}).`
+  const stops = work.sessions + work.helpers.length === 1 ? "it" : "all of them"
+  return [
+    ...(work.sessions > 0 ? [sessions] : []),
+    ...(work.helpers.length > 0 ? [helpers] : []),
+    `Changing this setting stops ${stops}, and the new setting applies from your next message.`,
+  ].join(" ")
+}
