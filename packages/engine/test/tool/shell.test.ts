@@ -1269,6 +1269,7 @@ describe("tool.shell read-only allowlist", () => {
       "git status*": "allow",
       "git show*": "allow",
       "git log*": "allow",
+      "*--no-index*": "deny",
     },
   })
 
@@ -1316,6 +1317,30 @@ describe("tool.shell read-only allowlist", () => {
         ),
       )
     }
+
+    // Outside a git work tree git diff compares the two files whole, the way --no-index does.
+    it.live(`denies git diff of two files outside a git work tree [${item.label}]`, () =>
+      withShell(
+        item,
+        Effect.gen(function* () {
+          const tmp = yield* tmpdirScoped()
+          yield* Effect.promise(() => Bun.write(path.join(tmp, ".env"), "PLACEHOLDER=1"))
+          yield* Effect.promise(() => Bun.write(path.join(tmp, "README.md"), "readme"))
+          yield* runIn(
+            tmp,
+            Effect.gen(function* () {
+              const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+              expect(yield* fail({ command: "git diff .env README.md" }, enforce(requests))).toBeInstanceOf(
+                PermissionV1.DeniedError,
+              )
+              expect(requests.find((r) => r.permission === "bash")?.patterns).toContain(
+                "git diff --no-index .env README.md",
+              )
+            }),
+          )
+        }),
+      ),
+    )
 
     for (const command of ["git diff main", "git log -5"]) {
       it.live(`allows ${command} [${item.label}]`, () =>

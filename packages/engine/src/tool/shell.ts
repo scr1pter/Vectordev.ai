@@ -553,6 +553,10 @@ export const ShellTool = Tool.define(
           scan.patterns.add(source(node))
           scan.always.add(BashArity.prefix(tokens).join(" ") + " *")
         }
+        // Outside a git work tree `git diff a b` is `git diff --no-index a b` and prints both whole files, directories
+        // included, so it answers to the rules written for --no-index, such as the read-only specialists' deny.
+        if (diff && instance.project.vcs !== "git" && !tokens.includes("--no-index"))
+          scan.patterns.add(["git", "diff", "--no-index", ...tokens.slice(2)].join(" "))
       }
 
       // A target that cannot be resolved (`> "$OUT"`) is asked for as written, so a rule that denies edits denies it.
