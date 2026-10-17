@@ -1,13 +1,9 @@
 #!/usr/bin/env bun
 
-import { $ } from "bun"
 import path from "path"
 
 const dir = process.env.LATEST_YML_DIR!
 if (!dir) throw new Error("LATEST_YML_DIR is required")
-
-const repo = process.env.GH_REPO
-if (!repo) throw new Error("GH_REPO is required")
 
 const version = process.env.VECTOR_VERSION
 if (!version) throw new Error("VECTOR_VERSION is required")
@@ -110,15 +106,15 @@ if (macX64 || macArm64) {
   })
 }
 
-// Upload to release
-const tag = `v${version}`
+// Platform jobs hold read-only tokens, which cannot see or change a draft release. The merged files travel in each
+// platform's workflow artifact, and only the approved publish job uploads them to the release and the update feeds.
 const tmp = process.env.RUNNER_TEMP ?? "/tmp"
 
 for (const [filename, content] of Object.entries(output)) {
-  const filepath = path.join(tmp, filename)
-  await Bun.write(filepath, content)
-  await $`gh release upload ${tag} ${filepath} --clobber --repo ${repo}`
-  console.log(`uploaded ${filename}`)
+  const merged = parse(content)
+  if (merged.version !== version) throw new Error(`${filename} is for ${merged.version}, not ${version}`)
+  await Bun.write(path.join(tmp, filename), content)
+  console.log(`wrote ${filename}`)
 }
 
 console.log("finalized latest yml files")

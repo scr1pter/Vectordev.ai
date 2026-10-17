@@ -674,8 +674,6 @@ jobs:
 
       - name: Merge macOS updater metadata
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           LATEST_YML_DIR: ${{ runner.temp }}/vector-latest-yml
         run: |
           set -euo pipefail
