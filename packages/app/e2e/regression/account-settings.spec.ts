@@ -50,8 +50,13 @@ test("Delete account confirms in Vector, then continues on vectordev.ai", async 
   const settings = page.locator(".settings-v2-workspace")
   await expect(settings.getByText("You are running low on Codium credits.")).toBeVisible()
   await settings.getByRole("button", { name: "Delete account…" }).click()
+  await expect(settings.locator("[data-component='settings-account-delete']")).toContainText("ends any Codium plan")
   const confirm = settings.getByRole("group", { name: "Confirm account deletion" })
   await expect(confirm).toContainText("type ana@example.com to confirm")
+  // Deleting cancels the account's Codium subscription and disables its credits, so the confirmation says so.
+  await expect(confirm).toContainText(
+    "Any Vector Codium plan ends at once, and the credits left, this month's or purchased, can no longer be used.",
+  )
   await confirm.scrollIntoViewIfNeeded()
   await capture(page, testInfo, "account-delete-confirm.png")
   await confirm.getByRole("button", { name: "Keep my account" }).click()

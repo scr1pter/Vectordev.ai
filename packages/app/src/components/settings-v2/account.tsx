@@ -303,16 +303,17 @@ export function SettingsAccountV2(props: { onUsage: () => void }) {
           <div class="settings-account-section-head">
             <div>
               <h3>Delete account</h3>
-              <p>Deleting removes your sign-in and stops your CLI tokens. It cannot be undone.</p>
+              <p>Deleting removes your sign-in, stops your CLI tokens and ends any Codium plan. It cannot be undone.</p>
             </div>
           </div>
           <Switch>
             <Match when={deleting() === "confirm"}>
               <div class="settings-account-confirm" role="group" aria-label="Confirm account deletion">
                 <p>
-                  Vector deletes your account and sign-in and stops the CLI tokens this account has issued. Repositories
-                  on this machine are not touched, and neither is anything you have already published to your own cloud
-                  accounts.
+                  Vector deletes your account and sign-in and stops the CLI tokens this account has issued. Any Vector
+                  Codium plan ends at once, and the credits left, this month's or purchased, can no longer be used.
+                  Repositories on this machine are not touched, and neither is anything you have already published to
+                  your own cloud accounts.
                 </p>
                 <p>
                   Deletion is confirmed on vectordev.ai: Vector opens your account page, where you sign in if asked,
