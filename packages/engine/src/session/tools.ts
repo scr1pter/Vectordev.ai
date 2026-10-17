@@ -1,3 +1,4 @@
+import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import { Agent } from "@/agent/agent"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Provider } from "@/provider/provider"
@@ -61,6 +62,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     messageID: input.processor.message.id,
     callID: options.toolCallId,
     extra: { model: input.model, invokedAgents: input.invokedAgents, promptOps: input.promptOps },
+    ownedPaths: SubagentLifecycle.read(input.session)?.ownedPaths,
     agent: input.agent.name,
     messages: input.messages,
     metadata: (val) =>

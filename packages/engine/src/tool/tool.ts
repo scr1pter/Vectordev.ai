@@ -40,6 +40,8 @@ export type Context<M extends Metadata = Metadata> = {
   abort: AbortSignal
   callID?: string
   extra?: { [key: string]: unknown }
+  /** Assignment scope supplied by the session runtime, never by model arguments. */
+  ownedPaths?: readonly string[]
   messages: SessionV1.WithParts[]
   metadata(input: { title?: string; metadata?: M }): Effect.Effect<void>
   deniedResources?(input: Pick<PermissionV1.Request, "permission" | "patterns">): Effect.Effect<ReadonlyArray<string>>

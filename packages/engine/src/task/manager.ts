@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schema, Semaphore } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { eq, sql } from "drizzle-orm"
 import { Task } from "@vectordevai/schema/task"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -14,6 +14,7 @@ import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import type { TaskPromptOps } from "@/tool/task"
 import { TaskMailbox } from "@vectordevai/core/task-mailbox"
 import { ProviderV2 } from "@vectordevai/core/provider"
+import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { ModelV2 } from "@vectordevai/core/model"
 
 export class Error extends Schema.TaggedErrorClass<Error>()("TaskManager.Error", {
@@ -42,12 +43,17 @@ const layer = Layer.effect(Service, Effect.gen(function* () {
   const permissions = yield* Permission.Service
   const questions = yield* Question.Service
   const database = yield* Database.Service
-  const lock = Semaphore.makeUnsafe(1)
+  const guard = yield* SpendGuard.Service
+  const lock = SubagentLifecycle.controlLock
   const get = (id: SessionID) => sessions.get(id).pipe(Effect.mapError(() => new Error({ code: "not_found", message: "Task session was not found." })))
+  const persist = (sessionID: SessionID, patch: Parameters<typeof SubagentLifecycle.write>[2], attempt?: number) =>
+    SubagentLifecycle.write(sessions, sessionID, patch, attempt).pipe(Effect.mapError(() => new Error({ code: "not_found", message: "Task disappeared before its state could be saved." })))
 
   const requireTask = Effect.fn("TaskManager.requireTask")(function* (sessionID: SessionID, taskID: string, peer = false) {
     const requester = yield* get(sessionID)
-    const task = yield* get(SessionID.make(taskID))
+    const parsed = Schema.decodeUnknownOption(SessionID)(taskID)
+    if (parsed._tag === "None") return yield* new Error({ code: "invalid", message: "Task IDs must be valid session identifiers." })
+    const task = yield* get(parsed.value)
     if (task.internal || !SubagentLifecycle.read(task)) return yield* new Error({ code: "not_found", message: "This session is not a visible delegated task." })
     if (peer && requester.parentID && requester.parentID === task.parentID && SubagentLifecycle.read(requester)) return task
     const seen = new Set<string>([task.id])
@@ -89,15 +95,16 @@ const layer = Layer.effect(Service, Effect.gen(function* () {
     const completedAt = current.completedAt ?? job?.completed_at
     return {
       id: session.id, sessionID: session.id, parentSessionID: session.parentID!, source: "subagent",
-      title: current.title, agent: current.agent, status, batchID: current.batchID,
+      title: current.title.slice(0, 240), agent: current.agent, status, batchID: current.batchID,
       startedAt: current.startedAt, completedAt, elapsedMs: Math.max(0, (completedAt ?? Date.now()) - current.startedAt),
-      currentStep: pending ? "Waiting for your answer or permission" : tool?.type === "tool" ? tool.state.status === "running" ? tool.state.title ?? tool.tool : tool.tool : undefined,
+      currentStep: pending ? "Waiting for your answer or permission" : tool?.type === "tool" ? tool.state.status === "running" ? (tool.state.title ?? tool.tool).slice(0, 240) : tool.tool.slice(0, 240) : undefined,
       lastTool: tool?.type === "tool" ? tool.tool : undefined,
       usage: { cost: session.cost ?? 0, tokens, total: tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write, toolUses: Number(counts?.tools ?? 0), steps: Number(counts?.steps ?? 0), unpricedSteps: session.unpricedSteps },
       ownedPaths: current.ownedPaths ?? [], dependsOn: current.dependsOn ?? [],
       resultAvailable: Boolean(current.resultRef || job?.output || recent.some((message) => message.info.role === "assistant" && message.parts.some((part) => part.type === "text" && !part.synthetic && part.text))),
-      resultRef: current.resultRef ?? `session:${session.id}`, reason: current.reason ?? current.error ?? job?.error,
+      resultRef: current.resultRef ?? `session:${session.id}`, reason: (current.reason ?? current.error ?? job?.error)?.slice(0, 1000),
       attempt: current.attempt ?? 1, budget: current.budget,
+      budgetScopes: ACTIVE.has(status) ? yield* guard.scopes(session.id) : current.budgetScopes,
       controls: { inspect: true, message: ACTIVE.has(status) && job?.status === "running", stop: ACTIVE.has(status) },
     }
   })
@@ -127,7 +134,7 @@ const layer = Layer.effect(Service, Effect.gen(function* () {
     const messages = yield* sessions.messages({ sessionID: session.id, limit: 8 }).pipe(Effect.orDie)
     const parts = messages.flatMap((message) => message.parts)
     const steps = parts.flatMap((part) => part.type === "tool" ? [{ tool: part.tool, status: part.state.status, text: (part.state.status === "running" || part.state.status === "completed" ? part.state.title ?? part.tool : part.tool).slice(0, 240) }] : []).slice(-8)
-    const text = parts.flatMap((part) => part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []).join("\n\n")
+    const text = messages.filter((message) => message.info.role === "assistant").flatMap((message) => message.parts).flatMap((part) => part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []).join("\n\n")
     return { task, steps, output: text.slice(-OUTPUT_LIMIT), truncated: messages.length >= 8 || text.length > OUTPUT_LIMIT || parts.filter((part) => part.type === "tool").length > 8 }
   })
 
@@ -136,6 +143,8 @@ const layer = Layer.effect(Service, Effect.gen(function* () {
     const invalid = TaskMailbox.bodyError(text)
     if (invalid) return yield* new Error({ code: "invalid", message: invalid })
     const session = yield* requireTask(input.sessionID, input.taskID, true)
+    const requester = yield* get(input.sessionID)
+    const relation = requester.parentID && requester.parentID === session.parentID ? "peer" : "parent"
     const record = SubagentLifecycle.read(session)!
     if ((yield* jobs.get(session.id))?.status !== "running") return yield* new Error({ code: "finished", message: "The task has finished; no message was sent and no new run was started." })
     const now = Date.now()
@@ -143,7 +152,7 @@ const layer = Layer.effect(Service, Effect.gen(function* () {
     const limited = TaskMailbox.admissionError({ text, sentAt: mailbox.filter((item) => item.sender === input.sessionID).map((item) => item.createdAt), pending: mailbox.filter((item) => !item.deliveredAt).length, now })
     if (limited) return yield* new Error({ code: "rate_limited", message: limited })
     const entry = { id: MessageID.ascending(), sender: input.sessionID, text, delivery: input.delivery ?? "steer" as const, createdAt: now }
-    yield* SubagentLifecycle.update(sessions, session.id, { mailbox: [...mailbox.filter((item) => !item.deliveredAt || item.createdAt > now - 60_000), entry] }, record.attempt)
+    yield* persist(session.id, { mailbox: [...mailbox.filter((item) => !item.deliveredAt || item.createdAt > now - 60_000), entry] }, record.attempt)
     const accepted = yield* jobs.extend({
       id: session.id,
       concurrent: entry.delivery === "steer" && record.status !== "queued" && (yield* statuses.get(session.id)).type !== "idle",
@@ -151,17 +160,21 @@ const layer = Layer.effect(Service, Effect.gen(function* () {
         const current = yield* get(session.id)
         const value = SubagentLifecycle.read(current)!
         if (value.attempt !== record.attempt) return ""
-        yield* SubagentLifecycle.update(sessions, session.id, { mailbox: (value.mailbox ?? []).map((item) => item.id === entry.id ? { ...item, deliveredAt: Date.now() } : item) }, record.attempt)
+        yield* persist(session.id, { mailbox: (value.mailbox ?? []).map((item) => item.id === entry.id ? { ...item, deliveredAt: Date.now() } : item) }, record.attempt)
         const result = yield* ops.prompt({
           sessionID: session.id, messageID: entry.id, agent: record.agent,
           model: { providerID: ProviderV2.ID.make(record.model.providerID), modelID: ModelV2.ID.make(record.model.modelID) }, variant: record.model.variant,
-          parts: [{ type: "text", synthetic: true, text: TaskMailbox.envelope(text, { sender: input.sessionID, recipient: session.id }) }],
+          parts: [{ type: "text", synthetic: true, text: TaskMailbox.envelope(text, { sender: input.sessionID, recipient: session.id, relation }) }],
         })
-        return result.parts.flatMap((part) => part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []).join("\n\n")
+        const failed = result.info.role === "assistant" ? SubagentLifecycle.failure(result.info.error) : undefined
+        const output = result.parts.flatMap((part) => part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []).join("\n\n")
+        if (failed?.status === "cancelled") return yield* Effect.interrupt
+        if (failed) return yield* new BackgroundJob.RunFailed({ message: failed.error ?? "Task failed", output })
+        return output
       }).pipe(Effect.onInterrupt(() => ops.cancel(session.id))),
     })
     if (!accepted) {
-      yield* SubagentLifecycle.update(sessions, session.id, { mailbox }, record.attempt)
+      yield* persist(session.id, { mailbox }, record.attempt)
       return yield* new Error({ code: "finished", message: "The task finished during admission; no message was sent." })
     }
     return { taskID: session.id, messageID: entry.id, delivery: entry.delivery, accepted: true }
@@ -172,7 +185,7 @@ const layer = Layer.effect(Service, Effect.gen(function* () {
     return yield* Effect.forEach([...new Set(ids)], (id) => requireTask(sessionID, id))
   })
 
-  const stop: Interface["stop"] = Effect.fn("TaskManager.stop")(function* (input, ops) {
+  const stop: Interface["stop"] = Effect.fn("TaskManager.stop")((input, ops) => lock.withPermits(1)(Effect.gen(function* () {
     if (input.all && input.taskIDs?.length) return yield* new Error({ code: "invalid", message: "Choose task IDs or all, not both." })
     if (input.reason && input.reason.length > 1000) return yield* new Error({ code: "invalid", message: "Stop reasons are limited to 1000 characters." })
     const board = yield* list({ sessionID: input.sessionID, descendants: true, limit: MAX_TASKS })
@@ -197,9 +210,11 @@ const layer = Layer.effect(Service, Effect.gen(function* () {
       yield* jobs.cancel(task.id)
       yield* ops.cancel(task.id)
       yield* SubagentLifecycle.settle(sessions, task.id, { status: "cancelled" })
+      yield* persist(task.id, { budgetScopes: yield* guard.scopes(task.id) })
+      yield* guard.release(task.id)
     }), { concurrency: 4 })
     return { tasks: yield* Effect.forEach(tasks, (task) => get(task.id).pipe(Effect.flatMap(observe)), { concurrency: 4 }) }
-  })
+  })))
 
   const wait: Interface["wait"] = Effect.fn("TaskManager.wait")(function* (input) {
     if (!Number.isFinite(input.timeout ?? 30_000) || (input.timeout ?? 30_000) < 0 || (input.timeout ?? 30_000) > 60_000) return yield* new Error({ code: "invalid", message: "Wait timeout must be between 0 and 60000 milliseconds." })
@@ -215,5 +230,5 @@ const layer = Layer.effect(Service, Effect.gen(function* () {
   return Service.of({ list, inspect, message, stop, wait })
 }))
 
-export const node = LayerNode.make({ service: Service, layer, deps: [Session.node, BackgroundJob.node, SessionStatus.node, Permission.node, Question.node, Database.node] })
+export const node = LayerNode.make({ service: Service, layer, deps: [Session.node, BackgroundJob.node, SessionStatus.node, Permission.node, Question.node, Database.node, SpendGuard.node] })
 export * as TaskManager from "./manager"

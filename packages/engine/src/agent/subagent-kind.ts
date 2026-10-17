@@ -35,6 +35,7 @@ export type SubagentUsage = {
   toolUses: number
   /** Model steps the subagent took. */
   steps: number
+  unpricedSteps?: number
 }
 
 /**
@@ -63,6 +64,8 @@ export type SubagentRecord = {
   resultRef?: string
   resultSummary?: string
   reason?: string
+  notification?: { text: string; state: "completed" | "error" | "cancelled"; launchID: string; messageID?: string }
+  budgetScopes?: readonly import("@vectordevai/schema/task").Task.BudgetScope[]
   budget?: import("@vectordevai/schema/run-budget").RunBudget.Info
   mailbox?: Array<{ id: string; sender: string; text: string; delivery: "steer" | "queue"; createdAt: number; deliveredAt?: number }>
   model: { providerID: string; modelID: string; variant?: string }

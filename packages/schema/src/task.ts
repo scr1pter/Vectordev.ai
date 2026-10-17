@@ -24,6 +24,18 @@ export const Usage = Schema.Struct({
 }).annotate({ identifier: "Task.Usage" })
 export interface Usage extends Schema.Schema.Type<typeof Usage> {}
 
+export const BudgetScope = Schema.Struct({
+  kind: Schema.Literals(["run", "batch", "child"]),
+  id: Schema.String,
+  budget: RunBudget.Info,
+  spentUsd: Schema.Finite,
+  steps: Schema.Finite,
+  unpricedSteps: Schema.Finite,
+  costKind: optional(RunBudget.CostKind),
+  stopped: optional(Schema.Struct({ reason: RunBudget.StopReason, message: Schema.String })),
+}).annotate({ identifier: "Task.BudgetScope" })
+export interface BudgetScope extends Schema.Schema.Type<typeof BudgetScope> {}
+
 export const Info = Schema.Struct({
   id: Schema.String,
   sessionID: optional(Schema.String),
@@ -51,6 +63,7 @@ export const Info = Schema.Struct({
   reason: optional(Schema.String),
   attempt: Schema.Finite,
   budget: optional(RunBudget.Info),
+  budgetScopes: optional(Schema.Array(BudgetScope)),
   controls: Schema.Struct({ inspect: Schema.Boolean, message: Schema.Boolean, stop: Schema.Boolean }),
 }).annotate({ identifier: "Task.Info" })
 export interface Info extends Schema.Schema.Type<typeof Info> {}

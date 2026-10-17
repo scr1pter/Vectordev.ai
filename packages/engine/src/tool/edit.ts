@@ -16,6 +16,7 @@ import { Format } from "../format"
 import { InstanceState } from "@/effect/instance-state"
 import { Snapshot } from "@/snapshot"
 import { assertExternalDirectoryEffect } from "./external-directory"
+import { assertOwnedPath } from "./owned-path"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import * as Bom from "@/util/bom"
 
@@ -81,6 +82,7 @@ export const EditTool = Tool.define(
             ? params.filePath
             : path.join(instance.directory, params.filePath)
           yield* assertExternalDirectoryEffect(ctx, filePath)
+          yield* assertOwnedPath(ctx, filePath)
 
           let diff = ""
           let contentOld = ""
