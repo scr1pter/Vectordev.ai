@@ -112,7 +112,11 @@ const AgentCreateCommand = effectCmd({
         targetPath = path.join(scope === "global" ? Global.Path.config : path.join(ctx.worktree, ".vector"), "agents")
       }
       // Where the agent file must really land. Writing follows links, and a project's .vector can link anywhere.
-      const root = cliPath ? targetPath : FSUtil.contains(Global.Path.config, targetPath) ? Global.Path.config : ctx.worktree
+      const root = cliPath
+        ? targetPath
+        : FSUtil.contains(Global.Path.config, targetPath)
+          ? Global.Path.config
+          : ctx.worktree
 
       // Get description
       let description: string
