@@ -600,6 +600,8 @@ describe("tool.shell permissions", () => {
           }
           const cases = PS.has(sh())
             ? ([
+                // `cat` is PowerShell's own alias for Get-Content, so the bash spelling reads the file there too.
+                ["cat .env", ".env"],
                 ["Get-Content .env", ".env"],
                 ["Select-String STRIPE apps/web/.env.local", path.join("apps", "web", ".env.local")],
                 ["Get-Content -Raw ./.env", ".env"],
@@ -610,6 +612,8 @@ describe("tool.shell permissions", () => {
                 ["grep STRIPE apps/web/.env.local", path.join("apps", "web", ".env.local")],
                 ["source ./.env", ".env"],
                 ["while read line; do echo $line; done < .env.production", ".env.production"],
+                // cd adds no shell pattern of its own, but the substitution still reads the file.
+                ['cd "$(<.env)"', ".env"],
               ] as const)
           for (const [command, file] of cases) {
             requests.length = 0
@@ -660,6 +664,9 @@ describe("tool.shell permissions", () => {
                     }),
                 }
                 for (const [command, file] of [
+                  // PowerShell's built-in aliases for Get-Content.
+                  ["cat .env", ".env"],
+                  ["type .env", ".env"],
                   ["Get-Content -Path .env -Raw | Select-String KEY", ".env"],
                   ["gc '.env.local'", ".env.local"],
                   ['Get-Content "$PWD/.env"', ".env"],
@@ -715,6 +722,11 @@ describe("tool.shell permissions", () => {
             ["switch -File .ENV { default { $_ } }", [/^\.env$/i]],
             ['Get-Content ".e$($null)nv"', [/^\.env$/]],
             ['Get-Content "$dir/.en?"', [/^\$dir\/\.env$/]],
+            // NTFS streams: `::$DATA` is the file's own content, `:name` one of its alternate streams.
+            ["Get-Content '.env::$DATA'", [/^\.env$/]],
+            ["[IO.File]::ReadAllText('.env::$DATA')", [/^\.env$/]],
+            ["Get-Content -LiteralPath .\\.env:stream", [/^(\.\\)?\.env$/]],
+            ["Get-Content '.en?:stream:$DATA'", [/^\.env$/]],
           ],
           quiet: ["Get-Content *.txt", "Get-Content notes.txt", "Write-Output $x", "Get-Content .env.example"],
         },
@@ -728,6 +740,9 @@ describe("tool.shell permissions", () => {
             ["type *.ENV", [/^\*\.ENV$/]],
             ["type .e%OS:~0,0%nv", [/^\.env$/]],
             ["type %CD%\\.en?", [/^%CD%\\\.env$/]],
+            ["more < .env::$DATA", [/^\.env$/]],
+            ["type .env:notes", [/^\.env$/]],
+            ["type .e%OS:~0,0%nv:notes", [/^\.env$/]],
           ],
           quiet: ["type *.txt", "dir *.log", "echo %PATH%", "type .env.example"],
         },
@@ -870,6 +885,50 @@ describe("tool.shell permissions", () => {
                   if (entry.edit) expect(edit).toEqual([expect.stringMatching(entry.edit)])
                   else expect(edit).toBeUndefined()
                 }
+                // A statement whose only command changes directory adds no shell pattern, but it still reads the
+                // variable, and Set-Location prints the value it was given.
+                for (const command of [
+                  'cd "${C:\\Users\\me\\proj\\.env}"',
+                  "cd ${C:\\Users\\me\\proj\\.env}",
+                  'Set-Location -Path "${C:\\Users\\me\\proj\\.env}"',
+                  "if (${C:\\Users\\me\\proj\\.env}) { cd x }",
+                  "foreach ($l in ${C:\\Users\\me\\proj\\.env}) { cd $l }",
+                ]) {
+                  requests.length = 0
+                  const error = (yield* fail({ command }, stopAt("read"))).message
+                  const read = requests.find((r) => r.permission === "read")?.patterns
+                  expect({ command, error, read }).toEqual({
+                    command,
+                    error: err.message,
+                    read: [expect.stringMatching(/\.env$/)],
+                  })
+                }
+
+                // The provider globs a variable's path and reads a stream by its file's name, so these read `.env`.
+                yield* Effect.promise(() => Bun.write(path.join(tmp, ".env"), "KEY=1\n"))
+                for (const command of [
+                  `git log \${FileSystem::${tmp}/.en?}`,
+                  `git log "\${FileSystem::${tmp}/.env::$DATA}"`,
+                  'git log "${C:\\Users\\me\\proj\\.env::$DATA}"',
+                ]) {
+                  requests.length = 0
+                  const error = (yield* fail({ command }, stopAt("read"))).message
+                  const read = requests.find((r) => r.permission === "read")?.patterns ?? []
+                  expect({ command, error, env: read.some((item) => /(^|[\\/])\.env$/.test(item)) }).toEqual({
+                    command,
+                    error: err.message,
+                    env: true,
+                  })
+                }
+
+                // A drive the scan cannot place may map any folder, so it asks as a folder outside the project does.
+                requests.length = 0
+                const temp = "git log ${Temp:\\x}"
+                expect((yield* fail({ command: temp }, stopAt("external_directory"))).message).toBe(err.message)
+                requests.length = 0
+                yield* run({ command: "${function:git}" }, capture(requests))
+                expect(requests.map((r) => r.permission)).not.toContain("external_directory")
+
                 // A statement without a command is approved only as written.
                 requests.length = 0
                 yield* fail({ command: "${C:\\Users\\me\\proj\\.env}" }, stopAt("read"))

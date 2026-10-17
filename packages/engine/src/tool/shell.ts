@@ -78,6 +78,9 @@ const PS_ALIASES = new Map([
 ])
 // Variable qualifiers that name plain variables or environment variables rather than an item of another provider.
 const PS_SCOPES = new Set(["env", "variable", "global", "local", "script", "private", "using", "workflow"])
+// The built-in drives whose items are not files. Any other drive of more than one letter (`Temp:`, or one a profile
+// creates with New-PSDrive) may map a folder anywhere on disk.
+const PS_ITEM_DRIVES = new Set(["alias", "cert", "function", "hkcu", "hklm", "wsman"])
 const CMD_FILES = new Set([
   "copy",
   "del",
@@ -330,19 +333,21 @@ function provider(text: string) {
 }
 
 // The item a PowerShell variable reaches through a provider: `${C:\x}`, `$c:x` and `${FileSystem::C:\x}` read and
-// write a file, `${function:git}` a function. `file` is the file system path, when there is one. Environment
-// variables (`$env:A`) and scoped variables (`$global:a`) are plain variables.
+// write a file, `${function:git}` a function. `file` is the file system path, when there is one, and `folder` marks a
+// drive that may map a folder the scan cannot place. Environment variables (`$env:A`) and scoped variables
+// (`$global:a`) are plain variables.
 function providerItem(text: string) {
   const name = text.startsWith("${") ? text.slice(2, -1).replace(/`([\s\S])/g, "$1") : text.slice(1)
   const qualified = name.match(/^(?:[\w.]+\\)?(\w+)::(.*)$/s)
   if (qualified) {
     const kind = qualified[1].toLowerCase()
     if (kind === "environment" || kind === "variable") return
-    return { name, file: kind === "filesystem" ? qualified[2] : undefined }
+    return { name, file: kind === "filesystem" ? qualified[2] : undefined, folder: false }
   }
   const drive = name.match(/^(\w+):/)
   if (!drive || PS_SCOPES.has(drive[1].toLowerCase())) return
-  return { name, file: drive[1].length === 1 ? name : undefined }
+  if (drive[1].length === 1) return { name, file: name, folder: false }
+  return { name, file: undefined, folder: !PS_ITEM_DRIVES.has(drive[1].toLowerCase()) }
 }
 
 // How a statement uses a variable: `${C:\x} = 'v'` and a foreach loop only write it, `+=`, `++` and `--` read and
@@ -548,18 +553,22 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
     })
   }
 
-  if (scan.patterns.size === 0) return
-  yield* ctx.ask({
-    permission: ShellID.ToolID,
-    patterns: Array.from(scan.patterns),
-    always: Array.from(scan.always),
-    metadata: {
-      command: input.command,
-    },
-  })
+  if (scan.patterns.size > 0) {
+    yield* ctx.ask({
+      permission: ShellID.ToolID,
+      patterns: Array.from(scan.patterns),
+      always: Array.from(scan.always),
+      metadata: {
+        command: input.command,
+      },
+    })
+  }
 
   // The read tool's permission and patterns, so the read rules that ask for
   // `.env` files (and a session that may not read them) apply to the shell too.
+  // Asked even when the command has no shell pattern: a statement whose only
+  // command changes directory (`cd ${C:\proj\.env}`, `cd "$(<.env)"`) adds none,
+  // yet still reads the file and prints it in the error.
   if (scan.reads.size > 0) {
     yield* ctx.ask({
       permission: "read",
@@ -572,6 +581,7 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
     })
   }
 
+  if (scan.patterns.size === 0) return
   // After the shell's own permission, so a session that may not run the command
   // is refused without a cloud prompt. These ask every time, as vector_cloud's
   // own actions do: auto-accept and allow rules never answer them.
@@ -793,12 +803,15 @@ export const ShellTool = Tool.define(
         // `.env`. These rules hold for PowerShell and cmd on any system, so the scan does not depend on where it runs.
         const base = path.win32.basename(word)
         const dir = word.slice(0, word.length - base.length)
-        const name = base.replace(/[ .]+$/, "")
+        const expansion = ps ? PS_EXPANSION : CMD_EXPANSION
+        // NTFS ends a file name at its first colon: `.env::$DATA` is the file's own content and `.env:notes` one of its
+        // alternate streams. A colon inside an expansion (`%X:~0,0%`) is not part of the name.
+        const colon = base.replace(expansion, (text) => "*".repeat(text.length)).indexOf(":")
+        const name = (colon === -1 ? base : base.slice(0, colon)).replace(/[ .]+$/, "")
         if (ENV_FILE.test(name.toLowerCase())) return yield* readTarget(dir + name)
         // A wildcard (`.en?`, `.e*`) or an expansion inside the name (`.e%X:~0,0%nv`) asks for each environment file
         // it would open in its folder or, when the scan cannot list that folder, for one it could open. A name that is
         // only an expansion (`$file`) may be anything, as `cat $file` may be in bash.
-        const expansion = ps ? PS_EXPANSION : CMD_EXPANSION
         const glob = name.replace(expansion, "*")
         if (!name.replace(expansion, "") || !/[*?[]/.test(glob)) return
         const folder = /[*?[]/.test(dir) ? undefined : yield* wordPath(dir || ".", cwd, ps, shell)
@@ -915,8 +928,13 @@ export const ShellTool = Tool.define(
           const resolved = item.file ? yield* resolvePath(item.file, cwd, shell) : undefined
           const target = resolved ? path.relative(instance.worktree, resolved) : item.name
           if (use.read) scan.reads.add(target)
+          // The provider globs the path and reads a stream by its file's name, so `${C:\proj\.en?}` and
+          // `${C:\proj\.env::$DATA}` read `.env` the way `Get-Content .en?` does.
+          if (use.read && item.file) yield* envRead(item.file)
           if (use.write) scan.writes.add(target)
           if (resolved && !containsPath(resolved, instance)) scan.dirs.add(path.dirname(resolved))
+          // A drive the scan cannot place (`${Temp:\x}`) is outside the project as far as it knows.
+          if (item.folder) scan.dirs.add(path.win32.dirname(item.name))
         }
 
         // `switch -File .env { ... }` reads the file line by line.
