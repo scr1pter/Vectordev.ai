@@ -583,12 +583,19 @@ describe("tool.shell permissions", () => {
                 if (req.permission === "read") throw err
               }),
           }
-          const cases = [
-            ["cat .env", ".env"],
-            ["grep STRIPE apps/web/.env.local", path.join("apps", "web", ".env.local")],
-            ["source ./.env", ".env"],
-            ["while read line; do echo $line; done < .env.production", ".env.production"],
-          ] as const
+          const cases = PS.has(sh())
+            ? ([
+                ["Get-Content .env", ".env"],
+                ["Select-String STRIPE apps/web/.env.local", path.join("apps", "web", ".env.local")],
+                ["Get-Content -Raw ./.env", ".env"],
+                ["Get-Content .env.production | ForEach-Object { $_ }", ".env.production"],
+              ] as const)
+            : ([
+                ["cat .env", ".env"],
+                ["grep STRIPE apps/web/.env.local", path.join("apps", "web", ".env.local")],
+                ["source ./.env", ".env"],
+                ["while read line; do echo $line; done < .env.production", ".env.production"],
+              ] as const)
           for (const [command, file] of cases) {
             requests.length = 0
             expect({ command, error: (yield* fail({ command }, rejectRead)).message }).toEqual({
@@ -601,7 +608,14 @@ describe("tool.shell permissions", () => {
             })
           }
           requests.length = 0
-          yield* run({ command: "cat .env.example .envrc 2>/dev/null; true" }, rejectRead)
+          yield* run(
+            {
+              command: PS.has(sh())
+                ? "Get-Content .env.example,.envrc -ErrorAction SilentlyContinue"
+                : "cat .env.example .envrc 2>/dev/null; true",
+            },
+            rejectRead,
+          )
           expect(requests.map((item) => item.permission)).not.toContain("read")
         }),
       )

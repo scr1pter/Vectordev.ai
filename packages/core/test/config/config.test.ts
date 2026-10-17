@@ -1159,7 +1159,9 @@ describe("Config", () => {
             if (local?.type !== "local") return
             expect(local.cwd).not.toBe(tmp.path)
             expect(path.isAbsolute(local.command[0])).toBe(true)
-            expect(path.basename(local.command[0])).toMatch(/^node(?:\.exe)?$/)
+            expect(path.basename(local.command[0])).toMatch(
+              process.platform === "win32" ? /^node(?:\.exe)?$/i : /^node(?:\.exe)?$/,
+            )
             expect(local.command[1]).not.toBe(server)
             expect(project.info.mcp?.servers?.runner).toBeUndefined()
             expect(project.info.mcp?.servers?.wrapped).toBeUndefined()

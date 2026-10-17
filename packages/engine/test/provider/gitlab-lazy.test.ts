@@ -53,7 +53,7 @@ async function listModels(env: Record<string, string>) {
     return {
       exitCode,
       stderr: exitCode === 0 ? "" : stderr,
-      models: stdout.split("\n").filter((line) => line.startsWith("gitlab/")),
+      models: stdout.split(/\r?\n/).filter((line) => line.startsWith("gitlab/")),
       sdk: loaded.some((file) => file.includes("/node_modules/gitlab-ai-provider/")),
     }
   } finally {

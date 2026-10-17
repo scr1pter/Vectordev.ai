@@ -17,6 +17,7 @@ import { Plugin } from "../../src/plugin"
 import { Provider } from "../../src/provider/provider"
 import { Skill } from "../../src/skill"
 import { Truncate } from "../../src/tool/truncate"
+import { FSUtil } from "@vectordevai/core/fs-util"
 
 const agentLayer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   LayerNode.compile(
@@ -901,10 +902,48 @@ it.instance("global tmp directory children are allowed for external_directory", 
   Effect.gen(function* () {
     const build = yield* load((svc) => svc.get("build"))
     expect(
-      Permission.evaluate("external_directory", path.join(Global.Path.tmp, "scratch"), build!.permission).action,
+      Permission.evaluate(
+        "external_directory",
+        path.join(FSUtil.normalizePath(Global.Path.tmp), "scratch"),
+        build!.permission,
+      ).action,
     ).toBe("allow")
+    expect(
+      Permission.evaluate(
+        "external_directory",
+        `${FSUtil.normalizePath(Global.Path.tmp)}-other/scratch`,
+        build!.permission,
+      ).action,
+    ).toBe("ask")
     expect(Permission.evaluate("external_directory", "/some/other/path", build!.permission).action).toBe("ask")
   }),
+)
+
+it.instance(
+  "an explicit tmp directory deny applies to the captured canonical root",
+  () =>
+    Effect.gen(function* () {
+      const build = yield* load((svc) => svc.get("build"))
+      expect(
+        Permission.evaluate(
+          "external_directory",
+          path.join(FSUtil.normalizePath(Global.Path.tmp), "scratch"),
+          build!.permission,
+        ).action,
+      ).toBe("deny")
+    }),
+  {
+    trusted: true,
+    config: {
+      permission: {
+        external_directory: {
+          [process.platform === "win32"
+            ? path.join(Global.Path.tmp, "*").toUpperCase().replaceAll("\\", "/")
+            : path.join(Global.Path.tmp, "*")]: "deny",
+        },
+      },
+    },
+  },
 )
 
 it.instance(
@@ -944,7 +983,9 @@ it.instance(
       permission: {
         external_directory: {
           "*": "deny",
-          [Truncate.GLOB]: "deny",
+          [process.platform === "win32"
+            ? path.join(Global.Path.data, "tool-output", "*").toUpperCase()
+            : path.join(Global.Path.data, "tool-output", "*")]: "deny",
         },
       },
     },
@@ -1005,6 +1046,46 @@ it.instance(
         docs: "../docs",
       },
     },
+  },
+)
+
+it.instance(
+  "a captured reference allowance does not follow a retargeted directory link",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const link = path.join(test.directory, "docs-link")
+      const before = FSUtil.normalizePath(link)
+      const build = yield* load((svc) => svc.get("build"))
+      expect(Permission.evaluate("external_directory", path.join(before, "notes.md"), build!.permission).action).toBe(
+        "allow",
+      )
+      yield* Effect.promise(async () => {
+        await fs.unlink(link)
+        await fs.symlink(path.join(test.directory, "second"), link, process.platform === "win32" ? "junction" : "dir")
+      })
+      const after = yield* Effect.promise(() => fs.realpath(link))
+      expect(Permission.evaluate("external_directory", path.join(after, "notes.md"), build!.permission).action).toBe(
+        "ask",
+      )
+      expect(Permission.evaluate("external_directory", path.join(before, "notes.md"), build!.permission).action).toBe(
+        "allow",
+      )
+    }),
+  {
+    trusted: true,
+    git: true,
+    config: { references: { docs: "./docs-link" } },
+    init: (directory) =>
+      Effect.promise(async () => {
+        await fs.mkdir(path.join(directory, "first"))
+        await fs.mkdir(path.join(directory, "second"))
+        await fs.symlink(
+          path.join(directory, "first"),
+          path.join(directory, "docs-link"),
+          process.platform === "win32" ? "junction" : "dir",
+        )
+      }),
   },
 )
 

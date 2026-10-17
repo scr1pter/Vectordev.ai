@@ -918,7 +918,9 @@ it.instance("runs trusted bare MCP scripts from materialized bytes and rejects a
     if (!approved || !("type" in approved) || approved.type !== "local") return
     expect(approved.cwd).not.toBe(test.directory)
     expect(path.isAbsolute(approved.command[0])).toBe(true)
-    expect(path.basename(approved.command[0])).toMatch(/^node(?:\.exe)?$/)
+    expect(path.basename(approved.command[0])).toMatch(
+      process.platform === "win32" ? /^node(?:\.exe)?$/i : /^node(?:\.exe)?$/,
+    )
     expect(approved.command[1]).not.toBe(server)
     expect(config.mcp?.ambiguous).toBeUndefined()
     expect(config.mcp?.runner).toBeUndefined()
@@ -1046,9 +1048,14 @@ it.instance("runs approved Bun scripts without live bunfig or dotenv preloads", 
 
     const output = yield* Effect.promise(async () => {
       const child = Bun.spawn([...command], { cwd: test.directory, stdout: "pipe", stderr: "pipe" })
-      return { code: await child.exited, stdout: await new Response(child.stdout).text() }
+      const [code, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ])
+      return { code, stdout, stderr }
     })
-    expect(output).toEqual({ code: 0, stdout: "approved\n" })
+    expect(output).toEqual({ code: 0, stdout: "approved\n", stderr: "" })
   }),
 )
 
@@ -2657,7 +2664,10 @@ describe("machine-local config layer", () => {
       expect(mcp.overridden).toMatchObject({ url: "https://overridden.example/mcp", enabled: false })
       expect(mcp.added).toMatchObject({
         type: "local",
-        command: [expect.stringMatching(/node(?:\.exe)?$/), "--version"],
+        command: [
+          expect.stringMatching(process.platform === "win32" ? /node(?:\.exe)?$/i : /node(?:\.exe)?$/),
+          "--version",
+        ],
       })
     }),
   )

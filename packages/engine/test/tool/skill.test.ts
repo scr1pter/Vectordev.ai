@@ -92,7 +92,10 @@ Use this skill.
       expect(requests[0].patterns).toContain("tool-skill")
       expect(requests[0].always).toContain("tool-skill")
       expect(base).not.toBe(skill)
-      expect(base.endsWith(path.relative(path.parse(skill).root, skill))).toBe(true)
+      const relative = path.relative(path.parse(skill).root, skill)
+      expect(
+        process.platform === "win32" ? base.toLowerCase().endsWith(relative.toLowerCase()) : base.endsWith(relative),
+      ).toBe(true)
       expect(result.output).toContain(`<skill_content name="tool-skill">`)
       expect(result.output).toContain(`Base directory for this skill: ${base}`)
       expect(result.output).toContain(`<file>${file}</file>`)

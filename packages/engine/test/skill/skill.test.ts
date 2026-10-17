@@ -158,7 +158,12 @@ description: Skill for dirs test.
             // A trusted project's skills load from the private snapshot of the approved bytes, not the live directory.
             expect(dirs.length).toBe(1)
             expect(dirs[0]).not.toBe(source)
-            expect(dirs[0].endsWith(path.relative(path.parse(source).root, source))).toBe(true)
+            const relative = path.relative(path.parse(source).root, source)
+            expect(
+              process.platform === "win32"
+                ? dirs[0].toLowerCase().endsWith(relative.toLowerCase())
+                : dirs[0].endsWith(relative),
+            ).toBe(true)
           }),
         ),
       { git: true },
@@ -433,9 +438,12 @@ description: A skill in the .agents/skills directory.
             const item = list.find((entry) => entry.name === `${scope.slice(1)}-fixture`)!
             expect(item).toBeDefined()
             expect(item.location).not.toBe(path.join(source, "SKILL.md"))
-            expect(item.location.endsWith(path.relative(path.parse(source).root, path.join(source, "SKILL.md")))).toBe(
-              true,
-            )
+            const relative = path.relative(path.parse(source).root, path.join(source, "SKILL.md"))
+            expect(
+              process.platform === "win32"
+                ? item.location.toLowerCase().endsWith(relative.toLowerCase())
+                : item.location.endsWith(relative),
+            ).toBe(true)
             yield* Effect.promise(() =>
               Bun.write(path.join(source, "references", "guide.md"), "unapproved replacement"),
             )

@@ -77,3 +77,30 @@ The runtime, experience and cost tracks reviewed one another's changes. Review f
 - Retained each source's truncation independently across refresh failures, so an incomplete desktop snapshot cannot become eligible for Stop all merely because the engine refresh succeeds.
 
 Local command logs are retained in `/tmp/vector-subagents-validation`; browser and performance artifacts are referenced alongside their results. Owner-only release dispatch, production approval, npm 2FA and paid live checks remain outstanding by design.
+
+## Cross-platform CI follow-up
+
+The initial native [test run 38996170036](https://github.com/scr1pter/Vectordev.ai/actions/runs/38996170036), on pushed commit `de7983393`, did not pass all gates despite the earlier local results above. Windows unit tests exposed nine app failures and three Core fixture failures. Windows E2E completed with 126 passed, one existing skip, and one failure: the history-paging smoke test reported an inline-script CSP mismatch on all three attempts. Linux E2E passed. Native engine checks also exposed platform-sensitive fixtures and compatibility issues requiring the follow-up below; the prior results are retained as evidence of their original source, not substituted for native CI confirmation.
+
+- Upstream `501b80914` removes an obsolete global SDK mock from the prompt-submit tests and runs app files with Bun `--isolate`. That mock lacked `session.get` and `session.list`, explaining both empty economics request lists and the traffic-test error. The Composer fixture now supplies its own router mock. No request-count or spend assertion was weakened.
+- Core fixtures now handle native path spelling and case correctly. Separately, Windows built-in directory permissions normalize path aliases when the ruleset is created, retain those pinned paths, and preserve explicit deny precedence instead of resolving an allowance again after a junction may have changed.
+- Bun invocations use a private empty TOML configuration, with migration and tamper checks, so project configuration cannot become unintended process authority. Native PowerShell fixtures exercise the actual Windows shell. Preconnect tests assert supported Bun behavior; GitLab fixtures handle CRLF input. Linux startup-pipe and configuration fixtures were also corrected.
+- The shared app/desktop CSP hook now hashes inline script text after the same CRLF/lone-CR normalization performed by HTML parsing. The old Windows theme hash exactly matched the raw CRLF bytes, while Chromium requested the LF hash. A real Chromium regression first reproduced the CRLF and CR failures, then passed with the fix. It verifies trusted execution and continued rejection of unlisted inline code; no broader CSP allowance was added.
+- The CLI now recognizes request rejection before interpreting a pending event iterator's teardown. A deterministic real CLI fixture reproduced the duplicate error before the fix; afterward a rejection produces one error and no extra abort, while a genuine unfinished-stream disconnect still reports an error and aborts the session.
+
+Local follow-up checks completed so far:
+
+| Check | Result |
+| --- | --- |
+| Core full suite | 1,840 passed, one existing skip; 7,670 assertions; 44.03 seconds |
+| App isolated suites | 1,709 unit tests and 46 browser tests passed; app typecheck passed |
+| Provider focused checks | Four tests passed; 16 assertions |
+| Cloud tool focused checks | 34 tests passed; 891 assertions |
+| Linux startup/configuration fixtures | Three tests passed; eight assertions |
+| CSP, task controls, and timeline browser scenarios | 15 passed; 57.1 seconds; E2E typecheck passed |
+| CLI rejection and genuine disconnect checks | Eight tests passed; 24 assertions, including the existing real rejection cases |
+| Final Agent permission checks | 57 passed; 328 assertions, including explicit denies and junction retargeting |
+| Engine config and skill checks | 151 passed; 352 assertions; the combined Agent, shell and formatting run also passed 119 tests |
+| Custom LSP initialization | Two passed; three assertions |
+
+The app logs are retained as `app-ci-isolated.log`, `app-ci-typecheck.log`, `app-csp-regression-before.log`, `app-csp-regression-after.log`, and `app-csp-typecheck-e2e.log` under `/tmp/vector-subagents-validation`. The failing CSP and CLI teardown baselines are retained rather than omitted. The final desktop production rebuild passed with the same pinned catalog and desktop/required CLI 1.99.108, including the Node runtime scan and renderer verification (`desktop-build-ci-final.log`). The website production build passed after the latest upstream investor-page change (`web-build-ci-merge.log`). Final native CI confirmation for these follow-up changes is **pending**; the earlier full suites, build records, and benchmark measurements above remain unchanged.

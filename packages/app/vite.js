@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs"
-import { createHash } from "node:crypto"
 import { createRequire } from "node:module"
 import { dirname } from "node:path"
 import solidPlugin from "vite-plugin-solid"
 import tailwindcss from "@tailwindcss/vite"
 import { fileURLToPath } from "url"
 import { injectLaunchScreen, readLaunchParts } from "./src/features/launch/launch-inject.js"
+import { withInlineScriptHashes } from "./content-security-policy.js"
 
 const theme = fileURLToPath(new URL("./public/vector-theme-preload.js", import.meta.url))
 
@@ -88,17 +88,7 @@ export default [
     name: "vector:content-security-policy",
     transformIndexHtml: {
       order: "post",
-      handler(html) {
-        const hashes = [
-          ...new Set(
-            [...html.matchAll(/<script\b(?![^>]*\bsrc\s*=)[^>]*>([\s\S]*?)<\/script>/gi)].map(
-              (match) => `'sha256-${createHash("sha256").update(match[1]).digest("base64")}'`,
-            ),
-          ),
-        ]
-        if (!hashes.length) return html
-        return html.replace("script-src 'self'", `script-src 'self' ${hashes.join(" ")}`)
-      },
+      handler: withInlineScriptHashes,
     },
   },
   tailwindcss(),

@@ -866,6 +866,8 @@ export const RunCommand = effectCmd({
               idle && !waited() ? backgroundWait - (Date.now() - activeAt) : undefined,
               !idle || !waited(),
             )
+            // A rejected request is already terminal; its teardown can close an iterator that was awaiting an event.
+            if (failure.request) break
             if (next.timedOut || next.disconnected) {
               const message = next.timedOut
                 ? `Stopped waiting for ${background.running.size + background.unanswered.size} background subagent(s) after ${Math.round(backgroundWait / 1000)}s without activity`

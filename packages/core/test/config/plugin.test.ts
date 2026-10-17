@@ -73,8 +73,14 @@ describe("Executable config plugins", () => {
       )
 
       expect(yield* skills.sources()).toEqual([
-        SkillV2.DirectorySource.make({ type: "directory", path: AbsolutePath.make("/global/.vector/skill") }),
-        SkillV2.DirectorySource.make({ type: "directory", path: AbsolutePath.make("/global/.vector/skills") }),
+        SkillV2.DirectorySource.make({
+          type: "directory",
+          path: AbsolutePath.make(path.join(globalDirectory.path, "skill")),
+        }),
+        SkillV2.DirectorySource.make({
+          type: "directory",
+          path: AbsolutePath.make(path.join(globalDirectory.path, "skills")),
+        }),
         SkillV2.DirectorySource.make({ type: "directory", path: AbsolutePath.make("/global/skills") }),
         SkillV2.UrlSource.make({ type: "url", url: "https://1.1.1.1/catalog/" }),
       ])

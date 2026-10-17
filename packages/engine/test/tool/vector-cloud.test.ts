@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test"
+import path from "node:path"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { Cause, Effect, Exit, Schema } from "effect"
@@ -529,11 +530,11 @@ describe("vector_cloud bridge", () => {
         expect.objectContaining({
           permission: "edit",
           patterns: [
-            expect.stringMatching(/supabase\/migrations\/20261010120000_add_profiles\.sql$/),
-            expect.stringMatching(/supabase\/migrations\/down\/20261010120000_add_profiles\.down\.sql$/),
+            expect.stringMatching(/supabase[\\/]migrations[\\/]20261010120000_add_profiles\.sql$/),
+            expect.stringMatching(/supabase[\\/]migrations[\\/]down[\\/]20261010120000_add_profiles\.down\.sql$/),
           ],
           metadata: expect.objectContaining({
-            filepath: expect.stringContaining(files[0]),
+            filepath: expect.stringContaining(path.normalize(files[0])),
             diff: expect.stringContaining("+create table profiles (id uuid primary key);"),
             statements,
           }),

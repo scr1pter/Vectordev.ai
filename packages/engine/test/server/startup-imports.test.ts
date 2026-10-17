@@ -29,7 +29,8 @@ test("the server module graph loads without feature-only packages", async () => 
       process.execPath,
       "--conditions=browser",
       "--eval",
-      `await import("./src/server/server.ts"); console.log(JSON.stringify(Object.keys(require.cache)))`,
+      // Await the large inventory write before the subprocess exits and closes its pipe.
+      `await import("./src/server/server.ts"); await Bun.write(Bun.stdout, JSON.stringify(Object.keys(require.cache)))`,
     ],
     { cwd: path.resolve(import.meta.dir, "../.."), env: process.env, stdout: "pipe", stderr: "pipe" },
   )

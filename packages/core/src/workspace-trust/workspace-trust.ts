@@ -15,6 +15,7 @@ import { WebFetchRequest } from "../util/webfetch-request"
 const version = 1 as const
 const filename = "workspace-trust.json"
 const cacheDirectory = "workspace-trust"
+const emptyBunConfig = "empty-bunfig.toml"
 const ignoredDirectories = new Set([".git", "node_modules"])
 const ignoredFiles = new Set([".DS_Store", ".gitignore"])
 // What Vector itself writes into a .vector directory during normal work: plans, project memory, team rules, failure
@@ -215,6 +216,7 @@ export async function materialize(stateDirectory: string, current: Snapshot): Pr
 
   const temporary = await fs.mkdtemp(path.join(parent, `.${current.fingerprint}.`))
   try {
+    await ensureEmptyBunConfig(temporary)
     for (const directory of new Set([...current[capturedDirectories], ...current[executionDirectories]])) {
       await fs.mkdir(path.join(temporary, materializedRelativePath(directory)), { recursive: true, mode: 0o700 })
     }
@@ -339,7 +341,7 @@ export function materializedCommand(
       command: [
         executable,
         "--no-env-file",
-        `--config=${process.platform === "win32" ? "NUL" : "/dev/null"}`,
+        `--config=${path.join(current.directory, emptyBunConfig)}`,
         ...bound.slice(1),
       ],
       cwd: directory,
@@ -778,6 +780,21 @@ async function verifyMaterialized(directory: string, current: Snapshot) {
     if (!stat?.isDirectory() || stat.isSymbolicLink()) {
       throw new Error(`Trusted workspace cache ${directory} is missing ${target}`)
     }
+  }
+  await ensureEmptyBunConfig(directory)
+}
+
+async function ensureEmptyBunConfig(directory: string) {
+  // Captured inputs live under volume-<hash>/, so this private runtime file cannot collide with approved inputs.
+  // Exclusive creation also upgrades older caches without changing the user's approval fingerprint.
+  const file = path.join(directory, emptyBunConfig)
+  await fs.writeFile(file, "", { flag: "wx", mode: 0o400 }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "EEXIST") throw error
+  })
+  const stat = await fs.lstat(file)
+  const captured = stat.isFile() && !stat.isSymbolicLink() && stat.size === 0 ? await captureFile(file) : undefined
+  if (!captured || captured.content.length !== 0) {
+    throw new Error(`Trusted workspace cache ${directory} changed at ${file}`)
   }
 }
 

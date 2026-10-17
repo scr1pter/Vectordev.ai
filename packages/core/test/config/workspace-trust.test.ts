@@ -187,7 +187,9 @@ describe("WorkspaceTrust", () => {
     expect(command?.cwd).not.toBe(workspace.path)
     expect(command?.cwd.startsWith(trusted.directory)).toBe(true)
     expect(path.isAbsolute(command.command[0])).toBe(true)
-    expect(path.basename(command.command[0])).toMatch(/^node(?:\.exe)?$/)
+    expect(path.basename(command.command[0])).toMatch(
+      process.platform === "win32" ? /^node(?:\.exe)?$/i : /^node(?:\.exe)?$/,
+    )
     expect(command?.command[1]).not.toBe(server)
     expect(await fs.readFile(command.command[1], "utf8")).toBe("console.log('approved')\n")
   })
@@ -297,9 +299,57 @@ describe("WorkspaceTrust", () => {
     expect(path.isAbsolute(bun?.command[0] ?? "")).toBe(true)
     expect(bun?.command.slice(1, 3)).toEqual([
       "--no-env-file",
-      `--config=${process.platform === "win32" ? "NUL" : "/dev/null"}`,
+      `--config=${path.join(trusted.directory, "empty-bunfig.toml")}`,
     ])
     expect(bun?.command[3]).not.toBe(server)
+  })
+
+  test("migrates older snapshots to a private empty Bun config without changing approval", async () => {
+    await using workspace = await tmpdir()
+    await using state = await tmpdir()
+    const source = path.join(workspace.path, ".vector", "empty-bunfig.toml")
+    await fs.mkdir(path.dirname(source))
+    await fs.writeFile(source, 'preload = ["unapproved.js"]')
+    const approved = await WorkspaceTrust.snapshot(workspace.path, [])
+    await WorkspaceTrust.approve(state.path, approved)
+    const initial = await WorkspaceTrust.materialize(state.path, approved)
+    const config = path.join(initial.directory, "empty-bunfig.toml")
+    expect(await fs.readFile(config, "utf8")).toBe("")
+    expect(WorkspaceTrust.materializedPath(initial, source)).not.toBe(config)
+    expect(await fs.readFile(WorkspaceTrust.materializedPath(initial, source), "utf8")).toContain("unapproved.js")
+    // Existing approvals and cached snapshot directories predate this runtime support file.
+    await fs.chmod(config, 0o600)
+    await fs.rm(config)
+    const migrated = await Promise.all(
+      Array.from({ length: 4 }, () => WorkspaceTrust.materialize(state.path, approved)),
+    )
+    expect(migrated.map((item) => item.directory)).toEqual(Array.from({ length: 4 }, () => initial.directory))
+    expect(await fs.readFile(config, "utf8")).toBe("")
+    expect((await WorkspaceTrust.status(state.path, approved)).trusted).toBe(true)
+    if (process.platform !== "win32") expect((await fs.stat(config)).mode & 0o777).toBe(0o400)
+  })
+
+  describe.each(["nonempty", "directory", "symlink"])("%s private Bun config", (kind) => {
+    test.skipIf(kind === "symlink" && process.platform === "win32")(
+      "rejects tampered runtime configuration",
+      async () => {
+        await using workspace = await tmpdir()
+        await using state = await tmpdir()
+        const approved = await WorkspaceTrust.snapshot(workspace.path, [])
+        const initial = await WorkspaceTrust.materialize(state.path, approved)
+        const config = path.join(initial.directory, "empty-bunfig.toml")
+        await fs.chmod(config, 0o600)
+        await fs.rm(config)
+        if (kind === "nonempty") await fs.writeFile(config, 'preload = ["unapproved.js"]')
+        if (kind === "directory") await fs.mkdir(config)
+        if (kind === "symlink") {
+          const target = path.join(workspace.path, "empty.toml")
+          await fs.writeFile(target, "")
+          await fs.symlink(target, config)
+        }
+        await expect(WorkspaceTrust.materialize(state.path, approved)).rejects.toThrow()
+      },
+    )
   })
 
   test("classifies Windows drive paths as filesystem inputs before URLs", () => {

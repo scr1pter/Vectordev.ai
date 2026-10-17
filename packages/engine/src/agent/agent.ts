@@ -39,6 +39,7 @@ import { LocationServiceMap, locationServiceMapLayer } from "@vectordevai/core/l
 import { Reference } from "@vectordevai/core/reference"
 import { Location } from "@vectordevai/core/location"
 import { PluginV2 } from "@vectordevai/core/plugin"
+import { FSUtil } from "@vectordevai/core/fs-util"
 
 export const Info = Schema.Struct({
   name: Schema.String,
@@ -122,12 +123,31 @@ const layer = Layer.effect(
           yield* (yield* PluginV2.Service).wait(PluginV2.ID.make("core/config-reference"))
           return (yield* (yield* Reference.Service).list()).map((reference) => reference.path)
         }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))))
-        const whitelistedDirs = [
-          Truncate.GLOB,
-          path.join(Global.Path.tmp, "*"),
-          ...skillDirs.map((dir) => path.join(dir, "*")),
-          ...referenceDirs.map((dir) => path.join(dir, "*")),
-        ]
+        const directoryKey = (pattern: string) =>
+          process.platform === "win32" ? pattern.replaceAll("\\", "/").toLowerCase() : pattern
+        const directoryAliases = new Map(
+          [
+            [path.join(Global.Path.data, "tool-output", "*"), Truncate.GLOB],
+            ...[
+              path.join(Global.Path.tmp, "*"),
+              ...skillDirs.map((dir) => path.join(dir, "*")),
+              ...referenceDirs.map((dir) => path.join(dir, "*")),
+            ].map((pattern) => [pattern, FSUtil.normalizePathPattern(pattern)] as const),
+          ].map(([source, target]) => [directoryKey(source), target]),
+        )
+        const whitelistedDirs = Array.from(directoryAliases.values())
+        const builtInDeny = (pattern: string) => {
+          const known = directoryAliases.get(directoryKey(pattern))
+          if (known || process.platform !== "win32") return known
+          const match = pattern.match(/^(.*)[\\/]\*$/)
+          if (!match || /[*?\[]/.test(match[1])) return
+          // The final output directory may not exist yet; resolve only its already-created private parent.
+          const directory =
+            path.basename(match[1]).toLowerCase() === "tool-output"
+              ? path.join(FSUtil.normalizePath(path.dirname(match[1])), "tool-output")
+              : FSUtil.normalizePath(match[1])
+          return whitelistedDirs.find((root) => directoryKey(root) === directoryKey(path.join(directory, "*")))
+        }
         const readonlyExternalDirectory = {
           "*": "ask",
           ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
@@ -564,10 +584,18 @@ const layer = Layer.effect(
         // Ensure Truncate.GLOB is allowed unless explicitly configured
         for (const name in agents) {
           const agent = agents[name]
+          // Capture aliases once with the ruleset. Re-resolving allowed roots while evaluating a request could grant
+          // access to a different directory if a Windows junction is later retargeted. Preserve lexical deny rules
+          // and add their canonical spelling at the same precedence so a built-in allowance cannot bypass a deny.
+          agent.permission = agent.permission.flatMap((rule) => {
+            if (rule.permission !== "external_directory" || rule.action !== "deny") return [rule]
+            const pattern = builtInDeny(rule.pattern)
+            return !pattern || pattern === rule.pattern ? [rule] : [rule, { ...rule, pattern }]
+          })
           const explicit = agent.permission.some((r) => {
             if (r.permission !== "external_directory") return false
             if (r.action !== "deny") return false
-            return r.pattern === Truncate.GLOB
+            return directoryKey(r.pattern) === directoryKey(Truncate.GLOB)
           })
           if (explicit) continue
 

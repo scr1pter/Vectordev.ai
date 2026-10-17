@@ -21,7 +21,11 @@ const it = testEffect(
   LayerNode.compile(LayerNode.group([Provider.node, Env.node, Plugin.node, CrossSpawnSpawner.node])),
 )
 
-it.live("opens the provider connection before the first request, which then uses it", () =>
+// Bun 1.3.14 exposes fetch.preconnect on Windows, but its native implementation only supports POSIX.
+// https://github.com/oven-sh/bun/blob/bun-v1.3.14/src/bun_core/feature_flags.zig#L119-L120
+const supportsPreconnect = process.platform !== "win32"
+
+it.live("reuses a speculative connection when supported and serves the first request on every platform", () =>
   Effect.gen(function* () {
     const server = yield* endpoint()
     yield* provideTmpdirInstance(
@@ -31,7 +35,8 @@ it.live("opens the provider connection before the first request, which then uses
           const model = yield* provider.getModel(ProviderV2.ID.make("lmstudio"), ModelV2.ID.make("test-model"))
 
           yield* provider.preconnect(model)
-          yield* until(() => server.connections === 1)
+          if (supportsPreconnect) yield* until(() => server.connections === 1)
+          expect(server.connections).toBe(supportsPreconnect ? 1 : 0)
           // Opening the connection sends nothing.
           expect(server.requests).toBe(0)
 
@@ -48,7 +53,7 @@ it.live("opens the provider connection before the first request, which then uses
   }),
 )
 
-it.live("opens the connection a plugin names instead of the SDK's own endpoint", () =>
+it.live("uses a plugin's speculative endpoint when supported without changing actual SDK requests", () =>
   Effect.gen(function* () {
     const sdk = yield* endpoint()
     const named = yield* endpoint()
@@ -60,7 +65,8 @@ it.live("opens the connection a plugin names instead of the SDK's own endpoint",
           const model = yield* provider.getModel(ProviderV2.ID.make("lmstudio"), ModelV2.ID.make("test-model"))
 
           yield* provider.preconnect(model)
-          yield* until(() => named.connections === 1)
+          if (supportsPreconnect) yield* until(() => named.connections === 1)
+          expect(named.connections).toBe(supportsPreconnect ? 1 : 0)
           expect(sdk.connections).toBe(0)
 
           // The option is Vector's own and never reaches the SDK, whose requests still go to its endpoint.
