@@ -3,7 +3,7 @@
   "productName": "Vector",
   "private": true,
   "version": "1.99.108",
-  "vectorRequiredCliVersion": "1.99.99",
+  "vectorRequiredCliVersion": "1.99.108",
   "type": "module",
   "license": "SEE LICENSE IN ../../LICENSE",
   "homepage": "https://vectordev.ai",

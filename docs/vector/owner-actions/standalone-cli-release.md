@@ -14,13 +14,14 @@ The immutable manifest lives at `releases/vector-cli/v<VERSION>/manifest.json`. 
 
 `.github/workflows/vector-cli-release.yml` is manually dispatched only. No dispatch has been performed by this implementation. Configure the repository variable `VECTOR_CLI_BLOB_ORIGIN` to the canonical origin of Vector's public Blob store and the secret `BLOB_READ_WRITE_TOKEN` using the owner's normal GitHub/Vercel setup. Do not paste credentials into a task, source file, command argument, or build log.
 
-Before starting, prepare/review/publish the immutable catalog using the existing catalog release tooling. This workflow reads only `releases/vector-v<VERSION>/api.json` from the configured store and requires its reviewed SHA-256. It cannot select the latest catalog or prepare fresh model data silently.
+Before archive preparation, review and publish the immutable catalog using `phase=catalog` or the existing catalog release tooling. The archive phases read only `releases/vector-v<VERSION>/api.json` from the configured store and requires its reviewed SHA-256. It cannot select the latest catalog or prepare fresh model data silently.
 
-Dispatch inputs are the exact version, full reviewed lowercase source commit SHA, reviewed catalog SHA-256, publication timestamp in `YYYY-MM-DDTHH:mm:ss.sssZ` form, channel, and phase. Reuse the same identity/timestamp on retries.
+Dispatch inputs are `version`, `source_revision` (the full reviewed lowercase commit SHA), `catalog_sha256`, `published_at` (in `YYYY-MM-DDTHH:mm:ss.sssZ` form), `channel`, `phase`, and `containers`. Reuse the same identity and timestamp on retries. Select `containers=skip` for the standalone CLI handoff. `containers=prepare` builds container candidates; `containers=publish` publishes them and can do so even when the archive phase is `prepare`.
 
-1. `prepare` (default): validate identity, run packaging regression tests, download and verify the pinned catalog, build all twelve native targets, package them, and preserve the exact output as a GitHub workflow artifact. It does not receive a Blob write token or publish anything.
-2. `stage`: perform the same preparation, then upload immutable objects. Previously staged objects are reused only after byte verification. No public channel pointer changes.
-3. `commit`: read the immutable manifest directly from Blob, verify its requested identity, stream/hash-check all twelve remote archives, and only then write the channel pointer. It does not rebuild the release. An older version cannot overwrite a newer channel version.
+1. `catalog`: prepare the catalog from the configured owner-reviewed fork and exact fork revision, require its reviewed digest, publish or verify the immutable versioned catalog, and read it back. This is a production publication step; it does not build CLI archives or advance the standalone channel.
+2. `prepare` (default): validate identity, run packaging regression tests, download and verify the pinned catalog, build all twelve native targets, package them, and preserve the exact output as a GitHub workflow artifact. The archive preparation job does not receive a Blob write token or publish archives. The complete workflow remains nonpublishing only when `containers` is `skip` or `prepare`.
+3. `stage`: perform the same preparation, then upload immutable objects. Previously staged objects are reused only after byte verification. No public channel pointer changes.
+4. `commit`: read the immutable manifest directly from Blob, verify its requested identity, stream/hash-check all twelve remote archives, and only then write the channel pointer. It does not rebuild the release. An older version cannot overwrite a newer channel version.
 
 The workflow serializes all publisher runs with a shared concurrency group. Keep that serialization: Blob has no compare-and-swap for channel pointers, so independently running publishers must not race commits. A failed staging attempt can leave immutable objects, but cannot advance the channel. Retry the same release after resolving the cause; do not overwrite immutable bytes.
 
@@ -36,6 +37,12 @@ From `packages/cloud`, `bun run release:cli prepare|stage|verify|commit|all` exp
 - `BLOB_READ_WRITE_TOKEN` is required for remote phases only. Supply it through the owner's secret environment; the scripts never print it.
 
 `prepare` consumes already-built artifacts. `verify` performs remote integrity verification without changing pointers. `commit` reuses already-staged bytes and does not require local build output. Run local commits only while no other publisher is active. Preserve the prepared directory; packaging refuses to overwrite different bytes or a different local manifest.
+
+## npm packages required by desktop
+
+The standalone archive workflow does not publish npm packages. Before a desktop release, its exact `vectorRequiredCliVersion` must also exist for `@vectordevai/plugin`, `@vectordevai/cli`, and all six `@vectordevai/cli-{darwin,linux,windows}-{arm64,x64}` platform packages. The desktop workflow checks each package separately.
+
+From a clean checkout of the same reviewed commit, run `packages/engine/script/publish-vector.ts` from `packages/engine` with `VECTOR_CLI_VERSION`, `VECTOR_SOURCE_REVISION`, `VECTOR_RELEASE_CATALOG_PATH` and `VECTOR_RELEASE_CATALOG_SHA256` explicitly set to the matching reviewed identity. Keep the default six npm targets. First use `bun --no-env-file run script/publish-vector.ts --dry-run` to build and inspect the packages; the owner then uses `--publish` and completes any npm 2FA in the terminal. The script publishes the plugin, platform packages and umbrella package. Existing versions are immutable: do not relabel old builds or reuse a partially published version with different source bytes.
 
 ## Owner-created Homebrew and Scoop repositories
 
