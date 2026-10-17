@@ -17,17 +17,21 @@ export const ServerRowMenu: Component<{
   const key = ServerConnection.key(props.server)
   const builtin = ServerConnection.builtin(props.server)
   const isDefault = () => props.controller.defaultKey() === key
+  let trigger: HTMLButtonElement | undefined
 
   return (
     <MenuV2 gutter={6} modal={false} placement="bottom-end" open={props.open} onOpenChange={props.onOpenChange}>
       <MenuV2.Trigger
+        ref={trigger}
         as={IconButtonV2}
         variant="ghost-muted"
         size="small"
         icon={<IconV2 name="outline-dots" />}
         aria-label={language.t("common.moreOptions")}
       />
-      <MenuV2.Portal>
+      {/* Inside a dialog such as Settings, a menu portalled to the body sits under the dialog's layer and is
+          hidden from assistive technology, so it opens inside the dialog's content instead. */}
+      <MenuV2.Portal mount={trigger?.closest<HTMLElement>('[data-slot="dialog-content"]') ?? undefined}>
         <MenuV2.Content>
           <MenuV2.Group>
             <MenuV2.GroupLabel>{language.t("settings.section.server")}</MenuV2.GroupLabel>
