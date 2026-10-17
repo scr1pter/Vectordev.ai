@@ -1,7 +1,7 @@
 import { expect } from "bun:test"
 import path from "node:path"
 import nodeFs from "node:fs/promises"
-import { Effect } from "effect"
+import { Cause, Effect, Exit } from "effect"
 import { systemError } from "effect/PlatformError"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -422,6 +422,31 @@ it.live("never copies settings through a repository's link to an earlier folder 
     )
     const imported = yield* ConfigMigration.discover({ ...input, directory: inner, worktree: inner })
     expect(imported.map((item) => item.target)).toEqual([path.join(inner, ".vector", "vector.jsonc")])
+  }),
+)
+
+// Any shared folder above a non-git workspace, such as an extracted archive or /tmp, can hold an earlier folder beside a
+// linked .vector. That is not the user's to fix, so it is skipped rather than stopping Vector from starting.
+it.live("skips a linked .vector beside an earlier folder that is not the home folder's", () =>
+  Effect.gen(function* () {
+    const root = yield* tmpdirScoped()
+    const fs = yield* FSUtil.Service
+    const home = path.join(root, "home")
+    const parent = path.join(home, "downloads")
+    const directory = path.join(parent, "app")
+    const outside = path.join(root, "outside")
+    yield* fs.writeWithDirs(path.join(parent, `.${previous}`, `${previous}.json`), '{"permission":{"bash":"deny"}}')
+    yield* fs.ensureDir(outside)
+    yield* fs.ensureDir(directory)
+    yield* Effect.promise(() => nodeFs.symlink(outside, path.join(parent, ".vector"), linkType))
+    const input = { directory, worktree: "/", home, global: path.join(root, "global") }
+    expect(yield* ConfigMigration.discover(input)).toEqual([])
+    expect(yield* Effect.promise(() => nodeFs.readdir(outside))).toEqual([])
+    // The home folder's own linked .vector still stops with the message that says what to merge.
+    yield* fs.writeWithDirs(path.join(home, `.${previous}`, `${previous}.json`), '{"model":"fixture/model"}')
+    yield* Effect.promise(() => nodeFs.symlink(outside, path.join(home, ".vector"), linkType))
+    const exit = yield* ConfigMigration.discover(input).pipe(Effect.exit)
+    expect(Exit.isFailure(exit) && String(Cause.squash(exit.cause))).toContain("Cannot import into linked folder")
   }),
 )
 

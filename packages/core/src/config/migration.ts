@@ -293,12 +293,19 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
     const files = listing.value
     const assets = files.filter((file) => file.type === "directory" && assetNames.includes(file.name))
     const target = path.join(directory, ".vector")
-    if (entries.find((entry) => entry.name === ".vector")?.type === "symlink")
+    // A linked .vector in the user's home folder is theirs to merge. Anywhere else, such as an extracted archive or a
+    // shared folder above a non-git workspace, it is not, so it never stops Vector from starting.
+    if (entries.find((entry) => entry.name === ".vector")?.type === "symlink") {
+      if (directory !== input.home) {
+        yield* Effect.logWarning(`Skipped importing ${source}: ${target} is a link.`)
+        continue
+      }
       return yield* Effect.die(
         new Error(
           `Cannot import into linked folder ${target}. Merge the earlier settings into the intended destination before starting Vector.`,
         ),
       )
+    }
     const marker = path.join(target, "vector-migration.json")
     if (yield* fs.exists(marker)) continue
     if (!FSUtil.writableInside(root, marker)) {
