@@ -6603,7 +6603,7 @@ export default function NewLayout(props: ParentProps) {
         automaticReviewModel={() => workflowModel(reviewModels(), byokProviders.connected())}
         onApplyFix={(fix) => {
           const directory = activeWorkspaceScope().sourcePath
-          if (!directory) return Promise.reject(new Error("Open a project before applying a fix."))
+          if (!directory) return Promise.reject(new Error("Open a repository before applying a fix."))
           return applyReviewFix(serverSDK().createClient({ directory, throwOnError: true }), directory, fix)
         }}
         onAskAgent={(text) => {
