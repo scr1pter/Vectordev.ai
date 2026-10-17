@@ -119,24 +119,28 @@ const layer = Layer.effectDiscard(
     // Every provider plugin imports define from this module, so a static import of the provider list closes a cycle:
     // a provider module loaded first, as its own tests load it, finds its siblings uninitialized.
     const { ProviderPlugins } = yield* Effect.promise(() => import("./provider"))
-    yield* State.batch(
-      Effect.gen(function* () {
-        yield* add(ConfigReferencePlugin.Plugin)
-        yield* add(AgentPlugin.Plugin)
-        yield* add(CommandPlugin.Plugin)
-        yield* add(SkillPlugin.Plugin)
-        yield* add(ModelCatalogPlugin)
-        yield* add(ConfigAgentPlugin.Plugin)
-        yield* add(ConfigCommandPlugin.Plugin)
-        yield* add(ConfigSkillPlugin.Plugin)
-        for (const item of ProviderPlugins) yield* add(item)
-        yield* add(ConfigExternalPlugin.Plugin)
-        yield* add(ConfigProviderPlugin.Plugin)
-        // Account entitlements, prices and transport metadata cannot be replaced by repository configuration.
-        yield* add(VectorPlanPlugin)
-        yield* add(VariantPlugin.Plugin)
-      }),
-    ).pipe(Effect.withSpan("PluginInternal.boot"), Effect.forkScoped({ startImmediately: true }))
+    yield* Effect.gen(function* () {
+      // The agent waits for references before it starts, so they load in a batch of their own instead of waiting for
+      // every provider plugin and the model catalog below.
+      yield* State.batch(add(ConfigReferencePlugin.Plugin))
+      yield* State.batch(
+        Effect.gen(function* () {
+          yield* add(AgentPlugin.Plugin)
+          yield* add(CommandPlugin.Plugin)
+          yield* add(SkillPlugin.Plugin)
+          yield* add(ModelCatalogPlugin)
+          yield* add(ConfigAgentPlugin.Plugin)
+          yield* add(ConfigCommandPlugin.Plugin)
+          yield* add(ConfigSkillPlugin.Plugin)
+          for (const item of ProviderPlugins) yield* add(item)
+          yield* add(ConfigExternalPlugin.Plugin)
+          yield* add(ConfigProviderPlugin.Plugin)
+          // Account entitlements, prices and transport metadata cannot be replaced by repository configuration.
+          yield* add(VectorPlanPlugin)
+          yield* add(VariantPlugin.Plugin)
+        }),
+      )
+    }).pipe(Effect.withSpan("PluginInternal.boot"), Effect.forkScoped({ startImmediately: true }))
   }),
 )
 
