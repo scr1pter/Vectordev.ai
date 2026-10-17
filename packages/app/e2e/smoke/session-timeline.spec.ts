@@ -505,7 +505,6 @@ async function expectCanScrollToStart(
   const seenMessages = new Set<string>()
   const samples: TraversalSample[] = []
   let current = await timelineState(page)
-  let unchangedAtTop = 0
 
   for (let attempt = 0; attempt < 600; attempt++) {
     collectSeen(current, seenParts, seenMessages)
@@ -528,9 +527,24 @@ async function expectCanScrollToStart(
     const before = current
     const changed = await scrollTimelineUp(page, current)
     current = await timelineState(page)
-    if (!changed && current.signature === before.signature && current.scrollTop <= 1) unchangedAtTop++
-    else unchangedAtTop = 0
-    if (unchangedAtTop >= 2) break
+    if (changed || current.signature !== before.signature || current.scrollTop > 1) continue
+
+    // At the top with history still missing, the older page is in flight or still rendering. On a slow
+    // runner that outlasts a scroll step's frame budget, so wait for the timeline to change rather than
+    // reading a quiet top as the end of history; a page that never arrives still fails below.
+    const moved = await page
+      .waitForFunction(
+        (signature) => (window as SmokeWindow).__timelineSmokeState?.().signature !== signature,
+        current.signature,
+        { timeout: APP_READY_TIMEOUT },
+      )
+      .then(
+        () => true,
+        () => false,
+      )
+    if (!moved) break
+    await waitForTimelineStable(page)
+    current = await timelineState(page)
   }
 
   collectSeen(current, seenParts, seenMessages)
