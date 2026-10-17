@@ -90,4 +90,32 @@ describe("listBackgroundTasks", () => {
     expect(listBackgroundTasks({ projectPath: "/repo", taskId: "ses_1" })[0]?.status).toBe("interrupted")
     expect(writes.count).toBe(1)
   })
+  test("restart settles queued and blocked tasks even when the stored clock is ahead", () => {
+    const created = createBackgroundTask({
+      kind: "agent",
+      projectPath: "/repo",
+      taskId: "ses_1",
+      name: "waiting",
+      status: "queued",
+    })
+    for (const status of ["queued", "waiting", "needs_input"] as const) {
+      store
+        .get("background-tasks")!
+        .set(
+          "records",
+          JSON.stringify([
+            {
+              ...created,
+              id: `task-${status}`,
+              status,
+              processID: "previous-process",
+              updatedAt: "2099-01-01T00:00:00.000Z",
+            },
+          ]),
+        )
+      const settled = listBackgroundTasks({ projectPath: "/repo", taskId: "ses_1" })[0]!
+      expect(settled.status).toBe("interrupted")
+      expect(settled.completedAt).toBeDefined()
+    }
+  })
 })

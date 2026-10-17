@@ -8,7 +8,7 @@ const STORE_KEY = "records"
 const MAX_RECORDS = 400
 const MAX_LOGS = 160
 const MAX_ACTIONS = 200
-const PROCESS_STARTED_AT = Date.now()
+const PROCESS_ID = randomUUID()
 
 export type BackgroundTaskStatus =
   | "queued"
@@ -23,12 +23,7 @@ export type BackgroundTaskStatus =
   | "discarded"
   | "interrupted"
 
-export type BackgroundTaskKind =
-  | "parallel-workspace"
-  | "browser-agent"
-  | "terminal"
-  | "agent"
-  | "checkpoint"
+export type BackgroundTaskKind = "parallel-workspace" | "browser-agent" | "terminal" | "agent" | "checkpoint"
 
 export type BackgroundTaskAction = {
   id: string
@@ -66,6 +61,7 @@ export type BackgroundTaskRecord = {
   logs: string[]
   actions: BackgroundTaskAction[]
   mergeState?: "none" | "merged" | "discarded"
+  processID?: string
 }
 
 export type CreateBackgroundTaskInput = {
@@ -128,14 +124,15 @@ function elapsed(startedAt?: string, completedAt?: string) {
 }
 
 function normalizeRecord(record: BackgroundTaskRecord): BackgroundTaskRecord {
-  const updatedAt = Date.parse(record.updatedAt || record.createdAt)
-  const belongsToPreviousProcess = Number.isNaN(updatedAt) || updatedAt < PROCESS_STARTED_AT
-  if (record.status === "running" && belongsToPreviousProcess) {
+  const belongsToPreviousProcess = record.processID !== PROCESS_ID
+  if (["queued", "running", "waiting", "needs_input"].includes(record.status) && belongsToPreviousProcess) {
     return {
       ...record,
       status: "interrupted",
       currentStep: "Interrupted while Vector was closed",
       updatedAt: now(),
+      completedAt: now(),
+      processID: PROCESS_ID,
       logs: ["Marked interrupted after app restart.", ...record.logs].slice(0, MAX_LOGS),
       actions: [
         {
@@ -194,17 +191,16 @@ export function createBackgroundTask(input: CreateBackgroundTaskInput) {
     actualUsage: input.actualUsage,
     errorSummary: input.errorSummary,
     logs: input.logs?.slice(0, MAX_LOGS) ?? [],
-    actions:
-      input.actions?.slice(0, MAX_ACTIONS) ??
-      [
-        {
-          id: randomUUID(),
-          at: timestamp,
-          label: input.currentStep ?? "Task queued",
-          status: input.status === "failed" ? "failed" : input.status === "running" ? "running" : "pending",
-        },
-      ],
+    actions: input.actions?.slice(0, MAX_ACTIONS) ?? [
+      {
+        id: randomUUID(),
+        at: timestamp,
+        label: input.currentStep ?? "Task queued",
+        status: input.status === "failed" ? "failed" : input.status === "running" ? "running" : "pending",
+      },
+    ],
     mergeState: input.mergeState,
+    processID: PROCESS_ID,
   }
   writeRecords([record, ...readRecords().filter((item) => item.id !== record.id)])
   return record
@@ -223,7 +219,8 @@ export function updateBackgroundTask(id: string, update: UpdateBackgroundTaskInp
     (patch.status && ["complete", "needs_review", "failed", "canceled", "merged", "discarded"].includes(patch.status)
       ? timestamp
       : current.completedAt)
-  const startedAt = patch.startedAt ?? (patch.status === "running" && !current.startedAt ? timestamp : current.startedAt)
+  const startedAt =
+    patch.startedAt ?? (patch.status === "running" && !current.startedAt ? timestamp : current.startedAt)
   const nextLogs = log ? [log, ...current.logs].slice(0, MAX_LOGS) : current.logs
   const nextActions = action
     ? [

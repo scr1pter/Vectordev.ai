@@ -47,9 +47,11 @@ const {
   postTeamMessage,
 } = await import("./agent-teams")
 const { pendingFor } = await import("./agent-team-model")
+const { listAgentTasks, inspectAgentTask, messageAgentTask, stopAgentTask } = await import("./agent-task-board")
 const {
   createParallelWorkspace,
   getParallelWorkspace,
+  listParallelWorkspaces,
   isInternalWorkspaceFile,
   nextVectorTeammateDelivery,
   pendingTeammateDelivery,
@@ -432,11 +434,161 @@ describe("team outbox delivery while members are running", () => {
     expect(pendingFor(getAgentTeam(team.id)!, beta.id).map((message) => message.id)).toEqual(["retry-me"])
   })
 
+  test("external delivery bounds a turn while retaining the rest of the mailbox", async () => {
+    const alpha = await member("Alpha")
+    const beta = await member("Beta")
+    const team = createAgentTeam({ name: "team", topology: "collaborative", sourcePath: userDataPath })
+    addTeamMember(team.id, alpha.id)
+    addTeamMember(team.id, beta.id)
+    Array.from({ length: 8 }).forEach((_, index) =>
+      postTeamMessage({
+        messageId: `bounded-${index}`,
+        teamId: team.id,
+        fromWorkspaceId: alpha.id,
+        fromName: alpha.name,
+        toWorkspaceId: beta.id,
+        text: "x".repeat(4096),
+      }),
+    )
+    const delivery = pendingTeammateDelivery(beta, "mission")
+    expect(delivery.messageIds).toHaveLength(4)
+    expect(Buffer.byteLength(delivery.prompt)).toBeLessThan(20_000)
+    expect(pendingFor(getAgentTeam(team.id)!, beta.id)).toHaveLength(8)
+  })
+
+  test("shared board scopes observation and controls by both parent and project", async () => {
+    const record = {
+      id: "board-workspace",
+      name: "Parser",
+      taskPrompt: "Implement parser",
+      runtime: "vector",
+      provider: "test",
+      model: "test",
+      sourcePath: userDataPath,
+      parentSessionId: "parent",
+      isolatedPath: join(userDataPath, "isolated"),
+      isolation: "git-worktree",
+      status: "needs review",
+      progress: 100,
+      lastAction: "Ready for review",
+      createdAt: "2026-01-01T00:00:00Z",
+      lastActivityAt: "2026-01-01T00:00:10Z",
+      changedFilesCount: 1,
+      riskLevel: "low",
+      estimatedCost: "$5",
+      measuredCost: 0.12,
+      finalSummary: "s".repeat(7000),
+      mergeState: "none",
+      logs: [],
+      terminalOutput: [],
+      browserResults: [],
+      changedFiles: ["parser.ts"],
+      diff: "",
+      turns: [
+        {
+          id: "turn",
+          role: "assistant",
+          text: "Done",
+          at: "2026-01-01T00:00:10Z",
+          state: "done",
+          activity: Array.from({ length: 12 }, (_, i) => ({ kind: "tool", state: "done", label: `Step ${i}` })),
+        },
+      ],
+    }
+    store.set("parallel-workspaces-state", new Map([["records", [record]]]))
+    const scope = { parentSessionID: "parent", sourcePath: userDataPath }
+    expect(listAgentTasks(scope).tasks).toHaveLength(1)
+    expect(listAgentTasks({ ...scope, parentSessionID: "other" }).tasks).toHaveLength(0)
+    expect(listAgentTasks({ ...scope, sourcePath: "/other" }).tasks).toHaveLength(0)
+    const input = { ...scope, taskID: "workspace:board-workspace" }
+    const detail = inspectAgentTask(input)
+    expect(detail.task.status).toBe("waiting_on_user")
+    expect(detail.task.measuredCost).toBe(0.12)
+    expect(detail.task.usage).toBeUndefined()
+    expect(detail.steps).toHaveLength(8)
+    expect(detail.output).toHaveLength(6000)
+    expect(detail.truncated).toBe(true)
+    expect(() => inspectAgentTask({ ...input, parentSessionID: "other" })).toThrow("does not belong")
+    await expect(stopAgentTask({ ...input, sourcePath: "/other" })).rejects.toThrow("does not belong")
+    await expect(messageAgentTask({ ...input, text: "continue" })).rejects.toThrow()
+    expect((await stopAgentTask(input)).tasks[0]?.status).toBe("waiting_on_user")
+    expect(getParallelWorkspace(record.id)?.status).toBe("needs review")
+    // Requested queue entries are abandoned after process ownership disappears;
+    // a workspace that has never been started remains available to launch.
+    const queued = { ...record, id: "queued", status: "queued", runOwnerID: "previous-process" }
+    const untouched = { ...record, id: "prepared", status: "queued" }
+    store.set("parallel-workspaces-state", new Map([["records", [queued, untouched]]]))
+    const recovered = listParallelWorkspaces()
+    expect(recovered.find((item) => item.id === "queued")?.status).toBe("failed")
+    expect(recovered.find((item) => item.id === "prepared")?.status).toBe("queued")
+  })
+
   test("durable team outbox internals never appear in review diffs", () => {
     expect(isInternalWorkspaceFile(".vector/team-outbox/message.json")).toBe(true)
     expect(isInternalWorkspaceFile(".vector/team-outbox/message.json.processing")).toBe(true)
     expect(isInternalWorkspaceFile(".vector/team-outbox/message.tmp")).toBe(true)
     expect(isInternalWorkspaceFile(".vector/team-outbox.jsonl.crash.processing")).toBe(true)
     expect(isInternalWorkspaceFile(".vector/BRAIN.md")).toBe(false)
+  })
+
+  test("mailbox admission rejects oversized and spoofed messages and enforces sender quotas", () => {
+    const team = createAgentTeam({ name: "limited", topology: "collaborative", sourcePath: userDataPath })
+    addTeamMember(team.id, "a")
+    addTeamMember(team.id, "b")
+    const input = { teamId: team.id, fromWorkspaceId: "a", fromName: "Alpha", toWorkspaceId: "b", text: "finding" }
+    expect(postTeamMessage({ ...input, text: "🙂".repeat(1025) }).ok).toBe(false)
+    expect(postTeamMessage({ ...input, fromWorkspaceId: "vector:router" }).ok).toBe(false)
+    expect(postTeamMessage({ ...input, fromWorkspaceId: "outsider" }).ok).toBe(false)
+    Array.from({ length: 12 }).forEach((_, index) =>
+      expect(postTeamMessage({ ...input, messageId: `note-${index}` }).ok).toBe(true),
+    )
+    expect(postTeamMessage({ ...input, messageId: "overflow" })).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("per sender"),
+    })
+    expect(pendingFor(getAgentTeam(team.id)!, "b")).toHaveLength(12)
+    // Exact retry remains safe after the quota is reached; conflicting ID reuse is not.
+    expect(postTeamMessage({ ...input, messageId: "note-0" }).ok).toBe(true)
+    expect(postTeamMessage({ ...input, messageId: "note-0", text: "different" }).ok).toBe(false)
+  })
+
+  test("mailbox backpressure never discards pending work", () => {
+    const team = createAgentTeam({ name: "full", topology: "collaborative", sourcePath: userDataPath })
+    addTeamMember(team.id, "a")
+    addTeamMember(team.id, "b")
+    const current = getAgentTeam(team.id)!
+    const pending = Array.from({ length: 100 }, (_, index) => ({
+      id: `pending-${index}`,
+      teamId: team.id,
+      fromWorkspaceId: "a",
+      fromName: "Alpha",
+      toWorkspaceId: "b",
+      text: "earlier finding",
+      createdAt: "2020-01-01T00:00:00.000Z",
+      deliveredTo: [],
+    }))
+    store.get("agent-teams-state")!.set("teams", [{ ...current, messages: pending }])
+    expect(
+      postTeamMessage({
+        teamId: team.id,
+        fromWorkspaceId: "a",
+        fromName: "Alpha",
+        toWorkspaceId: "b",
+        text: "one more",
+      }),
+    ).toMatchObject({ ok: false, reason: expect.stringContaining("mailbox is full") })
+    expect(getAgentTeam(team.id)!.messages).toEqual(pending)
+  })
+
+  test("corrupt collaboration settings cannot widen permissions", () => {
+    const team = createAgentTeam({ name: "restricted", topology: "collaborative", sourcePath: userDataPath })
+    addTeamMember(team.id, "a")
+    addTeamMember(team.id, "b")
+    store.get("agent-teams-state")!.set("teams", [{ ...getAgentTeam(team.id)!, collaboration: { invalid: true } }])
+    expect(
+      postTeamMessage({ teamId: team.id, fromWorkspaceId: "a", fromName: "Alpha", toWorkspaceId: "b", text: "hello" })
+        .ok,
+    ).toBe(false)
+    expect(pendingFor(getAgentTeam(team.id)!, "b")).toEqual([])
   })
 })

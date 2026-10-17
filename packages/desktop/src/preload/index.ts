@@ -11,6 +11,7 @@ const updaterHandler = (_: unknown, state: UpdaterState) => {
   updaterCallbacks.forEach((callback) => callback(state))
 }
 
+let taskBoardSubscribers = 0
 const api: ElectronAPI = {
   killSidecar: () => ipcRenderer.invoke("kill-sidecar"),
   awaitInitialization: () => ipcRenderer.invoke("await-initialization"),
@@ -209,6 +210,20 @@ const api: ElectronAPI = {
       ipcRenderer.invoke("parallel-workspaces-merge-selection", id, selection, force),
     discard: (id) => ipcRenderer.invoke("parallel-workspaces-discard", id),
     remove: (id) => ipcRenderer.invoke("parallel-workspaces-remove", id),
+  },
+  agentTasks: {
+    list: (input) => ipcRenderer.invoke("agent-tasks-list", input),
+    inspect: (input) => ipcRenderer.invoke("agent-tasks-inspect", input),
+    message: (input) => ipcRenderer.invoke("agent-tasks-message", input),
+    stop: (input) => ipcRenderer.invoke("agent-tasks-stop", input),
+    onChange: (callback) => {
+      if (taskBoardSubscribers++ === 0) void ipcRenderer.invoke("agent-tasks-subscribe")
+      ipcRenderer.on("agent-tasks-changed", callback)
+      return () => {
+        ipcRenderer.removeListener("agent-tasks-changed", callback)
+        if (--taskBoardSubscribers === 0) void ipcRenderer.invoke("agent-tasks-unsubscribe")
+      }
+    },
   },
   swarmOrchestrator: {
     list: (scope) => ipcRenderer.invoke("swarm-runs-list", scope),

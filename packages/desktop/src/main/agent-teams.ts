@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto"
+import { TaskMailbox } from "@vectordevai/core/task-mailbox"
 
 import { getStore } from "./store"
+import { taskBoardChanged } from "./task-board-events"
 import {
   appendMessage,
   effectiveCollaborationGraph,
@@ -49,11 +51,11 @@ function readTeams(): AgentTeam[] {
 // A team stored before selective pairing has no `collaboration` key and must
 // stay that way: `undefined` is the all-to-all default, while `{ links: [] }`
 // is a deliberate "nobody may talk" the user chose. Malformed data therefore
-// degrades to the default rather than to silence — a bad read that muted a
-// running team would look exactly like the agents having nothing to say.
+// fails closed. Corrupt collaboration settings must not widen who can send.
 function readGraph(value: unknown): TeamCollaborationGraph | undefined {
+  if (value === undefined) return undefined
   const links = (value as { links?: unknown } | null | undefined)?.links
-  if (!Array.isArray(links)) return undefined
+  if (!Array.isArray(links)) return { links: [] }
   return {
     links: links.flatMap((entry) => {
       const link = entry as Partial<TeamLink> | null
@@ -65,6 +67,7 @@ function readGraph(value: unknown): TeamCollaborationGraph | undefined {
 
 function writeTeams(teams: AgentTeam[]) {
   getStore(STORE_NAME).set(STORE_KEY, teams)
+  taskBoardChanged()
 }
 
 function updateTeam(id: string, mutate: (team: AgentTeam) => AgentTeam) {
@@ -162,13 +165,29 @@ export function postTeamMessage(input: {
   memberNames?: Record<string, string>
 }) {
   const text = input.text.trim()
-  if (!text)
-    return { ok: false as const, reason: "Message not delivered: the message body was empty.", allowedRecipients: [] }
+  const invalid = TaskMailbox.bodyError(text)
+  if (invalid) return { ok: false as const, reason: invalid, allowedRecipients: [] }
   const team = getAgentTeam(input.teamId)
   if (!team)
     return { ok: false as const, reason: "Message not delivered: that team no longer exists.", allowedRecipients: [] }
+  if (!team.memberIds.includes(input.fromWorkspaceId))
+    return {
+      ok: false as const,
+      reason: "Message not delivered: the sender is not a member of this team.",
+      allowedRecipients: [],
+    }
   const existing = input.messageId ? team.messages.find((message) => message.id === input.messageId) : undefined
   if (existing) {
+    if (
+      existing.fromWorkspaceId !== input.fromWorkspaceId ||
+      existing.toWorkspaceId !== input.toWorkspaceId ||
+      existing.text !== text
+    )
+      return {
+        ok: false as const,
+        reason: "Message not delivered: that message ID belongs to a different message.",
+        allowedRecipients: [],
+      }
     const recipients = existing.toWorkspaceId ? [existing.toWorkspaceId] : recipientsFor(team, existing.fromWorkspaceId)
     return { ok: true as const, recipients, team }
   }
@@ -178,6 +197,25 @@ export function postTeamMessage(input: {
     toWorkspaceId: input.toWorkspaceId,
     memberNames: input.memberNames,
   })
+  const targets = routing.ok ? routing.recipients : [input.fromWorkspaceId]
+  const admission = TaskMailbox.admissionError({
+    text,
+    sentAt: team.messages
+      .filter(
+        (message) =>
+          message.fromWorkspaceId === input.fromWorkspaceId ||
+          (message.fromWorkspaceId === ROUTER_WORKSPACE_ID && message.toWorkspaceId === input.fromWorkspaceId),
+      )
+      .map((message) => Date.parse(message.createdAt)),
+    pending: Math.max(0, ...targets.map((id) => pendingFor(team, id).length)),
+    now: Date.now(),
+  })
+  if (admission)
+    return {
+      ok: false as const,
+      reason: admission,
+      allowedRecipients: routing.ok ? routing.recipients : routing.allowedRecipients,
+    }
   // A refused message addressed to a named teammate is bounced back to its
   // sender instead of dropped. The send tool runs in the engine sidecar and has
   // already returned "queued" by the time routing happens, so this notice is
