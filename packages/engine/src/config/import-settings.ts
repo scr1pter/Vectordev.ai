@@ -16,8 +16,8 @@ function notify(result: { message: string } | undefined) {
   })
 }
 
-export const run = Effect.fn("ConfigImport.run")(function* (directory: string, local = false) {
-  const result = yield* ConfigMigration.run(directory, local)
+export const run = Effect.fn("ConfigImport.run")(function* (directory: string, local = false, root = directory) {
+  const result = yield* ConfigMigration.run(directory, local, directory, root)
   notify(result)
   return result
 })

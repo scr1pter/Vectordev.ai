@@ -15,7 +15,7 @@ import { Teams } from "@vectordevai/core/teams"
 import { Env } from "../env"
 import { applyEdits, modify, parse } from "jsonc-parser"
 import { InstallationLocal } from "@vectordevai/core/installation/version"
-import { existsSync, lstatSync } from "fs"
+import { existsSync } from "fs"
 import { isRecord } from "@/util/record"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Redaction } from "@vectordevai/core/redaction"
@@ -477,8 +477,9 @@ const layer = Layer.effect(
     const http = yield* HttpClient.HttpClient
     const flock = yield* EffectFlock.Service
 
-    const importSettings = (directory: string, local = false) =>
-      ConfigImport.run(directory, local).pipe(
+    // `root` is where the import may write: the folder itself for the user's own, the workspace for a project's.
+    const importSettings = (directory: string, local = false, root = directory) =>
+      ConfigImport.run(directory, local, root).pipe(
         Effect.provideService(FSUtil.Service, fs),
         Effect.provideService(EffectFlock.Service, flock),
         Effect.orDie,
@@ -543,7 +544,9 @@ const layer = Layer.effect(
 
       yield* Effect.promise(() => resolveLoadedPlugins(data, options.path))
       const updated = ConfigSchema.rewrite(text)
-      if (updated !== text && !preserveSource) {
+      // Only the user's own files are rewritten here, and never through a link: a linked settings file belongs to
+      // whatever it points at.
+      if (updated !== text && !preserveSource && FSUtil.writableInside(path.dirname(options.path), options.path)) {
         data.$schema = "https://vectordev.ai/config.json"
         yield* fs.writeFileString(options.path, updated).pipe(Effect.catch(() => Effect.void))
       }
@@ -570,7 +573,7 @@ const layer = Layer.effect(
       // explicitly routes config through env-provided paths or content.
       if (!Flag.VECTOR_AGENT_CONFIG && !Flag.VECTOR_AGENT_CONFIG_DIR && !Flag.VECTOR_CONFIG_CONTENT) {
         const file = globalConfigFile()
-        if (!existsSync(file)) {
+        if (!existsSync(file) && FSUtil.writableInside(Global.Path.config, file)) {
           yield* fs
             .writeWithDirs(file, JSON.stringify({ $schema: "https://vectordev.ai/config.json" }, null, 2))
             .pipe(Effect.catch(() => Effect.void))
@@ -599,10 +602,11 @@ const layer = Layer.effect(
       return yield* Effect.uninterruptible(cachedGlobal)
     })
 
-    const ensureGitignore = Effect.fn("Config.ensureGitignore")(function* (dir: string) {
+    const ensureGitignore = Effect.fn("Config.ensureGitignore")(function* (dir: string, root: string) {
       const gitignore = path.join(dir, ".gitignore")
       const hasIgnore = yield* fs.existsSafe(gitignore)
-      if (!hasIgnore) {
+      // A dangling link reads as missing, and writing it would create the file it points at.
+      if (!hasIgnore && FSUtil.writableInside(root, gitignore)) {
         yield* fs
           .writeFileString(
             gitignore,
@@ -660,17 +664,16 @@ const layer = Layer.effect(
         const projectDirectories = allDirectories.filter(projectContains)
         const localAgentConfig = agentConfig?.project ? [agentConfig.path] : []
         const trustWorkspace = ctx.worktree === "/" ? ctx.directory : ctx.worktree
+        // Where a config folder may be written, never through a link: a project folder only where it really is inside
+        // the workspace, a folder above a non-git workspace only inside the folder that holds it, and the user's own
+        // folder only inside itself.
+        const writeRoot = (dir: string) =>
+          parentDirectories.includes(dir) ? path.dirname(dir) : projectContains(dir) ? trustWorkspace : dir
         const prepareProjectFile = Effect.fnUntraced(function* (filepath: string) {
-          // This runs before any trust decision, and writing follows links: a project's vector.json linked to
-          // ../../.codex/config.toml would turn that file into JSON. Only a regular file really inside the workspace
-          // is rewritten.
-          const inside = yield* Effect.try({
-            try: () =>
-              lstatSync(filepath, { throwIfNoEntry: false })?.isFile() === true &&
-              FSUtil.contains(FSUtil.realpath(trustWorkspace), FSUtil.realpath(filepath)),
-            catch: (cause) => cause,
-          }).pipe(Effect.orElseSucceed(() => false))
-          if (!inside) return
+          // This runs before any trust decision, and writing follows links: a project's vector.json linked, or
+          // hard-linked, to ../../.codex/config.toml would turn that file into JSON. Only a plain file really inside
+          // the workspace is rewritten.
+          if (!FSUtil.writableInside(trustWorkspace, filepath)) return
           const text = yield* readConfigFile(filepath)
           if (!text) return
           const normalized = /^\s*[{/]/.test(text) ? text : JSON.stringify(ConfigMigration.parseConfig(text, filepath))
@@ -901,8 +904,8 @@ const layer = Layer.effect(
           const local = projectContains(dir)
           const runtimeDir = local && trustedSnapshot ? WorkspaceTrust.materializedPath(trustedSnapshot, dir) : dir
           if (dir.endsWith(".vector") || dir === agentConfigDir?.path) {
-            if (dir === agentConfigDir?.path) yield* importSettings(dir)
-            if (!local || trusted) yield* importSettings(dir, true)
+            if (dir === agentConfigDir?.path) yield* importSettings(dir, false, writeRoot(dir))
+            if (!local || trusted) yield* importSettings(dir, true, writeRoot(dir))
             // Local files merge after the shared ones so machine-local settings win.
             for (const file of ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES]) {
               const source = path.join(dir, file)
@@ -925,7 +928,7 @@ const layer = Layer.effect(
             (yield* Effect.forEach(["plugin", "plugins", "tool", "tools"], (name) =>
               fs.isDir(path.join(runtimeDir, name)),
             )).some(Boolean)
-          if (runtimeFiles) yield* ensureGitignore(dir).pipe(Effect.orDie)
+          if (runtimeFiles) yield* ensureGitignore(dir, writeRoot(dir)).pipe(Effect.orDie)
 
           result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(runtimeDir)))
           const agents = mergeDeep(
@@ -1149,9 +1152,17 @@ const layer = Layer.effect(
     })
 
     const update = Effect.fn("Config.update")(function* (config: Info) {
-      const dir = yield* InstanceState.directory
-      const file = path.join(dir, "vector.json")
-      const existing = yield* loadFile(file)
+      const ctx = yield* InstanceState.context
+      const file = path.join(ctx.directory, "vector.json")
+      // The project's vector.json can be a link to any file of the user's, which a write would replace.
+      const workspace = ctx.worktree === "/" ? ctx.directory : ctx.worktree
+      if (!FSUtil.writableInside(workspace, file))
+        return yield* Effect.die(
+          new Error(`Cannot save settings to ${file}: it is a link, not a plain file, or outside ${workspace}.`),
+        )
+      // As written: {env:...} and {file:...} resolved here would be saved into the project file in place of their
+      // references, and an untrusted project's {file:...} could name any file of the user's.
+      const existing = yield* loadFile(file, undefined, false, true)
       // A client sends secrets back as Redaction.MARKER. Restoring them before the
       // merge keeps the ones inside arrays, such as plugin options, which a deep
       // merge replaces wholesale.
@@ -1182,6 +1193,8 @@ const layer = Layer.effect(
         "type" in entry ? entry : entry.enabled,
         { formattingOptions: { insertSpaces: true, tabSize: 2 } },
       )
+      if (!FSUtil.writableInside(path.dirname(file), file))
+        return yield* Effect.die(new Error(`Cannot save the integration to ${file}: it is a link or not a plain file.`))
       yield* fs.writeWithDirs(file, applyEdits(before, edits)).pipe(Effect.orDie)
     })
 
@@ -1225,11 +1238,16 @@ const layer = Layer.effect(
     const removeMcpLocal = Effect.fn("Config.removeMcpLocal")(function* (name: string) {
       const ctx = yield* InstanceState.context
       const root = ctx.worktree === "/" ? ctx.directory : ctx.worktree
-      // Integrations added before the store existed were written into the project's .vector directory.
-      for (const file of [
-        integrationStore(root),
-        ...LOCAL_CONFIG_FILES.map((item) => path.join(root, ".vector", item)),
+      // Integrations added before the store existed were written into the project's .vector directory. Each file is
+      // written only inside where it belongs, never through a link.
+      for (const [file, owner] of [
+        [integrationStore(root), path.dirname(integrationStore(root))],
+        ...LOCAL_CONFIG_FILES.map((item) => [path.join(root, ".vector", item), root]),
       ]) {
+        if (!FSUtil.writableInside(owner, file)) {
+          yield* Effect.logWarning("left an integration in a file that is a link or outside the project", { file })
+          continue
+        }
         const before = yield* readConfigFile(file)
         if (!before) continue
         const edits = modify(before, ["mcp", name], undefined, {
