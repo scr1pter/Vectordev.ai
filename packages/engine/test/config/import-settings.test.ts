@@ -350,12 +350,12 @@ it.live("imports folders above a non-git workspace only into themselves", () =>
   }),
 )
 
-it.live("imports a linked earlier folder and keeps linked assets as links", () =>
+it.live("imports a linked earlier folder in the home folder and keeps linked assets as links", () =>
   Effect.gen(function* () {
     const root = yield* tmpdirScoped()
     const fs = yield* FSUtil.Service
     const shared = path.join(root, "shared")
-    const directory = path.join(root, "project")
+    const directory = path.join(root, "home")
     yield* fs.writeWithDirs(path.join(shared, "earlier", `${previous}.json`), '{"permission":{"bash":"deny"}}')
     yield* fs.writeWithDirs(path.join(shared, "agent.md"), "linked agent")
     yield* fs.writeWithDirs(path.join(shared, "skills", "review", "SKILL.md"), "linked skill")
@@ -367,7 +367,14 @@ it.live("imports a linked earlier folder and keeps linked assets as links", () =
     yield* fs.symlink(path.join(shared, "agent.md"), path.join(source, "agents", "linked.md"))
     yield* fs.symlink(path.join(shared, "missing.md"), path.join(source, "agents", "broken.md"))
     yield* fs.symlink(path.join(shared, "skills"), path.join(source, "skills"))
-    const input = { directory, worktree: directory, home: path.join(root, "home"), global: path.join(root, "global") }
+    // Opened on a repository in the home folder, as a dotfiles setup links the home folder's earlier settings.
+    const input = {
+      directory: path.join(directory, "project"),
+      worktree: path.join(directory, "project"),
+      home: directory,
+      global: path.join(root, "global"),
+    }
+    yield* fs.ensureDir(input.directory)
     const target = path.join(directory, ".vector")
     expect((yield* ConfigMigration.discover(input)).map((item) => item.target)).toEqual([
       path.join(target, "vector.jsonc"),
@@ -385,6 +392,36 @@ it.live("imports a linked earlier folder and keeps linked assets as links", () =
     // An import interrupted before its marker is retried without treating its own links as conflicts.
     yield* fs.remove(path.join(target, "vector-migration.json"))
     expect((yield* ConfigMigration.discover(input)).map((item) => item.target)).toEqual([target])
+  }),
+)
+
+// A repository can carry a link to the user's own earlier settings elsewhere. Following it would copy their keys into the
+// repository before trust, so outside the home folder an earlier folder is imported only where it really lies inside the
+// folder that holds it.
+it.live("never copies settings through a repository's link to an earlier folder outside it", () =>
+  Effect.gen(function* () {
+    const root = yield* tmpdirScoped()
+    const fs = yield* FSUtil.Service
+    const own = path.join(root, "own")
+    const directory = path.join(root, "project")
+    yield* fs.writeWithDirs(
+      path.join(own, `${previous}.json`),
+      '{"provider":{"fixture":{"options":{"apiKey":"placeholder-secret"}}}}',
+    )
+    yield* fs.writeWithDirs(path.join(own, "commands", "review.md"), "review")
+    yield* fs.ensureDir(directory)
+    yield* Effect.promise(() => nodeFs.symlink(own, path.join(directory, `.${previous}`), linkType))
+    const input = { directory, worktree: directory, home: path.join(root, "home"), global: path.join(root, "global") }
+    expect(yield* ConfigMigration.discover(input)).toEqual([])
+    expect(yield* fs.exists(path.join(directory, ".vector"))).toBe(false)
+    // A link that stays inside the repository still imports.
+    const inner = path.join(root, "inner")
+    yield* fs.writeWithDirs(path.join(inner, "config", "earlier", `${previous}.json`), '{"permission":{"bash":"deny"}}')
+    yield* Effect.promise(() =>
+      nodeFs.symlink(path.join(inner, "config", "earlier"), path.join(inner, `.${previous}`), linkType),
+    )
+    const imported = yield* ConfigMigration.discover({ ...input, directory: inner, worktree: inner })
+    expect(imported.map((item) => item.target)).toEqual([path.join(inner, ".vector", "vector.jsonc")])
   }),
 )
 

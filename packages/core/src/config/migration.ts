@@ -277,6 +277,13 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
     if (!earlier) continue
     const source = path.join(directory, earlier.name)
     if (!(yield* fs.isDir(source))) continue
+    // Only the home folder's earlier folder is followed wherever it links. Anywhere else a link can be a repository's,
+    // pointing at the user's own settings elsewhere, and importing it would copy their keys into the repository
+    // before trust.
+    if (directory !== input.home && !realInside(root, source)) {
+      yield* Effect.logWarning(`Skipped importing ${source}: it links outside ${root}.`)
+      continue
+    }
     // No marker is written for a folder that cannot be listed yet, so a later launch imports it once readable.
     const listing = yield* fs.readDirectoryEntries(source).pipe(Effect.option)
     if (Option.isNone(listing)) {
@@ -396,4 +403,13 @@ const copyAsset: (source: string, target: string) => Effect.Effect<void, FSUtil.
 // The marker is still written: retrying would report conflicts for imported files the user has since edited.
 function skipUnreadable(source: string) {
   return Effect.logWarning(`Skipped ${source} while importing earlier settings because it cannot be read.`)
+}
+
+// Whether a path really lies inside root once both are resolved. One that cannot be resolved does not.
+function realInside(root: string, file: string) {
+  try {
+    return FSUtil.contains(FSUtil.realpath(root), FSUtil.realpath(file))
+  } catch {
+    return false
+  }
 }
