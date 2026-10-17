@@ -158,23 +158,22 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
         .catch(() => undefined),
     ])
     if (request !== boardRequest || rootID() !== sessionID) return
+    const observed = result?.data && Array.isArray(result.data.tasks) ? result.data : undefined
+    const local = desktop && Array.isArray(desktop.tasks) ? desktop : undefined
     setBoard("refreshing", false)
-    if (desktop) setBoard("desktop", desktop.tasks)
-    if (result?.data) setBoard("truncated", result.data.truncated || desktop?.truncated === true)
-    if (input.desktop && !desktop && board.desktop.length) {
+    if (local) setBoard("desktop", local.tasks)
+    if (observed) setBoard("truncated", observed.truncated || local?.truncated === true)
+    if (input.desktop && !local && board.desktop.length) {
       setBoard("error", "Desktop task updates unavailable. Showing the last known state.")
-      if (result?.data) setBoard("tasks", result.data.tasks)
+      if (observed) setBoard("tasks", observed.tasks)
       return
     }
-    if (!result?.data) {
+    if (!observed) {
       if (board.tasks.length) setBoard("error", "Task updates unavailable. Showing the last known state.")
       return
     }
-    setBoard("tasks", result.data.tasks)
-    setBoard(
-      "error",
-      result.data.truncated ? "Showing the most recent tasks. Open a child session for more." : undefined,
-    )
+    setBoard("tasks", observed.tasks)
+    setBoard("error", observed.truncated ? "Showing the most recent tasks. Open a child session for more." : undefined)
   }
   createEffect(
     on(rootID, () => {

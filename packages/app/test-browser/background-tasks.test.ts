@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createRoot, createSignal } from "solid-js"
 import type { AssistantMessage, Message, Part, Session, ToolPart, VectorClient } from "@vectordevai/sdk/v2/client"
+import type { Task } from "@vectordevai/schema/task"
 import type { retry } from "@vectordevai/core/util/retry"
 import type { DirectorySync } from "@/context/sync"
 import { createServerSession } from "@/context/server-session"
@@ -122,7 +123,11 @@ function engine() {
   // Every request, as "route:session".
   const calls: string[] = []
   const unreachable = new Set<string>()
-  const state = { abortFails: false, truncated: false }
+  const state: { abortFails: boolean; truncated: boolean; invalidBoard: boolean; task?: Task.Info } = {
+    abortFails: false,
+    truncated: false,
+    invalidBoard: false,
+  }
   const reach = (route: string, sessionID: string) => {
     calls.push(`${route}:${sessionID}`)
     if (unreachable.has(sessionID)) throw new Error("engine unreachable")
@@ -133,7 +138,13 @@ function engine() {
       session(CHILD, at, { parentID: ROOT, metadata: { subagent: record({ status, completedAt: at }) } }),
     )
   const client = {
-    experimental: { task: { list: async () => ({ data: { tasks: [], truncated: state.truncated } }) } },
+    experimental: {
+      task: {
+        list: async () => ({
+          data: state.invalidBoard ? [] : { tasks: state.task ? [state.task] : [], truncated: state.truncated },
+        }),
+      },
+    },
     session: {
       get: async (input: { sessionID: string }) => {
         reach("get", input.sessionID)
@@ -241,6 +252,34 @@ async function until(condition: () => boolean, ms = 2_000) {
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 describe("Background tasks after the event stream dropped", () => {
+  test("an unavailable task-list shape preserves the last valid observation", async () => {
+    const fake = engine()
+    fake.state.task = {
+      id: CHILD,
+      sessionID: CHILD,
+      parentSessionID: ROOT,
+      source: "subagent",
+      title: "Map the auth flow",
+      status: "running",
+      startedAt: 1000,
+      elapsedMs: 100,
+      ownedPaths: [],
+      dependsOn: [],
+      resultAvailable: false,
+      attempt: 1,
+      measuredCost: 0.2,
+      controls: { inspect: true, message: true, stop: true },
+    }
+    const page = await open(fake, [ROOT, CHILD])
+    await until(() => page.agent()?.cost === 0.2)
+    fake.state.invalidBoard = true
+    page.reconnect()
+    await until(() => Boolean(page.tasks.error()?.includes("Task updates unavailable")))
+    expect(page.agent()?.cost).toBe(0.2)
+    expect(page.agent()?.status).toBe("running")
+    page.dispose()
+  })
+
   test("a reconnect reloads what the stream missed and settles the card", async () => {
     const fake = engine()
     const page = await open(fake, [ROOT, CHILD])
