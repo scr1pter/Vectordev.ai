@@ -44,6 +44,7 @@ const DROP_ORDER: DropReason[] = [
   "duplicate",
   "dismissed",
   "rejected-by-verify",
+  "unconfirmed",
 ]
 
 export interface SelectInput {

@@ -18,7 +18,7 @@ import {
   type DiffFile,
 } from "@vectordevai/core/review/diff"
 import { fingerprint, normalizeCode, normalizeTitle } from "@vectordevai/core/review/fingerprint"
-import { noteVerifySkipped } from "@vectordevai/core/review/format"
+import { noteTriageUnchecked, noteVerifySkipped } from "@vectordevai/core/review/format"
 import { classifyPath, isSensitivePath } from "@vectordevai/core/review/ignore"
 import { reviewPermissionRules } from "@vectordevai/core/review/permission"
 import { packChanges, verifyHeadFiles } from "@vectordevai/core/review/pack"
@@ -93,7 +93,7 @@ export interface RunInput {
   config: ReviewConfig
   model: ResolvedModel
   // A cheaper model for the review and security passes. The double-check then runs on `model` for every finding
-  // above a nit, so what reaches the pull request was confirmed by the stronger model.
+  // above a nit, even with verify "off", and only the findings it confirmed are reported.
   triage?: ResolvedModel
   allowDirs?: string[]
   checks?: boolean
@@ -554,11 +554,11 @@ export const run: (
     const normalized = reports.flatMap((entry) => normalizeFindings(entry.report.findings, entry.source, input.anchors))
 
     // 7. Verify: blocking findings (and every suggestion when untrusted), or everything of concern or above. After a
-    // cheaper triage pass, everything of concern or above is confirmed on the review model.
-    const all = config.verify === "all" || (config.verify === "blocking" && triaged)
+    // cheaper triage pass, everything of concern or above is confirmed on the review model, whatever `verify` says.
+    const all = config.verify === "all" || triaged
     const candidates = [
       ...new Map(
-        (config.verify === "off" ? [] : normalized)
+        (config.verify === "off" && !triaged ? [] : normalized)
           .filter((finding) =>
             all
               ? finding.severity !== "nit" && finding.confidence >= config.minConfidence
@@ -599,10 +599,17 @@ export const run: (
             decode: decodeVerify,
           })
     const verdicts = new Map((verify?.value ?? []).map((entry) => [entry.id, entry.verdict]))
-    const findings = normalized
-      .filter((finding) => verdicts.get(finding.id) !== "rejected")
+    // After a triage pass only what the review model confirmed is reported: a candidate it rejected, gave no verdict
+    // for, or never saw because the double-check was skipped or failed is left out.
+    const unchecked = new Set(
+      triaged ? candidates.filter((finding) => verdicts.get(finding.id) !== "confirmed").map((finding) => finding.id) : [],
+    )
+    const kept = normalized.filter((finding) => verdicts.get(finding.id) !== "rejected")
+    const findings = kept
+      .filter((finding) => !unchecked.has(finding.id))
       .map((finding) => (verdicts.get(finding.id) === "confirmed" ? { ...finding, verified: true } : finding))
-    const rejected = normalized.length - findings.length
+    const rejected = normalized.length - kept.length
+    const unconfirmed = kept.length - findings.length
 
     // 8. Select. Paths outside the diff are checked against the repository first; selection is synchronous.
     const index = buildAnchorIndex(input.anchors)
@@ -629,7 +636,10 @@ export const run: (
       ignored: (file) => skipped.has(file) || classifyPath(file, { config }) !== undefined,
       knownPath: (file) => known.get(file) ?? true,
       teamDismissed: input.context.teamDismissed,
-      dropped: rejected ? [{ reason: "rejected-by-verify", count: rejected }] : [],
+      dropped: [
+        ...(rejected ? [{ reason: "rejected-by-verify" as const, count: rejected }] : []),
+        ...(unconfirmed ? [{ reason: "unconfirmed" as const, count: unconfirmed }] : []),
+      ],
       modelRisk: report.risk,
       sensitiveChanged: input.files.some((file) => isSensitivePath(file.path)),
       changedLines: input.files.reduce((sum, file) => sum + file.additions + file.deletions, 0),
@@ -693,7 +703,11 @@ export const run: (
         deletions: input.files.reduce((sum, file) => sum + file.deletions, 0),
       },
       notes: [
-        ...(verify?.status === "skipped" ? [noteVerifySkipped()] : []),
+        ...(triaged && verify && verify.status !== "ok" && unconfirmed
+          ? [noteTriageUnchecked(unconfirmed, nameOf(triage), nameOf(input.model))]
+          : verify?.status === "skipped"
+            ? [noteVerifySkipped()]
+            : []),
         ...(state.incomplete
           ? [
               "Reported cost may be incomplete; work with uncertain usage retained its estimated budget exposure for this review.",

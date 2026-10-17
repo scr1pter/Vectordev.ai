@@ -83,6 +83,7 @@ export type DropReason =
   | "duplicate"
   | "dismissed"
   | "rejected-by-verify"
+  | "unconfirmed" // after a triage pass, the review model did not confirm it
   | "nit" // a nit or a style finding, while nits are off
 
 export interface PriorFinding {
@@ -231,7 +232,7 @@ export interface ReviewConfig {
   timeoutMinutes: number
   model?: string // "provider/model"
   // A cheaper "provider/model" for the first pass. The review and security reviewers run on it, and every finding
-  // above a nit is then double-checked on `model`, so only confirmed findings from the cheap pass are posted.
+  // above a nit is then double-checked on `model`; only the ones it confirmed are reported, and `verify` cannot be off.
   triageModel?: string
   // Style nits are left out unless this is true or minSeverity is "nit".
   nits: boolean

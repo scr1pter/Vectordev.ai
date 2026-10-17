@@ -39,6 +39,7 @@ import {
   formatTokens,
   formatUsd,
   noteNothingToReview,
+  noteTriageUnchecked,
   sanitizeModelMarkdown,
   type RepoRef,
 } from "@vectordevai/core/review/format"
@@ -216,7 +217,8 @@ export type ReviewOutcomeLite = {
   notes: string[]
   // What the reviewers were given beyond the diff, so the panel can say what the review was grounded in.
   context?: { callers: number; checks: number; failing: number; instructions: boolean }
-  // The double-check pass: how many findings it re-read, and how many it rejected as not real.
+  // The double-check pass: how many findings it re-read, and how many it dropped as not real (or, after a triage
+  // pass, not confirmed).
   verification?: { checked: number; rejected: number; status: "ok" | "skipped" | "failed" }
   // Each reviewed file's path → a hash of its diff, so the next review can leave out files that did not change.
   fileKeys?: Record<string, string>
@@ -824,9 +826,10 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
 
   // The double-check: a second session re-reads the code behind each finding of concern or above and answers
   // confirmed or rejected; rejected findings are dropped. It is what keeps a reviewer's guesses off the pull request.
-  // `.vector/review.json` "verify": "off" turns it off; the desktop otherwise checks every finding above a nit.
+  // `.vector/review.json` "verify": "off" turns it off, except after a triage pass; the desktop otherwise checks every
+  // finding above a nit.
   const candidates =
-    config.verify === "off"
+    config.verify === "off" && !triage
       ? []
       : proposed.filter(
           (finding) =>
@@ -860,10 +863,21 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
         })
   stop.dispose()
   const verdicts = new Map((verify?.verdicts ?? []).map((entry) => [entry.id, entry.verdict]))
-  const checked = proposed
-    .filter((finding) => verdicts.get(finding.id) !== "rejected")
+  // After a triage pass only what the review model confirmed is shown: a finding above a nit that it rejected, gave
+  // no verdict for, or never saw because the double-check stopped or failed is left out.
+  const unchecked = new Set(
+    triage
+      ? candidates
+          .filter((finding) => finding.severity !== "nit" && verdicts.get(finding.id) !== "confirmed")
+          .map((finding) => finding.id)
+      : [],
+  )
+  const kept = proposed.filter((finding) => verdicts.get(finding.id) !== "rejected")
+  const checked = kept
+    .filter((finding) => !unchecked.has(finding.id))
     .map((finding) => (verdicts.get(finding.id) === "confirmed" ? { ...finding, verified: true } : finding))
-  const rejected = proposed.length - checked.length
+  const rejected = proposed.length - kept.length
+  const unconfirmed = kept.length - checked.length
   const findings = [...checked, ...carried]
   const report: ModelReport = {
     summary: (reports.find((entry) => entry.source === "review") ?? reports[0]!).report.summary,
@@ -895,7 +909,10 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
     modelRisk: report.risk,
     sensitiveChanged: review.some((file) => isSensitivePath(file.path)),
     changedLines: review.reduce((total, file) => total + file.additions + file.deletions, 0),
-    dropped: rejected ? [{ reason: "rejected-by-verify", count: rejected }] : [],
+    dropped: [
+      ...(rejected ? [{ reason: "rejected-by-verify" as const, count: rejected }] : []),
+      ...(unconfirmed ? [{ reason: "unconfirmed" as const, count: unconfirmed }] : []),
+    ],
   })
   const anchored: Record<string, string> = {}
   const fixes: Record<string, ReviewFix> = {}
@@ -980,7 +997,13 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
     sessions: [...runs, ...(verify ? [verify] : [])].flatMap((run) => (run.sessionID ? [run.sessionID] : [])),
     banners: partialBanners(runs, timeoutMs),
     notes: [
-      ...(verify && verify.status !== "ok" ? [VERIFY_SKIPPED_NOTE] : []),
+      ...(verify && verify.status !== "ok"
+        ? [
+            triage && unconfirmed
+              ? noteTriageUnchecked(unconfirmed, modelName(triage), modelName(model))
+              : VERIFY_SKIPPED_NOTE,
+          ]
+        : []),
       ...(config.triageModel && !triage && !named
         ? [
             `The triage model in .vector/review.json, ${config.triageModel}, is not connected, so the whole review ran on ${modelName(model)}.`,
@@ -995,7 +1018,12 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
     },
     ...(verify
       ? {
-          verification: { checked: candidates.length, rejected, status: verify.status === "ok" ? "ok" : verify.status },
+          // What the double-check dropped: the findings it rejected, and after a triage pass those it did not confirm.
+          verification: {
+            checked: candidates.length,
+            rejected: rejected + unconfirmed,
+            status: verify.status === "ok" ? "ok" : verify.status,
+          },
         }
       : {}),
     fileKeys,

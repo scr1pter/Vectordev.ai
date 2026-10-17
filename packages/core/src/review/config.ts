@@ -188,6 +188,13 @@ export function parseReviewConfig(
   if (ignore?.length) config.ignore = [...config.ignore, ...ignore]
   const auto = env.REVIEW_AUTO_MODEL?.trim()
   if (auto && input.trigger === "auto") assign(config, "model", auto, "REVIEW_AUTO_MODEL", warnings)
+  // A cheaper first pass is only posted once the review model confirmed it, so its double-check cannot be off.
+  if (config.triageModel && config.verify === "off") {
+    warnings.push(
+      '"verify": "off" is ignored while "triageModel" is set: every finding of the cheaper first pass is double-checked on the review model.',
+    )
+    config.verify = "all"
+  }
   return { config, warnings }
 }
 

@@ -115,6 +115,21 @@ describe("parseReviewConfig", () => {
     expect(bad.warnings).toHaveLength(2)
   })
 
+  test("keeps the double-check on whenever a triage model is set", () => {
+    const warning =
+      '"verify": "off" is ignored while "triageModel" is set: every finding of the cheaper first pass is double-checked on the review model.'
+    const json = parseReviewConfig({ json: JSON.stringify({ triageModel: "openrouter/cheap", verify: "off" }) })
+    expect(json.config.verify).toBe("all")
+    expect(json.warnings).toEqual([warning])
+    const env = parseReviewConfig({
+      json: JSON.stringify({ triageModel: "openrouter/cheap" }),
+      env: { REVIEW_VERIFY: "off" },
+    })
+    expect(env.config.verify).toBe("all")
+    expect(env.warnings).toEqual([warning])
+    expect(parseReviewConfig({ json: JSON.stringify({ verify: "off" }) }).config.verify).toBe("off")
+  })
+
   test("warns about auto, drafts and unknown keys, and ignores them", () => {
     const { config, warnings } = parseReviewConfig({
       json: '{"auto": false, "drafts": true, "bogus": 1, "__proto__": {"maxComments": 1}, "constructor": 2}',

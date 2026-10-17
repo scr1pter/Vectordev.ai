@@ -246,8 +246,11 @@ vector github review --pr 482 --dry-run</code><button class="doc-cmd-copy" type=
           </p>
           <p>
             With <code>triageModel</code> set in <code>.vector/review.json</code>, the review and security passes run on
-            that model and every finding above a nit is then checked on your review model, so what is posted was
-            confirmed by the model you chose. Each review lists what every pass spent.
+            that model, and every finding above a nit is then checked on your review model, even with
+            <code>verify</code> set to off. Only the findings your review model confirmed are posted. If that check
+            can't finish, for lack of budget or time, the cheaper pass's findings are left out and the summary says so.
+            Nits, when you turn them on, are listed in the summary without that check. <code>vector review</code> and
+            the desktop panel list what each pass spent when a review has more than one pass.
           </p>
 
           <h3 id="noise-control">Noise control</h3>

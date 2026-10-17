@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createVectorClient } from "@vectordevai/sdk/v2/client"
 import { parseUnifiedDiff } from "@vectordevai/core/review/diff"
+import { noteTriageUnchecked } from "@vectordevai/core/review/format"
 import { reviewPermissionRules } from "@vectordevai/core/review/permission"
 import { buildFinalizePrompt } from "@vectordevai/core/review/prompt"
 import { REVIEW_REPORT_JSON_SCHEMA, VERIFY_JSON_SCHEMA } from "@vectordevai/core/review/schema"
@@ -1295,6 +1296,53 @@ describe("cheaper first pass", () => {
       ["verify", "anthropic/claude-sonnet-4-5", 0.02],
     ])
     expect(outcome.selection.inline[0]?.verified).toBe(true)
+  })
+
+  test("shows only what the review model confirmed, even with verify off or a double-check that failed", async () => {
+    const concern = {
+      path: "src/list.ts",
+      line: 1,
+      severity: "concern",
+      category: "bug",
+      title: "last() of an empty array is not handled",
+      body: "An empty array returns undefined without saying so.",
+      confidence: 0.9,
+    }
+    const triageFiles = { "src/list.ts": HEAD, ".vector/review.json": '{"triageModel":"openrouter/cheap-coder"}' }
+    // The review model confirms only the blocking finding, and says nothing about the concern.
+    const partly = fakeClient({
+      files: triageFiles,
+      reply: (call) => {
+        if (!isVerify(call)) return fromModel(call, report([offByOne, concern]), 0.001)
+        const [first] = verdicts(call).results
+        return fromModel(call, { results: first ? [first] : [] }, 0.02)
+      },
+    })
+    const confirmed = (await run(partly.client, { catalog: [sonnet, cheap] }))!
+    expect(confirmed.selection.inline.map((finding) => [finding.title, finding.verified])).toEqual([
+      [offByOne.title, true],
+    ])
+    expect(confirmed.selection.dropped).toContainEqual({ reason: "unconfirmed", count: 1 })
+    expect(confirmed.verification).toEqual({ checked: 2, rejected: 1, status: "ok" })
+
+    const off = fakeClient({
+      files: { ...triageFiles, ".vector/review.json": '{"triageModel":"openrouter/cheap-coder","verify":"off"}' },
+      reply: (call) => (isVerify(call) ? fromModel(call, verdicts(call), 0.02) : fromModel(call, report(), 0.001)),
+    })
+    const checked = (await run(off.client, { catalog: [sonnet, cheap] }))!
+    expect(off.calls.prompt.filter(isVerify)).toHaveLength(1)
+    expect(checked.selection.inline[0]?.verified).toBe(true)
+
+    const failed = fakeClient({
+      files: triageFiles,
+      reply: (call) => (isVerify(call) ? undefined : fromModel(call, report([offByOne, concern]), 0.001)),
+    })
+    const unchecked = (await run(failed.client, { catalog: [sonnet, cheap] }))!
+    expect(unchecked.selection.inline).toEqual([])
+    expect(unchecked.selection.dropped).toContainEqual({ reason: "unconfirmed", count: 2 })
+    expect(unchecked.notes).toContain(
+      noteTriageUnchecked(2, "openrouter/cheap-coder", "anthropic/claude-sonnet-4-5"),
+    )
   })
 
   test("says so when the triage model is not connected, and runs everything on the review model", async () => {

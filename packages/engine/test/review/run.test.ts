@@ -12,7 +12,7 @@ import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { parseUnifiedDiff } from "@vectordevai/core/review/diff"
-import { noteVerifySkipped } from "@vectordevai/core/review/format"
+import { noteTriageUnchecked, noteVerifySkipped } from "@vectordevai/core/review/format"
 import {
   DEFAULT_REVIEW_CONFIG,
   type ModelFinding,
@@ -1240,12 +1240,72 @@ describe("Review.run", () => {
           ["verify", "lmstudio/test-model", 1_000, 50],
         ])
         expect(outcome.cost?.model).toBe("lmstudio/cheap-model + lmstudio/test-model")
+        // The review model gave no verdict, so the cheap model's concern is not reported.
+        expect(outcome.selection.inline).toEqual([])
+        expect(outcome.selection.dropped).toEqual([{ reason: "unconfirmed", count: 1 }])
 
         // Without a triage model the same concern is not double-checked under verify "blocking".
         yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", report([finding({ severity: "concern" })])))
         const plain = yield* Review.run(input(test.directory, { config: config({ verify: "blocking" }) }))
         expect(plain.specialists.map((item) => item.name)).toEqual(["review"])
         expect((yield* llm.hits).filter(VERIFY)).toHaveLength(1)
+      }),
+    TIMEOUT,
+  )
+
+  it.instance(
+    "after a triage pass reports only what the review model confirmed, even with verify off or the check skipped",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const llm = yield* TestLLMServer
+        const fs = yield* FSUtil.Service
+        const provider = testProviderConfig(llm.url)
+        Object.assign(provider.provider.lmstudio.models, {
+          "cheap-model": { ...provider.provider.lmstudio.models["test-model"], id: "cheap-model", name: "Cheap" },
+        })
+        yield* fs.writeWithDirs(
+          path.join(test.directory, "vector.json"),
+          JSON.stringify({ $schema: "https://vectordev.ai/config.json", ...provider }),
+        )
+        yield* fs.writeWithDirs(path.join(test.directory, "src/list.ts"), LIST_SOURCE)
+        yield* Effect.promise(() => trustWorkspace(test.directory))
+        const cheap = { ...ref, modelID: ModelV2.ID.make("cheap-model"), context: 100_000, costKind: "free" as const }
+        const blocking = finding()
+        const concern = finding({ line: 2, severity: "concern", title: "index is computed but never checked" })
+        const [blockingID] = Review.normalizeFindings([blocking], "review", LIST).map((item) => item.id)
+
+        // verify "off" does not turn the double-check off under a triage model; only the confirmed finding stays.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", report([blocking, concern])))
+        yield* llm.pushMatch(
+          VERIFY,
+          reply().tool("StructuredOutput", {
+            results: [{ id: blockingID, verdict: "confirmed", reason: "Reproduced." }],
+          }),
+        )
+        const off = yield* Review.run(input(test.directory, { triage: cheap, config: config({ verify: "off" }) }))
+        expect(off.specialists.map((item) => [item.name, item.status])).toEqual([
+          ["review", "ok"],
+          ["verify", "ok"],
+        ])
+        expect(off.selection.inline.map((item) => [item.id, item.verified])).toEqual([[blockingID, true]])
+        expect(off.selection.dropped).toEqual([{ reason: "unconfirmed", count: 1 }])
+
+        // With too little budget left for the double-check, nothing from the cheap pass is reported, and the note
+        // says why.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", report([blocking, concern])))
+        const skipped = yield* Review.run(
+          input(test.directory, {
+            triage: cheap,
+            model: priced,
+            config: config({ verify: "blocking", maxCostUsd: 0.000_001 }),
+          }),
+        )
+        expect(skipped.specialists.at(-1)).toEqual({ name: "verify", status: "skipped", steps: 0, detail: "budget" })
+        expect(skipped.selection.inline).toEqual([])
+        expect(skipped.selection.dropped).toEqual([{ reason: "unconfirmed", count: 2 }])
+        expect(skipped.notes).toContain(noteTriageUnchecked(2, "lmstudio/cheap-model", "lmstudio/test-model"))
+        expect(skipped.notes).not.toContain(noteVerifySkipped())
       }),
     TIMEOUT,
   )

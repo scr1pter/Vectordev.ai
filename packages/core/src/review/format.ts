@@ -541,6 +541,12 @@ export function noteVerifySkipped(): string {
   return "Blocking findings were not re-checked: too little budget or time was left for the verify pass."
 }
 
+// With a triage model only what the review model confirmed is reported, so a double-check that did not finish leaves
+// the cheaper pass's findings out instead of posting them unchecked.
+export function noteTriageUnchecked(count: number, triage: string, model: string): string {
+  return `The double-check on ${model} did not finish, so ${formatCount(count)} ${count === 1 ? "finding" : "findings"} from the cheaper first pass on ${triage} ${count === 1 ? "was" : "were"} left out: with a triage model, only findings the review model confirmed are reported.`
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // The sticky summary
 
