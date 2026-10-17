@@ -1374,6 +1374,20 @@ describe("reviewing again", () => {
     expect(outcome.selection).toEqual(previous.selection)
   })
 
+  test("reads the checkout again before reusing a review, so fixes are offered only where it still holds", async () => {
+    const previous = (await run(fakeClient({ files: { "src/list.ts": HEAD } }).client))!
+    expect(previous.checkout.mode).toBe("in-place")
+    expect(findingGroups(previous)[0]!.findings[0]!.apply).toBeDefined()
+    // The user switched to the base branch since: the pull request's diff is the same, the checkout is not.
+    const switched = fakeClient({ files: { "src/list.ts": BASE }, branch: "main" })
+    const outcome = (await run(switched.client, { previous }))!
+    expect(switched.calls.prompt).toEqual([])
+    expect(outcome.unchanged).toBe(true)
+    expect(outcome.checkout.mode).toBe("rebuilt")
+    expect(outcome.label).toStartWith("Your checkout is on `main`, not this pull request.")
+    expect(findingGroups(outcome)[0]!.findings[0]!.apply).toBeUndefined()
+  })
+
   test("reviews everything again when the settings changed or the last review stopped early", async () => {
     const previous = (await run(fakeClient({ files: { "src/list.ts": HEAD } }).client))!
     const settings = fakeClient({ files: { "src/list.ts": HEAD, ".vector/review.md": "- Flag every TODO." } })

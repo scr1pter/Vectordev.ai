@@ -617,13 +617,6 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
   const unchanged = new Set(
     review.filter((file) => previous?.fileKeys?.[file.path] === fileKeys[file.path]).map((file) => file.path),
   )
-  if (
-    previous &&
-    review.length > 0 &&
-    unchanged.size === review.length &&
-    Object.keys(previous.fileKeys ?? {}).length === review.length
-  )
-    return { ...previous, unchanged: true }
   const summary = {
     ...(pr ? { pr: pr.number } : {}),
     head,
@@ -663,6 +656,10 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
     : "Reviewing the uncommitted changes in your checkout"
   input.onProgress?.({ type: "checkout", checkout, label })
   if (input.signal?.aborted) return undefined
+  // Nothing changed since the last review, so its findings stand. The checkout is the one read just now: the user may
+  // have switched branches since, and Apply fix and Ask the agent follow it.
+  if (previous && unchanged.size === review.length && Object.keys(previous.fileKeys ?? {}).length === review.length)
+    return { ...previous, head, checkout, label, unchanged: true }
 
   // An explicit model in review.json wins; otherwise the review runs on the agent's model (see preferredModels).
   // The resolved model is passed explicitly to every prompt.
