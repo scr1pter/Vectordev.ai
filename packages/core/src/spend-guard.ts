@@ -316,6 +316,24 @@ function sameCall(left: Sig, right: Sig) {
   )
 }
 
+export type LinkOptions = {
+  readonly budget?: RunBudget.Info
+  readonly batch?: { readonly id: string; readonly budget?: RunBudget.Info }
+  // A settled child starts a new attempt only on an explicit continuation.
+  readonly renew?: boolean
+}
+
+export type ScopeSnapshot = {
+  readonly kind: "run" | "batch" | "child"
+  readonly id: string
+  readonly budget: RunBudget.Info
+  readonly spentUsd: number
+  readonly steps: number
+  readonly unpricedSteps: number
+  readonly costKind?: CostKind
+  readonly stopped?: Stop
+}
+
 export interface Interface {
   // Sets the budget for the root of `sessionID`: replaces an active run's budget, or holds it for begin().
   readonly arm: (sessionID: SessionID, budget: RunBudget.Info) => Effect.Effect<void>
@@ -329,7 +347,10 @@ export interface Interface {
   // step, cost and time limits, never edits files (so nothing would ever reset the loop window), and must account for
   // every stop it gets. Spend, step and cap checks still apply, in its own run or the run it is linked to.
   readonly ignoreLoops: (sessionID: SessionID) => Effect.Effect<void>
-  readonly link: (childID: SessionID, parentID: SessionID) => Effect.Effect<void>
+  readonly link: (childID: SessionID, parentID: SessionID, options?: LinkOptions) => Effect.Effect<void>
+  // Retains completed-attempt observations but allows old, unused launch ledgers to be reclaimed.
+  readonly release: (sessionID: SessionID) => Effect.Effect<void>
+  readonly scopes: (sessionID: SessionID) => Effect.Effect<ScopeSnapshot[]>
   // Drops a session's link to its root, so its next run is a run of its own, such as a helper started after the run
   // it once counted against has ended.
   readonly unlink: (sessionID: SessionID) => Effect.Effect<void>
@@ -338,7 +359,7 @@ export interface Interface {
   readonly running: (sessionID: SessionID) => Effect.Effect<boolean>
   // Applies one provider step to the run of `sessionID`'s root and publishes session.spend. A root with no active
   // run is ignored. A linked subagent still stepping after its root's run ended, such as a background task, counts
-  // against that finished run until the root begins another, so it keeps its cap, loop rules and stop.
+  // against its launching run even when the root begins another, so it keeps its cap, loop rules and stop.
   // `confirm` settles whether the step changed a file when `step.patched` could only guess. It is awaited only when
   // the guess would pause the run as a loop, so the common step never waits on a snapshot.
   readonly record: (sessionID: SessionID, step: Step, confirm?: Effect.Effect<boolean>) => Effect.Effect<Verdict>
@@ -357,12 +378,47 @@ export class Service extends Context.Service<Service, Interface>()("@vector/Spen
 // fallback as well; one the owner armed replaces the fallback.
 type Armed = { readonly budget: RunBudget.Info; readonly tighten: boolean }
 
+type Ledger = {
+  readonly kind: ScopeSnapshot["kind"]
+  readonly id: string
+  readonly lineage: number
+  readonly run: Run
+}
+
+type Binding = { readonly run: number; readonly scopes: readonly number[]; readonly live: boolean }
+
 type State = {
-  readonly runs: ReadonlyMap<SessionID, Run>
+  readonly next: number
+  readonly active: ReadonlyMap<SessionID, number>
+  readonly last: ReadonlyMap<SessionID, number>
+  readonly ledgers: ReadonlyMap<number, Ledger>
   readonly roots: ReadonlyMap<SessionID, SessionID>
+  readonly bindings: ReadonlyMap<SessionID, Binding>
   readonly armed: ReadonlyMap<SessionID, Armed>
-  readonly last: ReadonlyMap<SessionID, Run>
   readonly quiet: ReadonlySet<SessionID>
+}
+
+// A live child pins its launch ledger even after the parent has answered or started another run. Completed
+// attempts keep observations for the same bounded history as roots, without retaining every old task forever.
+function prune(current: State): State {
+  const last = new Map([...current.last].slice(-LAST_RUNS))
+  const retained = new Set([...current.active.values(), ...last.values()])
+  current.bindings.forEach((binding) => {
+    if (binding.live) retained.add(binding.run)
+  })
+  const bindings = new Map([...current.bindings].filter((entry) => retained.has(entry[1].run)))
+  const referenced = new Set([...retained, ...[...bindings.values()].flatMap((binding) => [...binding.scopes])])
+  const roots = new Map(
+    [...current.roots].filter(([id, rootID]) => bindings.has(id) || current.active.has(rootID) || last.has(rootID)),
+  )
+  return {
+    ...current,
+    last,
+    bindings,
+    roots,
+    ledgers: new Map([...current.ledgers].filter(([id]) => referenced.has(id))),
+    quiet: new Set([...current.quiet].filter((id) => roots.has(id) || current.active.has(id) || last.has(id))),
+  }
 }
 
 const layer = Layer.effect(
@@ -370,44 +426,70 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const events = yield* EventV2.Service
     const state = yield* Ref.make<State>({
-      runs: new Map(),
-      roots: new Map(),
-      armed: new Map(),
+      next: 1,
+      active: new Map(),
       last: new Map(),
+      ledgers: new Map(),
+      roots: new Map(),
+      bindings: new Map(),
+      armed: new Map(),
       quiet: new Set(),
     })
     const rootIn = (current: State, sessionID: SessionID) => current.roots.get(sessionID) ?? sessionID
-    // The run a session's steps count against: its root's active run, else, for a linked subagent, the root's
-    // finished run.
-    const runOf = (current: State, sessionID: SessionID) => {
-      const rootID = rootIn(current, sessionID)
-      const active = current.runs.get(rootID)
-      if (active) return { rootID, run: active, active: true }
-      if (rootID === sessionID) return undefined
-      const finished = current.last.get(rootID)
-      if (finished) return { rootID, run: finished, active: false }
-      return undefined
+    const runKey = (current: State, sessionID: SessionID, previous = false) =>
+      current.bindings.get(sessionID)?.run ??
+      current.active.get(rootIn(current, sessionID)) ??
+      (previous || current.roots.has(sessionID) ? current.last.get(rootIn(current, sessionID)) : undefined)
+    const keys = (current: State, sessionID: SessionID) => {
+      const run = runKey(current, sessionID)
+      return [...new Set([...(run === undefined ? [] : [run]), ...(current.bindings.get(sessionID)?.scopes ?? [])])]
     }
+    const apply = (current: State, sessionID: SessionID, step: Step) =>
+      keys(current, sessionID).flatMap((key) => {
+        const ledger = current.ledgers.get(key)
+        if (!ledger) return []
+        // Loop detection belongs to the launch run, not to several nested budgets. Every scope still counts
+        // actual spend and steps once, including in-flight work that finishes after any applicable stop.
+        return [
+          {
+            key,
+            ledger,
+            next: afterStep(ledger.run, current.quiet.has(sessionID) ? { ...step, tools: [] } : step, sessionID),
+          },
+        ]
+      })
+    const verdict = (results: ReturnType<typeof apply>) =>
+      results.find((item) => item.next.verdict.state === "stopped") ??
+      results.find((item) => item.next.verdict.state === "warn") ??
+      results[0]
 
     return Service.of({
       arm: Effect.fn("SpendGuard.arm")(function* (sessionID, budget) {
         yield* Ref.update(state, (current) => {
           const rootID = rootIn(current, sessionID)
-          const run = current.runs.get(rootID)
-          if (!run) return { ...current, armed: new Map(current.armed).set(rootID, { budget, tighten: false }) }
-          // A new cap may warn again.
-          const warned = run.warned && run.budget.usd === budget.usd
-          return { ...current, runs: new Map(current.runs).set(rootID, { ...run, budget, warned }) }
+          const key = current.active.get(rootID)
+          const ledger = key === undefined ? undefined : current.ledgers.get(key)
+          if (!ledger || key === undefined)
+            return { ...current, armed: new Map(current.armed).set(rootID, { budget, tighten: false }) }
+          const warned = ledger.run.warned && ledger.run.budget.usd === budget.usd
+          return {
+            ...current,
+            ledgers: new Map(current.ledgers).set(key, { ...ledger, run: { ...ledger.run, budget, warned } }),
+          }
         })
       }),
       tighten: Effect.fn("SpendGuard.tighten")(function* (sessionID, budget) {
         yield* Ref.update(state, (current) => {
           const rootID = rootIn(current, sessionID)
-          const run = current.runs.get(rootID)
-          if (run) {
-            const next = tighter(run.budget, budget)
-            const warned = run.warned && run.budget.usd === next.usd
-            return { ...current, runs: new Map(current.runs).set(rootID, { ...run, budget: next, warned }) }
+          const key = runKey(current, sessionID)
+          const ledger = key === undefined ? undefined : current.ledgers.get(key)
+          if (ledger && key !== undefined) {
+            const next = tighter(ledger.run.budget, budget)
+            const warned = ledger.run.warned && ledger.run.budget.usd === next.usd
+            return {
+              ...current,
+              ledgers: new Map(current.ledgers).set(key, { ...ledger, run: { ...ledger.run, budget: next, warned } }),
+            }
           }
           const held = current.armed.get(rootID)
           return {
@@ -421,35 +503,118 @@ const layer = Layer.effect(
       }),
       begin: Effect.fn("SpendGuard.begin")(function* (rootID, fallback) {
         yield* Ref.update(state, (current) => {
-          if (current.runs.has(rootID)) return current
+          if (current.active.has(rootID)) return current
           const armed = new Map(current.armed)
           armed.delete(rootID)
           const held = current.armed.get(rootID)
           const budget = held ? (held.tighten ? tighter(fallback, held.budget) : held.budget) : (fallback ?? {})
-          const run = start(rootID, budget, !current.quiet.has(rootID))
-          return { ...current, armed, runs: new Map(current.runs).set(rootID, run) }
+          const bindings = new Map(current.bindings)
+          current.roots.forEach((owner, childID) => {
+            if (owner === rootID && !bindings.has(childID))
+              bindings.set(childID, { run: current.next, scopes: [], live: true })
+          })
+          return {
+            ...current,
+            next: current.next + 1,
+            armed,
+            bindings,
+            active: new Map(current.active).set(rootID, current.next),
+            ledgers: new Map(current.ledgers).set(current.next, {
+              kind: "run",
+              id: `run:${current.next}`,
+              lineage: current.next,
+              run: start(rootID, budget, !current.quiet.has(rootID)),
+            }),
+          }
         })
       }),
       ignoreLoops: Effect.fn("SpendGuard.ignoreLoops")(function* (sessionID) {
         yield* Ref.update(state, (current) => {
           const quiet = new Set(current.quiet).add(sessionID)
-          const run = current.runs.get(sessionID)
-          if (!run) return { ...current, quiet }
-          return { ...current, quiet, runs: new Map(current.runs).set(sessionID, { ...run, loopRules: false }) }
+          const key = current.active.get(sessionID)
+          const ledger = key === undefined ? undefined : current.ledgers.get(key)
+          if (!ledger || key === undefined) return { ...current, quiet }
+          return {
+            ...current,
+            quiet,
+            ledgers: new Map(current.ledgers).set(key, { ...ledger, run: { ...ledger.run, loopRules: false } }),
+          }
         })
       }),
-      link: Effect.fn("SpendGuard.link")(function* (childID, parentID) {
-        yield* Ref.update(state, (current) => ({
-          ...current,
-          roots: new Map(current.roots).set(childID, rootIn(current, parentID)),
-        }))
+      link: Effect.fn("SpendGuard.link")(function* (childID, parentID, options) {
+        yield* Ref.update(state, (current) => {
+          const rootID = rootIn(current, parentID)
+          if (childID === rootID) return current
+          const roots = new Map(current.roots).set(childID, rootID)
+          const existing = current.bindings.get(childID)
+          // Repeated admission may tighten an active child's cap; it never resets the amount already spent.
+          if (existing && !options?.renew) {
+            const ledgers = new Map(current.ledgers)
+            existing.scopes.forEach((key) => {
+              const ledger = ledgers.get(key)
+              const budget =
+                ledger?.kind === "child" && ledger.id === childID
+                  ? options?.budget
+                  : ledger?.kind === "batch" && ledger.id === options?.batch?.id
+                    ? options.batch.budget
+                    : undefined
+              if (ledger && budget)
+                ledgers.set(key, { ...ledger, run: { ...ledger.run, budget: tighter(ledger.run.budget, budget) } })
+            })
+            return { ...current, roots, ledgers }
+          }
+          const launch = runKey(current, parentID, true)
+          if (launch === undefined) return { ...current, roots }
+          const ledgers = new Map(current.ledgers)
+          const scopes = [...(current.bindings.get(parentID)?.scopes ?? [])]
+          const batch = options?.batch
+          const found = batch
+            ? [...ledgers].find(
+                ([, ledger]) => ledger.kind === "batch" && ledger.lineage === launch && ledger.id === batch.id,
+              )
+            : undefined
+          const batchKey = batch ? (found?.[0] ?? current.next) : undefined
+          if (batch && batchKey !== undefined) {
+            ledgers.set(
+              batchKey,
+              found
+                ? { ...found[1], run: { ...found[1].run, budget: tighter(found[1].run.budget, batch.budget ?? {}) } }
+                : { kind: "batch", id: batch.id, lineage: launch, run: start(rootID, batch.budget ?? {}, false) },
+            )
+            scopes.push(batchKey)
+          }
+          const childKey = current.next + Number(batch !== undefined && !found)
+          ledgers.set(childKey, {
+            kind: "child",
+            id: childID,
+            lineage: launch,
+            run: start(childID, options?.budget ?? {}, false),
+          })
+          scopes.push(childKey)
+          return {
+            ...current,
+            next: childKey + 1,
+            roots,
+            ledgers,
+            bindings: new Map(current.bindings).set(childID, { run: launch, scopes: [...new Set(scopes)], live: true }),
+          }
+        })
+      }),
+      release: Effect.fn("SpendGuard.release")(function* (sessionID) {
+        yield* Ref.update(state, (current) => {
+          const binding = current.bindings.get(sessionID)
+          return binding
+            ? prune({ ...current, bindings: new Map(current.bindings).set(sessionID, { ...binding, live: false }) })
+            : current
+        })
       }),
       unlink: Effect.fn("SpendGuard.unlink")(function* (sessionID) {
         yield* Ref.update(state, (current) => {
-          if (!current.roots.has(sessionID)) return current
           const roots = new Map(current.roots)
+          const bindings = new Map(current.bindings)
           roots.delete(sessionID)
-          return { ...current, roots }
+          bindings.delete(sessionID)
+          return prune({ ...current, roots, bindings })
         })
       }),
       rootOf: Effect.fn("SpendGuard.rootOf")(function* (sessionID) {
@@ -457,86 +622,124 @@ const layer = Layer.effect(
       }),
       running: Effect.fn("SpendGuard.running")(function* (sessionID) {
         const current = yield* Ref.get(state)
-        return current.runs.has(rootIn(current, sessionID))
+        const key = runKey(current, sessionID)
+        return key !== undefined && current.active.get(rootIn(current, sessionID)) === key
       }),
       record: Effect.fn("SpendGuard.record")(function* (sessionID, input, confirm) {
-        // A session that polices its own loops counts its spend and steps, but not its tool calls.
-        const apply = (current: State, step: Step) => {
-          const found = runOf(current, sessionID)
-          if (!found) return undefined
-          return {
-            found,
-            next: afterStep(found.run, current.quiet.has(sessionID) ? { ...step, tools: [] } : step, sessionID),
-          }
-        }
-        const guess = apply(yield* Ref.get(state), input)?.next.verdict
+        const guess = verdict(apply(yield* Ref.get(state), sessionID, input))?.next.verdict
         const step =
           confirm && !input.patched && guess?.state === "stopped" && guess.reason === "loop"
             ? { ...input, patched: yield* confirm }
             : input
-        const result = yield* Ref.modify(state, (current) => {
-          const applied = apply(current, step)
-          if (!applied) return [undefined, current] as const
-          const next = applied.next
-          if (applied.found.active)
-            return [next, { ...current, runs: new Map(current.runs).set(applied.found.rootID, next.run) }] as const
-          return [next, { ...current, last: new Map(current.last).set(applied.found.rootID, next.run) }] as const
+        const results = yield* Ref.modify(state, (current) => {
+          const results = apply(current, sessionID, step)
+          return [
+            results,
+            {
+              ...current,
+              ledgers: new Map([
+                ...current.ledgers,
+                ...results.map((item) => [item.key, { ...item.ledger, run: item.next.run }] as const),
+              ]),
+            },
+          ] as const
         })
-        if (!result) return { state: "ok" } satisfies Verdict
+        const selected = verdict(results)
+        if (!selected) return { state: "ok" } satisfies Verdict
+        const root = results.find((item) => item.ledger.kind === "run")
+        // Old launch work must not overwrite the new run's spend meter, and a child-only cap must not present
+        // the parent as stopped. Its own session receives the scoped verdict instead.
+        const current = yield* Ref.get(state)
+        const published = root && current.active.get(root.next.run.rootID) === root.key ? root : selected
         yield* events.publish(SessionStatusEvent.Spend, {
-          sessionID: result.run.rootID,
-          state: result.verdict.state,
-          reason: result.verdict.reason,
-          message: result.verdict.message,
-          spentUsd: result.run.spentUsd,
-          capUsd: result.run.budget.usd,
-          steps: result.run.steps,
-          unpricedSteps: result.run.unpricedSteps,
+          sessionID: published === root ? published.next.run.rootID : sessionID,
+          state: published.next.verdict.state,
+          reason: published.next.verdict.reason,
+          message: published.next.verdict.message,
+          spentUsd: published.next.run.spentUsd,
+          capUsd: published.next.run.budget.usd,
+          steps: published.next.run.steps,
+          unpricedSteps: published.next.run.unpricedSteps,
           costKind: step.costKind,
-          estimate: result.verdict.estimate,
+          estimate: published.next.verdict.estimate,
         })
-        return result.verdict
+        if (selected !== published)
+          yield* events.publish(SessionStatusEvent.Spend, {
+            sessionID,
+            state: selected.next.verdict.state,
+            reason: selected.next.verdict.reason,
+            message: selected.next.verdict.message,
+            spentUsd: selected.next.run.spentUsd,
+            capUsd: selected.next.run.budget.usd,
+            steps: selected.next.run.steps,
+            unpricedSteps: selected.next.run.unpricedSteps,
+            costKind: step.costKind,
+            estimate: selected.next.verdict.estimate,
+          })
+        return selected.next.verdict
       }),
       changed: Effect.fn("SpendGuard.changed")(function* (sessionID) {
         yield* Ref.update(state, (current) => {
-          const found = runOf(current, sessionID)
-          const loop = found?.run.loops.get(sessionID)
-          if (!found || !loop?.ring.length) return current
-          const run = { ...found.run, loops: new Map(found.run.loops).set(sessionID, { ...loop, ring: [], stale: [] }) }
-          if (found.active) return { ...current, runs: new Map(current.runs).set(found.rootID, run) }
-          return { ...current, last: new Map(current.last).set(found.rootID, run) }
+          const key = runKey(current, sessionID)
+          const ledger = key === undefined ? undefined : current.ledgers.get(key)
+          const loop = ledger?.run.loops.get(sessionID)
+          if (!ledger || key === undefined || !loop?.ring.length) return current
+          return {
+            ...current,
+            ledgers: new Map(current.ledgers).set(key, {
+              ...ledger,
+              run: { ...ledger.run, loops: new Map(ledger.run.loops).set(sessionID, { ...loop, ring: [], stale: [] }) },
+            }),
+          }
         })
       }),
       stopped: Effect.fn("SpendGuard.stopped")(function* (sessionID) {
-        return runOf(yield* Ref.get(state), sessionID)?.run.stopped
+        const current = yield* Ref.get(state)
+        return keys(current, sessionID)
+          .map((key) => current.ledgers.get(key)?.run.stopped)
+          .find((stop) => stop !== undefined)
       }),
       end: Effect.fn("SpendGuard.end")(function* (rootID) {
         yield* Ref.update(state, (current) => {
           const armed = new Map(current.armed)
           armed.delete(rootID)
-          const run = current.runs.get(rootID)
-          if (!run) return { ...current, armed }
-          const runs = new Map(current.runs)
-          runs.delete(rootID)
+          const key = current.active.get(rootID)
+          if (key === undefined) return { ...current, armed }
+          const active = new Map(current.active)
+          active.delete(rootID)
           const last = new Map(current.last)
           last.delete(rootID)
-          last.set(rootID, run)
-          // A root whose finished run falls out of `last` also loses its subagent links, unless it runs again.
-          const dropped = new Set([...last.keys()].slice(0, -LAST_RUNS).filter((id) => !runs.has(id)))
-          return {
-            ...current,
-            armed,
-            runs,
-            roots: new Map([...current.roots].filter((entry) => !dropped.has(entry[1]))),
-            quiet: new Set([...current.quiet].filter((id) => !dropped.has(rootIn(current, id)))),
-            last: new Map([...last].slice(-LAST_RUNS)),
-          }
+          last.set(rootID, key)
+          return prune({ ...current, armed, active, last })
         })
       }),
       snapshot: Effect.fn("SpendGuard.snapshot")(function* (sessionID) {
         const current = yield* Ref.get(state)
-        const rootID = rootIn(current, sessionID)
-        return current.runs.get(rootID) ?? current.last.get(rootID)
+        const key = runKey(current, sessionID, true)
+        return key === undefined ? undefined : current.ledgers.get(key)?.run
+      }),
+      scopes: Effect.fn("SpendGuard.scopes")(function* (sessionID) {
+        const current = yield* Ref.get(state)
+        const key = runKey(current, sessionID, true)
+        return [
+          ...new Set([...(key === undefined ? [] : [key]), ...(current.bindings.get(sessionID)?.scopes ?? [])]),
+        ].flatMap((key) => {
+          const ledger = current.ledgers.get(key)
+          return ledger
+            ? [
+                {
+                  kind: ledger.kind,
+                  id: ledger.id,
+                  budget: ledger.run.budget,
+                  spentUsd: ledger.run.spentUsd,
+                  steps: ledger.run.steps,
+                  unpricedSteps: ledger.run.unpricedSteps,
+                  costKind: ledger.run.costKind,
+                  stopped: ledger.run.stopped,
+                },
+              ]
+            : []
+        })
       }),
     })
   }),
