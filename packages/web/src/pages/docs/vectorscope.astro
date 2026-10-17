@@ -222,7 +222,7 @@ vector github review --pr 482 --dry-run</code><button class="doc-cmd-copy" type=
             A review is not a diff in a prompt. Each specialist gets a read-only session and, with it:
           </p>
           <ul class="feature-list">
-            <li><strong>The changed files at head</strong><span>The diff, and the reviewer opens the changed files in full. On an untrusted pull request the working tree is the base branch, so each changed file's head version comes with the prompt: once, as a numbered view with its added and removed lines marked in place of its diff, where that is no longer than the two together. A file over 200 lines keeps 20 lines around each change and folds the rest, and a file too large to include is shown by its hunks with context. A re-review shows files with nothing new by their changed lines only.</span></li>
+            <li><strong>The changed files at head</strong><span>The diff, and the reviewer opens the changed files in full. On an untrusted pull request the working tree is the base branch, so the prompt carries each changed file's head version, once: a numbered view with the added and removed lines marked replaces its diff where that is no longer than both together. A file over 200 lines keeps 20 lines around each change and folds the rest; a file too large to include is shown by its hunks with context. A re-review shows files with nothing new by their changed lines only.</span></li>
             <li><strong>Their callers</strong><span>Declarations found in the added lines, then grep hits for where those symbols are used elsewhere.</span></li>
             <li><strong>Their history</strong><span><code>git log</code> and blame for the changed ranges, so a line that was deliberately written that way reads as such.</span></li>
             <li><strong>The conversation</strong><span>Human review comments already on the pull request.</span></li>
@@ -248,7 +248,7 @@ vector github review --pr 482 --dry-run</code><button class="doc-cmd-copy" type=
             With <code>triageModel</code> set in <code>.vector/review.json</code>, the review and security passes run on
             that model, and every finding above a nit is then checked on your review model, even with
             <code>verify</code> set to off. Only the findings your review model confirmed are posted. If that check
-            can't finish, for lack of budget or time, the cheaper pass's findings are left out and the summary says so.
+            doesn't finish, the cheaper pass's findings are left out and the summary says so.
             Nits, when you turn them on, are listed in the summary without that check. <code>vector review</code> and
             the desktop panel list what each pass spent when a review has more than one pass.
           </p>
