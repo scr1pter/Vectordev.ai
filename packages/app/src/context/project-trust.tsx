@@ -4,7 +4,7 @@ import { batch, createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
 import { ScopedKey, type ServerScope } from "@/utils/server-scope"
-import { projectTrustAnswer, type ProjectTrustAnswer } from "./project-trust-policy"
+import { projectTrustAnswer, projectTrustStatus, type ProjectTrustAnswer } from "./project-trust-policy"
 
 /**
  * One store of trust answers for the whole app, so every open project, Settings and the project menus read and write
@@ -50,7 +50,7 @@ export const { use: useProjectTrust, provider: ProjectTrustProvider } = createSi
       async approve(client: VectorClient, scope: ServerScope) {
         const status = await client.config.trust
           .approve()
-          .then((result) => result.data)
+          .then((result) => projectTrustStatus(result.data))
           .catch(() => undefined)
         if (!status?.trusted) return
         batch(() => {

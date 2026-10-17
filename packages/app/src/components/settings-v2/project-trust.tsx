@@ -3,6 +3,7 @@ import { getFilename } from "@vectordevai/core/util/path"
 import { createMemo, createResource, createSignal, For, Show } from "solid-js"
 import { useGlobal } from "@/context/global"
 import { useProjectTrust } from "@/context/project-trust"
+import { projectTrustStatus } from "@/context/project-trust-policy"
 import { useServer } from "@/context/server"
 import type { ServerScope } from "@/utils/server-scope"
 import {
@@ -32,7 +33,7 @@ export function SettingsProjectTrustV2(props: { repositoryPath?: string; session
           const client = input.sdk.createClient({ directory: folder.path })
           return client.config.trust
             .get()
-            .then((result) => result.data)
+            .then((result) => projectTrustStatus(result.data))
             .catch(() => undefined)
             .then((status) => ({ ...folder, client, scope: input.sdk.scope, status }))
         }),

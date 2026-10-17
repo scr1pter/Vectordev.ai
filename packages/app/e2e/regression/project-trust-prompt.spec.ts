@@ -135,3 +135,21 @@ test("asks again when another dialog replaced the question before it was answere
   await expect(question).toHaveCount(0)
   expect(trust.approvals).toBe(1)
 })
+
+test("an engine reply without a trust status leaves the app working and asks nothing", async ({ page }) => {
+  // An older or proxied engine can answer /config/trust with something that is not a status.
+  await mockStressTimeline(page)
+  await installTimelineSettings(page)
+  await installStressTasks(page, { draftID: "draft_project_trust" })
+  const trust = { reads: 0 }
+  await page.route(
+    (url) => url.pathname === "/config/trust",
+    (route) => {
+      trust.reads += 1
+      return route.fulfill({ json: {} })
+    },
+  )
+  await page.goto(stressDraftHref("draft_project_trust"))
+  await expectNoTrustDialog(page, trust, 0)
+  await expect(page.getByText("Something went wrong")).toHaveCount(0)
+})

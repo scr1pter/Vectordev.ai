@@ -8,7 +8,12 @@ import { createEffect, createMemo, createResource, createSignal, onCleanup, Show
 import { useGlobal } from "@/context/global"
 import { useLanguage } from "@/context/language"
 import { useProjectTrust } from "@/context/project-trust"
-import { projectTrustPrompt, projectTrustRecord, type ProjectTrustPrompt } from "@/context/project-trust-policy"
+import {
+  projectTrustPrompt,
+  projectTrustRecord,
+  projectTrustStatus,
+  type ProjectTrustPrompt,
+} from "@/context/project-trust-policy"
 import { useSDK } from "@/context/sdk"
 import type { ServerConnection } from "@/context/server"
 import { showToast } from "@/utils/toast"
@@ -30,7 +35,7 @@ export function ProjectTrustPrompt() {
     (input) =>
       input.directory.client.config.trust
         .get()
-        .then((result) => result.data)
+        .then((result) => projectTrustStatus(result.data))
         .catch(() => undefined),
   )
 
@@ -78,7 +83,7 @@ export function ProjectTrustMenuItem(props: { server: ServerConnection.Any; dire
     (input) =>
       input.client.config.trust
         .get()
-        .then((result) => result.data)
+        .then((result) => projectTrustStatus(result.data))
         .catch(() => undefined),
   )
 

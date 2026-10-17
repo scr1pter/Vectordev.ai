@@ -8,6 +8,19 @@ export type ProjectTrustAnswer = "trusted" | "dismissed"
 
 export type ProjectTrustPrompt = "ask" | "changed"
 
+/**
+ * Reads the engine's trust status, dropping a reply that is not one, such as an older or proxied engine's answer to a
+ * route it does not have. Acting on a reply without a workspace would ask about, and remember, no repository at all.
+ */
+export function projectTrustStatus(value: unknown): ProjectTrustStatus | undefined {
+  if (typeof value !== "object" || value === null) return
+  const status = value as Record<string, unknown>
+  if (typeof status.workspace !== "string" || !status.workspace) return
+  if (typeof status.trusted !== "boolean" || typeof status.ignored !== "boolean") return
+  if (typeof status.settings !== "boolean") return
+  return { workspace: status.workspace, trusted: status.trusted, ignored: status.ignored, settings: status.settings }
+}
+
 /** Reads a stored answer, dropping anything the app never writes. */
 export function projectTrustAnswer(value: unknown): ProjectTrustAnswer | undefined {
   if (value === "trusted" || value === "dismissed") return value

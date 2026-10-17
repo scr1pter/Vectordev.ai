@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import path from "node:path"
 import { dict } from "../i18n/en"
-import { projectTrustAnswer, projectTrustPrompt, projectTrustRecord } from "./project-trust-policy"
+import { projectTrustAnswer, projectTrustPrompt, projectTrustRecord, projectTrustStatus } from "./project-trust-policy"
 
 describe("trust wording", () => {
   // Vector has repositories, not projects (owner rule), so the question reads "Trust this repository?".
@@ -94,5 +94,24 @@ describe("projectTrustAnswer", () => {
     expect(projectTrustAnswer("yes")).toBeUndefined()
     expect(projectTrustAnswer(true)).toBeUndefined()
     expect(projectTrustAnswer(undefined)).toBeUndefined()
+  })
+})
+
+describe("projectTrustStatus", () => {
+  test("reads the engine's status", () => {
+    const status = { workspace: "/work/app", trusted: false, ignored: true, settings: true }
+    expect(projectTrustStatus(status)).toEqual(status)
+    expect(projectTrustStatus({ ...status, extra: 1 })).toEqual(status)
+  })
+
+  test("drops a reply that is not a status, so the app neither crashes nor asks", () => {
+    expect(projectTrustStatus({})).toBeUndefined()
+    expect(projectTrustStatus({ trusted: false, ignored: true, settings: true })).toBeUndefined()
+    expect(projectTrustStatus({ workspace: "", trusted: false, ignored: true, settings: true })).toBeUndefined()
+    expect(projectTrustStatus({ workspace: "/work/app", trusted: "no", ignored: true, settings: true })).toBeUndefined()
+    expect(projectTrustStatus({ workspace: "/work/app", trusted: false, ignored: true })).toBeUndefined()
+    expect(projectTrustStatus("<!doctype html>")).toBeUndefined()
+    expect(projectTrustStatus(null)).toBeUndefined()
+    expect(projectTrustStatus(undefined)).toBeUndefined()
   })
 })
