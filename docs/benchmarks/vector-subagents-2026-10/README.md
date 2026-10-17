@@ -17,6 +17,25 @@ These figures are modeled USD, not invoices. The original scripts used implicit 
 
 `router-smoke-invalid.json` preserves an early harness validation failure: the actor router incorrectly required a task ID from foreground results, although Claude Code returns the report directly. The operation scripts and fixture checks completed, but those cells were invalid under that router. The router now requires IDs only for background launches. They must not be selected as final comparison evidence.
 
+## Matched candidate results
+
+The candidate matrix pins `bcce917eb`, a clean merge of integration candidate `287b0fc43` with the strict verification harness and baseline archives. `candidate-*-attempt-1.json` contains all 24 cells; all are valid. Baseline `bdec3b29e` was driven by the same request-generating harness, with the strict verification receipts recorded in `baseline-*-verified.json`. Bun was 1.3.14 and Claude Code was 2.1.215. Later release fixes need their own request-shape check before these numbers are attributed to that release.
+
+Every dollar below is a modeled offline estimate. Each pair is **cold / second session** within a fresh simulated-cache run.
+
+| Scenario | Vector before | Vector candidate | Claude Code | Candidate requests, Vector / Claude |
+| --- | ---: | ---: | ---: | ---: |
+| Foreground Explore | $0.0645 / $0.0258 | $0.0700 / $0.0275 | $0.2137 / $0.1037 | 8 / 8 |
+| Foreground General | $0.0681 / $0.0245 | $0.0755 / $0.0263 | $0.2213 / $0.1005 | 8 / 8 |
+| Concurrent readers | Unavailable in this control protocol | $0.0914 / $0.0489 | $0.2736 / $0.1522 | 13 / 13 |
+| Dependency handoff | Unavailable in this control protocol | $0.1007 / $0.0427 | $0.2873 / $0.1550 | 12 / 13 |
+| Steer in flight | Unavailable in this control protocol | $0.0875 / $0.0382 | $0.2198 / $0.1123 | 10 / 9 |
+| Stop in flight | Unavailable in this control protocol | $0.0746 / $0.0319 | $0.2052 / $0.1086 | 8 / 8 |
+
+The new controls increase the matched foreground estimate: Explore rises **8.6% cold / 6.5% second-session** and General **11.0% / 7.3%**. Request counts stay unchanged. The parent's stable system/tool prefix grows by approximately 1,125 estimated tokens, including the richer task schema and `task_manage`; General children also receive the 519-token management definition. Explore's read-only tool set and prefix stay unchanged. This upgrade does not establish a cost reduction against the previous Vector implementation.
+
+For the new workflows, the old engine lacks `task_manage`; those baseline cells were not run and have no equivalent completion/cost result. The new cells verify useful behavior, not a lower cost against an unavailable baseline. Dependency adapters differ as described below, and Claude Code's extra prerequisite-wait turn is counted. Vector's extra completion-notification response in the steering case is also counted. Small input differences between sessions reflect interleaving and notification timing. No result here supports a live cheaper/faster claim or passes the historical model-behavior gate.
+
 ## Revised scenarios
 
 - `delegate-explore` and `delegate-general`: the original foreground workloads with explicit mode selection.
