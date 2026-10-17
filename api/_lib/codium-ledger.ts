@@ -24,9 +24,13 @@ const Entry = Schema.Struct({
   disputed: Schema.Boolean,
   stripeFee: Schema.NullOr(Schema.Number),
   stripeNet: Schema.Number,
+  // The credits the purchase granted before any refund or dispute.
+  granted: Schema.Number,
   credits: Schema.Number,
   openRouterFee: Schema.Number,
   profit: Schema.Number,
+  // A top-up's purchased-credit key usage when this entry was written; see codiumLedger.
+  walletUsage: Schema.optional(Schema.Number),
   updatedAt: Schema.Number,
 })
 type Entry = typeof Entry.Type
@@ -39,12 +43,7 @@ const LEDGER_KEY = "vector:codium:ledger"
  * not a paid Codium purchase by this account is left out. The read and the write happen under the account's lease,
  * so a slower notification that read the charge before a refund cannot land after, and undo, the one that read it.
  */
-export async function recordCodiumCharge(
-  id: string,
-  chargeID: string,
-  fetcher: typeof fetch = fetch,
-  now = Date.now(),
-) {
+export async function recordCodiumCharge(id: string, chargeID: string, fetcher: typeof fetch = fetch) {
   return withCodiumLease(
     id,
     async () => {
@@ -96,6 +95,17 @@ export async function recordCodiumCharge(
       const stripeFee = fee === undefined ? null : fee + sum("fee")
       const stripeNet = (net ?? price) - refunded + sum("net")
       const openRouterFee = Math.ceil((credits * openRouterFeePercent()) / 100)
+      const wallet =
+        sale.kind === "topup" && account.wallet
+          ? (await openRouterManagement(`/${encodeURIComponent(account.wallet.hash)}`, undefined, fetcher)).data
+          : undefined
+      const usage = stripeRecord(wallet) ? wallet.usage : undefined
+      if (wallet !== undefined && (typeof usage !== "number" || !Number.isFinite(usage) || usage < 0))
+        throw new ApiError(
+          503,
+          "CODIUM_LEDGER_USAGE",
+          "The purchased-credit usage for the Codium ledger could not be read.",
+        )
       const entry: Entry = {
         charge: chargeID,
         kind: sale.kind,
@@ -107,10 +117,14 @@ export async function recordCodiumCharge(
         disputed,
         stripeFee,
         stripeNet,
+        granted: sale.credits,
         credits,
         openRouterFee,
         profit: stripeNet - credits - openRouterFee,
-        updatedAt: now,
+        // A top-up bought before its account's purchased-credit key exists has spent nothing yet.
+        walletUsage: sale.kind !== "topup" ? undefined : typeof usage === "number" ? Math.ceil(usage * 100 - 1e-6) : 0,
+        // Written under the lease, so the latest entry holds the latest usage.
+        updatedAt: Date.now(),
       }
       await persistentStore(["HSET", LEDGER_KEY, chargeID, JSON.stringify(entry)], fetcher)
       return entry
@@ -119,10 +133,42 @@ export async function recordCodiumCharge(
   )
 }
 
-/** Every entry, newest first. */
+/**
+ * Every entry, newest first, counting what buyers spent before a refund or dispute took a top-up back. An entry's
+ * credits are what its purchase still pays for, but a key's usage stays when its limit drops, and every top-up of an
+ * account shares one key. So that spend is the key's latest usage above all the account's top-up credits, and it is
+ * the reversed top-ups' cost, oldest first, each up to the credits its reversal took away (`reversedSpend`).
+ */
 export async function codiumLedger(fetcher: typeof fetch = fetch) {
-  const entries = new Map((await ledgerPage(fetcher)).map((entry) => [entry.charge, entry]))
-  return [...entries.values()].sort((a, b) => b.created - a.created)
+  const entries = [...new Map((await ledgerPage(fetcher)).map((entry) => [entry.charge, entry])).values()].sort(
+    (a, b) => a.created - b.created,
+  )
+  const topups = entries.filter((entry) => entry.kind === "topup")
+  const unpaid = new Map(
+    [...new Set(topups.map((entry) => entry.account))].map((account) => {
+      const owned = topups.filter((entry) => entry.account === account)
+      const latest = owned.reduce((last, entry) => (entry.updatedAt >= last.updatedAt ? entry : last))
+      return [account, Math.max(0, (latest.walletUsage ?? 0) - owned.reduce((sum, entry) => sum + entry.credits, 0))]
+    }),
+  )
+  const fee = openRouterFeePercent()
+  return entries
+    .map((entry) => {
+      const left = unpaid.get(entry.account) ?? 0
+      const spent = entry.kind === "topup" ? Math.max(0, Math.min(left, entry.granted - entry.credits)) : 0
+      if (spent === 0) return { ...entry, reversedSpend: 0 }
+      unpaid.set(entry.account, left - spent)
+      const credits = entry.credits + spent
+      const openRouterFee = Math.ceil((credits * fee) / 100)
+      return {
+        ...entry,
+        credits,
+        openRouterFee,
+        profit: entry.stripeNet - credits - openRouterFee,
+        reversedSpend: spent,
+      }
+    })
+    .reverse()
 }
 
 /** The owner's view: totals overall and by month, with the funding check's last reading. */
@@ -257,9 +303,9 @@ async function ledgerPage(fetcher: typeof fetch, cursor = "0"): Promise<Entry[]>
   return next === "0" ? entries : [...entries, ...(await ledgerPage(fetcher, next))]
 }
 
-const month = (entry: Entry) => new Date(entry.created).toISOString().slice(0, 7)
+const month = (entry: { created: number }) => new Date(entry.created).toISOString().slice(0, 7)
 
-function totals(entries: readonly Entry[]) {
+function totals(entries: readonly (Entry & { reversedSpend: number })[]) {
   return entries.reduce(
     (sum, entry) => ({
       payments: sum.payments + 1,
@@ -268,6 +314,7 @@ function totals(entries: readonly Entry[]) {
       stripeFee: sum.stripeFee + (entry.stripeFee ?? 0),
       stripeNet: sum.stripeNet + entry.stripeNet,
       credits: sum.credits + entry.credits,
+      reversedSpend: sum.reversedSpend + entry.reversedSpend,
       openRouterFee: sum.openRouterFee + entry.openRouterFee,
       profit: sum.profit + entry.profit,
       feesPending: sum.feesPending + (entry.stripeFee === null ? 1 : 0),
@@ -279,6 +326,7 @@ function totals(entries: readonly Entry[]) {
       stripeFee: 0,
       stripeNet: 0,
       credits: 0,
+      reversedSpend: 0,
       openRouterFee: 0,
       profit: 0,
       feesPending: 0,

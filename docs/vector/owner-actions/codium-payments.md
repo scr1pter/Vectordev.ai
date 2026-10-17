@@ -132,11 +132,16 @@ curl -H "Authorization: Bearer $CODIUM_OWNER_SECRET" "https://vectordev.ai/api/m
 
 All amounts are US cents. The answer has three parts:
 
-- **`totals`** and **`months`** add up `price`, `refunded`, `stripeFee`, `stripeNet`, `credits`, `openRouterFee` and `profit`.
+- **`totals`** and **`months`** add up `price`, `refunded`, `stripeFee`, `stripeNet`, `credits`, `reversedSpend`, `openRouterFee` and `profit`.
 - **`funding`** is the funding check's last reading: whether sales are open, why they are paused (`short` or `unavailable`), the balance, what customers hold, what open checkouts reserve and what is needed. After a check that could not finish, the amounts are `null` and `error` names what failed.
 - **`entries`**, with `?entries=1`, lists each payment.
 
-`profit` is Stripe's net minus the credits minus OpenRouter's fee. It assumes every credit granted gets spent, so monthly credits that expire unused are extra margin it does not show. A refunded or disputed month counts what was spent before the reversal. `feesPending` counts charges whose Stripe fee had not settled yet; they update on their own.
+`profit` is Stripe's net minus the credits minus OpenRouter's fee. It assumes every credit granted gets spent, so monthly credits that expire unused are extra margin it does not show. A refunded or disputed payment still counts what was spent before the reversal:
+
+- a month counts its key's usage at the time;
+- top-ups share one purchased-credit key, so for them it is the key's usage above the credits still paid for. That spend is counted against the account's reversed top-ups, oldest first, each up to the credits its reversal took away, and shows as `reversedSpend`. A later top-up pays for that spend first, since the buyer gets only what is left of it, so `reversedSpend` then falls back to zero.
+
+`feesPending` counts charges whose Stripe fee had not settled yet; they update on their own.
 
 Anyone without the secret, signed-in buyers included, gets a 404. The ledger shows what each purchase includes, so never share its output or the secret.
 

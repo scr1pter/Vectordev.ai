@@ -923,6 +923,56 @@ describe("the private profit ledger", () => {
     expect(await entry(bought.charge.id)).toMatchObject({ refunded: 1000, credits: 0 })
   })
 
+  test("a top-up spent before a lost dispute or a refund still costs what was spent", async () => {
+    const first = await topUp(10)
+    await reconcileModelPlanEvent(event("checkout.session.completed", first.session), fetcher)
+    // The buyer spends $4.90 of the top-up's $5 of fixture credits, then disputes the charge and wins nothing back.
+    openRouter.keys.get("codium_key_1")!.data.usage = 4.9
+    first.charge.disputed = true
+    stripe.disputes = [
+      {
+        charge: first.charge.id,
+        payment_intent: first.payment.id,
+        status: "lost",
+        balance_transactions: [{ amount: -1000, fee: 1500, net: -2500 }],
+      },
+    ]
+    await reconcileModelPlanEvent(event("charge.dispute.closed", { charge: first.charge.id }), fetcher)
+    expect(openRouter.keys.get("codium_key_1")?.data).toMatchObject({ limit: 0, disabled: true })
+    // Stripe's net is the $9.41 kept less the $25 withdrawal; the $4.90 spent and OpenRouter's 5.5% on it are Vector's.
+    expect(await entry(first.charge.id)).toMatchObject({
+      disputed: true,
+      granted: 500,
+      credits: 490,
+      reversedSpend: 490,
+      openRouterFee: 27,
+      profit: 941 - 2500 - 490 - 27,
+    })
+
+    // A second top-up first pays for that spend: the buyer can use $20.10 of its $25, and nothing is lost.
+    const second = await topUp(50)
+    await reconcileModelPlanEvent(event("checkout.session.completed", second.session), fetcher)
+    await reconcileModelPlanEvent(event("charge.succeeded", { ...second.charge }), fetcher)
+    expect(await entry(first.charge.id)).toMatchObject({ credits: 0, reversedSpend: 0 })
+    expect((await codiumLedgerSummary(fetcher)).totals).toMatchObject({ credits: 2500, reversedSpend: 0 })
+
+    // Spent to its limit and then half refunded, it costs everything spent, not the $12.50 still paid for. The spend
+    // above what is still paid for goes to the reversed top-ups oldest first.
+    openRouter.keys.get("codium_key_1")!.data.usage = 25
+    Object.assign(second.charge, { amount_refunded: 2500 })
+    await reconcileModelPlanEvent(event("charge.refunded", { ...second.charge }), fetcher)
+    expect(openRouter.keys.get("codium_key_1")?.data).toMatchObject({ limit: 12.5, disabled: true })
+    expect(await entry(first.charge.id)).toMatchObject({ credits: 500, reversedSpend: 500 })
+    expect(await entry(second.charge.id)).toMatchObject({ granted: 2500, credits: 2000, reversedSpend: 750 })
+    expect((await codiumLedgerSummary(fetcher)).totals).toMatchObject({ credits: 2500, reversedSpend: 1250 })
+
+    // A third top-up pays for that spend in turn, so the reversals cost nothing beyond what is paid for.
+    const third = await topUp(200)
+    await reconcileModelPlanEvent(event("checkout.session.completed", third.session), fetcher)
+    await reconcileModelPlanEvent(event("charge.succeeded", { ...third.charge }), fetcher)
+    expect((await codiumLedgerSummary(fetcher)).totals).toMatchObject({ credits: 1250 + 10000, reversedSpend: 0 })
+  })
+
   test("a disputed month costs what was spent before it, plus Stripe's dispute fee, until the dispute is won", async () => {
     await redis(["SET", accountKey, JSON.stringify({ customer: "cus_buyer" })])
     const monthly = subscribe(50)
