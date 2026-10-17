@@ -1,5 +1,10 @@
-import { modelPlanStripe, stripeRecord } from "../../../api/_lib/model-plan-stripe"
-import { MODEL_PLAN_PRICES, modelPlans, modelTopups } from "../../../api/_lib/model-plan-config"
+import {
+  MODEL_PLAN_STRIPE_VERSION,
+  MODEL_PLAN_WEBHOOK_EVENTS,
+  modelPlanStripe,
+  stripeRecord,
+} from "../../../api/_lib/model-plan-stripe"
+import { MODEL_PLAN_PRICES, modelPlanOrigin, modelPlans, modelTopups } from "../../../api/_lib/model-plan-config"
 
 // Dry-run by default. Execute with --apply only in the intended Stripe account.
 if (!Bun.argv.includes("--apply")) {
@@ -14,6 +19,9 @@ if (!Bun.argv.includes("--apply")) {
     })),
   )
   console.log("Also creates a billing portal with payment-method updates, invoices and cancellation at period end.")
+  console.log(
+    `And a webhook to ${modelPlanOrigin()}/api/model-plans/webhook (API ${MODEL_PLAN_STRIPE_VERSION}) for: ${MODEL_PLAN_WEBHOOK_EVENTS.join(", ")}.`,
+  )
   console.log(
     "No changes made. Set STRIPE_SECRET_KEY to a test key and run again with --apply to prepare test billing.",
   )
@@ -95,6 +103,35 @@ const portal = await modelPlanStripe("billing_portal/configurations", {
 })
 if (typeof portal.id !== "string") throw new Error("Stripe did not return a billing portal configuration.")
 console.log(`STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID=${portal.id}`)
+
+// Stripe shows a webhook's signing secret only when it is created, so an existing endpoint is reported, not replaced.
+const webhook = `${modelPlanOrigin()}/api/model-plans/webhook`
+const endpoints = await modelPlanStripe("webhook_endpoints?limit=100")
+const registered = (Array.isArray(endpoints.data) ? endpoints.data.filter(stripeRecord) : []).find(
+  (endpoint) => endpoint.url === webhook,
+)
+if (registered) {
+  const events = Array.isArray(registered.enabled_events) ? registered.enabled_events : []
+  const missing = MODEL_PLAN_WEBHOOK_EVENTS.filter((name) => !events.includes(name) && !events.includes("*"))
+  console.log(
+    `Webhook ${String(registered.id)} already sends to ${webhook}; its signing secret is in the Stripe dashboard.` +
+      (missing.length ? ` Add these events to it: ${missing.join(", ")}.` : ""),
+  )
+} else {
+  const body = new URLSearchParams({
+    url: webhook,
+    api_version: MODEL_PLAN_STRIPE_VERSION,
+    description: "Vector Codium credits and ledger",
+  })
+  MODEL_PLAN_WEBHOOK_EVENTS.forEach((name, index) => body.set(`enabled_events[${index}]`, name))
+  const created = await modelPlanStripe("webhook_endpoints", {
+    method: "POST",
+    idempotency: "vector-codium-webhook-v1",
+    body,
+  })
+  if (typeof created.secret !== "string") throw new Error("Stripe did not return the webhook's signing secret.")
+  console.log(`STRIPE_MODEL_PLAN_WEBHOOK_SECRET=${created.secret}`)
+}
 console.log(
   "Prices are prepared. Keep MODEL_PLANS_ENABLED=false until allowances, model catalog, webhook, funding and live verification are complete.",
 )

@@ -43,7 +43,7 @@ export async function reconcileModelPlanEvent(event: Record<string, unknown>, fe
   // Read current Stripe state instead of applying webhook deltas: event retries
   // and out-of-order refund/dispute notifications cannot grant credits twice.
   await reconcileModelPlanAccount(id, fetcher)
-  const charge = String(event.type).startsWith("charge.dispute.")
+  const charge = /^charge\.(dispute|refund)\./.test(String(event.type))
     ? data.charge
     : String(event.type).startsWith("charge.")
       ? data.id

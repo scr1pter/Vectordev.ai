@@ -732,6 +732,10 @@ describe("the private profit ledger", () => {
       profit: 177,
     })
     expect(openRouter.keys.get("codium_key_2")?.data.limit).toBe(2.5)
+    // A refund's own updates name its charge and rewrite the same entry.
+    await reconcileModelPlanEvent(event("charge.refund.updated", { id: "re_buyer", charge: bought.charge.id }), fetcher)
+    expect(await codiumLedger(fetcher)).toHaveLength(2)
+    expect(await entry(bought.charge.id)).toMatchObject({ refunded: 500, profit: 177 })
   })
 
   test("a disputed month costs what was spent before it, plus Stripe's dispute fee, until the dispute is won", async () => {
