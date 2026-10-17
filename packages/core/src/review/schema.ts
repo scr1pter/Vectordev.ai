@@ -56,7 +56,11 @@ export const REVIEW_REPORT_JSON_SCHEMA = {
           severity: { type: "string", enum: [...SEVERITIES] },
           category: { type: "string", enum: [...CATEGORIES] },
           title: { type: "string", maxLength: MAX_TITLE_CHARS },
-          body: { type: "string", description: "What goes wrong, when, and why, citing the code you read." },
+          body: {
+            type: "string",
+            description:
+              "What goes wrong and when, why it matters, citing the code you read; end with `Fix:` and the concrete change.",
+          },
           suggestion: {
             type: "string",
             description: "The exact replacement for line..endLine, with the same indentation and no fences.",

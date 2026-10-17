@@ -100,6 +100,8 @@ const FIELDS: Record<keyof ReviewConfig, Field> = {
   maxCostUsdPerMonth: number({ min: 0 }),
   timeoutMinutes: number({ min: 1, max: 120 }),
   model,
+  triageModel: model,
+  nits: bool,
   paths,
 }
 

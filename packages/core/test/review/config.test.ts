@@ -103,6 +103,18 @@ describe("parseReviewConfig", () => {
     ])
   })
 
+  test("reads nits and a triage model, and refuses a triage model that is not provider/model", () => {
+    const { config, warnings } = parseReviewConfig({
+      json: JSON.stringify({ nits: true, triageModel: " openrouter/cheap-model ", model: "anthropic/strong" }),
+    })
+    expect(config).toMatchObject({ nits: true, triageModel: "openrouter/cheap-model", model: "anthropic/strong" })
+    expect(warnings).toEqual([])
+    const bad = parseReviewConfig({ json: JSON.stringify({ triageModel: "cheap", nits: "yes" }) })
+    expect(bad.config.triageModel).toBeUndefined()
+    expect(bad.config.nits).toBe(false)
+    expect(bad.warnings).toHaveLength(2)
+  })
+
   test("warns about auto, drafts and unknown keys, and ignores them", () => {
     const { config, warnings } = parseReviewConfig({
       json: '{"auto": false, "drafts": true, "bogus": 1, "__proto__": {"maxComments": 1}, "constructor": 2}',

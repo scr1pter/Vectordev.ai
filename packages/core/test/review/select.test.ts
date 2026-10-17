@@ -182,6 +182,23 @@ describe("selectFindings: filtering", () => {
     expect(selection.dropped).toEqual([{ reason: "duplicate", count: 2 }])
   })
 
+  test("leaves nits and style findings out unless they are asked for", () => {
+    const findings = () => [
+      finding({ line: 52, severity: "nit", category: "docs", title: "logout has no doc comment" }),
+      finding({ path: "src/auth/client.ts", line: 11, category: "style", title: "Prefer a named constant" }),
+      finding({ path: "src/db.ts", line: 101, severity: "blocking", category: "style", title: "Query style hides a bug" }),
+    ]
+    const quiet = run({ findings: findings() })
+    expect(quiet.nits).toEqual([])
+    expect(quiet.inline.map((f) => f.path)).toEqual(["src/db.ts"])
+    expect(quiet.dropped).toEqual([{ reason: "nit", count: 2 }])
+    const asked = run({ findings: findings(), config: { ...CONFIG, nits: true } })
+    expect(asked.dropped).toEqual([])
+    expect(asked.nits.map((f) => f.line)).toEqual([52])
+    const lowest = run({ findings: findings(), config: { ...CONFIG, minSeverity: "nit" } })
+    expect(lowest.dropped).toEqual([])
+  })
+
   test("merges drops counted before selection", () => {
     const selection = run({
       findings: [finding({ confidence: 0.1 })],
@@ -459,6 +476,28 @@ describe("selectFindings: duplicates, continuations and caps", () => {
     expect(apart.dropped).toEqual([])
   })
 
+  test("the same defect further down a file is one finding that names the other lines", () => {
+    const selection = run({
+      anchors: newFile(120),
+      findings: [
+        finding({ path: "src/big.ts", line: 90, title: "Write to the store is not awaited", confidence: 0.8 }),
+        finding({ path: "src/big.ts", line: 12, title: "Store write is not awaited", confidence: 0.95 }),
+        finding({ path: "src/big.ts", line: 40, title: "The store write is not awaited here" }),
+        finding({ path: "src/big.ts", line: 60, category: "tests", title: "Store write is not awaited in tests" }),
+        finding({ path: "src/big.ts", line: 70, severity: "blocking", title: "Store write is not awaited" }),
+      ],
+    })
+    expect(selection.inline.map((f) => [f.line, f.severity, f.category])).toEqual([
+      [70, "blocking", "bug"],
+      [12, "concern", "bug"],
+      [60, "concern", "tests"],
+    ])
+    const folded = selection.inline.find((f) => f.line === 12)!
+    expect(folded.also).toEqual(["src/big.ts:40", "src/big.ts:90"])
+    expect(folded.body).toBe("Explained.\n\nThe same problem is also at lines 40 and 90.")
+    expect(selection.dropped).toEqual([{ reason: "duplicate", count: 2 }])
+  })
+
   test("an earlier finding on an outdated thread is still open when reported again, and stays dismissed", () => {
     const outdated = prior({ line: null })
     const open = run({ findings: [finding({ id: outdated.id, line: 52 })], prior: [outdated] })
@@ -532,7 +571,9 @@ describe("risk", () => {
 
   test("the selection's risk counts every current finding and the still-open ones", () => {
     expect(run({ findings: [finding({ severity: "blocking" })] }).risk).toBe("high")
-    expect(run({ findings: [finding({ severity: "nit" })], sensitiveChanged: true }).risk).toBe("medium")
+    expect(
+      run({ findings: [finding({ severity: "nit" })], sensitiveChanged: true, config: { ...CONFIG, nits: true } }).risk,
+    ).toBe("medium")
     expect(run({ prior: [prior({ severity: "blocking" })] }).risk).toBe("high")
     expect(run({}).risk).toBe("low")
   })

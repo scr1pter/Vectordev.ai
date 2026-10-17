@@ -49,6 +49,8 @@ export interface Finding extends ModelFinding {
   side: Side
   source: "review" | "security"
   verified?: boolean
+  // Other places the same defect was reported in this run, as "path:line". Selection folds them into this finding.
+  also?: string[]
 }
 
 export type AnchorFailure = "file-not-in-diff" | "line-outside-diff" | "no-patch"
@@ -81,6 +83,7 @@ export type DropReason =
   | "duplicate"
   | "dismissed"
   | "rejected-by-verify"
+  | "nit" // a nit or a style finding, while nits are off
 
 export interface PriorFinding {
   id: string
@@ -216,6 +219,11 @@ export interface ReviewConfig {
   maxCostUsdPerMonth: number // 0 = none; install writes REVIEW_MAX_COST_USD_PER_MONTH=50 for paid models
   timeoutMinutes: number
   model?: string // "provider/model"
+  // A cheaper "provider/model" for the first pass. The review and security reviewers run on it, and every finding
+  // above a nit is then double-checked on `model`, so only confirmed findings from the cheap pass are posted.
+  triageModel?: string
+  // Style nits are left out unless this is true or minSeverity is "nit".
+  nits: boolean
   paths: { path: string; instructions: string }[] // JSON alternative to review.md sections
 }
 
@@ -243,5 +251,6 @@ export const DEFAULT_REVIEW_CONFIG: ReviewConfig = {
   maxCostUsdPerPr: 10,
   maxCostUsdPerMonth: 0,
   timeoutMinutes: 12,
+  nits: false,
   paths: [],
 }

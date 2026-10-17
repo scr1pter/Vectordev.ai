@@ -25,6 +25,8 @@ import {
 const NEAR = 3
 // Two nearby findings in one run are the same one only with titles at least this alike (or the same fix or code).
 const SAME_TITLE = 0.3
+// The same defect reported at several places in one file: titles at least this alike, same category and severity.
+const REPEAT_TITLE = 0.6
 // An earlier finding whose thread GitHub marked outdated has no line, so it matches by title alone, this alike.
 const OUTDATED_TITLE = 0.5
 const TEAM_PENALTY = 0.15
@@ -36,6 +38,7 @@ const LARGE_CHANGE = 800
 const DROP_ORDER: DropReason[] = [
   "empty",
   "low-confidence",
+  "nit",
   "ignored-path",
   "unknown-path",
   "duplicate",
@@ -49,7 +52,8 @@ export interface SelectInput {
   head: string
   trust: Trust
   mode: "full" | "incremental"
-  config: Pick<ReviewConfig, "minConfidence" | "minSeverity" | "maxComments" | "maxCommentsPerPr" | "suggestions">
+  config: Pick<ReviewConfig, "minConfidence" | "minSeverity" | "maxComments" | "maxCommentsPerPr" | "suggestions"> &
+    Partial<Pick<ReviewConfig, "nits">>
   prior?: PriorFinding[] // classified by classifyPrior, with current head lines
   focus?: FocusHunk[]
   inlinePosted?: number // state.inlinePosted
@@ -135,14 +139,26 @@ export function computeRisk(input: {
   return input.modelRisk === "medium" || input.modelRisk === "high" ? "medium" : "low"
 }
 
+// Nits are reported only when asked for: `nits: true`, or a minSeverity of "nit".
+export function wantsNits(config: Partial<Pick<ReviewConfig, "nits" | "minSeverity">>): boolean {
+  return config.nits === true || config.minSeverity === "nit"
+}
+
+// A nit, or a style finding short of blocking: what is left out while nits are off.
+export function isNit(finding: Pick<Finding, "severity" | "category">): boolean {
+  return finding.severity === "nit" || (finding.category === "style" && finding.severity !== "blocking")
+}
+
 export function selectFindings(input: SelectInput): Selection {
   const { config } = input
+  const asked = wantsNits(config)
   const drops = new Map<DropReason, number>()
   const drop = (reason: DropReason, count = 1) => drops.set(reason, (drops.get(reason) ?? 0) + count)
   for (const entry of input.dropped ?? []) drop(entry.reason, entry.count)
 
-  // 1–3. Empty findings, ignored and unknown paths, low confidence. A path written as "./x" or "b/x", or a
-  // renamed file's old path, becomes the diff's own path, so matching and anchoring agree.
+  // 1–3. Empty findings, ignored and unknown paths, low confidence, and nits unless they were asked for. A path
+  // written as "./x" or "b/x", or a renamed file's old path, becomes the diff's own path, so matching and anchoring
+  // agree.
   const index = buildAnchorIndex(input.anchors)
   const kept: Finding[] = []
   for (const finding of input.findings) {
@@ -152,6 +168,7 @@ export function selectFindings(input: SelectInput): Selection {
     else if (input.ignored?.(path)) drop("ignored-path")
     else if (!entry && input.knownPath && !input.knownPath(path)) drop("unknown-path")
     else if (finding.confidence < config.minConfidence) drop("low-confidence")
+    else if (!asked && isNit(finding)) drop("nit")
     else kept.push({ ...finding, path })
   }
 
@@ -186,9 +203,23 @@ export function selectFindings(input: SelectInput): Selection {
       other.category = finding.category
   }
 
+  // 4b. The same defect at several places in one file is one finding. The strongest keeps its line and names the
+  // others in its body, so a repeated pattern is one comment instead of one per occurrence.
+  const folded: Finding[] = []
+  for (const finding of unique) {
+    const first = folded.find((entry) => repeats(entry, finding))
+    if (!first) {
+      folded.push(finding)
+      continue
+    }
+    drop("duplicate")
+    first.also = [...(first.also ?? []), `${finding.path}:${finding.line}`]
+  }
+  for (const finding of folded) if (finding.also) finding.body = withAlso(finding.body, finding.also)
+
   // 5. Team memory, then the threshold again.
   const team = input.teamDismissed ?? []
-  const candidates = unique.filter((finding) => {
+  const candidates = folded.filter((finding) => {
     const penalty = team.length ? teamPenalty(finding, team) : 0
     if (!penalty) return true
     finding.confidence = Math.round((finding.confidence - penalty) * 100) / 100
@@ -335,6 +366,27 @@ function sameFinding(a: Finding, b: Finding, code: (finding: Finding) => string)
   const fix = (finding: Finding) => (finding.suggestion ?? "").replace(/\s+/g, " ").trim()
   if (fix(a) && fix(a) === fix(b)) return true
   return a.source !== b.source && code(a) !== "" && code(a) === code(b)
+}
+
+// One defect repeated further down the same file: what sameFinding leaves apart because the lines are far apart.
+function repeats(a: Finding, b: Finding): boolean {
+  return (
+    a.path === b.path &&
+    a.side === b.side &&
+    a.category === b.category &&
+    a.severity === b.severity &&
+    titleSimilarity(a.title, b.title) >= REPEAT_TITLE
+  )
+}
+
+// "path:line" entries of one file, as the sentence a reader sees under the finding.
+function withAlso(body: string, also: readonly string[]): string {
+  const lines = [...new Set(also.map((entry) => Number(entry.slice(entry.lastIndexOf(":") + 1))))].toSorted(
+    (a, b) => a - b,
+  )
+  const list = lines.length === 1 ? lines[0] : `${lines.slice(0, -1).join(", ")} and ${lines.at(-1)}`
+  const sentence = `The same problem is also at ${lines.length === 1 ? "line" : "lines"} ${list}.`
+  return body.trim() ? `${body.trim()}\n\n${sentence}` : sentence
 }
 
 function isInjection(finding: Finding): boolean {
