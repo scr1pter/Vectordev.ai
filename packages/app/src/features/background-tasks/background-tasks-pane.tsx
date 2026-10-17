@@ -689,7 +689,7 @@ function PhaseTable(props: { phase: TaskPhase; tasks: BackgroundTasks }) {
                         class="vector-bg-tasks-agent"
                         title={agentTooltip(agent)}
                         aria-label={`Open ${agent.title} (${KIND_LABEL[agent.kind]}, ${statusWord(agent.status)})`}
-                        disabled={!agent.sessionID}
+                        disabled={!props.tasks.canOpenAgent(agent)}
                         onClick={() => props.tasks.openAgent(agent)}
                       >
                         {/* A check once done; before that the agent's square (a dot
@@ -852,7 +852,7 @@ function AgentDetails(props: { agent: TaskAgent; tasks: BackgroundTasks }) {
                   {index() ? ", " : ""}
                   <button
                     type="button"
-                    disabled={!dependency()?.sessionID}
+                    disabled={!dependency() || !props.tasks.canOpenAgent(dependency()!)}
                     onClick={() => {
                       const agent = dependency()
                       if (agent) props.tasks.openAgent(agent)

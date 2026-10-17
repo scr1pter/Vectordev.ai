@@ -131,7 +131,10 @@ function boardAgent(task: Task.Info, previous?: TaskAgent): TaskAgent {
     cost: task.usage?.cost ?? task.measuredCost ?? previous?.cost,
     unpricedSteps: task.usage?.unpricedSteps ?? previous?.unpricedSteps,
     toolUses: task.usage?.toolUses ?? previous?.toolUses,
-    currentStep: task.currentStep ?? task.lastTool,
+    currentStep:
+      task.connection === "disconnected"
+        ? `Disconnected · last known: ${task.currentStep ?? task.status}`
+        : (task.currentStep ?? task.lastTool),
     ownedPaths: task.ownedPaths,
     dependsOn: task.dependsOn,
     error: task.status === "failed" ? task.reason : undefined,
@@ -175,4 +178,32 @@ export function appendTaskQuestion(prompt: Prompt, agent: Pick<TaskAgent, "title
   const end = prompt.reduce((end, part) => (part.type === "image" ? end : Math.max(end, part.end)), 0)
   const content = `${end ? "\n\n" : ""}${text}`
   return [...prompt, { type: "text", content, start: end, end: end + content.length }]
+}
+
+/** A swarm coordinator owns cancellation of its children; issue one control per scope. */
+export function stoppableAgents(agents: readonly TaskAgent[]) {
+  const unique = [
+    ...new Map(
+      agents
+        .filter((agent) => isLive(agent.status) && agent.task?.controls.stop !== false)
+        .map((agent) => [agent.task?.id ?? agent.sessionID ?? agent.key, agent]),
+    ).values(),
+  ]
+  const swarms = new Set(
+    unique.flatMap((agent) =>
+      agent.task?.groupID && agent.task.id === `swarm:${agent.task.groupID}` ? [agent.task.groupID] : [],
+    ),
+  )
+  return unique.filter(
+    (agent) =>
+      !agent.task?.groupID || !swarms.has(agent.task.groupID) || agent.task.id === `swarm:${agent.task.groupID}`,
+  )
+}
+
+/** Desktop measurements describe the latest workspace run, not the native ledger's lifetime total. */
+export function desktopSpendAgents(agents: readonly TaskAgent[]) {
+  return agents.filter(
+    (agent) =>
+      agent.task && !agent.task.usage && (agent.task.id.startsWith("workspace:") || agent.task.id.startsWith("swarm:")),
+  )
 }

@@ -2,7 +2,14 @@ import { describe, expect, test } from "bun:test"
 import type { Task } from "@vectordevai/schema/task"
 import type { Prompt } from "@/context/prompt"
 import { taskPartLocations, type TaskAgent } from "./subagent-model"
-import { appendTaskQuestion, mergeTaskBoard, taskCost, taskSpend } from "./task-board-model"
+import {
+  appendTaskQuestion,
+  mergeTaskBoard,
+  taskCost,
+  taskSpend,
+  stoppableAgents,
+  desktopSpendAgents,
+} from "./task-board-model"
 
 function observation(input: Partial<Task.Info> = {}): Task.Info {
   return {
@@ -108,4 +115,44 @@ test("Ask Vector appends a task question while preserving the existing draft and
   expect(prompt).toHaveLength(2)
   expect(next[2]).toMatchObject({ type: "text", start: 15 })
   expect(next[2]!.type === "text" && next[2]!.content).toContain("task ses_a")
+})
+
+test("Stop all sends one swarm coordinator control and keeps unrelated children", () => {
+  const root = agent({
+    key: "root",
+    sessionID: undefined,
+    task: observation({ id: "swarm:s", sessionID: undefined, source: "swarm", groupID: "s" }),
+  })
+  const child = agent({ key: "child", task: observation({ id: "swarm:s:child", source: "swarm", groupID: "s" }) })
+  const other = agent({
+    key: "other",
+    sessionID: "ses_other",
+    task: observation({ id: "ses_other", sessionID: "ses_other" }),
+  })
+  expect(stoppableAgents([root, child, other, other]).map((agent) => agent.key)).toEqual(["root", "other"])
+})
+
+test("desktop spend excludes native ledger mirrors and keeps measured dollars separate from tokens", () => {
+  const cards = mergeTaskBoard(
+    [],
+    [
+      observation({ id: "workspace:one", sessionID: "ses_one", measuredCost: 0.2 }),
+      observation({
+        id: "workspace:two",
+        sessionID: "ses_two",
+        measuredCost: 0.5,
+        usage: {
+          cost: 0.5,
+          tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+          total: 120,
+          steps: 1,
+          toolUses: 0,
+        },
+      }),
+      observation({ id: "swarm:coordinator", sessionID: undefined, source: "swarm" }),
+    ],
+  )
+  const selected = desktopSpendAgents(cards.flatMap((card) => card.agents))
+  expect(selected.map((agent) => agent.task!.id)).toEqual(["workspace:one", "swarm:coordinator"])
+  expect(taskSpend(selected)).toEqual({ cost: 0.2, tokens: undefined, unknown: true })
 })

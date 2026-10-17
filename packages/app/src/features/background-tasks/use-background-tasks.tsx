@@ -36,6 +36,12 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
     unpin: (sessionID) => serverSync().session.unpin(sessionID),
     desktop: window.api?.agentTasks ? { api: window.api.agentTasks, sourcePath: () => sdk().directory } : undefined,
     open,
+    openDesktop: (task) =>
+      window.dispatchEvent(
+        new CustomEvent("vector:open-agent-task", {
+          detail: { taskID: task.id, parentSessionID: task.parentSessionID, sourcePath: sdk().directory },
+        }),
+      ),
     ask: (agent, rootID) => {
       const target = prompt.capture({ dir: sdk().directory, id: rootID })
       const next = appendTaskQuestion(target.current(), agent)

@@ -8,7 +8,7 @@ import { showToast } from "@/utils/toast"
 import { modelDisplayName } from "@/utils/provider-brand"
 import { isInternalSession } from "@/utils/internal-sessions"
 import { loadDismissed, saveDismissed } from "./background-tasks-state"
-import { mergeTaskBoard } from "./task-board-model"
+import { mergeTaskBoard, stoppableAgents } from "./task-board-model"
 import {
   buildTaskCards,
   freshestSession,
@@ -47,6 +47,7 @@ export type BackgroundTasks = {
   /** Stops every background agent still running in this session's family. */
   stopAllBackground(): Promise<void>
   openAgent(agent: TaskAgent): void
+  canOpenAgent(agent: TaskAgent): boolean
   clearFinished(): void
   /** Brings back a card the trash hid, when a chip asks for it. */
   undismiss(cardKey: string): void
@@ -75,6 +76,7 @@ export type BackgroundTasksInput = {
   /** Opens a session's page. */
   open(sessionID: string): void
   ask?(agent: TaskAgent, rootID: string): void
+  openDesktop?(task: Task.Info): void
   desktop?: {
     api: NonNullable<NonNullable<Window["api"]>["agentTasks"]>
     sourcePath: Accessor<string>
@@ -131,11 +133,13 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     tasks: readonly Task.Info[]
     desktop: readonly Task.Info[]
     refreshing: boolean
+    truncated: boolean
     error?: string
   }>({
     tasks: [],
     desktop: [],
     refreshing: false,
+    truncated: false,
   })
   const [drafts, setDrafts] = createStore<Record<string, string>>({})
   let boardRequest = 0
@@ -156,6 +160,7 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     if (request !== boardRequest || rootID() !== sessionID) return
     setBoard("refreshing", false)
     if (desktop) setBoard("desktop", desktop.tasks)
+    if (result?.data) setBoard("truncated", result.data.truncated || desktop?.truncated === true)
     if (input.desktop && !desktop && board.desktop.length) {
       setBoard("error", "Desktop task updates unavailable. Showing the last known state.")
       if (result?.data) setBoard("tasks", result.data.tasks)
@@ -174,7 +179,7 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
   createEffect(
     on(rootID, () => {
       boardRequest += 1
-      setBoard({ tasks: [], desktop: [], refreshing: false, error: undefined })
+      setBoard({ tasks: [], desktop: [], refreshing: false, truncated: false, error: undefined })
     }),
   )
 
@@ -369,9 +374,7 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
   }
 
   const stop = async (card: TaskCard) => {
-    const results = await Promise.allSettled(
-      card.agents.filter((agent) => isLive(agent.status) && agent.task?.controls.stop !== false).map(stopAgent),
-    )
+    const results = await Promise.allSettled(stoppableAgents(card.agents).map(stopAgent))
     if (results.some((result) => result.status === "rejected"))
       showToast({
         variant: "error",
@@ -388,11 +391,18 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     ),
   ])
   const stopAllBackground = async () => {
+    if (board.truncated) {
+      showToast({
+        variant: "error",
+        title: "The task list is incomplete",
+        description: "Stop the visible tasks individually, or open a child session to manage its workers.",
+      })
+      return
+    }
     const agents = state.cards
       .flatMap((card) => card.agents)
       .filter((agent) => agent.background && isLive(agent.status) && agent.task?.controls.stop !== false)
-    const unique = [...new Map(agents.map((agent) => [agent.task?.id ?? agent.sessionID ?? agent.key, agent])).values()]
-    const stopped = await Promise.allSettled(unique.map(stopAgent))
+    const stopped = await Promise.allSettled(stoppableAgents(agents).map(stopAgent))
     if (stopped.some((result) => result.status === "rejected"))
       showToast({
         variant: "error",
@@ -401,7 +411,14 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
       })
   }
 
+  const desktopAgent = (agent: TaskAgent) => agent.task && /^(workspace|swarm):/.test(agent.task.id)
+  const canOpenAgent = (agent: TaskAgent) =>
+    desktopAgent(agent) ? Boolean(input.desktop && input.openDesktop) : Boolean(agent.sessionID)
   const openAgent = (agent: TaskAgent) => {
+    if (desktopAgent(agent)) {
+      if (input.desktop && agent.task) input.openDesktop?.(agent.task)
+      return
+    }
     if (!agent.sessionID) return
     input.open(agent.sessionID)
   }
@@ -506,6 +523,7 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     liveBackground,
     stopAllBackground,
     openAgent,
+    canOpenAgent,
     clearFinished,
     undismiss,
     hold,

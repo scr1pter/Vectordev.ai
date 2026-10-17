@@ -147,7 +147,11 @@ export function formatAgentCount(count: number) {
 }
 
 /** Milliseconds a task has run: to its end once finished, to `now` while live. */
-export function elapsedMs(item: { startedAt?: number; endedAt?: number; status: TaskStatus }, now: number) {
+export function elapsedMs(
+  item: { startedAt?: number; endedAt?: number; status: TaskStatus; task?: Task.Info },
+  now: number,
+) {
+  if (item.task?.connection === "disconnected") return item.task.elapsedMs
   if (item.startedAt === undefined) return undefined
   const end = item.endedAt ?? (isLive(item.status) ? now : undefined)
   if (end === undefined) return undefined

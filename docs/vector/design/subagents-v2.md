@@ -62,6 +62,18 @@ Retain the compact background panel and inline chips. Add current activity, dire
 
 TUI and CLI expose the same list, inspect, steer, and stop semantics. Headless execution waits for children and resulting notifications, with a real finite timeout even if event delivery stalls. Batch tool calls must display every child.
 
+## Implemented desktop bridge boundaries
+
+The desktop registers observations through the authenticated engine connection it already owns. Registration binds the real parent session and project directory to a private, unpredictable lease; it never accepts an agent-supplied callback URL. The engine queues bounded inspect/message/stop commands, and the desktop publishes durable receipts. An interrupted command is retained as uncertain rather than blindly replayed. Guest bridge registration, polling, and receipts are denied before remote proxying.
+
+Swarm workers retain the real parent identity even though their workspace records use an internal staging directory and synthetic parent. Authorization joins only workspace IDs recorded by a swarm owned by that parent and project. Synthetic coordinator workspace records do not create additional task scopes. A bounded snapshot advertises truncation; stop-all rejects an incomplete selection. Snapshots prioritize active tasks, then recent history.
+
+A missing desktop lease means disconnected, not stopped: the executor may still be running. A lease deadline publishes a parent update without requiring a read, preserves last-known progress, and disables remote mutations. Reconnection requires a fresh lease after expiry or engine restart. Native desktop restart reconciliation separately settles work whose process owner no longer exists. No path automatically retries paid work.
+
+Live steering is supported for native workspace sessions at durable V2 admission boundaries. External CLI runners expose only controls their existing executor can perform; unsupported live messaging remains unavailable. Parent corrections carry a host-derived parent relationship in the bounded coordination envelope, preserving the child's permissions, budget, and safe delivery boundary.
+
+The parent cost readout keeps the native ledger's cumulative session and descendant total. Desktop measured dollars appear as a separate **Desktop task spend** subtotal for the latest recorded workspace runs. Native ledger mirrors are excluded from that subtotal. A desktop record's measured cost is not established as lifetime cumulative across continuations, so the subtotal is not added to Session cost or the native run-cap meter. Missing external usage and unmeasured swarm planning remain unknown; no synthetic token counts or free-cost claims are produced.
+
 ## Verification and release
 
 Tests cover all management actions, preflight atomicity, completion/steer/stop races, failed dependencies, cycles, restart interruption, mailbox limits, ownership, guest authorization, budget lineage, coalescing boundaries, and exactly-once spend. Run package suites in bounded chunks on this eight-core machine; rerun timing failures alone. Run package `bun typecheck`, client/legacy SDK generation after public API changes, and the website build.

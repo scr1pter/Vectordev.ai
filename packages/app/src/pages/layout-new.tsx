@@ -2175,6 +2175,41 @@ export default function NewLayout(props: ParentProps) {
     void refreshParallelWorkspace(record.id)
   }
 
+  createEffect(() => {
+    const openTask = (event: Event) => {
+      const detail = (event as CustomEvent<{ taskID?: string; parentSessionID?: string; sourcePath?: string }>).detail
+      if (!detail?.taskID) return
+      const record = parallelRecords().find(
+        (record) =>
+          record.parentSessionId === detail.parentSessionID &&
+          record.sourcePath === detail.sourcePath &&
+          (detail.taskID === `workspace:${record.id}` ||
+            (record.swarmRunId && detail.taskID === `swarm:${record.swarmRunId}:${record.swarmTaskId}`)),
+      )
+      if (record) {
+        void openParallelWorkspace(record)
+        return
+      }
+      const run = swarmRuns().find(
+        (run) =>
+          run.parentSessionId === detail.parentSessionID &&
+          run.sourcePath === detail.sourcePath &&
+          (detail.taskID === `swarm:${run.id}` ||
+            run.tasks.some((task) => detail.taskID === `swarm:${run.id}:${task.id}`)),
+      )
+      if (run) {
+        openSwarmRun(run)
+        return
+      }
+      showToast({
+        title: "Task is reconnecting",
+        description: "Its saved details remain in the task board. Refresh the workspace and try again.",
+      })
+    }
+    window.addEventListener("vector:open-agent-task", openTask)
+    onCleanup(() => window.removeEventListener("vector:open-agent-task", openTask))
+  })
+
   let resolvingParallelWorkspaceRoute = ""
   createEffect(() => {
     const id = parallelWorkspaceIDFromRoute()

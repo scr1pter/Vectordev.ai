@@ -122,7 +122,7 @@ function engine() {
   // Every request, as "route:session".
   const calls: string[] = []
   const unreachable = new Set<string>()
-  const state = { abortFails: false }
+  const state = { abortFails: false, truncated: false }
   const reach = (route: string, sessionID: string) => {
     calls.push(`${route}:${sessionID}`)
     if (unreachable.has(sessionID)) throw new Error("engine unreachable")
@@ -133,6 +133,7 @@ function engine() {
       session(CHILD, at, { parentID: ROOT, metadata: { subagent: record({ status, completedAt: at }) } }),
     )
   const client = {
+    experimental: { task: { list: async () => ({ data: { tasks: [], truncated: state.truncated } }) } },
     session: {
       get: async (input: { sessionID: string }) => {
         reach("get", input.sessionID)
@@ -290,6 +291,17 @@ describe("Background tasks after the event stream dropped", () => {
 })
 
 describe("Stop", () => {
+  test("an incomplete board refuses Stop all before touching any visible worker", async () => {
+    const fake = engine()
+    fake.state.truncated = true
+    const page = await open(fake, [ROOT, CHILD])
+    await until(() => Boolean(page.tasks.error()?.includes("Showing the most recent tasks")))
+    await page.tasks.stopAllBackground()
+    expect(fake.count("abort:ses_child")).toBe(0)
+    expect(page.agent()?.status).toBe("running")
+    page.dispose()
+  })
+
   test("settles an agent whose run the engine lost, and reloads the stopped agent and the root", async () => {
     const fake = engine()
     const page = await open(fake, [ROOT, CHILD])
