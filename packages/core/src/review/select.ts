@@ -204,28 +204,9 @@ export function selectFindings(input: SelectInput): Selection {
       other.category = finding.category
   }
 
-  // 4b. The same defect at several places in one file is one finding. The strongest keeps its line and names the
-  // others in its body, so a repeated pattern is one comment instead of one per occurrence.
-  // A finding carried from an earlier review keeps the places it already names; only new ones are added.
-  const folded: Finding[] = []
-  const repeated = new Map<Finding, string[]>()
-  for (const finding of unique) {
-    const first = folded.find((entry) => repeats(entry, finding))
-    if (!first) {
-      folded.push(finding)
-      continue
-    }
-    drop("duplicate")
-    repeated.set(first, [...(repeated.get(first) ?? []), `${finding.path}:${finding.line}`])
-  }
-  for (const [finding, also] of repeated) {
-    finding.also = [...(finding.also ?? []), ...also]
-    finding.body = withAlso(finding.body, also)
-  }
-
   // 5. Team memory, then the threshold again.
   const team = input.teamDismissed ?? []
-  const candidates = folded.filter((finding) => {
+  const candidates = unique.filter((finding) => {
     const penalty = team.length ? teamPenalty(finding, team) : 0
     if (!penalty) return true
     finding.confidence = Math.round((finding.confidence - penalty) * 100) / 100
@@ -254,12 +235,35 @@ export function selectFindings(input: SelectInput): Selection {
     // Otherwise it is still open: counted and listed through `stillOpen`, never commented again.
   }
 
+  // 6b. The same defect at several places in one file is one finding. The strongest keeps its line and names the
+  // others in its body, so a repeated pattern is one comment instead of one per occurrence. It runs after earlier
+  // findings are matched, so a place the team dismissed never takes a new place with it, and a finding that continues
+  // an earlier one stays its own. A finding carried from an earlier review keeps the places it already names.
+  const folded: Finding[] = []
+  const repeated = new Map<Finding, string[]>()
+  for (const finding of posting) {
+    const first = continues.has(finding.id) ? undefined : folded.find((entry) => repeats(entry, finding, codeOf))
+    if (!first) {
+      folded.push(finding)
+      continue
+    }
+    drop("duplicate")
+    repeated.set(first, [...(repeated.get(first) ?? []), ...(finding.also ?? []), `${finding.path}:${finding.line}`])
+  }
+  for (const [finding, also] of repeated) {
+    const places = [...new Set([...(finding.also ?? []), ...also])].filter(
+      (place) => place !== `${finding.path}:${finding.line}`,
+    )
+    finding.also = places.toSorted((a, b) => lineOf(a) - lineOf(b))
+    finding.body = withAlso(finding.body, places)
+  }
+
   // 7–9. Anchors, the incremental focus, and severity.
   const outsideDiff: Selection["outsideDiff"] = []
   const elsewhere: Finding[] = []
   const nits: Finding[] = []
   const placed: PlacedFinding[] = []
-  for (const finding of posting) {
+  for (const finding of folded) {
     const resolved = resolveAnchor(index, finding)
     if (!resolved.ok) outsideDiff.push({ ...finding, reason: resolved.reason })
     else if (
@@ -375,25 +379,30 @@ function sameFinding(a: Finding, b: Finding, code: (finding: Finding) => string)
 }
 
 // One defect repeated further down the same file: what sameFinding leaves apart because the lines are far apart.
-function repeats(a: Finding, b: Finding): boolean {
-  return (
-    a.path === b.path &&
-    a.side === b.side &&
-    a.category === b.category &&
-    a.severity === b.severity &&
-    titleSimilarity(a.title, b.title) >= REPEAT_TITLE
-  )
+// Alike titles are not enough ("Missing null check on user" and "... on session" are two bugs): the code at both
+// places, or the fix, must be the same too.
+function repeats(a: Finding, b: Finding, code: (finding: Finding) => string): boolean {
+  if (a.path !== b.path || a.side !== b.side || a.category !== b.category || a.severity !== b.severity) return false
+  if (titleSimilarity(a.title, b.title) < REPEAT_TITLE) return false
+  const fix = (finding: Finding) => (finding.suggestion ?? "").replace(/\s+/g, " ").trim()
+  return (code(a) !== "" && code(a) === code(b)) || (fix(a) !== "" && fix(a) === fix(b))
 }
 
-// "path:line" entries of one file, as the sentence a reader sees under the finding.
+function lineOf(place: string) {
+  return Number(place.slice(place.lastIndexOf(":") + 1))
+}
+
+// "path:line" entries of one file, as the sentence a reader sees under the finding. A sentence written by an earlier
+// fold is replaced, so a carried finding never lists a place twice.
 function withAlso(body: string, also: readonly string[]): string {
-  const lines = [...new Set(also.map((entry) => Number(entry.slice(entry.lastIndexOf(":") + 1))))].toSorted(
-    (a, b) => a - b,
-  )
+  const lines = [...new Set(also.map(lineOf))].toSorted((a, b) => a - b)
   const list = lines.length === 1 ? lines[0] : `${lines.slice(0, -1).join(", ")} and ${lines.at(-1)}`
   const sentence = `The same problem is also at ${lines.length === 1 ? "line" : "lines"} ${list}.`
-  return body.trim() ? `${body.trim()}\n\n${sentence}` : sentence
+  const own = body.replace(ALSO_SENTENCE, "").trim()
+  return own ? `${own}\n\n${sentence}` : sentence
 }
+
+const ALSO_SENTENCE = /\s*The same problem is also at lines? [\d, ]+(?: and \d+)?\.\s*$/
 
 function isInjection(finding: Finding): boolean {
   return finding.title.trim().toLowerCase() === INJECTION_TITLE.toLowerCase()

@@ -21,6 +21,7 @@ import {
   estimateText,
   findingGroups,
   findingSections,
+  keptDismissals,
   passLines,
   pickReviewModel,
   reviewCatalog,
@@ -1409,6 +1410,26 @@ describe("reviewing again", () => {
     expect(again.calls.prompt.filter(isVerify)).toEqual([])
     expect(outcome.carried).toBe(1)
     expect(outcome.selection.inline.map((finding) => [finding.path, finding.verified])).toEqual([["src/list.ts", true]])
+  })
+})
+
+describe("dismissals after reviewing again", () => {
+  test("keep a dismissal only while the finding is there and names no new place", async () => {
+    const previous = (await run(fakeClient({ files: { "src/list.ts": HEAD } }).client))!
+    const id = previous.selection.inline[0]!.id
+    const withPlaces = (also?: string[]) => ({
+      ...previous,
+      selection: {
+        ...previous.selection,
+        inline: previous.selection.inline.map((finding) => ({ ...finding, ...(also ? { also } : {}) })),
+      },
+    })
+    const dismissed = { [id]: "Not a bug", gone: "Not a bug" }
+    expect(keptDismissals(dismissed, withPlaces(), previous)).toEqual({ [id]: "Not a bug" })
+    // The re-review folded a new place of the same defect into the dismissed finding: it is shown again.
+    expect(keptDismissals(dismissed, withPlaces(["src/list.ts:40"]), previous)).toEqual({})
+    const before = withPlaces(["src/list.ts:40"])
+    expect(keptDismissals(dismissed, withPlaces(["src/list.ts:40"]), before)).toEqual({ [id]: "Not a bug" })
   })
 })
 

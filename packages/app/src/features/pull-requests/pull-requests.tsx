@@ -12,6 +12,7 @@ import {
   estimateText,
   findingGroups,
   findingSections,
+  keptDismissals,
   passLines,
   REBUILT_HINT,
   repoOf,
@@ -671,12 +672,6 @@ function SecretList(props: { secrets: readonly AutoReviewSecret[] }) {
   )
 }
 
-// Dismissals that still apply after a re-review: those of findings it carried over or found again.
-function keepDismissed(dismissed: Record<string, string>, outcome: ReviewOutcomeLite) {
-  const ids = new Set(findingGroups(outcome).flatMap((group) => group.findings.map((finding) => finding.id)))
-  return Object.fromEntries(Object.entries(dismissed).filter(([id]) => ids.has(id)))
-}
-
 function capital(text: string) {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
@@ -1167,7 +1162,7 @@ export function PullRequests(props: {
     if (reviewRun()?.controller === controller) setReviewRun(undefined)
     if (!active) return
     setReview(outcome)
-    if (outcome) setDismissed(keepDismissed(kept, outcome))
+    if (outcome) setDismissed(keptDismissals(kept, outcome, previous))
     setBusy(undefined)
   }
 
@@ -1193,7 +1188,7 @@ export function PullRequests(props: {
     if (reviewRun()?.controller === controller) setReviewRun(undefined)
     if (!active) return
     setReview(outcome)
-    if (outcome) setDismissed(keepDismissed(kept, outcome))
+    if (outcome) setDismissed(keptDismissals(kept, outcome, previous))
     setBusy(undefined)
     void loadChanges(projectPath)
   }

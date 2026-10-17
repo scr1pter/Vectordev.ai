@@ -68,6 +68,22 @@ function newFile(lines: number) {
   )
 }
 
+// A new src/big.ts of `lines` added lines, where the given lines read as given, for repeated defects.
+function bigFile(lines: number, text: Record<number, string>) {
+  return parseUnifiedDiff(
+    [
+      "diff --git a/src/big.ts b/src/big.ts",
+      "new file mode 100644",
+      "index 0000000..7777777",
+      "--- /dev/null",
+      "+++ b/src/big.ts",
+      `@@ -0,0 +1,${lines} @@`,
+      ...Array.from({ length: lines }, (_, i) => `+${text[i + 1] ?? `line ${i + 1}`}`),
+      "",
+    ].join("\n"),
+  )
+}
+
 const CONFIG: SelectInput["config"] = {
   minConfidence: 0.7,
   minSeverity: "concern",
@@ -483,8 +499,9 @@ describe("selectFindings: duplicates, continuations and caps", () => {
   })
 
   test("the same defect further down a file is one finding that names the other lines", () => {
+    const write = "  store.write(next)"
     const selection = run({
-      anchors: newFile(120),
+      anchors: bigFile(120, { 12: write, 40: write, 60: write, 70: write, 90: write }),
       findings: [
         finding({ path: "src/big.ts", line: 90, title: "Write to the store is not awaited", confidence: 0.8 }),
         finding({ path: "src/big.ts", line: 12, title: "Store write is not awaited", confidence: 0.95 }),
@@ -502,6 +519,70 @@ describe("selectFindings: duplicates, continuations and caps", () => {
     expect(folded.also).toEqual(["src/big.ts:40", "src/big.ts:90"])
     expect(folded.body).toBe("Explained.\n\nThe same problem is also at lines 40 and 90.")
     expect(selection.dropped).toEqual([{ reason: "duplicate", count: 2 }])
+  })
+
+  test("different defects with alike titles stay apart, each with its own text", () => {
+    const selection = run({
+      anchors: bigFile(160, { 10: "  return user.name", 150: "  return session.id", 20: "  db.query(id)", 120: "  db.query(name)" }),
+      findings: [
+        finding({ path: "src/big.ts", line: 10, title: "Missing null check on user", body: "user can be null." }),
+        finding({ path: "src/big.ts", line: 150, title: "Missing null check on session", body: "session can be null." }),
+        finding({ path: "src/big.ts", line: 20, title: "Unvalidated id passed to SQL query", body: "id is raw." }),
+        finding({ path: "src/big.ts", line: 120, title: "Unvalidated name passed to SQL query", body: "name is raw." }),
+      ],
+    })
+    expect(selection.inline.map((f) => [f.line, f.body, f.also])).toEqual([
+      [10, "user can be null.", undefined],
+      [20, "id is raw.", undefined],
+      [120, "name is raw.", undefined],
+      [150, "session can be null.", undefined],
+    ])
+    expect(selection.dropped).toEqual([])
+  })
+
+  test("a dismissed place does not hide a new place of the same defect", () => {
+    const write = "  store.write(next)"
+    const selection = run({
+      anchors: bigFile(160, { 10: write, 150: write }),
+      prior: [
+        prior({
+          id: "aaaaaaaaaaaa",
+          path: "src/big.ts",
+          line: 10,
+          title: "Store write is not awaited",
+          status: "dismissed",
+        }),
+      ],
+      findings: [
+        finding({ path: "src/big.ts", line: 10, title: "Store write is not awaited", confidence: 0.95 }),
+        finding({ path: "src/big.ts", line: 150, title: "The store write is not awaited here", confidence: 0.8 }),
+      ],
+    })
+    expect(selection.inline.map((f) => [f.line, f.also])).toEqual([[150, undefined]])
+    expect(selection.dropped).toEqual([{ reason: "dismissed", count: 1 }])
+  })
+
+  test("folding into a finding that already names other places lists each place once", () => {
+    const write = "  store.write(next)"
+    const carried = finding({
+      path: "src/big.ts",
+      line: 12,
+      title: "Store write is not awaited",
+      body: "Explained.\n\nThe same problem is also at line 90.",
+      also: ["src/big.ts:90"],
+      confidence: 0.95,
+    })
+    const selection = run({
+      anchors: bigFile(120, { 12: write, 40: write, 90: write }),
+      findings: [
+        carried,
+        finding({ path: "src/big.ts", line: 90, title: "Store write is not awaited here" }),
+        finding({ path: "src/big.ts", line: 40, title: "The store write is not awaited" }),
+      ],
+    })
+    expect(selection.inline.map((f) => [f.line, f.also, f.body])).toEqual([
+      [12, ["src/big.ts:40", "src/big.ts:90"], "Explained.\n\nThe same problem is also at lines 40 and 90."],
+    ])
   })
 
   test("an earlier finding on an outdated thread is still open when reported again, and stays dismissed", () => {

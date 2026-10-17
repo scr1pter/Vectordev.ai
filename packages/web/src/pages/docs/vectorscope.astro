@@ -258,8 +258,8 @@ vector github review --pr 482 --dry-run</code><button class="doc-cmd-copy" type=
             Selection is where a review stops being a wall of text. A finding below <code>minConfidence</code> (0.7) or
             below <code>minSeverity</code> (concern) does not go on a line, and anything outside the changed lines is
             listed in the summary instead. Nits and style points are dropped unless <code>nits</code> is true or
-            <code>minSeverity</code> is nit. The same defect reported at several places in one file becomes one finding
-            that names the other lines.
+            <code>minSeverity</code> is nit. The same defect reported at several places in one file, with the same code or
+            the same fix at each, becomes one finding that names the other lines.
           </p>
           <p>
             The cap for a run is the smaller of <code>maxComments</code> (10) and what is left of

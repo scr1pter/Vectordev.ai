@@ -1576,6 +1576,25 @@ export function findingGroups(
   })).filter((group) => group.findings.length > 0)
 }
 
+// Dismissals that still apply after a re-review: those of findings it carried over or found again. A dismissed
+// finding that now names a place it did not name before is shown again, since that place was never looked at.
+export function keptDismissals(
+  dismissed: Readonly<Record<string, string>>,
+  outcome: ReviewOutcomeLite,
+  previous?: ReviewOutcomeLite,
+) {
+  const places = (review: ReviewOutcomeLite) =>
+    new Map(findingGroups(review).flatMap((group) => group.findings.map((finding) => [finding.id, finding.also ?? []])))
+  const now = places(outcome)
+  const before = previous ? places(previous) : new Map<string, string[]>()
+  return Object.fromEntries(
+    Object.entries(dismissed).filter(([id]) => {
+      const also = now.get(id)
+      return also !== undefined && also.every((place) => before.get(id)?.includes(place))
+    }),
+  )
+}
+
 const SECTION_LABEL: Record<Severity, string> = { blocking: "Blocking", concern: "Concerns", nit: "Nits" }
 
 // The findings list: one section per severity, blocking first, for the severities the filter shows. Dismissed findings
