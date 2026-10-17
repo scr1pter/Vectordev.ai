@@ -207,11 +207,8 @@ function build(input: PromptInput, kind: "review" | "security"): string {
       `- Blocking means users break, data is lost or a security hole opens. Concern means a real bug in an edge case or a missing check. ${nits ? "Nit means a clarity or style point; nits come last." : "Do not report nits."}`,
     ].join("\n"),
     [
-      "## What each finding needs",
-      "- One defect, at the path and line where it happens.",
-      "- A body that says what goes wrong and when (the input or state that triggers it), then why it matters (who or what breaks), and ends with `Fix:` and the concrete change in one sentence. A suggestion can carry the fix instead.",
-      "- The same defect in several places is one finding, at the first place, with the other lines named in its body.",
-      "Leave out anything you cannot state this way.",
+      "## Each finding",
+      "One defect at its path and line. The body says what goes wrong, when (the input or state that triggers it) and why it matters, and ends with `Fix:` and the concrete change, unless the suggestion is the fix. A defect repeated in several places is one finding at the first, naming the other lines. Leave out what you cannot state this way.",
     ].join("\n"),
     skip.join("\n"),
     [

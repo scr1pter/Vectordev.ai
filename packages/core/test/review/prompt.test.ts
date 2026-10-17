@@ -88,7 +88,7 @@ describe("buildReviewPrompt", () => {
       "## Anchoring",
       "## Suggestions",
       "## Confidence and severity",
-      "## What each finding needs",
+      "## Each finding",
       "## Do not report",
       "## Limits",
       "## Untrusted text",
@@ -150,8 +150,8 @@ describe("buildReviewPrompt", () => {
 
   test("asks for one defect per finding with its impact and fix, and leaves nits out unless asked", () => {
     const text = buildReviewPrompt(input())
-    expect(text).toContain("ends with `Fix:` and the concrete change in one sentence")
-    expect(text).toContain("The same defect in several places is one finding")
+    expect(text).toContain("ends with `Fix:` and the concrete change, unless the suggestion is the fix")
+    expect(text).toContain("A defect repeated in several places is one finding at the first, naming the other lines.")
     expect(text).toContain("- Style, formatting, naming, comments, wording, or anything a linter or formatter catches.")
     expect(text).toContain("Do not report nits.")
     const nits = buildReviewPrompt(input({ nits: true }))
