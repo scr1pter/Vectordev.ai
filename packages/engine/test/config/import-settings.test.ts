@@ -290,15 +290,23 @@ it.live("never writes through a project's links or outside the workspace while i
   }),
 )
 
-it.live("leaves folders above a non-git workspace alone and still imports the home folder", () =>
+it.live("imports folders above a non-git workspace only into themselves", () =>
   Effect.gen(function* () {
     const root = yield* tmpdirScoped()
     const fs = yield* FSUtil.Service
     const home = path.join(root, "home")
     const parent = path.join(home, "downloads")
     const directory = path.join(parent, "app")
+    const victim = path.join(root, "victim")
+    const original = "outside bytes\n"
+    yield* fs.writeWithDirs(victim, original)
     yield* fs.writeWithDirs(path.join(parent, "config.json"), '{"permission":{"bash":"deny"}}')
-    yield* fs.writeWithDirs(path.join(parent, `.${previous}`, "commands", "review.md"), "review")
+    yield* fs.writeWithDirs(
+      path.join(parent, `.${previous}`, `${previous}.local.json`),
+      '{"mcp":{"docs":{"enabled":false}}}',
+    )
+    yield* fs.ensureDir(path.join(parent, ".vector"))
+    yield* Effect.promise(() => nodeFs.link(victim, path.join(parent, ".vector", ".gitignore")))
     yield* fs.writeWithDirs(path.join(directory, "config.json"), '{"permission":{"edit":"deny"}}')
     yield* fs.writeWithDirs(path.join(home, `.${previous}`, `${previous}.json`), '{"model":"fixture/model"}')
     const imported = yield* ConfigMigration.discover({
@@ -308,10 +316,14 @@ it.live("leaves folders above a non-git workspace alone and still imports the ho
       global: path.join(root, "global"),
     })
     expect(imported.map((item) => item.target).toSorted()).toEqual(
-      [path.join(directory, "vector.jsonc"), path.join(home, ".vector", "vector.jsonc")].toSorted(),
+      [
+        path.join(directory, "vector.jsonc"),
+        path.join(parent, "vector.jsonc"),
+        path.join(home, ".vector", "vector.jsonc"),
+      ].toSorted(),
     )
-    expect(yield* fs.exists(path.join(parent, "vector.jsonc"))).toBe(false)
-    expect(yield* fs.exists(path.join(parent, ".vector"))).toBe(false)
+    expect(yield* fs.readFileString(victim)).toBe(original)
+    expect(yield* fs.exists(path.join(parent, ".vector", "vector.local.jsonc"))).toBe(false)
   }),
 )
 

@@ -234,12 +234,11 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
 }) {
   const fs = yield* FSUtil.Service
   const results: Array<{ sources: string[]; target: string; message: string }> = []
-  // Imports write before the workspace is trusted. A project folder is written only where it really is inside the
-  // workspace, and the home folder only inside itself. A folder above a non-git workspace is neither, so it is left
-  // alone.
+  // Imports write before the workspace is trusted. A folder inside the workspace is written only where it really is
+  // inside the workspace, so a project folder that links out of it is never written. The home folder and the folders
+  // above a non-git workspace, whose settings load with the project's, are written only inside themselves.
   const workspace = path.resolve(input.worktree && input.worktree !== "/" ? input.worktree : input.directory)
-  const owner = (directory: string) =>
-    FSUtil.contains(workspace, directory) ? workspace : directory === input.home ? input.home : undefined
+  const owner = (directory: string) => (FSUtil.contains(workspace, directory) ? workspace : directory)
   const global = yield* run(input.global)
   if (global) results.push(global)
   const parents: string[] = []
@@ -251,14 +250,11 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
   }
   if (!input.disableProject) visit(path.resolve(input.directory))
   for (const directory of parents.toReversed()) {
-    const root = owner(directory)
-    if (!root) continue
-    const imported = yield* run(directory, false, directory, root)
+    const imported = yield* run(directory, false, directory, owner(directory))
     if (imported) results.push(imported)
   }
   for (const directory of new Set([input.home, ...parents])) {
     const root = owner(directory)
-    if (!root) continue
     // Only the exact earlier folder is opened; other dot folders, such as ~/.Trash, which macOS refuses to list
     // without Full Disk Access, are never read. An unreadable folder holds nothing to import.
     const entries = yield* fs.readDirectoryEntries(directory).pipe(Effect.orElseSucceed(() => []))
