@@ -79,6 +79,7 @@ test("task CLI never renders missing usage as zero spend", () => {
     controls: { inspect: true, message: true, stop: true },
   }
   expect(formatTasks([task])).toContain("usage unavailable")
+  expect(formatTasks([{ ...task, connection: "disconnected" }])).toContain("disconnected (last known: running)")
   expect(formatTasks([{ ...task, source: "external", measuredCost: 0.125, costKind: "priced" }])).toContain(
     "$0.1250 reported · tokens unavailable",
   )

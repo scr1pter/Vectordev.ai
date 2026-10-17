@@ -63,7 +63,7 @@ export const TasksCommand = cmd({
     if ("tasks" in result) {
       console.log(formatTasks(result.tasks))
       if ("truncated" in result && result.truncated) console.log("More tasks are available; narrow the selection.")
-      if ("timedOut" in result && result.timedOut) console.log("Wait timed out; tasks continue running.")
+      if ("timedOut" in result && result.timedOut) console.log("Wait timed out; completion is not confirmed.")
       return
     }
     if ("task" in result) {
@@ -135,7 +135,7 @@ export function formatTasks(tasks: readonly Task.Info[]) {
   return tasks
     .map((task) =>
       [
-        `${task.id}  ${task.status}  ${task.title}`,
+        `${task.id}  ${task.connection === "disconnected" ? `disconnected (last known: ${task.status})` : task.status}  ${task.title}`,
         "  " +
           [
             `${Math.round(task.elapsedMs / 1000)}s`,
