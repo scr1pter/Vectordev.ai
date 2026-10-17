@@ -13,28 +13,40 @@ The original `before-explore.json` and `before-general.json` were captured befor
 
 These figures are modeled USD, not invoices. The original scripts used implicit Vector foreground execution. The revised scripts explicitly request `background: false` for these two cases so they continue to measure the same topology after the default changes. This adds a few serialized tokens. Matched before/after reports use the revised harness on both source revisions; the original reports remain as provenance.
 
-`baseline-explore.json` and `baseline-general.json` are the immutable baseline rerun: the revised harness at `44d81a5be` drove a separate, dependency-installed checkout at exactly `bdec3b29e`. All eight cells were valid. Explore measured $0.0645 cold / $0.0258 second-session for Vector and $0.2137 / $0.1037 for Claude Code; General measured $0.0681 / $0.0245 and $0.2213 / $0.1005 respectively. These are the matched baseline cells for the final comparison.
+`baseline-explore.json` and `baseline-general.json` are the immutable baseline rerun: the revised harness at `44d81a5be` drove a separate, dependency-installed checkout at exactly `bdec3b29e`. All eight cells were valid. Explore measured $0.0645 cold / $0.0258 second-session for Vector and $0.2137 / $0.1037 for Claude Code; General measured $0.0681 / $0.0245 and $0.2213 / $0.1005 respectively. The later `baseline-*-verified.json` reruns use the same request-generating scripts with the stricter successful-verification receipt check and are the selected baseline cells for the final comparison.
 
 `router-smoke-invalid.json` preserves an early harness validation failure: the actor router incorrectly required a task ID from foreground results, although Claude Code returns the report directly. The operation scripts and fixture checks completed, but those cells were invalid under that router. The router now requires IDs only for background launches. They must not be selected as final comparison evidence.
 
-## Matched candidate results
+## Final matched results
 
-The candidate matrix pins `bcce917eb`, a clean merge of integration candidate `287b0fc43` with the strict verification harness and baseline archives. `candidate-*-attempt-1.json` contains all 24 cells; all are valid. Baseline `bdec3b29e` was driven by the same request-generating harness, with the strict verification receipts recorded in `baseline-*-verified.json`. Bun was 1.3.14 and Claude Code was 2.1.215. Later release fixes need their own request-shape check before these numbers are attributed to that release.
+The selected final reports are `final-*-attempt-2.json`, pinned to clean source `947d8ca859103504351d0073363951b6de9122a4`. This merge includes integration `f99cbc4f1`: the final task-management provider schema, cancellation and relay fixes, internal foreground command fix, Node-compatible repeated-output digest, artifact cleanup, and CLI cost regressions. Its Engine, Core, Schema, and executable footprint harness match integration `f99cbc4f1`. The later integration merge `7fc99001a` adds account/marketing changes with no changes to those runtime or request-generating paths.
 
-Every dollar below is a modeled offline estimate. Each pair is **cold / second session** within a fresh simulated-cache run.
+All **12 final Vector cells** are valid under the scripted fixture protocol. Baseline `bdec3b29e` uses the same request-generating harness and strict verification receipts in `baseline-*-verified.json`. The **12 Claude Code cells** are reused from `candidate-*-attempt-1.json`: the executable harness, fixture operations, frozen rates, CLI version, and cache simulation are unchanged. Bun was 1.3.14 and Claude Code was 2.1.215. These are paired scenario comparisons, not simultaneous runs or live-model measurements.
 
-| Scenario | Vector before | Vector candidate | Claude Code | Candidate requests, Vector / Claude |
+Every dollar below is a modeled offline estimate. Each pair is **cold / second session** within a fresh simulated-cache run. Request counts are the same in both sessions of each selected cell pair.
+
+| Scenario | Vector before | Vector final | Claude Code | Final requests, Vector / Claude |
 | --- | ---: | ---: | ---: | ---: |
-| Foreground Explore | $0.0645 / $0.0258 | $0.0700 / $0.0275 | $0.2137 / $0.1037 | 8 / 8 |
-| Foreground General | $0.0681 / $0.0245 | $0.0755 / $0.0263 | $0.2213 / $0.1005 | 8 / 8 |
-| Concurrent readers | Unavailable in this control protocol | $0.0914 / $0.0489 | $0.2736 / $0.1522 | 13 / 13 |
-| Dependency handoff | Unavailable in this control protocol | $0.1007 / $0.0427 | $0.2873 / $0.1550 | 12 / 13 |
-| Steer in flight | Unavailable in this control protocol | $0.0875 / $0.0382 | $0.2198 / $0.1123 | 10 / 9 |
-| Stop in flight | Unavailable in this control protocol | $0.0746 / $0.0319 | $0.2052 / $0.1086 | 8 / 8 |
+| Foreground Explore | $0.064479 / $0.025787 | $0.069746 / $0.027384 | $0.213727 / $0.103717 | 8 / 8 |
+| Foreground General | $0.068077 / $0.024535 | $0.074975 / $0.026182 | $0.221268 / $0.100459 | 8 / 8 |
+| Concurrent readers | Unavailable in this control protocol | $0.090900 / $0.048538 | $0.273633 / $0.152177 | 13 / 13 |
+| Dependency handoff | Unavailable in this control protocol | $0.103823 / $0.046184 | $0.287256 / $0.154997 | 13 / 13 |
+| Steer in flight | Unavailable in this control protocol | $0.086853 / $0.038060 | $0.219759 / $0.112285 | 10 / 9 |
+| Stop in flight | Unavailable in this control protocol | $0.074233 / $0.031871 | $0.205239 / $0.108563 | 8 / 8 |
 
-The new controls increase the matched foreground estimate: Explore rises **8.6% cold / 6.5% second-session** and General **11.0% / 7.3%**. Request counts stay unchanged. The parent's stable system/tool prefix grows by approximately 1,125 estimated tokens, including the richer task schema and `task_manage`; General children also receive the 519-token management definition. Explore's read-only tool set and prefix stay unchanged. This upgrade does not establish a cost reduction against the previous Vector implementation.
+The controls increase the matched foreground estimate: Explore rises **8.2% cold / 6.2% second-session** and General **10.1% / 6.7%**. Request counts stay unchanged. The parent's stable system/tool prefix grows by approximately **1,064 estimated tokens**: system context rises from 3,487 to 3,575 and tools from 5,443 to 6,419. The unchanged 97-token initial message gives first-request input of 9,027 before and 10,091 after. The task definition grows from 1,685 to 2,203 tokens, and `task_manage` adds 458 tokens. General children also receive the 458-token management definition; Explore's read-only tool set and prefix stay unchanged. This upgrade does not establish a cost reduction against the previous Vector implementation.
 
-For the new workflows, the old engine lacks `task_manage`; those baseline cells were not run and have no equivalent completion/cost result. The new cells verify useful behavior, not a lower cost against an unavailable baseline. Dependency adapters differ as described below, and Claude Code's extra prerequisite-wait turn is counted. Vector's extra completion-notification response in the steering case is also counted. Small input differences between sessions reflect interleaving and notification timing. No result here supports a live cheaper/faster claim or passes the historical model-behavior gate.
+For the new workflows, the old engine lacks `task_manage`; those baseline cells were not run and have no equivalent completion/cost result. The new cells verify useful behavior, not a lower cost against an unavailable baseline. Dependency adapters differ as described below, and Claude Code's prerequisite-wait turn is counted. Vector's completion-notification responses are also counted, including the extra request in the steering case. Small input differences between sessions reflect interleaving and notification timing. No result here supports a live cheaper/faster claim or passes the historical model-behavior gate.
+
+## Retained attempts and schema validation
+
+`candidate-*-attempt-1.json` pins `bcce917eb`, a clean merge of integration candidate `287b0fc43` with the strict harness and baseline archives. All 24 candidate cells satisfied the scripted fixture protocol. Those Vector cells are superseded by the final reports; their Claude Code cells remain the matching comparator described above.
+
+`final-*-attempt-1.json` pins `1616de5756afce9fc1131130fb9933943eae26b9`, which includes integration `a41ac1f61`. All 12 Vector cells satisfied the scripted fixture protocol. A subsequent review found that the provider's projection of the top-level `task_manage` union advertised only the first action, `list`. The scripted provider could still emit the other valid tool calls, so passing fixture scripts did not prove that a real model could discover those actions from the advertised schema. This is why attempt 1 remains archived but is not the selected final footprint.
+
+Integration `f99cbc4f1` replaced that public union with a flat object while preserving strict runtime validation. A separate actual-registered-tool regression checks all five actions in the OpenAI Chat, OpenAI Responses, and Anthropic wire schemas and rejects nine malformed runtime payloads. The final matrix was rerun after that correction; the management definition shrank from 519 to 458 estimated tokens. Scripted execution checks and provider-schema checks establish different properties; neither establishes live model quality.
+
+The final dependency case contains 13 requests per session versus 12 in the earlier candidate. The additional completion-notification request is retained and charged in the final estimate. No earlier or failed attempt was discarded or replaced to improve the selected result.
 
 ## Revised scenarios
 
@@ -50,7 +62,7 @@ A cell is valid only if the CLI exits successfully, all required script steps ar
 
 ## Reproduction
 
-Use two clean source checkouts with dependencies installed, one at `bdec3b29e` and one at the final candidate. Keep the harness checkout fixed while changing only `--engine-root`. Run one command at a time on an idle machine. Each report records source revisions, CLI versions, frozen rates, request counts, logical actor counts, validity and fixture verification.
+Use two clean source checkouts with dependencies installed, one at `bdec3b29e` and one at final source `947d8ca85` (integration `f99cbc4f1` runtime-equivalent). Keep the harness checkout fixed while changing only `--engine-root`. Run one command at a time on an idle machine for reproducible timing. The final archived matrix ran serially alongside the early portion of an engine test suite, so its timing and RSS are diagnostic only. Each report records source revisions, CLI versions, frozen rates, request counts, logical actor counts, validity and fixture verification.
 
 ```sh
 bun --no-env-file script/agent-eval/footprint.ts --runtime vector,claude-code \
@@ -65,4 +77,4 @@ Repeat with `delegate-general`. Run each new scenario against the candidate and 
 
 The harness assumes approximately four characters per token and uses frozen Sonnet 4.5 list rates. It simulates prefix matching, but not provider routing, cache TTL, model-specific tokenization, or concurrent cache-write visibility. Different request ordering can change estimates slightly. OpenAI and Anthropic figures use different APIs/rates and must not be compared as a price contest. A stable prefix test is not evidence of a live cache hit.
 
-Machine load exceeded 25 during part of development. Timing/RSS samples in these archives are diagnostic only; no speed or memory advantage is claimed. The owner-run checks are in `script/agent-eval/live-efficiency.md`.
+Machine load exceeded 25 during part of development, and the final matrix shared the machine with an engine test run. Timing/RSS samples in these archives are diagnostic only; no speed or memory advantage is claimed. The owner-run checks are in `script/agent-eval/live-efficiency.md`.
