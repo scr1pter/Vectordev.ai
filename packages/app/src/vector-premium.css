@@ -3083,9 +3083,8 @@ html[data-vector-glass="false"] [data-vector-help-menu] {
    2.2:1. The header takes the light stage colour, the route the light canvas, and the white-alpha edges
    and fills become dark-alpha ones. The title bar needs no rule: index.css makes it transparent with
    !important inside a layer, which no unlayered rule here can override, so it shows what is behind it.
-   layout-new.tsx writes data-vector-theme="dark" once when the workspace mounts, and only the settings
-   effect writes "light" again, so on a normal launch with Light saved these rules stay off until the
-   scheme is switched in Settings, and a reload turns them off again. */
+   Only the settings effect in context/settings.tsx writes data-vector-theme, so a saved Light theme
+   applies from launch. */
 :root[data-vector-theme="light"] [data-vector-session-route] {
   --vector-workspace-bg: var(--vx-canvas);
 }

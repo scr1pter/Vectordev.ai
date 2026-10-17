@@ -818,11 +818,6 @@ export default function NewLayout(props: ParentProps) {
       },
     },
   ])
-  createEffect(() => {
-    const root = document.documentElement
-    root.dataset.vectorTheme = "dark"
-  })
-
   const measureChatSearchTop = () => {
     const header = document.querySelector("[data-vector-session-header]")?.getBoundingClientRect()
     if (header && header.height > 0) return Math.round(header.bottom + 12)
