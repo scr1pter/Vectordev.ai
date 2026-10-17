@@ -239,7 +239,8 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
   // above a non-git workspace, whose settings load with the project's, are written only inside themselves.
   const workspace = path.resolve(input.worktree && input.worktree !== "/" ? input.worktree : input.directory)
   const owner = (directory: string) => (FSUtil.contains(workspace, directory) ? workspace : directory)
-  const global = yield* run(input.global)
+  // The global folder can come from VECTOR_AGENT_CONFIG_DIR, which can name a folder of the project's.
+  const global = yield* run(input.global, false, input.global, owner(input.global))
   if (global) results.push(global)
   const parents: string[] = []
   const visit = (directory: string): void => {

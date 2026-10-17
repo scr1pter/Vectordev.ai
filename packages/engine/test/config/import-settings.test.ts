@@ -290,6 +290,24 @@ it.live("never writes through a project's links or outside the workspace while i
   }),
 )
 
+it.live("never imports into a global folder that is really a project link pointing out", () =>
+  Effect.gen(function* () {
+    const root = yield* tmpdirScoped()
+    const fs = yield* FSUtil.Service
+    const workspace = path.join(root, "workspace")
+    const outside = path.join(root, "outside")
+    yield* fs.writeWithDirs(path.join(outside, "config.json"), '{"permission":{"bash":"deny"}}')
+    yield* fs.ensureDir(workspace)
+    yield* Effect.promise(() => nodeFs.symlink(outside, path.join(workspace, "linked"), linkType))
+    const input = { directory: workspace, worktree: workspace, home: path.join(root, "home") }
+    expect(yield* ConfigMigration.discover({ ...input, global: path.join(workspace, "linked") })).toEqual([])
+    expect(yield* fs.exists(path.join(outside, "vector.jsonc"))).toBe(false)
+    // The user's own global folder outside the project still imports.
+    const imported = yield* ConfigMigration.discover({ ...input, global: outside })
+    expect(imported.map((item) => item.target)).toEqual([path.join(outside, "vector.jsonc")])
+  }),
+)
+
 it.live("imports folders above a non-git workspace only into themselves", () =>
   Effect.gen(function* () {
     const root = yield* tmpdirScoped()
