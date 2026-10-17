@@ -1,5 +1,6 @@
 /** @jsxImportSource react */
 import { useEffect, useState } from "react"
+import vectorMark from "../../../assets/vector-mark.webp"
 import { readAccountApiResponse, rememberAccountReturnPath, vectorAccountClient } from "../../../lib/account-client"
 import { GoogleMark } from "../account/AuthPage"
 import "../account/account.css"
@@ -54,7 +55,7 @@ export function DesignGate() {
   return (
     <section className="auth-card" aria-labelledby="design-title">
       <div className="auth-form-mark" aria-hidden="true">
-        <img src="/vector-logo.png" alt="" width="44" height="44" />
+        <img src={vectorMark.src} alt="" width="44" height="44" />
       </div>
       <p className="auth-form-eyebrow">PRIVATE</p>
       <h1 id="design-title">Design Lab</h1>

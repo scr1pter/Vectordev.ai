@@ -129,10 +129,25 @@
     opacity: 0.75;
   }
 
-  /* lensing: glass this thick bends what is behind it */
+  /* The bar's frosting. On this page the bar sits over the top of the sky, where a 26px blur
+     (with saturate 180% and brightness 1.06) of the sky and glyph field came out as one soft
+     violet that hardly changes as the glyphs fall. That colour, measured, is painted under the
+     glass instead of blurring live, which the GPU redid on every frame of the hero's animation.
+     This file styles the landing page only; the legal pages' bar keeps its live blur. */
   .vector-marketing .site-header .site-nav {
-    backdrop-filter: blur(26px) saturate(180%) brightness(1.06);
-    -webkit-backdrop-filter: blur(26px) saturate(180%) brightness(1.06);
+    background:
+      var(--glass-fill-strong),
+      linear-gradient(90deg, rgb(22 11.4 45) 5%, rgb(17.6 8.6 36.5) 24%, rgb(16 8 31) 44%, rgb(17.8 9.7 34.4) 63%, rgb(16.8 10 33.4) 90%);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  @media (max-width: 640px) {
+    .vector-marketing .site-header .site-nav {
+      background:
+        var(--glass-fill-strong),
+        linear-gradient(90deg, rgb(22 10.7 45.6), rgb(19.5 9.7 41) 40%, rgb(24.1 12.6 48.4) 75%);
+    }
   }
 
   /* ==================================================================
@@ -153,6 +168,17 @@
       inset 1px 0 0 rgba(255, 255, 255, 0.07),
       inset -1px 0 0 rgba(255, 255, 255, 0.07),
       inset 0 0 0 1px rgba(0, 0, 0, 0.4);
+    /* Over the hero the frame's underlay (ShotWindow) is the colour the old 28px backdrop
+       blur made of the sky: brighter and more violet under the aurora on the left. */
+    background:
+      var(--glass-fill-strong),
+      linear-gradient(90deg, rgb(16 9.5 31.5), rgb(13.5 8 24) 35%, rgb(10 6 17.5) 58%, rgb(11 7.5 19.5));
+  }
+
+  @media (max-width: 640px) {
+    .vector-marketing .showcase .product-window {
+      background: var(--glass-fill-strong), rgb(15 9 28);
+    }
   }
 
   /* the reflection ON the glass — a single wide diagonal band, pinned to

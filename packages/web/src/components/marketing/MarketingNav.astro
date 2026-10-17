@@ -1,4 +1,6 @@
 ---
+import vectorMark from "../../assets/vector-mark.webp"
+
 interface Props {
   active?: "home" | "product" | "docs" | "login" | "codium"
 }
@@ -9,7 +11,7 @@ const { active = "home" } = Astro.props
 <header class="site-header">
   <div class="site-nav">
     <a class="site-brand" href="/" aria-label="Vector home">
-      <img src="/vector-logo.png" alt="" width="28" height="28" />
+      <img src={vectorMark.src} alt="" width="28" height="28" />
     </a>
 
     <nav class="desktop-links" aria-label="Primary navigation">
