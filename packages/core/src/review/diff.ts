@@ -563,7 +563,8 @@ export function matchPostImage(text: string, file: DiffFile): boolean {
 }
 
 // The head version of a file with its line numbers, the lines the change added marked "+", and the removed lines
-// shown as "-" where they were, without a number. It holds what the file's diff and its full head text hold, once, so
+// shown as "-" where they were, with their base line number, so a finding on removed code can anchor to the LEFT side
+// although the diff is not sent. It holds what the file's diff and its full head text hold, once, so
 // a prompt can show it in place of both. In a file longer than `foldAbove` lines, only `context` lines around each
 // change are kept, and each run left out becomes one "⋯" line with its head and base line numbers. undefined when
 // `headText` is not the diff's post-image.
@@ -577,12 +578,13 @@ export function renderAnnotated(
   const context = options.context ?? ANNOTATED_CONTEXT
   const fold = head.length > (options.foldAbove ?? ANNOTATED_FOLD_ABOVE)
   const added = new Set<number>()
-  // The head line each run of removed lines sits before, and their text.
-  const removed = new Map<number, string[]>()
+  // The head line each run of removed lines sits before, and their base line numbers and text.
+  const removed = new Map<number, { line: number; text: string }[]>()
   for (const hunk of file.hunks) {
     let next = hunk.newLines === 0 ? hunk.newStart + 1 : hunk.newStart
     for (const line of hunk.lines) {
-      if (line.kind === "del") removed.set(next, [...(removed.get(next) ?? []), line.text])
+      if (line.kind === "del")
+        removed.set(next, [...(removed.get(next) ?? []), { line: line.oldLine!, text: line.text }])
       else {
         if (line.kind === "add") added.add(line.newLine!)
         next = line.newLine! + 1
@@ -601,8 +603,8 @@ export function renderAnnotated(
   const out: string[] = []
   const counts = { added: 0, removed: 0 }
   for (const line of Array.from({ length: head.length + 1 }, (_, index) => index + 1)) {
-    for (const text of removed.get(line) ?? []) {
-      out.push(row("", "-", text))
+    for (const gone of removed.get(line) ?? []) {
+      out.push(row(String(gone.line), "-", gone.text))
       counts.removed++
     }
     if (line > head.length) break

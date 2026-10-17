@@ -103,7 +103,7 @@ const UNTRUSTED_WORKTREE =
 
 // renderAnnotated's format, explained where it is used.
 const ANNOTATED =
-  '`annotated="true"` blocks number each head line and mark added lines `+`; `-` lines were removed and have no number. A `⋯` line stands for unchanged lines left out, with their base line numbers. Such a block replaces the file\'s diff. Never copy the numbers or marks into a suggestion.'
+  '`annotated="true"` blocks replace the file\'s diff: head lines are numbered, added ones marked `+`; `-` lines were removed and show their base number, for LEFT. A `⋯` line is unchanged lines left out, with base numbers. Never copy numbers or marks into a suggestion.'
 
 const REVIEW_TASK =
   "You are Vector's code reviewer. Find defects that this change introduces or exposes: bugs, security holes, lost data, broken error handling, races, missing checks and regressions. Report only problems that make the code wrong for someone; a short list of real bugs beats a long list of opinions."

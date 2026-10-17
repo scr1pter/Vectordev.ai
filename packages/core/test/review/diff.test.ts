@@ -446,7 +446,8 @@ describe("renderAnnotated", () => {
     expect(text.split("\n").slice(3, 8)).toEqual([
       " 4",
       " 5   export function last(items) {",
-      "   -   return items[items.length]",
+      // A removed line carries its base line number, which a LEFT-side finding anchors to.
+      " 6 -   return items[items.length]",
       " 6 +   return items[items.length - 1]",
       " 7   }",
     ])
