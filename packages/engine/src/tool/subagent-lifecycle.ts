@@ -5,6 +5,7 @@ import { MessageV2 } from "@/session/message-v2"
 import type { MessageID, SessionID } from "@/session/schema"
 import type { SubagentRecord, SubagentStatus, SubagentUsage } from "@/agent/subagent-kind"
 import { isRecord } from "@/util/record"
+import { randomUUID } from "node:crypto"
 
 /*
  * Lifecycle bookkeeping for task-tool subagents.
@@ -19,6 +20,8 @@ import { isRecord } from "@/util/record"
 
 /** Key of the lifecycle record in a child session's metadata. */
 export const METADATA_KEY = "subagent"
+// Observation identity only: this never claims durable or clustered execution ownership.
+export const RUNTIME_ID = randomUUID()
 
 export type FinalStatus = Extract<SubagentStatus, "completed" | "error" | "cancelled">
 
@@ -56,9 +59,10 @@ export function defined<T extends object>(value: T): Partial<T> {
 }
 
 /** Merges a patch into the child's record. setMetadata replaces the whole metadata object, so this reads first. */
-export function update(sessions: Session.Interface, sessionID: SessionID, patch: Partial<SubagentRecord>) {
+export function update(sessions: Session.Interface, sessionID: SessionID, patch: Partial<SubagentRecord>, attempt?: number) {
   return Effect.gen(function* () {
     const info = yield* sessions.get(sessionID)
+    if (attempt !== undefined && read(info)?.attempt !== attempt) return
     yield* sessions.setMetadata({
       sessionID,
       metadata: { ...info.metadata, [METADATA_KEY]: merge(read(info), patch) },

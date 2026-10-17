@@ -54,6 +54,17 @@ export type SubagentRecord = {
   callID?: string
   /** Index within a task batch; callID remains the real provider tool call. */
   batchIndex?: number
+  batchID?: string
+  attempt?: number
+  runtimeID?: string
+  ownedPaths?: string[]
+  dependsOn?: string[]
+  successCriteria?: string[]
+  resultRef?: string
+  resultSummary?: string
+  reason?: string
+  budget?: import("@vectordevai/schema/run-budget").RunBudget.Info
+  mailbox?: Array<{ id: string; sender: string; text: string; delivery: "steer" | "queue"; createdAt: number; deliveredAt?: number }>
   model: { providerID: string; modelID: string; variant?: string }
   background: boolean
   status: SubagentStatus
