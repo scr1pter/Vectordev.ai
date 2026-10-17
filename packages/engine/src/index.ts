@@ -46,6 +46,17 @@ declare const VECTOR_CLI_STANDALONE: boolean
 const isVectorCli =
   (typeof VECTOR_CLI_STANDALONE === "boolean" && VECTOR_CLI_STANDALONE) || process.env.VECTOR_CLI === "1"
 
+// Bun reports a write to a reader that has gone as an `error` event and then quietly reopens the
+// stream, after which ending it never finishes. Remember the failure so flush() skips that stream,
+// and rethrow when nothing else listens, which is what the event does when it has no listener.
+const failedOutput = new Set<NodeJS.WriteStream>()
+function rememberFailure(this: NodeJS.WriteStream, error: Error) {
+  failedOutput.add(this)
+  if (this.listenerCount("error") === 1) throw error
+}
+process.stdout.on("error", rememberFailure)
+process.stderr.on("error", rememberFailure)
+
 function show(out: string) {
   const text = out.trimStart()
   if (!text.startsWith("vector ")) {
@@ -174,9 +185,32 @@ try {
     UI.error("Vector could not finish runtime cleanup.")
     process.exitCode = 1
   })
+  // A pipe takes output only as fast as its reader reads, and process.exit() drops whatever is
+  // still queued, so a late reader of `vector export <id> | jq` would get only the first 64 KB.
+  await Promise.all([flush(process.stdout), flush(process.stderr)])
   // Some subprocesses don't react properly to SIGTERM and similar signals.
   // Most notably, some docker-container-based MCP servers don't handle such signals unless
   // run using `docker run --init`.
   // Explicitly exit to avoid any hanging subprocesses.
   process.exit()
+}
+
+// Bun queues piped stdio writes outside the Writable buffer: writableLength stays 0 and an empty
+// write calls back at once, so neither shows pending output. Ending the stream runs Bun's flush of
+// that queue. The bound stops a reader that stopped reading from holding the CLI open, and a
+// terminal is left alone so the TUI can still restore it.
+function flush(stream: NodeJS.WriteStream) {
+  // From here a failed write only means the reader left early, which must not change the exit code.
+  stream.off("error", rememberFailure)
+  if (stream.isTTY || failedOutput.has(stream)) return
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 5_000)
+    const done = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    // Every write still queued can fail once the reader has gone, so keep listening.
+    stream.on("error", done)
+    stream.end(done)
+  })
 }

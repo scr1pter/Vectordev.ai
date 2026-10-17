@@ -18,6 +18,7 @@
 // without changing the fixture. Long-lived commands like `serve` will need a
 // different return shape — see the TODO at the bottom of VectorCli.
 import { test, type TestOptions } from "bun:test"
+import { $ } from "bun"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -158,6 +159,9 @@ export type VectorCli = {
   // High-level: run a single prompt against the test model. Short-lived.
   readonly run: (message: string, opts?: RunOpts) => Effect.Effect<RunResult>
   readonly startRun: (message: string, opts?: RunOpts) => Effect.Effect<RunHandle, never, Scope.Scope>
+  // `vector <args> | <reader>`: resolves once both have exited, with the reader's exit code and
+  // stdout and both processes' stderr. Use it to test the CLI against a reader that is slow or gone.
+  readonly pipe: (args: string[], reader: string[], opts?: SpawnOpts) => Effect.Effect<RunResult>
   // Spawn `vector serve` and wait until it's listening. Long-lived: the
   // returned handle is killed when the caller's Scope closes. Fails if the
   // listening line doesn't appear within `readyTimeoutMs`.
@@ -318,6 +322,33 @@ export function withCliFixture<A, E>(
       } satisfies RunHandle
     })
 
+    const pipe = Effect.fn("vector.pipe")(function* (args: string[], reader: string[], opts?: SpawnOpts) {
+      const start = Date.now()
+      const timeoutMs = opts?.timeoutMs ?? 30_000
+      // Bun's shell joins the two with an OS pipe on every platform. A Bun.spawn pipe cannot stand in
+      // for the reader: Bun drains it into this process from the moment the child starts.
+      // A shell pipeline cannot be killed, so a timeout leaves the CLI to its own exit.
+      return yield* Effect.promise(() =>
+        $`bun run --conditions=browser ${cliEntry} ${args} | ${reader}`
+          .cwd(home)
+          .env({ ...process.env, ...env, ...opts?.env })
+          .nothrow()
+          .quiet(),
+      ).pipe(
+        Effect.map((result) => ({
+          exitCode: result.exitCode,
+          stdout: normalizeLines(result.stdout.toString()),
+          stderr: normalizeLines(result.stderr.toString()),
+          durationMs: Date.now() - start,
+        })),
+        Effect.timeoutOrElse({
+          duration: Duration.millis(timeoutMs),
+          orElse: () =>
+            Effect.succeed({ exitCode: -1, stdout: "", stderr: "", durationMs: Date.now() - start, timedOut: true }),
+        }),
+      )
+    })
+
     const serve = Effect.fn("vector.serve")(function* (opts?: ServeOpts) {
       const argv = ["serve"]
       // Default port 0 — let the OS pick a free port, parse the actual one
@@ -472,7 +503,7 @@ export function withCliFixture<A, E>(
       } satisfies AcpHandle
     })
 
-    const vector: VectorCli = { run, startRun, serve, acp, spawn, expectExit, parseJsonEvents }
+    const vector: VectorCli = { run, startRun, pipe, serve, acp, spawn, expectExit, parseJsonEvents }
 
     return yield* fn({ llm, home, vector })
     // FetchHttpClient is provided so test bodies can `yield* HttpClient.HttpClient`
