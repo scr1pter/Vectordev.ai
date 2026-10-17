@@ -581,28 +581,27 @@ describe("SpendGuard service", () => {
     }),
   )
 
-  it.effect(
-    "holds a linked child still stepping after its root's run ended to that run, until the root begins again",
-    () =>
-      Effect.gen(function* () {
-        const guard = yield* SpendGuard.Service
-        yield* guard.begin(root, { usd: 1 })
-        yield* guard.link(child, root)
-        expect((yield* guard.record(root, step({ costUsd: 1.2 }))).state).toBe("stopped")
-        yield* guard.end(root)
+  it.effect("keeps a background child on its launch budget when the parent begins a new run", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root, { usd: 1 })
+      yield* guard.link(child, root)
+      expect((yield* guard.record(root, step({ costUsd: 1.2 }))).state).toBe("stopped")
+      yield* guard.end(root)
 
-        // A background child keeps the finished run's stop and has its spend counted.
-        expect((yield* guard.stopped(child))?.reason).toBe("cap")
-        expect((yield* guard.record(child, step({ costUsd: 0.3 }))).state).toBe("stopped")
-        expect((yield* guard.snapshot(root))?.spentUsd).toBeCloseTo(1.5, 6)
-        // The root itself only ever steps inside a run of its own.
-        expect(yield* guard.stopped(root)).toBeUndefined()
+      // A background child keeps the finished run's stop and has its spend counted.
+      expect((yield* guard.stopped(child))?.reason).toBe("cap")
+      expect((yield* guard.record(child, step({ costUsd: 0.3 }))).state).toBe("stopped")
+      expect((yield* guard.snapshot(root))?.spentUsd).toBeCloseTo(1.5, 6)
+      // The root itself only ever steps inside a run of its own.
+      expect(yield* guard.stopped(root)).toBeUndefined()
 
-        yield* guard.begin(root, { usd: 1 })
-        expect(yield* guard.stopped(child)).toBeUndefined()
-        expect((yield* guard.record(child, step({ costUsd: 0.1 }))).state).toBe("ok")
-        expect((yield* guard.snapshot(root))?.spentUsd).toBeCloseTo(0.1, 6)
-      }),
+      yield* guard.begin(root, { usd: 1 })
+      expect((yield* guard.stopped(child))?.reason).toBe("cap")
+      expect((yield* guard.record(child, step({ costUsd: 0.1 }))).state).toBe("stopped")
+      expect((yield* guard.snapshot(root))?.spentUsd).toBe(0)
+      expect((yield* guard.snapshot(child))?.spentUsd).toBeCloseTo(1.6, 6)
+    }),
   )
 
   it.effect("holds a linked child to its root's finished run with no stop, and counts its spend there", () =>
@@ -719,11 +718,107 @@ describe("SpendGuard service", () => {
       yield* Effect.forEach(others, (id) => Effect.andThen(guard.begin(id), guard.end(id)), { discard: true })
       expect(yield* guard.snapshot(child)).toBeDefined()
 
+      yield* guard.release(child)
       yield* guard.begin(sibling)
       yield* guard.end(sibling)
       expect(yield* guard.snapshot(root)).toBeUndefined()
       expect(yield* guard.rootOf(child)).toBe(child)
       expect(yield* guard.snapshot(SessionID.make("ses_run_0"))).toBeDefined()
+    }),
+  )
+})
+
+describe("SpendGuard task scopes", () => {
+  it.effect("checks child, batch and root ceilings while recording each step once per applicable scope", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root, { usd: 10 })
+      yield* guard.link(child, root, { budget: { usd: 1 }, batch: { id: "batch-a", budget: { usd: 3 } } })
+      yield* guard.link(sibling, root, { budget: { usd: 2 }, batch: { id: "batch-a", budget: { usd: 9 } } })
+      yield* guard.record(child, step({ costUsd: 0.7 }))
+      yield* guard.record(sibling, step({ costUsd: 0.6 }))
+      expect((yield* guard.scopes(child)).map((scope) => [scope.kind, scope.spentUsd, scope.budget.usd])).toEqual([
+        ["run", 1.2999999999999998, 10],
+        ["batch", 1.2999999999999998, 3],
+        ["child", 0.7, 1],
+      ])
+      expect((yield* guard.record(child, step({ costUsd: 0.4 }))).reason).toBe("cap")
+      expect(yield* guard.stopped(root)).toBeUndefined()
+      expect(yield* guard.stopped(sibling)).toBeUndefined()
+      yield* guard.record(sibling, step({ costUsd: 1.4 }))
+      expect((yield* guard.stopped(sibling))?.reason).toBe("cap")
+      expect((yield* guard.snapshot(root))?.spentUsd).toBeCloseTo(3.1, 6)
+      expect((yield* guard.scopes(sibling)).find((scope) => scope.kind === "batch")?.spentUsd).toBeCloseTo(3.1, 6)
+      expect((yield* guard.snapshot(root))?.steps).toBe(4)
+    }),
+  )
+
+  it.effect("nested children inherit ancestor and batch ceilings without counting a shared batch twice", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const nested = SessionID.make("ses_nested")
+      yield* guard.begin(root, { usd: 10 })
+      yield* guard.link(child, root, { budget: { usd: 1 }, batch: { id: "shared", budget: { usd: 2 } } })
+      yield* guard.link(nested, child, { budget: { usd: 5 }, batch: { id: "shared", budget: { usd: 9 } } })
+      expect((yield* guard.record(nested, step({ costUsd: 1.1 }))).reason).toBe("cap")
+      expect((yield* guard.stopped(child))?.reason).toBe("cap")
+      expect(yield* guard.stopped(root)).toBeUndefined()
+      const scopes = yield* guard.scopes(nested)
+      expect(scopes.map((scope) => scope.kind)).toEqual(["run", "batch", "child", "child"])
+      expect(scopes.every((scope) => scope.steps === 1 && scope.spentUsd === 1.1)).toBe(true)
+    }),
+  )
+
+  it.effect("follow-ups tighten limits without resetting spend, explicit renewal starts a new attempt", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root, { usd: 10 })
+      yield* guard.link(child, root, { budget: { usd: 1 } })
+      yield* guard.record(child, step({ costUsd: 0.9 }))
+      yield* guard.end(root)
+      yield* guard.begin(root, { usd: 20 })
+      yield* guard.link(child, root, { budget: { usd: 100 } })
+      expect((yield* guard.record(child, step({ costUsd: 0.2 }))).reason).toBe("cap")
+      expect((yield* guard.snapshot(root))?.spentUsd).toBe(0)
+      yield* guard.release(child)
+      yield* guard.link(child, root, { budget: { usd: 2 }, renew: true })
+      expect(yield* guard.stopped(child)).toBeUndefined()
+      yield* guard.record(child, step({ costUsd: 0.5 }))
+      expect((yield* guard.snapshot(root))?.spentUsd).toBe(0.5)
+      expect((yield* guard.scopes(child)).find((scope) => scope.kind === "child")?.spentUsd).toBe(0.5)
+    }),
+  )
+
+  it.effect("simultaneous siblings retain in-flight usage after their shared cap is crossed", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root, { usd: 10 })
+      yield* guard.link(child, root, { batch: { id: "concurrent", budget: { usd: 1 } } })
+      yield* guard.link(sibling, root, { batch: { id: "concurrent", budget: { usd: 1 } } })
+      yield* Effect.all([guard.record(child, step({ costUsd: 0.7 })), guard.record(sibling, step({ costUsd: 0.7 }))], {
+        concurrency: "unbounded",
+      })
+      expect((yield* guard.stopped(child))?.reason).toBe("cap")
+      expect((yield* guard.stopped(sibling))?.reason).toBe("cap")
+      expect((yield* guard.snapshot(root))?.spentUsd).toBe(1.4)
+      expect((yield* guard.scopes(child)).find((scope) => scope.kind === "batch")?.steps).toBe(2)
+    }),
+  )
+
+  it.effect("pins a live child's launch cap beyond the finished-run history until release", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root, { steps: 1 })
+      yield* guard.link(child, root, { budget: { steps: 2 } })
+      yield* guard.end(root)
+      yield* Effect.forEach(
+        Array.from({ length: SpendGuard.LAST_RUNS + 1 }, (_, index) => SessionID.make(`ses_other_${index}`)),
+        (id) => Effect.andThen(guard.begin(id), guard.end(id)),
+      )
+      expect((yield* guard.record(child, step())).reason).toBe("steps")
+      expect((yield* guard.scopes(child)).length).toBe(2)
+      yield* guard.release(child)
+      expect(yield* guard.scopes(child)).toEqual([])
     }),
   )
 })
