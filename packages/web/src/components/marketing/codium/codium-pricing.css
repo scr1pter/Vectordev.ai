@@ -1,10 +1,11 @@
 /*
- * /codium: the whole page, chrome included. Every size is in rem on a 15px root that becomes 16px at 900px, so the
- * layout scales as one piece. Spacing runs on two units: g (0.625rem, horizontal) and v (1.4rem, vertical).
- * Neutrals carry a faint violet hue; the translucent tones are mixes of the text colour, so they follow the theme.
+ * /codium: everything between the site's top bar and footer, which are the landing page's own. Every size is in rem
+ * on a 15px root that becomes 16px at 900px, so the layout scales as one piece; the bar and footer are sized in px and
+ * stay exactly as on the landing page. Spacing runs on two units: g (0.625rem, horizontal) and v (1.4rem, vertical).
+ * Neutrals carry a faint violet hue; the translucent tones are mixes of the text colour.
  */
 html:has(.cx-page) {
-  /* The dark palette is vectorsystemdesign.vercel.app's: ground, surface, raised, ink and accent. */
+  /* The palette is vectorsystemdesign.vercel.app's: ground, surface, raised, ink and accent. Dark only, like the rest of the site. */
   --cx-bg: #131017;
   --cx-card: #1a1620;
   --cx-card-02: #1e1a24;
@@ -13,47 +14,16 @@ html:has(.cx-page) {
   --cx-fg: #ece7f4;
   --cx-fg-02: #d6cfe2;
   --cx-accent: #b69cff;
-  --cx-header: 56px;
   color-scheme: dark;
   font-size: 15px;
   background: var(--cx-bg);
   scroll-behavior: auto;
-  scroll-padding-top: 64px;
   text-size-adjust: none;
   -webkit-text-size-adjust: none;
 }
 
-/* The light accent is darker than the reference's mapping so the 12px badge keeps AA contrast on its tint. */
-html[data-cx-theme="light"]:has(.cx-page) {
-  --cx-bg: #f7f6f9;
-  --cx-card: #f1f0f5;
-  --cx-card-02: #eae9ee;
-  --cx-card-03: #e5e4e9;
-  --cx-card-04: #e0dfe4;
-  --cx-fg: #25242b;
-  --cx-fg-02: #3a3940;
-  --cx-accent: #6646c4;
-  color-scheme: light;
-}
-
-/* System is the default, so the light palette also applies before the theme script runs. */
-@media (prefers-color-scheme: light) {
-  html:not([data-cx-theme="dark"]):has(.cx-page) {
-    --cx-bg: #f7f6f9;
-    --cx-card: #f1f0f5;
-    --cx-card-02: #eae9ee;
-    --cx-card-03: #e5e4e9;
-    --cx-card-04: #e0dfe4;
-    --cx-fg: #25242b;
-    --cx-fg-02: #3a3940;
-    --cx-accent: #6646c4;
-    color-scheme: light;
-  }
-}
-
 @media (min-width: 900px) {
   html:has(.cx-page) {
-    --cx-header: 52px;
     font-size: 16px;
   }
 }
@@ -69,19 +39,94 @@ body:has(.cx-page)::before {
 
 .cx-page {
   --cx-sec: color-mix(in oklab, var(--cx-fg) 60%, transparent);
-  --cx-hover: color-mix(in oklab, var(--cx-fg) 75%, transparent);
   --cx-border-01: color-mix(in oklab, var(--cx-fg) 2.5%, transparent);
   --cx-fg-05: color-mix(in oklab, var(--cx-fg) 5%, transparent);
   --cx-border-02: color-mix(in oklab, var(--cx-fg) 10%, transparent);
-  --cx-border-03: color-mix(in oklab, var(--cx-fg) 20%, transparent);
   --cx-pad: 0.89em 1.45em 0.91em;
   --cx-pad-md-sm: 0.64em 1.2em 0.66em;
   --cx-pad-sm: 0.45em 0.8em 0.46em;
   --cx-g: 0.625rem;
   --cx-v: 1.4rem;
   min-height: 100vh;
-  color: var(--cx-fg);
   background: var(--cx-bg);
+}
+
+@media (min-width: 900px) {
+  .cx-page {
+    --cx-pad: 0.78em 1.35em 0.8em;
+    --cx-pad-md-sm: 0.6em 1.25em 0.62em;
+    --cx-pad-sm: 0.4em 0.75em 0.42em;
+  }
+}
+
+/*
+ * The bar and footer keep the landing page's typefaces: Geist for the bar, the landing face for the footer. The bar
+ * scrolls away with the page as it does on the landing page, where LanderMotion's `.vector-marketing > *` makes it
+ * relative; its `top` still sets it 12px down. Pinned, the pricing content would show around its rounded ends.
+ */
+.cx-page > .site-header {
+  position: relative;
+  font-family: var(--font-sans);
+}
+
+.cx-page > .site-footer {
+  font-family: var(--font-landing);
+}
+
+/*
+ * The bar wears the landing page's material from LanderMaterials.astro: the violet measured under its glass, painted
+ * there instead of a live blur, and the rim lit from the top left. Only the pointer-tracked highlight is left out; it
+ * needs the landing page's script.
+ */
+.cx-page > .site-header .site-nav {
+  position: relative;
+  isolation: isolate;
+  background:
+    var(--glass-fill-strong),
+    linear-gradient(90deg, rgb(22 11.4 45) 5%, rgb(17.6 8.6 36.5) 24%, rgb(16 8 31) 44%, rgb(17.8 9.7 34.4) 63%, rgb(16.8 10 33.4) 90%);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.cx-page > .site-header .site-nav::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 1px;
+  background: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.9) 0%,
+    rgba(226, 214, 255, 0.5) 18%,
+    rgba(255, 255, 255, 0.06) 44%,
+    rgba(255, 255, 255, 0.02) 70%,
+    rgba(255, 255, 255, 0.14) 100%
+  );
+  border-radius: inherit;
+  opacity: 0.75;
+  pointer-events: none;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+@media (max-width: 640px) {
+  .cx-page > .site-header .site-nav {
+    background:
+      var(--glass-fill-strong),
+      linear-gradient(90deg, rgb(22 10.7 45.6), rgb(19.5 9.7 41) 40%, rgb(24.1 12.6 48.4) 75%);
+  }
+}
+
+/* The page's own type and resets stop at main, so the bar and footer render as they do on the landing page. */
+.cx-main {
+  min-height: 70vh;
+  color: var(--cx-fg);
   font-family: "Geist Variable", Geist, ui-sans-serif, system-ui, sans-serif;
   font-size: 1rem;
   font-weight: 400;
@@ -93,30 +138,22 @@ body:has(.cx-page)::before {
   -webkit-font-smoothing: antialiased;
 }
 
-@media (min-width: 900px) {
-  .cx-page {
-    --cx-pad: 0.78em 1.35em 0.8em;
-    --cx-pad-md-sm: 0.6em 1.25em 0.62em;
-    --cx-pad-sm: 0.4em 0.75em 0.42em;
-  }
-}
-
-.cx-page ::selection {
+.cx-main ::selection {
   background: color-mix(in oklab, var(--cx-fg) 15%, transparent);
 }
 
-:where(.cx-page) a {
+:where(.cx-main) a {
   color: inherit;
   text-decoration: none;
 }
 
-:where(.cx-page) button {
+:where(.cx-main) button {
   color: inherit;
   background: none;
   cursor: pointer;
 }
 
-.cx-page :focus-visible {
+.cx-main :focus-visible {
   outline: 2px solid var(--cx-fg);
   outline-offset: 0.3ch;
 }
@@ -229,17 +266,6 @@ body:has(.cx-page)::before {
   border-color: var(--cx-border-01);
 }
 
-.cx-btn--ghost {
-  color: var(--cx-fg);
-  background: transparent;
-  border-color: var(--cx-border-03);
-}
-
-.cx-btn--ghost:hover {
-  background: var(--cx-card);
-  border-color: var(--cx-border-03);
-}
-
 .cx-btn--sm {
   padding: var(--cx-pad-sm);
   font-size: 0.875rem;
@@ -268,231 +294,6 @@ body:has(.cx-page)::before {
 .cx-btn-icon svg {
   width: 0.7825em;
   height: 1em;
-}
-
-/* Header */
-.cx-header {
-  position: fixed;
-  inset: 0 0 auto;
-  z-index: 50;
-  height: var(--cx-header);
-  padding: 0 calc(var(--cx-g) * 2);
-  background: var(--cx-bg);
-}
-
-.cx-header-grid {
-  position: relative;
-  height: 100%;
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
-}
-
-.cx-logo {
-  position: relative;
-  left: -2px;
-  width: 95.75px;
-  height: 23.78px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  justify-self: start;
-}
-
-.cx-logo-mark {
-  width: 23.78px;
-  height: 23.78px;
-  flex: none;
-}
-
-.cx-logo-word {
-  width: 64px;
-  height: 11.2px;
-  flex: none;
-}
-
-/* Hidden until the first Tab reaches it; then a small light pill over the logo. */
-.cx-skip {
-  position: absolute;
-  top: 0.82rem;
-  left: -0.2rem;
-  z-index: 50;
-}
-
-.cx-skip:not(:focus) {
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  overflow: hidden;
-  border: 0;
-  clip-path: inset(50%);
-}
-
-.cx-page .cx-skip:focus-visible {
-  outline-offset: 2px;
-}
-
-.cx-nav {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  display: none;
-  transform: translate(-50%, -50%);
-}
-
-.cx-nav a {
-  display: inline-flex;
-  padding: 0.35rem 0.9375rem;
-  border: 1px solid transparent;
-  font-size: 0.875rem;
-  line-height: 1.5;
-}
-
-.cx-nav a:hover,
-.cx-signin:hover {
-  color: var(--cx-hover);
-}
-
-.cx-actions {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--cx-g) * 0.75);
-}
-
-.cx-signin {
-  display: flex;
-  padding: 0.25rem;
-  border: 1px solid transparent;
-  font-size: 0.875rem;
-  line-height: 1.5;
-}
-
-.cx-actions .cx-download,
-.cx-actions .cx-report,
-.cx-report-long {
-  display: none;
-}
-
-.cx-burger {
-  position: relative;
-  width: 2.1rem;
-  height: 2.1rem;
-  margin: 0 -0.3rem 0 var(--cx-g);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.cx-burger svg {
-  width: 100%;
-  height: 100%;
-}
-
-@media (min-width: 420px) {
-  .cx-actions .cx-download {
-    display: flex;
-  }
-}
-
-@media (min-width: 900px) {
-  .cx-header-grid {
-    grid-template-columns: auto 1fr auto;
-  }
-
-  .cx-nav {
-    display: flex;
-  }
-
-  .cx-actions {
-    grid-column: 3;
-  }
-
-  .cx-actions .cx-report {
-    display: inline-flex;
-  }
-
-  .cx-burger {
-    display: none;
-  }
-}
-
-@media (min-width: 1140px) {
-  .cx-report-long {
-    display: inline;
-  }
-
-  .cx-report-short {
-    display: none;
-  }
-}
-
-/* The small-screen menu covers the page; its own close button sits where the menu button was. */
-.cx-menu {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  padding: calc(var(--cx-header) + var(--cx-v) * 3) calc(var(--cx-g) * 2) 12.25px;
-  display: flex;
-  flex-direction: column;
-  background: var(--cx-bg);
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity 0.14s cubic-bezier(0.25, 1, 0.5, 1),
-    visibility 0s 0.14s;
-}
-
-html[data-cx-menu] .cx-menu {
-  opacity: 1;
-  visibility: visible;
-  transition: opacity 0.14s cubic-bezier(0.25, 1, 0.5, 1);
-}
-
-/* Only while the menu can be seen: from 900px it is hidden, and a locked page there would have no way to unlock. */
-@media (max-width: 899.98px) {
-  html[data-cx-menu] {
-    overflow: hidden;
-  }
-}
-
-.cx-menu-close {
-  position: absolute;
-  top: calc((var(--cx-header) - 2.1rem) / 2);
-  right: calc(var(--cx-g) * 2 - 0.3rem);
-  width: 2.1rem;
-  height: 2.1rem;
-}
-
-.cx-menu-close svg {
-  width: 100%;
-  height: 100%;
-}
-
-.cx-menu nav a {
-  display: block;
-  padding: calc(var(--cx-v) * 0.25) 0;
-}
-
-.cx-menu-actions {
-  margin-top: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--cx-g);
-}
-
-.cx-menu-actions .cx-btn {
-  width: 100%;
-}
-
-@media (min-width: 900px) {
-  .cx-menu {
-    display: none;
-  }
-}
-
-.cx-main {
-  min-height: 70vh;
-  padding-top: var(--cx-header);
 }
 
 /* Pricing: title, plan toggle, cards, the note under them, and the comparison table. */
@@ -795,9 +596,9 @@ html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
 }
 
 /*
- * Comparison table: from 660px; scrolls sideways below 1140px. The header row is sticky at every width. Below 1140px
- * the sideways scroller is its scroll container, so the row sits one header height lower there and covers the first
- * row under it.
+ * Comparison table: from 660px; scrolls sideways below 1140px. From 1140px the header row sticks to the top of the
+ * window, since the site's top bar has scrolled away by then. Below that the sideways scroller is the row's scroll
+ * container and never scrolls down, so the row stays put at the top of the table.
  */
 .cx-compare {
   margin-top: calc(var(--cx-v) * 4);
@@ -837,7 +638,7 @@ html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
 
 .cx-compare thead th {
   position: sticky;
-  top: var(--cx-header);
+  top: 0;
   z-index: 20;
   padding: 0.75rem 0.5rem;
   background: var(--cx-bg);
@@ -944,9 +745,10 @@ html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
     grid-column: 1 / 7;
   }
 
+  /* Sticks 12px below the window top: the gap the top bar keeps at the top of the page. */
   .cx-faq-title > div {
     position: sticky;
-    top: 64px;
+    top: 0.75rem;
   }
 
   .cx-faq-title h2 {
@@ -1040,190 +842,4 @@ html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
   align-items: center;
   justify-content: center;
   gap: var(--cx-g);
-}
-
-/* Footer */
-.cx-footer {
-  position: relative;
-  padding: calc(var(--cx-v) * 3) calc(var(--cx-g) * 2);
-  background: var(--cx-card);
-}
-
-.cx-footer-top {
-  margin-bottom: calc(var(--cx-v) * 4.5);
-}
-
-.cx-footer-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: calc(var(--cx-v) * 2) var(--cx-g);
-}
-
-.cx-footer h2 {
-  padding-bottom: calc(var(--cx-v) * 2.5 / 12);
-  color: var(--cx-sec);
-}
-
-.cx-footer li a {
-  display: inline-block;
-  padding: calc(var(--cx-v) * 2.5 / 12) 0;
-}
-
-.cx-footer-external {
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-@media (hover: hover) {
-  .cx-footer li a:hover .cx-footer-external,
-  .cx-footer li a:focus-visible .cx-footer-external {
-    opacity: 1;
-  }
-}
-
-.cx-footer-bottom {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: calc(var(--cx-v) * 2);
-}
-
-.cx-footer-legal {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--cx-g) * 1.5);
-  color: var(--cx-sec);
-}
-
-.cx-theme {
-  position: relative;
-  display: flex;
-  padding: 0.125rem;
-  background: var(--cx-card-03);
-  border-radius: 3.4e38px;
-}
-
-.cx-theme-indicator {
-  position: absolute;
-  top: 0.125rem;
-  bottom: 0.125rem;
-  left: 0.125rem;
-  width: calc((100% - 0.25rem) / 3);
-  background: var(--cx-border-02);
-  border-radius: 3.4e38px;
-  transition: transform 0.14s cubic-bezier(0.25, 1, 0.5, 1);
-}
-
-html[data-cx-theme="light"] .cx-theme-indicator {
-  transform: translateX(100%);
-}
-
-html[data-cx-theme="dark"] .cx-theme-indicator {
-  transform: translateX(200%);
-}
-
-.cx-theme button {
-  position: relative;
-  padding: var(--cx-pad-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--cx-sec);
-  border-radius: 3.4e38px;
-  font-size: 1rem;
-  line-height: 1;
-}
-
-@media (min-width: 660px) {
-  .cx-theme button {
-    font-size: 0.875rem;
-  }
-}
-
-.cx-theme button:hover,
-.cx-theme button[aria-pressed="true"] {
-  color: var(--cx-fg);
-}
-
-.cx-theme svg {
-  width: 1em;
-  height: 1em;
-}
-
-@media (min-width: 660px) {
-  .cx-footer {
-    padding-bottom: calc(var(--cx-g) * 3);
-  }
-
-  .cx-footer-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-
-  .cx-footer-bottom {
-    flex-direction: row;
-    align-items: center;
-  }
-}
-
-.cx-footer-type {
-  font-size: 1rem;
-  line-height: 1.5;
-  letter-spacing: 0.005em;
-}
-
-@media (min-width: 660px) {
-  .cx-footer-type {
-    font-size: 0.875rem;
-    letter-spacing: 0.01em;
-  }
-}
-
-/* The footer's theme switch and language pill. Vector's site is in English only, so the pill's list has one entry. */
-.cx-footer-tools {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--cx-g) * 1.5);
-}
-
-.cx-lang {
-  position: relative;
-  gap: calc(var(--cx-g) * 0.5);
-  font-size: 1rem;
-  letter-spacing: 0.005em;
-}
-
-@media (min-width: 660px) {
-  .cx-lang {
-    font-size: 0.875rem;
-    letter-spacing: 0.01em;
-  }
-}
-
-.cx-lang-globe {
-  width: 0.9386em;
-  height: 1em;
-}
-
-.cx-lang-chevron {
-  width: 0.7207em;
-  height: 1em;
-}
-
-.cx-lang select {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  appearance: none;
-  border: 0;
-  border-radius: inherit;
-  font-size: 16px;
-  cursor: pointer;
-}
-
-.cx-lang:has(select:focus-visible) {
-  outline: 2px solid var(--cx-fg);
-  outline-offset: 0.3ch;
 }
