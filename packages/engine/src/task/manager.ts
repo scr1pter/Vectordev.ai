@@ -474,7 +474,10 @@ const layer = Layer.effect(
         // Stopping a swarm coordinator already cancels its workers and dependencies.
         const roots = new Set(
           prepared.remote
-            .filter((task) => task.groupID && task.id === `swarm:${task.groupID}`)
+            .filter(
+              (task) =>
+                task.groupID && task.id === `swarm:${task.groupID}` && ACTIVE.has(task.status) && task.controls.stop,
+            )
             .map((task) => task.groupID),
         )
         const controls = prepared.remote.filter(

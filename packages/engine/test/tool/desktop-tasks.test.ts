@@ -434,6 +434,49 @@ describe("authenticated desktop task registry", () => {
       }),
     )
 
+  it.instance("stop-all still stops live workers when their coordinator cannot accept stop", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const desktop = yield* DesktopTasks.Service
+      const manager = yield* TaskManager.Service
+      const parent = yield* sessions.create()
+      const coordinator = observation(parent.id, {
+        id: "swarm:review",
+        groupID: "review",
+        source: "swarm",
+        status: "waiting_on_user",
+        controls: { inspect: true, message: false, stop: false },
+      })
+      const worker = observation(parent.id, { id: "swarm:review:worker", groupID: "review", source: "swarm" })
+      const stopped: Task.Info = {
+        ...worker,
+        status: "stopped",
+        controls: { inspect: true, message: false, stop: false },
+      }
+      const registered = yield* desktop.register({ sessionID: parent.id, tasks: [coordinator, worker] })
+      const [result] = yield* Effect.all(
+        [
+          manager.stop({ sessionID: parent.id, all: true }, ops),
+          Effect.gen(function* () {
+            const command = (yield* desktop.poll({ sessionID: parent.id, lease: registered.lease, timeout: 1000 }))
+              .commands[0]
+            expect(command?.taskID).toBe(worker.id)
+            expect(command?.action).toBe("stop")
+            yield* desktop.register({ sessionID: parent.id, lease: registered.lease, tasks: [coordinator, stopped] })
+            yield* desktop.receipt({
+              sessionID: parent.id,
+              lease: registered.lease,
+              commandID: command!.id,
+              result: { tasks: [stopped] },
+            })
+          }),
+        ],
+        { concurrency: "unbounded" },
+      )
+      expect(result.tasks.find((task) => task.id === worker.id)?.status).toBe("stopped")
+    }),
+  )
+
   it.instance("wait wakes on durable desktop changes and returns truthful completion", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
