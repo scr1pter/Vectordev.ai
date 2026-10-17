@@ -1,5 +1,7 @@
 import { Option, Schema } from "effect"
-import { NO_TRAINING_RETENTION, type FreeModelInfo } from "@vectordevai/schema/free-model"
+// A relative path, not the package name: vectordev.ai's API functions load this file on Vercel's Node runtime, where the
+// package name resolves to Schema's TypeScript source inside node_modules, which Node will not load.
+import { NO_TRAINING_RETENTION, type FreeModelInfo } from "../../schema/src/free-model.js"
 
 export const FreeProviderPolicy = Schema.Struct({
   name: Schema.String,
