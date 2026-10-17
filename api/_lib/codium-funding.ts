@@ -13,20 +13,25 @@ import { persistentStore } from "./persistent-store.js"
  */
 const Funding = Schema.Struct({
   status: Schema.Literals(["open", "paused"]),
+  // Why sales are paused: the balance is short of what is needed, or the check could not finish.
+  reason: Schema.optional(Schema.Literals(["short", "unavailable"])),
+  // The failed check's error code; the amounts of a failed check are unknown.
+  error: Schema.optional(Schema.String),
   checkedAt: Schema.Number,
   since: Schema.Number,
-  balance: Schema.Number,
-  owed: Schema.Number,
-  required: Schema.Number,
-  keys: Schema.Number,
+  balance: Schema.NullOr(Schema.Number),
+  owed: Schema.NullOr(Schema.Number),
+  required: Schema.NullOr(Schema.Number),
+  keys: Schema.NullOr(Schema.Number),
   notifiedAt: Schema.optional(Schema.Number),
 })
 export type CodiumFunding = typeof Funding.Type
 
 const FUNDING_KEY = "vector:codium:funding"
 const LOCK_KEY = "vector:codium:funding:lock"
-// The cron checks every ten minutes; a sale needs a check from the last half hour, so two missed runs still sell.
-export const CODIUM_FUNDING_MAX_AGE_MS = 30 * 60_000
+// The cron checks every ten minutes. A sale needs a reading from about one interval ago; an older one is stale, so the
+// sale runs a check of its own first.
+export const CODIUM_FUNDING_MAX_AGE_MS = 15 * 60_000
 const REMINDER_MS = 24 * 60 * 60_000
 // Every key Codium creates is named after the Vector account it pays for; other keys on the account are not owed.
 const CODIUM_KEY_NAME = /^(?:Vector|Codium) [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12} /i
@@ -60,38 +65,70 @@ export async function checkCodiumFunding(fetcher: typeof fetch = fetch, now = Da
 }
 
 async function measureFunding(fetcher: typeof fetch, now: number) {
-  const margin = fundingMargin()
-  const balance = await openRouterBalance(fetcher)
-  const owed = await creditsOwed(fetcher, now)
-  const required = Math.ceil((owed.cents * (100 + margin.percent)) / 100) + margin.cents
   const previous = await readCodiumFunding(fetcher)
-  const status: CodiumFunding["status"] = balance >= required ? "open" : "paused"
-  const changed = previous?.status !== status
-  const funding = {
-    status,
+  // A check that cannot finish pauses sales at once: without a reading, selling could promise credits Vector cannot pay.
+  const reading = await fundingReading(fetcher, now).then(
+    (value) => ({
+      ...value,
+      status: value.balance >= value.required ? ("open" as const) : ("paused" as const),
+      reason: value.balance >= value.required ? undefined : ("short" as const),
+      error: undefined,
+      failure: undefined,
+    }),
+    (failure: unknown) => ({
+      status: "paused" as const,
+      reason: "unavailable" as const,
+      error: failure instanceof ApiError ? failure.code : "CODIUM_FUNDING_FAILED",
+      balance: null,
+      owed: null,
+      required: null,
+      keys: null,
+      failure,
+    }),
+  )
+  const changed = previous?.status !== reading.status || previous?.reason !== reading.reason
+  const funding: CodiumFunding = {
+    status: reading.status,
+    reason: reading.reason,
+    error: reading.error,
     checkedAt: now,
-    since: changed || !previous ? now : previous.since,
-    balance,
-    owed: owed.cents,
-    required,
-    keys: owed.keys,
+    since: previous?.status === reading.status ? previous.since : now,
+    balance: reading.balance,
+    owed: reading.owed,
+    required: reading.required,
+    keys: reading.keys,
     notifiedAt: changed ? undefined : previous?.notifiedAt,
   }
   await persistentStore(["SET", FUNDING_KEY, JSON.stringify(funding)], fetcher)
-  // Tell the owner when sales pause, when they reopen after a pause, and each day they stay paused.
+  // Tell the owner when sales pause or the reason changes, each day they stay paused, and when they reopen.
   const notify =
-    status === "paused"
+    funding.status === "paused"
       ? funding.notifiedAt === undefined || now - funding.notifiedAt >= REMINDER_MS
       : changed && previous !== undefined
-  const notified = notify && (await emailOwner(funding, fetcher))
+  const notified = notify && (await emailOwner(funding, reading.failure, fetcher))
   if (notified) await persistentStore(["SET", FUNDING_KEY, JSON.stringify({ ...funding, notifiedAt: now })], fetcher)
+  // The scheduled job still reports the failure, so its log shows the check did not run.
+  if (funding.reason === "unavailable") throw reading.failure
   return { ...funding, notifiedAt: notified ? now : funding.notifiedAt, notified, ran: true }
 }
 
+async function fundingReading(fetcher: typeof fetch, now: number) {
+  const margin = fundingMargin()
+  const balance = await openRouterBalance(fetcher)
+  const owed = await creditsOwed(fetcher, now)
+  return {
+    balance,
+    owed: owed.cents,
+    required: Math.ceil((owed.cents * (100 + margin.percent)) / 100) + margin.cents,
+    keys: owed.keys,
+  }
+}
+
 /**
- * New subscriptions and top-ups need a recent check that found the balance covering what is owed. Without one, as
- * when OpenRouter cannot be read, sales stay closed: selling credits Vector may not be able to pay for is the failure
- * to avoid. Credits already bought keep working either way.
+ * New subscriptions and top-ups need a check from the last CODIUM_FUNDING_MAX_AGE_MS that found the balance covering
+ * what is owed. A failed check is saved as a pause, and a sale that finds the reading stale runs a check first and
+ * refuses unless it succeeds: selling credits Vector may not be able to pay for is the failure to avoid. Credits
+ * already bought keep working either way.
  */
 export async function requireCodiumSales(fetcher: typeof fetch = fetch, now = Date.now()) {
   const saved = await readCodiumFunding(fetcher)
@@ -185,44 +222,55 @@ function fundingMargin() {
   return { percent, cents: Math.round(dollars * 100) }
 }
 
-async function emailOwner(funding: CodiumFunding, fetcher: typeof fetch) {
+async function emailOwner(funding: CodiumFunding, failure: unknown, fetcher: typeof fetch) {
   const key = process.env.RESEND_API_KEY?.trim()
   const from = process.env.VECTOR_PURCHASE_EMAIL_FROM?.trim()
   const to = process.env.CODIUM_OWNER_EMAIL?.trim() || process.env.VECTOR_BUG_REPORT_TO?.trim()
   if (!key || !from || !to) return false
-  const money = (cents: number) => `$${(cents / 100).toFixed(2)}`
-  const lines =
-    funding.status === "paused"
-      ? [
-          "Vector Codium has paused new subscriptions and top-ups. Vector's OpenRouter balance cannot cover the credits customers still hold plus the safety margin.",
-          "",
-          `OpenRouter balance: ${money(funding.balance)}`,
-          `Credits customers still hold: ${money(funding.owed)} across ${funding.keys} keys`,
-          `Needed, with the margin: ${money(funding.required)}`,
-          `Short by: ${money(funding.required - funding.balance)}`,
-          "",
-          "Credits customers already bought keep working. Sales reopen by themselves at the next check after the balance covers what is needed; checks run every 10 minutes.",
-          "Add credits at https://openrouter.ai/settings/credits, or raise the auto top-up threshold above the amount needed.",
-        ]
-      : [
-          "Vector Codium is selling subscriptions and top-ups again. Vector's OpenRouter balance covers the credits customers still hold plus the safety margin.",
-          "",
-          `OpenRouter balance: ${money(funding.balance)}`,
-          `Credits customers still hold: ${money(funding.owed)} across ${funding.keys} keys`,
-          `Needed, with the margin: ${money(funding.required)}`,
-        ]
+  const money = (cents: number | null) => (cents === null ? "unknown" : `$${(cents / 100).toFixed(2)}`)
+  const amounts = [
+    `OpenRouter balance: ${money(funding.balance)}`,
+    `Credits customers still hold: ${money(funding.owed)} across ${funding.keys} keys`,
+    `Needed, with the margin: ${money(funding.required)}`,
+  ]
+  const reopen =
+    "Credits customers already bought keep working. Sales reopen by themselves at the first check that reads the balance and finds it covers what is needed; checks run every 10 minutes."
+  const message =
+    funding.status === "open"
+      ? {
+          subject: "Vector Codium sales reopened",
+          lines: [
+            "Vector Codium is selling subscriptions and top-ups again. Vector's OpenRouter balance covers the credits customers still hold plus the safety margin.",
+            "",
+            ...amounts,
+          ],
+        }
+      : funding.reason === "unavailable"
+        ? {
+            subject: "Vector Codium sales paused: the funding check could not finish",
+            lines: [
+              `Vector Codium has paused new subscriptions and top-ups because the funding check could not finish: ${failure instanceof ApiError ? failure.message : "it failed unexpectedly."}`,
+              "",
+              reopen,
+              "If this lasts, check OpenRouter's status, OPENROUTER_MANAGEMENT_KEY and the CODIUM_FUNDING_* settings.",
+            ],
+          }
+        : {
+            subject: `Vector Codium sales paused: OpenRouter is short ${money((funding.required ?? 0) - (funding.balance ?? 0))}`,
+            lines: [
+              "Vector Codium has paused new subscriptions and top-ups. Vector's OpenRouter balance cannot cover the credits customers still hold plus the safety margin.",
+              "",
+              ...amounts,
+              `Short by: ${money((funding.required ?? 0) - (funding.balance ?? 0))}`,
+              "",
+              reopen,
+              "Add credits at https://openrouter.ai/settings/credits, or raise the auto top-up threshold above the amount needed.",
+            ],
+          }
   const response = await fetcher("https://api.resend.com/emails", {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      from,
-      to,
-      subject:
-        funding.status === "paused"
-          ? `Vector Codium sales paused: OpenRouter is short ${money(funding.required - funding.balance)}`
-          : "Vector Codium sales reopened",
-      text: lines.join("\n"),
-    }),
+    body: JSON.stringify({ from, to, subject: message.subject, text: message.lines.join("\n") }),
     redirect: "error",
     signal: AbortSignal.timeout(10_000),
   }).catch(() => undefined)

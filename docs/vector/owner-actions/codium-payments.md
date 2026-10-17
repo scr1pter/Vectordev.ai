@@ -21,9 +21,13 @@ Once the steps below are done, Codium runs without anyone acting on a payment. U
    - Vector's OpenRouter balance (`GET /api/v1/credits`);
    - everything customers can still spend: the credit limit minus usage on every enabled, unexpired Codium key.
 
-   When the balance is less than what customers hold plus a safety margin, new checkouts and top-ups answer "New Codium purchases are temporarily unavailable. Credits you already have keep working. Please try again later." You get an email, and a reminder each day the pause lasts. Sales reopen at the first check that finds enough balance, and you get an email saying so.
+   When the balance is less than what customers hold plus a safety margin, new checkouts and top-ups answer "New Codium purchases are temporarily unavailable. Credits you already have keep working. Please try again later."
 
-   Checkout also fails closed. With no check in the last 30 minutes, it runs one first. If OpenRouter cannot be read, it does not sell. Credits customers already bought keep working either way.
+   The check fails safe:
+   - **A check that cannot finish pauses sales at once.** If it cannot read the balance or the key list (OpenRouter down, a wrong management key) or a margin setting is invalid, it saves a pause straight away. The last good reading no longer counts, so nothing sells until a later check succeeds.
+   - **A stale reading is not trusted.** A sale needs a reading from the last 15 minutes. When the newest is older, for example after a missed cron run, the checkout runs a check first and sells only if that check succeeds and finds enough balance.
+
+   You get an email when sales pause, saying whether the balance is short or the check could not finish, another if that reason changes, a reminder each day the pause lasts, and one when sales reopen. Sales reopen by themselves at the first check that succeeds and finds enough balance. Credits customers already bought keep working throughout.
 
 6. **Every payment lands in a private ledger.** For each Codium charge it records:
    - the price and any refund;
@@ -125,7 +129,7 @@ curl -H "Authorization: Bearer $CODIUM_OWNER_SECRET" "https://vectordev.ai/api/m
 All amounts are US cents. The answer has three parts:
 
 - **`totals`** and **`months`** add up `price`, `refunded`, `stripeFee`, `stripeNet`, `credits`, `openRouterFee` and `profit`.
-- **`funding`** is the funding check's last reading: the balance, what customers hold, what is needed and whether sales are open.
+- **`funding`** is the funding check's last reading: whether sales are open, why they are paused (`short` or `unavailable`), the balance, what customers hold and what is needed. After a check that could not finish, the amounts are `null` and `error` names what failed.
 - **`entries`**, with `?entries=1`, lists each payment.
 
 `profit` is Stripe's net minus the credits minus OpenRouter's fee. It assumes every credit granted gets spent, so monthly credits that expire unused are extra margin it does not show. A refunded or disputed month counts what was spent before the reversal. `feesPending` counts charges whose Stripe fee had not settled yet; they update on their own.

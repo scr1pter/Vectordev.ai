@@ -637,20 +637,66 @@ describe("sales follow Vector's OpenRouter balance", () => {
       code: "CODIUM_SALES_PAUSED",
     })
     expect(stripe.sessions.size).toBe(0)
-    expect(await readCodiumFunding(fetcher)).toBeUndefined()
+    expect(await readCodiumFunding(fetcher)).toMatchObject({
+      status: "paused",
+      reason: "unavailable",
+      error: "CODIUM_FUNDING_UNAVAILABLE",
+      balance: null,
+    })
 
     openRouter.unavailable = false
+    await checkCodiumFunding(fetcher)
     await modelTopupCheckout(user, "codium-topup-10", fetcher)
     const checked = await readCodiumFunding(fetcher)
     expect(checked).toMatchObject({ status: "open", balance: 10000 })
 
-    // A check older than half an hour is repeated before the next sale; a failed repeat closes sales.
+    // A stale reading is checked again before the next sale; a failed check closes sales and is saved as a pause.
     openRouter.unavailable = true
     const later = Date.now() + CODIUM_FUNDING_MAX_AGE_MS + 1000
     await expect(modelTopupCheckout(user, "codium-topup-50", fetcher, later)).rejects.toMatchObject({
       code: "CODIUM_SALES_PAUSED",
     })
-    expect(await readCodiumFunding(fetcher)).toEqual(checked)
+    expect(await readCodiumFunding(fetcher)).toMatchObject({
+      status: "paused",
+      reason: "unavailable",
+      checkedAt: later,
+    })
+    expect(stripe.sessions.size).toBe(1)
+  })
+
+  test("a scheduled check that cannot read OpenRouter pauses sales at once, not when the last reading ages out", async () => {
+    funded(1000)
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", ran: true })
+
+    // A minute later OpenRouter stops answering. The scheduled check fails (its route answers 503), and that failure
+    // pauses sales straight away instead of leaving the last good reading in force.
+    openRouter.unavailable = true
+    const minute = Date.now() + 60_000
+    await expect(checkCodiumFunding(fetcher, minute)).rejects.toMatchObject({ code: "CODIUM_FUNDING_UNAVAILABLE" })
+    await expect(modelTopupCheckout(user, "codium-topup-10", fetcher, minute)).rejects.toMatchObject({
+      code: "CODIUM_SALES_PAUSED",
+    })
+    await expect(modelPlanCheckout(user, "vector-10", fetcher, minute)).rejects.toMatchObject({
+      code: "CODIUM_SALES_PAUSED",
+    })
+    expect(stripe.sessions.size).toBe(0)
+    expect(emails).toHaveLength(1)
+    expect(emails[0]).toMatchObject({ subject: "Vector Codium sales paused: the funding check could not finish" })
+    expect(String(emails[0]!.text)).toContain("Vector's OpenRouter balance could not be read.")
+    // Later failures while paused stay quiet.
+    await expect(checkCodiumFunding(fetcher, minute + 600_000)).rejects.toMatchObject({
+      code: "CODIUM_FUNDING_UNAVAILABLE",
+    })
+    expect(emails).toHaveLength(1)
+
+    // OpenRouter answers again: the next check reopens sales and says so.
+    openRouter.unavailable = false
+    const reopened = minute + 1_200_000
+    expect(await checkCodiumFunding(fetcher, reopened)).toMatchObject({ status: "open", notified: true })
+    expect(emails.at(-1)).toMatchObject({ subject: "Vector Codium sales reopened" })
+    expect((await modelTopupCheckout(user, "codium-topup-10", fetcher, reopened)).url).toStartWith(
+      "https://checkout.stripe.com/",
+    )
   })
 
   test("a key listing that repeats a page instead of moving on keeps sales closed", async () => {
