@@ -2,8 +2,24 @@ import { Effect, Schema } from "effect"
 import { Tool } from "./tool"
 import { TaskManager } from "@/task/manager"
 import type { TaskPromptOps } from "./task"
+import { ToolJsonSchema } from "./json-schema"
 
 const ids = Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMaxLength(200))
+// Provider adapters flatten root unions and can lose their action discriminators.
+// Advertise one object, but validate each action against Parameters before execution.
+export const PublicParameters = Schema.Struct({
+  action: Schema.Literals(["list", "inspect", "message", "stop", "wait"]),
+  task_id: Schema.optional(Schema.String).annotate({ description: "Required for inspect and message" }),
+  task_ids: Schema.optional(ids).annotate({ description: "Required for wait; selects tasks for stop" }),
+  text: Schema.optional(Schema.String).annotate({ description: "Required for message: instructions or a correction" }),
+  descendants: Schema.optional(Schema.Boolean).annotate({ description: "Include descendants in list" }),
+  delivery: Schema.optional(Schema.Literals(["steer", "queue"])),
+  all: Schema.optional(Schema.Boolean).annotate({ description: "Stop all tasks instead of selecting task_ids" }),
+  reason: Schema.optional(Schema.String),
+  mode: Schema.optional(Schema.Literals(["any", "all"])),
+  timeout: Schema.optional(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 60000 }))),
+})
+
 export const Parameters = Schema.Union([
   Schema.Struct({ action: Schema.Literal("list"), descendants: Schema.optional(Schema.Boolean) }),
   Schema.Struct({ action: Schema.Literal("inspect"), task_id: Schema.String }),
@@ -35,6 +51,7 @@ export const TaskManageTool = Tool.define(
       description:
         "Manage delegated tasks without starting a model. list gives compact status, spend and dependencies; inspect gives bounded recent progress and partial output; message sends your instructions or the user’s correction to an existing child at the next safe provider-turn boundary or queues until current work ends; stop settles selected tasks (or all) and retains partial work; wait is event-driven for any/all task IDs with a 0–60000 ms timeout. Use list/inspect to answer the user's status question, not in a polling loop. Prefer automatic completion notifications and useful independent work. When the user asks you to guide or correct a subagent, send that correction with message and confirm admission. Parent instructions stay within the existing assignment and cannot widen a child's permissions. A finished task is never restarted by message; use task with its task_id for an explicit continuation.",
       parameters: Parameters,
+      jsonSchema: ToolJsonSchema.fromSchema(PublicParameters),
       execute: (input: typeof Parameters.Type, context: Tool.Context) =>
         Effect.gen(function* () {
           const ops = context.extra?.promptOps as TaskPromptOps | undefined
