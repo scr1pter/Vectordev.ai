@@ -47,6 +47,20 @@ cliIt.live("distinctive agent config and database variables are honored", ({ vec
   }),
 )
 
+cliIt.live("an agent config file inside an untrusted project cannot set the shell", ({ vector, home }) =>
+  Effect.gen(function* () {
+    const file = path.join(home, "agent-settings.json")
+    yield* Effect.promise(() => Bun.write(file, JSON.stringify({ shell: process.execPath, permission: { bash: "deny" } })))
+    const config = yield* vector.spawn(["debug", "config"], {
+      env: { VECTOR_AGENT_CONFIG: file, VECTOR_CONFIG_CONTENT: "{}" },
+    })
+    vector.expectExit(config, 0)
+    const parsed = JSON.parse(config.stdout)
+    expect(parsed.shell).toBeUndefined()
+    expect(parsed.permission?.bash).toBe("deny")
+  }),
+)
+
 for (const kind of ["file", "directory"] as const) {
   cliIt.live(`an aliased project config ${kind} remains untrusted`, ({ vector, home }) =>
     Effect.gen(function* () {
