@@ -44,14 +44,18 @@ Once the steps below are done, Codium runs without anyone acting on a payment. U
 
 ## 1. Stripe
 
-Do all of this in **test mode** first, then repeat it in live mode.
+Do all of this in **test mode** first, for the preview test run in [section 4](#4-test-mode-run-before-selling), then repeat it in live mode for Production.
 
 1. Finish the account: business details, identity verification and the bank account for payouts.
-2. Create the prices, the customer portal and the webhook. From `packages/web`, with a test secret key in your shell:
+2. Create the prices, the customer portal and the webhook. From `packages/web`:
 
    ```sh
    bun scripts/setup-model-plans.ts            # dry run: shows what it will create
-   STRIPE_SECRET_KEY=sk_test_... VECTOR_PUBLIC_URL=https://vectordev.ai bun scripts/setup-model-plans.ts --apply
+   # Test mode, for the preview in section 4:
+   STRIPE_SECRET_KEY=sk_test_... VECTOR_PUBLIC_URL=https://<preview address> \
+     VERCEL_AUTOMATION_BYPASS_SECRET=<bypass secret> bun scripts/setup-model-plans.ts --apply
+   # Live mode, for Production:
+   STRIPE_SECRET_KEY=sk_live_... VECTOR_PUBLIC_URL=https://vectordev.ai bun scripts/setup-model-plans.ts --apply
    ```
 
    It prints the values for the environment variables in [section 3](#3-vercel-environment):
@@ -59,7 +63,7 @@ Do all of this in **test mode** first, then repeat it in live mode.
    - `STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID`;
    - `STRIPE_MODEL_PLAN_WEBHOOK_SECRET`. Stripe shows the signing secret only once, so copy it straight into Vercel.
 
-   Running the script again reuses what exists. If the webhook already exists, the script lists any events it is missing.
+   Running the script again reuses what exists: prices by their lookup keys, the portal configuration it created, and the webhook at the same address. If that webhook's bypass secret changed, the script updates its address and keeps its signing secret; if it is missing events, the script lists them. If you deleted the webhook, the script creates a new one and prints its new secret.
 
 3. To do it by hand instead:
    - **Prices**, all USD:
@@ -88,12 +92,12 @@ Do all of this in **test mode** first, then repeat it in live mode.
 
 ## 3. Vercel environment
 
-Set these for **Production** (secrets only in Vercel, never in the repository), then redeploy.
+Set these for **Production** with the live values (secrets only in Vercel, never in the repository), then redeploy. The test run sets its own copies for one preview branch ([section 4](#4-test-mode-run-before-selling)).
 
 | Variable                                                                            | What to set                                                                                                                        |
 | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `MODEL_PLANS_ENABLED`                                                               | `false` until the test-mode run below passes, then `true`                                                                          |
-| `STRIPE_SECRET_KEY`                                                                 | Stripe secret key (`sk_test_…`, later `sk_live_…`)                                                                                 |
+| `MODEL_PLANS_ENABLED`                                                               | `false` until the test-mode run passes and the live values are in, then `true`                                                     |
+| `STRIPE_SECRET_KEY`                                                                 | Stripe live secret key (`sk_live_…`)                                                                                               |
 | `STRIPE_MODEL_PLAN_WEBHOOK_SECRET`                                                  | The webhook's signing secret (`whsec_…`)                                                                                           |
 | `STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID`                                                | The portal configuration (`bpc_…`)                                                                                                 |
 | `STRIPE_MODEL_PLAN_{10,50,100,200}_PRICE_ID`                                        | The four monthly price IDs                                                                                                         |
@@ -112,16 +116,41 @@ Set these for **Production** (secrets only in Vercel, never in the repository), 
 
 ## 4. Test-mode run before selling
 
-With Stripe test keys, `MODEL_PLANS_ENABLED=true` on a preview deployment, and a test card (`4242 4242 4242 4242`). OpenRouter has no test mode: the keys this creates are real, but nothing is spent until a model request is made.
+Run the test on one **preview** branch with its own settings, so test payments never reach Production. Production keeps `MODEL_PLANS_ENABLED=false` throughout. You need Stripe test keys and the test card `4242 4242 4242 4242`. OpenRouter has no test mode: the keys this creates are real, but nothing is spent until a model request is made.
+
+1. **A stable preview address.** Push a branch for the test, for example `codium-test`, and use its branch address from Vercel (Deployments → the branch's deployment → Domains, `…-git-codium-test-….vercel.app`), or give the branch a domain under Settings → Domains. It stays the same on every push.
+2. **Let Stripe through.** Previews sit behind Vercel's Deployment Protection, which would turn Stripe's notifications away. Under Settings → Deployment Protection → Protection Bypass for Automation, create a secret. The setup script adds it to the webhook's address (`VERCEL_AUTOMATION_BYPASS_SECRET` in section 1), and your own calls below add `?x-vercel-protection-bypass=<secret>`.
+3. **A separate store.** Connect a second Redis database to **Preview only** (Storage → Create → Upstash for Redis). The test writes Codium accounts, the funding state and the ledger, and none of that may land in Production's store.
+4. **Preview settings for that branch only.** Under Settings → Environment Variables, add each variable from section 3 for **Preview**, limited to the branch, with these values:
+   - `MODEL_PLANS_ENABLED=true`;
+   - `VECTOR_PUBLIC_URL=https://<preview address>`, where checkout sends buyers back;
+   - the Stripe values from a test-mode run of section 1;
+   - the second store's `KV_REST_API_URL` and `KV_REST_API_TOKEN`;
+   - a `MODEL_PLAN_KEY_ENCRYPTION_SECRET` and a `CRON_SECRET` of their own;
+   - the same `OPENROUTER_MANAGEMENT_KEY`, email settings, `CODIUM_OWNER_SECRET` and allowances as Production.
+
+   Then redeploy the branch.
+
+5. **Sign in on the preview's account page** (`https://<preview address>/account`) with your email and password. Google and GitHub sign-in return there only if the address is in Supabase's Redirect URLs (Authentication → URL Configuration).
+
+Then:
 
 1. Buy the $10 plan. Within seconds OpenRouter should list a new key named `Vector <your account id> sub_…`, capped at that plan's credits, and the account page should show 100% left.
 2. Buy a $10 top-up. A `Codium <your account id> purchased credits` key appears with that top-up's credits.
 3. Refund the top-up in Stripe. The purchased-credit key's limit drops to zero. Refund the plan's charge. The monthly key is switched off.
-4. Read the ledger (below). There should be two entries, with Stripe's fees filled in, the refunds shown and the profit worked out.
-5. Set `CODIUM_FUNDING_MARGIN_USD` above your OpenRouter balance (for example `100000`) and redeploy. Run the check in Vercel (Settings → Cron Jobs → **Run** on `/api/model-plans/funding`). Checkout should now refuse with "temporarily unavailable", and the pause email should arrive. Set the margin back, redeploy and run the check again: sales reopen and the reopen email arrives.
-6. Cancel the plan in the portal. Its credits last until the period ends, then its key expires.
+4. Read the ledger (below) at the preview address, adding `?entries=1&x-vercel-protection-bypass=<secret>`. There should be two entries, with Stripe's fees filled in, the refunds shown and the profit worked out.
+5. Run the funding check. Vercel runs cron jobs only on Production, so call it yourself:
 
-Then repeat section 1 in live mode, put the live values in Production, and set `MODEL_PLANS_ENABLED=true`.
+   ```sh
+   curl -H "Authorization: Bearer <preview CRON_SECRET>" \
+     "https://<preview address>/api/model-plans/funding?x-vercel-protection-bypass=<secret>"
+   ```
+
+   It should answer `{"enabled":true,"status":"open","ran":true,"notified":false}`. Then set the branch's `CODIUM_FUNDING_MARGIN_USD` above the OpenRouter balance (for example `100000`), redeploy and call it again: it answers `"status":"paused"`, checkout refuses with "temporarily unavailable", and the pause email arrives. Set the margin back, redeploy and call it again: sales reopen and the reopen email arrives.
+
+6. Cancel the plan in the preview's portal. Its key stays switched off, as the refund left it, and expires at the end of the period.
+
+Afterwards, delete the branch's Preview variables and the test webhook (Stripe test mode → Developers → Webhooks). The test's OpenRouter keys end switched off by the refunds, so Production's funding check does not count them. Then run section 1 in live mode, put the live values in Production (section 3), and set `MODEL_PLANS_ENABLED=true` there when you decide to sell.
 
 ## Reading the ledger
 
@@ -139,7 +168,7 @@ All amounts are US cents. The answer has three parts:
 `profit` is Stripe's net minus the credits minus OpenRouter's fee. It assumes every credit granted gets spent, so monthly credits that expire unused are extra margin it does not show. A refunded or disputed payment still counts what was spent before the reversal:
 
 - a month counts its key's usage at the time;
-- top-ups share one purchased-credit key, so for them it is the key's usage above the credits still paid for. That spend is counted against the account's reversed top-ups, oldest first, each up to the credits its reversal took away, and shows as `reversedSpend`. A later top-up pays for that spend first, since the buyer gets only what is left of it, so `reversedSpend` then falls back to zero.
+- top-ups share one purchased-credit key, so for them it is the key's usage above the credits still paid for. That spend is counted against the account's reversed top-ups, oldest first, each up to the credits its reversal took away, and shows as `reversedSpend`. A later top-up pays for that spend first, since the buyer gets only what is left of it, so `reversedSpend` falls by what the new top-up covers.
 
 `feesPending` counts charges whose Stripe fee had not settled yet; they update on their own.
 
