@@ -1324,6 +1324,17 @@ describe("reviewing again", () => {
     expect(outcome.selection).toEqual(previous.selection)
   })
 
+  test("reviews everything again when the settings changed or the last review stopped early", async () => {
+    const previous = (await run(fakeClient({ files: { "src/list.ts": HEAD } }).client))!
+    const settings = fakeClient({ files: { "src/list.ts": HEAD, ".vector/review.md": "- Flag every TODO." } })
+    expect((await run(settings.client, { previous }))!.unchanged).toBeUndefined()
+    expect(settings.calls.prompt.length).toBeGreaterThan(0)
+    const stopped = { ...previous, specialists: [{ name: "review" as const, status: "timeout" as const }] }
+    const partial = fakeClient({ files: { "src/list.ts": HEAD } })
+    expect((await run(partial.client, { previous: stopped }))!.unchanged).toBeUndefined()
+    expect(partial.calls.prompt.length).toBeGreaterThan(0)
+  })
+
   test("looks only at the files that changed, and carries the last review's findings in the others", async () => {
     const files = { "src/list.ts": HEAD, "src/names.ts": "export const index = 0\n" }
     const first = fakeClient({

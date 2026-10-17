@@ -220,6 +220,8 @@ export type ReviewOutcomeLite = {
   verification?: { checked: number; rejected: number; status: "ok" | "skipped" | "failed" }
   // Each reviewed file's path → a hash of its diff, so the next review can leave out files that did not change.
   fileKeys?: Record<string, string>
+  // A hash of the settings, rules, instructions and model choice the review ran under; a change means a full review.
+  settingsKey?: string
   // Findings carried from the last review, in files whose diff did not change since.
   carried?: number
   // Nothing changed since the last review, so this is that review again and nothing was sent to a model.
@@ -586,8 +588,21 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
   const { review, skipped } = classifyFiles(files, { config, attributes })
   const head = pr ? pr.headRefOid || pr.headRefName : "HEAD"
   const fileKeys = Object.fromEntries(review.map((file) => [file.path, fileKey(file)]))
-  // Files whose diff is the same as at the last review of this subject. When every file is, that review stands.
-  const previous = input.previous && input.previous.pr === pr?.number ? input.previous : undefined
+  const settingsKey = fnv1a64(
+    [json, attributesText, ...rulesTexts, instructions, ...(input.preferredModels ?? [])]
+      .map((part) => part ?? "")
+      .join("\0"),
+  )
+  // Files whose diff is the same as at the last review of this subject, under the same settings. When every file is,
+  // that review stands. A review that stopped early or lost a reviewer did not see everything, so it is not reused.
+  const previous =
+    input.previous &&
+    input.previous.pr === pr?.number &&
+    input.previous.settingsKey === settingsKey &&
+    input.previous.specialists.length > 0 &&
+    input.previous.specialists.every((specialist) => specialist.status === "ok")
+      ? input.previous
+      : undefined
   const unchanged = new Set(
     review.filter((file) => previous?.fileKeys?.[file.path] === fileKeys[file.path]).map((file) => file.path),
   )
@@ -975,6 +990,7 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
         }
       : {}),
     fileKeys,
+    settingsKey,
     ...(carried.length ? { carried: carried.length } : {}),
     ...(passes.length ? { passes } : {}),
     ...(triage ? { triage: modelName(triage) } : {}),
