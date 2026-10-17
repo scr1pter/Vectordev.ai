@@ -1,0 +1,79 @@
+export * as Task from "./task"
+
+import { Schema } from "effect"
+import { optional } from "./schema"
+import { RunBudget } from "./run-budget"
+
+export const Status = Schema.Literals([
+  "queued", "running", "waiting_on_user", "completed", "failed", "stopped",
+]).annotate({ identifier: "Task.Status" })
+export type Status = typeof Status.Type
+
+export const Usage = Schema.Struct({
+  cost: Schema.Finite,
+  tokens: Schema.Struct({
+    input: Schema.Finite,
+    output: Schema.Finite,
+    reasoning: Schema.Finite,
+    cache: Schema.Struct({ read: Schema.Finite, write: Schema.Finite }),
+  }),
+  total: Schema.Finite,
+  toolUses: Schema.Finite,
+  steps: Schema.Finite,
+  unpricedSteps: optional(Schema.Finite),
+}).annotate({ identifier: "Task.Usage" })
+export interface Usage extends Schema.Schema.Type<typeof Usage> {}
+
+export const Info = Schema.Struct({
+  id: Schema.String,
+  sessionID: optional(Schema.String),
+  parentSessionID: Schema.String,
+  source: Schema.Literals(["subagent", "team", "swarm", "external"]),
+  title: Schema.String,
+  agent: optional(Schema.String),
+  status: Status,
+  batchID: optional(Schema.String),
+  groupID: optional(Schema.String),
+  startedAt: Schema.Finite,
+  completedAt: optional(Schema.Finite),
+  elapsedMs: Schema.Finite,
+  currentStep: optional(Schema.String),
+  lastTool: optional(Schema.String),
+  usage: optional(Usage),
+  ownedPaths: Schema.Array(Schema.String),
+  dependsOn: Schema.Array(Schema.String),
+  resultAvailable: Schema.Boolean,
+  resultRef: optional(Schema.String),
+  reason: optional(Schema.String),
+  attempt: Schema.Finite,
+  budget: optional(RunBudget.Info),
+  controls: Schema.Struct({ inspect: Schema.Boolean, message: Schema.Boolean, stop: Schema.Boolean }),
+}).annotate({ identifier: "Task.Info" })
+export interface Info extends Schema.Schema.Type<typeof Info> {}
+
+export const ListResult = Schema.Struct({ tasks: Schema.Array(Info), truncated: Schema.Boolean })
+  .annotate({ identifier: "Task.ListResult" })
+export interface ListResult extends Schema.Schema.Type<typeof ListResult> {}
+
+export const InspectResult = Schema.Struct({
+  task: Info,
+  steps: Schema.Array(Schema.Struct({ tool: optional(Schema.String), status: optional(Schema.String), text: Schema.String })),
+  output: Schema.String,
+  truncated: Schema.Boolean,
+}).annotate({ identifier: "Task.InspectResult" })
+export interface InspectResult extends Schema.Schema.Type<typeof InspectResult> {}
+
+export const MessageResult = Schema.Struct({
+  taskID: Schema.String,
+  messageID: Schema.String,
+  delivery: Schema.Literals(["steer", "queue"]),
+  accepted: Schema.Literal(true),
+}).annotate({ identifier: "Task.MessageResult" })
+export interface MessageResult extends Schema.Schema.Type<typeof MessageResult> {}
+
+export const StopResult = Schema.Struct({ tasks: Schema.Array(Info) }).annotate({ identifier: "Task.StopResult" })
+export interface StopResult extends Schema.Schema.Type<typeof StopResult> {}
+
+export const WaitResult = Schema.Struct({ tasks: Schema.Array(Info), timedOut: Schema.Boolean })
+  .annotate({ identifier: "Task.WaitResult" })
+export interface WaitResult extends Schema.Schema.Type<typeof WaitResult> {}
