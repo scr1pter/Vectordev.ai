@@ -7,6 +7,7 @@ import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { Cause, Effect, Exit, Layer } from "effect"
 import { afterEach, describe, expect } from "bun:test"
 import path from "path"
+import fs from "node:fs/promises"
 import type { Permission } from "../../src/permission"
 import type { Tool } from "@/tool/tool"
 import { SkillTool } from "../../src/tool/skill"
@@ -53,8 +54,9 @@ Use this skill.
       yield* Effect.promise(() => Bun.write(path.join(skill, "scripts", "demo.txt"), "demo"))
       yield* Effect.promise(() => trustWorkspace(dir))
 
+      yield* Effect.promise(() => fs.mkdir(path.join(dir, "empty-home"), { recursive: true }))
       const home = process.env.VECTOR_TEST_HOME
-      process.env.VECTOR_TEST_HOME = dir
+      process.env.VECTOR_TEST_HOME = path.join(dir, "empty-home")
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           process.env.VECTOR_TEST_HOME = home
