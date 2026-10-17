@@ -1,0 +1,58 @@
+[WebServer] $ vite --host "0.0.0.0" --port "4567"
+
+[WebServer] (node:47388) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+
+Running 128 tests using 1 worker
+
+(node:47587) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:47587) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/128] [chromium] › e2e/regression/agent-dashboard-visibility.spec.ts:6:1 › the native window chrome never covers the Agent Dashboard
+[2/128] [chromium] › e2e/regression/agent-dashboard-visibility.spec.ts:41:1 › the Agent Dashboard still fills the browser viewport on the web
+[3/128] [chromium] › e2e/regression/agent-launcher.spec.ts:9:1 › the project launcher is a single accessible Vector creation sheet
+[4/128] [chromium] › e2e/regression/codium-image-routing.spec.ts:22:1 › an attached image never moves the prompt onto Vector Codium
+[5/128] [chromium] › e2e/regression/cross-server-tab-close.spec.ts:9:1 › server status endpoints remain distinct from unknown session IDs
+[6/128] [chromium] › e2e/regression/cross-server-tab-close.spec.ts:31:1 › closing the active task by keyboard opens the remaining server task
+[7/128] [chromium] › e2e/regression/cross-server-tab-close.spec.ts:69:1 › legacy session routes preserve an existing task's server
+[8/128] [chromium] › e2e/regression/editor-codespace-providers.spec.ts:9:1 › Editor opens a project file beside the active Vector Agent
+[9/128] [chromium] › e2e/regression/external-agent-chat.spec.ts:13:3 › Codex workspace is a conversation with safe running follow-ups
+[10/128] [chromium] › e2e/regression/external-agent-chat.spec.ts:13:3 › Claude Code workspace is a conversation with safe running follow-ups
+[11/128] [chromium] › e2e/regression/external-agent-chat.spec.ts:13:3 › Cursor Agent workspace is a conversation with safe running follow-ups
+[12/128] [chromium] › e2e/regression/first-run-free-model.spec.ts:133:1 › fresh profile starts free from the composer and keeps the draft ready to send
+  1) [chromium] › e2e/regression/first-run-free-model.spec.ts:133:1 › fresh profile starts free from the composer and keeps the draft ready to send 
+
+    Test was interrupted.
+
+    Error: locator.click: Target page, context or browser has been closed
+
+      157 |   await page.screenshot({ path: test.info().outputPath("02-send-without-model.png"), animations: "disabled" })
+      158 |
+    > 159 |   await signInOnOpenRouter(page, () => start.click(), authorize)
+          |                                              ^
+      160 |   expect(state.methods).toEqual([0])
+      161 |
+      162 |   await expect(card).toHaveCount(0)
+        at start (<worktree>/packages/app/e2e/regression/first-run-free-model.spec.ts:159:46)
+        at signInOnOpenRouter (<worktree>/packages/app/e2e/regression/first-run-free-model.spec.ts:119:9)
+        at <worktree>/packages/app/e2e/regression/first-run-free-model.spec.ts:159:9
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e/test-results/regression-first-run-free--37f05-eps-the-draft-ready-to-send-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #2: video (video/webm) ──────────────────────────────────────────────────────────────
+    e2e/test-results/regression-first-run-free--37f05-eps-the-draft-ready-to-send-chromium/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+  1 interrupted
+    [chromium] › e2e/regression/first-run-free-model.spec.ts:133:1 › fresh profile starts free from the composer and keeps the draft ready to send 
+  116 did not run
+  11 passed (29.5s)

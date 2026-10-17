@@ -1,0 +1,7 @@
+[WebServer] $ vite build
+
+[WebServer] (node:89162) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Error: Timed out waiting 120000ms from config.webServer.
+

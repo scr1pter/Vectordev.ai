@@ -1,0 +1,146 @@
+[WebServer] $ vite --host "0.0.0.0" --port "4567"
+
+[WebServer] (node:51663) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+
+Running 128 tests using 1 worker
+
+(node:51899) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:51899) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/128] [chromium] › e2e/regression/agent-dashboard-visibility.spec.ts:6:1 › the native window chrome never covers the Agent Dashboard
+[2/128] [chromium] › e2e/regression/agent-dashboard-visibility.spec.ts:41:1 › the Agent Dashboard still fills the browser viewport on the web
+[3/128] [chromium] › e2e/regression/agent-launcher.spec.ts:9:1 › the project launcher is a single accessible Vector creation sheet
+[4/128] [chromium] › e2e/regression/codium-image-routing.spec.ts:22:1 › an attached image never moves the prompt onto Vector Codium
+[5/128] [chromium] › e2e/regression/cross-server-tab-close.spec.ts:9:1 › server status endpoints remain distinct from unknown session IDs
+[6/128] [chromium] › e2e/regression/cross-server-tab-close.spec.ts:31:1 › closing the active task by keyboard opens the remaining server task
+[7/128] [chromium] › e2e/regression/cross-server-tab-close.spec.ts:69:1 › legacy session routes preserve an existing task's server
+[8/128] [chromium] › e2e/regression/editor-codespace-providers.spec.ts:9:1 › Editor opens a project file beside the active Vector Agent
+[9/128] [chromium] › e2e/regression/external-agent-chat.spec.ts:13:3 › Codex workspace is a conversation with safe running follow-ups
+[10/128] [chromium] › e2e/regression/external-agent-chat.spec.ts:13:3 › Claude Code workspace is a conversation with safe running follow-ups
+[11/128] [chromium] › e2e/regression/external-agent-chat.spec.ts:13:3 › Cursor Agent workspace is a conversation with safe running follow-ups
+[12/128] [chromium] › e2e/regression/first-run-free-model.spec.ts:133:1 › fresh profile starts free from the composer and keeps the draft ready to send
+[13/128] [chromium] › e2e/regression/first-run-free-model.spec.ts:173:1 › the first-run checklist starts free and returns to the next step
+[14/128] [chromium] › e2e/regression/free-models.spec.ts:167:1 › groups free models once, prefers own account, and hides the group when OFF
+[15/128] [chromium] › e2e/regression/free-models.spec.ts:189:1 › switching agents preserves the selected free model until an explicit paid model choice
+[16/128] [chromium] › e2e/regression/free-models.spec.ts:204:1 › quota recovery resumes the same failed turn without submitting a new prompt
+[17/128] [chromium] › e2e/regression/free-models.spec.ts:237:1 › Connect OpenRouter starts PKCE and resumes the same conversation after authorization
+[18/128] [chromium] › e2e/regression/light-theme-launch.spec.ts:18:1 › a saved Light theme applies from launch and the empty-session headline stays readable
+[19/128] [chromium] › e2e/regression/mock-server-events.spec.ts:6:3 › API mocks leave documents and modules on the local server (separate backend)
+[20/128] [chromium] › e2e/regression/mock-server-events.spec.ts:6:3 › API mocks leave documents and modules on the local server (same-origin backend)
+[21/128] [chromium] › e2e/regression/mock-server-events.spec.ts:82:1 › keeps global event envelopes separate from directory presence payloads
+[22/128] [chromium] › e2e/regression/native-window-chrome.spec.ts:8:3 › macos native chrome protects every fullscreen surface without session tabs
+[23/128] [chromium] › e2e/regression/native-window-chrome.spec.ts:8:3 › windows native chrome protects every fullscreen surface without session tabs
+[24/128] [chromium] › e2e/regression/native-window-chrome.spec.ts:54:1 › native chrome styles do not change web geometry
+[25/128] [chromium] › e2e/regression/plugin-oauth.spec.ts:70:1 › an older server cannot expose the paused built-in Copilot sign-in
+[26/128] [chromium] › e2e/regression/plugin-oauth.spec.ts:76:1 › a runtime-approved community plugin can complete its supplied OAuth method
+[27/128] [chromium] › e2e/regression/prompt-thinking-level.spec.ts:10:1 › keeps the V2 thinking level control available in the Agent composer
+[28/128] [chromium] › e2e/regression/provider-unavailable-notice.spec.ts:10:1 › explains ignored credentials and a configured model fallback in the app
+[29/128] [chromium] › e2e/regression/public-share-consent.spec.ts:12:3 › public sharing requires consent and retains retry controls on unshare failure (new layout: false)
+[30/128] [chromium] › e2e/regression/public-share-consent.spec.ts:12:3 › public sharing requires consent and retains retry controls on unshare failure (new layout: true)
+[31/128] [chromium] › e2e/regression/public-share-delete.spec.ts:11:3 › keeps the old public link visible until local deletion is explicitly confirmed (new layout: false)
+[32/128] [chromium] › e2e/regression/public-share-delete.spec.ts:11:3 › keeps the old public link visible until local deletion is explicitly confirmed (new layout: true)
+[33/128] [chromium] › e2e/regression/pull-requests-github-sign-in.spec.ts:11:1 › Pull Requests signs in to GitHub in Vector and then lists pull requests
+[34/128] [chromium] › e2e/regression/remote-tab-busy.spec.ts:12:6 › tab busy indicator reflects the tab server's own session status
+[35/128] [chromium] › e2e/regression/review-image-flash.spec.ts:11:1 › clicking an image file in the v2 review pane does not blank the panel
+[36/128] [chromium] › e2e/regression/review-line-comment.spec.ts:14:1 › opens the comment editor when code is clicked
+[37/128] [chromium] › e2e/regression/review-line-comment.spec.ts:23:1 › opens the comment editor when a line number is clicked
+[38/128] [chromium] › e2e/regression/review-line-comment.spec.ts:32:1 › opens the comment editor for a line number range
+[39/128] [chromium] › e2e/regression/review-line-comment.spec.ts:54:1 › shows a comment button when a line number is hovered
+[40/128] [chromium] › e2e/regression/review-line-comment.spec.ts:69:1 › stages a submitted line comment in the prompt context
+[41/128] [chromium] › e2e/regression/sdk-wire.spec.ts:58:1 › both SDK clients send directory-scoped JSON and bodyless GET to a real HTTP server
+[42/128] [chromium] › e2e/regression/sdk-wire.spec.ts:89:1 › URL rewriting preserves multipart and binary bytes, headers, and cancellation in Chromium
+[43/128] [chromium] › e2e/regression/session-cost-readout-style.spec.ts:11:1 › the session cost pill is muted with a faint fill
+[44/128] [chromium] › e2e/regression/session-list-path-loading.spec.ts:6:1 › shows loaded sessions before the directory path request resolves
+[45/128] [chromium] › e2e/regression/session-request-docks.spec.ts:11:1 › shows a pending question dock
+[46/128] [chromium] › e2e/regression/session-request-docks.spec.ts:73:3 › shows a pending permission dock without persistent approval
+[47/128] [chromium] › e2e/regression/session-request-docks.spec.ts:73:3 › shows a pending permission dock with persistent approval
+[48/128] [chromium] › e2e/regression/session-timeline-accessibility.spec.ts:4:1 › space activates a focused timeline button instead of scrolling
+[49/128] [chromium] › e2e/regression/session-timeline-collapse-state.spec.ts:104:3 › regression: session timeline local row state › keeps a manually collapsed tool collapsed when later assistant content streams
+[50/128] [chromium] › e2e/regression/session-timeline-collapse-state.spec.ts:139:3 › regression: session timeline local row state › does not remount an edit diff when sibling parts or diff counts update
+[51/128] [chromium] › e2e/regression/session-timeline-collapse-state.spec.ts:195:3 › regression: session timeline local row state › keeps a sticky edit header aligned with a multi-hunk diff
+[52/128] [chromium] › e2e/regression/session-timeline-context-resize.spec.ts:28:3 › regression: session timeline context group resize › remeasures a recent explored context group before the next paint
+[53/128] [chromium] › e2e/regression/session-timeline-context-resize.spec.ts:47:3 › regression: session timeline context group resize › paints a stable exploring to explored transition
+[54/128] [chromium] › e2e/regression/session-timeline-context-state.spec.ts:10:1 › preserves a collapsed context group through count and status updates
+[55/128] [chromium] › e2e/regression/session-timeline-file-projection.spec.ts:4:1 › renders completed write content
+[56/128] [chromium] › e2e/regression/session-timeline-file-projection.spec.ts:19:1 › renders a completed single-file patch
+[57/128] [chromium] › e2e/regression/session-timeline-file-state.spec.ts:10:1 › updates edit diagnostics without resetting manual collapse state
+[58/128] [chromium] › e2e/regression/session-timeline-file-state.spec.ts:29:1 › preserves nested patch file state through outer collapse and reopen
+[59/128] [chromium] › e2e/regression/session-timeline-lifecycle-state.spec.ts:16:3 › preserves shell user intent from a collapsed default
+[60/128] [chromium] › e2e/regression/session-timeline-lifecycle-state.spec.ts:16:3 › preserves shell user intent from a expanded default
+[61/128] [chromium] › e2e/regression/session-timeline-lifecycle-state.spec.ts:35:1 › transitions thinking and hidden reasoning through busy to idle
+[62/128] [chromium] › e2e/regression/session-timeline-lifecycle-state.spec.ts:57:1 › moves busy through retry and recovery to final idle content
+[63/128] [chromium] › e2e/regression/session-timeline-locale-projection.spec.ts:8:3 › projects translated context status in de
+[64/128] [chromium] › e2e/regression/session-timeline-locale-projection.spec.ts:8:3 › projects translated context status in ar
+[65/128] [chromium] › e2e/regression/session-timeline-projection.spec.ts:13:3 › session timeline projection › renders every admitted tool family and hides timeline-only exclusions
+[66/128] [chromium] › e2e/regression/session-timeline-projection.spec.ts:71:3 › session timeline projection › projects gaps, dividers, assistant parts, and errors together
+[67/128] [chromium] › e2e/regression/session-timeline-projection.spec.ts:131:3 › session timeline projection › renders comment strips and historical diff summary overflow
+[68/128] [chromium] › e2e/regression/session-timeline-projection.spec.ts:171:3 › session timeline projection › renders interruption independently when the turn is not compacted
+[69/128] [chromium] › e2e/regression/session-timeline-projection.spec.ts:190:3 › session timeline projection › renders user image, file attachment, file reference, and agent reference
+[70/128] [chromium] › e2e/regression/session-timeline-reasoning-projection.spec.ts:58:3 › projects busy reasoning profile summaries off no reasoning
+[71/128] [chromium] › e2e/regression/session-timeline-reasoning-projection.spec.ts:58:3 › projects busy reasoning profile summaries off reasoning heading
+[72/128] [chromium] › e2e/regression/session-timeline-reasoning-projection.spec.ts:58:3 › projects busy reasoning profile summaries off with visible tool
+[73/128] [chromium] › e2e/regression/session-timeline-reasoning-projection.spec.ts:58:3 › projects busy reasoning profile summaries on no content
+[74/128] [chromium] › e2e/regression/session-timeline-reasoning-projection.spec.ts:58:3 › projects busy reasoning profile summaries on blank reasoning
+[75/128] [chromium] › e2e/regression/session-timeline-reasoning-projection.spec.ts:58:3 › projects busy reasoning profile summaries on visible reasoning
+[76/128] [chromium] › e2e/regression/session-timeline-reasoning-projection.spec.ts:58:3 › projects busy reasoning profile summaries on visible tool no reasoning
+[77/128] [chromium] › e2e/regression/session-timeline-reasoning-projection.spec.ts:80:1 › does not infer reasoning visibility from provider identity
+[78/128] [chromium] › e2e/regression/session-timeline-reducer-projection.spec.ts:15:1 › groups singleton and separated context operations at correct boundaries
+[79/128] [chromium] › e2e/regression/session-timeline-reducer-projection.spec.ts:32:1 › reducer-hardening: converges when idle arrives before final part and message completion
+[80/128] [chromium] › e2e/regression/session-timeline-tool-projection.spec.ts:10:1 › renders every tool error outcome without leaking hidden tools
+[81/128] [chromium] › e2e/regression/session-timeline-tool-projection.spec.ts:47:1 › transitions shell and question through running error outcomes
+[82/128] [chromium] › e2e/regression/session-timeline-tool-projection.spec.ts:82:1 › labels all web search provider variants
+[83/128] [chromium] › e2e/regression/session-timeline-tool-state.spec.ts:10:1 › updates expanded web search links without resetting expansion
+[84/128] [chromium] › e2e/regression/session-timeline-tool-state.spec.ts:35:1 › preserves an expanded tool error card across duplicate delivery
+[85/128] [chromium] › e2e/regression/session-timeline-tool-state.spec.ts:49:1 › renders multiple question answers and preserves open state on answer updates
+[86/128] [chromium] › e2e/regression/session-timeline-transport.spec.ts:11:1 › keeps one connection open while delivering multiple events
+[87/128] [chromium] › e2e/regression/session-timeline-transport.spec.ts:24:1 › delivers a burst from one stream chunk
+[88/128] [chromium] › e2e/regression/session-timeline-transport.spec.ts:37:1 › parses split JSON and a split multibyte code point
+[89/128] [chromium] › e2e/regression/session-timeline-transport.spec.ts:53:1 › delivers server heartbeat without mutating the timeline
+[90/128] [chromium] › e2e/regression/session-timeline-transport.spec.ts:66:1 › reconnects after a clean close
+[91/128] [chromium] › e2e/regression/session-timeline-transport.spec.ts:79:1 › reconnects after a stream error
+[92/128] [chromium] › e2e/regression/session-timeline-transport.spec.ts:92:1 › keeps directory presence open while reconnecting the global timeline stream
+[93/128] [chromium] › e2e/regression/session-timeline-transport.spec.ts:111:1 › records event IDs and reconnect Last-Event-ID headers
+[94/128] [chromium] › e2e/regression/session-timeline-transport.spec.ts:125:1 › passes through non-event fetches
+[95/128] [chromium] › e2e/regression/session-todo-dock-navigation.spec.ts:26:1 › animates todo lifecycle without replaying it across task switches
+[96/128] [chromium] › e2e/regression/settings-server-menu.spec.ts:11:1 › a server's menu in full-screen Settings opens above Settings and deletes the server
+[97/128] [chromium] › e2e/regression/settings-workspace.spec.ts:9:1 › full-screen Settings is searchable and returns to the active task
+[98/128] [chromium] › e2e/regression/subagent-child-navigation.spec.ts:19:1 › navigates to a subagent child session missing from the session list
+[99/128] [chromium] › e2e/regression/subagent-child-navigation.spec.ts:30:1 › shows the not found fallback when the viewed session is deleted
+[100/128] [chromium] › e2e/regression/subagent-child-navigation.spec.ts:47:3 › keeps indexed child outcomes and navigation when the batch is completed
+[101/128] [chromium] › e2e/regression/subagent-child-navigation.spec.ts:47:3 › keeps indexed child outcomes and navigation when the batch is error
+[102/128] [chromium] › e2e/regression/subagent-child-navigation.spec.ts:84:1 › surfaces a blocked subagent alongside running siblings and opens its question
+[103/128] [chromium] › e2e/regression/subagent-child-navigation.spec.ts:105:1 › manages a background subagent without leaving the parent or replacing its draft
+[104/128] [chromium] › e2e/regression/support-report.spec.ts:7:1 › crash report is a local editable draft; failure is retryable and success is explicit
+[105/128] [chromium] › e2e/regression/support-report.spec.ts:35:1 › public support form preserves failures and posts only on explicit submit
+[106/128] [chromium] › e2e/regression/support-report.spec.ts:63:1 › browser crash draft goes to the exact Vector popup without report text in the URL
+[107/128] [chromium] › e2e/regression/support-report.spec.ts:78:1 › terminal crash keeps its draft local until the user opens the exact public support form
+[108/128] [chromium] › e2e/regression/swarm-stop.spec.ts:11:1 › a closed coordinated run reopens from the sidebar and its Stop waits for the desktop
+[109/128] [chromium] › e2e/regression/teams.spec.ts:12:1 › team settings switch only after explicit Apply and failures remain reviewable
+[110/128] [chromium] › e2e/regression/teams.spec.ts:35:1 › Personal workspace recovery remains available after the team list fails
+[111/128] [chromium] › e2e/regression/terminal-hidden.spec.ts:11:1 › unmounts the terminal renderer while the pane is hidden
+[112/128] [chromium] › e2e/regression/terminal-tab-switch.spec.ts:22:1 › keeps the terminal session alive when switching tasks in a workspace
+[113/128] [chromium] › e2e/regression/unknown-server-link.spec.ts:10:1 › a link to a session on a server outside the list, followed from an open session, says so
+[114/128] [chromium] › e2e/regression/vectorscope-changes-and-automatic-reviews.spec.ts:156:1 › Vectorscope offers a review of uncommitted changes only when there are some
+[115/128] [chromium] › e2e/regression/vectorscope-changes-and-automatic-reviews.spec.ts:181:1 › Vectorscope opens the automatic-review pull request only after showing what it adds
+[116/128] [chromium] › e2e/regression/vectorscope-changes-and-automatic-reviews.spec.ts:209:1 › Vectorscope says automatic reviews are on instead of offering to set them up
+[117/128] [chromium] › e2e/regression/vectorscope-changes-and-automatic-reviews.spec.ts:225:1 › Vectorscope asks for GitHub's workflow permission only to set up automatic reviews
+[118/128] [chromium] › e2e/regression/vectorscope-changes-and-automatic-reviews.spec.ts:244:1 › Vectorscope says when reviews only run on a /vector review comment
+[119/128] [chromium] › e2e/regression/vectorscope-stable-reload.spec.ts:13:1 › Vectorscope loads pull requests once while the app changes around it in the same project
+[120/128] [chromium] › e2e/regression/workspace-global-tabs.spec.ts:9:1 › the redesigned workspace never renders the retired global session strip
+[121/128] [chromium] › e2e/smoke/session-review-navigation.spec.ts:14:1 › renders review content after cached task navigation
+[122/128] [chromium] › e2e/smoke/session-timeline.spec.ts:33:3 › smoke: session timeline › keeps the visible message fixed while prepending history
+[123/128] [chromium] › e2e/smoke/session-timeline.spec.ts:92:3 › smoke: session timeline › preserves the timeline gap above the composer
+[124/128] [chromium] › e2e/smoke/session-timeline.spec.ts:118:3 › smoke: session timeline › loads older history when task navigation lands on a short initial page
+[125/128] [chromium] › e2e/smoke/session-timeline.spec.ts:153:3 › smoke: session timeline › paints cached sessions at the latest message when switching tasks
+[126/128] [chromium] › e2e/smoke/session-timeline.spec.ts:263:3 › smoke: session timeline › paints a cold session at the latest message when switching tasks
+[127/128] [chromium] › e2e/smoke/session-timeline.spec.ts:325:3 › smoke: session timeline › renders seeded timeline in order while paging through history
+[128/128] [chromium] › e2e/smoke.spec.ts:7:1 › first run shows the activation checklist and dismissing persists
+  1 skipped
+  127 passed (6.5m)
