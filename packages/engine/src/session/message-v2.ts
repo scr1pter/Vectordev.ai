@@ -36,7 +36,7 @@ import { errorMessage } from "@/util/error"
 import { isMedia } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -80,12 +80,23 @@ export const cursor = {
   },
 }
 
-const info = (row: typeof MessageTable.$inferSelect) =>
-  ({
+const decodeFormat = Schema.decodeUnknownOption(SessionV1.Format)
+
+const info = (row: typeof MessageTable.$inferSelect) => {
+  const data = {
     ...row.data,
     id: row.id,
     sessionID: row.session_id,
-  }) as Info
+  } as Info
+  // The database returns a user message's output format as plain JSON, but the format schemas are classes and the
+  // HTTP encoder refuses anything else: every session prompted with a JSON schema, such as a Vectorscope reviewer,
+  // could not be read back over the API.
+  if (data.role !== "user" || !data.format) return data
+  return Option.match(decodeFormat(data.format), {
+    onNone: () => data,
+    onSome: (format) => ({ ...data, format }),
+  })
+}
 
 const part = (row: typeof PartTable.$inferSelect) =>
   ({
