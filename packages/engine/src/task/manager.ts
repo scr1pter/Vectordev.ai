@@ -377,7 +377,7 @@ const layer = Layer.effect(
               message: "The task finished during admission; no message was sent.",
             })
           }
-          return { taskID: session.id, messageID: entry.id, delivery: entry.delivery, accepted: true }
+          return { taskID: session.id, messageID: entry.id, delivery: entry.delivery, accepted: true as const }
         }),
       )
     })
@@ -459,7 +459,7 @@ const layer = Layer.effect(
                   claimed.delete(session.id)
                   const current = yield* get(session.id)
                   const record = SubagentLifecycle.read(current)
-                  if (record?.attempt !== entry.attempt) return yield* observe(current)
+                  if (!record || record.attempt !== entry.attempt) return yield* observe(current)
                   if (record.status === "running" || record.status === "queued")
                     yield* SubagentLifecycle.settle(sessions, session.id, { status: "cancelled" })
                   yield* persist(session.id, { budgetScopes: yield* guard.scopes(session.id) }, entry.attempt)

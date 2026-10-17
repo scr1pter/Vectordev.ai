@@ -64,7 +64,7 @@ describe("authenticated desktop task registry", () => {
           if (event.type !== Session.Event.Updated.type) return
           const record = yield* storage.read<{ tasks: Task.Info[] }>(["task-bridge", parent.id])
           if (record.tasks[0]?.connection === "disconnected") yield* Deferred.succeed(disconnected, undefined)
-        }),
+        }).pipe(Effect.orDie),
       )
       yield* Effect.addFinalizer(() => unsubscribe)
       yield* TestClock.adjust(40_000)
