@@ -77,6 +77,27 @@ export async function openRouterManagement(
   return result
 }
 
+// The webhook and model requests wait this long for the account's lease before answering BILLING_MUTATION_BUSY.
+const LEASE_WAIT_MS = 5_000
+
+/**
+ * The account's billing lease for the payment webhook and model requests, which wait briefly for it instead of failing
+ * at once: Stripe sends several notifications for one payment at the same moment, and a buyer's first request often
+ * arrives while one of them is still granting the credits. Checkout and account deletion still refuse at once.
+ */
+export async function withCodiumLease<T>(
+  id: string,
+  work: (verify: () => Promise<void>) => Promise<T>,
+  fetcher: typeof fetch = fetch,
+  deadline = Date.now() + LEASE_WAIT_MS,
+): Promise<T> {
+  return withBillingMutation(`model-plan:${id}`, work, fetcher).catch(async (error: unknown) => {
+    if (!(error instanceof ApiError) || error.code !== "BILLING_MUTATION_BUSY" || Date.now() >= deadline) throw error
+    await new Promise((resolve) => setTimeout(resolve, 100 + Math.random() * 150))
+    return withCodiumLease(id, work, fetcher, deadline)
+  })
+}
+
 export function protectModelPlanKey(value: string, context: string) {
   const iv = randomBytes(12)
   const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv)
@@ -219,8 +240,8 @@ async function settlePendingTopup(id: string, fetcher: typeof fetch) {
 }
 
 export async function reconcileModelTopup(id: string, checkoutID: string, fetcher: typeof fetch = fetch) {
-  return withBillingMutation(
-    `model-plan:${id}`,
+  return withCodiumLease(
+    id,
     async (verify) => {
       const account = await readModelPlanAccount(id, fetcher)
       if (!account) throw new ApiError(400, "BILLING_ACCOUNT_MISMATCH", "The billing account does not match.")
@@ -342,8 +363,8 @@ async function walletCredential(id: string, fetcher: typeof fetch, requiredCredi
       }
     }
   }
-  return withBillingMutation(
-    `model-plan:${id}`,
+  return withCodiumLease(
+    id,
     async (verify) => {
       const account = await readModelPlanAccount(id, fetcher)
       if (!account || account.closing)
@@ -413,8 +434,8 @@ async function provisionWalletKey(
  */
 export async function reconcileModelPlanAccount(id: string, fetcher: typeof fetch = fetch, now = Date.now()) {
   await settlePendingTopup(id, fetcher)
-  await withBillingMutation(
-    `model-plan:${id}`,
+  await withCodiumLease(
+    id,
     async (verify) => {
       const account = await readModelPlanAccount(id, fetcher)
       if (!account) return
@@ -738,8 +759,8 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
       }
     }
   }
-  return withBillingMutation(
-    `model-plan:${id}`,
+  return withCodiumLease(
+    id,
     async (verify) => {
       const account = await readModelPlanAccount(id, fetcher)
       if (!account)

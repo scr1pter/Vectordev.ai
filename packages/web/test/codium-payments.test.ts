@@ -1,6 +1,6 @@
 import { RedisClient } from "bun"
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test"
-import { createHmac } from "node:crypto"
+import { createHash, createHmac } from "node:crypto"
 import { mkdtemp, rm } from "node:fs/promises"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
@@ -554,6 +554,33 @@ describe("payment notifications grant and remove credits without anyone acting",
     ]
     await reconcileModelPlanEvent(event("charge.dispute.closed", { charge: first.charge.id }), fetcher)
     expect(openRouter.keys.get("codium_key_1")?.data).toMatchObject({ limit: 30 })
+  })
+
+  test("simultaneous notifications for one payment all succeed and grant once", async () => {
+    const bought = await topUp(10)
+    const completed = event("checkout.session.completed", bought.session)
+    // Stripe delivers several notifications about one payment at the same moment; each waits its turn for the lease.
+    const results = await Promise.allSettled(
+      [
+        completed,
+        completed,
+        event("payment_intent.succeeded", { ...bought.payment }),
+        event("charge.succeeded", { ...bought.charge }),
+        event("charge.updated", { ...bought.charge }),
+      ].map((value) => reconcileModelPlanEvent(value, fetcher)),
+    )
+    expect(results.filter((result) => result.status === "rejected")).toEqual([])
+    expect(openRouter.keys.size).toBe(1)
+    expect(openRouter.keys.get("codium_key_1")?.data).toMatchObject({ limit: 5, disabled: false })
+  })
+
+  test("a buyer's first request waits for a notification that is still granting the credits", async () => {
+    await redis(["SET", accountKey, JSON.stringify({ customer: "cus_buyer" })])
+    subscribe(10)
+    // A notification holds the account's lease for a moment, as it does while it creates the month's key.
+    const lease = `vector:billing-mutation:${createHash("sha256").update(`model-plan:${user.id}`).digest("hex")}`
+    await redis(["SET", lease, "webhook", "PX", "600"])
+    expect((await modelPlanCredential(user.id, fetcher)).key).toBe("codium-secret-1")
   })
 
   test("only a correctly signed notification is accepted", () => {
