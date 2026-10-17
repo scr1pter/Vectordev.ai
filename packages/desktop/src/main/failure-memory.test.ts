@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -144,6 +144,18 @@ describe("recording runs", () => {
 
     const onDisk = JSON.parse(await readFile(failureMemoryPath(dir), "utf8")) as { records: unknown[] }
     expect(onDisk.records).toHaveLength(1)
+  })
+
+  test("never writes or clears memory through a repository's links", async () => {
+    const dir = await project()
+    const outside = await project()
+    await symlink(outside, join(dir, ".vector"), process.platform === "win32" ? "junction" : "dir")
+    const run = { report: report(check("package:typecheck", "failed", TS_ERROR_A)), changedFiles: [], diff: "d" }
+    await recordValidationRun(dir, run)
+    expect(await readdir(outside)).toEqual([])
+    await writeFile(join(outside, "failure-memory.json"), "outside", "utf8")
+    await clearFailureMemory(dir)
+    expect(await readFile(join(outside, "failure-memory.json"), "utf8")).toBe("outside")
   })
 
   test("separate failures get separate records", async () => {

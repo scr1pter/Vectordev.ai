@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { FSUtil } from "@vectordevai/core/fs-util"
 import { vectorConfigDir } from "./config-path"
 import { getStore } from "./store"
 import { mergeRulesFile, rulesForRepository, selectRules, type RepoRule } from "./repo-rules-model"
@@ -90,6 +91,9 @@ export async function deleteRepoRule(id: string) {
 // a teammate authored outside that block.
 export async function syncRulesFile(repositoryPath: string, rules = readAll(), previousRules = rules) {
   const target = repositoryPath ? rulesFilePath(repositoryPath) : globalRulesFilePath()
+  // A repository can carry its .vector, or RULES.md, as a link to any file of the user's, and writing follows it.
+  if (repositoryPath && !FSUtil.writableInside(repositoryPath, target))
+    throw new Error(`Cannot save rules to ${target}: it is a link, not a plain file, or outside ${repositoryPath}.`)
   const applies = (rule: RepoRule) =>
     rule.enabled && (repositoryPath ? rule.repositoryPath === repositoryPath : !rule.repositoryPath)
   const body = mergeRulesFile(
@@ -121,6 +125,7 @@ async function commitRules(next: RepoRule[], previous: RepoRule[], repositoryPat
   } catch (error) {
     await Promise.all(
       targets.map(async (target, index) => {
+        if (paths[index] && !FSUtil.writableInside(paths[index], target)) return
         const snapshot = snapshots[index]
         if (!snapshot) return rm(target, { force: true }).catch(() => undefined)
         await mkdir(dirname(target), { recursive: true }).catch(() => undefined)

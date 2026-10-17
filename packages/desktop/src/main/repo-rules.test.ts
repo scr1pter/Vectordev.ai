@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -72,6 +72,20 @@ describe("repository rule persistence", () => {
     const content = await readFile(rulesFilePath(repositoryPath), "utf8")
     expect(content).toContain("Keep this paragraph.")
     expect(content).toContain("Use the service layer (applies to src/**)")
+  })
+
+  test("never saves project rules through a repository's links", async () => {
+    const repositoryPath = join(userDataPath, "project")
+    const outside = join(userDataPath, "outside")
+    await mkdir(repositoryPath, { recursive: true })
+    await mkdir(outside, { recursive: true })
+    await symlink(outside, join(repositoryPath, ".vector"), process.platform === "win32" ? "junction" : "dir")
+
+    await expect(
+      saveRepoRule({ description: "Use the service layer", repositoryPath, filePatterns: [] }),
+    ).rejects.toThrow("Cannot save rules")
+    expect(await readdir(outside)).toEqual([])
+    expect(listRepoRules(repositoryPath)).toEqual([])
   })
 
   test("editing after disable and re-enable keeps one rule and its file", async () => {
