@@ -736,6 +736,7 @@ async function job(
     dryRun?: boolean
     expectedHead?: string
     botLogin?: string
+    resolveModel?: () => Promise<ResolvedModel>
   } = {},
 ) {
   const runner = options.runner ?? (await w.repo.runner(w.fake.pull.head.sha))
@@ -768,7 +769,7 @@ async function job(
     }),
     git: createReviewGit({ directory: runner, run: runGit }),
     runReview: review.run,
-    resolveModel: async () => MODEL,
+    resolveModel: options.resolveModel ?? (async () => MODEL),
     log: (line) => log.push(line),
     now: () => NOW,
     nonce: () => `run${++nonce}`,
@@ -1034,6 +1035,23 @@ describe("vector github review against a fake GitHub", () => {
       expect(summaries).toHaveLength(1)
       expect(result.posted.summaryId).toBe(summaries[0]!.id)
       expect(state(w)).toMatchObject({ head: w.head, reviews: 1 })
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "5b. a model that cannot run fails the job even when GitHub cannot list the comments to say why",
+    async () => {
+      await using w = await world()
+      w.fake.faults.push({ method: "GET", path: /\/issues\/7\/comments$/, status: 502, times: 100 })
+      const reason = "acme/model needs ACME_API_KEY."
+      const { result, log } = await job(w, reviewer(), {
+        resolveModel: () => Promise.reject(new Error(reason)),
+      })
+      expect(result.exitCode).toBe(1)
+      expect(result.error).toBe(reason)
+      expect(log).toContain(`Configuration error: ${reason}`)
+      expect(posts(w, /\/pulls\/7\/reviews$/)).toHaveLength(0)
     },
     TIMEOUT,
   )

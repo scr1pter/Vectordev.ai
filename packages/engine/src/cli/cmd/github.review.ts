@@ -287,21 +287,25 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
   )
   if (model instanceof Error) {
     // The job fails either way; without a note the pull request shows only a red check, and a person who commented
-    // `/vector review` sees nothing at all.
-    const found = await gh
+    // `/vector review` sees nothing at all. The note is best effort: a GitHub failure while listing or posting must
+    // not escape, or executeReviewJob would turn this configuration error into a green job.
+    await gh
       .listIssueComments(ctx.pr)
-      .then((list) => findSticky(list, ctx.botLogin) ?? findSticky(list, ACTIONS_BOT))
-    const body = clean(
-      buildNoteBody({
-        previous: found?.body,
-        note: noteCannotStart(model.message),
-        state: found ? readState(found.body) : undefined,
-      }),
-    )
-    await (found ? gh.updateIssueComment(found.id, body) : gh.createIssueComment(ctx.pr, body)).then(
-      () => undefined,
-      (error: unknown) => log(`Could not post why the review cannot start: ${messageOf(error)}`),
-    )
+      .then((list) => {
+        const found = findSticky(list, ctx.botLogin) ?? findSticky(list, ACTIONS_BOT)
+        const body = clean(
+          buildNoteBody({
+            previous: found?.body,
+            note: noteCannotStart(model.message),
+            state: found ? readState(found.body) : undefined,
+          }),
+        )
+        return found ? gh.updateIssueComment(found.id, body) : gh.createIssueComment(ctx.pr, body).then(() => undefined)
+      })
+      .then(
+        () => undefined,
+        (error: unknown) => log(`Could not post why the review cannot start: ${messageOf(error)}`),
+      )
     return configError(model.message)
   }
 
