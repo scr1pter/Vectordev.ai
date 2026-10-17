@@ -4,14 +4,15 @@
  * Neutrals carry a faint violet hue; the translucent tones are mixes of the text colour, so they follow the theme.
  */
 html:has(.cx-page) {
-  --cx-bg: #121118;
-  --cx-card: #19181e;
-  --cx-card-02: #1e1d23;
-  --cx-card-03: #242329;
-  --cx-card-04: #29282e;
-  --cx-fg: #ececed;
-  --cx-fg-02: #d6d6d7;
-  --cx-accent: #aa8cff;
+  /* The dark palette is vectorsystemdesign.vercel.app's: ground, surface, raised, ink and accent. */
+  --cx-bg: #131017;
+  --cx-card: #1a1620;
+  --cx-card-02: #1e1a24;
+  --cx-card-03: #221d29;
+  --cx-card-04: #27212f;
+  --cx-fg: #ece7f4;
+  --cx-fg-02: #d6cfe2;
+  --cx-accent: #b69cff;
   --cx-header: 56px;
   color-scheme: dark;
   font-size: 15px;
