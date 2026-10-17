@@ -408,6 +408,24 @@ const stack = [
     <p class="ip-footnote"><strong>Controlled, not hosted:</strong> Vector deploys to Vercel and migrates Supabase on the team's own accounts. Hosting, databases and billing for them stay with those providers.</p>
   </section>
 
+  <section class="ip-section" aria-labelledby="privacy-title">
+    <div class="ip-section-head">
+      <div class="ip-eyebrow">Privacy</div>
+      <h2 id="privacy-title">Your code stays on your computer, and Vector trains on none of it</h2>
+      <p>Vector is local-first. Sessions, history and checkpoints stay on the developer's computer. Vector's servers keep no prompts or code, apart from what a user chooses to publish or send to support. Nothing in Vector collects data for training. Prompts still go to the model provider the user picks, under that provider's rules, so picking the provider is how users control their privacy.</p>
+    </div>
+    <ul class="ip-clean">
+      <li><strong>Local first.</strong> Sessions, history and checkpoints are kept on the user's computer, in a local database and Vector's own data folder. Session history does not sync to Vector. The one exception is a share link the user chooses to publish, which is public for 30 days at most.</li>
+      <li><strong>No prompts kept on Vector's servers.</strong> With the user's own key or a ChatGPT sign-in, prompts go straight from the computer to that provider. A model on the user's own computer keeps them there. On Vector's own model routes, the gateway passes prompts and replies through without storing or logging them.</li>
+      <li><strong>Nothing collected for training.</strong> No part of Vector gathers prompts or code to train a model, so there is no setting to switch off. Velocity, the model Vector plans to build, will not be trained on customers' code.</li>
+      <li><strong>Zero retention on Codium.</strong> Every Codium request asks OpenRouter to route only to providers it records as zero data retention and to deny data collection. It sends OpenRouter a one-way hash of the account ID, never the user's email or name. <span class="ip-status">In development</span></li>
+      <li><strong>No-training free models.</strong> From 1.99.108, every request to an included free model asks that prompts are not used for training, and only providers on Vector's allowlist serve them. These providers are not zero retention and may keep prompts under their own policies.</li>
+      <li><strong>Counts, not content.</strong> Usage counts are totals, such as sessions and tokens, with the app version, platform and the models used most. They never include prompts, code, file names, model output or keys, and users can switch them off. Crash reports are off by default, OpenTelemetry sends data only to an endpoint the user sets, and desktop dictation runs on a local Whisper model.</li>
+    </ul>
+    <p class="ip-muted"><strong class="ip-ink">How that compares on personal plans.</strong> On personal plans of Codex and Claude Code, whether your sessions train their models depends on a setting. OpenAI may train on ChatGPT and Codex content from Free, Plus and Pro accounts unless the user turns off “Improve the model for everyone”. Codex has a separate “Include environments” setting, and rating a reply can let OpenAI train on that whole conversation even after opting out. Anthropic trains on Claude Free, Pro and Max accounts, Claude Code included, when the user's training setting is on, and keeps that data for up to five years, or 30 days with the setting off. Both companies offer an opt-out, and neither trains on business or API data by default. Vector itself trains on nothing, so it has no such setting. Prompts sent through a ChatGPT sign-in or through Claude Code inside Vector still follow that company's setting.<sup>2</sup></p>
+    <p class="ip-footnote"><strong>What Vector cannot change:</strong> a prompt sent to a model provider follows that provider's rules. A user who signs in with ChatGPT, or runs Claude Code or Codex inside Vector, is still under OpenAI's or Anthropic's terms for that account. Codium's zero-retention routing relies on OpenRouter's records and the providers' published policies, not an independent audit. Usage counts are on by default.</p>
+  </section>
+
   <section class="ip-section" aria-labelledby="model-title">
     <div class="ip-section-head">
       <div class="ip-eyebrow">The model layer</div>
@@ -634,8 +652,9 @@ const stack = [
   <footer class="ip-foot">
     <p class="ip-footnote"><strong>* Benchmark method.</strong> Vector's offline footprint benchmark (script/agent-eval/footprint.ts), run 9–10 October 2026 against Claude Code 2.1.215. Both agents perform identical scripted tool steps against a local fake model server; each request is priced at Claude Sonnet 4.5 list prices with Anthropic prompt-caching rules, and tokens are estimated as characters ÷ 4. It measures what each agent sends, not the quality of answers, live cache behaviour or speed. Later runs of the same harness, archived in Vector's repository, found request-cost gaps at least this large; this page quotes the smaller figures. Those runs also show Claude Code and Codex faster and lighter than Vector; see Limitations. Codex was not part of this run; Vector's live comparison with Codex is under Limitations.</p>
     <p class="ip-footnote"><strong>1.</strong> Stack Overflow 2026 Developer Survey, published 6 October 2026.</p>
+    <p class="ip-footnote"><strong>2.</strong> OpenAI's help center and enterprise privacy page; Anthropic's consumer-terms update, Claude Code data-usage docs and privacy center. All checked 17 October 2026.</p>
     <details class="ip-details ip-sources">
-      <summary>Sources, checked 11–15 October 2026</summary>
+      <summary>Sources, checked 11–17 October 2026</summary>
       <div class="ip-source-groups">
         <div>
           <h4>Competitors</h4>
@@ -654,6 +673,14 @@ const stack = [
             <li><a href="https://www.coderabbit.ai/newsroom/coderabbit-series-c-agentic-change-management" rel="noopener">CodeRabbit Series C</a>, <a href="https://cursor.com/blog/graphite" rel="noopener">Cursor and Graphite</a>, <a href="https://vibekanban.com/blog/shutdown" rel="noopener">Vibe Kanban shutdown</a></li>
             <li><a href="https://stackoverflow.blog/2026/10/06/the-results-of-the-2026-developer-survey-are-here/" rel="noopener">Stack Overflow 2026 Developer Survey</a></li>
             <li><a href="https://techcrunch.com/2026/04/17/sources-cursor-in-talks-to-raise-2b-at-50b-valuation-as-enterprise-growth-surges/" rel="noopener">TechCrunch on Cursor's margins</a>, <a href="https://www.anthropic.com/news/anthropic-raises-30-billion-series-g-funding-380-billion-post-money-valuation" rel="noopener">Anthropic Series G</a>, <a href="https://techcrunch.com/2025/06/03/windsurf-says-anthropic-is-limiting-its-direct-access-to-claude-ai-models" rel="noopener">TechCrunch on Windsurf</a>, <a href="https://venturebeat.com/ai/anthropic-cracks-down-on-unauthorized-claude-usage-by-third-party-harnesses/" rel="noopener">VentureBeat, January 2026</a>, <a href="https://www.channelinsider.com/ai/news-openai-cursor-model-access-spacex-acquisition/" rel="noopener">Channel Insider on OpenAI and Cursor</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Privacy</h4>
+          <ul>
+            <li>OpenAI: <a href="https://help.openai.com/en/articles/5722486-how-your-data-is-used-to-improve-model-performance" rel="noopener">how your data is used</a>, <a href="https://help.openai.com/en/articles/7730893-data-controls-in-chatgpt" rel="noopener">data controls and Codex</a>, <a href="https://openai.com/enterprise-privacy/" rel="noopener">enterprise privacy</a></li>
+            <li>Anthropic: <a href="https://www.anthropic.com/news/updates-to-our-consumer-terms" rel="noopener">consumer terms update</a>, <a href="https://code.claude.com/docs/en/data-usage" rel="noopener">Claude Code data usage</a>, <a href="https://privacy.claude.com/en/articles/10023548-how-long-do-you-store-my-data" rel="noopener">data retention</a></li>
+            <li>Vector: <a href="/legal/privacy">privacy policy</a> (<a href="/legal/privacy#codium">Codium</a>, <a href="/legal/privacy#included-models">included models</a>, <a href="/legal/privacy#training">training</a>), <a href="/legal/terms">terms</a></li>
           </ul>
         </div>
         <div>
@@ -989,7 +1016,7 @@ const stack = [
   /* Footer and sources */
   .ip-foot { border-top: 1px solid var(--line); padding-top: 16px; display: grid; gap: 10px; }
   .ip-sources { color: var(--faint); }
-  .ip-source-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 24px; padding-top: 12px; }
+  .ip-source-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; padding-top: 12px; }
   @media (max-width: 860px) { .ip-source-groups { grid-template-columns: minmax(0, 1fr); } }
   .ip-source-groups li { font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
   .ip-root a { color: var(--accent); }

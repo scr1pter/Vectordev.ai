@@ -91,6 +91,35 @@ const pluginNames = [
 // ships it and linked to the docs section that describes it in full. Order:
 // review, the browser, the agents, where you work with it, what it ships to,
 // then how it keeps itself honest.
+// Privacy in six claims, each checked against the code and /legal/privacy on 17 October 2026.
+// Keep the "coming soon" and 1.99.108 labels until those ship.
+const privacyFacts = [
+  {
+    title: "Local first",
+    text: "Sessions, history and checkpoints are saved on your computer, and desktop dictation is transcribed there too.",
+  },
+  {
+    title: "Straight to your provider",
+    text: "With your own key or ChatGPT sign-in, prompts go straight to that provider under its terms, never through Vector, and a model on your own computer keeps them there.",
+  },
+  {
+    title: "No copy on our servers",
+    text: "Vector's servers never keep your prompts or code, except what you choose to send: a share link you publish, public for 30 days at most, or a bug report.",
+  },
+  {
+    title: "Never trained on",
+    text: "Vector collects nothing for training, and Velocity, the model we plan to build, won't be trained on customers' code.",
+  },
+  {
+    title: "On Vector's own models",
+    text: "Codium, coming soon, routes only to providers OpenRouter records as zero data retention, and from 1.99.108 every included free-model request asks providers not to train on your prompts. They may still keep them.",
+  },
+  {
+    title: "Counts, not content",
+    text: "Usage counts are totals like sessions and tokens, never your prompts, code, file names or output. You can switch them off, and crash reports are off by default.",
+  },
+]
+
 const trustCards = [
   {
     icon: GitPullRequest,
@@ -346,6 +375,30 @@ const trustCards = [
     </section>
 
     <AppShots />
+
+    <section id="privacy" data-chapter="Privacy" class="story" aria-labelledby="privacy-title">
+      <div class="story-copy" data-reveal-group>
+        <p class="story-kicker" data-reveal>Privacy</p>
+        <h2 id="privacy-title" class="story-title" data-reveal>Your code lives on your&nbsp;computer.</h2>
+        <p class="story-subtitle" data-reveal>
+          Vector's servers keep no copy of your prompts, Vector never trains on your code, and you pick who runs the
+          model.
+        </p>
+        <ul class="story-facts" data-reveal>
+          {
+            privacyFacts.map((fact) => (
+              <li>
+                <h3>{fact.title}</h3>
+                <p>{fact.text}</p>
+              </li>
+            ))
+          }
+        </ul>
+        <div class="story-action" data-reveal>
+          <a class="landing-pill" href="/legal/privacy">Read the privacy policy</a>
+        </div>
+      </div>
+    </section>
 
     <section id="trust" data-chapter="Trust" class="trust" aria-labelledby="trust-title">
       <div class="trust-head" data-reveal-group>
