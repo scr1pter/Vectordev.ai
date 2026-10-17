@@ -60,6 +60,7 @@ import type { UpdaterController } from "./updater-controller"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
 import { inspectAgentTask, listAgentTasks, messageAgentTask, stopAgentTask, type TaskScope } from "./agent-task-board"
 import { onTaskBoardChange } from "./task-board-events"
+import { initTaskRelay } from "./task-relay"
 import { runBrowserAgent } from "./browser-agent"
 import { prepareAgentTask } from "./context-budget"
 import { speakVoiceText, stopVoiceSynthesis } from "./voice-synthesis"
@@ -232,6 +233,7 @@ function on<T extends unknown[]>(channel: string, listener: (event: IpcMainEvent
 
 export function registerIpcHandlers(deps: Deps) {
   initializeVectorAccount(deps.awaitInitialization)
+  app.once("will-quit", initTaskRelay(deps.awaitInitialization))
   handle("vector-account-status", () => vectorAccount.status())
   handle("vector-account-start", () => vectorAccount.start())
   handle("vector-account-cancel", () => vectorAccount.cancel())

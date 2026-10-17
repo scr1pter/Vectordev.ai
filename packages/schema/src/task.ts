@@ -5,7 +5,12 @@ import { optional } from "./schema"
 import { RunBudget } from "./run-budget"
 
 export const Status = Schema.Literals([
-  "queued", "running", "waiting_on_user", "completed", "failed", "stopped",
+  "queued",
+  "running",
+  "waiting_on_user",
+  "completed",
+  "failed",
+  "stopped",
 ]).annotate({ identifier: "Task.Status" })
 export type Status = typeof Status.Type
 
@@ -44,6 +49,9 @@ export const Info = Schema.Struct({
   title: Schema.String,
   agent: optional(Schema.String),
   status: Status,
+  // A disconnected runner may still be executing. Preserve its last observed
+  // status and disable live controls rather than inventing completion.
+  connection: optional(Schema.Literals(["connected", "disconnected"])),
   batchID: optional(Schema.String),
   groupID: optional(Schema.String),
   startedAt: Schema.Finite,
@@ -68,13 +76,16 @@ export const Info = Schema.Struct({
 }).annotate({ identifier: "Task.Info" })
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 
-export const ListResult = Schema.Struct({ tasks: Schema.Array(Info), truncated: Schema.Boolean })
-  .annotate({ identifier: "Task.ListResult" })
+export const ListResult = Schema.Struct({ tasks: Schema.Array(Info), truncated: Schema.Boolean }).annotate({
+  identifier: "Task.ListResult",
+})
 export interface ListResult extends Schema.Schema.Type<typeof ListResult> {}
 
 export const InspectResult = Schema.Struct({
   task: Info,
-  steps: Schema.Array(Schema.Struct({ tool: optional(Schema.String), status: optional(Schema.String), text: Schema.String })),
+  steps: Schema.Array(
+    Schema.Struct({ tool: optional(Schema.String), status: optional(Schema.String), text: Schema.String }),
+  ),
   output: Schema.String,
   truncated: Schema.Boolean,
 }).annotate({ identifier: "Task.InspectResult" })
@@ -91,6 +102,7 @@ export interface MessageResult extends Schema.Schema.Type<typeof MessageResult> 
 export const StopResult = Schema.Struct({ tasks: Schema.Array(Info) }).annotate({ identifier: "Task.StopResult" })
 export interface StopResult extends Schema.Schema.Type<typeof StopResult> {}
 
-export const WaitResult = Schema.Struct({ tasks: Schema.Array(Info), timedOut: Schema.Boolean })
-  .annotate({ identifier: "Task.WaitResult" })
+export const WaitResult = Schema.Struct({ tasks: Schema.Array(Info), timedOut: Schema.Boolean }).annotate({
+  identifier: "Task.WaitResult",
+})
 export interface WaitResult extends Schema.Schema.Type<typeof WaitResult> {}

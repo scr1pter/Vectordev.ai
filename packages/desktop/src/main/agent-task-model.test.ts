@@ -95,7 +95,7 @@ describe("shared desktop task observations", () => {
     expect(task.controls.message).toBe(true)
   })
 
-  test("swarm placeholders disappear when a workspace takes over the same stable task id", () => {
+  test("swarm tasks retain a stable identity when their workspace is provisioned", () => {
     const run = swarm({
       tasks: [
         {
@@ -122,7 +122,7 @@ describe("shared desktop task observations", () => {
     expect(planned[1]!.controls.stop).toBe(true)
     expect(
       swarmTasks({ ...run, tasks: run.tasks.map((task) => ({ ...task, workspaceId: "ws_one" })) }, Date.now()),
-    ).toHaveLength(1)
+    ).toHaveLength(2)
     expect(workspaceTaskID(workspace({ swarmRunId: run.id, swarmTaskId: "task_1" }))).toBe(planned[1]!.id)
   })
 

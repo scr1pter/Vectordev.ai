@@ -35,7 +35,7 @@ export function workspaceTask(
   return {
     id: workspaceTaskID(record),
     sessionID: record.agentSessionId,
-    parentSessionID: record.parentSessionId ?? "",
+    parentSessionID: input.swarm?.parentSessionId ?? record.parentSessionId ?? "",
     source: record.swarmRunId
       ? "swarm"
       : record.teamId
@@ -55,7 +55,7 @@ export function workspaceTask(
     dependsOn: task?.dependsOn.map((id) => `swarm:${record.swarmRunId}:${id}`) ?? [],
     resultAvailable: Boolean(record.finalSummary || record.changedFiles.length),
     resultRef: record.changedFiles.length ? `workspace:${record.id}` : undefined,
-    reason: task?.error ?? record.error,
+    reason: task?.stopReason ?? record.stopReason ?? task?.error ?? record.error,
     attempt: Math.max(1, record.turns?.filter((turn) => turn.role === "user").length ?? 1),
     measuredCost: cost !== undefined && Number.isFinite(cost) && cost >= 0 ? cost : undefined,
     costKind: cost !== undefined ? "priced" : "unknown",
@@ -93,43 +93,41 @@ export function swarmTasks(run: SwarmRunRecord, now: number): Task.Info[] {
     dependsOn: [],
     resultAvailable: Boolean(run.summary),
     resultRef: run.summary ? `swarm:${run.id}` : undefined,
-    reason: run.error,
+    reason: run.stopReason ?? run.error,
     attempt: 1,
     controls: { inspect: true, message: false, stop: status === "running" },
   }
   return [
     root,
-    ...run.tasks
-      .filter((task) => !task.workspaceId)
-      .map(
-        (task): Task.Info => ({
-          id: `swarm:${run.id}:${task.id}`,
-          parentSessionID: root.parentSessionID,
-          source: "swarm",
-          title: task.title,
-          agent: task.role,
-          groupID: run.id,
-          status: swarmTaskStatus(task),
-          startedAt: task.startedAt ? Date.parse(task.startedAt) : root.startedAt,
-          completedAt: task.completedAt ? Date.parse(task.completedAt) : undefined,
-          elapsedMs: task.startedAt
-            ? Math.max(0, (task.completedAt ? Date.parse(task.completedAt) : now) - Date.parse(task.startedAt))
-            : 0,
-          currentStep: task.lastAction,
-          ownedPaths: task.fileHints,
-          dependsOn: task.dependsOn.map((id) => `swarm:${run.id}:${id}`),
-          resultAvailable: Boolean(task.summary),
-          reason: task.error,
-          attempt: 1,
-          controls: {
-            inspect: true,
-            message: false,
-            stop:
-              ["planned", "creating", "queued", "running", "merging", "blocked"].includes(task.status) &&
-              !task.cancelRequested,
-          },
-        }),
-      ),
+    ...run.tasks.map(
+      (task): Task.Info => ({
+        id: `swarm:${run.id}:${task.id}`,
+        parentSessionID: root.parentSessionID,
+        source: "swarm",
+        title: task.title,
+        agent: task.role,
+        groupID: run.id,
+        status: swarmTaskStatus(task),
+        startedAt: task.startedAt ? Date.parse(task.startedAt) : root.startedAt,
+        completedAt: task.completedAt ? Date.parse(task.completedAt) : undefined,
+        elapsedMs: task.startedAt
+          ? Math.max(0, (task.completedAt ? Date.parse(task.completedAt) : now) - Date.parse(task.startedAt))
+          : 0,
+        currentStep: task.lastAction,
+        ownedPaths: task.fileHints,
+        dependsOn: task.dependsOn.map((id) => `swarm:${run.id}:${id}`),
+        resultAvailable: Boolean(task.summary),
+        reason: task.stopReason ?? task.error,
+        attempt: 1,
+        controls: {
+          inspect: true,
+          message: false,
+          stop:
+            ["planned", "creating", "queued", "running", "merging", "blocked"].includes(task.status) &&
+            !task.cancelRequested,
+        },
+      }),
+    ),
   ]
 }
 

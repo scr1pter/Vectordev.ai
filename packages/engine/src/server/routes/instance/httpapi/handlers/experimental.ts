@@ -7,6 +7,8 @@ import { Project } from "@/project/project"
 import { Session } from "@/session/session"
 import { SessionPrompt } from "@/session/prompt"
 import { TaskManager } from "@/task/manager"
+import { DesktopTasks } from "@/task/desktop"
+import { TaskBridge } from "@vectordevai/schema/task-bridge"
 import type { TaskPromptOps } from "@/tool/task"
 import type { SessionID } from "@/session/schema"
 import { ToolJsonSchema } from "@/tool/json-schema"
@@ -47,6 +49,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const background = yield* BackgroundJob.Service
     const flags = yield* RuntimeFlags.Service
     const tasks = yield* TaskManager.Service
+    const desktop = yield* DesktopTasks.Service
     const prompts = yield* SessionPrompt.Service
     const taskPrompts: TaskPromptOps = {
       cancel: prompts.cancel,
@@ -102,6 +105,40 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     }) {
       yield* access(ctx.params.sessionID)
       return yield* taskError(tasks.wait({ ...ctx.params, ...ctx.payload }))
+    })
+
+    const owner = Effect.gen(function* () {
+      if ((yield* RequestPrincipal).kind !== "owner")
+        return yield* new ForbiddenError({
+          message: "Desktop task connections require the authenticated server owner.",
+        })
+    })
+    const taskBridgeRegister = Effect.fn("ExperimentalHttpApi.taskBridgeRegister")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof TaskBridge.RegisterInput.Type
+    }) {
+      yield* owner
+      return yield* desktop
+        .register({ ...ctx.params, ...ctx.payload })
+        .pipe(Effect.mapError((error) => new TaskApiError({ code: error.code, message: error.message })))
+    })
+    const taskBridgePoll = Effect.fn("ExperimentalHttpApi.taskBridgePoll")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof TaskBridge.PollInput.Type
+    }) {
+      yield* owner
+      return yield* desktop
+        .poll({ ...ctx.params, ...ctx.payload })
+        .pipe(Effect.mapError((error) => new TaskApiError({ code: error.code, message: error.message })))
+    })
+    const taskBridgeReceipt = Effect.fn("ExperimentalHttpApi.taskBridgeReceipt")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof TaskBridge.ReceiptInput.Type
+    }) {
+      yield* owner
+      return yield* desktop
+        .receipt({ ...ctx.params, ...ctx.payload })
+        .pipe(Effect.mapError((error) => new TaskApiError({ code: error.code, message: error.message })))
     })
 
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
@@ -222,6 +259,9 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       .handle("taskMessage", taskMessage)
       .handle("taskStop", taskStop)
       .handle("taskWait", taskWait)
+      .handle("taskBridgeRegister", taskBridgeRegister)
+      .handle("taskBridgePoll", taskBridgePoll)
+      .handle("taskBridgeReceipt", taskBridgeReceipt)
       .handle("resource", resource)
   }),
 )

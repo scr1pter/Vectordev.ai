@@ -94,6 +94,7 @@ export type SwarmTaskRecord = {
   summary: string
   error?: string
   cancelRequested?: boolean
+  stopReason?: string
 }
 
 export type SwarmRunRecord = {
@@ -124,6 +125,7 @@ export type SwarmRunRecord = {
   summary: string
   logs: string[]
   error?: string
+  stopReason?: string
 }
 
 export type CreateSwarmRunInput = {
@@ -352,6 +354,7 @@ export function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine) {
       currentStep: run.tasks.length ? "Resuming dependency scheduler" : "Resuming project decomposition",
       completedAt: undefined,
       error: undefined,
+      stopReason: undefined,
       tasks: run.tasks.map((task): SwarmTaskRecord => {
         if (!retryable(task)) return task
         const merged = workspace(task)
@@ -379,6 +382,7 @@ export function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine) {
             ...task,
             status: "planned",
             cancelRequested: undefined,
+            stopReason: undefined,
             completedAt: undefined,
             lastAction: "Ready to integrate its finished changes into staging",
             error: undefined,
@@ -387,6 +391,7 @@ export function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine) {
           ...task,
           status: "planned",
           cancelRequested: undefined,
+          stopReason: undefined,
           workspaceId: undefined,
           startedAt: undefined,
           completedAt: undefined,
@@ -402,12 +407,18 @@ export function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine) {
   })
 }
 
-export async function stopSwarmRun(id: string, timeoutMs = 10_000, stopWorkspace = stopParallelWorkspace) {
+export async function stopSwarmRun(
+  id: string,
+  timeoutMs = 10_000,
+  stopWorkspace = stopParallelWorkspace,
+  reason?: string,
+) {
   const current = getSwarmRun(id)
   if (!current) throw new Error("Swarm run was not found.")
   const active = activeRuns.get(id)
   const stopping = stoppingRuns.get(id)
   if (!active && !stopping && !["planning", "running", "interrupted"].includes(current.status)) return current
+  if (reason) updateRun(id, (run) => ({ ...run, stopReason: reason.slice(0, 1000) }))
   active?.controller.abort()
   const cleanup =
     stopping ??
@@ -447,7 +458,7 @@ export async function stopSwarmRun(id: string, timeoutMs = 10_000, stopWorkspace
   }))
 }
 
-export function stopSwarmTask(id: string, taskID: string, timeoutMs = 10_000) {
+export function stopSwarmTask(id: string, taskID: string, timeoutMs = 10_000, reason?: string) {
   return inTurn(id, async () => {
     const current = getSwarmRun(id)
     if (!current) throw new Error("Swarm run was not found.")
@@ -470,6 +481,7 @@ export function stopSwarmTask(id: string, taskID: string, timeoutMs = 10_000) {
         return {
           ...task,
           cancelRequested: true,
+          stopReason: reason?.slice(0, 1000),
           status: executing?.has(task.id) ? task.status : "canceled",
           completedAt: executing?.has(task.id) ? task.completedAt : now(),
           lastAction: executing?.has(task.id)
