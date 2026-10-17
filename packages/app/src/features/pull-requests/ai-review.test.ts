@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { createVectorClient } from "@vectordevai/sdk/v2/client"
 import { parseUnifiedDiff } from "@vectordevai/core/review/diff"
 import { reviewPermissionRules } from "@vectordevai/core/review/permission"
 import { buildFinalizePrompt } from "@vectordevai/core/review/prompt"
@@ -1403,6 +1404,36 @@ describe("applying a fix", () => {
     expect(writes).toEqual([{ path: "src/list.ts", content: applyFix(HEAD, fix)! }])
     expect(await applyReviewFix(client(BASE), "/w/project", fix)).toBe("changed")
     expect(writes).toHaveLength(1)
+  })
+
+  // The SDK's methods read `this.client`, so a method copied off its object fails before any request is sent.
+  test("writes through the real SDK client", async () => {
+    const requests: { method: string; pathname: string; body?: unknown }[] = []
+    const sdk = createVectorClient({
+      baseUrl: "http://engine.test",
+      throwOnError: true,
+      fetch: Object.assign(
+        async (source: RequestInfo | URL, init?: RequestInit) => {
+          const request = source instanceof Request ? source : new Request(source, init)
+          const pathname = new URL(request.url).pathname
+          requests.push({
+            method: request.method,
+            pathname,
+            ...(request.method === "POST" ? { body: await request.json() } : {}),
+          })
+          if (pathname === "/file/content") return Response.json({ type: "text", content: HEAD })
+          if (pathname === "/file/write") return Response.json(true)
+          throw new Error(`Unexpected request: ${request.method} ${pathname}`)
+        },
+        { preconnect() {} },
+      ),
+    })
+    expect(await applyReviewFix(sdk, "/w/project", fix)).toBe("applied")
+    expect(requests.at(-1)).toEqual({
+      method: "POST",
+      pathname: "/file/write",
+      body: { path: "src/list.ts", content: applyFix(HEAD, fix)! },
+    })
   })
 
   test("a finding offers the edit only when the checkout is the reviewed code", async () => {

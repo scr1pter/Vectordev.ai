@@ -1701,13 +1701,14 @@ export async function applyReviewFix(
   directory: string,
   fix: ReviewFix,
 ): Promise<"applied" | "changed"> {
-  const write = client.file.write
-  if (!write) throw new Error("This version of Vector can't edit files from a review. Update Vector and try again.")
+  // Called on client.file itself: the SDK's methods read `this.client`, so a copied-out method fails.
+  if (!client.file.write)
+    throw new Error("This version of Vector can't edit files from a review. Update Vector and try again.")
   const current = await client.file.read({ directory, path: fix.path })
   if (current.data?.type !== "text") return "changed"
   const next = applyFix(current.data.content, fix)
   if (next === undefined) return "changed"
-  await write({ directory, path: fix.path, content: next })
+  await client.file.write({ directory, path: fix.path, content: next })
   return "applied"
 }
 
