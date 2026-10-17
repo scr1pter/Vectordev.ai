@@ -140,7 +140,16 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
   const allDirectories = (yield* ConfigPaths.directories(ctx.directory, worktree)).map(
     (directory) => ConfigPaths.projectPath(directory, sourceContext) ?? directory,
   )
-  yield* Effect.promise(() => migrateTuiConfig({ directories: allDirectories, cwd: ctx.directory }))
+  yield* Effect.promise(() =>
+    migrateTuiConfig({
+      directories: allDirectories,
+      cwd: ctx.directory,
+      workspace,
+      worktree,
+      agentConfig,
+      agentDirectory,
+    }),
+  )
   const projectFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG
     ? []
     : yield* ConfigPaths.files("tui", ctx.directory, worktree)
