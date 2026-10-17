@@ -7,6 +7,8 @@ import { basename, dirname, join, relative } from "node:path"
 import { app } from "electron"
 import { VERIFIED_COMPLETION_POLICY } from "@vectordevai/app/judge"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
+import { TaskMailbox } from "@vectordevai/core/task-mailbox"
+import { taskBoardChanged } from "./task-board-events"
 import { backupBeforeOverwrite } from "./workspace-checkpoint"
 
 import {
@@ -71,6 +73,7 @@ export type { ParallelWorkspaceTurn } from "./parallel-workspace-turns"
 // workspace directory makes either the store or the checkout root unreadable.
 const STORE_NAME = "parallel-workspaces-state"
 const STORE_KEY = "records"
+const PROCESS_ID = randomUUID()
 const WORKSPACE_DIRECTORY_NAME = "parallel-workspace-runs"
 
 const EXCLUDED_DIRS = new Set([
@@ -164,6 +167,8 @@ export type ParallelWorkspaceRecord = {
   riskLevel: "low" | "medium" | "high"
   estimatedCost: string
   actualCost?: string
+  measuredCost?: number
+  runOwnerID?: string
   finalSummary: string
   mergeState: "none" | "merged" | "discarded"
   // Set just before a merge starts writing into the source. With mergeState still "none" it means Vector stopped
@@ -375,6 +380,7 @@ function writeRecords(records: ParallelWorkspaceRecord[]) {
   const store = getStore(STORE_NAME)
   store.set(STORE_KEY, records)
   cache.wrote(store, records)
+  taskBoardChanged()
 }
 
 function updateRecord(id: string, update: (record: ParallelWorkspaceRecord) => ParallelWorkspaceRecord) {
@@ -952,7 +958,8 @@ function normalizeStatusLine(line: string) {
 export function pendingTeammateDelivery(record: Pick<ParallelWorkspaceRecord, "id" | "name">, basePrompt: string) {
   const team = teamForWorkspace(record.id)
   if (!team) return { prompt: basePrompt, messageIds: [] }
-  const pending = pendingTeamMessages(team.id, record.id)
+  // Bound each external turn; unread messages remain durable for following turns.
+  const pending = pendingTeamMessages(team.id, record.id).slice(0, 4)
   if (!pending.length) return { prompt: basePrompt, messageIds: [] }
   return {
     prompt: [formatDelivery(pending, record.name), basePrompt].filter(Boolean).join("\n\n"),
@@ -1439,7 +1446,8 @@ export function listParallelWorkspaces(scope?: { sourcePath?: string; parentSess
   const records = readRecords()
   let changed = false
   const next = records.map((record) => {
-    const wasRunning = RUNNING_STATUSES.includes(record.status)
+    const wasRunning =
+      RUNNING_STATUSES.includes(record.status) || (record.status === "queued" && Boolean(record.runOwnerID))
     if (!wasRunning || activeRuns.has(record.id) || queuedRuns.has(record.id)) return record
     changed = true
     const interrupted: ParallelWorkspaceRecord = {
@@ -1673,6 +1681,7 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
     teamId: input.teamId,
     llmJudge: input.llmJudge === true,
     status: "queued",
+    runOwnerID: PROCESS_ID,
     progress: 0,
     lastAction: "Isolated workspace created",
     createdAt,
@@ -2601,6 +2610,7 @@ async function recordVectorRunSpend(
   const measured = updateRecord(id, (current) => ({
     ...current,
     actualCost: cost === undefined ? current.actualCost : formatUsd(cost),
+    measuredCost: cost ?? current.measuredCost,
     logs: stop ? [stop, ...current.logs].slice(0, 120) : current.logs,
   }))
   syncBackgroundTask(measured)
@@ -2664,6 +2674,7 @@ export async function runParallelWorkspace(
   const queued = updateRecord(id, (record) => ({
     ...record,
     status: "queued",
+    runOwnerID: PROCESS_ID,
     progress: 0,
     lastAction:
       activeRuns.size < maxConcurrentRuns
@@ -2718,6 +2729,7 @@ export async function followUpParallelWorkspace(
   const queued = updateRecord(id, (record) => ({
     ...record,
     status: "queued",
+    runOwnerID: PROCESS_ID,
     progress: 0,
     error: undefined,
     mergeFailure: undefined,
@@ -2765,6 +2777,44 @@ export async function stopParallelWorkspace(id: string) {
     }
   }
   return updated
+}
+
+export function parallelWorkspaceCanMessage(id: string) {
+  const active = activeRuns.get(id)
+  const record = getParallelWorkspace(id)
+  return (
+    record?.runtime === "vector" &&
+    Boolean(active?.sessionId && active.acceptsTeamMessages && !active.controller.signal.aborted)
+  )
+}
+
+export async function messageParallelWorkspace(id: string, text: string) {
+  const invalid = TaskMailbox.bodyError(text)
+  if (invalid) throw new Error(invalid)
+  const active = activeRuns.get(id)
+  if (!active?.sessionId || !parallelWorkspaceCanMessage(id))
+    throw new Error(
+      "This agent cannot receive a message while idle or during validation. Open its session to continue.",
+    )
+  const budgetUsd = await promptBudgetUsd(active, active.sessionId)
+  if (budgetUsd !== undefined && budgetUsd <= 0) throw new Error("This agent has reached its spend limit.")
+  if (activeRuns.get(id) !== active || !parallelWorkspaceCanMessage(id))
+    throw new Error("This agent finished before the message was sent. Your draft has been kept.")
+  const messageID = `msg_vector_${randomUUID().replaceAll("-", "")}`
+  await engineRequest(active.engine, `/api/session/${encodeURIComponent(active.sessionId)}/prompt`, {
+    method: "POST",
+    body: {
+      id: messageID,
+      prompt: { text: text.trim() },
+      delivery: "steer",
+      resume: true,
+      budget: budgetUsd === undefined ? undefined : { usd: budgetUsd },
+    },
+    signal: active.controller.signal,
+  })
+  if (active.spend) active.spend.draining = true
+  taskBoardChanged()
+  return { messageID }
 }
 
 async function createCheckpoint(record: ParallelWorkspaceRecord) {

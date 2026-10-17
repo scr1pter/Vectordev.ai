@@ -2288,6 +2288,518 @@
         ]
       }
     },
+    "/experimental/session/{sessionID}/tasks": {
+      "get": {
+        "tags": ["experimental"],
+        "operationId": "experimental.task.list",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "descendants",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            },
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session task board",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskListResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TaskApiError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TaskApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read compact child task status and measured usage without starting model work.",
+        "summary": "List session tasks",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.task.list({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/experimental/session/{sessionID}/tasks/{taskID}": {
+      "get": {
+        "tags": ["experimental"],
+        "operationId": "experimental.task.inspect",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "taskID",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded task progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskInspectResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TaskApiError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TaskApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read bounded recent steps and partial output with a full-result reference.",
+        "summary": "Inspect a session task",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.task.inspect({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/experimental/session/{sessionID}/tasks/{taskID}/message": {
+      "post": {
+        "tags": ["experimental"],
+        "operationId": "experimental.task.message",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "taskID",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task message receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskMessageResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TaskApiError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TaskApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Admit a bounded correction for the next safe boundary; finished tasks are never restarted implicitly.",
+        "summary": "Message a running task",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "delivery": {
+                    "type": "string",
+                    "enum": ["steer", "queue"]
+                  }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.task.message({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/experimental/session/{sessionID}/tasks/stop": {
+      "post": {
+        "tags": ["experimental"],
+        "operationId": "experimental.task.stop",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Settled tasks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskStopResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TaskApiError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TaskApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Stop selected children or all children, preserving the reason and partial work.",
+        "summary": "Stop session tasks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskIDs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
+                  },
+                  "all": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 1000
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.task.stop({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/experimental/session/{sessionID}/tasks/wait": {
+      "post": {
+        "tags": ["experimental"],
+        "operationId": "experimental.task.wait",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task wait result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskWaitResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TaskApiError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TaskApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Wait for any or all selected children with a bounded timeout and no polling or model requests.",
+        "summary": "Wait for session tasks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskIDs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": ["any", "all"]
+                  },
+                  "timeout": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 60000
+                  }
+                },
+                "required": ["taskIDs"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.task.wait({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/experimental/resource": {
       "get": {
         "tags": ["experimental"],
@@ -27488,6 +28000,20 @@
         ],
         "additionalProperties": false
       },
+      "TaskApiError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": ["not_found", "forbidden", "invalid", "finished", "rate_limited"]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["code", "message"],
+        "additionalProperties": false
+      },
       "McpResource": {
         "type": "object",
         "properties": {
@@ -35562,6 +36088,325 @@
       "TeamsID": {
         "type": "string",
         "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+      },
+      "TaskStatus": {
+        "type": "string",
+        "enum": ["queued", "running", "waiting_on_user", "completed", "failed", "stopped"]
+      },
+      "TaskUsage": {
+        "type": "object",
+        "properties": {
+          "cost": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
+          },
+          "total": {
+            "type": "number"
+          },
+          "toolUses": {
+            "type": "number"
+          },
+          "steps": {
+            "type": "number"
+          },
+          "unpricedSteps": {
+            "type": "number"
+          }
+        },
+        "required": ["cost", "tokens", "total", "toolUses", "steps"],
+        "additionalProperties": false
+      },
+      "TaskBudgetScope": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["run", "batch", "child"]
+          },
+          "id": {
+            "type": "string"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/RunBudget"
+          },
+          "spentUsd": {
+            "type": "number"
+          },
+          "steps": {
+            "type": "number"
+          },
+          "unpricedSteps": {
+            "type": "number"
+          },
+          "costKind": {
+            "$ref": "#/components/schemas/CostKind"
+          },
+          "stopped": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "$ref": "#/components/schemas/RunBudgetStopReason"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["reason", "message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["kind", "id", "budget", "spentUsd", "steps", "unpricedSteps"],
+        "additionalProperties": false
+      },
+      "TaskInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sessionID": {
+            "type": "string"
+          },
+          "parentSessionID": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["subagent", "team", "swarm", "external"]
+          },
+          "title": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "batchID": {
+            "type": "string"
+          },
+          "groupID": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "number"
+          },
+          "completedAt": {
+            "type": "number"
+          },
+          "elapsedMs": {
+            "type": "number"
+          },
+          "currentStep": {
+            "type": "string"
+          },
+          "lastTool": {
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/TaskUsage"
+          },
+          "measuredCost": {
+            "type": "number"
+          },
+          "costKind": {
+            "$ref": "#/components/schemas/CostKind"
+          },
+          "ownedPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dependsOn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resultAvailable": {
+            "type": "boolean"
+          },
+          "resultRef": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "attempt": {
+            "type": "number"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/RunBudget"
+          },
+          "budgetScopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskBudgetScope"
+            }
+          },
+          "controls": {
+            "type": "object",
+            "properties": {
+              "inspect": {
+                "type": "boolean"
+              },
+              "message": {
+                "type": "boolean"
+              },
+              "stop": {
+                "type": "boolean"
+              }
+            },
+            "required": ["inspect", "message", "stop"],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "parentSessionID",
+          "source",
+          "title",
+          "status",
+          "startedAt",
+          "elapsedMs",
+          "ownedPaths",
+          "dependsOn",
+          "resultAvailable",
+          "attempt",
+          "controls"
+        ],
+        "additionalProperties": false
+      },
+      "TaskListResult": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskInfo"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": ["tasks", "truncated"],
+        "additionalProperties": false
+      },
+      "TaskInspectResult": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "$ref": "#/components/schemas/TaskInfo"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tool": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            }
+          },
+          "output": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": ["task", "steps", "output", "truncated"],
+        "additionalProperties": false
+      },
+      "TaskMessageResult": {
+        "type": "object",
+        "properties": {
+          "taskID": {
+            "type": "string"
+          },
+          "messageID": {
+            "type": "string"
+          },
+          "delivery": {
+            "type": "string",
+            "enum": ["steer", "queue"]
+          },
+          "accepted": {
+            "type": "boolean",
+            "enum": [true]
+          }
+        },
+        "required": ["taskID", "messageID", "delivery", "accepted"],
+        "additionalProperties": false
+      },
+      "TaskStopResult": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskInfo"
+            }
+          }
+        },
+        "required": ["tasks"],
+        "additionalProperties": false
+      },
+      "TaskWaitResult": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskInfo"
+            }
+          },
+          "timedOut": {
+            "type": "boolean"
+          }
+        },
+        "required": ["tasks", "timedOut"],
+        "additionalProperties": false
       },
       "ProjectDirectories": {
         "type": "array",

@@ -25,6 +25,8 @@ import { WorkspaceTable } from "@vectordevai/core/control-plane/workspace.sql"
 import { Database } from "@vectordevai/core/database/database"
 import { Project } from "../../src/project/project"
 import { Session } from "../../src/session/session"
+import { SessionID } from "../../src/session/schema"
+import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 import { WorkspacePaths } from "../../src/server/routes/instance/httpapi/groups/workspace"
 import {
   WorkspaceRoutingMiddleware,
@@ -263,6 +265,122 @@ const serveProbe = HttpApiBuilder.layer(ProbeApi).pipe(
 )
 
 describe("HttpApi workspace routing middleware", () => {
+  it.live("checks task-control ownership before forwarding with remote owner credentials", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const project = yield* Project.use.fromDirectory(dir)
+      const forwarded: string[] = []
+      const remoteUrl = yield* startRemoteWorkspaceHttpServer((request) => {
+        forwarded.push(requestURL(request).pathname)
+        return HttpServerResponse.json(true)
+      })
+      const workspace = yield* createRemoteWorkspace({
+        dir,
+        projectID: project.project.id,
+        type: "remote-task-controls",
+        url: `${remoteUrl}/base`,
+        headers: { authorization: "Basic remote-owner-placeholder" },
+      })
+      const api = HttpApi.make("task-routing-probe").add(
+        HttpApiGroup.make("tasks")
+          .add(
+            HttpApiEndpoint.get("list", "/experimental/session/:sessionID/tasks", {
+              params: Schema.Struct({ sessionID: SessionID }),
+              query: WorkspaceRoutingQuery,
+              success: Schema.Boolean,
+            }),
+            HttpApiEndpoint.post("stop", "/experimental/session/:sessionID/tasks/stop", {
+              params: Schema.Struct({ sessionID: SessionID }),
+              query: WorkspaceRoutingQuery,
+              success: Schema.Boolean,
+            }),
+            HttpApiEndpoint.post("message", "/experimental/session/:sessionID/tasks/:taskID/message", {
+              params: Schema.Struct({ sessionID: SessionID, taskID: Schema.String }),
+              query: WorkspaceRoutingQuery,
+              success: Schema.Boolean,
+            }),
+            ...(["register", "poll", "receipt"] as const).map((action) =>
+              HttpApiEndpoint.post(action, `/experimental/session/:sessionID/tasks/bridge/${action}`, {
+                params: Schema.Struct({ sessionID: SessionID }),
+                query: WorkspaceRoutingQuery,
+                success: Schema.Boolean,
+              }),
+            ),
+          )
+          .middleware(WorkspaceRoutingMiddleware),
+      )
+      yield* HttpApiBuilder.layer(api).pipe(
+        Layer.provide(
+          HttpApiBuilder.group(api, "tasks", (handlers) =>
+            handlers
+              .handle("list", () => Effect.succeed(false))
+              .handle("stop", () => Effect.succeed(false))
+              .handle("message", () => Effect.succeed(false))
+              .handle("register", () => Effect.succeed(false))
+              .handle("poll", () => Effect.succeed(false))
+              .handle("receipt", () => Effect.succeed(false)),
+          ),
+        ),
+        Layer.provide(workspaceRoutingTestLayer),
+        Layer.provide(
+          Layer.mock(Session.Service)({
+            get: (id) =>
+              Effect.succeed({
+                id,
+                slug: "fixture",
+                title: "Fixture session",
+                version: "test",
+                projectID: project.project.id,
+                directory: workspace.directory!,
+                workspaceID: workspace.id,
+                time: { created: 1, updated: 1 },
+              }),
+          }),
+        ),
+        HttpRouter.provideRequest(
+          Layer.succeed(RequestPrincipal, {
+            kind: "guest",
+            username: "guest",
+            workspaceIDs: new Set([workspace.id]),
+            workspaceDirectories: new Map([[workspace.id, workspace.directory!]]),
+            sessionIDs: new Set(["ses_claimed"]),
+          }),
+        ),
+        HttpRouter.serve,
+        Layer.build,
+      )
+      const base = "/experimental/session/ses_owner/tasks"
+      expect((yield* HttpClient.get(base)).status).toBe(200)
+      expect(forwarded).toEqual([`/base${base}`])
+      for (const route of [
+        `${base}/stop`,
+        `${base}/ses_child/message`,
+        `${base.toUpperCase()}/stop`,
+        `${base}/stop;x`,
+      ]) {
+        expect((yield* HttpClientRequest.post(route).pipe(HttpClient.execute)).status).toBe(403)
+      }
+      expect(forwarded).toHaveLength(1)
+      expect(
+        (yield* HttpClientRequest.post("/experimental/session/ses_claimed/tasks/stop").pipe(HttpClient.execute)).status,
+      ).toBe(200)
+      expect(
+        (yield* HttpClientRequest.post("/experimental/session/ses_claimed/tasks/ses_child/message").pipe(
+          HttpClient.execute,
+        )).status,
+      ).toBe(200)
+      expect(forwarded).toHaveLength(3)
+      for (const action of ["register", "poll", "receipt"]) {
+        expect(
+          (yield* HttpClientRequest.post(`/experimental/session/ses_claimed/tasks/bridge/${action}`).pipe(
+            HttpClient.execute,
+          )).status,
+        ).toBe(403)
+      }
+      expect(forwarded).toHaveLength(3)
+    }),
+  )
+
   it.live("proxies remote workspace HTTP requests through the selected workspace target", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })

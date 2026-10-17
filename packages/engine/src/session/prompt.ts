@@ -1,3 +1,4 @@
+import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -1250,7 +1251,13 @@ const layer = Layer.effect(
       const arm = (budget: RunBudget.Info) =>
         options?.tightenBudget ? guard.tighten(input.sessionID, budget) : guard.arm(input.sessionID, budget)
       if (input.budget) yield* arm(input.budget)
-      const message = yield* createUserMessage(input, options)
+      const messageID = input.messageID ?? MessageID.ascending()
+      const recovered = input.parts.some((part) => part.type !== "text" || !part.synthetic)
+        ? yield* SubagentLifecycle.recover(sessions, database, input.sessionID, messageID).pipe(Effect.orDie)
+        : []
+      // Reports recovered after a restart precede the actual human text in the same input; they cannot become
+      // a newer synthetic user turn or start model execution on their own.
+      const message = yield* createUserMessage({ ...input, messageID, parts: [...recovered, ...input.parts] }, options)
       yield* sessions.touch(input.sessionID)
 
       const permissions: PermissionV1.Rule[] = []
@@ -1309,8 +1316,8 @@ const layer = Layer.effect(
       if (session.parentID && session.internal) {
         const rootID = (yield* rootSession(session)).id
         if (rootID !== sessionID && (yield* guard.running(rootID))) {
-          yield* guard.link(sessionID, rootID)
-          return yield* steps
+          yield* guard.link(sessionID, rootID, { renew: true })
+          return yield* steps.pipe(Effect.ensuring(guard.release(sessionID)))
         }
         yield* guard.unlink(sessionID)
       }

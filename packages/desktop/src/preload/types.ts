@@ -841,6 +841,29 @@ export type ElectronAPI = {
     discard: (id: string) => Promise<ParallelWorkspaceRecord>
     remove: (id: string) => Promise<ParallelWorkspaceRecord[]>
   }
+  agentTasks: {
+    list: (input: {
+      parentSessionID: string
+      sourcePath: string
+    }) => Promise<import("@vectordevai/schema/task").ListResult>
+    inspect: (input: {
+      parentSessionID: string
+      sourcePath: string
+      taskID: string
+    }) => Promise<import("@vectordevai/schema/task").InspectResult>
+    message: (input: {
+      parentSessionID: string
+      sourcePath: string
+      taskID: string
+      text: string
+    }) => Promise<import("@vectordevai/schema/task").MessageResult>
+    stop: (input: {
+      parentSessionID: string
+      sourcePath: string
+      taskID: string
+    }) => Promise<import("@vectordevai/schema/task").StopResult>
+    onChange: (callback: () => void) => () => void
+  }
   swarmOrchestrator: {
     list: (scope?: { sourcePath?: string; parentSessionId?: string }) => Promise<SwarmRunRecord[]>
     create: (input: CreateSwarmRunInput) => Promise<SwarmRunRecord>

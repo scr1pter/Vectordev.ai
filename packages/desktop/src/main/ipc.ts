@@ -58,6 +58,8 @@ import {
 } from "./open-path"
 import type { UpdaterController } from "./updater-controller"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
+import { inspectAgentTask, listAgentTasks, messageAgentTask, stopAgentTask, type TaskScope } from "./agent-task-board"
+import { onTaskBoardChange } from "./task-board-events"
 import { runBrowserAgent } from "./browser-agent"
 import { prepareAgentTask } from "./context-budget"
 import { speakVoiceText, stopVoiceSynthesis } from "./voice-synthesis"
@@ -238,7 +240,36 @@ export function registerIpcHandlers(deps: Deps) {
 
   const voiceOwners = new Set<number>()
   const updaterSubscriptions = createUpdaterSubscriptions()
+  const taskSubscriptions = new Map<number, () => void>()
   app.once("will-quit", updaterSubscriptions.clear)
+  app.once("will-quit", () => {
+    taskSubscriptions.forEach((stop) => stop())
+    taskSubscriptions.clear()
+  })
+  handle("agent-tasks-list", (_event, input: TaskScope) => listAgentTasks(input))
+  handle("agent-tasks-inspect", (_event, input: TaskScope & { taskID: string }) => inspectAgentTask(input))
+  handle("agent-tasks-message", (_event, input: TaskScope & { taskID: string; text: string }) =>
+    messageAgentTask(input),
+  )
+  handle("agent-tasks-stop", (_event, input: TaskScope & { taskID: string }) => stopAgentTask(input))
+  handle("agent-tasks-subscribe", (event) => {
+    const id = event.sender.id
+    taskSubscriptions.get(id)?.()
+    taskSubscriptions.set(
+      id,
+      onTaskBoardChange(() => {
+        if (!event.sender.isDestroyed()) event.sender.send("agent-tasks-changed")
+      }),
+    )
+    event.sender.once("destroyed", () => {
+      taskSubscriptions.get(id)?.()
+      taskSubscriptions.delete(id)
+    })
+  })
+  handle("agent-tasks-unsubscribe", (event) => {
+    taskSubscriptions.get(event.sender.id)?.()
+    taskSubscriptions.delete(event.sender.id)
+  })
 
   handle("kill-sidecar", () => deps.killSidecar())
   handle("await-initialization", () => deps.awaitInitialization())

@@ -57,6 +57,7 @@ import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
 import { Sidebar } from "./sidebar"
 import { SubagentFooter } from "./subagent-footer.tsx"
+import { DialogTasks } from "./dialog-tasks"
 import { filetype } from "../../util/filetype"
 import parsers from "../../parsers-config"
 import { errorMessage } from "../../util/error"
@@ -437,6 +438,13 @@ export function Session() {
   }
 
   const sessionCommandList = createMemo(() => [
+    {
+      title: "Manage subagent tasks",
+      value: "session.tasks",
+      category: "Session",
+      slash: { name: "tasks" },
+      run: () => dialog.replace(() => <DialogTasks sessionID={route.sessionID} />),
+    },
     {
       title: "Rename session",
       value: "session.rename",
@@ -967,12 +975,23 @@ export function Session() {
       category: "Session",
       enabled: backgroundSessions().length > 0,
       run: () => {
-        const ids = backgroundSessions()
-        for (const sessionID of ids) void sdk.client.session.abort({ sessionID }).catch(() => undefined)
-        toast.show({
-          message: `Stopping ${ids.length} background subagent${ids.length === 1 ? "" : "s"}`,
-          variant: "info",
-        })
+        void sdk.client.experimental.task
+          .stop(
+            {
+              sessionID: route.sessionID,
+              all: true,
+              reason: "Stopped all subagents from the terminal",
+              workspace: project.workspace.current(),
+            },
+            { throwOnError: true },
+          )
+          .then((result) =>
+            toast.show({
+              message: `Stopped ${result.data?.tasks.length ?? 0} subagent tasks. Partial work is retained.`,
+              variant: "info",
+            }),
+          )
+          .catch((error: unknown) => toast.show({ message: errorMessage(error), variant: "error" }))
         dialog.clear()
       },
     },

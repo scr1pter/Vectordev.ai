@@ -17,6 +17,38 @@ import { described } from "./metadata"
 import { QueryBoolean } from "./query"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
+import { Task } from "@vectordevai/schema/task"
+
+export class TaskApiError extends Schema.ErrorClass<TaskApiError>("TaskApiError")(
+  {
+    code: Schema.Literals(["not_found", "forbidden", "invalid", "finished", "rate_limited"]),
+    message: Schema.String,
+  },
+  { httpApiStatus: 400 },
+) {}
+
+export const TaskListQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  descendants: Schema.optional(QueryBoolean),
+  limit: Schema.optional(Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 200 }))),
+})
+
+export const TaskMessageInput = Schema.Struct({
+  text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
+  delivery: Schema.optional(Schema.Literals(["steer", "queue"])),
+})
+
+export const TaskStopInput = Schema.Struct({
+  taskIDs: Schema.optional(Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMaxLength(200))),
+  all: Schema.optional(Schema.Boolean),
+  reason: Schema.optional(Schema.String.check(Schema.isMaxLength(1000))),
+})
+
+export const TaskWaitInput = Schema.Struct({
+  taskIDs: Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  mode: Schema.optional(Schema.Literals(["any", "all"])),
+  timeout: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 60_000 }))),
+})
 
 const CapabilitiesResponse = Schema.Struct({
   backgroundSubagents: Schema.Boolean,
@@ -76,6 +108,11 @@ export const ExperimentalPaths = {
   session: "/experimental/session",
   sessionUsage: "/experimental/session/usage",
   sessionBackground: "/experimental/session/:sessionID/background",
+  taskList: "/experimental/session/:sessionID/tasks",
+  taskInspect: "/experimental/session/:sessionID/tasks/:taskID",
+  taskMessage: "/experimental/session/:sessionID/tasks/:taskID/message",
+  taskStop: "/experimental/session/:sessionID/tasks/stop",
+  taskWait: "/experimental/session/:sessionID/tasks/wait",
   resource: "/experimental/resource",
 } as const
 
@@ -197,6 +234,71 @@ export const ExperimentalApi = HttpApi.make("experimental")
             summary: "Background subagents",
             description:
               "Detach any synchronous subagents currently blocking the session and continue them in the background.",
+          }),
+        ),
+        HttpApiEndpoint.get("taskList", ExperimentalPaths.taskList, {
+          params: { sessionID: SessionID },
+          query: TaskListQuery,
+          success: described(Task.ListResult, "Session task board"),
+          error: TaskApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.task.list",
+            summary: "List session tasks",
+            description: "Read compact child task status and measured usage without starting model work.",
+          }),
+        ),
+        HttpApiEndpoint.get("taskInspect", ExperimentalPaths.taskInspect, {
+          params: { sessionID: SessionID, taskID: Schema.String },
+          query: WorkspaceRoutingQuery,
+          success: described(Task.InspectResult, "Bounded task progress"),
+          error: TaskApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.task.inspect",
+            summary: "Inspect a session task",
+            description: "Read bounded recent steps and partial output with a full-result reference.",
+          }),
+        ),
+        HttpApiEndpoint.post("taskMessage", ExperimentalPaths.taskMessage, {
+          params: { sessionID: SessionID, taskID: Schema.String },
+          query: WorkspaceRoutingQuery,
+          payload: TaskMessageInput,
+          success: described(Task.MessageResult, "Task message receipt"),
+          error: TaskApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.task.message",
+            summary: "Message a running task",
+            description:
+              "Admit a bounded correction for the next safe boundary; finished tasks are never restarted implicitly.",
+          }),
+        ),
+        HttpApiEndpoint.post("taskStop", ExperimentalPaths.taskStop, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: TaskStopInput,
+          success: described(Task.StopResult, "Settled tasks"),
+          error: TaskApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.task.stop",
+            summary: "Stop session tasks",
+            description: "Stop selected children or all children, preserving the reason and partial work.",
+          }),
+        ),
+        HttpApiEndpoint.post("taskWait", ExperimentalPaths.taskWait, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: TaskWaitInput,
+          success: described(Task.WaitResult, "Task wait result"),
+          error: TaskApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.task.wait",
+            summary: "Wait for session tasks",
+            description:
+              "Wait for any or all selected children with a bounded timeout and no polling or model requests.",
           }),
         ),
         HttpApiEndpoint.get("resource", ExperimentalPaths.resource, {

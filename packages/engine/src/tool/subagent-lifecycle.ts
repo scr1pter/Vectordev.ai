@@ -1,10 +1,12 @@
-import { Effect } from "effect"
+import { Effect, Semaphore } from "effect"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
 import type { Session } from "@/session/session"
 import { MessageV2 } from "@/session/message-v2"
 import type { MessageID, SessionID } from "@/session/schema"
 import type { SubagentRecord, SubagentStatus, SubagentUsage } from "@/agent/subagent-kind"
 import { isRecord } from "@/util/record"
+import { randomUUID } from "node:crypto"
+import { Database } from "@vectordevai/core/database/database"
 
 /*
  * Lifecycle bookkeeping for task-tool subagents.
@@ -19,6 +21,10 @@ import { isRecord } from "@/util/record"
 
 /** Key of the lifecycle record in a child session's metadata. */
 export const METADATA_KEY = "subagent"
+// Observation identity only: this never claims durable or clustered execution ownership.
+export const RUNTIME_ID = randomUUID()
+// Admission, messaging and Stop share one short critical section; execution runs outside it.
+export const controlLock = Semaphore.makeUnsafe(1)
 
 export type FinalStatus = Extract<SubagentStatus, "completed" | "error" | "cancelled">
 
@@ -56,17 +62,44 @@ export function defined<T extends object>(value: T): Partial<T> {
 }
 
 /** Merges a patch into the child's record. setMetadata replaces the whole metadata object, so this reads first. */
-export function update(sessions: Session.Interface, sessionID: SessionID, patch: Partial<SubagentRecord>) {
+export function write(sessions: Session.Interface, sessionID: SessionID, patch: Partial<SubagentRecord>, attempt?: number) {
   return Effect.gen(function* () {
     const info = yield* sessions.get(sessionID)
+    if (attempt !== undefined && read(info)?.attempt !== attempt) return
     yield* sessions.setMetadata({
       sessionID,
       metadata: { ...info.metadata, [METADATA_KEY]: merge(read(info), patch) },
     })
-  }).pipe(
+  })
+}
+
+export function update(sessions: Session.Interface, sessionID: SessionID, patch: Partial<SubagentRecord>, attempt?: number) {
+  return write(sessions, sessionID, patch, attempt).pipe(
     Effect.catchCause((cause) => Effect.logWarning("subagent lifecycle update failed", { sessionID, cause })),
     Effect.withSpan("SubagentLifecycle.update"),
   )
+}
+
+/** Recover undelivered reports only into a human's next prompt, never into a paid retry after a crash. */
+export function recover(sessions: Session.Interface, database: Database.Interface, parentID: SessionID, messageID: MessageID) {
+  return Effect.gen(function* () {
+    const children = (yield* sessions.children(parentID)).filter((child) => !child.internal)
+    return (yield* Effect.forEach(children, (child) => Effect.gen(function* () {
+      const record = read(child)
+      const note = record?.notification
+      if (!note || record.runtimeID === RUNTIME_ID) return []
+      const exists = (id: string) => MessageV2.get({ sessionID: parentID, messageID: id as MessageID }).pipe(
+        Effect.provideService(Database.Service, database), Effect.option,
+      )
+      if ((yield* exists(note.launchID))._tag === "None") {
+        yield* write(sessions, child.id, { notification: undefined }, record.attempt)
+        return []
+      }
+      if (note.messageID && (yield* exists(note.messageID))._tag === "Some") return []
+      yield* write(sessions, child.id, { notification: { ...note, messageID } }, record.attempt)
+      return [{ type: "text" as const, synthetic: true, text: note.text, metadata: { taskNotification: { taskID: child.id, state: note.state, recovered: true } } }]
+    }))).flat()
+  })
 }
 
 /** How a run ended, read from the error its last assistant message carries; undefined when it did not fail. */
@@ -109,6 +142,7 @@ export function observe(sessions: Session.Interface, sessionID: SessionID) {
       total: tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write,
       toolUses,
       steps,
+      unpricedSteps: info.unpricedSteps,
     }
     const last = messages.findLast((message) => message.info.role === "assistant")
     return { usage, failure: last?.info.role === "assistant" ? failure(last.info.error) : undefined }

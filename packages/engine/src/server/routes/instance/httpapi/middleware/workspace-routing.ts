@@ -244,8 +244,7 @@ function routePtyTicket<E>(
     return yield* RequestPlan.$match(plan, {
       InvalidWorkspace: () => Effect.succeed(invalidPtyTicket()),
       MissingWorkspace: () => Effect.succeed(invalidPtyTicket()),
-      Remote: ({ request, workspace, target, url, path }) =>
-        proxyRemote(client, request, workspace, target, url, path),
+      Remote: ({ request, workspace, target, url, path }) => proxyRemote(client, request, workspace, target, url, path),
       Local: ({ directory, workspaceID }) =>
         Effect.gen(function* () {
           const valid = yield* tickets.consume({
@@ -308,8 +307,7 @@ function routeWorkspace<E>(
           ),
         ),
       MissingWorkspace: ({ workspaceID }) => Effect.succeed(missingWorkspaceResponse(workspaceID)),
-      Remote: ({ request, workspace, target, url, path }) =>
-        proxyRemote(client, request, workspace, target, url, path),
+      Remote: ({ request, workspace, target, url, path }) => proxyRemote(client, request, workspace, target, url, path),
       Local: ({ directory, workspaceID, sessionID }) =>
         effect.pipe(
           Effect.provideService(
@@ -354,6 +352,22 @@ function routeHttpApiWorkspace<E>(
     // while the handler serves a different one.
     const route = yield* HttpRouter.RouteContext
     const sessionID = getWorkspaceRouteSessionID(route.params)
+    const principal = yield* RequestPrincipal
+    // Remote targets authenticate with the adapter's owner credentials. Apply task-control ownership before
+    // forwarding, while the original guest principal is still available, as well as in the local handler.
+    if (
+      request.method === "POST" &&
+      ((route.route.path.startsWith("/experimental/session/:sessionID/tasks/bridge/") && principal.kind !== "owner") ||
+        ([
+          "/experimental/session/:sessionID/tasks/stop",
+          "/experimental/session/:sessionID/tasks/:taskID/message",
+        ].includes(route.route.path) &&
+          (!sessionID || !allowsSession(principal, sessionID))))
+    )
+      return HttpServerResponse.jsonUnsafe(
+        { _tag: "ForbiddenError", message: "This session's tasks are outside your authorized sessions" },
+        { status: 403 },
+      )
     const session = sessionID
       ? yield* Session.Service.use((svc) => svc.get(sessionID)).pipe(
           Effect.catchIf(

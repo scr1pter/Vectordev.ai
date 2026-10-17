@@ -12,6 +12,8 @@ import { ToolRegistry } from "@/tool/registry"
 import { Worktree } from "@/worktree"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Session } from "@/session/session"
+import { SessionPrompt } from "@/session/prompt"
+import { TaskManager } from "@/task/manager"
 import { SessionID } from "@/session/schema"
 import { ExperimentalApi } from "@/server/routes/instance/httpapi/groups/experimental"
 import { experimentalHandlers } from "@/server/routes/instance/httpapi/handlers/experimental"
@@ -54,6 +56,8 @@ const it = testEffect(
         Layer.mock(Project.Service)({}),
         Layer.mock(ToolRegistry.Service)({}),
         Layer.mock(Worktree.Service)({}),
+        Layer.mock(SessionPrompt.Service)({}),
+        Layer.mock(TaskManager.Service)({}),
         Layer.mock(Session.Service)({
           get: () =>
             Effect.succeed({

@@ -11,6 +11,8 @@ import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
+import { TaskManageTool } from "./task-manage"
+import { TaskManager } from "@/task/manager"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { Database } from "@vectordevai/core/database/database"
 import { TodoWriteTool } from "./todo"
@@ -119,6 +121,7 @@ const layer = Layer.effect(
 
     const invalid = yield* InvalidTool
     const task = yield* TaskTool
+    const taskManage = yield* TaskManageTool
     const read = yield* ReadTool
     const question = yield* QuestionTool
     const todo = yield* TodoWriteTool
@@ -251,6 +254,7 @@ const layer = Layer.effect(
           edit: Tool.init(edit),
           write: Tool.init(writetool),
           task: Tool.init(task),
+          taskManage: Tool.init(taskManage),
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
           teammate: Tool.init(teammate),
@@ -276,6 +280,7 @@ const layer = Layer.effect(
             tool.edit,
             tool.write,
             tool.task,
+            tool.taskManage,
             tool.fetch,
             tool.todo,
             ...(team ? [tool.teammate] : []),
@@ -492,6 +497,7 @@ export const node = LayerNode.make({
     Database.node,
     Ripgrep.node,
     SpendGuard.node,
+    TaskManager.node,
   ],
 })
 

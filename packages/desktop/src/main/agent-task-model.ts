@@ -1,0 +1,129 @@
+import type { Task } from "@vectordevai/schema/task"
+import type { ParallelWorkspaceRecord } from "./parallel-workspaces"
+import type { SwarmRunRecord } from "./swarm-orchestrator"
+
+export function workspaceTaskID(record: Pick<ParallelWorkspaceRecord, "id" | "swarmRunId" | "swarmTaskId">) {
+  return record.swarmRunId && record.swarmTaskId
+    ? `swarm:${record.swarmRunId}:${record.swarmTaskId}`
+    : `workspace:${record.id}`
+}
+
+export function workspaceTask(
+  record: ParallelWorkspaceRecord,
+  input: { now: number; swarm?: SwarmRunRecord; canMessage?: boolean },
+): Task.Info {
+  const status: Task.Status =
+    record.status === "queued"
+      ? "queued"
+      : ["planning", "editing", "running commands", "testing"].includes(record.status)
+        ? "running"
+        : record.status === "needs review"
+          ? "waiting_on_user"
+          : record.status === "failed"
+            ? "failed"
+            : record.status === "stopped" || record.status === "discarded"
+              ? "stopped"
+              : "completed"
+  const startedAt = Date.parse(record.createdAt)
+  const settled = status === "failed" || status === "stopped" || status === "completed" || status === "waiting_on_user"
+  const completedAt = settled ? Date.parse(record.lastActivityAt) : undefined
+  const task = input.swarm?.tasks.find((task) => task.id === record.swarmTaskId)
+  const cost =
+    record.measuredCost ??
+    (record.actualCost && /^\$\d+(?:\.\d+)?$/.test(record.actualCost) ? Number(record.actualCost.slice(1)) : undefined)
+  return {
+    id: workspaceTaskID(record),
+    sessionID: record.agentSessionId,
+    parentSessionID: record.parentSessionId ?? "",
+    source: record.swarmRunId
+      ? "swarm"
+      : record.teamId
+        ? "team"
+        : record.runtime === "vector"
+          ? "subagent"
+          : "external",
+    title: record.name,
+    agent: record.agent ?? record.runtime,
+    status,
+    groupID: record.swarmRunId ?? record.teamId,
+    startedAt: Number.isFinite(startedAt) ? startedAt : 0,
+    completedAt: completedAt !== undefined && Number.isFinite(completedAt) ? completedAt : undefined,
+    elapsedMs: Number.isFinite(startedAt) ? Math.max(0, (completedAt ?? input.now) - startedAt) : 0,
+    currentStep: record.lastAction,
+    ownedPaths: task?.fileHints ?? [],
+    dependsOn: task?.dependsOn.map((id) => `swarm:${record.swarmRunId}:${id}`) ?? [],
+    resultAvailable: Boolean(record.finalSummary || record.changedFiles.length),
+    resultRef: record.changedFiles.length ? `workspace:${record.id}` : undefined,
+    reason: record.error,
+    attempt: Math.max(1, record.turns?.filter((turn) => turn.role === "user").length ?? 1),
+    measuredCost: cost !== undefined && Number.isFinite(cost) && cost >= 0 ? cost : undefined,
+    costKind: cost !== undefined ? "priced" : "unknown",
+    controls: { inspect: true, message: input.canMessage === true && !settled, stop: !settled },
+  }
+}
+
+export function swarmTasks(run: SwarmRunRecord, now: number): Task.Info[] {
+  const status: Task.Status = ["planning", "running"].includes(run.status)
+    ? "running"
+    : run.status === "needs review"
+      ? "waiting_on_user"
+      : ["canceled", "interrupted", "discarded"].includes(run.status)
+        ? "stopped"
+        : run.status === "failed"
+          ? "failed"
+          : "completed"
+  const root: Task.Info = {
+    id: `swarm:${run.id}`,
+    parentSessionID: run.parentSessionId ?? "",
+    source: "swarm",
+    title: run.name,
+    agent: "coordinator",
+    groupID: run.id,
+    status,
+    startedAt: Date.parse(run.createdAt),
+    completedAt: run.completedAt ? Date.parse(run.completedAt) : undefined,
+    elapsedMs: Math.max(0, (run.completedAt ? Date.parse(run.completedAt) : now) - Date.parse(run.createdAt)),
+    currentStep: run.currentStep,
+    ownedPaths: [],
+    dependsOn: [],
+    resultAvailable: Boolean(run.summary),
+    resultRef: run.summary ? `swarm:${run.id}` : undefined,
+    reason: run.error,
+    attempt: 1,
+    controls: { inspect: true, message: false, stop: status === "running" },
+  }
+  return [
+    root,
+    ...run.tasks
+      .filter((task) => !task.workspaceId)
+      .map(
+        (task): Task.Info => ({
+          id: `swarm:${run.id}:${task.id}`,
+          parentSessionID: root.parentSessionID,
+          source: "swarm",
+          title: task.title,
+          agent: task.role,
+          groupID: run.id,
+          status: ["failed"].includes(task.status)
+            ? "failed"
+            : ["canceled", "interrupted"].includes(task.status)
+              ? "stopped"
+              : task.status === "complete"
+                ? "completed"
+                : "queued",
+          startedAt: task.startedAt ? Date.parse(task.startedAt) : root.startedAt,
+          completedAt: task.completedAt ? Date.parse(task.completedAt) : undefined,
+          elapsedMs: task.startedAt
+            ? Math.max(0, (task.completedAt ? Date.parse(task.completedAt) : now) - Date.parse(task.startedAt))
+            : 0,
+          currentStep: task.lastAction,
+          ownedPaths: task.fileHints,
+          dependsOn: task.dependsOn.map((id) => `swarm:${run.id}:${id}`),
+          resultAvailable: Boolean(task.summary),
+          reason: task.error,
+          attempt: 1,
+          controls: { inspect: true, message: false, stop: false },
+        }),
+      ),
+  ]
+}

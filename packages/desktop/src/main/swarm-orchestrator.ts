@@ -5,6 +5,7 @@ import type { SessionMessage } from "@vectordevai/schema/session-message"
 
 import { getStore } from "./store"
 import { createStoreCache } from "./store-cache"
+import { taskBoardChanged } from "./task-board-events"
 import {
   createParallelWorkspace,
   discardParallelWorkspace,
@@ -153,6 +154,7 @@ function writeRuns(runs: SwarmRunRecord[]) {
   const store = getStore(STORE_NAME)
   store.set(STORE_KEY, runs)
   cache.wrote(store, runs)
+  taskBoardChanged()
 }
 
 function deriveProgress(tasks: SwarmTaskRecord[]) {

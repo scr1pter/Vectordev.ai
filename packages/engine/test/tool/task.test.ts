@@ -1807,7 +1807,7 @@ describe("tool.task", () => {
       const tool = yield* TaskTool
       const def = yield* singleTaskDefinition(tool)
       expect(flags.backgroundSubagents).toBe(true)
-      expect(def.description).toContain("a one-item tasks array may set background=true")
+      expect(def.description).toContain("batches run in the background by default")
       // Model-facing calls use batches, and a one-item batch can still hand its brief off to the background.
       expect(def.jsonSchema).toMatchObject({ required: ["tasks"], properties: { background: { type: "boolean" } } })
     }),
@@ -3642,7 +3642,7 @@ function singleTaskDefinition(tool: Effect.Success<typeof TaskTool>) {
     Effect.map((def) => ({
       ...def,
       execute: (...args: Parameters<typeof def.execute>) =>
-        def.execute(...args).pipe(
+        def.execute({ background: false, ...args[0] }, args[1]).pipe(
           Effect.map((result) => {
             if ("taskBatch" in result.metadata) throw new Error("Legacy singular input returned batch metadata")
             return { ...result, metadata: result.metadata }
@@ -3650,6 +3650,14 @@ function singleTaskDefinition(tool: Effect.Success<typeof TaskTool>) {
         ),
     })),
   )
+}
+
+// Existing synchronous assertions explicitly select foreground; defaults are exercised separately below.
+function foregroundTaskDefinition(tool: Effect.Success<typeof TaskTool>) {
+  return tool.init().pipe(Effect.map((def) => ({
+    ...def,
+    execute: (...args: Parameters<typeof def.execute>) => def.execute({ background: false, ...args[0] }, args[1]),
+  })))
 }
 
 describe("task batches", () => {
@@ -3661,6 +3669,47 @@ describe("task batches", () => {
     success_criteria: [`Verify ${area} findings`],
   })
 
+  background.instance("multi-child batches return by default and retain their durable group, scope and context", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const jobs = yield* BackgroundJob.Service
+    const seeded = yield* seed()
+    const guard = yield* SpendGuard.Service
+    yield* guard.begin(seeded.chat.id, { steps: 20 })
+    const definition = yield* (yield* TaskTool).init()
+    const gate = yield* Deferred.make<void>()
+    const started = yield* Deferred.make<void>()
+    const prompts: SessionPrompt.PromptInput[] = []
+    const result = yield* definition.execute({ tasks: [
+      { ...brief("alpha"), context_pack: { findings: ["The handler already validates input"] }, budget: { steps: 3 } },
+      brief("beta"),
+    ], budget: { steps: 8 } }, taskContext({ sessionID: seeded.chat.id, messageID: seeded.assistant.id, callID: "batch_default", promptOps: {
+      ...stubOps(), prompt: (input) => Effect.gen(function* () {
+        prompts.push(input)
+        if (prompts.length === 2) yield* Deferred.succeed(started, undefined)
+        yield* Deferred.await(gate)
+        return reply(input, "Verified")
+      }),
+    } }))
+    expect(result.metadata).toMatchObject({ taskBatch: 1, status: "running", tasks: [{ background: true }, { background: true }] })
+    yield* Deferred.await(started)
+    const children = yield* sessions.children(seeded.chat.id)
+    expect(children).toHaveLength(2)
+    expect(children.every((item) => item.metadata?.subagent && (item.metadata.subagent as { batchID: string }).batchID === `${seeded.chat.id}:batch_default`)).toBe(true)
+    expect(prompts.some((input) => input.parts.some((part) => part.type === "text" && part.text.includes("The handler already validates input")))).toBe(true)
+    expect((yield* guard.scopes(children.find((item) => item.title.includes("alpha"))!.id)).map((scope) => scope.kind)).toContain("child")
+    yield* Deferred.succeed(gate, undefined)
+    yield* Effect.forEach(children, (item) => jobs.wait({ id: item.id }))
+  }), { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } })
+
+  background.instance("oversized context packs refuse the entire background batch", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const seeded = yield* seed()
+    const definition = yield* (yield* TaskTool).init()
+    const exit = yield* definition.execute({ tasks: [brief("alpha"), { ...brief("beta"), context_pack: { findings: ["界".repeat(3000)] } }] }, taskContext({ sessionID: seeded.chat.id, messageID: seeded.assistant.id, promptOps: stubOps() })).pipe(Effect.exit)
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(yield* sessions.children(seeded.chat.id)).toEqual([])
+  }), { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } })
+
   it.instance(
     "preflights all permissions before starting siblings and preserves indexed metadata",
     () =>
@@ -3668,7 +3717,7 @@ describe("task batches", () => {
         const sessions = yield* Session.Service
         const jobs = yield* BackgroundJob.Service
         const { chat, assistant } = yield* seed()
-        const def = yield* (yield* TaskTool).init()
+        const def = yield* foregroundTaskDefinition(yield* TaskTool)
         const gate = yield* Deferred.make<void>()
         const prompts: SessionPrompt.PromptInput[] = []
         const permissions: string[] = []
@@ -3743,7 +3792,6 @@ describe("task batches", () => {
     { name: "empty", input: { tasks: [] } },
     { name: "too many", input: { tasks: Array.from({ length: 9 }, (_, i) => brief(String(i))) } },
     { name: "hybrid", input: { tasks: [brief("a")], ...brief("b") } },
-    { name: "background batch", input: { tasks: [brief("a"), brief("b")], background: true } },
     { name: "background entry", input: { tasks: [{ ...brief("a"), background: true }] } },
     { name: "duplicate brief", input: { tasks: [brief("a"), brief("a")] } },
     { name: "overlap", input: { tasks: [brief("a"), { ...brief("b"), owned_paths: ["packages/a/nested"] }] } },
@@ -3768,7 +3816,7 @@ describe("task batches", () => {
         Effect.gen(function* () {
           const sessions = yield* Session.Service
           const { chat, assistant } = yield* seed()
-          const def = yield* (yield* TaskTool).init()
+          const def = yield* foregroundTaskDefinition(yield* TaskTool)
           const prompts: SessionPrompt.PromptInput[] = []
           const exit = yield* def
             .execute(
@@ -3804,7 +3852,7 @@ describe("task batches", () => {
       Effect.gen(function* () {
         const jobs = yield* BackgroundJob.Service
         const { chat, assistant } = yield* seed()
-        const def = yield* (yield* TaskTool).init()
+        const def = yield* foregroundTaskDefinition(yield* TaskTool)
         const gate = yield* Deferred.make<void>()
         const notes = yield* Deferred.make<SessionPrompt.PromptInput>()
         const result = yield* def.execute(
@@ -3848,7 +3896,7 @@ describe("task batches", () => {
       Effect.gen(function* () {
         const sessions = yield* Session.Service
         const { chat, assistant } = yield* seed()
-        const def = yield* (yield* TaskTool).init()
+        const def = yield* foregroundTaskDefinition(yield* TaskTool)
         let asked = 0
         const exit = yield* def
           .execute(
@@ -3876,7 +3924,7 @@ describe("task batches", () => {
       Effect.gen(function* () {
         const sessions = yield* Session.Service
         const { chat, assistant } = yield* seed()
-        const def = yield* (yield* TaskTool).init()
+        const def = yield* foregroundTaskDefinition(yield* TaskTool)
         const gate = yield* Deferred.make<void>()
         const result = yield* def.execute(
           { tasks: [brief("bad"), brief("good")] },
@@ -3924,7 +3972,7 @@ describe("task batches", () => {
       Effect.gen(function* () {
         const jobs = yield* BackgroundJob.Service
         const { chat, assistant } = yield* seed()
-        const def = yield* (yield* TaskTool).init()
+        const def = yield* foregroundTaskDefinition(yield* TaskTool)
         const abort = new AbortController()
         const started: string[] = []
         const cancelled: string[] = []
@@ -3979,7 +4027,7 @@ describe("task batches", () => {
         const sessions = yield* Session.Service
         const { chat, assistant } = yield* seed()
         const outsider = yield* sessions.create({ title: "Unrelated session" })
-        const def = yield* (yield* TaskTool).init()
+        const def = yield* foregroundTaskDefinition(yield* TaskTool)
         const exit = yield* def
           .execute(
             { tasks: [brief("a"), { ...brief("b"), task_id: outsider.id }] },
@@ -4036,7 +4084,7 @@ describe("task batches", () => {
         const sessions = yield* Session.Service
         const jobs = yield* BackgroundJob.Service
         const { chat, assistant } = yield* seed()
-        const def = yield* (yield* TaskTool).init()
+        const def = yield* foregroundTaskDefinition(yield* TaskTool)
         const gate = yield* Deferred.make<void>()
         const prompts: SessionPrompt.PromptInput[] = []
         const ctx = taskContext({
@@ -4091,7 +4139,7 @@ describe("task batches", () => {
         const sessions = yield* Session.Service
         const jobs = yield* BackgroundJob.Service
         const { chat, assistant } = yield* seed()
-        const def = yield* (yield* TaskTool).init()
+        const def = yield* foregroundTaskDefinition(yield* TaskTool)
         const gate = yield* Deferred.make<void>()
         const ctx = taskContext({
           sessionID: chat.id,
@@ -4131,7 +4179,7 @@ describe("task batches", () => {
       Effect.gen(function* () {
         const sessions = yield* Session.Service
         const { chat, assistant } = yield* seed()
-        const def = yield* (yield* TaskTool).init()
+        const def = yield* foregroundTaskDefinition(yield* TaskTool)
         const prompts: SessionPrompt.PromptInput[] = []
         const exit = yield* def
           .execute(
@@ -4164,7 +4212,7 @@ describe("task batches", () => {
         const sessions = yield* Session.Service
         const jobs = yield* BackgroundJob.Service
         const { chat, assistant } = yield* seed()
-        const def = yield* (yield* TaskTool).init()
+        const def = yield* foregroundTaskDefinition(yield* TaskTool)
         const initial = yield* def.execute(
           { ...brief("a"), owned_paths: [] },
           taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: stubOps() }),
@@ -4232,7 +4280,7 @@ describe("task batches", () => {
         const { chat, assistant } = yield* seed()
         const original = yield* (yield* TaskTool).init()
         const initial = yield* original.execute(
-          { ...brief("a"), owned_paths: [] },
+          { ...brief("a"), owned_paths: [], background: false },
           taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: stubOps() }),
         )
         if ("taskBatch" in initial.metadata) throw new Error("Expected scalar metadata")
@@ -4255,7 +4303,7 @@ describe("task batches", () => {
         const prompts: SessionPrompt.PromptInput[] = []
         const result = yield* awaitWithTimeout(
           def.execute(
-            { tasks: [{ ...brief("a"), task_id: initial.metadata.sessionId, owned_paths: [] }] },
+            { tasks: [{ ...brief("a"), task_id: initial.metadata.sessionId, owned_paths: [] }], background: false },
             taskContext({
               sessionID: chat.id,
               messageID: assistant.id,

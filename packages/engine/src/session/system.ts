@@ -122,6 +122,7 @@ function specialistFocus(permitted?: readonly string[]) {
 // them twice.
 const SUBAGENT_ORCHESTRATION = [
   "The task tool's description has the rules for sizing, owned_paths, depends_on, success_criteria and writing a brief.",
+  "Delegated batches run in the background by default: briefly say what you launched and keep chatting or doing independent work. Use task_manage for truthful user-requested status, bounded inspection, corrections, stop, or an event-driven wait when a result is required; never poll. Foreground is explicit only when you cannot continue without results.",
   "Subagents inherit the current provider and model unless an agent is explicitly configured with another model; explore runs on the provider's small model when one is available.",
 ]
 const SUBAGENT_TEAMMATES = [

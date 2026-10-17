@@ -210,6 +210,61 @@ function childMessage(input: {
 }
 
 describe("run subagent data", () => {
+  test("shows every batch child and keeps individual lifecycle updates", () => {
+    const data = createSubagentData()
+    const part = taskMessage("batch").parts[0]
+    if (part?.type !== "tool" || part.state.status !== "completed") throw new Error("expected completed task fixture")
+    part.state.input = {
+      tasks: [
+        { description: "Read API", subagent_type: "explore" },
+        { description: "Fix CLI", subagent_type: "general" },
+      ],
+    }
+    part.state.metadata = {
+      taskBatch: 1,
+      status: "running",
+      tasks: [
+        { index: 1, sessionId: "child-2", status: "queued", background: true, title: "Fix CLI" },
+        { index: 0, sessionId: "child-1", status: "running", background: true, title: "Read API" },
+      ],
+    }
+    bootstrapSubagentData({
+      data,
+      messages: [{ parts: [part] }],
+      children: [{ id: "child-1" }, { id: "child-2" }],
+      permissions: [],
+      questions: [],
+    })
+    expect(snapshotSubagentData(data).tabs).toEqual([
+      expect.objectContaining({
+        sessionID: "child-1",
+        label: "Explore",
+        description: "Read API",
+        status: "running",
+        background: true,
+      }),
+      expect.objectContaining({
+        sessionID: "child-2",
+        label: "General",
+        description: "Fix CLI",
+        status: "running",
+        background: true,
+      }),
+    ])
+    part.state.metadata = {
+      taskBatch: 1,
+      tasks: [
+        { index: 0, sessionId: "child-1", status: "completed", background: true, title: "Read API" },
+        { index: 1, sessionId: "child-2", status: "cancelled", background: true, title: "Fix CLI" },
+      ],
+    }
+    reduce(data, { type: "message.part.updated", properties: { part } })
+    expect(snapshotSubagentData(data).tabs.map((tab) => [tab.sessionID, tab.status])).toEqual([
+      ["child-1", "completed"],
+      ["child-2", "cancelled"],
+    ])
+  })
+
   test("bootstraps tabs and child blockers from parent task parts", () => {
     const data = createSubagentData()
 

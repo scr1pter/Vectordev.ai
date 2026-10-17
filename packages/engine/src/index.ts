@@ -27,6 +27,7 @@ import { InviteCommand } from "./cli/cmd/invite"
 import { PrCommand } from "./cli/cmd/pr"
 import { ReviewCommand } from "./cli/cmd/review"
 import { SessionCommand } from "./cli/cmd/session"
+import { TasksCommand } from "./cli/cmd/tasks"
 import { DbCommand } from "./cli/cmd/db"
 import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
@@ -127,6 +128,7 @@ const cli = yargs(args)
   .command(PrCommand)
   .command(ReviewCommand)
   .command(SessionCommand)
+  .command(TasksCommand)
   .command(PluginCommand)
   .command(DbCommand)
   .command(TrustCommand)
