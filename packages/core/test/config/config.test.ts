@@ -987,6 +987,70 @@ describe("Config", () => {
     ),
   )
 
+  it.live("keeps a VECTOR_AGENT_CONFIG_DIR inside the project under project trust under any spelling", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) => {
+        const project = path.join(tmp.path, "project")
+        const inside = path.join(project, "agent-config")
+        const outside = path.join(tmp.path, "own-config")
+        const alias = path.join(tmp.path, "alias")
+        const withConfigDirectory = <A, E, R>(value: string, self: Effect.Effect<A, E, R>) =>
+          Effect.acquireUseRelease(
+            Effect.sync(() => {
+              const previous = process.env.VECTOR_AGENT_CONFIG_DIR
+              process.env.VECTOR_AGENT_CONFIG_DIR = value
+              return previous
+            }),
+            () => self,
+            (previous) =>
+              Effect.sync(() => {
+                if (previous === undefined) delete process.env.VECTOR_AGENT_CONFIG_DIR
+                else process.env.VECTOR_AGENT_CONFIG_DIR = previous
+              }),
+          )
+        const load = (directory: string) =>
+          withConfigDirectory(
+            directory,
+            Effect.gen(function* () {
+              const config = yield* Config.Service
+              const entries = yield* config.entries()
+              const document = entries.find(
+                (entry): entry is Config.Document =>
+                  entry.type === "document" &&
+                  [inside, outside].some((folder) => entry.path === path.join(folder, "vector.json")),
+              )!
+              return {
+                scope: config.scope?.(document),
+                executable: config.executable?.(document),
+                global: entries.filter((entry) => config.scope?.(entry) === "global").map((entry) => entry.path),
+              }
+            }).pipe(Effect.provide(testLayer(project, directory, project))),
+          )
+        return Effect.gen(function* () {
+          yield* Effect.promise(async () => {
+            for (const directory of [inside, outside]) {
+              await fs.mkdir(path.join(directory, "plugins"), { recursive: true })
+              await fs.writeFile(path.join(directory, "vector.json"), JSON.stringify({ shell: "/fixture/v2-shell" }))
+              await fs.writeFile(path.join(directory, "plugins", "marker.ts"), "export default {}\n")
+            }
+            await fs.symlink(project, alias, process.platform === "win32" ? "junction" : "dir")
+          })
+
+          // Named as written and through another spelling of the project, the folder is the project's.
+          for (const directory of [inside, path.join(alias, "agent-config")]) {
+            const loaded = yield* load(directory)
+            expect({ directory, ...loaded }).toEqual({ directory, scope: "project", executable: false, global: [] })
+          }
+          // The user's own folder outside the project stays theirs.
+          expect(yield* load(outside)).toMatchObject({ scope: "global", executable: true })
+        })
+      }),
+    ),
+  )
+
   it.live("fails closed when approved project config changes before loading", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),

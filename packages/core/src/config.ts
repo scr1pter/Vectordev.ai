@@ -223,11 +223,31 @@ const layer = Layer.effect(
               stop: location.project.directory,
             })
             .pipe(Effect.orDie)
-    const projectDirectories = discovered
-      .filter((item) => path.basename(item) === ".vector")
-      .toReversed()
-      .map((directory) => AbsolutePath.make(directory))
-    const directories = [globalDirectory, ...projectDirectories]
+    // VECTOR_AGENT_CONFIG_DIR replaces the global folder, and it can name a folder of the project's under any spelling
+    // (as written, through an alias of the workspace, or through a workspace link that points out). Such a folder is
+    // the project's: it loads under project trust after the project's own .vector folders, and nothing loads as global
+    // in its place. The user's own config folders stay global, as does the folder a location opened on itself.
+    const fromEnvironment =
+      Flag.VECTOR_AGENT_CONFIG_DIR !== undefined &&
+      path.resolve(Flag.VECTOR_AGENT_CONFIG_DIR) === path.resolve(global.config)
+    const projectGlobal =
+      !fromEnvironment ||
+      locationIsGlobal ||
+      [Global.Path.config, path.join(global.home, ".vector")].some((root) => FSUtil.contains(root, global.config))
+        ? undefined
+        : projectSpelling(
+            location.project.directory === path.parse(location.project.directory).root
+              ? [location.directory]
+              : [location.directory, location.project.directory],
+            global.config,
+          )
+    const projectDirectories = Array.from(
+      new Set([
+        ...discovered.filter((item) => path.basename(item) === ".vector").toReversed(),
+        // A folder that does not exist holds nothing, and has nothing for trust to capture.
+        ...(projectGlobal && (yield* fs.isDir(projectGlobal)) ? [projectGlobal] : []),
+      ]),
+    ).map((directory) => AbsolutePath.make(directory))
     // A config closer to the opened directory should win over one higher up.
     // Search starts nearby, so reverse the results before applying them.
     const directPaths = discovered.filter((item) => path.basename(item) !== ".vector").toReversed()
@@ -269,7 +289,7 @@ const layer = Layer.effect(
       Effect.map((configs) => configs.filter((config): config is Document => config !== undefined)),
     )
     const supplementary = [
-      yield* loadDirectory(globalDirectory).pipe(Effect.orDie),
+      projectGlobal ? [] : yield* loadDirectory(globalDirectory).pipe(Effect.orDie),
       ...(yield* Effect.forEach(projectDirectories, (directory) =>
         loadDirectory(
           directory,
@@ -349,6 +369,16 @@ export const node = makeLocationNode({
   layer,
   deps: [FSUtil.node, Global.node, Location.node, Policy.node, EffectFlock.node, Teams.node],
 })
+
+// The project's spelling of a folder that passes through it, or undefined. One that cannot be resolved is held back
+// as the project's.
+function projectSpelling(roots: string[], directory: string) {
+  try {
+    return FSUtil.within(roots, directory)
+  } catch {
+    return directory
+  }
+}
 
 function bindTrustedProjectExecutables(
   info: Info,
