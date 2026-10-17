@@ -1,5 +1,6 @@
 import { expect } from "bun:test"
 import path from "node:path"
+import nodeFs from "node:fs/promises"
 import { Effect } from "effect"
 import { systemError } from "effect/PlatformError"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
@@ -225,6 +226,94 @@ for (const permissionMode of process.platform === "win32" ? ["denied"] : ["posix
       }),
   )
 }
+
+const linkType = process.platform === "win32" ? "junction" : "dir"
+// File links need a privilege on Windows, which CI runners hold; elsewhere they always work.
+const fileLink = (target: string, link: string) =>
+  Effect.promise(() =>
+    nodeFs
+      .symlink(target, link, "file")
+      .then(() => true)
+      .catch((error) => {
+        if (process.platform === "win32" && error?.code === "EPERM") return false
+        throw error
+      }),
+  )
+
+it.live("never writes through a project's links or outside the workspace while importing before trust", () =>
+  Effect.gen(function* () {
+    const root = yield* tmpdirScoped()
+    const fs = yield* FSUtil.Service
+    const outside = path.join(root, "outside")
+    const workspace = path.join(root, "workspace")
+    const victim = path.join(outside, "victim")
+    const original = "outside bytes\n"
+    yield* fs.writeWithDirs(victim, original)
+    yield* fs.writeWithDirs(path.join(outside, "config.json"), '{"permission":{"bash":"deny"}}')
+    const source = path.join(workspace, `.${previous}`)
+    yield* fs.writeWithDirs(path.join(source, `${previous}.local.json`), '{"mcp":{"docs":{"enabled":false}}}')
+    yield* fs.writeWithDirs(path.join(source, "commands", "review.md"), "review")
+    // A .gitignore hard-linked to an outside file, which every OS can create without a privilege.
+    yield* fs.ensureDir(path.join(workspace, ".vector"))
+    yield* Effect.promise(() => nodeFs.link(victim, path.join(workspace, ".vector", ".gitignore")))
+    // A project folder that is really a folder outside the workspace.
+    yield* Effect.promise(() => nodeFs.symlink(outside, path.join(workspace, "sub"), linkType))
+    const input = {
+      directory: path.join(workspace, "sub"),
+      worktree: workspace,
+      home: path.join(root, "home"),
+      global: path.join(root, "global"),
+    }
+    const imported = yield* ConfigMigration.discover(input)
+    expect(imported.map((item) => item.target)).toEqual([path.join(workspace, ".vector")])
+    expect(yield* fs.readFileString(victim)).toBe(original)
+    expect(yield* fs.exists(path.join(outside, "vector.jsonc"))).toBe(false)
+    expect(yield* fs.exists(path.join(workspace, ".vector", "vector.local.jsonc"))).toBe(false)
+    expect(yield* fs.readFileString(path.join(workspace, ".vector", "commands", "review.md"))).toBe("review")
+
+    // The same through a symbolic link, which is what a cloned repository carries.
+    const linked = path.join(root, "linked")
+    yield* fs.writeWithDirs(
+      path.join(linked, `.${previous}`, `${previous}.local.json`),
+      '{"mcp":{"docs":{"enabled":false}}}',
+    )
+    yield* fs.ensureDir(path.join(linked, ".vector"))
+    if (!(yield* fileLink(victim, path.join(linked, ".vector", ".gitignore")))) return
+    yield* fileLink(path.join(outside, "missing"), path.join(linked, "vector.jsonc"))
+    yield* fs.writeFileString(path.join(linked, "earlier.json"), '{"permission":{"edit":"deny"}}')
+    yield* ConfigMigration.discover({ ...input, directory: linked, worktree: linked })
+    expect(yield* fs.readFileString(victim)).toBe(original)
+    expect(yield* fs.exists(path.join(outside, "missing"))).toBe(false)
+    expect(yield* fs.exists(path.join(linked, ".vector", "vector.local.jsonc"))).toBe(false)
+    // The project's own link is left as it was rather than replaced.
+    expect((yield* Effect.promise(() => nodeFs.lstat(path.join(linked, "vector.jsonc")))).isSymbolicLink()).toBe(true)
+  }),
+)
+
+it.live("leaves folders above a non-git workspace alone and still imports the home folder", () =>
+  Effect.gen(function* () {
+    const root = yield* tmpdirScoped()
+    const fs = yield* FSUtil.Service
+    const home = path.join(root, "home")
+    const parent = path.join(home, "downloads")
+    const directory = path.join(parent, "app")
+    yield* fs.writeWithDirs(path.join(parent, "config.json"), '{"permission":{"bash":"deny"}}')
+    yield* fs.writeWithDirs(path.join(parent, `.${previous}`, "commands", "review.md"), "review")
+    yield* fs.writeWithDirs(path.join(directory, "config.json"), '{"permission":{"edit":"deny"}}')
+    yield* fs.writeWithDirs(path.join(home, `.${previous}`, `${previous}.json`), '{"model":"fixture/model"}')
+    const imported = yield* ConfigMigration.discover({
+      directory,
+      worktree: "/",
+      home,
+      global: path.join(root, "global"),
+    })
+    expect(imported.map((item) => item.target).toSorted()).toEqual(
+      [path.join(directory, "vector.jsonc"), path.join(home, ".vector", "vector.jsonc")].toSorted(),
+    )
+    expect(yield* fs.exists(path.join(parent, "vector.jsonc"))).toBe(false)
+    expect(yield* fs.exists(path.join(parent, ".vector"))).toBe(false)
+  }),
+)
 
 it.live("imports a linked earlier folder and keeps linked assets as links", () =>
   Effect.gen(function* () {

@@ -71,10 +71,15 @@ function mergeSettings(left: Record<string, unknown>, right: Record<string, unkn
   )
 }
 
+/**
+ * Imports settings from `directory` into `destination`. Nothing is written unless every file it writes is a plain file
+ * that really lands inside `root`, which is the workspace for a project folder and the folder itself for the user's.
+ */
 export const run = Effect.fn("ConfigMigration.run")(function* (
   directory: string,
   local = false,
   destination = directory,
+  root = destination,
 ) {
   const fs = yield* FSUtil.Service
   if (!(yield* fs.isDir(directory))) return
@@ -186,6 +191,17 @@ export const run = Effect.fn("ConfigMigration.run")(function* (
           applyEdits(result, modify(result, [key], value, { formattingOptions: { insertSpaces: true, tabSize: 2 } })),
         original,
       )
+      // This runs before the workspace is trusted, and writing follows links: a project can ship its .gitignore or
+      // settings file as a link to a file outside it.
+      const refused = [targets[1], ...(local ? [path.join(destination, ".gitignore")] : [])].find(
+        (file) => !FSUtil.writableInside(root, file),
+      )
+      if (refused) {
+        yield* Effect.logWarning(
+          `Skipped importing settings from ${directory}: ${refused} is a link, not a plain file, or outside ${root}.`,
+        )
+        return
+      }
       if (local) {
         const gitignore = path.join(destination, ".gitignore")
         const existing = (yield* fs.readFileStringSafe(gitignore)) ?? ""
@@ -218,6 +234,12 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
 }) {
   const fs = yield* FSUtil.Service
   const results: Array<{ sources: string[]; target: string; message: string }> = []
+  // Imports write before the workspace is trusted. A project folder is written only where it really is inside the
+  // workspace, and the home folder only inside itself. A folder above a non-git workspace is neither, so it is left
+  // alone.
+  const workspace = path.resolve(input.worktree && input.worktree !== "/" ? input.worktree : input.directory)
+  const owner = (directory: string) =>
+    FSUtil.contains(workspace, directory) ? workspace : directory === input.home ? input.home : undefined
   const global = yield* run(input.global)
   if (global) results.push(global)
   const parents: string[] = []
@@ -229,10 +251,14 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
   }
   if (!input.disableProject) visit(path.resolve(input.directory))
   for (const directory of parents.toReversed()) {
-    const imported = yield* run(directory)
+    const root = owner(directory)
+    if (!root) continue
+    const imported = yield* run(directory, false, directory, root)
     if (imported) results.push(imported)
   }
   for (const directory of new Set([input.home, ...parents])) {
+    const root = owner(directory)
+    if (!root) continue
     // Only the exact earlier folder is opened; other dot folders, such as ~/.Trash, which macOS refuses to list
     // without Full Disk Access, are never read. An unreadable folder holds nothing to import.
     const entries = yield* fs.readDirectoryEntries(directory).pipe(Effect.orElseSucceed(() => []))
@@ -262,13 +288,17 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
       )
     const marker = path.join(target, "vector-migration.json")
     if (yield* fs.exists(marker)) continue
+    if (!FSUtil.writableInside(root, marker)) {
+      yield* Effect.logWarning(`Skipped importing ${source}: ${target} is not a plain folder inside ${root}.`)
+      continue
+    }
     const flock = yield* EffectFlock.Service
     const copied = yield* flock.withLock(
       Effect.gen(function* () {
         if (yield* fs.exists(marker)) return
         yield* fs.ensureDir(target)
-        const imported = yield* run(source, false, target)
-        const local = yield* run(source, true, target)
+        const imported = yield* run(source, false, target, root)
+        const local = yield* run(source, true, target, root)
         if (imported) results.push(imported)
         if (local) results.push(local)
         // package.json only carries dependencies for copied plugins and tools.

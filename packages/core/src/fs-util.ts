@@ -252,6 +252,23 @@ export namespace FSUtil {
     return join(realpath(parent), basename(resolved))
   }
 
+  /**
+   * Whether writing `target` changes nothing but a plain file inside `root`. Writing follows links, so a link at the
+   * path is refused, as are a directory, a device, a FIFO and a file with other hard links; a path that does not
+   * exist yet is fine. Where it really lands, links in its parents followed, must be inside where `root` really is.
+   * Anything that cannot be resolved answers no.
+   */
+  export function writableInside(root: string, target: string) {
+    const file = pathResolve(windowsPath(target))
+    try {
+      const info = lstatSync(file, { throwIfNoEntry: false })
+      if (info && (!info.isFile() || info.nlink > 1)) return false
+      return contains(realpath(root), realpath(file))
+    } catch {
+      return false
+    }
+  }
+
   export function windowsPath(p: string): string {
     if (process.platform !== "win32") return p
     return p
