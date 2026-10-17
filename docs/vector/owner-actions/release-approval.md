@@ -11,12 +11,18 @@ section for the CLI build that already carries the number 1.99.107.
 
 The release continues the established interim unsigned installer and in-app
 update-feed policy; `1.99.107` is in the version-specific unsigned allowlist.
-The owner must first create the GitHub `production-release` environment with
-required reviewers. The workflow refuses to proceed without that protection.
-Once it exists and the final checks pass, dispatch the manual desktop workflow
-from the exact integrated main commit with tag `v1.99.107`,
-`allow_unsigned=true` and `prerelease=false`. All platforms must build that same
-commit and immutable catalog.
+The GitHub `production-release` environment exists (checked 16 October 2026
+through the public API): it requires a review from `scr1pter` and its
+deployment branch policy allows only the `main` branch. Once the final checks
+pass, dispatch the manual desktop workflow from `main` at the exact integrated
+commit with tag `v1.99.107`, `allow_unsigned=true` and `prerelease=false`, and
+approve the release job when it waits for review. All platforms must build that
+same commit and immutable catalog.
+
+Pushing a `v*` tag cannot publish. The workflow still lists `push: tags: v*` as
+a trigger, but in such a run `github.ref` is the tag, which the environment's
+`main`-only branch policy refuses, so the release job fails before it starts. Only a
+`workflow_dispatch` run started from `main` reaches `production-release`.
 
 ### A CLI numbered 1.99.107 is already public
 
