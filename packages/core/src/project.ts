@@ -153,7 +153,11 @@ const layer = Layer.effect(
     })
 
     const commit = Effect.fn("Project.commit")(function* (input: { store: AbsolutePath; id: ID }) {
-      yield* fs.writeWithDirs(path.join(input.store, "vector", "project-id"), input.id).pipe(Effect.ignore)
+      const file = path.join(input.store, "vector", "project-id")
+      // This runs when a project is opened, before trust, and writing follows links: a downloaded repository can carry
+      // its .git/vector as a link to any folder of the user's.
+      if (!FSUtil.writableInside(input.store, file)) return
+      yield* fs.writeWithDirs(file, input.id).pipe(Effect.ignore)
     })
 
     return Service.of({ directories, resolve, commit })

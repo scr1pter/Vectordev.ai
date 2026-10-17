@@ -181,6 +181,32 @@ describe("ProjectV2.resolve", () => {
     }),
   )
 
+  it.live("records the id only inside the repository's own store", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      const outside = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      yield* Effect.promise(() => initRepo(tmp.path, { commit: true }))
+      const project = yield* ProjectV2.Service
+      const store = abs(path.join(tmp.path, ".git"))
+      yield* project.commit({ store, id: ProjectV2.ID.make("own-id") })
+      expect(yield* Effect.promise(() => fs.readFile(path.join(store, "vector", "project-id"), "utf8"))).toBe("own-id")
+
+      // A store folder that is really a folder elsewhere is left alone.
+      yield* Effect.promise(() => fs.rm(path.join(store, "vector"), { recursive: true }))
+      yield* Effect.promise(() =>
+        fs.symlink(outside.path, path.join(store, "vector"), process.platform === "win32" ? "junction" : "dir"),
+      )
+      yield* project.commit({ store, id: ProjectV2.ID.make("linked-id") })
+      expect(yield* Effect.promise(() => fs.readdir(outside.path))).toEqual([])
+    }),
+  )
+
   it.live("resolves from nested directories to repo root", () =>
     Effect.gen(function* () {
       const tmp = yield* Effect.acquireRelease(
