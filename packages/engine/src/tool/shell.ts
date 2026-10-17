@@ -108,7 +108,7 @@ type Scan = {
   patterns: Set<string>
   always: Set<string>
   writes: Set<string>
-  /** Environment files a command names or reads from, relative to the worktree. */
+  /** Files a command reads that the read tool's rules apply to, relative to the worktree. */
   reads: Set<string>
   /** Vercel and Supabase CLI calls that act on a cloud account, by permission pattern. */
   cloud: Map<string, CloudCli.Request & { command: string }>
@@ -212,6 +212,8 @@ function statements(node: Node) {
 // Output redirects that write a file. `>&` and `<&` only duplicate a descriptor unless their target is a file name.
 const WRITES = new Set([">", ">>", "&>", "&>>", ">|", ">&"])
 const DEVICES = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "$null", "nul"])
+// Devices a command may read from without reading a file.
+const INPUTS = new Set(["/dev/stdin", "/dev/zero", "/dev/random", "/dev/urandom"])
 
 // The files a statement's redirects write. A redirect target is never one of the command's arguments, so without
 // this `git status > src/index.ts` would be checked only as `git status`. `<>` opens its file for writing too.
@@ -272,17 +274,20 @@ const ENV_NAMES = [".env", ".env.local", ".env.development", ".env.production", 
 // What PowerShell (`$name`, `${name}`, `$(...)`) and cmd (`%NAME%`, `!NAME!`) expand inside a word.
 const PS_EXPANSION = /\$\([^)]*\)?|\$\{[^}]*\}?|\$[\w:?]+/g
 const CMD_EXPANSION = /%[^%]*%|![^!]*!/g
+// What bash expands inside a word once its quotes are gone: `$name`, `${...}`, `$(...)` and `` `...` ``.
+const BASH_EXPANSION = /\$\([^)]*\)?|\$\{[^}]*\}?|\$(?:[A-Za-z_]\w*|[0-9?!#@*$-])|`[^`]*`?/g
 
-// A PowerShell or cmd wildcard as a regular expression over lower-case names. `?` may also match nothing, as cmd lets
-// a trailing one do, and a PowerShell `[...]` set stands for any one character, so the test can only match more.
-function winGlob(glob: string) {
-  const source = glob.toLowerCase().replace(/\[[^\]]*\]|[*?]|[^*?[]+|\[/g, (part) => {
+// A wildcard as a regular expression over names, lower-case ones for PowerShell and cmd. There `?` may also match
+// nothing, as cmd lets a trailing one do. A `[...]` set stands for any one character, so the test can only match more.
+// bash matches a leading dot only when the name spells it (`.en?`, not `*` or `?env`), which `hidden` says.
+function wildcard(glob: string, win: boolean, hidden = win || !/^[*?[]/.test(glob)) {
+  const source = (win ? glob.toLowerCase() : glob).replace(/\[[^\]]*\]|[*?]|[^*?[]+|\[/g, (part) => {
     if (part === "*") return ".*"
-    if (part === "?") return ".?"
+    if (part === "?") return win ? ".?" : "."
     if (part.length > 1 && part.startsWith("[")) return "."
     return part.replace(/[.+^${}()|[\]\\]/g, "\\$&")
   })
-  return new RegExp(`^${source}$`, "s")
+  return new RegExp(`^${hidden ? "" : "(?!\\.)"}${source}$`, "s")
 }
 
 function unquote(text: string) {
@@ -300,6 +305,52 @@ function cmdWord(text: string) {
     /"([^"]*)"?|\^([\s\S]?)/g,
     (_, quoted: string | undefined, escaped: string | undefined) => quoted ?? escaped ?? "",
   )
+}
+
+// The word a program gets from bash once bash removes quotes and escapes: `.e""nv`, `.e\nv`, `$'.env'` and
+// `$'\x2eenv'` all open `.env`. An expansion is kept as written, so a word that holds one stays unknown.
+function bashWord(text: string) {
+  return text.replace(
+    /\\([\s\S]?)|'([^']*)'?|\$'((?:\\[\s\S]|[^'\\])*)'?|\$?"((?:\\[\s\S]|[^"\\])*)"?|\$\([^)]*\)?|\$\{[^}]*\}?|`[^`]*`?/g,
+    (match, escaped?: string, single?: string, ansi?: string, double?: string) => {
+      if (escaped !== undefined) return escaped === "\n" ? "" : escaped
+      if (single !== undefined) return single
+      if (ansi !== undefined) return ansiC(ansi)
+      if (double !== undefined) return double.replace(/\\\n/g, "").replace(/\\([$`"\\])/g, "$1")
+      return match
+    },
+  )
+}
+
+// The text of a bash `$'...'` string, with its escapes decoded as bash decodes them.
+function ansiC(text: string) {
+  return text.replace(
+    /\\(?:x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})|([0-7]{1,3})|c([\s\S])|([\s\S]))/g,
+    (match, hex?: string, short?: string, long?: string, octal?: string, control?: string, other?: string) => {
+      if (hex) return String.fromCharCode(parseInt(hex, 16))
+      const point = short ?? long
+      if (point) return parseInt(point, 16) <= 0x10ffff ? String.fromCodePoint(parseInt(point, 16)) : match
+      if (octal) return String.fromCharCode(parseInt(octal, 8) & 0xff)
+      if (control !== undefined) return String.fromCharCode(control.charCodeAt(0) & 0x1f)
+      return ANSI_ESCAPES[other ?? ""] ?? match
+    },
+  )
+}
+
+const ANSI_ESCAPES: Record<string, string> = {
+  a: "\x07",
+  b: "\b",
+  e: "\x1b",
+  E: "\x1b",
+  f: "\f",
+  n: "\n",
+  r: "\r",
+  t: "\t",
+  v: "\v",
+  "\\": "\\",
+  "'": "'",
+  '"': '"',
+  "?": "?",
 }
 
 function home(text: string) {
@@ -330,12 +381,24 @@ function expand(text: string, cwd: string, shell: string) {
 }
 
 // A word as the program it is passed to gets it: unquoted, with PowerShell's `$env:`, `$HOME` and `$PWD` expanded,
-// PowerShell's backtick escapes and cmd's `^` escapes and double quotes removed, so a path rule tests the file the
-// program opens.
+// PowerShell's backtick escapes, cmd's `^` escapes and double quotes, and bash's quotes and escapes removed, so a path
+// rule tests the file the program opens.
 function shellWord(arg: string, cwd: string, ps: boolean, shell: string) {
   if (ps) return expand(arg, cwd, shell).replace(/`([\s\S])/g, "$1")
   if (Shell.name(shell) === "cmd") return home(cmdWord(unquote(arg)))
-  return home(unquote(arg))
+  return home(bashWord(arg))
+}
+
+// A word split into its folder and the name of the file it opens. Windows opens a name whatever its case and without its
+// trailing spaces and dots: `.ENV` and `'.env '` are `.env`. NTFS ends a file name at its first colon: `.env::$DATA` is
+// the file's own content and `.env:notes` one of its alternate streams. A colon inside an expansion (`%X:~0,0%`) is not
+// part of the name. These rules hold for PowerShell and cmd on any system, so the scan does not depend on where it runs.
+function fileName(word: string, win: boolean, expansion: RegExp) {
+  const base = win ? path.win32.basename(word) : path.basename(word)
+  const dir = word.slice(0, word.length - base.length)
+  if (!win) return { dir, name: base }
+  const colon = base.replace(expansion, (text) => "*".repeat(text.length)).indexOf(":")
+  return { dir, name: (colon === -1 ? base : base.slice(0, colon)).replace(/[ .]+$/, "") }
 }
 
 // A provider may be named with its module (`Microsoft.PowerShell.Core\FileSystem::C:\x`).
@@ -795,8 +858,8 @@ export const ShellTool = Tool.define(
       const list = commands(root).map((node) => {
         const command = parts(node)
         const tokens = command.map((item) => item.text)
-        // PowerShell runs `Microsoft.PowerShell.Management\Get-Content` and its alias `gc` as Get-Content, and cmd
-        // runs `ty^pe` as `type`.
+        // PowerShell runs `Microsoft.PowerShell.Management\Get-Content` and its alias `gc` as Get-Content, cmd runs
+        // `ty^pe` as `type`, and bash runs `c''at` as `cat`.
         const name = ps ? tokens[0]?.toLowerCase().replace(/^[\w.]+\\/, "") : tokens[0]
         return {
           node,
@@ -804,45 +867,58 @@ export const ShellTool = Tool.define(
           tokens,
           cmd: ps
             ? name && (PS_ALIASES.get(name) ?? name)
-            : shellKind === "cmd" && name !== undefined
-              ? cmdWord(unquote(name)).toLowerCase()
-              : name,
+            : name === undefined
+              ? name
+              : shellKind === "cmd"
+                ? cmdWord(unquote(name)).toLowerCase()
+                : bashWord(name),
         }
       })
       // `cat .env`, `grep KEY .env.local` or `source .env` read the same secrets the read tool asks for, so they ask
       // under read too. A name the scan cannot resolve (`"$HOME/.env"`, `%USERPROFILE%\.env`) is asked for as written.
       // The name is tested as the program gets it, so cmd's `type .e^nv` asks as `type .env` does.
+      const expansion = ps ? PS_EXPANSION : win ? CMD_EXPANSION : BASH_EXPANSION
+      const fold = (item: string) => (win ? item.toLowerCase() : item)
       const envRead = Effect.fnUntraced(function* (text: string) {
+        const file = fileName(shellWord(text, cwd, ps, shell), win, expansion)
+        if (ENV_FILE.test(fold(file.name))) return yield* readTarget(file.dir + file.name)
+        // A wildcard (`.en?`, `.e*`) or an expansion inside the name (`.e%X:~0,0%nv`, `.e"$X"nv`) asks for each
+        // environment file it would open in its folder or, when the scan cannot list that folder, for one it could
+        // open. A name that is only an expansion (`$file`) may be anything, as `cat $file` may be in bash.
+        const glob = file.name.replace(expansion, "*")
+        if (!file.name.replace(expansion, "") || !/[*?[]/.test(glob)) return yield* linkedEnv(file.dir + file.name)
+        const folder = /[*?[]/.test(file.dir) ? undefined : yield* wordPath(file.dir || ".", cwd, ps, shell)
+        const names = folder ? yield* entries(folder) : ENV_NAMES
+        // An expansion may begin with the dot a wildcard would not match.
+        const match = wildcard(glob, win, win || !/^[*?[]/.test(file.name))
+        const found = names.filter((item) => ENV_FILE.test(fold(item)) && match.test(fold(item)))
+        for (const item of folder ? found : found.slice(0, 1)) yield* readTarget(file.dir + item)
+      })
+      const entries = (folder: string) =>
+        fs.readDirectoryEntries(folder).pipe(
+          Effect.map((items) => items.map((entry) => entry.name)),
+          Effect.catch(() => Effect.succeed([] as string[])),
+        )
+      // An input redirect opens its file whatever the file is called, and bash's `$(<file)` prints it without running
+      // any command. So every file a redirect reads asks under read, as the read tool asks for it, and for its folder
+      // when that lies outside the project, as `cat` of the same file does. A wildcard opens the one file it matches.
+      const redirectRead = Effect.fnUntraced(function* (text: string) {
+        yield* envRead(text)
         const word = shellWord(text, cwd, ps, shell)
-        if (!win) {
-          if (ENV_FILE.test(path.basename(word))) return yield* readTarget(word)
-          return yield* linkedEnv(word)
-        }
-        // Windows opens a name whatever its case and without its trailing spaces and dots: `.ENV` and `'.env '` are
-        // `.env`. These rules hold for PowerShell and cmd on any system, so the scan does not depend on where it runs.
-        const base = path.win32.basename(word)
-        const dir = word.slice(0, word.length - base.length)
-        const expansion = ps ? PS_EXPANSION : CMD_EXPANSION
-        // NTFS ends a file name at its first colon: `.env::$DATA` is the file's own content and `.env:notes` one of its
-        // alternate streams. A colon inside an expansion (`%X:~0,0%`) is not part of the name.
-        const colon = base.replace(expansion, (text) => "*".repeat(text.length)).indexOf(":")
-        const name = (colon === -1 ? base : base.slice(0, colon)).replace(/[ .]+$/, "")
-        if (ENV_FILE.test(name.toLowerCase())) return yield* readTarget(dir + name)
-        // A wildcard (`.en?`, `.e*`) or an expansion inside the name (`.e%X:~0,0%nv`) asks for each environment file
-        // it would open in its folder or, when the scan cannot list that folder, for one it could open. A name that is
-        // only an expansion (`$file`) may be anything, as `cat $file` may be in bash.
-        const glob = name.replace(expansion, "*")
-        if (!name.replace(expansion, "") || !/[*?[]/.test(glob)) return yield* linkedEnv(dir + name)
-        const folder = /[*?[]/.test(dir) ? undefined : yield* wordPath(dir || ".", cwd, ps, shell)
-        const names = folder
-          ? yield* fs.readDirectoryEntries(folder).pipe(
-              Effect.map((entries) => entries.map((entry) => entry.name)),
-              Effect.catch(() => Effect.succeed([] as string[])),
-            )
-          : ENV_NAMES
-        const match = winGlob(glob)
-        const found = names.filter((item) => ENV_FILE.test(item.toLowerCase()) && match.test(item.toLowerCase()))
-        for (const item of folder ? found : found.slice(0, 1)) yield* readTarget(dir + item)
+        if (DEVICES.has(word.toLowerCase()) || INPUTS.has(word)) return
+        const file = fileName(word, win, expansion)
+        const folder = yield* wordPath(file.dir || ".", cwd, ps, shell)
+        if (folder && !containsPath(folder, instance)) scan.dirs.add(folder)
+        const resolved = /[*?[]/.test(file.name) ? undefined : yield* wordPath(file.dir + file.name, cwd, ps, shell)
+        const match = wildcard(file.name, win)
+        const opened = resolved
+          ? [resolved]
+          : folder
+            ? (yield* entries(folder)).filter((item) => match.test(fold(item))).map((item) => path.join(folder, item))
+            : []
+        // A name the scan cannot resolve (`< "$IN"`), or a wildcard that matches nothing, is asked for as written.
+        if (opened.length === 0) scan.reads.add(file.dir + file.name)
+        for (const item of opened) scan.reads.add(path.relative(instance.worktree, item))
       })
       // A link to an environment file, or on Windows its 8.3 short name (`ENV~1`), opens it under another name, so the
       // name it really has is tested too, as the read tool tests both.
@@ -910,8 +986,17 @@ export const ShellTool = Tool.define(
         }
       }
 
-      // `while read line; do ...; done < .env`
-      for (const source of inputRedirects(root, ps)) yield* envRead(source)
+      // `while read line; do ...; done < .env`. PowerShell refuses to parse `<`, so its file is never opened.
+      for (const source of inputRedirects(root, ps)) yield* ps ? envRead(source) : redirectRead(source)
+      // `$(<file)` prints a file without running a command, so it is checked like one, approved only as written.
+      if (!ps) {
+        for (const node of root.descendantsOfType("command_substitution")) {
+          if (!node || node.descendantsOfType("command").length > 0) continue
+          if (node.descendantsOfType("file_redirect").length === 0) continue
+          scan.patterns.add(node.text)
+          scan.always.add(node.text)
+        }
+      }
 
       // A .NET method call runs code without being a command (`[IO.File]::ReadAllText('.env')`), so without this a
       // statement made only of calls would run with no permission asked at all. Each chain of calls is checked like

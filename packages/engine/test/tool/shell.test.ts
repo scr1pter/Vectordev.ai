@@ -764,6 +764,114 @@ describe("tool.shell permissions", () => {
     )
   }
 
+  // bash removes quotes and escapes and expands wildcards before it opens a redirect's file, and `$(<file)` prints that
+  // file without running any command, so a read written that way asks what `cat` of the same file asks: under read, and
+  // for its folder when that lies outside the project.
+  for (const item of shells.filter((item) => !PS.has(item.label) && item.label !== "cmd")) {
+    it.live(`asks for the file a bash redirect or substitution reads, by the name bash opens [${item.label}]`, () =>
+      withShell(
+        item,
+        Effect.gen(function* () {
+          const outside = yield* tmpdirScoped()
+          const away = path.join(outside, "secret.txt").replaceAll("\\", "/")
+          const key = path.join(outside, ".ssh", "id_rsa").replaceAll("\\", "/")
+          yield* Effect.promise(async () => {
+            await Bun.write(away, "secret")
+            await Bun.write(key, "secret")
+          })
+          const tmp = yield* tmpdirScoped({ git: true })
+          yield* Effect.promise(async () => {
+            await Bun.write(path.join(tmp, ".env"), "KEY=1\n")
+            await Bun.write(path.join(tmp, "notes.txt"), "notes\n")
+            await Bun.write(path.join(tmp, "id.pem"), "key\n")
+          })
+          yield* runIn(
+            tmp,
+            Effect.gen(function* () {
+              const err = new Error("prompt rejected")
+              const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+              const stopAt = (permission: string) => ({
+                ...ctx,
+                ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+                  Effect.sync(() => {
+                    requests.push(req)
+                    if (req.permission === permission) throw err
+                  }),
+              })
+              for (const command of [
+                'cd "$(<.e""nv)"',
+                'cd "$(<.e\\nv)"',
+                'cd "$(<.en?)"',
+                "cd \"$(<$'.env')\"",
+                "cd \"$(<$'\\x2eenv')\"",
+                'cd "$(<.e"$UNSET_NAME"nv)"',
+                "cd `<.env`",
+                "cat .e''nv",
+                "c''at .env",
+              ]) {
+                requests.length = 0
+                const error = (yield* fail({ command }, stopAt("read"))).message
+                const read = requests.find((r) => r.permission === "read")?.patterns ?? []
+                expect({
+                  command,
+                  error,
+                  env: read.includes(".env"),
+                }).toEqual({
+                  command,
+                  error: err.message,
+                  env: true,
+                })
+              }
+              // Any file a redirect opens meets the read rules, by the name a wildcard matches.
+              requests.length = 0
+              yield* fail({ command: 'cd "$(<id.pe?)"' }, stopAt("read"))
+              expect(requests.find((r) => r.permission === "read")?.patterns).toContain("id.pem")
+              for (const [command, folder] of [
+                [`cd "$(<${away})"`, outside],
+                [`pushd "$(<${key})"`, path.join(outside, ".ssh")],
+                [`git log "$(<${key})"`, path.join(outside, ".ssh")],
+                [`while read l; do echo "$l"; done < ${away}`, outside],
+              ] as const) {
+                requests.length = 0
+                const error = (yield* fail({ command }, stopAt("external_directory"))).message
+                expect({
+                  command,
+                  error,
+                  dirs: requests[0]?.patterns,
+                }).toEqual({
+                  command,
+                  error: err.message,
+                  dirs: [glob(path.join(folder, "*"))],
+                })
+              }
+              // Past the outside-folder prompt, the read rules see the file too.
+              const rules = Permission.fromConfig({
+                read: { "*": "allow", "**/.ssh/*": "ask" },
+              })
+              requests.length = 0
+              yield* fail({ command: `cd "$(<${key})"` }, stopAt("read"))
+              expect(
+                requests
+                  .find((r) => r.permission === "read")
+                  ?.patterns.some((p) => Permission.evaluate("read", p, rules).action === "ask"),
+              ).toBe(true)
+              // `$(<file)` runs no command, so it is approved only as written, like a statement.
+              requests.length = 0
+              yield* fail({ command: 'git log "$(<notes.txt)"' }, stopAt("bash"))
+              expect(requests.find((r) => r.permission === "bash")?.always).toContain("$(<notes.txt)")
+              // Reading a device opens no file, and bash's `*` does not match the leading dot of `.env`.
+              for (const command of ["cat < /dev/null", "ls *"]) {
+                requests.length = 0
+                yield* run({ command }, stopAt("read"))
+                expect({ command, asked: requests.map((r) => r.permission) }).toEqual({ command, asked: ["bash"] })
+              }
+            }),
+          )
+        }),
+      ),
+    )
+  }
+
   // PowerShell reads a file through a .NET call as easily as through a command, and refuses to parse `<` rather than
   // reading from it, so neither may slip past the read prompt the bash forms get.
   it.live("asks under read before PowerShell reads an environment file by command, redirect or .NET call", () =>
@@ -1892,6 +2000,8 @@ describe("tool.shell read-only allowlist", () => {
     ["X=1; git status", "X=1"],
     ["f() { rm -rf x; }; git diff", "f() { rm -rf x; }"],
     ["A=1 git diff", "A=1 git diff"],
+    // `$(<file)` reads a file without running a command.
+    ['git log "$(<notes.txt)"', "$(<notes.txt)"],
   ]
 
   // cmd expands %NAME% before git sees the path, so `%USERPROFILE%\.ssh\id_rsa` may point anywhere: git diff may
