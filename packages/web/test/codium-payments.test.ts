@@ -1,0 +1,555 @@
+import { RedisClient } from "bun"
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test"
+import { createHmac } from "node:crypto"
+import { mkdtemp, rm, stat } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import {
+  modelPlanCredential,
+  modelTopupCheckout,
+  readModelPlanAccount,
+  reconcileModelPlanAccount,
+} from "../../../api/_lib/model-plan-account"
+import { verifyModelPlanWebhook } from "../../../api/_lib/model-plan-stripe"
+import { reconcileModelPlanEvent } from "../../../api/model-plans/webhook"
+
+// The money pipeline end to end against local fakes: Stripe, OpenRouter and Resend are one local HTTP server, and
+// leases, accounts and the ledger live in a real, isolated Valkey database.
+const directory = await mkdtemp(join(tmpdir(), "codium-payments-test-"))
+const socket = join(directory, "redis.sock")
+const database = process.env.VECTOR_TEST_REDIS_URL ? new RedisClient(process.env.VECTOR_TEST_REDIS_URL) : undefined
+const processHandle = database
+  ? undefined
+  : Bun.spawn(
+      [
+        process.env.VECTOR_TEST_VALKEY_SERVER ?? "valkey-server",
+        "--port",
+        "0",
+        "--unixsocket",
+        socket,
+        "--save",
+        "",
+        "--appendonly",
+        "no",
+        "--dir",
+        directory,
+      ],
+      { stdout: "ignore", stderr: "pipe" },
+    )
+async function redis(command: readonly (string | number)[]) {
+  if (database) return database.send(String(command[0]), command.slice(1).map(String))
+  const child = Bun.spawn(
+    [process.env.VECTOR_TEST_VALKEY_CLI ?? "valkey-cli", "-s", socket, "--json", ...command.map(String)],
+    { stdout: "pipe", stderr: "pipe" },
+  )
+  const output = await new Response(child.stdout).text()
+  if (await child.exited) throw new Error(await new Response(child.stderr).text())
+  return JSON.parse(output) as unknown
+}
+
+const user = { id: "44444444-4444-4444-8444-444444444444", email: "buyer@example.test" }
+const accountKey = `vector:model-plans:account:${user.id}`
+const DAY = 86_400
+
+type Charge = {
+  id: string
+  customer: string
+  amount: number
+  amount_refunded: number
+  currency: string
+  paid: boolean
+  refunded: boolean
+  disputed: boolean
+  created: number
+  balance_transaction: { id: string; amount: number; fee: number; net: number } | null
+  refunds: { data: { amount: number; balance_transaction: { fee: number; net: number } }[]; has_more: boolean }
+  payment_intent: string | null
+  invoice: string | null
+}
+const stripe = {
+  charges: new Map<string, Charge>(),
+  invoices: new Map<string, Record<string, unknown> & { charge: string | null }>(),
+  payments: new Map<string, Record<string, unknown>>(),
+  sessions: new Map<string, Record<string, unknown>>(),
+  subscriptions: [] as Record<string, unknown>[],
+  disputes: [] as Record<string, unknown>[],
+  idempotency: new Map<string, Record<string, unknown>>(),
+}
+const openRouter = {
+  keys: new Map<string, { key: string; data: Record<string, unknown> }>(),
+  credits: { total_credits: 0, total_usage: 0 },
+  unavailable: false,
+  pageSize: 2,
+}
+const emails: Record<string, unknown>[] = []
+const resend = { failing: false }
+
+const environment = [
+  "NODE_ENV",
+  "VERCEL_ENV",
+  "MODEL_PLANS_ENABLED",
+  "MODEL_CREDIT_MARKUP_PERCENT",
+  "STRIPE_SECRET_KEY",
+  "STRIPE_MODEL_PLAN_WEBHOOK_SECRET",
+  "STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID",
+  "MODEL_PLAN_KEY_ENCRYPTION_SECRET",
+  "OPENROUTER_MANAGEMENT_KEY",
+  "KV_REST_API_URL",
+  "KV_REST_API_TOKEN",
+  "UPSTASH_REDIS_REST_URL",
+  "UPSTASH_REDIS_REST_TOKEN",
+  "RESEND_API_KEY",
+  "VECTOR_PURCHASE_EMAIL_FROM",
+  "CODIUM_OWNER_EMAIL",
+  "CODIUM_OWNER_SECRET",
+  "CODIUM_FUNDING_MARGIN_PERCENT",
+  "CODIUM_FUNDING_MARGIN_USD",
+  "CODIUM_OPENROUTER_FEE_PERCENT",
+  "CRON_SECRET",
+  ...[10, 50, 100, 200].flatMap((price) => [
+    `STRIPE_MODEL_TOPUP_${price}_PRICE_ID`,
+    `MODEL_TOPUP_${price}_CREDITS_USD`,
+    `STRIPE_MODEL_PLAN_${price}_PRICE_ID`,
+    `MODEL_PLAN_${price}_CREDITS_USD`,
+  ]),
+]
+const previous = new Map(environment.map((key) => [key, process.env[key]]))
+
+function expandedCharge(id: string | null) {
+  const charge = id ? stripe.charges.get(id) : undefined
+  return charge ? { ...charge } : null
+}
+function expandedInvoice(id: string | null) {
+  const invoice = id ? stripe.invoices.get(id) : undefined
+  return invoice ? { ...invoice, charge: expandedCharge(invoice.charge) } : null
+}
+function expandedSubscription(value: Record<string, unknown>) {
+  return { ...value, latest_invoice: expandedInvoice(String(value.latest_invoice)) }
+}
+
+const server = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  async fetch(request) {
+    const url = new URL(request.url)
+    if (url.pathname === "/redis") {
+      const command: unknown = await request.json()
+      if (!Array.isArray(command)) throw new Error("Invalid Redis command")
+      return Response.json({ result: await redis(command) })
+    }
+    const body =
+      request.method === "GET"
+        ? {}
+        : request.headers.get("content-type")?.includes("json")
+          ? ((await request.json()) as Record<string, unknown>)
+          : Object.fromEntries(new URLSearchParams(await request.text()))
+    if (url.pathname === "/emails") {
+      expect(request.headers.get("authorization")).toBe("Bearer re_fixture")
+      if (resend.failing) return Response.json({ message: "fixture outage" }, { status: 503 })
+      emails.push(body)
+      return Response.json({ id: `email_${emails.length}` })
+    }
+    if (url.pathname.startsWith("/v1/")) {
+      expect(request.headers.get("authorization")).toBe("Bearer sk_test_fixture")
+      const parts = url.pathname.split("/")
+      if (url.pathname === "/v1/customers") return Response.json({ id: "cus_buyer" })
+      if (url.pathname === "/v1/customers/cus_buyer")
+        return Response.json({ id: "cus_buyer", metadata: { vector_account_id: user.id } })
+      if (url.pathname === "/v1/subscriptions")
+        return Response.json({ data: stripe.subscriptions.map(expandedSubscription), has_more: false })
+      if (url.pathname === "/v1/disputes")
+        return Response.json({
+          data: stripe.disputes.filter(
+            (value) =>
+              (!url.searchParams.get("charge") || value.charge === url.searchParams.get("charge")) &&
+              (!url.searchParams.get("payment_intent") ||
+                value.payment_intent === url.searchParams.get("payment_intent")),
+          ),
+          has_more: false,
+        })
+      if (url.pathname.startsWith("/v1/prices/"))
+        return Response.json({
+          active: true,
+          currency: "usd",
+          unit_amount: Number(url.pathname.match(/(\d+)$/)?.[1]) * 100,
+          recurring: url.pathname.includes("monthly") ? { interval: "month", interval_count: 1 } : null,
+        })
+      if (url.pathname === "/v1/checkout/sessions") {
+        if (request.method === "GET")
+          return Response.json({
+            data: [...stripe.sessions.values()].filter((value) => value.status === "open"),
+            has_more: false,
+          })
+        const token = request.headers.get("idempotency-key")!
+        if (stripe.idempotency.has(token)) return Response.json(stripe.idempotency.get(token))
+        const metadata = Object.fromEntries(
+          Object.entries(body)
+            .filter(([key]) => key.startsWith("metadata["))
+            .map(([key, value]) => [key.slice(9, -1), value]),
+        )
+        const amount = Number(String(body["line_items[0][price]"]).match(/(\d+)$/)?.[1]) * 100
+        const session = {
+          id: `cs_buyer${stripe.sessions.size + 1}`,
+          customer: body.customer,
+          client_reference_id: body.client_reference_id,
+          mode: body.mode,
+          status: "open",
+          payment_status: "unpaid",
+          amount_total: amount,
+          currency: "usd",
+          metadata,
+          url: `https://checkout.stripe.com/c/pay/cs_buyer${stripe.sessions.size + 1}`,
+          expires_at: Number(body.expires_at),
+          payment_intent: null as string | null,
+          line_items: {
+            data: [
+              {
+                quantity: 1,
+                price: { id: body["line_items[0][price]"], currency: "usd", unit_amount: amount, recurring: null },
+              },
+            ],
+          },
+        }
+        stripe.sessions.set(session.id, session)
+        stripe.idempotency.set(token, session)
+        return Response.json(session)
+      }
+      if (url.pathname.startsWith("/v1/checkout/sessions/")) {
+        const session = stripe.sessions.get(parts[4]!)
+        if (!session) return new Response(null, { status: 404 })
+        if (url.pathname.endsWith("/expire")) session.status = "expired"
+        const payment = typeof session.payment_intent === "string" ? stripe.payments.get(session.payment_intent) : null
+        return Response.json({
+          ...session,
+          payment_intent: payment ? { ...payment, latest_charge: expandedCharge(String(payment.latest_charge)) } : null,
+        })
+      }
+      if (url.pathname.startsWith("/v1/payment_intents/")) {
+        const payment = stripe.payments.get(parts[3]!)
+        if (!payment) return new Response(null, { status: 404 })
+        return Response.json({ ...payment, latest_charge: expandedCharge(String(payment.latest_charge)) })
+      }
+      if (url.pathname.startsWith("/v1/charges/")) {
+        const charge = stripe.charges.get(parts[3]!)
+        if (!charge) return new Response(null, { status: 404 })
+        const invoice = charge.invoice ? stripe.invoices.get(charge.invoice) : undefined
+        const subscription = invoice
+          ? stripe.subscriptions.find((value) => value.id === invoice.subscription)
+          : undefined
+        return Response.json({
+          ...charge,
+          payment_intent: charge.payment_intent ? (stripe.payments.get(charge.payment_intent) ?? null) : null,
+          invoice: invoice ? { ...invoice, subscription: subscription ?? invoice.subscription } : null,
+        })
+      }
+    }
+    if (url.pathname === "/api/v1/credits") {
+      expect(request.headers.get("authorization")).toBe("Bearer or_management_fixture")
+      if (openRouter.unavailable) return new Response(null, { status: 503 })
+      return Response.json({ data: openRouter.credits })
+    }
+    if (url.pathname.startsWith("/api/v1/keys")) {
+      expect(request.headers.get("authorization")).toBe("Bearer or_management_fixture")
+      if (openRouter.unavailable) return new Response(null, { status: 503 })
+      if (url.pathname === "/api/v1/keys" && request.method === "GET") {
+        const offset = Number(url.searchParams.get("offset") ?? 0)
+        const listed = [...openRouter.keys.values()].map((value) => value.data).filter((value) => !value.disabled)
+        return Response.json({ data: listed.slice(offset, offset + openRouter.pageSize) })
+      }
+      if (request.method === "POST") {
+        const hash = `codium_key_${openRouter.keys.size + 1}`
+        const value = {
+          key: `codium-secret-${openRouter.keys.size + 1}`,
+          data: { ...body, hash, usage: 0, disabled: false },
+        }
+        openRouter.keys.set(hash, value)
+        return Response.json(value)
+      }
+      const value = openRouter.keys.get(url.pathname.split("/").at(-1)!)
+      if (!value) return new Response(null, { status: 404 })
+      if (request.method === "PATCH") Object.assign(value.data, body)
+      return Response.json({ data: value.data })
+    }
+    throw new Error(`Unexpected request ${request.method} ${url.pathname}`)
+  },
+})
+const fetcher: typeof fetch = Object.assign(
+  (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (["https://api.stripe.com", "https://openrouter.ai", "https://api.resend.com"].includes(url.origin))
+      return fetch(new URL(url.pathname + url.search, server.url), init)
+    if (url.origin === server.url.origin) return fetch(input, init)
+    throw new Error(`Unexpected network destination ${url.origin}`)
+  },
+  { preconnect: fetch.preconnect },
+)
+
+beforeAll(async () => {
+  if (!database)
+    for (let count = 0; count < 300 && !(await stat(socket).catch(() => undefined)); count++) await Bun.sleep(10)
+  expect(await redis(["PING"])).toBe("PONG")
+})
+beforeEach(async () => {
+  await redis(["FLUSHDB"])
+  stripe.charges.clear()
+  stripe.invoices.clear()
+  stripe.payments.clear()
+  stripe.sessions.clear()
+  stripe.idempotency.clear()
+  stripe.subscriptions = []
+  stripe.disputes = []
+  openRouter.keys.clear()
+  Object.assign(openRouter, { credits: { total_credits: 0, total_usage: 0 }, unavailable: false, pageSize: 2 })
+  emails.length = 0
+  resend.failing = false
+  Object.assign(process.env, {
+    NODE_ENV: "development",
+    MODEL_PLANS_ENABLED: "true",
+    STRIPE_SECRET_KEY: "sk_test_fixture",
+    STRIPE_MODEL_PLAN_WEBHOOK_SECRET: "whsec_fixture",
+    STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID: "bpc_fixture",
+    MODEL_PLAN_KEY_ENCRYPTION_SECRET: "cd".repeat(32),
+    OPENROUTER_MANAGEMENT_KEY: "or_management_fixture",
+    KV_REST_API_URL: new URL("/redis", server.url).href,
+    KV_REST_API_TOKEN: "fixture",
+    RESEND_API_KEY: "re_fixture",
+    VECTOR_PURCHASE_EMAIL_FROM: "Vector <support@example.test>",
+    CODIUM_OWNER_EMAIL: "owner@example.test",
+    CODIUM_OWNER_SECRET: "owner-fixture-secret-".repeat(3),
+    CRON_SECRET: "cron-fixture-secret",
+  })
+  for (const key of [
+    "VERCEL_ENV",
+    "UPSTASH_REDIS_REST_URL",
+    "UPSTASH_REDIS_REST_TOKEN",
+    "MODEL_CREDIT_MARKUP_PERCENT",
+    "CODIUM_FUNDING_MARGIN_PERCENT",
+    "CODIUM_FUNDING_MARGIN_USD",
+    "CODIUM_OPENROUTER_FEE_PERCENT",
+  ])
+    delete process.env[key]
+  for (const price of [10, 50, 100, 200]) {
+    process.env[`STRIPE_MODEL_TOPUP_${price}_PRICE_ID`] = `price_topup${price}`
+    process.env[`STRIPE_MODEL_PLAN_${price}_PRICE_ID`] = `price_monthly${price}`
+    // Fixture allowances only, unrelated to any live conversion.
+    process.env[`MODEL_TOPUP_${price}_CREDITS_USD`] = String(price / 2)
+    process.env[`MODEL_PLAN_${price}_CREDITS_USD`] = String(price / 2)
+  }
+})
+afterAll(async () => {
+  server.stop(true)
+  processHandle?.kill()
+  database?.close()
+  await processHandle?.exited
+  await rm(directory, { recursive: true, force: true })
+  previous.forEach((value, key) => {
+    delete process.env[key]
+    if (value !== undefined) process.env[key] = value
+  })
+})
+
+let sequence = 0
+function charge(input: Partial<Charge> & { amount: number }) {
+  sequence += 1
+  const fee = Math.round(input.amount * 0.029) + 30
+  const value: Charge = {
+    id: `ch_buyer${sequence}`,
+    customer: "cus_buyer",
+    amount_refunded: 0,
+    currency: "usd",
+    paid: true,
+    refunded: false,
+    disputed: false,
+    created: Math.floor(Date.UTC(2026, 9, 17) / 1000),
+    balance_transaction: { id: `txn_buyer${sequence}`, amount: input.amount, fee, net: input.amount - fee },
+    refunds: { data: [], has_more: false },
+    payment_intent: null,
+    invoice: null,
+    ...input,
+  }
+  stripe.charges.set(value.id, value)
+  return value
+}
+
+/** A paid monthly subscription, as Stripe holds it after checkout or a renewal. */
+function subscribe(price = 10, start = Math.floor(Date.now() / 1000) - 3600) {
+  const end = start + 30 * DAY
+  const paid = charge({ amount: price * 100 })
+  const invoice = {
+    id: `in_buyer${sequence}`,
+    customer: "cus_buyer",
+    subscription: "sub_buyer",
+    paid: true,
+    status: "paid",
+    amount_paid: price * 100,
+    charge: paid.id,
+    lines: { data: [{ price: { id: `price_monthly${price}` }, period: { start, end }, proration: false }] },
+  }
+  stripe.invoices.set(invoice.id, invoice)
+  paid.invoice = invoice.id
+  const subscription = {
+    id: "sub_buyer",
+    customer: "cus_buyer",
+    status: "active",
+    cancel_at_period_end: false,
+    metadata: { vector_account_id: user.id, vector_model_credits_usd: String(price / 2) },
+    items: {
+      data: [
+        {
+          quantity: 1,
+          current_period_start: start,
+          current_period_end: end,
+          price: {
+            id: `price_monthly${price}`,
+            currency: "usd",
+            unit_amount: price * 100,
+            recurring: { interval: "month", interval_count: 1 },
+          },
+        },
+      ],
+    },
+    latest_invoice: invoice.id,
+  }
+  stripe.subscriptions = [subscription]
+  return { subscription, invoice, charge: paid, start, end }
+}
+
+/** A completed top-up checkout, paid in full. */
+async function topUp(price = 10) {
+  await modelTopupCheckout(user, `codium-topup-${price}`, fetcher)
+  const session = [...stripe.sessions.values()].at(-1)!
+  const paid = charge({ amount: price * 100 })
+  const payment = {
+    id: `pi_buyer${sequence}`,
+    customer: "cus_buyer",
+    currency: "usd",
+    status: "succeeded",
+    amount: price * 100,
+    amount_received: price * 100,
+    metadata: session.metadata,
+    latest_charge: paid.id,
+  }
+  stripe.payments.set(payment.id, payment)
+  paid.payment_intent = payment.id
+  Object.assign(session, { status: "complete", payment_status: "paid", payment_intent: payment.id })
+  return { session, payment, charge: paid }
+}
+
+const event = (type: string, object: Record<string, unknown>, id = `evt_${type}_${sequence}`) => ({
+  id,
+  type,
+  data: { object },
+})
+const activeKeys = () => [...openRouter.keys.values()].map((value) => value.data).filter((value) => !value.disabled)
+
+describe("payment notifications grant and remove credits without anyone acting", () => {
+  test("a subscription checkout grants the month's credits before the first request, once", async () => {
+    await redis(["SET", accountKey, JSON.stringify({ customer: "cus_buyer" })])
+    const paid = subscribe(50)
+    const completed = event("checkout.session.completed", {
+      id: "cs_subscription",
+      customer: "cus_buyer",
+      mode: "subscription",
+      status: "complete",
+    })
+    await reconcileModelPlanEvent(completed, fetcher)
+    expect(openRouter.keys.size).toBe(1)
+    expect(openRouter.keys.get("codium_key_1")?.data).toMatchObject({
+      limit: 25,
+      disabled: false,
+      limit_reset: null,
+      expires_at: new Date(paid.end * 1000).toISOString(),
+    })
+    // Stripe retries and the dashboard's resend deliver the same notification again; nothing changes.
+    await reconcileModelPlanEvent(completed, fetcher)
+    await reconcileModelPlanEvent(event("invoice.paid", paid.invoice), fetcher)
+    expect(openRouter.keys.size).toBe(1)
+    expect((await modelPlanCredential(user.id, fetcher)).key).toBe("codium-secret-1")
+  })
+
+  test("each renewal resets the month's credits on a fresh key and retires the old one", async () => {
+    await redis(["SET", accountKey, JSON.stringify({ customer: "cus_buyer" })])
+    const first = subscribe(10)
+    await reconcileModelPlanEvent(event("invoice.paid", first.invoice), fetcher)
+    openRouter.keys.get("codium_key_1")!.data.usage = 4.5
+    // Stripe moves the subscription to its next period and pays that period's invoice.
+    const renewal = subscribe(10, first.end)
+    await reconcileModelPlanAccount(user.id, fetcher, (first.end + 60) * 1000)
+    expect(openRouter.keys.get("codium_key_1")?.data.disabled).toBe(true)
+    expect(openRouter.keys.get("codium_key_2")?.data).toMatchObject({
+      limit: 5,
+      usage: 0,
+      disabled: false,
+      expires_at: new Date(renewal.end * 1000).toISOString(),
+    })
+  })
+
+  test("a failed renewal, a cancellation and a refund each switch the month's credits off", async () => {
+    await redis(["SET", accountKey, JSON.stringify({ customer: "cus_buyer" })])
+    const paid = subscribe(10)
+    await reconcileModelPlanEvent(event("invoice.paid", paid.invoice), fetcher)
+    expect(activeKeys()).toHaveLength(1)
+
+    // Failed renewal: Stripe marks the subscription past due and its latest invoice open.
+    Object.assign(paid.subscription, { status: "past_due" })
+    Object.assign(paid.invoice, { paid: false, status: "open" })
+    await reconcileModelPlanEvent(event("invoice.payment_failed", paid.invoice), fetcher)
+    expect(activeKeys()).toHaveLength(0)
+    await expect(modelPlanCredential(user.id, fetcher)).rejects.toMatchObject({ code: "MODEL_PLAN_PAYMENT_REQUIRED" })
+
+    // The retry succeeds: the same period's credits come back on the same key, usage kept.
+    openRouter.keys.get("codium_key_1")!.data.usage = 1
+    Object.assign(paid.subscription, { status: "active" })
+    Object.assign(paid.invoice, { paid: true, status: "paid" })
+    await reconcileModelPlanEvent(event("invoice.paid", paid.invoice), fetcher)
+    expect(openRouter.keys.get("codium_key_1")?.data).toMatchObject({ disabled: false, usage: 1, limit: 5 })
+
+    // A refund of the period's charge takes the month's credits away.
+    Object.assign(paid.charge, { amount_refunded: 1000, refunded: true })
+    await reconcileModelPlanEvent(event("charge.refunded", { ...paid.charge }), fetcher)
+    expect(activeKeys()).toHaveLength(0)
+
+    // Cancellation.
+    Object.assign(paid.charge, { amount_refunded: 0, refunded: false })
+    await reconcileModelPlanEvent(event("invoice.paid", paid.invoice), fetcher)
+    expect(activeKeys()).toHaveLength(1)
+    Object.assign(paid.subscription, { status: "canceled" })
+    await reconcileModelPlanEvent(event("customer.subscription.deleted", paid.subscription), fetcher)
+    expect(activeKeys()).toHaveLength(0)
+  })
+
+  test("a top-up grants its credits at once and later top-ups add to them", async () => {
+    const first = await topUp(10)
+    await reconcileModelPlanEvent(event("checkout.session.completed", first.session), fetcher)
+    expect(openRouter.keys.get("codium_key_1")?.data).toMatchObject({ limit: 5, expires_at: null, disabled: false })
+    openRouter.keys.get("codium_key_1")!.data.usage = 2
+    const second = await topUp(50)
+    await reconcileModelPlanEvent(event("checkout.session.completed", second.session), fetcher)
+    await reconcileModelPlanEvent(event("checkout.session.completed", second.session), fetcher)
+    expect(openRouter.keys.size).toBe(1)
+    expect(openRouter.keys.get("codium_key_1")?.data).toMatchObject({ limit: 30, usage: 2, disabled: false })
+    expect((await readModelPlanAccount(user.id, fetcher))?.purchases).toHaveLength(2)
+
+    // A dispute on the first top-up takes its credits away until Stripe says the dispute was won.
+    first.charge.disputed = true
+    stripe.disputes = [
+      { charge: first.charge.id, payment_intent: first.payment.id, status: "needs_response", balance_transactions: [] },
+    ]
+    await reconcileModelPlanEvent(event("charge.dispute.created", { charge: first.charge.id }), fetcher)
+    expect(openRouter.keys.get("codium_key_1")?.data).toMatchObject({ limit: 25 })
+    stripe.disputes = [
+      { charge: first.charge.id, payment_intent: first.payment.id, status: "won", balance_transactions: [] },
+    ]
+    await reconcileModelPlanEvent(event("charge.dispute.closed", { charge: first.charge.id }), fetcher)
+    expect(openRouter.keys.get("codium_key_1")?.data).toMatchObject({ limit: 30 })
+  })
+
+  test("only a correctly signed notification is accepted", () => {
+    const raw = Buffer.from(JSON.stringify(event("invoice.paid", { customer: "cus_buyer" })))
+    const timestamp = Math.floor(Date.now() / 1000)
+    const signature = createHmac("sha256", "whsec_fixture").update(`${timestamp}.`).update(raw).digest("hex")
+    expect(verifyModelPlanWebhook(raw, `t=${timestamp},v1=${signature}`)).toMatchObject({ type: "invoice.paid" })
+    expect(() => verifyModelPlanWebhook(raw, `t=${timestamp},v1=${"0".repeat(64)}`)).toThrow()
+    expect(() => verifyModelPlanWebhook(raw, `t=${timestamp - 600},v1=${signature}`)).toThrow()
+  })
+})

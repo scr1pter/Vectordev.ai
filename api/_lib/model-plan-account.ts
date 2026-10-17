@@ -362,38 +362,55 @@ async function walletCredential(id: string, fetcher: typeof fetch, requiredCredi
         }
       }
       if (credits <= 0 || credits < requiredCredits) throw purchasedShortfall()
-      await verify()
-      const result = await openRouterManagement(
-        "",
-        {
-          name: `Codium ${id} purchased credits`,
-          limit: credits,
-          limit_reset: null,
-          include_byok_in_limit: true,
-          expires_at: null,
-        },
-        fetcher,
-        "POST",
-      )
-      if (
-        !stripeRecord(result.data) ||
-        typeof result.data.hash !== "string" ||
-        typeof result.key !== "string" ||
-        !result.key
-      )
-        throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your purchased-credit allowance could not be created.")
-      await saveAccount(
-        id,
-        { ...account, wallet: { hash: result.data.hash, encrypted: protectModelPlanKey(result.key, `${id}:wallet`) } },
-        fetcher,
-      )
-      return { key: result.key, pool: result.data.hash, available: credits }
+      return { ...(await provisionWalletKey(id, account, credits, fetcher, verify)), available: credits }
     },
     fetcher,
   )
 }
 
-export async function reconcileModelPlanAccount(id: string, fetcher: typeof fetch = fetch) {
+async function provisionWalletKey(
+  id: string,
+  account: Account,
+  credits: number,
+  fetcher: typeof fetch,
+  verify: () => Promise<void>,
+) {
+  await verify()
+  const result = await openRouterManagement(
+    "",
+    {
+      name: `Codium ${id} purchased credits`,
+      limit: credits,
+      limit_reset: null,
+      include_byok_in_limit: true,
+      expires_at: null,
+    },
+    fetcher,
+    "POST",
+  )
+  if (
+    !stripeRecord(result.data) ||
+    typeof result.data.hash !== "string" ||
+    typeof result.key !== "string" ||
+    !result.key
+  )
+    throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your purchased-credit allowance could not be created.")
+  await saveAccount(
+    id,
+    { ...account, wallet: { hash: result.data.hash, encrypted: protectModelPlanKey(result.key, `${id}:wallet`) } },
+    fetcher,
+  )
+  return { key: result.key, pool: result.data.hash }
+}
+
+/**
+ * Bring the account's OpenRouter keys in line with what Stripe says is paid, as soon as a billing notification
+ * arrives, so a buyer's credits are ready before their first request: the paid period's key gets the plan's credits
+ * (each period gets a new key, so monthly credits reset rather than roll over), the purchased-credit key gets every
+ * top-up still paid for, and a key nothing pays for any more is switched off. It reads Stripe's current state rather
+ * than applying the notification, so a replayed or out-of-order notification changes nothing.
+ */
+export async function reconcileModelPlanAccount(id: string, fetcher: typeof fetch = fetch, now = Date.now()) {
   await settlePendingTopup(id, fetcher)
   await withBillingMutation(
     `model-plan:${id}`,
@@ -402,12 +419,19 @@ export async function reconcileModelPlanAccount(id: string, fetcher: typeof fetc
       if (!account) return
       const paid = account.closing
         ? []
-        : (await subscriptions(account.customer, fetcher)).filter((value) => paidModelPlan(value, id))
+        : (await subscriptions(account.customer, fetcher))
+            .map((subscription) => paidModelPlan(subscription, id, now))
+            .filter((value) => value !== undefined)
       if (account.key && paid.length !== 1) {
         await verify()
         await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
       }
-      if (account.wallet) await synchronizeWalletKey(id, account, fetcher, verify)
+      const current =
+        paid.length === 1 ? (await provisionMonthlyKey(id, account, paid[0]!, fetcher, verify)).account : account
+      if (current.wallet) return synchronizeWalletKey(id, current, fetcher, verify)
+      if (current.closing) return
+      const credits = await purchasedCredits(current, id, fetcher)
+      if (credits > 0) await provisionWalletKey(id, current, credits, fetcher, verify)
     },
     fetcher,
   )
@@ -735,87 +759,98 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
         )
       }
       if (paid.plan.credits < requiredCredits) throw monthlyShortfall()
-      const context = `${id}:${paid.id}:${paid.start}`
-      if (account.key?.subscription === paid.id && account.key.start === paid.start) {
-        const result = await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, undefined, fetcher)
-        const key = result.data
-        if (
-          !stripeRecord(key) ||
-          typeof key.disabled !== "boolean" ||
-          typeof key.usage !== "number" ||
-          !Number.isFinite(key.usage) ||
-          key.usage < 0
-        )
-          throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your model allowance could not be verified.")
-        requireMonthlyCredits(paid.plan.credits, key.usage, requiredCredits)
-        if (
-          key.disabled ||
-          key.limit !== paid.plan.credits ||
-          key.limit_reset !== null ||
-          key.include_byok_in_limit !== true ||
-          key.expires_at !== new Date(paid.end * 1000).toISOString()
-        ) {
-          await verify()
-          await openRouterManagement(
-            `/${encodeURIComponent(account.key.hash)}`,
-            {
-              disabled: false,
-              limit: paid.plan.credits,
-              limit_reset: null,
-              include_byok_in_limit: true,
-              expires_at: new Date(paid.end * 1000).toISOString(),
-            },
-            fetcher,
-            "PATCH",
-          )
-        }
-        return {
-          key: revealModelPlanKey(account.key.encrypted, context),
-          pool: account.key.hash,
-          available: paid.plan.credits - key.usage,
-        }
-      }
-      if (account.key)
-        await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
-      await verify()
-      const result = await openRouterManagement(
-        "",
-        {
-          name: `Vector ${id} ${paid.id} ${paid.start}`,
-          limit: paid.plan.credits,
-          limit_reset: null,
-          include_byok_in_limit: true,
-          expires_at: new Date(paid.end * 1000).toISOString(),
-        },
-        fetcher,
-        "POST",
-      )
-      if (
-        !stripeRecord(result.data) ||
-        typeof result.data.hash !== "string" ||
-        typeof result.key !== "string" ||
-        !result.key
-      )
-        throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your model allowance could not be created.")
-      await saveAccount(
-        id,
-        {
-          ...account,
-          key: {
-            hash: result.data.hash,
-            encrypted: protectModelPlanKey(result.key, context),
-            subscription: paid.id,
-            start: paid.start,
-            end: paid.end,
-            credits: paid.plan.credits,
-          },
-        },
-        fetcher,
-      )
-      return { key: result.key, pool: result.data.hash, available: paid.plan.credits }
+      const funding = await provisionMonthlyKey(id, account, paid, fetcher, verify)
+      requireMonthlyCredits(paid.plan.credits, funding.usage, requiredCredits)
+      return { key: funding.key, pool: funding.pool, available: paid.plan.credits - funding.usage }
     },
     fetcher,
   )
+}
+
+/** The paid period's key, repaired to the plan's credits, or a new one when the period changed. Callers hold the lease. */
+async function provisionMonthlyKey(
+  id: string,
+  account: Account,
+  paid: NonNullable<ReturnType<typeof paidModelPlan>>,
+  fetcher: typeof fetch,
+  verify: () => Promise<void>,
+) {
+  const context = `${id}:${paid.id}:${paid.start}`
+  const expires = new Date(paid.end * 1000).toISOString()
+  if (account.key?.subscription === paid.id && account.key.start === paid.start) {
+    const result = await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, undefined, fetcher)
+    const key = result.data
+    if (
+      !stripeRecord(key) ||
+      typeof key.disabled !== "boolean" ||
+      typeof key.usage !== "number" ||
+      !Number.isFinite(key.usage) ||
+      key.usage < 0
+    )
+      throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your model allowance could not be verified.")
+    if (
+      key.disabled ||
+      key.limit !== paid.plan.credits ||
+      key.limit_reset !== null ||
+      key.include_byok_in_limit !== true ||
+      key.expires_at !== expires
+    ) {
+      await verify()
+      await openRouterManagement(
+        `/${encodeURIComponent(account.key.hash)}`,
+        {
+          disabled: false,
+          limit: paid.plan.credits,
+          limit_reset: null,
+          include_byok_in_limit: true,
+          expires_at: expires,
+        },
+        fetcher,
+        "PATCH",
+      )
+    }
+    return {
+      key: revealModelPlanKey(account.key.encrypted, context),
+      pool: account.key.hash,
+      usage: key.usage,
+      account,
+    }
+  }
+  if (account.key)
+    await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
+  await verify()
+  const result = await openRouterManagement(
+    "",
+    {
+      name: `Vector ${id} ${paid.id} ${paid.start}`,
+      limit: paid.plan.credits,
+      limit_reset: null,
+      include_byok_in_limit: true,
+      expires_at: expires,
+    },
+    fetcher,
+    "POST",
+  )
+  if (
+    !stripeRecord(result.data) ||
+    typeof result.data.hash !== "string" ||
+    typeof result.key !== "string" ||
+    !result.key
+  )
+    throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your model allowance could not be created.")
+  const updated = {
+    ...account,
+    key: {
+      hash: result.data.hash,
+      encrypted: protectModelPlanKey(result.key, context),
+      subscription: paid.id,
+      start: paid.start,
+      end: paid.end,
+      credits: paid.plan.credits,
+    },
+  }
+  await saveAccount(id, updated, fetcher)
+  return { key: result.key, pool: result.data.hash, usage: 0, account: updated }
 }
 
 // A shortfall keeps the code that lets purchased credits cover the request instead.
