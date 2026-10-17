@@ -789,6 +789,23 @@ describe("SpendGuard task scopes", () => {
     }),
   )
 
+  it.effect("a released old attempt never inherits the next completed parent run after pruning", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root, { usd: 1 })
+      yield* guard.link(child, root, { budget: { usd: 0.5 } })
+      yield* guard.record(child, step({ costUsd: 0.1 }))
+      yield* guard.release(child)
+      yield* guard.end(root)
+      yield* guard.begin(root, { usd: 20 })
+      yield* guard.record(root, step({ costUsd: 2 }))
+      yield* guard.end(root)
+      expect(yield* guard.rootOf(child)).toBe(child)
+      expect(yield* guard.scopes(child)).toEqual([])
+      expect((yield* guard.snapshot(root))?.spentUsd).toBe(2)
+    }),
+  )
+
   it.effect("simultaneous siblings retain in-flight usage after their shared cap is crossed", () =>
     Effect.gen(function* () {
       const guard = yield* SpendGuard.Service

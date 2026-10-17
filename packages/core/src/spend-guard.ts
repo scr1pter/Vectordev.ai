@@ -409,7 +409,10 @@ function prune(current: State): State {
   const bindings = new Map([...current.bindings].filter((entry) => retained.has(entry[1].run)))
   const referenced = new Set([...retained, ...[...bindings.values()].flatMap((binding) => [...binding.scopes])])
   const roots = new Map(
-    [...current.roots].filter(([id, rootID]) => bindings.has(id) || current.active.has(rootID) || last.has(rootID)),
+    [...current.roots].filter(
+      ([id, rootID]) =>
+        bindings.has(id) || (!current.bindings.has(id) && (current.active.has(rootID) || last.has(rootID))),
+    ),
   )
   return {
     ...current,
