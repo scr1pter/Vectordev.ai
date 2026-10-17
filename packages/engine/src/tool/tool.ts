@@ -42,6 +42,7 @@ export type Context<M extends Metadata = Metadata> = {
   extra?: { [key: string]: unknown }
   /** Assignment scope supplied by the session runtime, never by model arguments. */
   ownedPaths?: readonly string[]
+  getOwnedPaths?: () => Effect.Effect<readonly string[] | undefined>
   messages: SessionV1.WithParts[]
   metadata(input: { title?: string; metadata?: M }): Effect.Effect<void>
   deniedResources?(input: Pick<PermissionV1.Request, "permission" | "patterns">): Effect.Effect<ReadonlyArray<string>>

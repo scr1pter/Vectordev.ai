@@ -31,6 +31,8 @@ import {
 import { TaskSquares } from "./task-squares"
 import type { BackgroundTasks } from "./background-tasks"
 import { useBackgroundTasks } from "./use-background-tasks"
+import type { Task } from "@vectordevai/schema/task"
+import { taskCost } from "./task-board-model"
 
 const MAX_ROWS = 12
 
@@ -323,6 +325,14 @@ function Pane(props: { tasks: BackgroundTasks }) {
           <CloseIcon />
         </button>
       </header>
+      <Show when={tasks.error()}>
+        <p class="vector-bg-tasks-notice" role="status">
+          {tasks.error()}
+        </p>
+      </Show>
+      <Show when={total() > 0}>
+        <p class="vector-bg-tasks-total">Subagent spend · {taskCost(tasks.cards().flatMap((card) => card.agents))}</p>
+      </Show>
 
       <Show
         when={total() > 0}
@@ -431,7 +441,8 @@ function CardView(props: {
   // Read once: only a card's first mount can be new.
   const [entering, setEntering] = createSignal(props.fresh)
   const expanded = () => !props.finished || props.open
-  const canStop = () => props.card.agents.some((agent) => isLive(agent.status) && !!agent.sessionID)
+  const canStop = () =>
+    props.card.agents.some((agent) => isLive(agent.status) && (agent.task?.controls.stop ?? !!agent.sessionID))
   const waiting = () => props.card.agents.find((agent) => agent.status === "waiting" && agent.sessionID)
   const mixed = () => new Set(props.card.agents.map((agent) => agent.status)).size > 1
   const agentCount = () => countAgents(props.card.agents)
@@ -525,6 +536,7 @@ function CardView(props: {
             <span class="vector-bg-tasks-num">{formatTokens(props.card.tokens)}</span> tokens
           </span>
         </Show>
+        <span>{taskCost(props.card.agents)}</span>
       </p>
       {/* Collapsed, a finished card is its head and facts: the status says
           how it ended. Only when its agents ended differently ("Failed" with two
@@ -669,42 +681,49 @@ function PhaseTable(props: { phase: TaskPhase; tasks: BackgroundTasks }) {
             {(agent) => {
               const name = () => nameParts(agent.title)
               return (
-                <tr class="vector-bg-tasks-row" data-status={agent.status}>
-                  <td>
-                    <button
-                      type="button"
-                      class="vector-bg-tasks-agent"
-                      title={agentTooltip(agent)}
-                      aria-label={`Open ${agent.title} (${KIND_LABEL[agent.kind]}, ${statusWord(agent.status)})`}
-                      disabled={!agent.sessionID}
-                      onClick={() => props.tasks.openAgent(agent)}
-                    >
-                      {/* A check once done; before that the agent's square (a dot
-                        for a specialist) in its status colour. */}
-                      <span
-                        class="vector-bg-tasks-agent-state"
-                        data-status={agent.status}
-                        data-kind={agent.kind}
-                        aria-hidden="true"
+                <>
+                  <tr class="vector-bg-tasks-row" data-status={agent.status}>
+                    <td>
+                      <button
+                        type="button"
+                        class="vector-bg-tasks-agent"
+                        title={agentTooltip(agent)}
+                        aria-label={`Open ${agent.title} (${KIND_LABEL[agent.kind]}, ${statusWord(agent.status)})`}
+                        disabled={!props.tasks.canOpenAgent(agent)}
+                        onClick={() => props.tasks.openAgent(agent)}
                       >
-                        <Show when={agent.status === "done"}>
-                          <CheckIcon />
-                        </Show>
-                      </span>
-                      <span class="vector-bg-tasks-agent-name">
-                        <span class="vector-bg-tasks-agent-head">{name().head}</span>
-                        <Show when={name().tail}>
-                          <span class="vector-bg-tasks-agent-tail">{name().tail}</span>
-                        </Show>
-                      </span>
-                    </button>
-                  </td>
-                  <td title={modelTooltip(agent)}>{agent.model?.short ?? "—"}</td>
-                  <td>{formatTokens(agent.tokens)}</td>
-                  <td>
-                    <time>{formatDuration(elapsedMs(agent, props.tasks.now()))}</time>
-                  </td>
-                </tr>
+                        {/* A check once done; before that the agent's square (a dot
+                        for a specialist) in its status colour. */}
+                        <span
+                          class="vector-bg-tasks-agent-state"
+                          data-status={agent.status}
+                          data-kind={agent.kind}
+                          aria-hidden="true"
+                        >
+                          <Show when={agent.status === "done"}>
+                            <CheckIcon />
+                          </Show>
+                        </span>
+                        <span class="vector-bg-tasks-agent-name">
+                          <span class="vector-bg-tasks-agent-head">{name().head}</span>
+                          <Show when={name().tail}>
+                            <span class="vector-bg-tasks-agent-tail">{name().tail}</span>
+                          </Show>
+                        </span>
+                      </button>
+                    </td>
+                    <td title={modelTooltip(agent)}>{agent.model?.short ?? "—"}</td>
+                    <td>{formatTokens(agent.tokens)}</td>
+                    <td>
+                      <time>{formatDuration(elapsedMs(agent, props.tasks.now()))}</time>
+                    </td>
+                  </tr>
+                  <tr class="vector-bg-tasks-detail-row">
+                    <td colSpan={4}>
+                      <AgentDetails agent={agent} tasks={props.tasks} />
+                    </td>
+                  </tr>
+                </>
               )
             }}
           </For>
@@ -716,5 +735,199 @@ function PhaseTable(props: { phase: TaskPhase; tasks: BackgroundTasks }) {
         </button>
       </Show>
     </>
+  )
+}
+
+function AgentDetails(props: { agent: TaskAgent; tasks: BackgroundTasks }) {
+  const [state, setState] = createStore<{
+    talk: boolean
+    expanded: boolean
+    loading: boolean
+    sending: boolean
+    stopping: boolean
+    error?: string
+    notice?: string
+    detail?: Task.InspectResult
+  }>({
+    talk: false,
+    expanded: false,
+    loading: false,
+    sending: false,
+    stopping: false,
+  })
+  const editable = () => props.agent.task?.controls.message ?? (isLive(props.agent.status) && !!props.agent.sessionID)
+  const canStop = () => props.agent.task?.controls.stop ?? (isLive(props.agent.status) && !!props.agent.sessionID)
+  const identify = () => domKey(props.agent.task?.id ?? props.agent.key)
+  const failure = (error: unknown) =>
+    error instanceof Error
+      ? error.message
+      : "The action could not be completed. Your draft and partial work have been kept."
+  const inspect = async () => {
+    setState({ expanded: !state.expanded, error: undefined })
+    if (!state.expanded || state.loading) return
+    setState("loading", true)
+    await props.tasks
+      .inspect(props.agent)
+      .then((detail) => setState("detail", detail))
+      .catch((error: unknown) => setState("error", failure(error)))
+    setState("loading", false)
+  }
+  const send = async (event: SubmitEvent) => {
+    event.preventDefault()
+    const text = props.tasks.draft(props.agent).trim()
+    if (!text || state.sending || !editable()) return
+    if (new TextEncoder().encode(text).byteLength > 4096) {
+      setState("error", "Keep your message within 4 KB. Send a concise direction or file reference.")
+      return
+    }
+    setState({ sending: true, error: undefined, notice: undefined })
+    await props.tasks
+      .message(props.agent, text)
+      .then(() => {
+        if (props.tasks.draft(props.agent).trim() === text) props.tasks.setDraft(props.agent, "")
+        setState("notice", "Message queued for the next safe step.")
+      })
+      .catch((error: unknown) => setState("error", failure(error)))
+    setState("sending", false)
+  }
+  const stop = async () => {
+    if (state.stopping) return
+    setState({ stopping: true, error: undefined, notice: undefined })
+    await props.tasks
+      .stopAgent(props.agent)
+      .then(() => setState("notice", "Stopped. Partial work has been kept."))
+      .catch((error: unknown) => setState("error", failure(error)))
+    setState("stopping", false)
+  }
+  return (
+    <div class="vector-bg-tasks-detail">
+      <p class="vector-bg-tasks-activity">
+        {props.agent.currentStep ?? statusWord(props.agent.status)} <span>· {taskCost([props.agent])}</span>
+      </p>
+      <div class="vector-bg-tasks-actions">
+        <button
+          type="button"
+          disabled={!props.agent.sessionID && !props.agent.task?.controls.inspect}
+          aria-expanded={state.expanded}
+          aria-controls={`task-detail-${identify()}`}
+          onClick={inspect}
+        >
+          {state.loading ? "Loading…" : "Details"}
+        </button>
+        <Show when={editable() || state.talk || props.tasks.draft(props.agent)}>
+          <button
+            type="button"
+            aria-expanded={state.talk}
+            aria-controls={`task-message-${identify()}`}
+            onClick={() => {
+              setState("talk", !state.talk)
+              if (state.talk)
+                requestAnimationFrame(() => document.getElementById(`task-message-input-${identify()}`)?.focus())
+            }}
+          >
+            Talk to this subagent
+          </button>
+        </Show>
+        <button type="button" onClick={() => props.tasks.ask(props.agent)}>
+          Ask Vector about this
+        </button>
+        <Show when={canStop()}>
+          <button type="button" disabled={state.stopping} onClick={stop}>
+            {state.stopping ? "Stopping…" : "Stop"}
+          </button>
+        </Show>
+      </div>
+      <Show when={(props.agent.dependsOn?.length ?? 0) > 0}>
+        <p class="vector-bg-tasks-dependencies">
+          Depends on:{" "}
+          <For each={props.agent.dependsOn}>
+            {(id, index) => {
+              const dependency = () =>
+                props.tasks
+                  .cards()
+                  .flatMap((card) => card.agents)
+                  .find((agent) => agent.task?.id === id || agent.sessionID === id)
+              return (
+                <>
+                  {index() ? ", " : ""}
+                  <button
+                    type="button"
+                    disabled={!dependency() || !props.tasks.canOpenAgent(dependency()!)}
+                    onClick={() => {
+                      const agent = dependency()
+                      if (agent) props.tasks.openAgent(agent)
+                    }}
+                  >
+                    {dependency()?.title ?? id}
+                  </button>
+                </>
+              )
+            }}
+          </For>
+        </p>
+      </Show>
+      <Show when={state.talk}>
+        <form id={`task-message-${identify()}`} class="vector-bg-tasks-message" onSubmit={send}>
+          <label for={`task-message-input-${identify()}`}>Message {props.agent.title}</label>
+          <textarea
+            id={`task-message-input-${identify()}`}
+            rows={3}
+            value={props.tasks.draft(props.agent)}
+            onInput={(event) => props.tasks.setDraft(props.agent, event.currentTarget.value)}
+            placeholder="Add a direction or share a finding…"
+          />
+          <p>
+            {editable()
+              ? "Delivered at the next safe step. Your conversation stays open."
+              : "This task has finished. Open its session to continue; your draft is kept."}
+          </p>
+          <button type="submit" disabled={!editable() || state.sending || !props.tasks.draft(props.agent).trim()}>
+            {state.sending ? "Sending…" : "Send message"}
+          </button>
+        </form>
+      </Show>
+      <Show when={state.expanded}>
+        <div id={`task-detail-${identify()}`} class="vector-bg-tasks-inspect" aria-busy={state.loading}>
+          <Show when={(props.agent.ownedPaths?.length ?? 0) > 0}>
+            <p>Owned paths: {props.agent.ownedPaths?.join(", ")}</p>
+          </Show>
+          <Show when={state.detail}>
+            {(detail) => (
+              <>
+                <ol>
+                  <For each={detail().steps}>
+                    {(step) => <li>{[step.tool, step.status, step.text].filter(Boolean).join(" · ")}</li>}
+                  </For>
+                </ol>
+                <Show when={detail().output}>
+                  <pre>{detail().output}</pre>
+                </Show>
+                <Show when={detail().truncated}>
+                  <p>Showing a bounded summary. Open the session for the full history.</p>
+                </Show>
+                <Show when={detail().task.resultRef}>
+                  <p>
+                    Artifact: <code>{detail().task.resultRef}</code>
+                  </p>
+                </Show>
+                <Show when={!detail().output && !detail().steps.length}>
+                  <p>No activity reported yet.</p>
+                </Show>
+              </>
+            )}
+          </Show>
+        </div>
+      </Show>
+      <Show when={state.error}>
+        <p class="vector-bg-tasks-action-error" role="alert">
+          {state.error}
+        </p>
+      </Show>
+      <Show when={state.notice}>
+        <p class="vector-bg-tasks-notice" role="status">
+          {state.notice}
+        </p>
+      </Show>
+    </div>
   )
 }

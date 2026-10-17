@@ -18,6 +18,7 @@ import { QueryBoolean } from "./query"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { Task } from "@vectordevai/schema/task"
+import { TaskBridge } from "@vectordevai/schema/task-bridge"
 
 export class TaskApiError extends Schema.ErrorClass<TaskApiError>("TaskApiError")(
   {
@@ -113,6 +114,9 @@ export const ExperimentalPaths = {
   taskMessage: "/experimental/session/:sessionID/tasks/:taskID/message",
   taskStop: "/experimental/session/:sessionID/tasks/stop",
   taskWait: "/experimental/session/:sessionID/tasks/wait",
+  taskBridgeRegister: "/experimental/session/:sessionID/tasks/bridge/register",
+  taskBridgePoll: "/experimental/session/:sessionID/tasks/bridge/poll",
+  taskBridgeReceipt: "/experimental/session/:sessionID/tasks/bridge/receipt",
   resource: "/experimental/resource",
 } as const
 
@@ -299,6 +303,45 @@ export const ExperimentalApi = HttpApi.make("experimental")
             summary: "Wait for session tasks",
             description:
               "Wait for any or all selected children with a bounded timeout and no polling or model requests.",
+          }),
+        ),
+        HttpApiEndpoint.post("taskBridgeRegister", ExperimentalPaths.taskBridgeRegister, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: TaskBridge.RegisterInput,
+          success: TaskBridge.RegisterResult,
+          error: TaskApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.task.bridge.register",
+            summary: "Register desktop task observations",
+            description: "Owner-authenticated desktop relay with an expiring lease. No callback URLs are accepted.",
+          }),
+        ),
+        HttpApiEndpoint.post("taskBridgePoll", ExperimentalPaths.taskBridgePoll, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: TaskBridge.PollInput,
+          success: TaskBridge.PollResult,
+          error: TaskApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.task.bridge.poll",
+            summary: "Wait for desktop task commands",
+            description: "Owner-authenticated desktop relay with an expiring lease. No callback URLs are accepted.",
+          }),
+        ),
+        HttpApiEndpoint.post("taskBridgeReceipt", ExperimentalPaths.taskBridgeReceipt, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: TaskBridge.ReceiptInput,
+          success: TaskBridge.ReceiptResult,
+          error: TaskApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.task.bridge.receipt",
+            summary: "Confirm a desktop task command",
+            description: "Owner-authenticated desktop relay with an expiring lease. No callback URLs are accepted.",
           }),
         ),
         HttpApiEndpoint.get("resource", ExperimentalPaths.resource, {

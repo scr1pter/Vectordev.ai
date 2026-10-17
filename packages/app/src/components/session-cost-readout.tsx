@@ -1,5 +1,7 @@
 import { For, Show, createMemo, createSignal } from "solid-js"
 import { TooltipV2 } from "@vectordevai/ui/v2/tooltip-v2"
+import { useBackgroundTasks } from "@/features/background-tasks/use-background-tasks"
+import { desktopSpendAgents, taskCost } from "@/features/background-tasks/task-board-model"
 import { useSync } from "@/context/sync"
 import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
@@ -38,6 +40,10 @@ export function SessionCostReadout() {
   const tokens = createMemo(() => sessionTokens(info()))
   const [hovered, setHovered] = createSignal(false)
   const delegated = createDelegatedSpend(info, hovered)
+  const tasks = useBackgroundTasks()
+  const desktop = createMemo(() =>
+    tasks?.rootID() === info()?.id ? desktopSpendAgents(tasks?.cards().flatMap((card) => card.agents) ?? []) : [],
+  )
 
   const usd = createMemo(
     () =>
@@ -91,7 +97,7 @@ export function SessionCostReadout() {
 
   // Only appears once the session has actually spent something.
   return (
-    <Show when={params.id && (cost() > 0 || tokens() > 0)}>
+    <Show when={params.id && (cost() > 0 || tokens() > 0 || desktop().length > 0)}>
       <TooltipV2
         placement="bottom"
         value={
@@ -122,6 +128,33 @@ export function SessionCostReadout() {
                   </div>
                 )}
               </For>
+              <For each={delegated().children.slice(0, 8)}>
+                {(child) => (
+                  <div data-slot="session-cost-child" class="flex items-center justify-between gap-4 pl-2">
+                    <span class="truncate text-v2-text-text-muted" title={child.label}>
+                      {child.label}
+                    </span>
+                    <span class="shrink-0 text-v2-text-text-base">{partText(child)}</span>
+                  </div>
+                )}
+              </For>
+              <Show when={delegated().children.length > 8}>
+                <div class="text-[11px] leading-4 text-v2-text-text-faint">
+                  {delegated().children.length - 8} more in Background tasks
+                </div>
+              </Show>
+            </Show>
+            <Show when={desktop().length > 0}>
+              <div
+                data-slot="session-cost-desktop"
+                class="flex items-center justify-between gap-4 border-t border-v2-border-base pt-2"
+              >
+                <span class="text-v2-text-text-muted">Desktop task spend</span>
+                <span class="shrink-0 text-v2-text-text-base">{taskCost(desktop())}</span>
+              </div>
+              <div class="text-[11px] leading-4 text-v2-text-text-faint">
+                Latest recorded workspace runs, shown separately from Session cost. Tasks without usage remain unpriced.
+              </div>
             </Show>
             <Show when={unpriced() > 0}>
               <div class="pt-1 text-[11px] leading-4 text-v2-text-text-faint">
@@ -146,10 +179,12 @@ export function SessionCostReadout() {
           class="flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-[color:var(--vx-line)] bg-[color:color-mix(in_srgb,var(--vx-text)_3%,transparent)] px-2.5 text-[11px] font-medium tabular-nums text-[color:color-mix(in_srgb,var(--vx-text)_62%,transparent)] transition-colors duration-150 hover:border-[color:var(--vx-line)] hover:text-[color:color-mix(in_srgb,var(--vx-text)_80%,transparent)]"
         >
           <span classList={{ "text-[#a78bfa]": !pill().warn, "text-[color:var(--vx-amber)]": pill().warn }}>
-            {pill().label}
+            {cost() > 0 || tokens() > 0 ? pill().label : `Desktop ${taskCost(desktop())}`}
           </span>
-          <span class="text-[color:color-mix(in_srgb,var(--vx-text)_25%,transparent)]">·</span>
-          <span>{compactTokens(tokens())}</span>
+          <Show when={tokens() > 0}>
+            <span class="text-[color:color-mix(in_srgb,var(--vx-text)_25%,transparent)]">·</span>
+            <span>{compactTokens(tokens())}</span>
+          </Show>
         </div>
       </TooltipV2>
     </Show>

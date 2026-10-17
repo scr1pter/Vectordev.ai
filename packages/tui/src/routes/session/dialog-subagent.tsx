@@ -91,7 +91,7 @@ export function DialogSubagent(props: { sessionID: string; parentSessionID?: str
                       { throwOnError: true },
                     )
                     .then(() => {
-                      toast.show({ message: "Subagent stopped. Partial work is retained.", variant: "info" })
+                      toast.show({ message: "Stop requested. Partial work is retained.", variant: "info" })
                       dialog.clear()
                     })
                     .catch(fail)
@@ -100,18 +100,22 @@ export function DialogSubagent(props: { sessionID: string; parentSessionID?: str
               },
             ]
           : []),
-        {
-          title: "Open",
-          value: "subagent.view",
-          description: "the subagent's session",
-          onSelect: (dialog) => {
-            route.navigate({
-              type: "session",
-              sessionID: props.sessionID,
-            })
-            dialog.clear()
-          },
-        },
+        ...(!props.task || (props.task.source === "subagent" && props.task.sessionID)
+          ? [
+              {
+                title: "Open",
+                value: "subagent.view",
+                description: "the subagent's session",
+                onSelect: () => {
+                  route.navigate({
+                    type: "session",
+                    sessionID: props.task?.sessionID ?? props.sessionID,
+                  })
+                  dialog.clear()
+                },
+              },
+            ]
+          : []),
       ]}
     />
   )

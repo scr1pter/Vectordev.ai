@@ -1586,6 +1586,7 @@ const layer = Layer.effect(
             messages: msgs,
             promptOps,
           }).pipe(
+            Effect.provideService(Session.Service, sessions),
             Effect.provideService(Plugin.Service, plugin),
             Effect.provideService(Permission.Service, permission),
             Effect.provideService(ToolRegistry.Service, registry),

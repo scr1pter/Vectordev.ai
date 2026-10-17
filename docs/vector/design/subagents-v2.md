@@ -36,6 +36,8 @@ Keep a fixed, documented 500 ms window starting with the first completion. Compl
 
 V1 uses its own prompt admission adapter and serialized provider-turn boundary. Synthetic notifications must not become the user's selected model/format/budget or displace a pending human message. V2 continues to admit durable inputs through `SessionV2.prompt` and `SessionExecution`; never bridge its runner to the legacy loop. Steer promotes at a safe provider-turn boundary; queue promotes only when the session would otherwise become idle.
 
+The current app conversation uses the engine's V1 task tools. Its desktop bridge controls native V2 workspace workers through their durable prompt API. Pure SDK-next V2 parent sessions do not automatically receive `task` or `task_manage`; their canonical application-tool registration remains a separate integration surface. Native V2 team members retain their scoped teammate mailbox. This release does not claim identical tool catalogs across the two runners.
+
 Persist observation across restarts. A persisted running state is not evidence of a surviving executor: reconcile abandoned work as stopped with an interruption reason, retain partial results, and require an explicit continuation. Do not retry paid provider work automatically after a crash.
 
 ## Collaboration and file ownership
@@ -59,6 +61,18 @@ Child and batch ceilings tighten the launching run's Run Guard. Bind children to
 Retain the compact background panel and inline chips. Add current activity, direct tokens/cost, grouping, dependency details, bounded progress, Talk to this subagent, Ask Vector about this, Stop, and Open. Keep Needs-you prominent. Preserve drafts and state clearly whether a correction was admitted or the child already finished. Stale connectivity is shown separately from task progress.
 
 TUI and CLI expose the same list, inspect, steer, and stop semantics. Headless execution waits for children and resulting notifications, with a real finite timeout even if event delivery stalls. Batch tool calls must display every child.
+
+## Implemented desktop bridge boundaries
+
+The desktop registers observations through the authenticated engine connection it already owns. Registration binds the real parent session and project directory to a private, unpredictable lease; it never accepts an agent-supplied callback URL. The engine queues bounded inspect/message/stop commands, and the desktop publishes durable receipts. An interrupted command is retained as uncertain rather than blindly replayed. Guest bridge registration, polling, and receipts are denied before remote proxying.
+
+Swarm workers retain the real parent identity even though their workspace records use an internal staging directory and synthetic parent. Authorization joins only workspace IDs recorded by a swarm owned by that parent and project. Synthetic coordinator workspace records do not create additional task scopes. A bounded snapshot advertises truncation; stop-all rejects an incomplete selection. Snapshots prioritize active tasks, then recent history.
+
+A missing desktop lease means disconnected, not stopped: the executor may still be running. A lease deadline publishes a parent update without requiring a read, preserves last-known progress, and disables remote mutations. Reconnection requires a fresh lease after expiry or engine restart. Native desktop restart reconciliation separately settles work whose process owner no longer exists. No path automatically retries paid work.
+
+Live steering is supported for native workspace sessions at durable V2 admission boundaries. External CLI runners expose only controls their existing executor can perform; unsupported live messaging remains unavailable. Parent corrections carry a host-derived parent relationship in the bounded coordination envelope, preserving the child's permissions, budget, and safe delivery boundary.
+
+The parent cost readout keeps the native ledger's cumulative session and descendant total. Desktop measured dollars appear as a separate **Desktop task spend** subtotal for the latest recorded workspace runs. Native ledger mirrors are excluded from that subtotal. A desktop record's measured cost is not established as lifetime cumulative across continuations, so the subtotal is not added to Session cost or the native run-cap meter. Missing external usage and unmeasured swarm planning remain unknown; no synthetic token counts or free-cost claims are produced.
 
 ## Verification and release
 

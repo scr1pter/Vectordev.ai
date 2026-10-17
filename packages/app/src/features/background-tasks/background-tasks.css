@@ -1207,6 +1207,127 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-card-toggle {
   line-height: 16px;
 }
 
+.vector-bg-tasks-total,
+.vector-bg-tasks > .vector-bg-tasks-notice {
+  margin: 0;
+  padding: 0 16px 12px;
+  color: var(--bgt-text-2);
+  font-size: var(--bgt-fs-table);
+}
+
+.vector-bg-tasks-detail-row > td {
+  padding: 0 var(--bgt-inset) 12px;
+  white-space: normal;
+}
+
+.vector-bg-tasks-detail {
+  color: var(--bgt-text-2);
+  font-size: var(--bgt-fs-table);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.vector-bg-tasks-activity {
+  margin: 0 0 4px;
+  color: var(--bgt-text-1);
+}
+
+.vector-bg-tasks-activity > span {
+  color: var(--bgt-text-3);
+}
+
+.vector-bg-tasks-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+:is(.vector-bg-tasks-actions, .vector-bg-tasks-message, .vector-bg-tasks-dependencies) button {
+  min-height: 30px;
+  padding: 4px 2px;
+  color: var(--bgt-text-1);
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+:is(.vector-bg-tasks-actions, .vector-bg-tasks-message, .vector-bg-tasks-dependencies) button:hover:not(:disabled) {
+  background: var(--bgt-well-hover);
+}
+
+:is(.vector-bg-tasks-actions, .vector-bg-tasks-message, .vector-bg-tasks-dependencies) button:disabled {
+  color: var(--bgt-text-3);
+  cursor: default;
+  text-decoration: none;
+}
+
+.vector-bg-tasks-message {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.vector-bg-tasks-message label {
+  color: var(--bgt-text-1);
+}
+
+.vector-bg-tasks-message textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 72px;
+  padding: 8px;
+  border: 1px solid var(--bgt-text-3);
+  border-radius: 6px;
+  background: var(--bgt-pane);
+  color: var(--bgt-text-1);
+  font: inherit;
+}
+
+.vector-bg-tasks-message p,
+.vector-bg-tasks-inspect p,
+.vector-bg-tasks-dependencies,
+.vector-bg-tasks-notice,
+.vector-bg-tasks-action-error {
+  margin: 4px 0;
+}
+
+.vector-bg-tasks-message button[type="submit"] {
+  justify-self: start;
+}
+
+.vector-bg-tasks-inspect {
+  margin-top: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.vector-bg-tasks-inspect ol {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+.vector-bg-tasks-inspect pre {
+  white-space: pre-wrap;
+  font: inherit;
+  margin: 8px 0;
+}
+.vector-bg-tasks-action-error {
+  color: var(--bgt-fail-text);
+}
+
+:is(.vector-bg-tasks-actions, .vector-bg-tasks-message, .vector-bg-tasks-dependencies)
+  :is(button, textarea):focus-visible {
+  outline: 2px solid var(--bgt-ring);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  :is(.vector-bg-tasks-actions, .vector-bg-tasks-message, .vector-bg-tasks-dependencies) button {
+    min-height: 44px;
+  }
+}
+
 /* focus */
 :is(
   .vector-bg-tasks-icon-btn,
@@ -1243,12 +1364,7 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-card-toggle {
     transition: none;
   }
 
-  :is(
-      .vector-bg-tasks-phase-toggle,
-      .vector-bg-tasks-card-toggle,
-      .vector-bg-tasks-finished-toggle,
-      .vector-task-chip
-    )
+  :is(.vector-bg-tasks-phase-toggle, .vector-bg-tasks-card-toggle, .vector-bg-tasks-finished-toggle, .vector-task-chip)
     > [data-component="icon"] {
     transition: none;
   }
@@ -1283,10 +1399,10 @@ html:is([data-vector-reduce-animations="true"], [data-vector-animation-speed="of
   }
 
   :is(.vector-bg-tasks-square, .vector-task-chip-square):is(
-      [data-status="done"],
-      [data-status="failed"],
-      [data-status="waiting"]
-    ),
+    [data-status="done"],
+    [data-status="failed"],
+    [data-status="waiting"]
+  ),
   .vector-bg-tasks-agent-state:is([data-status="failed"], [data-status="waiting"])::before {
     background: CanvasText;
   }

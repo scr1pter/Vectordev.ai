@@ -2,7 +2,11 @@ import type { Task } from "@vectordevai/schema/task"
 
 export function taskDescription(task: Task.Info) {
   return [
-    task.status === "waiting_on_user" ? "Needs you" : task.status,
+    task.connection === "disconnected"
+      ? `Disconnected (last known: ${task.status})`
+      : task.status === "waiting_on_user"
+        ? "Needs you"
+        : task.status,
     `${Math.round(task.elapsedMs / 1000)}s`,
     ...(task.usage
       ? [

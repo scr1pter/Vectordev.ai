@@ -710,6 +710,90 @@ const scenarios: Scenario[] = [
     }),
   http.protected.get("/experimental/resource", "experimental.resource.list").json(),
   http.protected
+    .get("/experimental/session/{sessionID}/tasks", "experimental.task.list")
+    .seeded((ctx) => ctx.session({ title: "Task board owner" }))
+    .at((ctx) => ({
+      path: route("/experimental/session/{sessionID}/tasks", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+    }))
+    .json(200, (body) => {
+      object(body)
+      array(body.tasks)
+      check(body.tasks.length === 0 && body.truncated === false, "a fresh task board should be empty")
+    }),
+  http.protected
+    .get("/experimental/session/{sessionID}/tasks/{taskID}", "experimental.task.inspect.missing")
+    .seeded((ctx) => ctx.session({ title: "Task inspection owner" }))
+    .at((ctx) => ({
+      path: route("/experimental/session/{sessionID}/tasks/{taskID}", {
+        sessionID: ctx.state.id,
+        taskID: "ses_missing",
+      }),
+      headers: ctx.headers(),
+    }))
+    .status(400),
+  http.protected
+    .post("/experimental/session/{sessionID}/tasks/{taskID}/message", "experimental.task.message.missing")
+    .seeded((ctx) => ctx.session({ title: "Task instruction owner" }))
+    .at((ctx) => ({
+      path: route("/experimental/session/{sessionID}/tasks/{taskID}/message", {
+        sessionID: ctx.state.id,
+        taskID: "ses_missing",
+      }),
+      headers: ctx.headers(),
+      body: { text: "Keep the existing public API", delivery: "steer" },
+    }))
+    .status(400),
+  http.protected
+    .post("/experimental/session/{sessionID}/tasks/stop", "experimental.task.stop.empty")
+    .seeded((ctx) => ctx.session({ title: "Task stop owner" }))
+    .at((ctx) => ({
+      path: route("/experimental/session/{sessionID}/tasks/stop", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+      body: { all: true },
+    }))
+    .json(200, (body) => {
+      object(body)
+      array(body.tasks)
+      check(body.tasks.length === 0, "stopping an empty board should not start work")
+    }),
+  http.protected
+    .post("/experimental/session/{sessionID}/tasks/wait", "experimental.task.wait.invalid")
+    .seeded((ctx) => ctx.session({ title: "Task wait owner" }))
+    .at((ctx) => ({
+      path: route("/experimental/session/{sessionID}/tasks/wait", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+      body: { taskIDs: [], timeout: 0 },
+    }))
+    .status(400),
+  http.protected
+    .post("/experimental/session/{sessionID}/tasks/bridge/register", "experimental.task.bridge.register")
+    .seeded((ctx) => ctx.session({ title: "Desktop task bridge owner" }))
+    .at((ctx) => ({
+      path: route("/experimental/session/{sessionID}/tasks/bridge/register", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+      body: { tasks: [] },
+    }))
+    .json(200, (body) => {
+      object(body)
+      check(typeof body.lease === "string" && body.lease.length >= 32, "the bridge should issue an opaque lease")
+      check(typeof body.expiresAt === "number", "the bridge lease should expire")
+    }),
+  ...(["poll", "receipt"] as const).map((action) =>
+    http.protected
+      .post(`/experimental/session/{sessionID}/tasks/bridge/${action}`, `experimental.task.bridge.${action}.invalid`)
+      .seeded((ctx) => ctx.session({ title: "Desktop lease rejection" }))
+      .at((ctx) => ({
+        path: route(`/experimental/session/{sessionID}/tasks/bridge/${action}`, { sessionID: ctx.state.id }),
+        headers: ctx.headers(),
+        body: {
+          lease: "x".repeat(64),
+          ...(action === "poll" ? { timeout: 0 } : { commandID: "missing", error: "Not executed" }),
+        },
+      }))
+      .status(400),
+  ),
+  http.protected
     .post("/sync/history", "sync.history.list")
     .at((ctx) => ({ path: "/sync/history", headers: ctx.headers(), body: {} }))
     .json(200, array),

@@ -1,4 +1,5 @@
 import type { Message, Part, Session, SessionStatus, ToolPart } from "@vectordevai/sdk/v2"
+import type { Task } from "@vectordevai/schema/task"
 import { GENERAL_SUBAGENT_ID, subagentIdentity } from "@vectordevai/session-ui/subagent-identity"
 import { taskBatchEntries, taskItemState } from "@vectordevai/ui/task-batch"
 import { isInternalSession } from "@/utils/internal-sessions"
@@ -66,6 +67,12 @@ export type TaskAgent = {
   toolUses?: number
   model?: TaskModel
   error?: string
+  task?: Task.Info
+  cost?: number
+  unpricedSteps?: number
+  currentStep?: string
+  ownedPaths?: readonly string[]
+  dependsOn?: readonly string[]
   /**
    * Later task parts that only added to this agent's live run (a task_id call
    * on a job still running). They get no row, square or chip of their own.
@@ -140,7 +147,11 @@ export function formatAgentCount(count: number) {
 }
 
 /** Milliseconds a task has run: to its end once finished, to `now` while live. */
-export function elapsedMs(item: { startedAt?: number; endedAt?: number; status: TaskStatus }, now: number) {
+export function elapsedMs(
+  item: { startedAt?: number; endedAt?: number; status: TaskStatus; task?: Task.Info },
+  now: number,
+) {
+  if (item.task?.connection === "disconnected") return item.task.elapsedMs
   if (item.startedAt === undefined) return undefined
   const end = item.endedAt ?? (isLive(item.status) ? now : undefined)
   if (end === undefined) return undefined
@@ -244,7 +255,7 @@ export function modelShortName(name: string) {
 // ---------------------------------------------------------------------------
 // Lifecycle fields, read defensively from either surface
 
-type Usage = { total?: number; toolUses?: number }
+type Usage = { total?: number; toolUses?: number; cost?: number; unpricedSteps?: number }
 
 type Lifecycle = {
   kind?: SubagentKind
@@ -261,6 +272,8 @@ type Lifecycle = {
   completedAt?: number
   usage?: Usage
   error?: string
+  ownedPaths?: readonly string[]
+  dependsOn?: readonly string[]
   model?: { providerID: string; modelID: string; variant?: string }
 }
 
@@ -302,7 +315,7 @@ function readUsage(value: unknown): Usage | undefined {
   const total = finite(item.total) ?? summed
   const toolUses = finite(item.toolUses)
   if (total === undefined && toolUses === undefined) return undefined
-  return { total, toolUses }
+  return { total, toolUses, ...definedFields({ cost: finite(item.cost), unpricedSteps: finite(item.unpricedSteps) }) }
 }
 
 /** Reads lifecycle fields from a task part's metadata (parentMessageId, sessionId) or a child record (parentMessageID). */
@@ -329,6 +342,12 @@ export function readLifecycle(value: unknown): Lifecycle {
     completedAt: finite(item.completedAt),
     usage: readUsage(item.usage),
     error: text(item.error),
+    ownedPaths: Array.isArray(item.ownedPaths)
+      ? item.ownedPaths.filter((path): path is string => typeof path === "string")
+      : undefined,
+    dependsOn: Array.isArray(item.dependsOn)
+      ? item.dependsOn.filter((id): id is string => typeof id === "string")
+      : undefined,
     model: readModel(item.model),
   }
 }
@@ -438,6 +457,9 @@ type ChildFacts = {
   toolUses?: number
   last?: StatusInput["last"]
   lastModel?: { providerID: string; modelID: string; variant?: string }
+  currentStep?: string
+  cost?: number
+  unpricedSteps?: number
 }
 
 function tokenSum(tokens: unknown) {
@@ -464,6 +486,7 @@ export function childFacts(source: TaskSource, sessionID: string | undefined): C
   let messageTokens: number | undefined
   let last: ChildFacts["last"]
   let lastModel: ChildFacts["lastModel"]
+  let currentStep: string | undefined
   for (const message of messages) {
     if (message.role !== "assistant") continue
     messageTokens = (messageTokens ?? 0) + tokenSum(message.tokens)
@@ -478,7 +501,11 @@ export function childFacts(source: TaskSource, sessionID: string | undefined): C
     if (!parts) continue
     toolUses ??= 0
     for (const part of parts) {
-      if (part.type === "tool") toolUses += 1
+      if (part.type === "tool") {
+        toolUses += 1
+        if (part.state)
+          currentStep = `${part.tool}: ${"title" in part.state && part.state.title ? part.state.title : part.state.status}`
+      }
       if (part.type === "step-finish") {
         steps += 1
         stepTokens += tokenSum(part.tokens)
@@ -487,7 +514,15 @@ export function childFacts(source: TaskSource, sessionID: string | undefined): C
   }
   const row = tokenSum(source.session(sessionID)?.tokens)
   const tokens = steps > 0 ? stepTokens : row > 0 ? row : messageTokens
-  return { tokens, toolUses, last, lastModel }
+  return {
+    tokens,
+    toolUses,
+    last,
+    lastModel,
+    currentStep,
+    cost: finite(source.session(sessionID)?.cost),
+    unpricedSteps: finite(source.session(sessionID)?.unpricedSteps),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -594,6 +629,19 @@ function buildAgent(source: TaskSource, seed: AgentSeed): TaskAgent {
     toolUses: run.usage?.toolUses ?? facts.toolUses,
     model,
     error: status === "failed" ? error : undefined,
+    cost: facts.cost ?? run.usage?.cost,
+    unpricedSteps: facts.unpricedSteps ?? run.usage?.unpricedSteps,
+    currentStep: facts.currentStep,
+    ownedPaths:
+      run.ownedPaths ??
+      (Array.isArray(input.owned_paths)
+        ? input.owned_paths.filter((path): path is string => typeof path === "string")
+        : undefined),
+    dependsOn:
+      run.dependsOn ??
+      (Array.isArray(input.depends_on)
+        ? input.depends_on.filter((id): id is string => typeof id === "string")
+        : undefined),
   }
 }
 

@@ -56,6 +56,12 @@ import type {
   ExperimentalSessionListResponses,
   ExperimentalSessionUsageErrors,
   ExperimentalSessionUsageResponses,
+  ExperimentalTaskBridgePollErrors,
+  ExperimentalTaskBridgePollResponses,
+  ExperimentalTaskBridgeReceiptErrors,
+  ExperimentalTaskBridgeReceiptResponses,
+  ExperimentalTaskBridgeRegisterErrors,
+  ExperimentalTaskBridgeRegisterResponses,
   ExperimentalTaskInspectErrors,
   ExperimentalTaskInspectResponses,
   ExperimentalTaskListErrors,
@@ -292,6 +298,9 @@ import type {
   SyncStartResponses,
   SyncStealErrors,
   SyncStealResponses,
+  TaskBridgePollInput,
+  TaskBridgeReceiptInput,
+  TaskBridgeRegisterInput,
   TeamsId,
   TextPartInput,
   ToolIdsErrors,
@@ -1018,6 +1027,137 @@ export class Session extends HeyApiClient {
   }
 }
 
+export class Bridge extends HeyApiClient {
+  /**
+   * Register desktop task observations
+   *
+   * Owner-authenticated desktop relay with an expiring lease. No callback URLs are accepted.
+   */
+  public register<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      taskBridgeRegisterInput?: TaskBridgeRegisterInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "taskBridgeRegisterInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalTaskBridgeRegisterResponses,
+      ExperimentalTaskBridgeRegisterErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/bridge/register",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Wait for desktop task commands
+   *
+   * Owner-authenticated desktop relay with an expiring lease. No callback URLs are accepted.
+   */
+  public poll<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      taskBridgePollInput?: TaskBridgePollInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "taskBridgePollInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalTaskBridgePollResponses,
+      ExperimentalTaskBridgePollErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/bridge/poll",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Confirm a desktop task command
+   *
+   * Owner-authenticated desktop relay with an expiring lease. No callback URLs are accepted.
+   */
+  public receipt<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      taskBridgeReceiptInput?: TaskBridgeReceiptInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "taskBridgeReceiptInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalTaskBridgeReceiptResponses,
+      ExperimentalTaskBridgeReceiptErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/bridge/receipt",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Task extends HeyApiClient {
   /**
    * List session tasks
@@ -1236,6 +1376,11 @@ export class Task extends HeyApiClient {
         ...params.headers,
       },
     })
+  }
+
+  private _bridge?: Bridge
+  get bridge(): Bridge {
+    return (this._bridge ??= new Bridge({ client: this.client }))
   }
 }
 

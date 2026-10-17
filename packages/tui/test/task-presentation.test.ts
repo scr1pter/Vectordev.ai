@@ -21,6 +21,9 @@ const task: Task.Info = {
 test("task summaries name pending attention and preserve unknown usage", () => {
   expect(taskDescription(task)).toBe("Needs you · 3s · usage unavailable · 1 dependency")
   expect(taskDescription(task)).not.toContain("$0")
+  expect(taskDescription({ ...task, status: "running", connection: "disconnected" })).toContain(
+    "Disconnected (last known: running)",
+  )
 })
 
 test("external reported cost never implies a known token count", () => {

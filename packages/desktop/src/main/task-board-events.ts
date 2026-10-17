@@ -8,5 +8,13 @@ export function onTaskBoardChange(listener: () => void) {
 }
 
 export function taskBoardChanged() {
-  listeners.forEach((listener) => listener())
+  // A detached renderer must not fail a completed durable write or starve the
+  // engine relay of the same change notification.
+  listeners.forEach((listener) => {
+    try {
+      listener()
+    } catch (error) {
+      console.warn("Task observer failed", error instanceof Error ? error.message : "unknown observer error")
+    }
+  })
 }

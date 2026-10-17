@@ -59,7 +59,13 @@ export function DialogTasks(props: { sessionID: string }) {
         value: task.id,
         title: task.title,
         description: taskDescription(task),
-        category: task.batchID ? `Batch ${task.batchID.slice(-8)}` : "Subagents",
+        category: task.groupID
+          ? `${task.source === "swarm" ? "Swarm" : "Team"} ${task.groupID.slice(-8)}`
+          : task.batchID
+            ? `Batch ${task.batchID.slice(-8)}`
+            : task.source === "external"
+              ? "External agents"
+              : "Subagents",
         onSelect: (dialog) =>
           dialog.replace(() => <DialogSubagent sessionID={task.id} parentSessionID={props.sessionID} task={task} />),
       }))}

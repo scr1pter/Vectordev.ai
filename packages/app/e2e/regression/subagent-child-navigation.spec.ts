@@ -102,6 +102,103 @@ test("surfaces a blocked subagent alongside running siblings and opens its quest
   )
 })
 
+test("manages a background subagent without leaving the parent or replacing its draft", async ({ page }) => {
+  await setup(page)
+  const messages: unknown[] = []
+  const stops: unknown[] = []
+  const task = {
+    id: childID,
+    sessionID: childID,
+    parentSessionID: parentID,
+    source: "subagent",
+    title: taskDescription,
+    agent: "explore",
+    status: "running",
+    batchID: "batch_one",
+    startedAt: Date.now() - 200,
+    elapsedMs: 200,
+    currentStep: "Reading navigation routes",
+    ownedPaths: ["src/routes"],
+    dependsOn: [],
+    resultAvailable: false,
+    attempt: 1,
+    controls: { inspect: true, message: true, stop: true },
+    usage: {
+      cost: 0.12,
+      tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+      total: 120,
+      toolUses: 2,
+      steps: 1,
+      unpricedSteps: 0,
+    },
+  }
+  await page.route(
+    (url) => url.pathname.startsWith(`/experimental/session/${parentID}/tasks`),
+    async (route) => {
+      const pathname = new URL(route.request().url()).pathname
+      const body = pathname.endsWith("/message")
+        ? (messages.push(route.request().postDataJSON()),
+          { taskID: childID, messageID: "msg_steer", delivery: "steer", accepted: true })
+        : pathname.endsWith("/stop")
+          ? (stops.push(route.request().postDataJSON()),
+            Object.assign(task, {
+              status: "stopped",
+              completedAt: Date.now(),
+              controls: { inspect: true, message: false, stop: false },
+            }),
+            { tasks: [task] })
+          : pathname.endsWith(`/${childID}`)
+            ? {
+                task,
+                steps: [{ tool: "read", status: "completed", text: "Checked the parent route" }],
+                output: "Navigation findings are available.",
+                truncated: false,
+              }
+            : { tasks: [task], truncated: false }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": "*" },
+        body: JSON.stringify(body),
+      })
+    },
+  )
+  await page.goto(sessionHref(parentID))
+  await expectSessionTitle(page, parentTitle)
+  const composer = page.locator('[data-component="prompt-input"]').last()
+  await composer.fill("Keep my existing draft")
+  await page.getByRole("button", { name: /Background tasks, 1 running/ }).click()
+  const panel = page.getByRole("complementary", { name: "Background tasks", exact: true })
+  await expect(panel.getByText("Reading navigation routes", { exact: false })).toBeVisible()
+  await expect(panel.getByText("Subagent spend · $0.12", { exact: true })).toBeVisible()
+  await panel.getByRole("button", { name: "Details", exact: true }).click()
+  await expect(panel.getByText("Navigation findings are available.")).toBeVisible()
+  await expect(panel.getByText("Owned paths: src/routes")).toBeVisible()
+  await panel.getByRole("button", { name: "Ask Vector about this", exact: true }).click()
+  await expect(composer).toContainText("Keep my existing draft")
+  await expect(composer).toContainText(`task ${childID}`)
+  await panel.getByRole("button", { name: "Talk to this subagent", exact: true }).click()
+  await panel.getByLabel(`Message ${taskDescription}`, { exact: true }).fill("Check redirects too")
+  await panel.getByRole("button", { name: "Close background tasks", exact: true }).click()
+  await page.getByRole("button", { name: /Background tasks, 1 running/ }).click()
+  await panel.getByRole("button", { name: "Talk to this subagent", exact: true }).click()
+  await expect(panel.getByLabel(`Message ${taskDescription}`, { exact: true })).toHaveValue("Check redirects too")
+  await panel.getByRole("button", { name: "Send message", exact: true }).click()
+  await expect(panel.getByText("Message queued for the next safe step.")).toBeVisible()
+  expect(messages).toEqual([{ text: "Check redirects too", delivery: "steer" }])
+  await expect(page).toHaveURL(new RegExp(`/session/${parentID}$`))
+  await page.screenshot({ path: test.info().outputPath("subagent-active-controls.png"), fullPage: true, animations: "disabled" })
+  await panel.getByRole("button", { name: "Stop", exact: true }).click()
+  await expect.poll(() => stops.length).toBe(1)
+  expect(stops[0]).toMatchObject({ taskIDs: [childID], reason: "Stopped by the user" })
+  await expect(panel.getByRole("button", { name: "Finished 1", exact: true })).toBeVisible()
+  await page.screenshot({
+    path: test.info().outputPath("subagent-controls.png"),
+    fullPage: true,
+    animations: "disabled",
+  })
+})
+
 async function setup(
   page: Page,
   options: { events?: () => EventPayload[]; blocked?: boolean; batch?: "completed" | "error" } = {},

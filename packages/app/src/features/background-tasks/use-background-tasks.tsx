@@ -3,8 +3,10 @@ import { useNavigate, useParams } from "@solidjs/router"
 import { useSDK } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useSync } from "@/context/sync"
+import { usePrompt } from "@/context/prompt"
 import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/session-route"
 import { createBackgroundTasks, type BackgroundTasks } from "./background-tasks"
+import { appendTaskQuestion } from "./task-board-model"
 
 const Context = createContext<BackgroundTasks>()
 
@@ -18,6 +20,13 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
   const serverSync = useServerSync()
   const navigate = useNavigate()
   const params = useParams<{ serverKey?: string }>()
+  const prompt = usePrompt()
+  const open = (sessionID: string) =>
+    navigate(
+      params.serverKey
+        ? sessionHref(requireServerKey(params.serverKey), sessionID)
+        : legacySessionHref(sdk().directory, sessionID),
+    )
   const value = createBackgroundTasks({
     sessionID: props.sessionID,
     sync: useSync(),
@@ -25,12 +34,24 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
     reconnects: () => serverSync().reconnects(),
     pin: (sessionID) => serverSync().session.pin(sessionID),
     unpin: (sessionID) => serverSync().session.unpin(sessionID),
-    open: (sessionID) =>
-      navigate(
-        params.serverKey
-          ? sessionHref(requireServerKey(params.serverKey), sessionID)
-          : legacySessionHref(sdk().directory, sessionID),
+    desktop: window.api?.agentTasks ? { api: window.api.agentTasks, sourcePath: () => sdk().directory } : undefined,
+    open,
+    openDesktop: (task) =>
+      window.dispatchEvent(
+        new CustomEvent("vector:open-agent-task", {
+          detail: { taskID: task.id, parentSessionID: task.parentSessionID, sourcePath: sdk().directory },
+        }),
       ),
+    ask: (agent, rootID) => {
+      const target = prompt.capture({ dir: sdk().directory, id: rootID })
+      const next = appendTaskQuestion(target.current(), agent)
+      target.set(
+        next,
+        next.reduce((end, part) => (part.type === "image" ? end : Math.max(end, part.end)), 0),
+      )
+      if (props.sessionID() !== rootID) open(rootID)
+      requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-component="prompt-input"]')?.focus())
+    },
   })
   return <Context.Provider value={value}>{props.children}</Context.Provider>
 }

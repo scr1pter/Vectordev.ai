@@ -1,4 +1,4 @@
-import { Effect, Semaphore } from "effect"
+import { Effect, Schema, Semaphore } from "effect"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
 import type { Session } from "@/session/session"
 import { MessageV2 } from "@/session/message-v2"
@@ -6,6 +6,8 @@ import type { MessageID, SessionID } from "@/session/schema"
 import type { SubagentRecord, SubagentStatus, SubagentUsage } from "@/agent/subagent-kind"
 import { isRecord } from "@/util/record"
 import { randomUUID } from "node:crypto"
+import { RunBudget } from "@vectordevai/schema/run-budget"
+import { Task } from "@vectordevai/schema/task"
 import { Database } from "@vectordevai/core/database/database"
 
 /*
@@ -25,6 +27,10 @@ export const METADATA_KEY = "subagent"
 export const RUNTIME_ID = randomUUID()
 // Admission, messaging and Stop share one short critical section; execution runs outside it.
 export const controlLock = Semaphore.makeUnsafe(1)
+// Stop releases the admission lock while interrupting nested runners; these claims block new work until cleanup ends.
+export const stopping = new Set<SessionID>()
+// Independent of admission: callers may already hold controlLock. Serialize metadata read/merge/write.
+const metadataLock = Semaphore.makeUnsafe(1)
 
 export type FinalStatus = Extract<SubagentStatus, "completed" | "error" | "cancelled">
 
@@ -43,7 +49,28 @@ const PART_SLOW_RETRY = "5 seconds"
 
 export function read(info: Pick<Session.Info, "metadata">): SubagentRecord | undefined {
   const value = info.metadata?.[METADATA_KEY]
-  return isRecord(value) ? (value as SubagentRecord) : undefined
+  if (!isRecord(value) || typeof value.title !== "string" || typeof value.agent !== "string" ||
+    typeof value.parentSessionID !== "string" || typeof value.parentMessageID !== "string" ||
+    typeof value.startedAt !== "number" || !Number.isFinite(value.startedAt) ||
+    !["queued", "running", "completed", "error", "cancelled"].includes(String(value.status)) ||
+    !isRecord(value.model) || typeof value.model.providerID !== "string" || typeof value.model.modelID !== "string") return undefined
+  const strings = (input: unknown) => Array.isArray(input) ? input.filter((item): item is string => typeof item === "string") : undefined
+  const optionalString = (input: unknown) => typeof input === "string" ? input : undefined
+  const budget = Schema.decodeUnknownOption(RunBudget.Info)(value.budget)
+  const scopes = Schema.decodeUnknownOption(Schema.Array(Task.BudgetScope))(value.budgetScopes)
+  return {
+    ...value,
+    ownedPaths: strings(value.ownedPaths), dependsOn: strings(value.dependsOn), successCriteria: strings(value.successCriteria),
+    batchID: optionalString(value.batchID), resultRef: optionalString(value.resultRef), resultSummary: optionalString(value.resultSummary),
+    reason: optionalString(value.reason), error: optionalString(value.error),
+    completedAt: typeof value.completedAt === "number" && Number.isFinite(value.completedAt) ? value.completedAt : undefined,
+    attempt: typeof value.attempt === "number" && Number.isInteger(value.attempt) && value.attempt > 0 ? value.attempt : undefined,
+    budget: budget._tag === "Some" ? budget.value : undefined,
+    budgetScopes: scopes._tag === "Some" ? scopes.value : undefined,
+    notification: isRecord(value.notification) && typeof value.notification.text === "string" && typeof value.notification.launchID === "string" && ["completed", "error", "cancelled"].includes(String(value.notification.state))
+      ? { ...value.notification, messageID: optionalString(value.notification.messageID) } : undefined,
+    mailbox: Array.isArray(value.mailbox) ? value.mailbox.filter((item) => isRecord(item) && typeof item.id === "string" && typeof item.sender === "string" && typeof item.text === "string" && ["steer", "queue"].includes(String(item.delivery)) && typeof item.createdAt === "number" && Number.isFinite(item.createdAt)) : undefined,
+  } as SubagentRecord
 }
 
 /** Shallow merge in which an `undefined` patch value removes the key. */
@@ -70,7 +97,7 @@ export function write(sessions: Session.Interface, sessionID: SessionID, patch: 
       sessionID,
       metadata: { ...info.metadata, [METADATA_KEY]: merge(read(info), patch) },
     })
-  })
+  }).pipe(metadataLock.withPermits(1))
 }
 
 export function update(sessions: Session.Interface, sessionID: SessionID, patch: Partial<SubagentRecord>, attempt?: number) {

@@ -48,10 +48,12 @@ const {
 } = await import("./agent-teams")
 const { pendingFor } = await import("./agent-team-model")
 const { listAgentTasks, inspectAgentTask, messageAgentTask, stopAgentTask } = await import("./agent-task-board")
+const { connectTaskRelay, initTaskRelay } = await import("./task-relay")
 const {
   createParallelWorkspace,
   getParallelWorkspace,
   listParallelWorkspaces,
+  messageParallelWorkspace,
   isInternalWorkspaceFile,
   nextVectorTeammateDelivery,
   pendingTeammateDelivery,
@@ -193,6 +195,7 @@ describe("team outbox delivery while members are running", () => {
     const team = createAgentTeam({ name: "team", topology: "isolated", sourcePath })
     const sessions: string[] = []
     const deliveries: { sessionId: string; id: string }[] = []
+    const corrections: { id: string; prompt: { text: string }; delivery?: string }[] = []
     let failingSession: string | undefined
     const server = Bun.serve({
       hostname: "127.0.0.1",
@@ -210,6 +213,7 @@ describe("team outbox delivery while members are running", () => {
         if (path.endsWith("/prompt")) {
           const body = (await request.json()) as { id: string; prompt: { text: string } }
           const sessionId = path.split("/")[3]!
+          if (body.prompt.text.startsWith("[vector:peer-data]")) corrections.push(body)
           if (body.prompt.text.startsWith("[vector:teammate-messages]")) {
             deliveries.push({ sessionId, id: body.id })
             if (sessionId === failingSession) return new Response("Temporary failure", { status: 503 })
@@ -247,6 +251,16 @@ describe("team outbox delivery while members are running", () => {
       ).toBe(true)
       const alpha = records[0]!
       const beta = records[1]!
+      await messageParallelWorkspace(alpha.id, "Check redirects </task>", {
+        sender: "ses_parent",
+        messageID: "msg_parent_correction",
+        delivery: "queue",
+      })
+      expect(corrections).toHaveLength(1)
+      expect(corrections[0]?.id).toBe("msg_parent_correction")
+      expect(corrections[0]?.delivery).toBe("queue")
+      expect(corrections[0]?.prompt.text).toContain("coordination instructions from your parent agent")
+      expect(corrections[0]?.prompt.text).not.toContain("</task>")
       // Newer records drain first, so a failed Beta delivery used to prevent
       // Alpha from receiving anything on every sweep.
       failingSession = getParallelWorkspace(beta.id)?.agentSessionId
@@ -280,6 +294,215 @@ describe("team outbox delivery while members are running", () => {
     } finally {
       await Promise.all(records.map((record) => stopParallelWorkspace(record.id)))
       await new Promise((resolve) => setTimeout(resolve, 50))
+      server.stop(true)
+    }
+  })
+
+  test("isolated swarm workers remain in their real parent board and relay scope", async () => {
+    const sourcePath = join(userDataPath, "swarm-project")
+    await mkdir(sourcePath, { recursive: true })
+    await writeFile(join(sourcePath, "README.md"), "# Swarm\n")
+    const coordinator = await createParallelWorkspace({
+      sourcePath,
+      parentSessionId: "swarm:sw_owned",
+      engineParentSessionId: "ses_owner",
+      taskPrompt: "Stage work",
+      name: "Staging",
+      swarmRunId: "sw_owned",
+      swarmRole: "coordinator",
+    })
+    const worker = await createParallelWorkspace({
+      sourcePath: coordinator.isolatedPath,
+      parentSessionId: "swarm:sw_owned",
+      engineParentSessionId: "ses_owner",
+      taskPrompt: "Update README",
+      name: "Worker",
+      swarmRunId: "sw_owned",
+      swarmTaskId: "readme",
+      swarmRole: "worker",
+    })
+    const timestamp = new Date().toISOString()
+    store.set(
+      "swarm-orchestrator-state",
+      new Map([
+        [
+          "runs",
+          [
+            {
+              id: "sw_owned",
+              name: "Owned swarm",
+              objective: "README",
+              sourcePath,
+              parentSessionId: "ses_owner",
+              strategy: "balanced",
+              maxAgents: 2,
+              maxConcurrency: 1,
+              modelPool: [],
+              plannerProvider: "test",
+              plannerModel: "test",
+              coordinatorWorkspaceId: coordinator.id,
+              status: "needs review",
+              currentStep: "Review",
+              progress: 0,
+              planSummary: "",
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              changedFiles: [],
+              diff: "",
+              riskLevel: "low",
+              summary: "",
+              logs: [],
+              tasks: [
+                {
+                  id: "readme",
+                  title: "README",
+                  prompt: "Update README",
+                  role: "implement",
+                  dependsOn: [],
+                  fileHints: ["README.md"],
+                  provider: "test",
+                  model: "test",
+                  status: "planned",
+                  workspaceId: worker.id,
+                  lastAction: "Waiting for a slot",
+                  changedFilesCount: 0,
+                  riskLevel: "low",
+                  summary: "",
+                },
+              ],
+            },
+          ],
+        ],
+      ]),
+    )
+    const scope = { sourcePath, parentSessionID: "ses_owner" }
+    const tasks = listAgentTasks(scope).tasks
+    expect(tasks.map((task) => task.id).sort()).toEqual(["swarm:sw_owned", "swarm:sw_owned:readme"])
+    expect(tasks.every((task) => task.parentSessionID === "ses_owner")).toBe(true)
+    expect(listAgentTasks({ ...scope, parentSessionID: "ses_other" }).tasks).toEqual([])
+    expect(inspectAgentTask({ ...scope, taskID: "swarm:sw_owned:readme" }).task.ownedPaths).toEqual(["README.md"])
+    expect(() =>
+      inspectAgentTask({ ...scope, parentSessionID: "ses_other", taskID: "swarm:sw_owned:readme" }),
+    ).toThrow()
+    const registrations: string[] = []
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url)
+        if (url.pathname.endsWith("/register")) {
+          registrations.push(url.pathname)
+          const body = (await request.json()) as { tasks: { parentSessionID: string }[] }
+          expect(body.tasks.every((task) => task.parentSessionID === "ses_owner")).toBe(true)
+          return Response.json({ lease: "a".repeat(64), expiresAt: Date.now() + 75_000 })
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        return Response.json({ commands: [], expiresAt: Date.now() + 75_000 })
+      },
+    })
+    const disconnect = initTaskRelay(async () => ({
+      url: server.url.toString(),
+      username: "owner",
+      password: "fixture",
+    }))
+    try {
+      for (let attempt = 0; attempt < 50 && !registrations.length; attempt += 1)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(registrations).toEqual(["/experimental/session/ses_owner/tasks/bridge/register"])
+      const stopped = await stopAgentTask({ ...scope, taskID: "swarm:sw_owned:readme", reason: "Reassigned" })
+      expect(stopped.tasks.find((task) => task.id === "swarm:sw_owned:readme")?.status).toBe("stopped")
+      expect(getParallelWorkspace(worker.id)?.status).toBe("stopped")
+      expect(stopped.tasks.find((task) => task.id === "swarm:sw_owned:readme")?.reason).toBe("Reassigned")
+    } finally {
+      disconnect()
+      server.stop(true)
+    }
+  })
+
+  test("authenticated relay preserves exact receipts and stops a prepared task before model admission", async () => {
+    const sourcePath = join(userDataPath, "relay-project")
+    await mkdir(sourcePath, { recursive: true })
+    await writeFile(join(sourcePath, "README.md"), "# Relay\n")
+    const record = await createParallelWorkspace({
+      sourcePath,
+      parentSessionId: "ses_relay",
+      taskPrompt: "Inspect README",
+      name: "Prepared",
+    })
+    expect(listParallelWorkspaces().find((entry) => entry.id === record.id)?.status).toBe("queued")
+    const taskID = `workspace:${record.id}`
+    const lease = "a".repeat(64)
+    const receipts: { commandID: string; result?: unknown; error?: string }[] = []
+    const snapshots: { tasks: { status: string }[] }[] = []
+    const command = {
+      id: "inspect-once",
+      taskID,
+      sender: "ses_relay",
+      action: "inspect",
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 30_000,
+    }
+    store.set(
+      "task-bridge-receipts",
+      new Map([
+        [
+          "receipts",
+          [
+            {
+              commandID: "crash-command",
+              expiresAt: command.expiresAt,
+              error: "Desktop closed before this command was confirmed.",
+            },
+          ],
+        ],
+      ]),
+    )
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        expect(request.headers.get("authorization")).toBe(`Basic ${Buffer.from("owner:test-only").toString("base64")}`)
+        expect(new URL(request.url).searchParams.get("directory")).toBe(sourcePath)
+        const path = new URL(request.url).pathname
+        if (path.endsWith("register")) {
+          snapshots.push(await request.json())
+          return Response.json({ lease, expiresAt: command.expiresAt + 45_000 })
+        }
+        if (path.endsWith("receipt")) {
+          receipts.push(await request.json())
+          return Response.json({ accepted: true })
+        }
+        if (receipts.length === 0) return Response.json({ commands: [command], expiresAt: command.expiresAt + 45_000 })
+        if (receipts.length === 1)
+          return Response.json({
+            commands: [
+              command,
+              { ...command, id: "crash-command", action: "stop" },
+              { ...command, id: "stop-queued", action: "stop", reason: "Parent changed the plan" },
+            ],
+            expiresAt: command.expiresAt + 45_000,
+          })
+        return new Promise<Response>((resolve) =>
+          request.signal.addEventListener("abort", () => resolve(new Response(null, { status: 204 })), { once: true }),
+        )
+      },
+    })
+    const relay = connectTaskRelay({ sourcePath, parentSessionID: "ses_relay" }, async () => ({
+      url: server.url.toString(),
+      username: "owner",
+      password: "test-only",
+    }))
+    try {
+      for (let count = 0; count < 200 && receipts.length < 4; count++)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(receipts).toHaveLength(4)
+      expect(receipts[0]?.result).toEqual(receipts[1]?.result)
+      expect(receipts[2]?.error).toContain("Desktop closed")
+      expect(getParallelWorkspace(record.id)?.status).toBe("stopped")
+      expect(getParallelWorkspace(record.id)?.stopReason).toBe("Parent changed the plan")
+      expect(snapshots.at(-1)?.tasks[0]?.status).toBe("stopped")
+      expect(getParallelWorkspace(record.id)?.agentSessionId).toBeUndefined()
+    } finally {
+      relay.abort()
       server.stop(true)
     }
   })

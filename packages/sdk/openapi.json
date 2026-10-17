@@ -2800,6 +2800,273 @@
         ]
       }
     },
+    "/experimental/session/{sessionID}/tasks/bridge/register": {
+      "post": {
+        "tags": ["experimental"],
+        "operationId": "experimental.task.bridge.register",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "TaskBridge.RegisterResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskBridgeRegisterResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TaskApiError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TaskApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Owner-authenticated desktop relay with an expiring lease. No callback URLs are accepted.",
+        "summary": "Register desktop task observations",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskBridgeRegisterInput"
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.task.bridge.register({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/experimental/session/{sessionID}/tasks/bridge/poll": {
+      "post": {
+        "tags": ["experimental"],
+        "operationId": "experimental.task.bridge.poll",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "TaskBridge.PollResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskBridgePollResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TaskApiError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TaskApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Owner-authenticated desktop relay with an expiring lease. No callback URLs are accepted.",
+        "summary": "Wait for desktop task commands",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskBridgePollInput"
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.task.bridge.poll({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/experimental/session/{sessionID}/tasks/bridge/receipt": {
+      "post": {
+        "tags": ["experimental"],
+        "operationId": "experimental.task.bridge.receipt",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "TaskBridge.ReceiptResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskBridgeReceiptResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "TaskApiError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TaskApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Owner-authenticated desktop relay with an expiring lease. No callback URLs are accepted.",
+        "summary": "Confirm a desktop task command",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskBridgeReceiptInput"
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.experimental.task.bridge.receipt({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/experimental/resource": {
       "get": {
         "tags": ["experimental"],
@@ -36211,6 +36478,10 @@
           "status": {
             "$ref": "#/components/schemas/TaskStatus"
           },
+          "connection": {
+            "type": "string",
+            "enum": ["connected", "disconnected"]
+          },
           "batchID": {
             "type": "string"
           },
@@ -36406,6 +36677,155 @@
           }
         },
         "required": ["tasks", "timedOut"],
+        "additionalProperties": false
+      },
+      "TaskBridgeRegisterInput": {
+        "type": "object",
+        "properties": {
+          "lease": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 128
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskInfo"
+            },
+            "maxItems": 200
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": ["tasks"],
+        "additionalProperties": false
+      },
+      "TaskBridgeRegisterResult": {
+        "type": "object",
+        "properties": {
+          "lease": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 128
+          },
+          "expiresAt": {
+            "type": "number"
+          }
+        },
+        "required": ["lease", "expiresAt"],
+        "additionalProperties": false
+      },
+      "TaskBridgePollInput": {
+        "type": "object",
+        "properties": {
+          "lease": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 128
+          },
+          "timeout": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 30000
+          }
+        },
+        "required": ["lease"],
+        "additionalProperties": false
+      },
+      "TaskBridgeCommand": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "taskID": {
+            "type": "string"
+          },
+          "sender": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": ["inspect", "message", "stop"]
+          },
+          "text": {
+            "type": "string"
+          },
+          "delivery": {
+            "type": "string",
+            "enum": ["steer", "queue"]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "expiresAt": {
+            "type": "number"
+          }
+        },
+        "required": ["id", "taskID", "sender", "action", "createdAt", "expiresAt"],
+        "additionalProperties": false
+      },
+      "TaskBridgePollResult": {
+        "type": "object",
+        "properties": {
+          "commands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskBridgeCommand"
+            }
+          },
+          "expiresAt": {
+            "type": "number"
+          }
+        },
+        "required": ["commands", "expiresAt"],
+        "additionalProperties": false
+      },
+      "TaskBridgeReceiptInput": {
+        "type": "object",
+        "properties": {
+          "lease": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 128
+          },
+          "commandID": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskInspectResult"
+              },
+              {
+                "$ref": "#/components/schemas/TaskMessageResult"
+              },
+              {
+                "$ref": "#/components/schemas/TaskStopResult"
+              }
+            ]
+          },
+          "error": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        },
+        "required": ["lease", "commandID"],
+        "additionalProperties": false
+      },
+      "TaskBridgeReceiptResult": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "required": ["accepted"],
         "additionalProperties": false
       },
       "ProjectDirectories": {

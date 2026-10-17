@@ -169,6 +169,7 @@ export type ParallelWorkspaceRecord = {
   actualCost?: string
   measuredCost?: number
   runOwnerID?: string
+  stopReason?: string
   finalSummary: string
   mergeState: "none" | "merged" | "discarded"
   // Set just before a merge starts writing into the source. With mergeState still "none" it means Vector stopped
@@ -1447,7 +1448,8 @@ export function listParallelWorkspaces(scope?: { sourcePath?: string; parentSess
   let changed = false
   const next = records.map((record) => {
     const wasRunning =
-      RUNNING_STATUSES.includes(record.status) || (record.status === "queued" && Boolean(record.runOwnerID))
+      RUNNING_STATUSES.includes(record.status) ||
+      (record.status === "queued" && Boolean(record.runOwnerID) && record.runOwnerID !== PROCESS_ID)
     if (!wasRunning || activeRuns.has(record.id) || queuedRuns.has(record.id)) return record
     changed = true
     const interrupted: ParallelWorkspaceRecord = {
@@ -1682,6 +1684,7 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
     llmJudge: input.llmJudge === true,
     status: "queued",
     runOwnerID: PROCESS_ID,
+    stopReason: undefined,
     progress: 0,
     lastAction: "Isolated workspace created",
     createdAt,
@@ -2675,6 +2678,7 @@ export async function runParallelWorkspace(
     ...record,
     status: "queued",
     runOwnerID: PROCESS_ID,
+    stopReason: undefined,
     progress: 0,
     lastAction:
       activeRuns.size < maxConcurrentRuns
@@ -2730,6 +2734,7 @@ export async function followUpParallelWorkspace(
     ...record,
     status: "queued",
     runOwnerID: PROCESS_ID,
+    stopReason: undefined,
     progress: 0,
     error: undefined,
     mergeFailure: undefined,
@@ -2749,7 +2754,7 @@ export async function followUpParallelWorkspace(
   return readRecords().find((record) => record.id === id) ?? queued
 }
 
-export async function stopParallelWorkspace(id: string) {
+export async function stopParallelWorkspace(id: string, reason?: string) {
   const active = activeRuns.get(id)
   const queued = queuedRuns.get(id)
   queuedRuns.delete(id)
@@ -2760,12 +2765,13 @@ export async function stopParallelWorkspace(id: string) {
   if (!current) throw new Error("Parallel workspace was not found.")
   // Stopping is only meaningful for work in flight; settled records
   // (needs review, complete, failed) keep their status.
-  if (!active && !queued) return current
+  if (!active && !queued && current.status !== "queued") return current
   const stoppedAt = now()
   const updated = updateRecord(id, (record) => ({
     ...record,
     status: "stopped",
     lastAction: "Workspace stopped",
+    stopReason: reason?.slice(0, 1000),
     lastActivityAt: stoppedAt,
     logs: [`Stopped at ${stoppedAt}.`, ...record.logs].slice(0, 80),
   }))
@@ -2788,7 +2794,11 @@ export function parallelWorkspaceCanMessage(id: string) {
   )
 }
 
-export async function messageParallelWorkspace(id: string, text: string) {
+export async function messageParallelWorkspace(
+  id: string,
+  text: string,
+  coordination?: { sender: string; messageID: string; delivery: "steer" | "queue" },
+) {
   const invalid = TaskMailbox.bodyError(text)
   if (invalid) throw new Error(invalid)
   const active = activeRuns.get(id)
@@ -2800,13 +2810,21 @@ export async function messageParallelWorkspace(id: string, text: string) {
   if (budgetUsd !== undefined && budgetUsd <= 0) throw new Error("This agent has reached its spend limit.")
   if (activeRuns.get(id) !== active || !parallelWorkspaceCanMessage(id))
     throw new Error("This agent finished before the message was sent. Your draft has been kept.")
-  const messageID = `msg_vector_${randomUUID().replaceAll("-", "")}`
+  const messageID = coordination?.messageID ?? `msg_vector_${randomUUID().replaceAll("-", "")}`
   await engineRequest(active.engine, `/api/session/${encodeURIComponent(active.sessionId)}/prompt`, {
     method: "POST",
     body: {
       id: messageID,
-      prompt: { text: text.trim() },
-      delivery: "steer",
+      prompt: {
+        text: coordination
+          ? TaskMailbox.envelope(text.trim(), {
+              sender: coordination.sender,
+              recipient: active.sessionId,
+              relation: "parent",
+            })
+          : text.trim(),
+      },
+      delivery: coordination?.delivery ?? "steer",
       resume: true,
       budget: budgetUsd === undefined ? undefined : { usd: budgetUsd },
     },
