@@ -31,6 +31,8 @@ export type SettingsWorkspaceProps = {
   sessionID?: string
   section?: SettingsTab
   repositoryPath?: string
+  /** The folder the active session runs in, when it is an agent or parallel workspace apart from the repository. */
+  sessionDirectory?: string
   onBack?: () => void
   class?: string
 }
@@ -63,7 +65,8 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
     if (item === "voice") return <SettingsVoiceV2 />
     if (item === "personalization") return <SettingsPersonalizationV2 />
     if (item === "rules") return <SettingsRulesV2 repositoryPath={props.repositoryPath} />
-    if (item === "trust") return <SettingsProjectTrustV2 repositoryPath={props.repositoryPath} />
+    if (item === "trust")
+      return <SettingsProjectTrustV2 repositoryPath={props.repositoryPath} sessionDirectory={props.sessionDirectory} />
     if (item === "subagents") return <SettingsSubagentsV2 />
     if (item === "providers") return <SettingsProvidersV2 />
     if (item === "models") return <SettingsModelsV2 />

@@ -2373,7 +2373,7 @@ html[data-vector-reduce-animations="true"] *::after {
 .settings-notice-details summary { cursor: pointer; }
 .settings-notice-details pre { margin-top: 12px; }
 
-/* Project trust: the engine's verdict as a small pill beside the project name. */
+/* Repository trust: the engine's verdict as a small pill beside the repository name. */
 .settings-v2-project-trust-state {
   display: inline-flex;
   align-items: center;
@@ -2395,4 +2395,21 @@ html[data-vector-reduce-animations="true"] *::after {
 .settings-v2-project-trust-state[data-state="untrusted"] {
   border-color: color-mix(in srgb, var(--vx-amber) 45%, transparent);
   color: var(--vx-amber);
+}
+
+/* Which folder a card is about when an agent workspace session shows its own folder and its repository. */
+.settings-v2-project-trust-kind {
+  margin: 0 0 4px;
+  color: var(--vx-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.settings-v2-project-trust-path {
+  margin: 4px 0 0;
+  color: var(--vx-text-muted);
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 11px;
+  overflow-wrap: anywhere;
 }

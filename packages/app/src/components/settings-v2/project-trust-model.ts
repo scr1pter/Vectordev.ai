@@ -49,3 +49,28 @@ export function projectTrustSummary(status: ProjectTrustStatus | undefined, name
     canTrust: false,
   }
 }
+
+export type ProjectTrustFolder = { path: string; kind: "session" | "repository" }
+
+/**
+ * The folders Settings checks. An agent or parallel workspace session runs in its own folder, which the engine trusts
+ * separately from the repository it came from, so that folder comes first and the repository follows.
+ */
+export function projectTrustFolders(sessionDirectory?: string, repositoryPath?: string): ProjectTrustFolder[] {
+  const session = sessionDirectory?.trim()
+  const repository = repositoryPath?.trim()
+  const folders: ProjectTrustFolder[] = repository ? [{ path: repository, kind: "repository" }] : []
+  if (!session || session === repository) return folders
+  return [{ path: session, kind: "session" }, ...folders]
+}
+
+/**
+ * Folders the engine resolves to one trust workspace, such as a session in a subfolder of its repository, share one
+ * approval, so each workspace is shown once.
+ */
+export function uniqueTrustWorkspaces<T extends { path: string; status?: Pick<ProjectTrustStatus, "workspace"> }>(
+  entries: T[],
+) {
+  const key = (entry: T) => entry.status?.workspace ?? entry.path
+  return entries.filter((entry, index) => entries.findIndex((other) => key(other) === key(entry)) === index)
+}

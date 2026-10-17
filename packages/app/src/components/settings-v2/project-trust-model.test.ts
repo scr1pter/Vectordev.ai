@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { projectTrustSummary } from "./project-trust-model"
+import { projectTrustFolders, projectTrustSummary, uniqueTrustWorkspaces } from "./project-trust-model"
 
 const status = (input: { trusted: boolean; ignored: boolean; settings: boolean }) => ({
   workspace: "/work/app",
@@ -47,7 +47,9 @@ describe("projectTrustSummary", () => {
         [true, false].flatMap((ignored) => [true, false].map((settings) => status({ trusted, ignored, settings }))),
       ),
     ]
-    const words = statuses.map((item) => projectTrustSummary(item, "app")).map((item) => `${item.title} ${item.description}`)
+    const words = statuses
+      .map((item) => projectTrustSummary(item, "app"))
+      .map((item) => `${item.title} ${item.description}`)
     expect(words.filter((text) => /project/i.test(text))).toEqual([])
   })
 
@@ -55,5 +57,43 @@ describe("projectTrustSummary", () => {
     const summary = projectTrustSummary(undefined, "app")
     expect(summary.state).toBe("unknown")
     expect(summary.canTrust).toBe(false)
+  })
+})
+
+describe("projectTrustFolders", () => {
+  test("checks an agent workspace session's own folder first, then the repository it came from", () => {
+    expect(projectTrustFolders("/work/.vector/workspaces/agent-1/app", "/work/app")).toEqual([
+      { path: "/work/.vector/workspaces/agent-1/app", kind: "session" },
+      { path: "/work/app", kind: "repository" },
+    ])
+  })
+
+  test("checks the repository once when the session runs in it", () => {
+    expect(projectTrustFolders("/work/app", "/work/app")).toEqual([{ path: "/work/app", kind: "repository" }])
+    expect(projectTrustFolders(undefined, "/work/app")).toEqual([{ path: "/work/app", kind: "repository" }])
+    expect(projectTrustFolders("  ", " /work/app ")).toEqual([{ path: "/work/app", kind: "repository" }])
+  })
+
+  test("checks the session's folder when no repository is known, and nothing when neither is", () => {
+    expect(projectTrustFolders("/work/scratch", undefined)).toEqual([{ path: "/work/scratch", kind: "session" }])
+    expect(projectTrustFolders(undefined, undefined)).toEqual([])
+  })
+})
+
+describe("uniqueTrustWorkspaces", () => {
+  test("shows a session in a subfolder of its repository once, as the repository the engine trusts", () => {
+    const entries = [
+      { path: "/work/app/packages/web", kind: "session", status: { workspace: "/work/app" } },
+      { path: "/work/app", kind: "repository", status: { workspace: "/work/app" } },
+    ]
+    expect(uniqueTrustWorkspaces(entries)).toEqual([entries[0]!])
+  })
+
+  test("keeps folders with their own trust, and folders whose status could not be read", () => {
+    const entries = [
+      { path: "/work/.vector/workspaces/agent-1/app", status: { workspace: "/work/.vector/workspaces/agent-1/app" } },
+      { path: "/work/app", status: undefined },
+    ]
+    expect(uniqueTrustWorkspaces(entries)).toEqual(entries)
   })
 })
