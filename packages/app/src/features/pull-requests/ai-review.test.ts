@@ -18,6 +18,8 @@ import {
   countBySeverity,
   estimateText,
   findingGroups,
+  findingSections,
+  passLines,
   pickReviewModel,
   reviewCatalog,
   reviewEvents,
@@ -1421,5 +1423,49 @@ describe("applying a fix", () => {
     expect(askAgentPrompt(undefined, findingGroups(outcome)[0]!.findings[0]!)).toStartWith(
       "Vectorscope found a problem in the uncommitted changes in this checkout.",
     )
+  })
+})
+
+describe("the findings list", () => {
+  const view = (id: string, severity: "blocking" | "concern" | "nit") => ({
+    id,
+    severity,
+    category: "bug",
+    path: "src/a.ts",
+    line: 1,
+    title: id,
+    body: "",
+    place: "changed" as const,
+  })
+  const groups = [
+    { severity: "blocking" as const, findings: [view("b1", "blocking"), view("b2", "blocking")] },
+    { severity: "concern" as const, findings: [view("c1", "concern")] },
+  ]
+
+  test("has one section per severity, with dismissed findings last and not counted", () => {
+    const sections = findingSections(groups, { filter: "all", dismissed: { b1: "Not a bug" } })
+    expect(sections.map((section) => [section.label, section.open, section.findings.map((f) => f.id)])).toEqual([
+      ["Blocking", 1, ["b2", "b1"]],
+      ["Concerns", 1, ["c1"]],
+    ])
+    expect(findingSections(groups, { filter: "concern", dismissed: {} }).map((section) => section.label)).toEqual([
+      "Concerns",
+    ])
+  })
+
+  test("lists what each pass spent, with dollars only when the review has a price", () => {
+    const passes = [
+      { name: "review" as const, model: "a/cheap", costUsd: 0.001, input: 1_000, output: 200, cacheRead: 0 },
+      { name: "verify" as const, model: "b/strong", costUsd: 0.02, input: 900, output: 100, cacheRead: 0 },
+    ]
+    const cost = { costUsd: 0.021, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, model: "x" }
+    expect(passLines({ passes, cost: { ...cost, kind: "priced" } })).toEqual([
+      "Review · a/cheap · $0.0010 · 1.2k tokens",
+      "Double-check · b/strong · $0.02 · 1.0k tokens",
+    ])
+    expect(passLines({ passes, cost: { ...cost, kind: "plan" } })).toEqual([
+      "Review · a/cheap · 1.2k tokens",
+      "Double-check · b/strong · 1.0k tokens",
+    ])
   })
 })

@@ -245,6 +245,9 @@ export type ReviewTarget =
 
 // What the panel passes to onReview. The layout adds the directory, the models and the client.
 export type ReviewRequest = ReviewTarget & {
+  // The last review of the same pull request or of the same checkout. Files whose diff did not change since are not
+  // sent again, and their findings are carried over; when nothing changed, nothing runs.
+  previous?: ReviewOutcomeLite
   signal?: AbortSignal // the Stop button
   confirm?: (estimate: ReviewEstimate) => Promise<boolean>
   onProgress?: (progress: ReviewProgress) => void
@@ -252,9 +255,6 @@ export type ReviewRequest = ReviewTarget & {
 
 export type ReviewRunInput = ReviewRequest & {
   directory: string
-  // The last review of the same pull request or of the same checkout. Files whose diff did not change since are not
-  // sent again, and their findings are carried over; when nothing changed, nothing runs.
-  previous?: ReviewOutcomeLite
   // The session the review was started from: the reviewers' spend counts towards it. Reviews started outside any
   // session stand alone, and the panel and the usage view show what they spent.
   parentID?: string
@@ -1506,6 +1506,46 @@ export function findingGroups(
     severity,
     findings: all.filter((item) => item.severity === severity),
   })).filter((group) => group.findings.length > 0)
+}
+
+const SECTION_LABEL: Record<Severity, string> = { blocking: "Blocking", concern: "Concerns", nit: "Nits" }
+
+// The findings list: one section per severity, blocking first, for the severities the filter shows. Dismissed findings
+// sink to the end of their section and are left out of its count.
+export function findingSections(
+  groups: readonly { severity: Severity; findings: readonly ReviewFindingView[] }[],
+  options: { filter: "all" | Severity; dismissed: Readonly<Record<string, string>> },
+) {
+  return groups
+    .filter((group) => options.filter === "all" || group.severity === options.filter)
+    .map((group) => ({
+      severity: group.severity,
+      label: SECTION_LABEL[group.severity],
+      open: group.findings.filter((finding) => !options.dismissed[finding.id]).length,
+      findings: group.findings.toSorted(
+        (a, b) => Number(Boolean(options.dismissed[a.id])) - Number(Boolean(options.dismissed[b.id])),
+      ),
+    }))
+}
+
+const PASS_LABEL: Record<ReviewPass["name"], string> = {
+  review: "Review",
+  security: "Security",
+  verify: "Double-check",
+}
+
+// What each pass of a finished review spent, one line each. Dollars show only when the review as a whole has a price;
+// otherwise, as for a subscription or Vector Codium, only tokens.
+export function passLines(outcome: Pick<ReviewOutcomeLite, "passes" | "cost">) {
+  const priced = outcome.cost?.kind === "priced"
+  return (outcome.passes ?? []).map((pass) =>
+    [
+      PASS_LABEL[pass.name],
+      pass.model,
+      ...(priced && pass.costUsd !== undefined ? [formatUsd(pass.costUsd)] : []),
+      `${formatTokens(pass.input + pass.output)} tokens`,
+    ].join(" · "),
+  )
 }
 
 export function countBySeverity(groups: readonly { severity: Severity; findings: readonly unknown[] }[]) {

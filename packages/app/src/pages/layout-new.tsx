@@ -31,6 +31,7 @@ import { taskScopeId, taskScopeSearch, type TaskScope } from "@/utils/task-scope
 import { WORKSPACE_FILE_SAVED_EVENT, workspaceFileSavedDetail } from "@/utils/workspace-file-saved"
 import { WORKSPACE_MODE_CHANGED_EVENT, workspaceModeFromEvent, type WorkspaceMode } from "@/utils/workspace-mode"
 import {
+  applyReviewFix,
   reviewCatalog,
   runReview,
   trackReviewSpend,
@@ -6600,6 +6601,18 @@ export default function NewLayout(props: ParentProps) {
             : Promise.resolve(undefined)
         }}
         automaticReviewModel={() => workflowModel(reviewModels(), byokProviders.connected())}
+        onApplyFix={(fix) => {
+          const directory = activeWorkspaceScope().sourcePath
+          if (!directory) return Promise.reject(new Error("Open a project before applying a fix."))
+          return applyReviewFix(serverSDK().createClient({ directory, throwOnError: true }), directory, fix)
+        }}
+        onAskAgent={(text) => {
+          // The task on screen takes it as its next message; with no composer on screen, a new task on the project
+          // starts with it.
+          if (requestComposerPrompt({ text, send: true })) return
+          const directory = activeWorkspaceScope().sourcePath
+          if (directory) tabs.newDraft({ server: server.key, directory }, text, { send: true })
+        }}
       />
 
       <AgentDashboard
