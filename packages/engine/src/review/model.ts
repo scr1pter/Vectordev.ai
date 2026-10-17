@@ -111,8 +111,8 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
 })
 
 // Why a workflow's model cannot run. A missing secret is the usual cause: the provider is in the catalog but never
-// loaded, because the review step's env does not pass its key. Only a provider Vector no longer lists means the
-// workflow itself is out of date.
+// loaded, because the review step's env does not pass its key. A retired model never loads, key or not. Only a
+// provider Vector no longer lists means the workflow itself is out of date.
 function workflowRefusal(input: {
   name: string
   modelID: string
@@ -127,10 +127,18 @@ function workflowRefusal(input: {
       ? `vectordev.ai did not offer ${input.name} to this workflow. Check that the VECTOR_CLI_TOKEN secret is current, or set MODEL in ${WORKFLOW_FILE} to another model.`
       : `${input.name} needs the repository secret VECTOR_CLI_TOKEN. Create one at vectordev.ai/auth/cli.`
   if (!input.listed) return "This workflow was set up by an older Vector; run vector github install again."
-  if (!Object.hasOwn(input.listed.models, input.modelID)) {
+  const listed = Object.hasOwn(input.listed.models, input.modelID) ? input.listed.models[input.modelID] : undefined
+  if (!listed) {
     const suggestions = input.error.suggestions?.length ? ` Did you mean ${input.error.suggestions.join(", ")}?` : ""
     return `${input.listed.name} has no model ${input.modelID}.${suggestions} Set MODEL in ${WORKFLOW_FILE} to one of its models, or run vector github install again.`
   }
+  // Vector drops retired catalog models when it loads a provider.
+  if (listed.status === "deprecated")
+    return `${input.listed.name} has retired ${input.modelID}. Set MODEL in ${WORKFLOW_FILE} to one of its current models.`
+  // GitHub passes a secret that does not exist as an empty string.
+  const key = input.listed.env.find((name) => input.env[name]?.trim())
+  if (key)
+    return `Vector could not load ${input.name} in this workflow, although ${key} is set. Set MODEL in ${WORKFLOW_FILE} to another model.`
   const keys = input.listed.env.length ? input.listed.env.join(" or ") : `${input.listed.name}'s credentials`
   return `${input.name} needs ${keys}. Add it as a repository secret and pass it to the Review step in ${WORKFLOW_FILE}.`
 }

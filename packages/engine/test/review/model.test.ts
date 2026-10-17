@@ -104,7 +104,10 @@ const services = (setup: Setup) =>
             id: "anthropic",
             name: "Anthropic",
             env: ["ANTHROPIC_API_KEY"],
-            models: { "claude-sonnet-4-5": { id: "claude-sonnet-4-5" } },
+            models: {
+              "claude-sonnet-4-5": { id: "claude-sonnet-4-5" },
+              "claude-2": { id: "claude-2", status: "deprecated" },
+            },
           },
         } as unknown as Record<string, ModelCatalog.Provider>),
     }),
@@ -250,6 +253,35 @@ describe("free review defaults", () => {
       expect(missingModel.message).toBe(
         "Acme has no model missing. Set MODEL in .github/workflows/vector.yml to one of its models, or run vector github install again.",
       )
+    }),
+  )
+  it.effect("a workflow whose key is set is never told to add it", () =>
+    Effect.gen(function* () {
+      const key = { ANTHROPIC_API_KEY: "test-only" }
+      const retired = yield* resolve({ trigger: "auto", env: { MODEL: "anthropic/claude-2", ...key } }).pipe(
+        Effect.flip,
+      )
+      expect(retired.message).toBe(
+        "Anthropic has retired claude-2. Set MODEL in .github/workflows/vector.yml to one of its current models.",
+      )
+      // A retired model stays retired whether or not its key is passed in.
+      const retiredWithoutKey = yield* resolve({ trigger: "auto", env: { MODEL: "anthropic/claude-2" } }).pipe(
+        Effect.flip,
+      )
+      expect(retiredWithoutKey.message).toBe(retired.message)
+      const unloaded = yield* resolve({
+        trigger: "auto",
+        env: { MODEL: "anthropic/claude-sonnet-4-5", ...key },
+      }).pipe(Effect.flip)
+      expect(unloaded.message).toBe(
+        "Vector could not load anthropic/claude-sonnet-4-5 in this workflow, although ANTHROPIC_API_KEY is set. Set MODEL in .github/workflows/vector.yml to another model.",
+      )
+      // An empty secret is a missing one: GitHub passes an unset secret as an empty string.
+      const empty = yield* resolve({
+        trigger: "auto",
+        env: { MODEL: "anthropic/claude-sonnet-4-5", ANTHROPIC_API_KEY: " " },
+      }).pipe(Effect.flip)
+      expect(empty.message).toContain("needs ANTHROPIC_API_KEY. Add it as a repository secret")
     }),
   )
   it.effect("marks direct OpenRouter free variants free and explains obsolete workflow models", () =>

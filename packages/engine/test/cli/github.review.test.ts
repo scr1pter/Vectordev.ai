@@ -1810,6 +1810,31 @@ describe("vector github review: the workflow's command end to end", () => {
       }),
     120_000,
   )
+
+  cliIt.live(
+    "a retired model whose key is passed is called retired, not a missing secret, on the pull request",
+    ({ llm, vector, home }) =>
+      Effect.gen(function* () {
+        const { w, runner, event } = yield* setup(home, opened)
+        const result = yield* vector.spawn(["github", "review"], {
+          cwd: runner,
+          timeoutMs: 100_000,
+          env: {
+            ...actions(w, llm.url, { name: "pull_request", path: event }),
+            MODEL: "deepinfra/zai-org/GLM-4.5",
+            DEEPINFRA_API_KEY: "test-placeholder-not-a-key",
+          },
+        })
+        vector.expectExit(result, 1, "the review job")
+        const reason =
+          "Deep Infra has retired zai-org/GLM-4.5. Set MODEL in .github/workflows/vector.yml to one of its current models."
+        expect(result.stderr).toContain(reason)
+        expect(result.stderr).not.toContain("needs DEEPINFRA_API_KEY")
+        expect(sticky(w)!.body).toContain(noteCannotStart(reason))
+        expect(yield* llm.hits).toHaveLength(0)
+      }),
+    120_000,
+  )
 })
 
 function lastUserText(body: Record<string, unknown>) {
