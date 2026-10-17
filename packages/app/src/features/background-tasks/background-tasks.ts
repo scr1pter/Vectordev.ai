@@ -133,13 +133,13 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     tasks: readonly Task.Info[]
     desktop: readonly Task.Info[]
     refreshing: boolean
-    truncated: boolean
+    truncated: { engine: boolean; desktop: boolean }
     error?: string
   }>({
     tasks: [],
     desktop: [],
     refreshing: false,
-    truncated: false,
+    truncated: { engine: false, desktop: false },
   })
   const [drafts, setDrafts] = createStore<Record<string, string>>({})
   let boardRequest = 0
@@ -161,8 +161,11 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     const observed = result?.data && Array.isArray(result.data.tasks) ? result.data : undefined
     const local = desktop && Array.isArray(desktop.tasks) ? desktop : undefined
     setBoard("refreshing", false)
-    if (local) setBoard("desktop", local.tasks)
-    if (observed) setBoard("truncated", observed.truncated || local?.truncated === true)
+    if (local) {
+      setBoard("desktop", local.tasks)
+      setBoard("truncated", "desktop", local.truncated)
+    }
+    if (observed) setBoard("truncated", "engine", observed.truncated)
     if (input.desktop && !local && board.desktop.length) {
       setBoard("error", "Desktop task updates unavailable. Showing the last known state.")
       if (observed) setBoard("tasks", observed.tasks)
@@ -170,15 +173,28 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     }
     if (!observed) {
       if (board.tasks.length) setBoard("error", "Task updates unavailable. Showing the last known state.")
+      if (!board.tasks.length && local?.truncated)
+        setBoard("error", "Showing the most recent tasks. Open a child session for more.")
       return
     }
     setBoard("tasks", observed.tasks)
-    setBoard("error", observed.truncated ? "Showing the most recent tasks. Open a child session for more." : undefined)
+    setBoard(
+      "error",
+      board.truncated.engine || board.truncated.desktop
+        ? "Showing the most recent tasks. Open a child session for more."
+        : undefined,
+    )
   }
   createEffect(
     on(rootID, () => {
       boardRequest += 1
-      setBoard({ tasks: [], desktop: [], refreshing: false, truncated: false, error: undefined })
+      setBoard({
+        tasks: [],
+        desktop: [],
+        refreshing: false,
+        truncated: { engine: false, desktop: false },
+        error: undefined,
+      })
     }),
   )
 
@@ -390,7 +406,7 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     ),
   ])
   const stopAllBackground = async () => {
-    if (board.truncated) {
+    if (board.truncated.engine || board.truncated.desktop) {
       showToast({
         variant: "error",
         title: "The task list is incomplete",

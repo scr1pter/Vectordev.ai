@@ -5,7 +5,7 @@ import type { Task } from "@vectordevai/schema/task"
 import type { retry } from "@vectordevai/core/util/retry"
 import type { DirectorySync } from "@/context/sync"
 import { createServerSession } from "@/context/server-session"
-import { createBackgroundTasks } from "@/features/background-tasks/background-tasks"
+import { createBackgroundTasks, type BackgroundTasksInput } from "@/features/background-tasks/background-tasks"
 
 /*
  * A background subagent finishes, or its run is lost to an engine restart, while the app's event stream is down.
@@ -196,7 +196,11 @@ function engine() {
 }
 
 // The open session's page, as the provider builds it, over the real session store.
-async function open(fake: ReturnType<typeof engine>, loaded: readonly string[]) {
+async function open(
+  fake: ReturnType<typeof engine>,
+  loaded: readonly string[],
+  desktop?: BackgroundTasksInput["desktop"],
+) {
   const store = createServerSession(fake.client as unknown as VectorClient, { retry: retryImmediately })
   for (const id of loaded) await store.sync(id)
   const sync = {
@@ -231,6 +235,7 @@ async function open(fake: ReturnType<typeof engine>, loaded: readonly string[]) 
       pin: () => undefined,
       unpin: () => undefined,
       open: () => undefined,
+      desktop,
     }),
   }))
   return {
@@ -330,6 +335,53 @@ describe("Background tasks after the event stream dropped", () => {
 })
 
 describe("Stop", () => {
+  test("a failed desktop refresh cannot clear its retained snapshot's truncation", async () => {
+    const fake = engine()
+    const task: Task.Info = {
+      id: "workspace:one",
+      parentSessionID: ROOT,
+      source: "external",
+      title: "Desktop worker",
+      status: "running",
+      startedAt: 1000,
+      elapsedMs: 100,
+      ownedPaths: [],
+      dependsOn: [],
+      resultAvailable: false,
+      attempt: 1,
+      controls: { inspect: true, message: false, stop: true },
+    }
+    const state = { failed: false, stops: 0 }
+    const page = await open(fake, [ROOT, CHILD], {
+      sourcePath: () => "/repo",
+      api: {
+        list: async () => {
+          if (state.failed) throw new Error("Desktop unavailable")
+          return { tasks: [task], truncated: true }
+        },
+        inspect: async () => {
+          throw new Error("Unexpected inspect")
+        },
+        message: async () => {
+          throw new Error("Unexpected message")
+        },
+        stop: async () => {
+          state.stops += 1
+          return { tasks: [task] }
+        },
+        onChange: () => () => undefined,
+      },
+    })
+    await until(() => page.tasks.cards().some((card) => card.agents.some((agent) => agent.task?.id === task.id)))
+    state.failed = true
+    page.reconnect()
+    await until(() => Boolean(page.tasks.error()?.includes("Desktop task updates unavailable")))
+    await page.tasks.stopAllBackground()
+    expect(state.stops).toBe(0)
+    expect(fake.count("abort:ses_child")).toBe(0)
+    page.dispose()
+  })
+
   test("an incomplete board refuses Stop all before touching any visible worker", async () => {
     const fake = engine()
     fake.state.truncated = true
