@@ -2,11 +2,13 @@ import { createComputed, createEffect, createMemo, createSignal, on, onCleanup, 
 import { createStore, reconcile } from "solid-js/store"
 import type { Session } from "@vectordevai/sdk/v2"
 import type { VectorClient } from "@vectordevai/sdk/v2/client"
+import type { Task } from "@vectordevai/schema/task"
 import type { DirectorySync } from "@/context/sync"
 import { showToast } from "@/utils/toast"
 import { modelDisplayName } from "@/utils/provider-brand"
 import { isInternalSession } from "@/utils/internal-sessions"
 import { loadDismissed, saveDismissed } from "./background-tasks-state"
+import { mergeTaskBoard } from "./task-board-model"
 import {
   buildTaskCards,
   freshestSession,
@@ -14,7 +16,6 @@ import {
   isDismissed,
   isLive,
   liveAgentCount,
-  liveBackgroundSessions,
   runningAgentCount,
   taskPartLocations,
   waitingAgentCount,
@@ -41,7 +42,7 @@ export type BackgroundTasks = {
   now: Accessor<number>
   locate(partID: string): TaskLocation | undefined
   stop(card: TaskCard): Promise<void>
-  /** Sessions of the background agents still running, which Stop on the main turn leaves alone. */
+  /** Task identities of stoppable background agents, including desktop runners. */
   liveBackground: Accessor<readonly string[]>
   /** Stops every background agent still running in this session's family. */
   stopAllBackground(): Promise<void>
@@ -51,6 +52,14 @@ export type BackgroundTasks = {
   undismiss(cardKey: string): void
   /** While the caller is mounted, keep these agents' sessions cached and load old ones that have no usage record. */
   hold(agents: Accessor<readonly TaskAgent[]>): void
+  inspect(agent: TaskAgent): Promise<Task.InspectResult>
+  message(agent: TaskAgent, text: string): Promise<Task.MessageResult>
+  stopAgent(agent: TaskAgent): Promise<void>
+  ask(agent: TaskAgent): void
+  refreshing: Accessor<boolean>
+  error: Accessor<string | undefined>
+  draft(agent: TaskAgent): string
+  setDraft(agent: TaskAgent, text: string): void
 }
 
 export type BackgroundTasksInput = {
@@ -65,6 +74,11 @@ export type BackgroundTasksInput = {
   unpin(sessionID: string): void
   /** Opens a session's page. */
   open(sessionID: string): void
+  ask?(agent: TaskAgent, rootID: string): void
+  desktop?: {
+    api: NonNullable<NonNullable<Window["api"]>["agentTasks"]>
+    sourcePath: Accessor<string>
+  }
 }
 
 /** The Background tasks state for the open session's family, built from the session store and kept current. */
@@ -113,6 +127,56 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     }),
   )
   const fetchedByID = createMemo(() => new Map(fetched().map((session) => [session.id, session])))
+  const [board, setBoard] = createStore<{
+    tasks: readonly Task.Info[]
+    desktop: readonly Task.Info[]
+    refreshing: boolean
+    error?: string
+  }>({
+    tasks: [],
+    desktop: [],
+    refreshing: false,
+  })
+  const [drafts, setDrafts] = createStore<Record<string, string>>({})
+  let boardRequest = 0
+  const refreshBoard = async () => {
+    const sessionID = rootID()
+    if (!sessionID) return
+    const request = ++boardRequest
+    setBoard("refreshing", true)
+    const [result, desktop] = await Promise.all([
+      input
+        .client()
+        .experimental.task.list({ sessionID, descendants: "true" })
+        .catch(() => undefined),
+      input.desktop?.api
+        .list({ parentSessionID: sessionID, sourcePath: input.desktop.sourcePath() })
+        .catch(() => undefined),
+    ])
+    if (request !== boardRequest || rootID() !== sessionID) return
+    setBoard("refreshing", false)
+    if (desktop) setBoard("desktop", desktop.tasks)
+    if (input.desktop && !desktop && board.desktop.length) {
+      setBoard("error", "Desktop task updates unavailable. Showing the last known state.")
+      if (result?.data) setBoard("tasks", result.data.tasks)
+      return
+    }
+    if (!result?.data) {
+      if (board.tasks.length) setBoard("error", "Task updates unavailable. Showing the last known state.")
+      return
+    }
+    setBoard("tasks", result.data.tasks)
+    setBoard(
+      "error",
+      result.data.truncated ? "Showing the most recent tasks. Open a child session for more." : undefined,
+    )
+  }
+  createEffect(
+    on(rootID, () => {
+      boardRequest += 1
+      setBoard({ tasks: [], desktop: [], refreshing: false, error: undefined })
+    }),
+  )
 
   const children = createMemo(() => {
     const root = rootID()
@@ -129,6 +193,35 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
       (session) => freshestSession(input.sync().session.get(session.id), fetchedByID().get(session.id)) ?? session,
     )
   })
+  // Refresh on engine events and reconnects, never on a polling interval. Batch
+  // simultaneous child updates so a provider turn makes one observation request.
+  createEffect(() => {
+    const parent = rootID()
+    if (parent) input.sync().session.get(parent)?.time.updated
+    input.reconnects()
+    children().forEach((child) => {
+      child.time.updated
+      input.sync().data.session_status[child.id]
+      input.sync().data.permission[child.id]?.length
+      input.sync().data.question[child.id]?.length
+    })
+    const timer = setTimeout(() => void refreshBoard(), 150)
+    onCleanup(() => clearTimeout(timer))
+  })
+  onCleanup(() => {
+    boardRequest += 1
+  })
+  if (input.desktop) {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const stop = input.desktop.api.onChange(() => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => void refreshBoard(), 150)
+    })
+    onCleanup(() => {
+      stop()
+      if (timer) clearTimeout(timer)
+    })
+  }
 
   const source = (root: string): TaskSource => ({
     rootID: root,
@@ -155,7 +248,7 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     const root = rootID()
     let next: TaskCard[] = []
     try {
-      next = root ? buildTaskCards(source(root)) : []
+      next = root ? mergeTaskBoard(buildTaskCards(source(root)), [...board.tasks, ...board.desktop]) : []
     } catch (error) {
       console.error("[background-tasks] could not read subagents", error)
       return
@@ -275,16 +368,98 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     })
   }
 
-  const stop = (card: TaskCard) =>
-    stopSessions(
-      card.agents.filter((agent) => isLive(agent.status) && agent.sessionID).map((agent) => agent.sessionID!),
+  const stop = async (card: TaskCard) => {
+    const results = await Promise.allSettled(
+      card.agents.filter((agent) => isLive(agent.status) && agent.task?.controls.stop !== false).map(stopAgent),
     )
-  const liveBackground = createMemo(() => liveBackgroundSessions(state.cards))
-  const stopAllBackground = () => stopSessions(liveBackground())
+    if (results.some((result) => result.status === "rejected"))
+      showToast({
+        variant: "error",
+        title: "Could not stop every subagent",
+        description: "Open its details to retry. Partial work has been kept.",
+      })
+  }
+  const liveBackground = createMemo(() => [
+    ...new Set(
+      state.cards
+        .flatMap((card) => card.agents)
+        .filter((agent) => agent.background && isLive(agent.status) && agent.task?.controls.stop !== false)
+        .flatMap((agent) => agent.task?.id ?? agent.sessionID ?? []),
+    ),
+  ])
+  const stopAllBackground = async () => {
+    const agents = state.cards
+      .flatMap((card) => card.agents)
+      .filter((agent) => agent.background && isLive(agent.status) && agent.task?.controls.stop !== false)
+    const unique = [...new Map(agents.map((agent) => [agent.task?.id ?? agent.sessionID ?? agent.key, agent])).values()]
+    const stopped = await Promise.allSettled(unique.map(stopAgent))
+    if (stopped.some((result) => result.status === "rejected"))
+      showToast({
+        variant: "error",
+        title: "Could not stop every subagent",
+        description: "Open its details to retry. Partial work has been kept.",
+      })
+  }
 
   const openAgent = (agent: TaskAgent) => {
     if (!agent.sessionID) return
     input.open(agent.sessionID)
+  }
+
+  const inspect = async (agent: TaskAgent) => {
+    const sessionID = rootID()
+    const taskID = agent.task?.id ?? agent.sessionID
+    if (!sessionID || !taskID) throw new Error("This task is not available yet.")
+    if (input.desktop && board.desktop.some((task) => task.id === taskID))
+      return input.desktop.api.inspect({ parentSessionID: sessionID, sourcePath: input.desktop.sourcePath(), taskID })
+    const result = await input.client().experimental.task.inspect({ sessionID, taskID }, { throwOnError: true })
+    if (!result.data) throw new Error("The task details are unavailable.")
+    return result.data
+  }
+  const message = async (agent: TaskAgent, text: string) => {
+    const sessionID = rootID()
+    const taskID = agent.task?.id ?? agent.sessionID
+    if (!sessionID || !taskID) throw new Error("This task is not available yet.")
+    if (input.desktop && board.desktop.some((task) => task.id === taskID)) {
+      const result = await input.desktop.api.message({
+        parentSessionID: sessionID,
+        sourcePath: input.desktop.sourcePath(),
+        taskID,
+        text,
+      })
+      await refreshBoard()
+      return result
+    }
+    const result = await input
+      .client()
+      .experimental.task.message({ sessionID, taskID, text, delivery: "steer" }, { throwOnError: true })
+    if (!result.data) throw new Error("The message was not accepted. Your draft has been kept.")
+    await refreshBoard()
+    return result.data
+  }
+  async function stopAgent(agent: TaskAgent) {
+    const sessionID = rootID()
+    if (!sessionID) return
+    if (!agent.task) {
+      if (agent.sessionID) await stopSessions([agent.sessionID])
+      return
+    }
+    if (input.desktop && board.desktop.some((task) => task.id === agent.task?.id)) {
+      await input.desktop.api.stop({
+        parentSessionID: sessionID,
+        sourcePath: input.desktop.sourcePath(),
+        taskID: agent.task.id,
+      })
+      await refreshBoard()
+      return
+    }
+    await input
+      .client()
+      .experimental.task.stop(
+        { sessionID, taskIDs: [agent.task.id], reason: "Stopped by the user" },
+        { throwOnError: true },
+      )
+    await refreshBoard()
   }
 
   const attempted = new Set<string>()
@@ -334,5 +509,16 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     clearFinished,
     undismiss,
     hold,
+    inspect,
+    message,
+    stopAgent,
+    ask: (agent) => {
+      const root = rootID()
+      if (root) input.ask?.(agent, root)
+    },
+    refreshing: () => board.refreshing,
+    error: () => board.error,
+    draft: (agent) => drafts[agent.task?.id ?? agent.sessionID ?? agent.key] ?? "",
+    setDraft: (agent, text) => setDrafts(agent.task?.id ?? agent.sessionID ?? agent.key, text),
   }
 }

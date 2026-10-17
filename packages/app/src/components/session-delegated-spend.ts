@@ -1,7 +1,8 @@
 import { createMemo, createResource, type Accessor } from "solid-js"
 import type { Session } from "@vectordevai/sdk/v2/client"
 import { useSDK } from "@/context/sdk"
-import { delegatedSpend, sessionTokens } from "@/utils/session-cost"
+import { delegatedSpend, sessionSpend, sessionTokens } from "@/utils/session-cost"
+import { isInternalSession } from "@/utils/internal-sessions"
 
 // What a session delegated, named per Vector helper. Helper sessions are in no list, so they are read as the session's
 // children, again whenever its rolled-up spend moves while the breakdown is shown. Autocomplete moves it on nearly
@@ -32,6 +33,18 @@ export function createDelegatedSpend(info: Accessor<Session | undefined>, shown:
   return createMemo(() => {
     const loaded = children.latest?.sessionID === info()?.id ? children.latest?.sessions : undefined
     // Until the children are read, what was delegated cannot be split between helpers and subagents.
-    return { ...delegatedSpend(info(), loaded ?? []), split: loaded !== undefined }
+    return {
+      ...delegatedSpend(info(), loaded ?? []),
+      split: loaded !== undefined,
+      children: (loaded ?? [])
+        .filter((session) => !isInternalSession(session))
+        .map((session) => ({
+          id: session.id,
+          label: session.title.replace(/\s*\(@[^)]+ subagent\)\s*$/, ""),
+          ...sessionSpend(session),
+          tokens: sessionTokens(session),
+        }))
+        .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens),
+    }
   })
 }

@@ -122,6 +122,21 @@ export function SessionCostReadout() {
                   </div>
                 )}
               </For>
+              <For each={delegated().children.slice(0, 8)}>
+                {(child) => (
+                  <div data-slot="session-cost-child" class="flex items-center justify-between gap-4 pl-2">
+                    <span class="truncate text-v2-text-text-muted" title={child.label}>
+                      {child.label}
+                    </span>
+                    <span class="shrink-0 text-v2-text-text-base">{partText(child)}</span>
+                  </div>
+                )}
+              </For>
+              <Show when={delegated().children.length > 8}>
+                <div class="text-[11px] leading-4 text-v2-text-text-faint">
+                  {delegated().children.length - 8} more in Background tasks
+                </div>
+              </Show>
             </Show>
             <Show when={unpriced() > 0}>
               <div class="pt-1 text-[11px] leading-4 text-v2-text-text-faint">

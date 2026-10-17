@@ -361,6 +361,29 @@ declare global {
       deepLinks?: string[]
     }
     api?: {
+      agentTasks?: {
+        list: (input: {
+          parentSessionID: string
+          sourcePath: string
+        }) => Promise<import("@vectordevai/schema/task").ListResult>
+        inspect: (input: {
+          parentSessionID: string
+          sourcePath: string
+          taskID: string
+        }) => Promise<import("@vectordevai/schema/task").InspectResult>
+        message: (input: {
+          parentSessionID: string
+          sourcePath: string
+          taskID: string
+          text: string
+        }) => Promise<import("@vectordevai/schema/task").MessageResult>
+        stop: (input: {
+          parentSessionID: string
+          sourcePath: string
+          taskID: string
+        }) => Promise<import("@vectordevai/schema/task").StopResult>
+        onChange: (callback: () => void) => () => void
+      }
       setTitlebar?: (theme: { mode: "light" | "dark" }) => Promise<void>
       openLink?: (url: string) => void
       exportDebugLogs?: () => Promise<string>
