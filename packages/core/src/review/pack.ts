@@ -1,8 +1,8 @@
 // What a review prompt shows of a change. A file whose exact pull request version is at hand is shown once, as an
 // annotated file (renderAnnotated) that stands in for both its diff and its full text, when that is no larger than the
-// two together: its line numbers cost a few characters a line, which a small change to a long file does not repay. In an incremental review a file
-// with no hunk in the focus was reviewed before, so it keeps only its changed lines: no context lines and no full text.
-// Pure and browser-safe.
+// two together: its line numbers cost a few characters a line, which a small change to a long file does not repay. In
+// an incremental review a file with no hunk in the focus was reviewed before, so it keeps only its changed lines: no
+// context lines and no full text. Pure and browser-safe.
 
 import { renderAnnotated, renderPatch, type DiffFile } from "./diff"
 import type { HeadFile } from "./prompt"

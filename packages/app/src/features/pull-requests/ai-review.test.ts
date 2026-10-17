@@ -1415,6 +1415,9 @@ describe("applying a fix", () => {
       before: ["  return items[items.length]"],
       after: ["  return items[items.length - 1]"],
     })
+    // On a pull request, a fix the double-check did not confirm is shown but not offered.
+    const unchecked = (await run(fakeClient({ files: { "src/list.ts": HEAD, ...NO_VERIFY } }).client))!
+    expect(findingGroups(unchecked)[0]!.findings[0]!.apply).toBeUndefined()
     const rebuilt = (await run(fakeClient({ files: { "src/list.ts": BASE } }).client))!
     expect(findingGroups(rebuilt)[0]!.findings[0]!.apply).toBeUndefined()
     expect(findingGroups(rebuilt)[0]!.findings[0]!.fix).toEqual({

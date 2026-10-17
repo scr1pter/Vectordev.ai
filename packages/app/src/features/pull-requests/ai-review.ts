@@ -1483,11 +1483,15 @@ export type ReviewFindingView = {
 
 // Every finding, grouped by severity (blocking first), with its fix as a diff against the lines it replaces.
 export function findingGroups(
-  outcome: Pick<ReviewOutcomeLite, "selection" | "anchored"> & Partial<Pick<ReviewOutcomeLite, "fixes" | "checkout">>,
+  outcome: Pick<ReviewOutcomeLite, "selection" | "anchored"> &
+    Partial<Pick<ReviewOutcomeLite, "fixes" | "checkout" | "pr">>,
 ) {
   const { selection } = outcome
-  // A fix is applied to the user's files only when they are the version that was reviewed.
+  // A fix is applied to the user's files only when they are the version that was reviewed. On a pull request the
+  // suggestion came from a model that read someone else's code, so it is offered only once the double-check confirmed
+  // the finding.
   const inPlace = outcome.checkout?.mode === "in-place"
+  const applicable = (finding: Finding) => inPlace && (outcome.pr === undefined || finding.verified === true)
   const view = (finding: Finding, place: ReviewFindingView["place"], path = finding.path, line = finding.line) => {
     const edit = outcome.fixes?.[finding.id]
     const current = edit ? edit.before.join("\n") : outcome.anchored[finding.id]
@@ -1501,7 +1505,7 @@ export function findingGroups(
       body: finding.body,
       place,
       ...(finding.verified ? { verified: true } : {}),
-      ...(edit && inPlace ? { apply: edit } : {}),
+      ...(edit && applicable(finding) ? { apply: edit } : {}),
       ...(finding.also?.length ? { also: finding.also } : {}),
     }
     if (finding.suggestion)
