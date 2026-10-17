@@ -414,6 +414,7 @@ const layer = Layer.effect(
             description: task.description,
             subagent_type: task.agent,
             command: task.command,
+            background: false,
           },
           time: { start: Date.now() },
         },
@@ -423,6 +424,8 @@ const layer = Layer.effect(
         description: task.description,
         subagent_type: task.agent,
         command: task.command,
+        // A slash command's answer and cancellation belong to this turn.
+        background: false,
       }
       yield* plugin.trigger(
         "tool.execute.before",

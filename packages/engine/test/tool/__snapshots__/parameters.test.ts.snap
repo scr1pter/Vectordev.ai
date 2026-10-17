@@ -301,13 +301,94 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
+    "budget": {
+      "description": "Shared ceiling for this entire batch, subordinate to the parent run budget",
+      "properties": {
+        "steps": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "minimum": -9007199254740991,
+          "type": "integer",
+        },
+        "unpricedSteps": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "minimum": -9007199254740991,
+          "type": "integer",
+        },
+        "usd": {
+          "exclusiveMinimum": 0,
+          "type": "number",
+        },
+        "warnAt": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number",
+        },
+      },
+      "type": "object",
+    },
     "tasks": {
       "description": "One to eight complete, independent subagent briefs",
       "items": {
         "properties": {
+          "budget": {
+            "description": "A child spend/step ceiling subordinate to the parent run budget",
+            "properties": {
+              "steps": {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer",
+              },
+              "unpricedSteps": {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer",
+              },
+              "usd": {
+                "exclusiveMinimum": 0,
+                "type": "number",
+              },
+              "warnAt": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number",
+              },
+            },
+            "type": "object",
+          },
           "command": {
             "description": "The command that triggered this task",
             "type": "string",
+          },
+          "context_pack": {
+            "description": "Established paths, symbols and findings the child can reuse; maximum 8192 UTF-8 bytes",
+            "properties": {
+              "findings": {
+                "items": {
+                  "type": "string",
+                },
+                "maxItems": 16,
+                "type": "array",
+              },
+              "paths": {
+                "items": {
+                  "type": "string",
+                },
+                "maxItems": 32,
+                "type": "array",
+              },
+              "symbols": {
+                "items": {
+                  "type": "string",
+                },
+                "maxItems": 32,
+                "type": "array",
+              },
+            },
+            "type": "object",
           },
           "depends_on": {
             "description": "Task IDs that must complete successfully before this subagent starts",
