@@ -952,7 +952,10 @@ describe("tool.shell permissions", () => {
 
                 // Environment, scoped and plain variables are not files.
                 requests.length = 0
-                yield* run({ command: "$env:PATH; ${env:PATH}; $global:a = 1; $b = $a; $variable:b" }, capture(requests))
+                yield* run(
+                  { command: "$env:PATH; ${env:PATH}; $global:a = 1; $b = $a; $variable:b" },
+                  capture(requests),
+                )
                 expect(requests.map((r) => r.permission)).toEqual(["bash"])
               }),
             )

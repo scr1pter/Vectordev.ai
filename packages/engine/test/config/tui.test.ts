@@ -955,6 +955,55 @@ it.instance("VECTOR_TUI_CONFIG provides settings when no project config exists",
   ),
 )
 
+it.instance("keeps env-named TUI config inside an untrusted project under project trust", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const test = yield* TestInstance
+      const outside = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "vector-tui-env-"))),
+        (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
+      )
+      const alias = path.join(outside, "project")
+      yield* Effect.promise(() => symlink(test.directory, alias, process.platform === "win32" ? "junction" : "dir"))
+      yield* fs.writeFileString(
+        path.join(test.directory, "env-plugin.ts"),
+        'export default { id: "env", tui: async () => {} }\n',
+      )
+      yield* fs.writeJson(path.join(test.directory, "custom-tui.json"), {
+        theme: "from-env",
+        plugin: ["./env-plugin.ts"],
+      })
+      yield* fs.writeWithDirs(
+        path.join(test.directory, "config-dir", "tui.json"),
+        JSON.stringify({ theme: "from-dir", plugin: ["../env-plugin.ts"] }),
+      )
+
+      // Under the project's own spelling and through a link into it, the settings apply but the plugin waits for trust.
+      for (const root of [test.directory, alias]) {
+        for (const [name, value, theme] of [
+          ["VECTOR_TUI_CONFIG", path.join(root, "custom-tui.json"), "from-env"],
+          ["VECTOR_AGENT_CONFIG_DIR", path.join(root, "config-dir"), "from-dir"],
+        ]) {
+          const state = yield* withEnv(name, value, getTuiState(test.directory))
+          expect(state.config.theme).toBe(theme)
+          expect(state.config.plugin ?? []).toEqual([])
+          expect(state.origins).toEqual([])
+        }
+      }
+
+      // The user's own file outside the project still loads its plugin as theirs.
+      yield* fs.writeFileString(
+        path.join(outside, "user-plugin.ts"),
+        'export default { id: "user", tui: async () => {} }\n',
+      )
+      yield* fs.writeJson(path.join(outside, "user-tui.json"), { plugin: ["./user-plugin.ts"] })
+      const user = yield* withEnv("VECTOR_TUI_CONFIG", path.join(outside, "user-tui.json"), getTuiState(test.directory))
+      expect(user.origins.map((item) => item.scope)).toEqual(["global"])
+    }),
+  ),
+)
+
 it.instance("does not derive tui path from VECTOR_AGENT_CONFIG", () =>
   withCleanState(
     Effect.gen(function* () {

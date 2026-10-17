@@ -24,6 +24,7 @@ import {
   withTestInstance,
   provideInstanceEffect,
   testInstanceStoreLayer,
+  disposeAllInstancesEffect,
 } from "../fixture/fixture"
 import { InstanceRuntime } from "@/project/instance-runtime"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
@@ -36,6 +37,7 @@ import { Global } from "@vectordevai/core/global"
 import { ProjectV2 } from "@vectordevai/core/project"
 import { Filesystem } from "@/util/filesystem"
 import { ConfigPlugin } from "@/config/plugin"
+import { ConfigPaths } from "@/config/paths"
 import { ConfigPluginV1 } from "@vectordevai/core/v1/config/plugin"
 import { AuthTest } from "../fake/auth"
 import { NpmTest } from "../fake/npm"
@@ -1605,6 +1607,186 @@ for (const marker of ["plugin", "plugins", "tool", "tools", "package.json"]) {
     }),
   )
 }
+
+describe("config paths named by environment variables", () => {
+  it.effect("are project config, in the project's own spelling, when they pass through the project", () =>
+    Effect.gen(function* () {
+      const project = yield* tmpdirScoped()
+      const outside = yield* tmpdirScoped()
+      const alias = path.join(outside, "project")
+      const away = path.join(outside, "away")
+      yield* FSUtil.use.ensureDir(away)
+      yield* writeConfigEffect(project, {}, "agent.json")
+      yield* Effect.promise(() => fs.symlink(project, alias, linkType))
+      yield* Effect.promise(() => fs.symlink(away, path.join(project, "linked"), linkType))
+      const classify = (input: string) => ConfigPaths.environmentPath(input, { directory: project })
+
+      // Through a link into the project: a file, a file that does not exist yet, and the directory itself.
+      expect(yield* classify(path.join(alias, "agent.json"))).toEqual({
+        path: path.join(project, "agent.json"),
+        project: true,
+      })
+      expect(yield* classify(path.join(alias, "missing.json"))).toEqual({
+        path: path.join(project, "missing.json"),
+        project: true,
+      })
+      expect(yield* classify(alias)).toEqual({ path: project, project: true })
+      // A link the project owns stays the project's wherever it points, under either spelling of the project.
+      for (const root of [project, alias]) {
+        expect(yield* classify(path.join(root, "linked", "agent.json"))).toEqual({
+          path: path.join(project, "linked", "agent.json"),
+          project: true,
+        })
+      }
+      // Outside the project, the path is read where it was classified, with `..` collapsed first.
+      expect(yield* classify(path.join(away, "agent.json"))).toEqual({
+        path: path.join(away, "agent.json"),
+        project: false,
+      })
+      expect(yield* classify([alias, "..", "agent.json"].join(path.sep))).toEqual({
+        path: path.join(outside, "agent.json"),
+        project: false,
+      })
+    }),
+  )
+
+  it.effect("are project config when a link chain passes through the project on its way out", () =>
+    Effect.gen(function* () {
+      const project = yield* tmpdirScoped()
+      const outside = yield* tmpdirScoped()
+      const away = yield* tmpdirScoped()
+      // A user's directory link to a project directory link that points out of the project again.
+      yield* writeConfigEffect(away, {}, "vector.json")
+      yield* Effect.promise(() => fs.symlink(away, path.join(project, "dlink"), linkType))
+      yield* Effect.promise(() => fs.symlink(path.join(project, "dlink"), path.join(outside, "dir-alias"), linkType))
+      expect(
+        yield* ConfigPaths.environmentPath(path.join(outside, "dir-alias", "vector.json"), { directory: project }),
+      ).toEqual({
+        path: path.join(project, "dlink", "vector.json"),
+        project: true,
+      })
+      expect(yield* ConfigPaths.environmentPath(path.join(outside, "dir-alias"), { directory: project })).toEqual({
+        path: path.join(project, "dlink"),
+        project: true,
+      })
+      // The same chain made of file links. Windows creates those only with a privilege, which CI runners hold.
+      const linked = yield* Effect.promise(() =>
+        fs
+          .symlink(path.join(away, "vector.json"), path.join(project, "link-out.json"), "file")
+          .then(() => fs.symlink(path.join(project, "link-out.json"), path.join(outside, "user-link.json"), "file"))
+          .then(() => true)
+          .catch((error) => {
+            if (process.platform === "win32" && error?.code === "EPERM") return false
+            throw error
+          }),
+      )
+      if (!linked) return
+      expect(yield* ConfigPaths.environmentPath(path.join(outside, "user-link.json"), { directory: project })).toEqual({
+        path: path.join(project, "link-out.json"),
+        project: true,
+      })
+      // A relative link target applies its own `..` after the links before it, so the chain is still followed.
+      yield* Effect.promise(() =>
+        fs.symlink(
+          path.join("..", path.basename(project), "link-out.json"),
+          path.join(outside, "relative-link.json"),
+          "file",
+        ),
+      )
+      expect(
+        yield* ConfigPaths.environmentPath(path.join(outside, "relative-link.json"), { directory: project }),
+      ).toEqual({ path: path.join(project, "link-out.json"), project: true })
+      // The user's own file outside the project, and a chain that never enters it, stay the user's.
+      yield* Effect.promise(() => fs.symlink(path.join(away, "vector.json"), path.join(outside, "own.json"), "file"))
+      expect(yield* ConfigPaths.environmentPath(path.join(outside, "own.json"), { directory: project })).toEqual({
+        path: path.join(outside, "own.json"),
+        project: false,
+      })
+    }),
+  )
+
+  it.effect("are not loaded at all when they cannot be resolved", () =>
+    Effect.gen(function* () {
+      // A file link loop, which Windows cannot create without a privilege.
+      if (process.platform === "win32") return
+      const project = yield* tmpdirScoped()
+      const loop = path.join(yield* tmpdirScoped(), "loop")
+      yield* Effect.promise(() => fs.symlink(loop, loop))
+      expect(yield* ConfigPaths.environmentPath(path.join(loop, "agent.json"), { directory: project })).toBeUndefined()
+    }),
+  )
+})
+
+it.effect("holds a .vector above a non-git workspace back until the workspace is trusted", () =>
+  Effect.gen(function* () {
+    // A non-git folder, as at the top of an extracted archive or in a shared /tmp, opened one level down.
+    const root = yield* tmpdirScoped()
+    const app = path.join(root, "app")
+    const parent = path.join(root, ".vector")
+    yield* FSUtil.use.ensureDir(app)
+    yield* writeConfigEffect(parent, {
+      shell: "/fixture/parent-shell",
+      permission: { bash: "deny" },
+      mcp: { parent: { type: "local", command: ["/fixture/parent-mcp"] } },
+    })
+    yield* FSUtil.use.writeWithDirs(path.join(parent, "command", "parent-command.md"), "Parent command")
+    yield* FSUtil.use.writeWithDirs(path.join(parent, "plugin", "marker.ts"), "export default {}")
+    const load = Config.use.get().pipe(provideInstanceEffect(app), Effect.ensuring(disposeAllInstancesEffect))
+
+    const config = yield* load
+    expect(config.shell).toBeUndefined()
+    // The folder may still narrow what the agent can do.
+    expect(config.permission?.bash).toBe("deny")
+    expect(config.mcp?.parent).toBeUndefined()
+    expect(config.command?.["parent-command"]).toBeUndefined()
+    expect((config.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item)).join()).not.toContain("marker")
+
+    // Once the workspace is trusted, the folder's commands load as before.
+    yield* Config.Service.use((service) => service.approve!()).pipe(
+      provideInstanceEffect(app),
+      Effect.ensuring(disposeAllInstancesEffect),
+    )
+    expect((yield* load).command?.["parent-command"]).toBeDefined()
+  }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
+)
+
+it.effect("treats a VECTOR_AGENT_CONFIG_DIR inside an untrusted project as project config under any spelling", () =>
+  Effect.gen(function* () {
+    const project = yield* tmpdirScoped()
+    const alias = path.join(yield* tmpdirScoped(), "project")
+    yield* Effect.promise(() => fs.symlink(project, alias, linkType))
+    const directory = path.join(project, "agent-config")
+    yield* writeConfigEffect(directory, { shell: "/fixture/dir-shell", permission: { bash: "deny" } })
+    yield* FSUtil.use.writeWithDirs(
+      path.join(directory, "agent", "granted.md"),
+      "---\npermission:\n  bash: allow\n---\nGranted agent",
+    )
+    yield* FSUtil.use.writeWithDirs(path.join(directory, "command", "project-command.md"), "Project command")
+    yield* FSUtil.use.writeWithDirs(path.join(directory, "plugin", "marker.ts"), "export default {}")
+    const load = (spelling: string) =>
+      withProcessEnv("VECTOR_AGENT_CONFIG_DIR", spelling, Config.use.get().pipe(provideInstanceEffect(project))).pipe(
+        Effect.ensuring(disposeAllInstancesEffect),
+      )
+
+    for (const spelling of [directory, path.join(alias, "agent-config")]) {
+      const config = yield* load(spelling)
+      expect(config.shell).toBeUndefined()
+      // A project may still narrow what the agent can do.
+      expect(config.permission?.bash).toBe("deny")
+      expect(config.agent?.granted).toBeUndefined()
+      expect(config.command?.["project-command"]).toBeUndefined()
+      expect((config.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item)).join()).not.toContain("marker")
+    }
+
+    // Once the project is trusted, the directory's commands load as before.
+    yield* withProcessEnv(
+      "VECTOR_AGENT_CONFIG_DIR",
+      path.join(alias, "agent-config"),
+      Config.Service.use((service) => service.approve!()).pipe(provideInstanceEffect(project)),
+    ).pipe(Effect.ensuring(disposeAllInstancesEffect))
+    expect((yield* load(path.join(alias, "agent-config"))).command?.["project-command"]).toBeDefined()
+  }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
+)
 
 it.effect("does not try to install dependencies in read-only VECTOR_AGENT_CONFIG_DIR", () =>
   Effect.gen(function* () {

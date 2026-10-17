@@ -622,34 +622,43 @@ const layer = Layer.effect(
     const loadInstanceState = Effect.fn("Config.loadInstanceState")(
       function* (ctx: InstanceContext) {
         const auth = yield* authSvc.all().pipe(Effect.orDie)
-        // These directories belong to the user even when the current workspace is their home or config folder.
-        const projectPath = (file: string) =>
-          [Global.Path.config, path.join(Global.Path.home, ".vector")].some((root) => FSUtil.contains(root, file))
-            ? undefined
-            : ConfigPaths.projectPath(file, ctx)
-        const projectContains = (file: string) => projectPath(file) !== undefined
         const projectFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG
           ? []
           : yield* ConfigPaths.files("vector", ctx.directory, ctx.worktree).pipe(Effect.orDie)
         const projectTuiFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG
           ? []
           : yield* ConfigPaths.files("tui", ctx.directory, ctx.worktree).pipe(Effect.orDie)
-        const agentConfig = Flag.VECTOR_AGENT_CONFIG
-          ? (projectPath(Flag.VECTOR_AGENT_CONFIG) ?? Flag.VECTOR_AGENT_CONFIG)
-          : undefined
-        const agentConfigDir = Flag.VECTOR_AGENT_CONFIG_DIR
-          ? (projectPath(Flag.VECTOR_AGENT_CONFIG_DIR) ?? Flag.VECTOR_AGENT_CONFIG_DIR)
-          : undefined
+        // A file or directory an env var names is project config when it is inside the project under any spelling.
+        const agentConfig = yield* ConfigPaths.environmentPath(Flag.VECTOR_AGENT_CONFIG, ctx)
+        const agentConfigDir = yield* ConfigPaths.environmentPath(Flag.VECTOR_AGENT_CONFIG_DIR, ctx)
+        // Not loaded here, but captured as the TUI captures it, so both reach the same trust decision.
+        const tuiConfig = yield* ConfigPaths.environmentPath(Flag.VECTOR_TUI_CONFIG, ctx)
         const allDirectories = Array.from(
           new Set(
             (yield* ConfigPaths.directories(ctx.directory, ctx.worktree)).map(
-              (directory) => projectPath(directory) ?? directory,
+              (directory) => ConfigPaths.projectPath(directory, ctx) ?? directory,
             ),
           ),
         )
+        // Above a non-git workspace the upward walk also finds .vector folders in its parents, such as the top of an
+        // extracted archive or a shared /tmp. The vector.json files beside them already load as the project's, and so
+        // do these: their settings stay narrowed and their plugins, commands and agents wait for trust, as the TUI and
+        // core already treat them. The user's own folders are never among them.
+        const parentDirectories =
+          ctx.worktree === "/"
+            ? allDirectories.filter(
+                (directory) =>
+                  path.basename(directory) === ".vector" &&
+                  !ConfigPaths.userOwned(directory) &&
+                  FSUtil.contains(path.dirname(directory), ctx.directory) &&
+                  !FSUtil.contains(ctx.directory, directory),
+              )
+            : []
+        const projectContains = (file: string) =>
+          ConfigPaths.projectContains(file, ctx) ||
+          parentDirectories.some((directory) => FSUtil.contains(directory, file))
         const projectDirectories = allDirectories.filter(projectContains)
-        const localAgentConfig = agentConfig && projectContains(agentConfig) ? [agentConfig] : []
-        const localTuiConfig = Flag.VECTOR_TUI_CONFIG ? projectPath(Flag.VECTOR_TUI_CONFIG) : undefined
+        const localAgentConfig = agentConfig?.project ? [agentConfig.path] : []
         const trustWorkspace = ctx.worktree === "/" ? ctx.directory : ctx.worktree
         const prepareProjectFile = Effect.fnUntraced(function* (filepath: string) {
           // This runs before any trust decision, and writing follows links: a project's vector.json linked to
@@ -675,7 +684,7 @@ const layer = Layer.effect(
             ...projectTuiFiles,
             ...projectDirectories,
             ...localAgentConfig,
-            ...(localTuiConfig ? [localTuiConfig] : []),
+            ...(tuiConfig?.project ? [tuiConfig.path] : []),
           ]).catch((cause) => WorkspaceTrust.unavailableSnapshot(trustWorkspace, cause))
         const existingTrustSnapshot = yield* Effect.promise(captureTrustSnapshot)
         const snapshotFailure = WorkspaceTrust.unavailableReason(existingTrustSnapshot)
@@ -857,11 +866,11 @@ const layer = Layer.effect(
         yield* merge(Global.Path.config, global, "global")
 
         if (agentConfig) {
-          const next = projectContains(agentConfig)
-            ? yield* loadProjectFile(agentConfig, authEnv, !trusted)
-            : yield* loadFile(agentConfig, authEnv, true)
-          yield* merge(agentConfig, next)
-          yield* Effect.logDebug("loaded custom config", { path: agentConfig })
+          const next = agentConfig.project
+            ? yield* loadProjectFile(agentConfig.path, authEnv, !trusted)
+            : yield* loadFile(agentConfig.path, authEnv, true)
+          yield* merge(agentConfig.path, next, agentConfig.project ? "local" : "global")
+          yield* Effect.logDebug("loaded custom config", { path: agentConfig.path })
         }
 
         if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
@@ -883,7 +892,7 @@ const layer = Layer.effect(
           )
 
         if (agentConfigDir) {
-          yield* Effect.logDebug("loading config from VECTOR_AGENT_CONFIG_DIR", { path: agentConfigDir })
+          yield* Effect.logDebug("loading config from VECTOR_AGENT_CONFIG_DIR", { path: agentConfigDir.path })
         }
 
         const deps: Fiber.Fiber<void>[] = []
@@ -891,8 +900,8 @@ const layer = Layer.effect(
         for (const dir of allDirectories) {
           const local = projectContains(dir)
           const runtimeDir = local && trustedSnapshot ? WorkspaceTrust.materializedPath(trustedSnapshot, dir) : dir
-          if (dir.endsWith(".vector") || dir === agentConfigDir) {
-            if (dir === agentConfigDir) yield* importSettings(dir)
+          if (dir.endsWith(".vector") || dir === agentConfigDir?.path) {
+            if (dir === agentConfigDir?.path) yield* importSettings(dir)
             if (!local || trusted) yield* importSettings(dir, true)
             // Local files merge after the shared ones so machine-local settings win.
             for (const file of ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES]) {
@@ -911,7 +920,7 @@ const layer = Layer.effect(
           // The desktop also owns .vector directories containing repository state and rules.
           const runtimeFiles =
             dir === Global.Path.config ||
-            dir === agentConfigDir ||
+            dir === agentConfigDir?.path ||
             (yield* fs.isFile(path.join(runtimeDir, "package.json"))) ||
             (yield* Effect.forEach(["plugin", "plugins", "tool", "tools"], (name) =>
               fs.isDir(path.join(runtimeDir, name)),
@@ -1052,9 +1061,9 @@ const layer = Layer.effect(
           config: result,
           directories,
           configDirectory:
-            agentConfigDir && trustedSnapshot && projectContains(agentConfigDir)
-              ? WorkspaceTrust.materializedPath(trustedSnapshot, agentConfigDir)
-              : agentConfigDir,
+            agentConfigDir?.project && trustedSnapshot
+              ? WorkspaceTrust.materializedPath(trustedSnapshot, agentConfigDir.path)
+              : agentConfigDir?.path,
           deps,
           trust: trustSnapshot,
           trusted,
@@ -1182,6 +1191,7 @@ const layer = Layer.effect(
     const storedMcp = Effect.fn("Config.storedMcp")(function* (name: string) {
       const ctx = yield* InstanceState.context
       const settings = yield* InstanceState.use(state, (s) => s)
+      const agentConfig = yield* ConfigPaths.environmentPath(Flag.VECTOR_AGENT_CONFIG, ctx)
       const project = Flag.VECTOR_DISABLE_PROJECT_CONFIG
         ? []
         : yield* ConfigPaths.files("vector", ctx.directory, ctx.worktree).pipe(
@@ -1191,7 +1201,7 @@ const layer = Layer.effect(
           )
       const files = [
         ...["config.json", "vector.json", "vector.jsonc"].map((file) => path.join(Global.Path.config, file)),
-        ...(Flag.VECTOR_AGENT_CONFIG ? [Flag.VECTOR_AGENT_CONFIG] : []),
+        ...(agentConfig ? [agentConfig.path] : []),
         ...project,
         ...settings.directories
           .filter((dir) => dir.endsWith(".vector") || dir === settings.configDirectory)

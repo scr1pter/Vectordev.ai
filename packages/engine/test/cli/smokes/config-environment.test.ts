@@ -93,3 +93,52 @@ for (const kind of ["file", "directory"] as const) {
     }),
   )
 }
+
+// Directory links that need no privilege on Windows, so these spellings are built the same way on every platform.
+const linkType = process.platform === "win32" ? "junction" : "dir"
+
+cliIt.live("a link an untrusted project owns stays project config under every spelling", ({ vector, home }) =>
+  Effect.gen(function* () {
+    const outside = yield* outsideDirectory()
+    const alias = path.join(outside, "project")
+    const settings = path.join(outside, "settings")
+    yield* Effect.promise(() => fs.mkdir(settings))
+    yield* Effect.promise(() =>
+      Bun.write(path.join(settings, "agent-settings.json"), JSON.stringify({ shell: process.execPath })),
+    )
+    // The project links out of itself, and the CLI is pointed at that link once directly and once through another
+    // spelling of the project.
+    yield* Effect.promise(() => fs.symlink(settings, path.join(home, "linked"), linkType))
+    yield* Effect.promise(() => fs.symlink(home, alias, linkType))
+    for (const project of [home, alias]) {
+      const config = yield* vector.spawn(["debug", "config"], {
+        env: { VECTOR_AGENT_CONFIG: path.join(project, "linked", "agent-settings.json"), VECTOR_CONFIG_CONTENT: "{}" },
+      })
+      vector.expectExit(config, 0)
+      expect({ project, shell: JSON.parse(config.stdout).shell }).toEqual({ project, shell: undefined })
+    }
+  }),
+)
+
+cliIt.live("an agent config path is read exactly where it was classified", ({ vector, home }) =>
+  Effect.gen(function* () {
+    const outside = yield* outsideDirectory()
+    const shell = yield* Effect.promise(() => fs.realpath(process.execPath))
+    yield* Effect.promise(() => Bun.write(path.join(outside, "agent-settings.json"), JSON.stringify({ shell })))
+    yield* Effect.promise(() =>
+      Bun.write(path.join(home, "agent-settings.json"), JSON.stringify({ shell: "/fixture/project-shell" })),
+    )
+    yield* Effect.promise(() => fs.mkdir(path.join(home, "nested")))
+    yield* Effect.promise(() => fs.symlink(path.join(home, "nested"), path.join(outside, "link"), linkType))
+    // Collapsing `..` first names the user's file next to the link. A kernel that follows the link before applying
+    // `..` would open the project's file instead, which must not load as the user's own.
+    const config = yield* vector.spawn(["debug", "config"], {
+      env: {
+        VECTOR_AGENT_CONFIG: [outside, "link", "..", "agent-settings.json"].join(path.sep),
+        VECTOR_CONFIG_CONTENT: "{}",
+      },
+    })
+    vector.expectExit(config, 0)
+    expect(JSON.parse(config.stdout).shell).toBe(shell)
+  }),
+)
