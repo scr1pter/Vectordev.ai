@@ -255,17 +255,19 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
             const tabs = useTabs()
             const tabsStore = tabs.store
             const tabsStoreActions = tabs
+            const listedServer = (route: { server?: string }) =>
+              global.servers.list().find((item) => ServerConnection.key(item) === (route.server ?? server.key))
             const [session] = createResource(
               () => {
                 const route = layout.route()
                 if (route.type !== "session") return undefined
-                const conn = global.servers
-                  .list()
-                  .find((item) => ServerConnection.key(item) === (route.server ?? server.key))
-                return conn ? { route, sdk: global.ensureServerCtx(conn).sdk } : undefined
+                const conn = listedServer(route)
+                // A missing source keeps the last session, which the tab effect below would re-add under a server
+                // that is not in the list; the tabs store drops such tabs at once, and the two looped forever.
+                return { route, sdk: conn ? global.ensureServerCtx(conn).sdk : undefined }
               },
               ({ route, sdk }) =>
-                sdk.client.session
+                sdk?.client.session
                   .get({ sessionID: route.sessionId })
                   .then((x) => x.data)
                   .catch(() => {}),
@@ -284,7 +286,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                 )
                 if (main) return main
                 const s = session()
-                if (s?.parentID) {
+                if (s?.parentID && s.id === route.sessionId) {
                   const parentID = s.parentID
                   const parent = tabsStore.find(
                     (item) => item.type === "session" && item.server === routeServer && item.sessionId === parentID,
@@ -306,9 +308,10 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
               }
 
               if (route.type === "session") {
+                if (!listedServer(route)) return
                 const s = session()
                 // A helper session is never given a tab; its route goes on to the session that launched it.
-                if (!s || isInternalSession(s)) return
+                if (!s || s.id !== route.sessionId || isInternalSession(s)) return
                 const sessionId = s.parentID ?? s.id
                 const next = { server: route.server ?? server.key, sessionId }
                 tabsStoreActions.addSessionTab(next)
