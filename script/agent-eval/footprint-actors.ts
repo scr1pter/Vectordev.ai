@@ -23,6 +23,7 @@ export type ActorStep = Work & {
   after?: { actor: string; requests: number }
   releaseOn?: "message" | "stop"
   requires?: string
+  verify?: boolean
 }
 export type ActorPlan = { steps: ActorStep[]; actors?: Record<string, ActorStep[]> }
 
@@ -124,6 +125,8 @@ export function actorScript(plan: ActorPlan, inline = false) {
       if (seen.has(item.id)) return
       seen.add(item.id)
       const operation = operations.get(item.id)
+      if (operation?.verify && (item.failed || !/\b0 fail\b/.test(item.text)))
+        errors.push(`Scripted verification did not pass: ${item.text.slice(0, 500)}`)
       if (operation && !["bash", "delegate", "manage"].includes(operation.kind) && item.failed)
         errors.push(`${operation.kind} failed: ${item.text.slice(0, 500)}`)
       const control = controls.get(item.id)

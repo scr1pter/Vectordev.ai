@@ -2,8 +2,8 @@
 // Offline request-cost benchmark. Runs a real agent (Vector's `vector run`, the Claude Code CLI or the Codex CLI)
 // against a local fake model server (Anthropic Messages, or the OpenAI Responses API) that plays a fixed script of
 // tool calls, records every request the agent sends, and prices each one under the provider's prompt-caching rules
-// (prompt-cache.ts). No API key, no network and no model variance: the same build always produces the same numbers,
-// and two runtimes doing the same steps can be compared exactly. It measures what each runtime sends, not how well a
+// (prompt-cache.ts). No real API key or model calls are used. Concurrent request order can affect the estimates.
+// The scripted work permits request-footprint comparisons. It measures what each runtime sends, not how well a
 // model would do with it; the live harness in run.ts measures that.
 //
 //   bun script/agent-eval/footprint.ts                                   Vector, every scenario
@@ -59,7 +59,7 @@ const FIX: Step = {
   from: "  return invoices.filter((invoice) => !invoice.paidOn && invoice.dueOn <= today)",
   to: "  return invoices.filter((invoice) => !invoice.paidOn && invoice.dueOn < today)",
 }
-const TEST: Step = { kind: "bash", command: "bun test", description: "Run the test suite" }
+const TEST: Step = { kind: "bash", command: "bun test", description: "Run the test suite", verify: true }
 
 const SCENARIOS: Scenario[] = [
   {
@@ -67,7 +67,7 @@ const SCENARIOS: Scenario[] = [
     title: "Fix a failing test alone: run the suite, read, edit, re-run, answer",
     task: "bugfix-overdue-invoices",
     steps: [
-      TEST,
+      { ...TEST, verify: false },
       { kind: "read", path: "src/invoice.ts" },
       FIX,
       TEST,
@@ -112,7 +112,7 @@ const SCENARIOS: Scenario[] = [
         prompt: "Make `bun test` pass in this repository without editing test/. Report the change and the test run.",
       },
       // The subagent's own steps.
-      TEST,
+      { ...TEST, verify: false },
       { kind: "read", path: "src/invoice.ts" },
       FIX,
       TEST,
@@ -127,7 +127,7 @@ const SCENARIOS: Scenario[] = [
     title: "A 12-step investigation: how the prompt cache holds up as a tool loop grows",
     task: "discipline-single-file-fix",
     steps: [
-      TEST,
+      { ...TEST, verify: false },
       { kind: "list", pattern: "**/*.ts" },
       { kind: "read", path: "README.md" },
       { kind: "search", pattern: "export function" },
@@ -136,7 +136,7 @@ const SCENARIOS: Scenario[] = [
       { kind: "read", path: "src/config.ts" },
       { kind: "search", pattern: "TODO" },
       { kind: "bash", command: "git status --short", description: "Check the working tree" },
-      TEST,
+      { ...TEST, verify: false },
       { kind: "list", pattern: "test/**/*.ts" },
       { kind: "answer", text: "Investigation finished; the failing case is in src/args.ts." },
     ],

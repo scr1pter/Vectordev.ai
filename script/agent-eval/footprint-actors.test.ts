@@ -84,6 +84,18 @@ describe("offline actor scripts", () => {
     expect(script.errors).toEqual(["a did not receive required context: handoff"])
   })
 
+  test("requires every scripted verification to pass even when independent fixture checks might pass later", () => {
+    const script = actorScript({ steps: [] })
+    const check = { kind: "bash", command: "bun test", description: "Verify", verify: true } as const
+    script.track("check-good", check)
+    script.observe(result("check-good", "3 pass\n0 fail\n8 expect() calls"))
+    script.track("check-bad", check)
+    script.observe(result("check-bad", "bun: command not found"))
+    script.track("check-expected-failure", { ...check, verify: false })
+    script.observe(result("check-expected-failure", "2 pass\n1 fail", true))
+    expect(script.errors).toEqual(["Scripted verification did not pass: bun: command not found"])
+  })
+
   test("understands launch IDs from native runtime outputs", () => {
     expect(returnedTaskID("task_id: ses_abcd")).toBe("ses_abcd")
     expect(returnedTaskID("agentId: a90de42 (save this ID)")).toBe("a90de42")
