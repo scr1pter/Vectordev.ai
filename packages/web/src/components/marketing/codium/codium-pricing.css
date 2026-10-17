@@ -60,67 +60,18 @@ body:has(.cx-page)::before {
 }
 
 /*
- * The bar and footer keep the landing page's typefaces: Geist for the bar, the landing face for the footer. The bar
- * scrolls away with the page as it does on the landing page, where LanderMotion's `.vector-marketing > *` makes it
- * relative; its `top` still sets it 12px down. Pinned, the pricing content would show around its rounded ends.
+ * The bar is the landing page's own: MarketingNav inside a .vector-marketing wrapper, so LanderMaterials gives it the
+ * same glass, rim, paint and pointer-tracked light. It scrolls away with the page as on the landing page, where
+ * LanderMotion's `.vector-marketing > *` makes it relative; its `top` still sets it 12px down. The footer keeps the
+ * landing face.
  */
-.cx-page > .site-header {
+.cx-bar > .site-header {
   position: relative;
   font-family: var(--font-sans);
 }
 
 .cx-page > .site-footer {
   font-family: var(--font-landing);
-}
-
-/*
- * The bar wears the landing page's material from LanderMaterials.astro: the violet measured under its glass, painted
- * there instead of a live blur, and the rim lit from the top left. Only the pointer-tracked highlight is left out; it
- * needs the landing page's script.
- */
-.cx-page > .site-header .site-nav {
-  position: relative;
-  isolation: isolate;
-  background:
-    var(--glass-fill-strong),
-    linear-gradient(90deg, rgb(22 11.4 45) 5%, rgb(17.6 8.6 36.5) 24%, rgb(16 8 31) 44%, rgb(17.8 9.7 34.4) 63%, rgb(16.8 10 33.4) 90%);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
-
-.cx-page > .site-header .site-nav::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  padding: 1px;
-  background: linear-gradient(
-    145deg,
-    rgba(255, 255, 255, 0.9) 0%,
-    rgba(226, 214, 255, 0.5) 18%,
-    rgba(255, 255, 255, 0.06) 44%,
-    rgba(255, 255, 255, 0.02) 70%,
-    rgba(255, 255, 255, 0.14) 100%
-  );
-  border-radius: inherit;
-  opacity: 0.75;
-  pointer-events: none;
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-}
-
-@media (max-width: 640px) {
-  .cx-page > .site-header .site-nav {
-    background:
-      var(--glass-fill-strong),
-      linear-gradient(90deg, rgb(22 10.7 45.6), rgb(19.5 9.7 41) 40%, rgb(24.1 12.6 48.4) 75%);
-  }
 }
 
 /* The page's own type and resets stop at main, so the bar and footer render as they do on the landing page. */

@@ -3,6 +3,7 @@ import { publicModelPlans } from "../../../../api/_lib/model-plan-config"
 import { CodiumPricing, CodiumQuestions } from "../components/marketing/codium/CodiumPricing"
 import "../components/marketing/codium/codium-pricing.css"
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import LanderMaterials from "../components/marketing/LanderMaterials.astro"
 import MarketingNav from "../components/marketing/MarketingNav.astro"
 import SiteFooter from "../components/marketing/SiteFooter.astro"
 import { codiumPricing } from "../lib/codium-pricing"
@@ -23,8 +24,10 @@ const prices = pricing.monthly.map((plan) => plan.price)
   document.documentElement.dataset.codiumMode = new URLSearchParams(location.search).get("type") === "topups" ? "topup" : "monthly";
 </script>
   <div class="cx-page">
-    {/* The landing page's own top bar and footer box; the bar leaves out the Vector mark in its corner. */}
-    <MarketingNav active="codium" brand={false} />
+    {/* The landing page's own top bar, lit by LanderMaterials exactly as on the landing page, and its footer box. */}
+    <div class="vector-marketing cx-bar">
+      <MarketingNav active="codium" />
+    </div>
 
     <main class="cx-main">
       <section class="cx-section cx-pricing">
@@ -58,4 +61,5 @@ const prices = pricing.monthly.map((plan) => plan.price)
 
     <SiteFooter />
   </div>
+  <LanderMaterials />
 </MarketingLayout>

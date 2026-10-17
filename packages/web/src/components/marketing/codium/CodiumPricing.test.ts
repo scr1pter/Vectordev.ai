@@ -362,21 +362,22 @@ describe("Codium pricing page", () => {
     expect(lander).toContain("<SiteFooter />")
     expect(source).toContain('import MarketingNav from "../components/marketing/MarketingNav.astro"')
     expect(source).toContain('import SiteFooter from "../components/marketing/SiteFooter.astro"')
-    const nav = source.indexOf('<MarketingNav active="codium" brand={false} />')
+    // The bar sits in a .vector-marketing wrapper so LanderMaterials lights it exactly as on the landing page.
+    const nav = source.indexOf('<div class="vector-marketing cx-bar">\n      <MarketingNav active="codium" />')
     expect(nav).toBeGreaterThan(source.indexOf('<div class="cx-page">'))
     expect(source.indexOf('<main class="cx-main">')).toBeGreaterThan(nav)
     expect(source.indexOf("<SiteFooter />")).toBeGreaterThan(source.indexOf("</main>"))
+    expect(source).toContain('import LanderMaterials from "../components/marketing/LanderMaterials.astro"')
+    expect(source).toContain("<LanderMaterials />")
     expect(source).toContain("Get started with Vector.")
     // The page's own header, menu, footer, theme switch and wordmark are gone.
     for (const removed of ["cx-header", "cx-logo", "cx-menu", "cx-footer", "cx-theme", "wordmark", "localStorage"])
       expect(source).not.toContain(removed)
 
-    // The mark is optional and on by default, so every other page keeps it; without it the links stay at the right end.
+    // The bar keeps the Vector mark, as on the landing page.
     const bar = await Bun.file(new URL("../MarketingNav.astro", import.meta.url)).text()
-    expect(bar).toContain('const { active = "home", brand = true } = Astro.props')
-    expect(bar).toMatch(/brand && \(\s*<a class="site-brand" href="\/" aria-label="Vector home">/)
-    expect(bar).toContain('<div class:list={["site-nav", { "site-nav--bare": !brand }]}>')
-    expect(bar).toMatch(/\.site-nav--bare \{\n    justify-content: flex-end;\n  \}/)
+    expect(bar).toContain('<a class="site-brand" href="/" aria-label="Vector home">')
+    expect(source).not.toContain("brand={false}")
   })
 
   test("the page is dark only, and its own typeface stops at main so the bar and footer match the landing page", async () => {
@@ -388,18 +389,17 @@ describe("Codium pricing page", () => {
       expect(css).not.toContain(removed)
     expect(css).toContain(".cx-page {\n  --cx-sec")
     expect(css).toMatch(/^\.cx-main \{[^}]*font-family: "Geist Variable"/m)
-    expect(css).toMatch(/^\.cx-page > \.site-header \{[^}]*font-family: var\(--font-sans\);/m)
+    expect(css).toMatch(/^\.cx-bar > \.site-header \{[^}]*font-family: var\(--font-sans\);/m)
     expect(css).toMatch(/^\.cx-page > \.site-footer \{\n  font-family: var\(--font-landing\);/m)
     expect(css.match(/font-family:/g)).toHaveLength(3)
     // The landing page gives its bar Geist and its footer the landing face.
     const lander = await Bun.file(new URL("../../Lander.astro", import.meta.url)).text()
     expect(lander).toMatch(/\.vector-marketing > :global\(\.site-header\) \{\n    font-family: var\(--font-sans\);/)
     expect(lander).toMatch(/\.vector-marketing \{[^}]*font-family: var\(--font-landing\);/)
-    // The bar is painted with the landing page's own underlay at both of its sizes, so the two cannot drift apart.
+    // The bar's glass, rim and paint come from LanderMaterials itself, not a copy that could drift.
     const materials = await Bun.file(new URL("../LanderMaterials.astro", import.meta.url)).text()
-    const paints = css.match(/linear-gradient\(90deg, [^;]+;/g) ?? []
-    expect(paints).toHaveLength(2)
-    for (const paint of paints) expect(materials).toContain(paint)
+    expect(materials).toContain(".vector-marketing .site-header .site-nav::before")
+    expect(css).not.toMatch(/linear-gradient\(90deg/)
   })
 
   test("the bar scrolls away as on the landing page, and the table header and Q&A heading stick to the window top", async () => {
@@ -414,7 +414,7 @@ describe("Codium pricing page", () => {
     const wide = bar.match(/\.site-header \{[^}]*position: sticky;\n    top: (\d+)px;/)
     expect(wide).not.toBeNull()
     expect(motion).toMatch(/\.vector-marketing > \* \{\n    position: relative;/)
-    expect(css).toMatch(/^\.cx-page > \.site-header \{\n  position: relative;/m)
+    expect(css).toMatch(/^\.cx-bar > \.site-header \{\n  position: relative;/m)
     // Nothing is left holding space for a pinned bar.
     for (const removed of ["--cx-nav", "--cx-header", "scroll-padding"]) expect(css).not.toContain(removed)
     // The header row sticks to the window top at every width; below 1140px its sideways scroller holds it in place.
