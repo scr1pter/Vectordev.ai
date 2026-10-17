@@ -49,10 +49,10 @@ async function expectNoTrustDialog(page: Page, trust: { reads: number }, after: 
   await expect(page.getByRole("dialog")).toHaveCount(0)
 }
 
-test("asks once to trust a project with its own settings and remembers Not now", async ({ page }) => {
+test("asks once to trust a repository with its own settings and remembers Not now", async ({ page }) => {
   const trust = await openDraft(page, ignoredSettings)
 
-  const dialog = page.getByRole("dialog", { name: "Trust this project?" })
+  const dialog = page.getByRole("dialog", { name: "Trust this repository?" })
   await expect(dialog).toBeVisible()
   await expect(dialog).toContainText("Trusting SmokeProject lets Vector load the settings it comes with")
   await expect(page.locator('[data-component="project-trust-notice"]')).toHaveCount(0)
@@ -68,13 +68,13 @@ test("asks once to trust a project with its own settings and remembers Not now",
   expect(trust.approvals).toBe(0)
 })
 
-test("Trust this project approves through the engine and asks again only after the settings change", async ({
+test("Trust this repository approves through the engine and asks again only after the settings change", async ({
   page,
 }) => {
   const trust = await openDraft(page, ignoredSettings)
 
-  const dialog = page.getByRole("dialog", { name: "Trust this project?" })
-  await dialog.getByRole("button", { name: "Trust this project" }).click()
+  const dialog = page.getByRole("dialog", { name: "Trust this repository?" })
+  await dialog.getByRole("button", { name: "Trust this repository" }).click()
   await expect(dialog).toHaveCount(0)
   expect(trust.approvals).toBe(1)
   await expect.poll(() => storedAnswers(page)).toContain("trusted")
@@ -83,15 +83,15 @@ test("Trust this project approves through the engine and asks again only after t
   await page.reload()
   await expectNoTrustDialog(page, trust, reads)
 
-  // The engine stops trusting a project whose settings changed after the approval.
+  // The engine stops trusting a repository whose settings changed after the approval.
   trust.status = { ...trust.status, ...ignoredSettings }
   await page.reload()
-  const changed = page.getByRole("dialog", { name: "Trust this project's new settings?" })
+  const changed = page.getByRole("dialog", { name: "Trust this repository's new settings?" })
   await expect(changed).toBeVisible()
   await expect(changed).toContainText("SmokeProject's Vector settings changed after you trusted it")
 })
 
-test("never asks about a project with no Vector settings of its own", async ({ page }) => {
+test("never asks about a repository with no Vector settings of its own", async ({ page }) => {
   const trust = await openDraft(page, { trusted: false, ignored: true, settings: false })
   await expectNoTrustDialog(page, trust, 0)
   expect(trust.approvals).toBe(0)

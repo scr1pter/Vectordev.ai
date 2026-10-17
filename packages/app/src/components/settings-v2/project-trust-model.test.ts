@@ -7,11 +7,11 @@ const status = (input: { trusted: boolean; ignored: boolean; settings: boolean }
 })
 
 describe("projectTrustSummary", () => {
-  test("offers trust for a project whose own settings are ignored", () => {
+  test("offers trust for a repository whose own settings are ignored", () => {
     const summary = projectTrustSummary(status({ trusted: false, ignored: true, settings: true }), "app")
     expect(summary.state).toBe("untrusted")
     expect(summary.canTrust).toBe(true)
-    expect(summary.description).toContain("Vector ignores them until you trust the project")
+    expect(summary.description).toContain("Vector ignores them until you trust the repository")
   })
 
   test("offers trust when only the user's own language servers, formatters and MCP servers are held back", () => {
@@ -21,23 +21,34 @@ describe("projectTrustSummary", () => {
     expect(summary.description).toContain("has no Vector settings of its own")
   })
 
-  test("a trusted project has nothing to approve and says a change asks again", () => {
+  test("a trusted repository has nothing to approve and says a change asks again", () => {
     const summary = projectTrustSummary(status({ trusted: true, ignored: false, settings: true }), "app")
     expect(summary.state).toBe("trusted")
     expect(summary.canTrust).toBe(false)
-    expect(summary.description).toContain("until you trust the project again")
+    expect(summary.description).toContain("until you trust the repository again")
   })
 
-  test("--pure leaves project settings off and cannot be trusted around", () => {
+  test("--pure leaves repository settings off and cannot be trusted around", () => {
     const summary = projectTrustSummary(status({ trusted: false, ignored: false, settings: true }), "app")
     expect(summary.state).toBe("pure")
     expect(summary.canTrust).toBe(false)
   })
 
-  test("a project with nothing to hold back has nothing to trust", () => {
+  test("a repository with nothing to hold back has nothing to trust", () => {
     const summary = projectTrustSummary(status({ trusted: false, ignored: false, settings: false }), "app")
     expect(summary.state).toBe("none")
     expect(summary.canTrust).toBe(false)
+  })
+
+  test("every state says repository, never project", () => {
+    const statuses = [
+      undefined,
+      ...[true, false].flatMap((trusted) =>
+        [true, false].flatMap((ignored) => [true, false].map((settings) => status({ trusted, ignored, settings }))),
+      ),
+    ]
+    const words = statuses.map((item) => projectTrustSummary(item, "app")).map((item) => `${item.title} ${item.description}`)
+    expect(words.filter((text) => /project/i.test(text))).toEqual([])
   })
 
   test("an unreadable status never offers trust", () => {

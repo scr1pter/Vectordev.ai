@@ -94,9 +94,9 @@ export const settingsGroups: readonly SettingsGroup[] = [
       { value: "rules", label: "Project rules", icon: "shield", keywords: ["repository", "instructions", "paths"] },
       {
         value: "trust",
-        label: "Project trust",
+        label: "Repository trust",
         icon: "circle-check",
-        keywords: ["trusted", "vector.json", ".vector", "project settings", "security"],
+        keywords: ["trusted", "vector.json", ".vector", "repository settings", "project settings", "security"],
       },
       { value: "editor", label: "Editor", icon: "code", keywords: ["font", "wrap", "autocomplete", "line numbers"] },
       { value: "chat", label: "Chat", icon: "bubble-5", keywords: ["composer", "conversation", "spacing", "width"] },

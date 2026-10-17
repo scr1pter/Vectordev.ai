@@ -1,6 +1,17 @@
 import { describe, expect, test } from "bun:test"
 import path from "node:path"
+import { dict } from "../i18n/en"
 import { projectTrustAnswer, projectTrustPrompt, projectTrustRecord } from "./project-trust-policy"
+
+describe("trust wording", () => {
+  // Vector has repositories, not projects (owner rule), so the question reads "Trust this repository?".
+  test("the trust dialog, its errors and the repository menu say repository, never project", () => {
+    const strings = Object.entries(dict).filter(([key]) => key.startsWith("project.trust."))
+    expect(strings.length).toBeGreaterThan(0)
+    expect(strings.filter(([, text]) => /project/i.test(text)).map(([key]) => key)).toEqual([])
+    expect(dict["project.trust.dialog.title"]).toBe("Trust this repository?")
+  })
+})
 
 describe("who may trust a repository", () => {
   // A clone can come from any pasted link, so its vector.json and .vector settings are a stranger's code. Only the

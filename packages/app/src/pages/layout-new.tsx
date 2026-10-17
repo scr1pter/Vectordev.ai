@@ -7023,8 +7023,8 @@ export default function NewLayout(props: ParentProps) {
                   <small>{parallelModelState.current()?.provider.name || "Configure BYOK"}</small>
                 </button>
                 <button type="button" class="vector-engineering-row" onClick={openProjectTrustSettings}>
-                  <span>Project trust</span>
-                  <small>The project's own Vector settings</small>
+                  <span>Repository trust</span>
+                  <small>The repository's own Vector settings</small>
                 </button>
               </div>
             </section>

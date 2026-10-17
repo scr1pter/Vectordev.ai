@@ -7,13 +7,13 @@ export type ProjectTrustSummary = {
   canTrust: boolean
 }
 
-/** What Settings says about one project's trust, worded from the engine's own status. */
+/** What Settings says about one repository's trust, worded from the engine's own status. */
 export function projectTrustSummary(status: ProjectTrustStatus | undefined, name: string): ProjectTrustSummary {
   if (!status)
     return {
       state: "unknown",
       title: "Status unavailable",
-      description: `Vector could not read whether it trusts ${name}. Check that the project folder is still there, then open this page again.`,
+      description: `Vector could not read whether it trusts ${name}. Check that the repository folder is still there, then open this page again.`,
       canTrust: false,
     }
   if (status.trusted)
@@ -21,7 +21,7 @@ export function projectTrustSummary(status: ProjectTrustStatus | undefined, name
       state: "trusted",
       title: "Trusted",
       description: status.settings
-        ? `Vector loads ${name}'s own settings as they were when you trusted it. If they change, Vector ignores them until you trust the project again.`
+        ? `Vector loads ${name}'s own settings as they were when you trusted it. If they change, Vector ignores them until you trust the repository again.`
         : `${name} has no Vector settings of its own, and your language servers, formatters and MCP servers run in it.`,
       canTrust: false,
     }
@@ -30,15 +30,15 @@ export function projectTrustSummary(status: ProjectTrustStatus | undefined, name
       state: "untrusted",
       title: "Not trusted",
       description: status.settings
-        ? `${name} has its own Vector settings, like agents, commands, plugins or MCP servers, which can run code on this computer. Vector ignores them until you trust the project.`
+        ? `${name} has its own Vector settings, like agents, commands, plugins or MCP servers, which can run code on this computer. Vector ignores them until you trust the repository.`
         : `${name} has no Vector settings of its own, but until you trust it your language servers and formatters stay off in it and your MCP servers start outside it.`,
       canTrust: true,
     }
-  // The engine reports nothing ignored for an untrusted project only when --pure turns project settings off.
+  // The engine reports nothing ignored for an untrusted repository only when --pure turns its settings off.
   if (status.settings)
     return {
       state: "pure",
-      title: "Project settings off",
+      title: "Repository settings off",
       description: `Vector is running with --pure, which leaves ${name}'s own settings off, so trust cannot be changed now.`,
       canTrust: false,
     }

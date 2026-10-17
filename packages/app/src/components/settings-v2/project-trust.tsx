@@ -5,8 +5,8 @@ import { useProjectTrust } from "@/context/project-trust"
 import { useServer } from "@/context/server"
 import { projectTrustSummary } from "./project-trust-model"
 
-// Where a project the user answered "Not now" for, or one opened before the trust dialog existed, can be trusted
-// later. It approves through the same engine API as the dialog, so the open project picks the change up at once.
+// Where a repository the user answered "Not now" for, or one opened before the trust dialog existed, can be trusted
+// later. It approves through the same engine API as the dialog, so the open repository picks the change up at once.
 export function SettingsProjectTrustV2(props: { repositoryPath?: string }) {
   const global = useGlobal()
   const server = useServer()
@@ -32,7 +32,7 @@ export function SettingsProjectTrustV2(props: { repositoryPath?: string }) {
         .then((result) => result.data)
         .catch(() => undefined),
   )
-  const name = () => getFilename(status()?.workspace ?? directory()) || "This project"
+  const name = () => getFilename(status()?.workspace ?? directory()) || "This repository"
   const summary = () => projectTrustSummary(status(), name())
 
   const approve = async () => {
@@ -49,11 +49,11 @@ export function SettingsProjectTrustV2(props: { repositoryPath?: string }) {
     <section class="settings-v2-page">
       <div class="settings-v2-page-hero">
         <div>
-          <p class="settings-v2-page-kicker">Project trust</p>
-          <h2 class="settings-v2-page-title">Decide what a project may run</h2>
+          <p class="settings-v2-page-kicker">Repository trust</p>
+          <h2 class="settings-v2-page-title">Decide what a repository may run</h2>
           <p class="settings-v2-page-subtitle">
-            A project can bring its own Vector settings in vector.json and .vector, like agents, commands, plugins and
-            MCP servers. They can run code on this computer, so Vector ignores them until you trust the project.
+            A repository can bring its own Vector settings in vector.json and .vector, like agents, commands, plugins
+            and MCP servers. They can run code on this computer, so Vector ignores them until you trust the repository.
           </p>
         </div>
       </div>
@@ -64,9 +64,9 @@ export function SettingsProjectTrustV2(props: { repositoryPath?: string }) {
           fallback={
             <div class="settings-v2-card-head">
               <div class="settings-v2-card-copy">
-                <h3 class="settings-v2-card-title">No project open</h3>
+                <h3 class="settings-v2-card-title">No repository open</h3>
                 <p class="settings-v2-card-description">
-                  Open a project, then come back here to see whether it is trusted.
+                  Open a repository, then come back here to see whether it is trusted.
                 </p>
               </div>
             </div>
@@ -83,7 +83,7 @@ export function SettingsProjectTrustV2(props: { repositoryPath?: string }) {
                 </Show>
               </h3>
               <p class="settings-v2-card-description">
-                {status.loading ? "Checking this project…" : summary().description}
+                {status.loading ? "Checking this repository…" : summary().description}
               </p>
             </div>
           </div>
@@ -91,7 +91,7 @@ export function SettingsProjectTrustV2(props: { repositoryPath?: string }) {
             <div class="settings-v2-card-body">
               <div class="settings-v2-action-grid">
                 <button type="button" class="settings-v2-action" disabled={busy()} onClick={() => void approve()}>
-                  {busy() ? "Trusting…" : "Trust this project"}
+                  {busy() ? "Trusting…" : "Trust this repository"}
                 </button>
               </div>
               <Show when={error()}>
