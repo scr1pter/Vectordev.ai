@@ -5,7 +5,7 @@ import {
   parallelWorkspaceCanMessage,
   stopParallelWorkspace,
 } from "./parallel-workspaces"
-import { listSwarmRuns, stopSwarmRun } from "./swarm-orchestrator"
+import { listSwarmRuns, stopSwarmRun, stopSwarmTask } from "./swarm-orchestrator"
 import { swarmTasks, workspaceTask, workspaceTaskID } from "./agent-task-model"
 
 export type TaskScope = { parentSessionID: string; sourcePath: string }
@@ -64,8 +64,11 @@ export async function stopAgentTask(input: TaskScope & { taskID: string }): Prom
   if (!task) throw new Error("The task does not belong to this session and project.")
   if (!task.controls.stop) return { tasks: [task] }
   const workspace = listParallelWorkspaces(scope(input)).find((record) => workspaceTaskID(record) === input.taskID)
-  if (workspace) await stopParallelWorkspace(workspace.id)
-  if (!workspace && task.groupID && task.id === `swarm:${task.groupID}`) await stopSwarmRun(task.groupID)
+  const swarm = listSwarmRuns(scope(input)).find((run) => run.id === task.groupID)
+  const child = swarm?.tasks.find((child) => `swarm:${swarm.id}:${child.id}` === task.id)
+  if (swarm && child) await stopSwarmTask(swarm.id, child.id)
+  if (workspace && !child) await stopParallelWorkspace(workspace.id)
+  if (!workspace && !child && task.groupID && task.id === `swarm:${task.groupID}`) await stopSwarmRun(task.groupID)
   return listAgentTasks(input)
 }
 

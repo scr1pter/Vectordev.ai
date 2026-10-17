@@ -44,7 +44,7 @@ mock.module("./store", () => ({
   removeStoreFileIfEmpty: () => undefined,
 }))
 
-const { discardSwarmRun, getSwarmRun, listSwarmRuns, resumeSwarmRun, stopSwarmRun } = await import(
+const { discardSwarmRun, getSwarmRun, listSwarmRuns, resumeSwarmRun, stopSwarmRun, stopSwarmTask } = await import(
   "./swarm-orchestrator"
 )
 const { createParallelWorkspace, getParallelWorkspace, mergeParallelWorkspace, refreshParallelWorkspace, runGit } =
@@ -342,6 +342,52 @@ describe("swarm lifecycle", () => {
     expect(getSwarmRun(run.id)?.status).toBe("discarded")
     expect(requests).toContain("POST /api/session/planner/interrupt")
     expect(await stat(join(directory, "staging")).catch(() => undefined)).toBeUndefined()
+  })
+
+  test("stopping one queued task settles its dependent chain and preserves independent work", async () => {
+    const run = await seed("interrupted", [
+      inspectTask,
+      { ...inspectTask, id: "edit", dependsOn: ["inspect"] },
+      { ...inspectTask, id: "verify", dependsOn: ["edit"] },
+      { ...inspectTask, id: "independent" },
+    ])
+    const stopped = await stopSwarmTask(run.id, "inspect")
+    expect(stopped.tasks.map((task) => [task.id, task.status])).toEqual([
+      ["inspect", "canceled"],
+      ["edit", "canceled"],
+      ["verify", "canceled"],
+      ["independent", "planned"],
+    ])
+    expect(stopped.tasks.slice(0, 3).every((task) => task.completedAt)).toBe(true)
+    expect((await stopSwarmTask(run.id, "inspect")).updatedAt).toBe(stopped.updatedAt)
+    await expect(stopSwarmTask(run.id, "unknown")).rejects.toThrow("does not belong")
+    expect(requests).toEqual([])
+  })
+
+  test("stopping one task during provisioning retains its workspace and never starts its model", async () => {
+    const run = await seed("interrupted", [inspectTask])
+    const creating = Promise.withResolvers<void>()
+    onWrite = (name) => {
+      if (name === "swarm-orchestrator-state" && getSwarmRun(run.id)?.tasks[0]?.status === "creating")
+        creating.resolve()
+    }
+    await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
+    await creating.promise
+    const stopped = await stopSwarmTask(run.id, "inspect")
+    expect(stopped.tasks[0]?.status).toBe("canceled")
+    expect(stopped.tasks[0]?.workspaceId).toBeTruthy()
+    expect(getParallelWorkspace(stopped.tasks[0]!.workspaceId!)?.status).toBe("stopped")
+    expect(requests).toEqual([])
+  })
+
+  test("stopping one executing task interrupts its model and its queued dependent", async () => {
+    const run = await seed("interrupted", [inspectTask, { ...inspectTask, id: "dependent", dependsOn: ["inspect"] }])
+    await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
+    await prompted.promise
+    const stopped = await stopSwarmTask(run.id, "inspect")
+    expect(stopped.tasks.map((task) => task.status)).toEqual(["canceled", "canceled"])
+    expect(requests).toContain("POST /api/session/planner/interrupt")
+    expect(stopped.tasks[1]?.workspaceId).toBeUndefined()
   })
 
   test("stopping during worker provisioning never starts the worker", async () => {
@@ -891,47 +937,52 @@ describe("swarm lifecycle", () => {
     expect(await stat(join(directory, "staging")).catch(() => undefined)).toBeUndefined()
   }, 30_000)
 
-  test("stopping while a worker's changes merge into staging keeps the task complete", async () => {
-    const run = await seed("interrupted", [inspectTask])
-    // The worker's engine session edits its isolated copy, reports busy once and then goes idle with no error.
-    let worker = ""
-    let busy = true
-    route = async (url) => {
-      if (url.pathname === "/session") {
-        worker = url.searchParams.get("directory") ?? ""
-        return Response.json({ id: "worker" })
+  test.each(["swarm", "task"] as const)(
+    "stopping a %s while changes merge keeps completed work and stops dependents",
+    async (target) => {
+      const run = await seed("interrupted", [inspectTask, { ...inspectTask, id: "dependent", dependsOn: ["inspect"] }])
+      // The worker's engine session edits its isolated copy, reports busy once and then goes idle with no error.
+      let worker = ""
+      let busy = true
+      route = async (url) => {
+        if (url.pathname === "/session") {
+          worker = url.searchParams.get("directory") ?? ""
+          return Response.json({ id: "worker" })
+        }
+        if (url.pathname === "/api/session/worker/prompt") {
+          await writeFile(join(worker, "result.txt"), "inspected\n")
+          return Response.json({ data: {} })
+        }
+        if (url.pathname === "/api/session/active") {
+          const active = busy ? { worker: { type: "busy" } } : {}
+          busy = false
+          return Response.json({ data: active })
+        }
+        if (url.pathname === "/api/session/worker/message") return Response.json({ data: [] })
+        if (url.pathname === "/api/session/worker/context") return Response.json({ data: [] })
+        return undefined
       }
-      if (url.pathname === "/api/session/worker/prompt") {
-        await writeFile(join(worker, "result.txt"), "inspected\n")
-        return Response.json({ data: {} })
+      // Stop lands while the merge into staging is under way, after the worker validated and finished.
+      let stopping: Promise<SwarmRunRecord> | undefined
+      onWrite = (name) => {
+        if (name !== "swarm-orchestrator-state" || stopping) return
+        if (getSwarmRun(run.id)?.tasks[0]?.status === "merging")
+          stopping = target === "swarm" ? stopSwarmRun(run.id) : stopSwarmTask(run.id, "inspect")
       }
-      if (url.pathname === "/api/session/active") {
-        const active = busy ? { worker: { type: "busy" } } : {}
-        busy = false
-        return Response.json({ data: active })
-      }
-      if (url.pathname === "/api/session/worker/message") return Response.json({ data: [] })
-      if (url.pathname === "/api/session/worker/context") return Response.json({ data: [] })
-      return undefined
-    }
-    // Stop lands while the merge into staging is under way, after the worker validated and finished.
-    let stopping: Promise<SwarmRunRecord> | undefined
-    onWrite = (name) => {
-      if (name !== "swarm-orchestrator-state" || stopping) return
-      if (getSwarmRun(run.id)?.tasks[0]?.status === "merging") stopping = stopSwarmRun(run.id)
-    }
-    await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
-    const deadline = Date.now() + 30_000
-    while (!stopping && Date.now() < deadline) await Bun.sleep(50)
-    if (!stopping) throw new Error("The worker never reached the staging merge.")
-    const stopped = await stopping
+      await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
+      const deadline = Date.now() + 30_000
+      while (!stopping && Date.now() < deadline) await Bun.sleep(50)
+      if (!stopping) throw new Error("The worker never reached the staging merge.")
+      const stopped = await stopping
 
-    expect(stopped.status).toBe("canceled")
-    expect(stopped.tasks[0]?.status).toBe("complete")
-    expect(stopped.tasks[0]?.lastAction).toBe("Validated changes integrated into staging")
-    expect(await Bun.file(join(directory, "staging", "repo", "result.txt")).text()).toBe("inspected\n")
-    expect(getParallelWorkspace(stopped.tasks[0]!.workspaceId!)?.mergeState).toBe("merged")
-  })
+      if (target === "swarm") expect(stopped.status).toBe("canceled")
+      expect(stopped.tasks[0]?.status).toBe("complete")
+      expect(stopped.tasks[1]?.status).toBe("canceled")
+      expect(stopped.tasks[0]?.lastAction).toBe("Validated changes integrated into staging")
+      expect(await Bun.file(join(directory, "staging", "repo", "result.txt")).text()).toBe("inspected\n")
+      expect(getParallelWorkspace(stopped.tasks[0]!.workspaceId!)?.mergeState).toBe("merged")
+    },
+  )
 
   test.each(["complete", "needs review", "merged", "discarded"] as const)(
     "stopping a settled %s swarm preserves its outcome",

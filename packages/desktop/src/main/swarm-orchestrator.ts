@@ -36,6 +36,7 @@ const STORE_NAME = "swarm-orchestrator-state"
 const STORE_KEY = "runs"
 const activeRuns = new Map<string, { controller: AbortController; completion: Promise<void> }>()
 const stoppingRuns = new Map<string, Promise<SwarmRunRecord>>()
+const taskExecutions = new Map<string, Map<string, Promise<void>>>()
 // Task statuses only a live worker holds. Without a scheduler or a Stop owning the run, no worker is left.
 const IN_FLIGHT = ["creating", "queued", "running", "merging"]
 // Resume and Discard of one run take turns. Resume reads the run, waits on cleanup and the disk, and then starts a
@@ -92,6 +93,7 @@ export type SwarmTaskRecord = {
   riskLevel: "low" | "medium" | "high"
   summary: string
   error?: string
+  cancelRequested?: boolean
 }
 
 export type SwarmRunRecord = {
@@ -376,6 +378,7 @@ export function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine) {
           return {
             ...task,
             status: "planned",
+            cancelRequested: undefined,
             completedAt: undefined,
             lastAction: "Ready to integrate its finished changes into staging",
             error: undefined,
@@ -383,6 +386,7 @@ export function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine) {
         return {
           ...task,
           status: "planned",
+          cancelRequested: undefined,
           workspaceId: undefined,
           startedAt: undefined,
           completedAt: undefined,
@@ -441,6 +445,59 @@ export async function stopSwarmRun(id: string, timeoutMs = 10_000, stopWorkspace
     currentStep: "Swarm stopped; workspace cleanup is still finishing",
     logs: [...run.logs, `${now()}  Stop returned while workspace cleanup continues.`].slice(-240),
   }))
+}
+
+export function stopSwarmTask(id: string, taskID: string, timeoutMs = 10_000) {
+  return inTurn(id, async () => {
+    const current = getSwarmRun(id)
+    if (!current) throw new Error("Swarm run was not found.")
+    const task = current.tasks.find((task) => task.id === taskID)
+    if (!task) throw new Error("The task does not belong to this swarm.")
+    if (["complete", "failed", "canceled", "interrupted"].includes(task.status)) return current
+    const selected = new Set([taskID])
+    // Settle the entire dependency chain now, including workers that have no workspace yet.
+    while (current.tasks.some((task) => !selected.has(task.id) && task.dependsOn.some((id) => selected.has(id)))) {
+      current.tasks
+        .filter((task) => task.dependsOn.some((id) => selected.has(id)))
+        .forEach((task) => selected.add(task.id))
+    }
+    const executing = taskExecutions.get(id)
+    updateRun(id, (run) => ({
+      ...run,
+      tasks: run.tasks.map((task) => {
+        if (!selected.has(task.id) || ["complete", "failed", "canceled", "interrupted"].includes(task.status))
+          return task
+        return {
+          ...task,
+          cancelRequested: true,
+          status: executing?.has(task.id) ? task.status : "canceled",
+          completedAt: executing?.has(task.id) ? task.completedAt : now(),
+          lastAction: executing?.has(task.id)
+            ? "Stop requested; retaining partial work"
+            : task.id === taskID
+              ? "Stopped by user"
+              : "Stopped because a dependency was stopped",
+        }
+      }),
+    }))
+    const cleanup = Promise.all([
+      ...current.tasks
+        .filter((task) => selected.has(task.id) && task.workspaceId && task.status !== "merging")
+        .map((task) => stopParallelWorkspace(task.workspaceId!)),
+      ...[...selected].flatMap((id) => executing?.get(id) ?? []),
+    ])
+    // Provisioning can finish after Stop. Its worker checks the durable cancellation before any model admission.
+    if (!(await waitForCleanup(cleanup, timeoutMs)))
+      updateRun(id, (run) => ({
+        ...run,
+        tasks: run.tasks.map((task) =>
+          selected.has(task.id) && IN_FLIGHT.includes(task.status)
+            ? { ...task, lastAction: "Stop requested; workspace cleanup is still finishing" }
+            : task,
+        ),
+      }))
+    return getSwarmRun(id)!
+  })
 }
 
 export async function mergeSwarmRun(id: string, force = false) {
@@ -528,7 +585,10 @@ function startSwarmRun(id: string, engine: ParallelWorkspaceEngine) {
   const controller = new AbortController()
   const completion = Promise.resolve()
     .then(() => executeSwarmRun(id, engine, controller))
-    .finally(() => activeRuns.delete(id))
+    .finally(() => {
+      activeRuns.delete(id)
+      taskExecutions.delete(id)
+    })
   activeRuns.set(id, { controller, completion })
 }
 
@@ -598,11 +658,14 @@ async function executeSwarmRun(id: string, engine: ParallelWorkspaceEngine, cont
     const aggregate = await refreshParallelWorkspace(coordinator.id)
     controller.signal.throwIfAborted()
     const failures = run.tasks.filter((task) => task.status === "failed" || task.status === "blocked")
+    const canceled = run.tasks.filter((task) => task.status === "canceled")
     const status: SwarmRunStatus = aggregate.changedFilesCount
       ? "needs review"
       : failures.length
         ? "failed"
-        : "complete"
+        : canceled.length
+          ? "canceled"
+          : "complete"
     // Like the failure path below, a run the user discarded or merged meanwhile keeps that outcome.
     if (["discarded", "merged"].includes(getSwarmRun(id)?.status ?? "")) return
     updateRun(id, (current) => ({
@@ -612,12 +675,17 @@ async function executeSwarmRun(id: string, engine: ParallelWorkspaceEngine, cont
         ? `Aggregate diff ready: ${aggregate.changedFilesCount} changed file${aggregate.changedFilesCount === 1 ? "" : "s"}`
         : failures.length
           ? `${failures.length} swarm task${failures.length === 1 ? "" : "s"} failed`
-          : "Swarm completed with no file changes",
+          : canceled.length
+            ? `${canceled.length} swarm task${canceled.length === 1 ? "" : "s"} stopped; partial work retained`
+            : "Swarm completed with no file changes",
       completedAt: now(),
       changedFiles: aggregate.changedFiles,
       diff: aggregate.diff,
       riskLevel: aggregate.riskLevel,
-      summary: swarmSummary(current.tasks, aggregate.changedFilesCount, failures.length),
+      summary: [
+        swarmSummary(current.tasks, aggregate.changedFilesCount, failures.length),
+        ...(canceled.length ? [`${canceled.length} task(s) stopped; unfinished work remains.`] : []),
+      ].join("\n"),
       error: failures.length
         ? failures.map((task) => `${task.title}: ${task.error || task.lastAction}`).join("\n")
         : undefined,
@@ -654,6 +722,7 @@ async function executeSwarmRun(id: string, engine: ParallelWorkspaceEngine, cont
 
 async function scheduleSwarmTasks(id: string, engine: ParallelWorkspaceEngine, signal: AbortSignal) {
   const executing = new Map<string, Promise<void>>()
+  taskExecutions.set(id, executing)
   while (!signal.aborted) {
     let run = getSwarmRun(id)
     if (!run) throw new Error("Swarm run was not found.")
@@ -691,13 +760,17 @@ async function scheduleSwarmTasks(id: string, engine: ParallelWorkspaceEngine, s
           const detail = error instanceof Error ? error.message : String(error)
           updateTask(id, task.id, (current) => ({
             ...current,
-            status: signal.aborted ? "canceled" : "failed",
+            status: signal.aborted || current.cancelRequested ? "canceled" : "failed",
             completedAt: now(),
-            lastAction: signal.aborted ? "Canceled by user" : "Agent task failed",
-            error: signal.aborted ? undefined : detail,
+            lastAction:
+              signal.aborted || current.cancelRequested ? "Stopped; partial work retained" : "Agent task failed",
+            error: signal.aborted || current.cancelRequested ? undefined : detail,
             summary: detail,
           }))
-          appendLog(id, `${task.title} failed: ${detail}`)
+          appendLog(
+            id,
+            `${task.title} ${signal.aborted || getSwarmRun(id)?.tasks.find((item) => item.id === task.id)?.cancelRequested ? "stopped" : "failed"}: ${detail}`,
+          )
         })
         .finally(() => executing.delete(task.id))
       executing.set(task.id, execution)
@@ -740,6 +813,8 @@ async function executeSwarmTask(id: string, taskID: string, engine: ParallelWork
   // its checks, and Resume undid any merge Vector stopped part-way through, so only a fresh merge into staging is left.
   const kept = task.workspaceId ? getParallelWorkspace(task.workspaceId) : undefined
   const settled = kept ?? (await runSwarmWorker(run, task, coordinator, engine, signal))
+  if (signal.aborted || getSwarmRun(id)?.tasks.find((task) => task.id === taskID)?.cancelRequested)
+    throw new DOMException("Swarm task stopped.", "AbortError")
 
   const summary = settled.finalSummary || settled.lastAction
   if (settled.changedFilesCount) {
@@ -823,6 +898,10 @@ async function runSwarmWorker(
     status: "queued",
     lastAction: "Queued on the isolated agent pool",
   }))
+  if (signal.aborted || getSwarmRun(run.id)?.tasks.find((item) => item.id === task.id)?.cancelRequested) {
+    await stopParallelWorkspace(workspace.id)
+    throw new DOMException("Swarm task stopped before starting its worker.", "AbortError")
+  }
   signal.throwIfAborted()
   appendLog(run.id, `${task.title} assigned to ${task.provider}/${task.model}.`)
   // No concurrency argument: the run pool is shared by every agent on the
@@ -845,6 +924,10 @@ async function runSwarmWorker(
 async function waitForWorkspace(workspaceID: string, runID: string, taskID: string, signal: AbortSignal) {
   let previous = ""
   while (!signal.aborted) {
+    if (getSwarmRun(runID)?.tasks.find((task) => task.id === taskID)?.cancelRequested) {
+      await stopParallelWorkspace(workspaceID)
+      throw new DOMException("Swarm task stopped.", "AbortError")
+    }
     const workspace = getParallelWorkspace(workspaceID)
     if (!workspace) throw new Error("The isolated worker workspace disappeared.")
     if (workspace.status !== previous) {

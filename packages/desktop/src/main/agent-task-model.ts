@@ -12,8 +12,10 @@ export function workspaceTask(
   record: ParallelWorkspaceRecord,
   input: { now: number; swarm?: SwarmRunRecord; canMessage?: boolean },
 ): Task.Info {
-  const status: Task.Status =
-    record.status === "queued"
+  const task = input.swarm?.tasks.find((task) => task.id === record.swarmTaskId)
+  const status: Task.Status = task
+    ? swarmTaskStatus(task)
+    : record.status === "queued"
       ? "queued"
       : ["planning", "editing", "running commands", "testing"].includes(record.status)
         ? "running"
@@ -27,7 +29,6 @@ export function workspaceTask(
   const startedAt = Date.parse(record.createdAt)
   const settled = status === "failed" || status === "stopped" || status === "completed" || status === "waiting_on_user"
   const completedAt = settled ? Date.parse(record.lastActivityAt) : undefined
-  const task = input.swarm?.tasks.find((task) => task.id === record.swarmTaskId)
   const cost =
     record.measuredCost ??
     (record.actualCost && /^\$\d+(?:\.\d+)?$/.test(record.actualCost) ? Number(record.actualCost.slice(1)) : undefined)
@@ -49,16 +50,20 @@ export function workspaceTask(
     startedAt: Number.isFinite(startedAt) ? startedAt : 0,
     completedAt: completedAt !== undefined && Number.isFinite(completedAt) ? completedAt : undefined,
     elapsedMs: Number.isFinite(startedAt) ? Math.max(0, (completedAt ?? input.now) - startedAt) : 0,
-    currentStep: record.lastAction,
+    currentStep: task?.lastAction ?? record.lastAction,
     ownedPaths: task?.fileHints ?? [],
     dependsOn: task?.dependsOn.map((id) => `swarm:${record.swarmRunId}:${id}`) ?? [],
     resultAvailable: Boolean(record.finalSummary || record.changedFiles.length),
     resultRef: record.changedFiles.length ? `workspace:${record.id}` : undefined,
-    reason: record.error,
+    reason: task?.error ?? record.error,
     attempt: Math.max(1, record.turns?.filter((turn) => turn.role === "user").length ?? 1),
     measuredCost: cost !== undefined && Number.isFinite(cost) && cost >= 0 ? cost : undefined,
     costKind: cost !== undefined ? "priced" : "unknown",
-    controls: { inspect: true, message: input.canMessage === true && !settled, stop: !settled },
+    controls: {
+      inspect: true,
+      message: input.canMessage === true && !settled && !task?.cancelRequested,
+      stop: !settled && !task?.cancelRequested,
+    },
   }
 }
 
@@ -104,13 +109,7 @@ export function swarmTasks(run: SwarmRunRecord, now: number): Task.Info[] {
           title: task.title,
           agent: task.role,
           groupID: run.id,
-          status: ["failed"].includes(task.status)
-            ? "failed"
-            : ["canceled", "interrupted"].includes(task.status)
-              ? "stopped"
-              : task.status === "complete"
-                ? "completed"
-                : "queued",
+          status: swarmTaskStatus(task),
           startedAt: task.startedAt ? Date.parse(task.startedAt) : root.startedAt,
           completedAt: task.completedAt ? Date.parse(task.completedAt) : undefined,
           elapsedMs: task.startedAt
@@ -122,8 +121,22 @@ export function swarmTasks(run: SwarmRunRecord, now: number): Task.Info[] {
           resultAvailable: Boolean(task.summary),
           reason: task.error,
           attempt: 1,
-          controls: { inspect: true, message: false, stop: false },
+          controls: {
+            inspect: true,
+            message: false,
+            stop:
+              ["planned", "creating", "queued", "running", "merging", "blocked"].includes(task.status) &&
+              !task.cancelRequested,
+          },
         }),
       ),
   ]
+}
+
+function swarmTaskStatus(task: SwarmRunRecord["tasks"][number]): Task.Status {
+  if (["failed", "blocked"].includes(task.status)) return "failed"
+  if (["canceled", "interrupted"].includes(task.status)) return "stopped"
+  if (task.status === "complete") return "completed"
+  if (["creating", "running", "merging"].includes(task.status)) return "running"
+  return "queued"
 }

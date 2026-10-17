@@ -119,10 +119,56 @@ describe("shared desktop task observations", () => {
     expect(planned).toHaveLength(2)
     expect(planned[1]!.id).toBe("swarm:sw_one:task_1")
     expect(planned[1]!.dependsOn).toEqual(["swarm:sw_one:task_0"])
-    expect(planned[1]!.controls.stop).toBe(false)
+    expect(planned[1]!.controls.stop).toBe(true)
     expect(
       swarmTasks({ ...run, tasks: run.tasks.map((task) => ({ ...task, workspaceId: "ws_one" })) }, Date.now()),
     ).toHaveLength(1)
     expect(workspaceTaskID(workspace({ swarmRunId: run.id, swarmTaskId: "task_1" }))).toBe(planned[1]!.id)
+  })
+
+  test.each([
+    ["merging", "needs review", "running", true],
+    ["canceled", "complete", "stopped", false],
+    ["complete", "discarded", "completed", false],
+  ] as const)("projects a %s swarm task from its orchestration state", (status, workspaceStatus, expected, stop) => {
+    const run = swarm({
+      tasks: [
+        {
+          id: "task_1",
+          title: "Parser",
+          prompt: "task",
+          role: "implement",
+          dependsOn: [],
+          fileHints: ["parser.ts"],
+          provider: "test",
+          model: "test-model",
+          status,
+          lastAction: "Swarm activity",
+          changedFilesCount: 0,
+          riskLevel: "low",
+          summary: "",
+        },
+      ],
+    })
+    const task = workspaceTask(
+      workspace({
+        status: workspaceStatus,
+        swarmRunId: run.id,
+        swarmTaskId: "task_1",
+        measuredCost: 0.125,
+      }),
+      { now: Date.now(), swarm: run, canMessage: true },
+    )
+    expect(task.status).toBe(expected)
+    expect(task.controls.stop).toBe(stop)
+    expect(task.currentStep).toBe("Swarm activity")
+    expect(task.measuredCost).toBe(0.125)
+    expect(
+      workspaceTask(workspace({ swarmRunId: run.id, swarmTaskId: "task_1" }), {
+        now: Date.now(),
+        swarm: { ...run, tasks: run.tasks.map((task) => ({ ...task, cancelRequested: true })) },
+        canMessage: true,
+      }).controls,
+    ).toEqual({ inspect: true, message: false, stop: false })
   })
 })
