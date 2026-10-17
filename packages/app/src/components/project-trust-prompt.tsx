@@ -4,7 +4,7 @@ import { useDialog } from "@vectordevai/ui/context/dialog"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { DialogBody, DialogFooter, DialogHeader, DialogTitleGroup, DialogV2 } from "@vectordevai/ui/v2/dialog-v2"
 import { MenuV2 } from "@vectordevai/ui/v2/menu-v2"
-import { createEffect, createMemo, createResource, createSignal, Show, untrack } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, onCleanup, Show, untrack } from "solid-js"
 import { useGlobal } from "@/context/global"
 import { useLanguage } from "@/context/language"
 import { useProjectTrust } from "@/context/project-trust"
@@ -154,13 +154,18 @@ function DialogProjectTrust(props: { name: string; changed: boolean; onTrust: ()
   const dialog = useDialog()
   const language = useLanguage()
   const [pending, setPending] = createSignal(false)
+  // Escape can close the dialog while the approval is still saving; closing again then would close whatever is on top.
+  const state = { open: true }
+  onCleanup(() => {
+    state.open = false
+  })
 
   const trust = () => {
     if (pending()) return
     setPending(true)
     void props.onTrust().then((trusted) => {
       setPending(false)
-      if (trusted) dialog.close()
+      if (trusted && state.open) dialog.close()
     })
   }
 
