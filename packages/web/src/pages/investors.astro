@@ -554,7 +554,7 @@ const stack = [
 
   <section class="ip-section" aria-labelledby="roadmap-title">
     <div class="ip-section-head">
-      <div class="ip-eyebrow">Roadmap · October 2026 to March 2027</div>
+      <div class="ip-eyebrow">Roadmap · from October 2026</div>
       <h2 id="roadmap-title">From running agents to building the model behind them</h2>
     </div>
     <div class="ip-road">
@@ -577,6 +577,19 @@ const stack = [
         <span class="ip-stage">Planned</span>
         <h3>Vector Velocity</h3>
         <p>Vector's own coding model, planned at 300B+ parameters, designed for the loop Vector runs and offered beside every other provider.</p>
+      </div>
+      <div class="ip-milestone ip-milestone-wide">
+        <span class="ip-stage">Planned</span>
+        <h3>Vector Cloud, the software factory</h3>
+        <p>Teams are not leaving Vercel and Supabase, so Vector Cloud works inside the accounts they already have instead of replacing them. Today Vector's agents publish to Vercel and run Supabase migrations there. Next, Vector Cloud is planned to run the whole line in the cloud, with no laptop open:</p>
+        <ol class="ip-line">
+          <li><b>Intake</b><span>A GitHub issue, a ticket or a schedule starts the work.</span></li>
+          <li><b>Build</b><span>Agents from any vendor, on any model, each in its own cloud copy of the repository.</span></li>
+          <li><b>Check</b><span>The project's tests, the repair loop, a secret scan, Vectorscope review and a spend cap on every change.</span></li>
+          <li><b>Preview</b><span>A pull request with a Vercel preview and its own Supabase branch database.</span></li>
+          <li><b>Approve</b><span>A person merges and ships to production. The line never does that on its own.</span></li>
+        </ol>
+        <p>The line itself would live in the repository, so a team reviews and versions it like code and sees what each run cost. Several stations already run on the desktop: scheduled agents with spend caps, issue comments that become pull requests, Vectorscope review, and Vercel and Supabase controls.</p>
       </div>
     </div>
     <p class="ip-footnote"><strong>Also on the way:</strong> live spend caps for interactive runs (built, not in 1.99.106 or any earlier release; scheduled agents already stop at $5 a run and $25 a day by default), signed installers, and one-click sign-in for Vercel and Supabase (waiting on app registration).</p>
@@ -944,6 +957,15 @@ const stack = [
   .ip-milestone h3 { font-size: 18px; font-weight: 700; }
   .ip-milestone p { font-size: 13.5px; color: var(--muted); }
   .ip-stage { justify-self: start; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 1px 8px; }
+  .ip-milestone.ip-milestone-wide { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); }
+  .ip-line { list-style: none; margin: 4px 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); counter-reset: station; }
+  @media (max-width: 760px) { .ip-line { grid-template-columns: minmax(0, 1fr); } }
+  .ip-line li { counter-increment: station; display: grid; gap: 4px; align-content: start; padding: 12px 14px; border-left: 1px solid var(--line); min-width: 0; font-size: 13px; }
+  .ip-line li:first-child { border-left: 0; }
+  @media (max-width: 760px) { .ip-line li { border-left: 0; } .ip-line li:nth-child(n+2) { border-top: 1px solid var(--line); } }
+  .ip-line b { font-weight: 600; color: var(--ink); }
+  .ip-line b::before { content: counter(station, decimal-leading-zero); margin-right: 8px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--accent); }
+  .ip-line span { color: var(--muted); }
 
   /* Business + limits */
   .ip-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; }
