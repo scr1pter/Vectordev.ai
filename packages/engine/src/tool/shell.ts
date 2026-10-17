@@ -254,6 +254,15 @@ function unquote(text: string) {
   return text
 }
 
+// The word a program gets from cmd: `^` escapes the next character outside double quotes, and the quotes themselves
+// are dropped, so `.e^nv` and `".e"nv` both open `.env`.
+function cmdWord(text: string) {
+  return text.replace(
+    /"([^"]*)"?|\^([\s\S]?)/g,
+    (_, quoted: string | undefined, escaped: string | undefined) => quoted ?? escaped ?? "",
+  )
+}
+
 function home(text: string) {
   if (text === "~") return os.homedir()
   if (text.startsWith("~/") || text.startsWith("~\\")) return path.join(os.homedir(), text.slice(2))
@@ -279,6 +288,14 @@ function expand(text: string, cwd: string, shell: string) {
     .replace(/\$env:([A-Za-z_][A-Za-z0-9_]*)/gi, (_, key: string) => envValue(key) || "")
     .replace(/\$(HOME|PWD|PSHOME)(?=$|[\\/])/gi, (_, key: string) => auto(key, cwd, shell) || "")
   return home(out)
+}
+
+// A word as the program it is passed to gets it: unquoted, with PowerShell's `$env:`, `$HOME` and `$PWD` expanded and
+// cmd's `^` escapes and double quotes removed, so a path rule tests the file the program opens.
+function shellWord(arg: string, cwd: string, ps: boolean, shell: string) {
+  if (ps) return expand(arg, cwd, shell)
+  if (Shell.name(shell) === "cmd") return home(cmdWord(unquote(arg)))
+  return home(unquote(arg))
 }
 
 // A provider may be named with its module (`Microsoft.PowerShell.Core\FileSystem::C:\x`).
@@ -329,9 +346,9 @@ function dynamic(text: string, ps: boolean, cmd: boolean) {
   if (text.startsWith("(") || text.startsWith("@(")) return true
   if (text.includes("$(") || text.includes("${") || text.includes("`")) return true
   if (ps) return /\$(?!env:)/i.test(text)
-  // cmd expands `%USERPROFILE%` (and `!NAME!` under delayed expansion) and drops `^` before the program sees the
-  // word, so `%USERPROFILE%\.ssh\id_rsa` would otherwise pass for a path inside the project.
-  if (cmd && /[%!^]/.test(text)) return true
+  // cmd expands `%USERPROFILE%` (and `!NAME!` under delayed expansion) before the program sees the word, so
+  // `%USERPROFILE%\.ssh\id_rsa` would otherwise pass for a path inside the project. Its `^` escapes are already gone.
+  if (cmd && /[%!]/.test(text)) return true
   // Left over from home(): bash expands `~root`, `~+` and `~-` to directories the scan does not know.
   return text.includes("$") || text.startsWith("~")
 }
@@ -679,7 +696,11 @@ export const ShellTool = Tool.define(
     })
 
     const argPath = Effect.fn("ShellTool.argPath")(function* (arg: string, cwd: string, ps: boolean, shell: string) {
-      const text = ps ? expand(arg, cwd, shell) : home(unquote(arg))
+      return yield* wordPath(shellWord(arg, cwd, ps, shell), cwd, ps, shell)
+    })
+
+    // The path a word names once its shell has read it (see shellWord), or nothing when the scan cannot know it.
+    const wordPath = Effect.fn("ShellTool.wordPath")(function* (text: string, cwd: string, ps: boolean, shell: string) {
       const file = text && prefix(text)
       if (!file || dynamic(file, ps, Shell.name(shell) === "cmd")) return
       const next = ps ? provider(file) : file
@@ -726,21 +747,28 @@ export const ShellTool = Tool.define(
       const list = commands(root).map((node) => {
         const command = parts(node)
         const tokens = command.map((item) => item.text)
-        // PowerShell runs `Microsoft.PowerShell.Management\Get-Content` and its alias `gc` as Get-Content.
+        // PowerShell runs `Microsoft.PowerShell.Management\Get-Content` and its alias `gc` as Get-Content, and cmd
+        // runs `ty^pe` as `type`.
         const name = ps ? tokens[0]?.toLowerCase().replace(/^[\w.]+\\/, "") : tokens[0]
         return {
           node,
           command,
           tokens,
-          cmd: ps ? name && (PS_ALIASES.get(name) ?? name) : shellKind === "cmd" ? name?.toLowerCase() : name,
+          cmd: ps
+            ? name && (PS_ALIASES.get(name) ?? name)
+            : shellKind === "cmd" && name !== undefined
+              ? cmdWord(unquote(name)).toLowerCase()
+              : name,
         }
       })
       // `cat .env`, `grep KEY .env.local` or `source .env` read the same secrets the read tool asks for, so they ask
       // under read too. A name the scan cannot resolve (`"$HOME/.env"`, `%USERPROFILE%\.env`) is asked for as written.
+      // The name is tested as the program gets it, so cmd's `type .e^nv` asks as `type .env` does.
       const envRead = Effect.fnUntraced(function* (text: string) {
-        if (!ENV_FILE.test(path.basename(unquote(text)))) return
-        const resolved = yield* argPath(text, cwd, ps, shell)
-        scan.reads.add(resolved ? path.relative(instance.worktree, resolved) : unquote(text))
+        const word = shellWord(text, cwd, ps, shell)
+        if (!ENV_FILE.test(shellKind === "cmd" ? path.win32.basename(word) : path.basename(word))) return
+        const resolved = yield* wordPath(word, cwd, ps, shell)
+        scan.reads.add(resolved ? path.relative(instance.worktree, resolved) : word)
       })
       // A directory change anywhere in the command leaves unknown where git diff starts looking for its work tree.
       const moved = list.some((item) => item.cmd !== undefined && CWD.has(item.cmd))

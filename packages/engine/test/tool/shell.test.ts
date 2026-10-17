@@ -1653,6 +1653,55 @@ describe("tool.shell read-only allowlist", () => {
     }),
   )
 
+  // cmd removes `^` escapes and double quotes before the program sees a word, so `type .e^nv` opens `.env`.
+  it.live("asks under read and for outside folders by the name cmd passes after its escapes and quotes", () =>
+    Effect.gen(function* () {
+      for (const item of yield* scanShells("cmd")) {
+        yield* withShell(
+          item,
+          Effect.gen(function* () {
+            const tmp = yield* tmpdirScoped({ git: true })
+            const outside = yield* tmpdirScoped()
+            yield* runIn(
+              tmp,
+              Effect.gen(function* () {
+                const err = new Error("prompt rejected")
+                const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+                const stopAt = (permission: string) => ({
+                  ...ctx,
+                  ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+                    Effect.sync(() => {
+                      requests.push(req)
+                      if (req.permission === permission) throw err
+                    }),
+                })
+                for (const [command, file] of [
+                  ["type .e^nv", ".env"],
+                  ['type ".e"nv', ".env"],
+                  ["more < .e^nv.local", ".env.local"],
+                  ["findstr KEY .e^n^v.production", ".env.production"],
+                ] as const) {
+                  requests.length = 0
+                  const error = (yield* fail({ command }, stopAt("read"))).message
+                  expect({ command, error, read: requests.find((r) => r.permission === "read")?.patterns }).toEqual({
+                    command,
+                    error: err.message,
+                    read: [file],
+                  })
+                }
+                // A caret no longer hides a path, or the command that takes it, from the outside-folder check.
+                requests.length = 0
+                const command = `ty^pe ..^/${path.basename(outside)}/notes.txt`
+                expect((yield* fail({ command }, stopAt("external_directory"))).message).toBe(err.message)
+                expect(requests[0]?.patterns).toEqual([glob(path.join(outside, "*"))])
+              }),
+            )
+          }),
+        )
+      }
+    }),
+  )
+
   // PowerShell parses these as different statements.
   for (const item of shells.filter((item) => !PS.has(item.label))) {
     for (const [command, pattern] of denied) {
