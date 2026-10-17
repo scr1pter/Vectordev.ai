@@ -244,6 +244,25 @@ function trustedExecutableValue(
   return preserveFileUrl ? pathToFileURL(target).href : target
 }
 
+// The env var can reach the project through a symlink (macOS's /tmp and /var are links) while the instance directory
+// does not, or the other way round. A file inside the project under either spelling is project config, so trust
+// applies to it, and it comes back in the project's own spelling so the trust snapshot captures it.
+const projectAgentConfigPath = Effect.fnUntraced(function* (ctx: InstanceContext) {
+  const file = Flag.VECTOR_AGENT_CONFIG
+  if (!file) return
+  if (containsPath(file, ctx)) return file
+  const real = yield* canonicalPath(file)
+  const roots = ctx.worktree === "/" ? [ctx.directory] : [ctx.directory, ctx.worktree]
+  const bases = yield* Effect.forEach(roots, canonicalPath)
+  const index = bases.findIndex((base) => FSUtil.contains(base, real))
+  if (index === -1) return
+  return path.join(roots[index], path.relative(bases[index], real))
+})
+
+function canonicalPath(file: string) {
+  return Effect.try({ try: () => FSUtil.resolve(file), catch: (cause) => cause }).pipe(Effect.orElseSucceed(() => file))
+}
+
 function authorityNarrowingPermission(permission: ConfigPermissionV1.Info | undefined) {
   if (!permission) return
   const entries = Object.entries(permission)
@@ -629,8 +648,8 @@ const layer = Layer.effect(
           : yield* ConfigPaths.files("tui", ctx.directory, ctx.worktree).pipe(Effect.orDie)
         const allDirectories = yield* ConfigPaths.directories(ctx.directory, ctx.worktree)
         const projectDirectories = allDirectories.filter((directory) => containsPath(directory, ctx))
-        const localAgentConfig =
-          Flag.VECTOR_AGENT_CONFIG && containsPath(Flag.VECTOR_AGENT_CONFIG, ctx) ? [Flag.VECTOR_AGENT_CONFIG] : []
+        const projectAgentConfig = yield* projectAgentConfigPath(ctx)
+        const localAgentConfig = projectAgentConfig ? [projectAgentConfig] : []
         const prepareProjectFile = Effect.fnUntraced(function* (filepath: string) {
           const text = yield* readConfigFile(filepath)
           if (!text) return
@@ -827,10 +846,10 @@ const layer = Layer.effect(
         yield* merge(Global.Path.config, global, "global")
 
         if (Flag.VECTOR_AGENT_CONFIG) {
-          const next = containsPath(Flag.VECTOR_AGENT_CONFIG, ctx)
-            ? yield* loadProjectFile(Flag.VECTOR_AGENT_CONFIG, authEnv, !trusted)
+          const next = projectAgentConfig
+            ? yield* loadProjectFile(projectAgentConfig, authEnv, !trusted)
             : yield* loadFile(Flag.VECTOR_AGENT_CONFIG, authEnv, true)
-          yield* merge(Flag.VECTOR_AGENT_CONFIG, next)
+          yield* merge(projectAgentConfig ?? Flag.VECTOR_AGENT_CONFIG, next)
           yield* Effect.logDebug("loaded custom config", { path: Flag.VECTOR_AGENT_CONFIG })
         }
 

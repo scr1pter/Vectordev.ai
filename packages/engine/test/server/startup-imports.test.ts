@@ -23,13 +23,15 @@ const FEATURE_ONLY = [
 ]
 
 test("the server module graph loads without feature-only packages", async () => {
-  // A separate process, so modules other test files already loaded do not count.
+  // A separate process, so modules other test files already loaded do not count. The list is over 200 KB, and once the
+  // server graph is loaded Bun 1.3.14 can exit before a console.log that size has drained into a pipe, leaving the first
+  // 64 KB. process.stdout.write keeps the process alive until the pipe has taken it all.
   const child = Bun.spawn(
     [
       process.execPath,
       "--conditions=browser",
       "--eval",
-      `await import("./src/server/server.ts"); console.log(JSON.stringify(Object.keys(require.cache)))`,
+      `await import("./src/server/server.ts"); process.stdout.write(JSON.stringify(Object.keys(require.cache)))`,
     ],
     { cwd: path.resolve(import.meta.dir, "../.."), env: process.env, stdout: "pipe", stderr: "pipe" },
   )
