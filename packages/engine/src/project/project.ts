@@ -304,7 +304,7 @@ const layer = Layer.effect(
 
       yield* emitUpdated(result)
       if (projectID !== ProjectV2.ID.global && data.vcs?.type === "git") {
-        yield* projectV2.commit({ store: data.vcs.store, id: data.id })
+        yield* projectV2.commit({ store: data.vcs.store, worktree: data.directory, id: data.id })
       }
       return { project: result, sandbox: data.vcs ? data.directory : worktree }
     })

@@ -194,7 +194,8 @@ describe("ProjectV2.resolve", () => {
       yield* Effect.promise(() => initRepo(tmp.path, { commit: true }))
       const project = yield* ProjectV2.Service
       const store = abs(path.join(tmp.path, ".git"))
-      yield* project.commit({ store, id: ProjectV2.ID.make("own-id") })
+      const worktree = abs(tmp.path)
+      yield* project.commit({ store, worktree, id: ProjectV2.ID.make("own-id") })
       expect(yield* Effect.promise(() => fs.readFile(path.join(store, "vector", "project-id"), "utf8"))).toBe("own-id")
 
       // A store folder that is really a folder elsewhere is left alone.
@@ -202,8 +203,53 @@ describe("ProjectV2.resolve", () => {
       yield* Effect.promise(() =>
         fs.symlink(outside.path, path.join(store, "vector"), process.platform === "win32" ? "junction" : "dir"),
       )
-      yield* project.commit({ store, id: ProjectV2.ID.make("linked-id") })
+      yield* project.commit({ store, worktree, id: ProjectV2.ID.make("linked-id") })
       expect(yield* Effect.promise(() => fs.readdir(outside.path))).toEqual([])
+    }),
+  )
+
+  // A downloaded repository can carry its .git as a link to another repository's store, or as a gitdir file naming one.
+  // git then opens that store, but the id belongs to neither, so it is written only into a store the repository owns:
+  // its own, or the shared store of a linked worktree that git registered there.
+  it.live("never records the id in another repository's store", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      const victim = path.join(tmp.path, "victim")
+      const linked = path.join(tmp.path, "linked")
+      const named = path.join(tmp.path, "named")
+      const worktree = path.join(tmp.path, "worktree")
+      yield* Effect.promise(async () => {
+        for (const directory of [victim, linked, named]) await fs.mkdir(directory, { recursive: true })
+        await initRepo(victim, { commit: true })
+        await fs.symlink(
+          path.join(victim, ".git"),
+          path.join(linked, ".git"),
+          process.platform === "win32" ? "junction" : "dir",
+        )
+        await fs.writeFile(path.join(named, ".git"), `gitdir: ${path.join(victim, ".git")}\n`)
+      })
+      const project = yield* ProjectV2.Service
+      for (const directory of [linked, named]) {
+        const resolved = yield* project.resolve(abs(directory))
+        expect(resolved.vcs?.type).toBe("git")
+        yield* project.commit({ store: resolved.vcs!.store, worktree: resolved.directory, id: ProjectV2.ID.make("x") })
+        const written = (yield* Effect.promise(() => fs.readdir(path.join(victim, ".git")))).includes("vector")
+        expect({ directory, written }).toEqual({ directory, written: false })
+      }
+      // A worktree git added shares the main repository's store, which records the id for both.
+      yield* Effect.promise(() => $`git worktree add ${worktree} -b shared-${Date.now()}`.cwd(victim).quiet())
+      const resolved = yield* project.resolve(abs(worktree))
+      yield* project.commit({
+        store: resolved.vcs!.store,
+        worktree: resolved.directory,
+        id: ProjectV2.ID.make("shared"),
+      })
+      expect(yield* Effect.promise(() => fs.readFile(path.join(victim, ".git", "vector", "project-id"), "utf8"))).toBe(
+        "shared",
+      )
     }),
   )
 
