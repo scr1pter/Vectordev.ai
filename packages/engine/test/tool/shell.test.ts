@@ -641,6 +641,70 @@ describe("tool.shell permissions", () => {
     }),
   )
 
+  // A link opens the file it points at, and on Windows an 8.3 short name (`ENV~1`) opens `.env`, so the name a file
+  // really has asks under read as the read tool does.
+  it.live("asks under read for an environment file reached through a link", () =>
+    Effect.gen(function* () {
+      const items = [
+        ...shells.filter((item) => !PS.has(item.label) && item.label !== "cmd"),
+        ...(yield* scanShells("pwsh")),
+        ...(yield* scanShells("cmd")),
+      ]
+      for (const item of items) {
+        yield* withShell(
+          item,
+          Effect.gen(function* () {
+            const tmp = yield* tmpdirScoped({ git: true })
+            yield* Effect.promise(() => Bun.write(path.join(tmp, ".env"), "KEY=1\n"))
+            // File links need a privilege on Windows, which CI runners hold.
+            const linked = yield* Effect.promise(() =>
+              fs
+                .symlink(path.join(tmp, ".env"), path.join(tmp, "secrets"), "file")
+                .then(() => true)
+                .catch((error) => {
+                  if (process.platform === "win32" && error?.code === "EPERM") return false
+                  throw error
+                }),
+            )
+            if (!linked) return
+            yield* runIn(
+              tmp,
+              Effect.gen(function* () {
+                const err = new Error("read prompt rejected")
+                const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+                const rejectRead = {
+                  ...ctx,
+                  ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+                    Effect.sync(() => {
+                      requests.push(req)
+                      if (req.permission === "read") throw err
+                    }),
+                }
+                const command = PS.has(item.label)
+                  ? "Get-Content secrets"
+                  : item.label === "cmd"
+                    ? "type secrets"
+                    : "cat secrets"
+                const error = (yield* fail({ command }, rejectRead)).message
+                const read = requests.find((r) => r.permission === "read")?.patterns ?? []
+                expect({ shell: item.label, error, env: read.some((file) => /(^|[\\/])\.env$/.test(file)) }).toEqual({
+                  shell: item.label,
+                  error: err.message,
+                  env: true,
+                })
+                // A plain file is not asked for.
+                requests.length = 0
+                yield* Effect.promise(() => Bun.write(path.join(tmp, "notes.txt"), "notes\n"))
+                yield* run({ command: command.replace("secrets", "notes.txt") }, rejectRead)
+                expect(requests.map((r) => r.permission)).not.toContain("read")
+              }),
+            )
+          }),
+        )
+      }
+    }),
+  )
+
   // PowerShell reads a file through a .NET call as easily as through a command, and refuses to parse `<` rather than
   // reading from it, so neither may slip past the read prompt the bash forms get.
   it.live("asks under read before PowerShell reads an environment file by command, redirect or .NET call", () =>

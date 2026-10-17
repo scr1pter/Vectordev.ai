@@ -796,8 +796,8 @@ export const ShellTool = Tool.define(
       const envRead = Effect.fnUntraced(function* (text: string) {
         const word = shellWord(text, cwd, ps, shell)
         if (!win) {
-          if (ENV_FILE.test(path.basename(word))) yield* readTarget(word)
-          return
+          if (ENV_FILE.test(path.basename(word))) return yield* readTarget(word)
+          return yield* linkedEnv(word)
         }
         // Windows opens a name whatever its case and without its trailing spaces and dots: `.ENV` and `'.env '` are
         // `.env`. These rules hold for PowerShell and cmd on any system, so the scan does not depend on where it runs.
@@ -813,7 +813,7 @@ export const ShellTool = Tool.define(
         // it would open in its folder or, when the scan cannot list that folder, for one it could open. A name that is
         // only an expansion (`$file`) may be anything, as `cat $file` may be in bash.
         const glob = name.replace(expansion, "*")
-        if (!name.replace(expansion, "") || !/[*?[]/.test(glob)) return
+        if (!name.replace(expansion, "") || !/[*?[]/.test(glob)) return yield* linkedEnv(dir + name)
         const folder = /[*?[]/.test(dir) ? undefined : yield* wordPath(dir || ".", cwd, ps, shell)
         const names = folder
           ? yield* fs.readDirectoryEntries(folder).pipe(
@@ -824,6 +824,17 @@ export const ShellTool = Tool.define(
         const match = winGlob(glob)
         const found = names.filter((item) => ENV_FILE.test(item.toLowerCase()) && match.test(item.toLowerCase()))
         for (const item of folder ? found : found.slice(0, 1)) yield* readTarget(dir + item)
+      })
+      // A link to an environment file, or on Windows its 8.3 short name (`ENV~1`), opens it under another name, so the
+      // name it really has is tested too, as the read tool tests both.
+      const linkedEnv = Effect.fnUntraced(function* (word: string) {
+        const resolved = yield* wordPath(word, cwd, ps, shell)
+        if (!resolved) return
+        const real = yield* Effect.try({ try: () => FSUtil.realpath(resolved), catch: (cause) => cause }).pipe(
+          Effect.orElseSucceed(() => undefined),
+        )
+        if (!real || !ENV_FILE.test(win ? path.win32.basename(real).toLowerCase() : path.basename(real))) return
+        scan.reads.add(path.relative(instance.worktree, real))
       })
       // A name with a wildcard (`*.env`) is asked for as written, not as the folder it starts in.
       const readTarget = Effect.fnUntraced(function* (word: string) {
