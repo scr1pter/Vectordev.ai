@@ -233,6 +233,19 @@ describe("free review defaults", () => {
       expect(missingKey.message).toBe(
         "anthropic/claude-sonnet-4-5 needs ANTHROPIC_API_KEY. Add it as a repository secret and pass it to the Review step in .github/workflows/vector.yml.",
       )
+      const freeWithoutToken = yield* resolve({ trigger: "auto", env: { MODEL: "vector/acme/missing:free" } }).pipe(
+        Effect.flip,
+      )
+      expect(freeWithoutToken.message).toBe(
+        "vector/acme/missing:free needs the repository secret VECTOR_CLI_TOKEN. Create one at vectordev.ai/auth/cli.",
+      )
+      const freeNotOffered = yield* resolve({
+        trigger: "auto",
+        env: { MODEL: "vector/acme/missing:free", VECTOR_CLI_TOKEN: "test-only" },
+      }).pipe(Effect.flip)
+      expect(freeNotOffered.message).toBe(
+        "vectordev.ai did not offer vector/acme/missing:free to this workflow. Check that the VECTOR_CLI_TOKEN secret is current, or set MODEL in .github/workflows/vector.yml to another model.",
+      )
       const missingModel = yield* resolve({ trigger: "command", env: { MODEL: "acme/missing" } }).pipe(Effect.flip)
       expect(missingModel.message).toBe(
         "Acme has no model missing. Set MODEL in .github/workflows/vector.yml to one of its models, or run vector github install again.",

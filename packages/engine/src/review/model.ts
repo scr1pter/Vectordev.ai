@@ -11,7 +11,7 @@ import { contextRefusal, type ReviewPrice } from "@vectordevai/core/review/plan"
 import { WORKFLOW_FILE } from "@vectordevai/core/review/workflow"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import type { CostKind, Trigger } from "@vectordevai/core/review/types"
-import type { ProviderV2 } from "@vectordevai/core/provider"
+import { ProviderV2 } from "@vectordevai/core/provider"
 import type { ModelV2 } from "@vectordevai/core/model"
 
 export interface ResolvedModel {
@@ -81,7 +81,9 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
         if (!ci)
           return yield* new ReviewModelError({ message: `${name} is not available. Check the provider and its key.` })
         const listed = (yield* catalog.get())[ref.providerID]
-        return yield* new ReviewModelError({ message: workflowRefusal(name, ref.modelID, listed, error) })
+        return yield* new ReviewModelError({
+          message: workflowRefusal({ name, modelID: ref.modelID, listed, error, env }),
+        })
       }),
     ),
   )
@@ -111,20 +113,26 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
 // Why a workflow's model cannot run. A missing secret is the usual cause: the provider is in the catalog but never
 // loaded, because the review step's env does not pass its key. Only a provider Vector no longer lists means the
 // workflow itself is out of date.
-function workflowRefusal(
-  name: string,
-  modelID: string,
-  listed: ModelCatalog.Provider | undefined,
-  error: Provider.ModelNotFoundError,
-) {
-  if (error.unavailable) return `${name} cannot run in this workflow. ${error.unavailable.message}`
-  if (!listed) return "This workflow was set up by an older Vector; run vector github install again."
-  if (!Object.hasOwn(listed.models, modelID)) {
-    const suggestions = error.suggestions?.length ? ` Did you mean ${error.suggestions.join(", ")}?` : ""
-    return `${listed.name} has no model ${modelID}.${suggestions} Set MODEL in ${WORKFLOW_FILE} to one of its models, or run vector github install again.`
+function workflowRefusal(input: {
+  name: string
+  modelID: string
+  listed: ModelCatalog.Provider | undefined
+  error: Provider.ModelNotFoundError
+  env: Record<string, string | undefined>
+}) {
+  if (input.error.unavailable) return `${input.name} cannot run in this workflow. ${input.error.unavailable.message}`
+  // Vector's free models come from vectordev.ai for the workflow's Vector account, not from the model catalog.
+  if (input.error.providerID === ProviderV2.ID.vector)
+    return input.env.VECTOR_CLI_TOKEN
+      ? `vectordev.ai did not offer ${input.name} to this workflow. Check that the VECTOR_CLI_TOKEN secret is current, or set MODEL in ${WORKFLOW_FILE} to another model.`
+      : `${input.name} needs the repository secret VECTOR_CLI_TOKEN. Create one at vectordev.ai/auth/cli.`
+  if (!input.listed) return "This workflow was set up by an older Vector; run vector github install again."
+  if (!Object.hasOwn(input.listed.models, input.modelID)) {
+    const suggestions = input.error.suggestions?.length ? ` Did you mean ${input.error.suggestions.join(", ")}?` : ""
+    return `${input.listed.name} has no model ${input.modelID}.${suggestions} Set MODEL in ${WORKFLOW_FILE} to one of its models, or run vector github install again.`
   }
-  const keys = listed.env.length ? listed.env.join(" or ") : `${listed.name}'s credentials`
-  return `${name} needs ${keys}. Add it as a repository secret and pass it to the Review step in ${WORKFLOW_FILE}.`
+  const keys = input.listed.env.length ? input.listed.env.join(" or ") : `${input.listed.name}'s credentials`
+  return `${input.name} needs ${keys}. Add it as a repository secret and pass it to the Review step in ${WORKFLOW_FILE}.`
 }
 
 function first(values: (string | undefined)[]) {
