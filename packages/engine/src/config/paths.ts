@@ -63,7 +63,9 @@ export function projectPath(file: string, ctx: { directory: string; worktree?: s
   const roots = [ctx.directory, ...(ctx.worktree && ctx.worktree !== "/" ? [ctx.worktree] : [])]
   if (roots.some((root) => FSUtil.contains(root, file))) return path.resolve(file)
   const resolved = FSUtil.resolve(file)
-  if (roots.some((root) => FSUtil.contains(FSUtil.resolve(root), resolved))) return resolved
+  const root = roots.find((root) => FSUtil.contains(FSUtil.resolve(root), resolved))
+  // Re-enter through the workspace spelling so snapshot normalization deduplicates Windows casing aliases.
+  if (root) return path.resolve(root, path.relative(FSUtil.resolve(root), resolved))
 }
 
 export function projectContains(file: string, ctx: { directory: string; worktree?: string }) {

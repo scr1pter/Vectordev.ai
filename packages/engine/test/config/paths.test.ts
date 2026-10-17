@@ -16,7 +16,7 @@ test("config project containment excludes the root sentinel and keeps missing-pa
   expect(ConfigPaths.projectContains(`${project.path}-sibling/vector.json`, ctx)).toBe(false)
 })
 
-test("config files and directories reached through external aliases use their physical project identity", async () => {
+test("config files and directories reached through external aliases use their project identity", async () => {
   await using project = await tmpdir()
   await using outside = await tmpdir()
   await Bun.write(path.join(project.path, "vector.json"), "{}")
@@ -39,7 +39,7 @@ test("lexical project config identity stays local when a directory link points o
   expect(ConfigPaths.projectPath(path.join(outside.path, "vector.json"), ctx)).toBeUndefined()
 })
 
-test("physical config identities round-trip through a snapshot whose workspace uses an alias", async () => {
+test("config identities round-trip through a snapshot whose workspace uses an alias", async () => {
   await using project = await tmpdir()
   await using outside = await tmpdir()
   const file = path.join(project.path, "vector.json")
@@ -47,7 +47,7 @@ test("physical config identities round-trip through a snapshot whose workspace u
   const alias = path.join(outside.path, "workspace-link")
   await fs.symlink(project.path, alias, process.platform === "win32" ? "junction" : "dir")
   const source = ConfigPaths.projectPath(file, { directory: alias, worktree: alias })
-  expect(source).toBe(file)
+  expect(source).toBe(path.join(alias, "vector.json"))
   if (!source) throw new Error("Expected a project config source")
   const snapshot = await WorkspaceTrust.snapshot(alias, [source])
   expect(WorkspaceTrust.readFileString(snapshot, source)).toBe('{"permission":{"bash":"deny"}}')
