@@ -14,22 +14,12 @@ html:has(.cx-page) {
   --cx-fg: #ece7f4;
   --cx-fg-02: #d6cfe2;
   --cx-accent: #b69cff;
-  /* The space the site's top bar keeps at the top of the window: it sticks 12px down in a 76px box (8px and 68px up
-     to 640px). Anchors and the page's sticky parts stop below it. */
-  --cx-nav: 88px;
   color-scheme: dark;
   font-size: 15px;
   background: var(--cx-bg);
   scroll-behavior: auto;
-  scroll-padding-top: var(--cx-nav);
   text-size-adjust: none;
   -webkit-text-size-adjust: none;
-}
-
-@media (max-width: 640px) {
-  html:has(.cx-page) {
-    --cx-nav: 76px;
-  }
 }
 
 @media (min-width: 900px) {
@@ -69,8 +59,13 @@ body:has(.cx-page)::before {
   }
 }
 
-/* The bar and footer keep the landing page's typefaces: Geist for the bar, the landing face for the footer. */
+/*
+ * The bar and footer keep the landing page's typefaces: Geist for the bar, the landing face for the footer. The bar
+ * scrolls away with the page as it does on the landing page, where LanderMotion's `.vector-marketing > *` makes it
+ * relative; its `top` still sets it 12px down. Pinned, the pricing content would show around its rounded ends.
+ */
 .cx-page > .site-header {
+  position: relative;
   font-family: var(--font-sans);
 }
 
@@ -601,9 +596,9 @@ html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
 }
 
 /*
- * Comparison table: from 660px; scrolls sideways below 1140px. From 1140px the header row sticks just below the site's
- * top bar. Below that the sideways scroller is the row's scroll container and never scrolls down, so the row keeps no
- * offset there: any offset would push it down over the first rows instead of holding it under the bar.
+ * Comparison table: from 660px; scrolls sideways below 1140px. From 1140px the header row sticks to the top of the
+ * window, since the site's top bar has scrolled away by then. Below that the sideways scroller is the row's scroll
+ * container and never scrolls down, so the row stays put at the top of the table.
  */
 .cx-compare {
   margin-top: calc(var(--cx-v) * 4);
@@ -660,10 +655,6 @@ html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
 @media (min-width: 1140px) {
   .cx-compare-scroll {
     overflow: visible;
-  }
-
-  .cx-compare thead th {
-    top: var(--cx-nav);
   }
 }
 
@@ -754,9 +745,10 @@ html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
     grid-column: 1 / 7;
   }
 
+  /* Sticks 12px below the window top: the gap the top bar keeps at the top of the page. */
   .cx-faq-title > div {
     position: sticky;
-    top: var(--cx-nav);
+    top: 0.75rem;
   }
 
   .cx-faq-title h2 {

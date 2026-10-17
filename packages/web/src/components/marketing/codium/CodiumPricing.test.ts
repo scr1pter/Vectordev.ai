@@ -388,7 +388,7 @@ describe("Codium pricing page", () => {
       expect(css).not.toContain(removed)
     expect(css).toContain(".cx-page {\n  --cx-sec")
     expect(css).toMatch(/^\.cx-main \{[^}]*font-family: "Geist Variable"/m)
-    expect(css).toMatch(/^\.cx-page > \.site-header \{\n  font-family: var\(--font-sans\);/m)
+    expect(css).toMatch(/^\.cx-page > \.site-header \{[^}]*font-family: var\(--font-sans\);/m)
     expect(css).toMatch(/^\.cx-page > \.site-footer \{\n  font-family: var\(--font-landing\);/m)
     expect(css.match(/font-family:/g)).toHaveLength(3)
     // The landing page gives its bar Geist and its footer the landing face.
@@ -402,27 +402,29 @@ describe("Codium pricing page", () => {
     for (const paint of paints) expect(materials).toContain(paint)
   })
 
-  test("the comparison table stays inside its scroller, and the sticky parts stop below the site's top bar", async () => {
+  test("the bar scrolls away as on the landing page, and the table header and Q&A heading stick to the window top", async () => {
     const css = await Bun.file(new URL("./codium-pricing.css", import.meta.url)).text()
     // Positioned, so the cells' visually hidden labels are clipped by the scroller instead of widening the page.
     expect(css).toContain(".cx-compare-scroll {\n  /* Positioned")
     expect(css).toMatch(/\.cx-compare-scroll \{[^}]*position: relative;/)
-    // The bar sticks `top` down in a box `height` tall, at both of its sizes; the page keeps exactly that much clear.
+    // The bar's own rule pins it, but the landing page makes every child of its wrapper relative, so it scrolls away
+    // there; /codium does the same, so no pricing content can show above, beside or below a pinned bar.
     const bar = await Bun.file(new URL("../MarketingNav.astro", import.meta.url)).text()
-    const wide = bar.match(/\.site-header \{[^}]*position: sticky;\n    top: (\d+)px;\n    z-index: 40;\n    height: (\d+)px;/)
-    const narrow = bar.match(/@media \(max-width: 640px\) \{\n    \.site-header \{[^}]*top: (\d+)px;\n      height: (\d+)px;/)
+    const motion = await Bun.file(new URL("../LanderMotion.astro", import.meta.url)).text()
+    const wide = bar.match(/\.site-header \{[^}]*position: sticky;\n    top: (\d+)px;/)
     expect(wide).not.toBeNull()
-    expect(narrow).not.toBeNull()
-    expect(css).toContain(`  --cx-nav: ${Number(wide![1]) + Number(wide![2])}px;`)
-    expect(css).toMatch(
-      new RegExp(`@media \\(max-width: 640px\\) \\{\\n  html:has\\(\\.cx-page\\) \\{\\n    --cx-nav: ${Number(narrow![1]) + Number(narrow![2])}px;`),
-    )
-    expect(css).not.toContain("--cx-header")
-    expect(css).toContain("scroll-padding-top: var(--cx-nav);")
-    // From 1140px the header row sticks under the bar; below it the scroller holds the row, so it keeps no offset.
+    expect(motion).toMatch(/\.vector-marketing > \* \{\n    position: relative;/)
+    expect(css).toMatch(/^\.cx-page > \.site-header \{\n  position: relative;/m)
+    // Nothing is left holding space for a pinned bar.
+    for (const removed of ["--cx-nav", "--cx-header", "scroll-padding"]) expect(css).not.toContain(removed)
+    // The header row sticks to the window top at every width; below 1140px its sideways scroller holds it in place.
     expect(css).toMatch(/^\.cx-compare thead th \{\n  position: sticky;\n  top: 0;/m)
-    expect(css).toMatch(/@media \(min-width: 1140px\) \{\n  \.cx-compare-scroll \{\n    overflow: visible;\n  \}\n\n  \.cx-compare thead th \{\n    top: var\(--cx-nav\);/)
-    expect(css).toMatch(/\.cx-faq-title > div \{\n    position: sticky;\n    top: var\(--cx-nav\);/)
+    expect(css.match(/\.cx-compare thead th \{[^}]*top:/g)).toHaveLength(1)
+    expect(css).toMatch(/@media \(min-width: 1140px\) \{\n  \.cx-compare-scroll \{\n    overflow: visible;\n  \}\n\}/)
+    // The Q&A heading (sticky from 900px, on a 16px root) keeps the bar's own gap from the window top.
+    const faq = css.match(/\.cx-faq-title > div \{\n    position: sticky;\n    top: ([\d.]+)rem;/)
+    expect(faq).not.toBeNull()
+    expect(Number(faq![1]) * 16).toBe(Number(wide![1]))
   })
 
   test("/pricing sends visitors to the Codium page, which the deploy keeps", async () => {
