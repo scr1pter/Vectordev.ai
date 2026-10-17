@@ -929,3 +929,45 @@ describe("missing model", () => {
     expect(createdSessions).toHaveLength(0)
   })
 })
+
+describe("image attachments", () => {
+  test("never send an image prompt on Vector Codium that the person did not pick", async () => {
+    currentModel = { id: "maker/text", provider: { id: "anthropic" } }
+    availableModels = [
+      currentModel,
+      { id: "codium/vision", provider: { id: "vector-plan" }, capabilities: { input: { image: true } } },
+    ] as typeof availableModels
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => undefined,
+      imageAttachments: () => [
+        { type: "image", id: "image", filename: "image.png", mime: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgo=" },
+      ],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(toasts).toMatchObject([
+      {
+        title: "Connect an image-capable model",
+        description:
+          "This model accepts text only, and Vector never switches to Vector Codium on its own. Choose a model with image input, then send again.",
+      },
+    ])
+    expect(createdSessions).toHaveLength(0)
+    expect(sentPrompts).toHaveLength(0)
+    expect(optimistic).toHaveLength(0)
+  })
+})

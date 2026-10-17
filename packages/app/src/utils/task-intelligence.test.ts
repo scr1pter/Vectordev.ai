@@ -113,4 +113,24 @@ describe("task intelligence", () => {
     })
     expect(routeModelForImages({ current: text, available: [text] })).toEqual({ model: undefined, routed: false })
   })
+
+  test("an image never moves a prompt onto Vector Codium", () => {
+    const vision = { capabilities: { reasoning: true, toolcall: true, input: { image: true } } }
+    const text = model("maker/text", { provider: { id: "anthropic" } })
+    const codium = model("codium/vision", { ...vision, provider: { id: "vector-plan" } })
+    const other = model("vision", { ...vision, provider: { id: "openai" } })
+    expect(routeModelForImages({ current: text, available: [text, codium] })).toEqual({
+      model: undefined,
+      routed: false,
+    })
+    expect(routeModelForImages({ current: text, available: [text, codium, other] })).toEqual({
+      model: other,
+      routed: true,
+    })
+    const codiumText = model("codium/text", { provider: { id: "vector-plan" } })
+    expect(routeModelForImages({ current: codiumText, available: [codiumText, codium, other] })).toEqual({
+      model: codium,
+      routed: true,
+    })
+  })
 })

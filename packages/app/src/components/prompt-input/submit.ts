@@ -7,6 +7,7 @@ import type { Message, Session } from "@vectordevai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@vectordevai/core/util/encode"
 import { Binary } from "@vectordevai/core/util/binary"
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { batch, type Accessor } from "solid-js"
 import { useTabs } from "@/context/tabs"
@@ -30,6 +31,7 @@ import { createPromptSubmissionState } from "./submission-state"
 import {
   classifyTaskDifficulty,
   isFreeModelSelection,
+  supportsImageInput,
   routeModelForImages,
   routeModelForTask,
   routeVariantForTask,
@@ -470,7 +472,9 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         title: "Connect an image-capable model",
         description: isFreeModelSelection(currentModel)
           ? "Free models currently accept text only. Remove the image to continue with your free model."
-          : "The connected models only accept text. Choose or connect a model with image input, then send again.",
+          : availableModels.some((item) => item.provider.id === ModelPlanStatus.PROVIDER_ID && supportsImageInput(item))
+            ? "This model accepts text only, and Vector never switches to Vector Codium on its own. Choose a model with image input, then send again."
+            : "The connected models only accept text. Choose or connect a model with image input, then send again.",
         variant: "error",
         duration: 10_000,
       })

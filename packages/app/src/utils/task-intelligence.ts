@@ -1,3 +1,5 @@
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
+
 export type TaskDifficulty = "trivial" | "simple" | "standard" | "complex"
 
 export type AgentTaskPreparation = {
@@ -111,8 +113,11 @@ export function routeModelForImages<T extends RoutableModel>(input: {
   // The guarded free route accepts text only; an image must never silently switch to paid inference.
   if (isFreeModelSelection(input.current)) return { model: undefined, routed: false }
   if (supportsImageInput(input.current)) return { model: input.current, routed: false }
+  // Codium spends the account's credits, so an image never moves a prompt onto it; the person picks it themselves.
+  const codium = input.current.provider.id === ModelPlanStatus.PROVIDER_ID
   const candidates = input.available
     .filter((model) => supportsImageInput(model))
+    .filter((model) => codium || model.provider.id !== ModelPlanStatus.PROVIDER_ID)
     .filter((model) => model.status !== "deprecated" && model.capabilities?.toolcall !== false)
     .toSorted((left, right) => {
       const leftProvider = left.provider.id === input.current.provider.id ? 1 : 0
