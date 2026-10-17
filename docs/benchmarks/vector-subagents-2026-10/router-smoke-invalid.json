@@ -1,0 +1,666 @@
+{
+  "models": {
+    "anthropic": "claude-sonnet-4-5",
+    "openai": "gpt-5.5",
+    "codex": "gpt-5.5"
+  },
+  "rates": {
+    "messages": {
+      "input": 3,
+      "cacheWrite": 3.75,
+      "cacheRead": 0.3,
+      "output": 15
+    },
+    "responses": {
+      "input": 2,
+      "cacheWrite": 0,
+      "cacheRead": 0.1,
+      "output": 10
+    }
+  },
+  "sessions": 1,
+  "websocket": false,
+  "engineRoot": "/Users/Krishna/.codex/worktrees/subagent-costs/Vectordev.ai",
+  "memorySamplingMs": 100,
+  "payloadEncoding": "utf8",
+  "scenarios": [
+    {
+      "scenario": "delegate-explore",
+      "runtime": "vector",
+      "session": 1,
+      "model": "claude-sonnet-4-5",
+      "exitCode": 0,
+      "unplayed": 0,
+      "actorRequests": {
+        "parent": 5,
+        "worker-0": 3
+      },
+      "scriptErrors": [
+        "No task ID in worker-0 launch result: <task id=\"ses_eb88db5b9ffe57beeiJzpiyNvC\" state=\"completed\">\n<task_result>\nsrc/invoice.ts line 5: `invoice.dueOn <= today` counts an invoice due today as overdue.\n</task_result>\n</task>"
+      ],
+      "valid": false,
+      "performance": {
+        "wallMs": 3539.1757089999996,
+        "timeToFirstRequestMs": 1741.378875,
+        "requestTimesMs": [
+          1741.378875,
+          1887.964292,
+          2084.406542,
+          2280.805542,
+          2575.739709,
+          2766.8819590000003,
+          2975.439167,
+          3262.485
+        ],
+        "postTerminalMs": 276.6907089999995,
+        "sampledPeakProcessTreeRssKiB": 537200,
+        "samples": [
+          {
+            "atMs": 128.27170900000004,
+            "phase": "startup",
+            "rssKiB": 93600
+          },
+          {
+            "atMs": 293.99724999999995,
+            "phase": "startup",
+            "rssKiB": 122848
+          },
+          {
+            "atMs": 401.015792,
+            "phase": "startup",
+            "rssKiB": 131568
+          },
+          {
+            "atMs": 463.46879199999995,
+            "phase": "startup",
+            "rssKiB": 132704
+          },
+          {
+            "atMs": 574.759875,
+            "phase": "startup",
+            "rssKiB": 144800
+          },
+          {
+            "atMs": 637.673125,
+            "phase": "startup",
+            "rssKiB": 151552
+          },
+          {
+            "atMs": 805.218834,
+            "phase": "startup",
+            "rssKiB": 157936
+          },
+          {
+            "atMs": 858.496625,
+            "phase": "startup",
+            "rssKiB": 173744
+          },
+          {
+            "atMs": 956.544292,
+            "phase": "startup",
+            "rssKiB": 226288
+          },
+          {
+            "atMs": 1053.2283750000001,
+            "phase": "startup",
+            "rssKiB": 251056
+          },
+          {
+            "atMs": 1154.4169590000001,
+            "phase": "startup",
+            "rssKiB": 276800
+          },
+          {
+            "atMs": 1275.028125,
+            "phase": "startup",
+            "rssKiB": 370944
+          },
+          {
+            "atMs": 1405.713209,
+            "phase": "startup",
+            "rssKiB": 406768
+          },
+          {
+            "atMs": 1463.840792,
+            "phase": "startup",
+            "rssKiB": 423072
+          },
+          {
+            "atMs": 1565.194875,
+            "phase": "startup",
+            "rssKiB": 434976
+          },
+          {
+            "atMs": 1664.8355840000002,
+            "phase": "startup",
+            "rssKiB": 455216
+          },
+          {
+            "atMs": 1762.0413340000002,
+            "phase": "active",
+            "rssKiB": 462608
+          },
+          {
+            "atMs": 1861.971667,
+            "phase": "active",
+            "rssKiB": 468832
+          },
+          {
+            "atMs": 1969.898042,
+            "phase": "active",
+            "rssKiB": 480256
+          },
+          {
+            "atMs": 2089.5412499999998,
+            "phase": "active",
+            "rssKiB": 484688
+          },
+          {
+            "atMs": 2175.493459,
+            "phase": "active",
+            "rssKiB": 490128
+          },
+          {
+            "atMs": 2278.2895,
+            "phase": "active",
+            "rssKiB": 494592
+          },
+          {
+            "atMs": 2368.6541669999997,
+            "phase": "active",
+            "rssKiB": 496816
+          },
+          {
+            "atMs": 2497.6539589999998,
+            "phase": "active",
+            "rssKiB": 494800
+          },
+          {
+            "atMs": 2571.808834,
+            "phase": "active",
+            "rssKiB": 496320
+          },
+          {
+            "atMs": 2672.192084,
+            "phase": "active",
+            "rssKiB": 513552
+          },
+          {
+            "atMs": 2778.218042,
+            "phase": "active",
+            "rssKiB": 508816
+          },
+          {
+            "atMs": 2884.856625,
+            "phase": "active",
+            "rssKiB": 518208
+          },
+          {
+            "atMs": 2974.209875,
+            "phase": "active",
+            "rssKiB": 514832
+          },
+          {
+            "atMs": 3074.2299169999997,
+            "phase": "active",
+            "rssKiB": 513568
+          },
+          {
+            "atMs": 3174.7391249999996,
+            "phase": "active",
+            "rssKiB": 513424
+          },
+          {
+            "atMs": 3277.3615419999996,
+            "phase": "tail",
+            "rssKiB": 530032
+          },
+          {
+            "atMs": 3376.042375,
+            "phase": "tail",
+            "rssKiB": 527408
+          },
+          {
+            "atMs": 3477.094,
+            "phase": "tail",
+            "rssKiB": 537200
+          }
+        ]
+      },
+      "verification": {
+        "exitCode": 0,
+        "output": "bun test v1.3.14 (0d9b296a)\n\ntest/invoice.test.ts:\n(pass) an invoice due today is not overdue yet [0.16ms]\n(pass) paid invoices are never overdue [0.03ms]\n(pass) the overdue total sums only overdue invoices [0.05ms]\n\n 3 pass\n 0 fail\n 3 expect() calls\nRan 3 tests across 1 file. [12.00ms]\n"
+      },
+      "requests": [
+        {
+          "index": 1,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 97,
+          "inputTokens": 9027,
+          "cacheRead": 0,
+          "cacheWrite": 9027,
+          "uncached": 0,
+          "outputTokens": 47,
+          "sentBytes": 36336,
+          "costUsd": 0.034556,
+          "uncachedCostUsd": 0.027786
+        },
+        {
+          "index": 2,
+          "who": "subagent",
+          "tools": 5,
+          "systemTokens": 426,
+          "toolTokens": 2243,
+          "messageTokens": 35,
+          "inputTokens": 2704,
+          "cacheRead": 0,
+          "cacheWrite": 2704,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 11047,
+          "costUsd": 0.010545,
+          "uncachedCostUsd": 0.008517
+        },
+        {
+          "index": 3,
+          "who": "subagent",
+          "tools": 5,
+          "systemTokens": 426,
+          "toolTokens": 2243,
+          "messageTokens": 220,
+          "inputTokens": 2889,
+          "cacheRead": 2704,
+          "cacheWrite": 185,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 11825,
+          "costUsd": 0.00191,
+          "uncachedCostUsd": 0.009072
+        },
+        {
+          "index": 4,
+          "who": "subagent",
+          "tools": 5,
+          "systemTokens": 426,
+          "toolTokens": 2243,
+          "messageTokens": 468,
+          "inputTokens": 3137,
+          "cacheRead": 2889,
+          "cacheWrite": 248,
+          "uncached": 0,
+          "outputTokens": 22,
+          "sentBytes": 12816,
+          "costUsd": 0.002127,
+          "uncachedCostUsd": 0.009741
+        },
+        {
+          "index": 5,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 236,
+          "inputTokens": 9166,
+          "cacheRead": 9027,
+          "cacheWrite": 139,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 36931,
+          "costUsd": 0.003634,
+          "uncachedCostUsd": 0.027903
+        },
+        {
+          "index": 6,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 484,
+          "inputTokens": 9414,
+          "cacheRead": 9166,
+          "cacheWrite": 248,
+          "uncached": 0,
+          "outputTokens": 74,
+          "sentBytes": 37922,
+          "costUsd": 0.00479,
+          "uncachedCostUsd": 0.029352
+        },
+        {
+          "index": 7,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 610,
+          "inputTokens": 9540,
+          "cacheRead": 9414,
+          "cacheWrite": 126,
+          "uncached": 0,
+          "outputTokens": 15,
+          "sentBytes": 38423,
+          "costUsd": 0.003522,
+          "uncachedCostUsd": 0.028845
+        },
+        {
+          "index": 8,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 696,
+          "inputTokens": 9626,
+          "cacheRead": 9540,
+          "cacheWrite": 86,
+          "uncached": 0,
+          "outputTokens": 14,
+          "sentBytes": 38765,
+          "costUsd": 0.003395,
+          "uncachedCostUsd": 0.029088
+        }
+      ],
+      "totals": {
+        "requests": 8,
+        "subagentRequests": 3,
+        "sideRequests": 0,
+        "warmupRequests": 0,
+        "inputTokens": 55503,
+        "cacheRead": 42740,
+        "cacheWrite": 12763,
+        "uncached": 0,
+        "outputTokens": 253,
+        "sentBytes": 224065,
+        "cacheReadShare": 0.77,
+        "fixedTokensPerRequest": 6582,
+        "firstRequest": {
+          "inputTokens": 9027,
+          "cacheRead": 0,
+          "uncached": 0,
+          "costUsd": 0.034556
+        },
+        "costUsd": 0.064479,
+        "uncachedCostUsd": 0.170304
+      },
+      "toolDefinitions": {
+        "agent": {
+          "task": 1685,
+          "bash": 940,
+          "todowrite": 618,
+          "edit": 490,
+          "read": 449,
+          "grep": 302,
+          "glob": 279,
+          "webfetch": 273,
+          "write": 257,
+          "skill": 150
+        },
+        "subagent": {
+          "bash": 940,
+          "read": 449,
+          "grep": 302,
+          "glob": 279,
+          "webfetch": 273
+        }
+      }
+    },
+    {
+      "scenario": "delegate-explore",
+      "runtime": "claude-code",
+      "session": 1,
+      "model": "claude-sonnet-4-5",
+      "exitCode": 0,
+      "unplayed": 0,
+      "actorRequests": {
+        "parent": 5,
+        "worker-0": 3
+      },
+      "scriptErrors": [
+        "No task ID in worker-0 launch result: src/invoice.ts line 5: `invoice.dueOn <= today` counts an invoice due today as overdue."
+      ],
+      "valid": false,
+      "performance": {
+        "wallMs": 428.7219580000001,
+        "timeToFirstRequestMs": 319.5374579999998,
+        "requestTimesMs": [
+          319.5374579999998,
+          328.7458749999996,
+          367.1683329999996,
+          375.04741699999977,
+          380.19054199999937,
+          385.68954199999916,
+          391.5672919999997,
+          421.57674999999927
+        ],
+        "postTerminalMs": 7.145208000000821,
+        "sampledPeakProcessTreeRssKiB": 352176,
+        "samples": [
+          {
+            "atMs": 119.73983299999963,
+            "phase": "startup",
+            "rssKiB": 235312
+          },
+          {
+            "atMs": 221.4695410000004,
+            "phase": "startup",
+            "rssKiB": 284032
+          },
+          {
+            "atMs": 323.25083300000006,
+            "phase": "active",
+            "rssKiB": 318128
+          },
+          {
+            "atMs": 424.069125,
+            "phase": "tail",
+            "rssKiB": 352176
+          }
+        ]
+      },
+      "verification": {
+        "exitCode": 0,
+        "output": "bun test v1.3.14 (0d9b296a)\n\ntest/invoice.test.ts:\n(pass) an invoice due today is not overdue yet [0.15ms]\n(pass) paid invoices are never overdue [0.02ms]\n(pass) the overdue total sums only overdue invoices [0.06ms]\n\n 3 pass\n 0 fail\n 3 expect() calls\nRan 3 tests across 1 file. [12.00ms]\n"
+      },
+      "requests": [
+        {
+          "index": 1,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 1940,
+          "inputTokens": 29857,
+          "cacheRead": 0,
+          "cacheWrite": 29857,
+          "uncached": 0,
+          "outputTokens": 49,
+          "sentBytes": 120390,
+          "costUsd": 0.112699,
+          "uncachedCostUsd": 0.090306
+        },
+        {
+          "index": 2,
+          "who": "subagent",
+          "tools": 17,
+          "systemTokens": 978,
+          "toolTokens": 10997,
+          "messageTokens": 1421,
+          "inputTokens": 13396,
+          "cacheRead": 0,
+          "cacheWrite": 13396,
+          "uncached": 0,
+          "outputTokens": 16,
+          "sentBytes": 54237,
+          "costUsd": 0.050475,
+          "uncachedCostUsd": 0.040428
+        },
+        {
+          "index": 3,
+          "who": "subagent",
+          "tools": 17,
+          "systemTokens": 978,
+          "toolTokens": 10997,
+          "messageTokens": 1601,
+          "inputTokens": 13576,
+          "cacheRead": 13396,
+          "cacheWrite": 180,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 54956,
+          "costUsd": 0.005099,
+          "uncachedCostUsd": 0.041133
+        },
+        {
+          "index": 4,
+          "who": "subagent",
+          "tools": 17,
+          "systemTokens": 978,
+          "toolTokens": 10997,
+          "messageTokens": 1805,
+          "inputTokens": 13780,
+          "cacheRead": 13576,
+          "cacheWrite": 204,
+          "uncached": 0,
+          "outputTokens": 22,
+          "sentBytes": 55771,
+          "costUsd": 0.005168,
+          "uncachedCostUsd": 0.04167
+        },
+        {
+          "index": 5,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 2061,
+          "inputTokens": 29978,
+          "cacheRead": 29857,
+          "cacheWrite": 121,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 120875,
+          "costUsd": 0.009816,
+          "uncachedCostUsd": 0.090339
+        },
+        {
+          "index": 6,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 2265,
+          "inputTokens": 30182,
+          "cacheRead": 29978,
+          "cacheWrite": 204,
+          "uncached": 0,
+          "outputTokens": 75,
+          "sentBytes": 121690,
+          "costUsd": 0.010883,
+          "uncachedCostUsd": 0.091671
+        },
+        {
+          "index": 7,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 2440,
+          "inputTokens": 30357,
+          "cacheRead": 30182,
+          "cacheWrite": 175,
+          "uncached": 0,
+          "outputTokens": 15,
+          "sentBytes": 122388,
+          "costUsd": 0.009936,
+          "uncachedCostUsd": 0.091296
+        },
+        {
+          "index": 8,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 2529,
+          "inputTokens": 30446,
+          "cacheRead": 30357,
+          "cacheWrite": 89,
+          "uncached": 0,
+          "outputTokens": 14,
+          "sentBytes": 122745,
+          "costUsd": 0.009651,
+          "uncachedCostUsd": 0.091548
+        }
+      ],
+      "totals": {
+        "requests": 8,
+        "subagentRequests": 3,
+        "sideRequests": 0,
+        "warmupRequests": 0,
+        "inputTokens": 191572,
+        "cacheRead": 147346,
+        "cacheWrite": 44226,
+        "uncached": 0,
+        "outputTokens": 245,
+        "sentBytes": 773052,
+        "cacheReadShare": 0.769,
+        "fixedTokensPerRequest": 21939,
+        "firstRequest": {
+          "inputTokens": 29857,
+          "cacheRead": 0,
+          "uncached": 0,
+          "costUsd": 0.112699
+        },
+        "costUsd": 0.213727,
+        "uncachedCostUsd": 0.578391
+      },
+      "toolDefinitions": {
+        "agent": {
+          "Workflow": 5260,
+          "Bash": 2854,
+          "Agent": 2042,
+          "ScheduleWakeup": 1017,
+          "CronCreate": 1008,
+          "EnterWorktree": 1004,
+          "TaskUpdate": 878,
+          "TaskCreate": 704,
+          "Read": 659,
+          "ExitWorktree": 627,
+          "ReportFindings": 545,
+          "Skill": 528,
+          "WebSearch": 469,
+          "WebFetch": 467,
+          "Edit": 426,
+          "NotebookEdit": 406,
+          "TaskOutput": 387,
+          "SendMessage": 322,
+          "TaskList": 298,
+          "Write": 256,
+          "TaskGet": 255,
+          "TaskStop": 202,
+          "CronDelete": 107,
+          "CronList": 70
+        },
+        "subagent": {
+          "Bash": 2854,
+          "CronCreate": 1008,
+          "EnterWorktree": 1004,
+          "TaskUpdate": 878,
+          "TaskCreate": 704,
+          "Read": 659,
+          "ExitWorktree": 627,
+          "ReportFindings": 545,
+          "Skill": 528,
+          "WebSearch": 469,
+          "WebFetch": 467,
+          "SendMessage": 322,
+          "TaskList": 298,
+          "TaskGet": 255,
+          "TaskStop": 202,
+          "CronDelete": 107,
+          "CronList": 70
+        }
+      }
+    }
+  ]
+}

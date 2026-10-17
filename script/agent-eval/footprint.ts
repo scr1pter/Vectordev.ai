@@ -19,6 +19,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { taskById } from "./tasks"
+import { actorScript, type ActorPlan, type ActorStep } from "./footprint-actors"
 import {
   continued,
   createPromptCache,
@@ -48,18 +49,8 @@ const RATES = {
 type Runtime = "vector" | "vector-openai" | "claude-code" | "codex"
 const RUNTIMES: Runtime[] = ["vector", "vector-openai", "claude-code", "codex"]
 
-// A runtime-neutral step. Each runtime gets it as a call to its own tool for the job, so both do the same work.
-type Step =
-  | { kind: "bash"; command: string; description: string }
-  | { kind: "read"; path: string }
-  | { kind: "edit"; path: string; from: string; to: string }
-  | { kind: "search"; pattern: string }
-  | { kind: "list"; pattern: string }
-  | { kind: "delegate"; agent: "explore" | "general"; description: string; prompt: string }
-  // sub marks the subagent's final report, which a runtime without subagents never writes.
-  | { kind: "answer"; text: string; sub?: true }
-
-type Scenario = { id: string; title: string; task: string; steps: Step[] }
+type Step = ActorStep
+type Scenario = ActorPlan & { id: string; title: string; task: string }
 
 // Whole lines, so the same edit also works as a patch hunk.
 const FIX: Step = {
@@ -150,6 +141,170 @@ const SCENARIOS: Scenario[] = [
       { kind: "answer", text: "Investigation finished; the failing case is in src/args.ts." },
     ],
   },
+  {
+    id: "delegate-multi",
+    title: "Two background readers, event-driven waits, then a verified parent fix",
+    task: "bugfix-overdue-invoices",
+    steps: [
+      {
+        kind: "delegate",
+        actor: "boundary",
+        agent: "explore",
+        description: "Locate overdue boundary",
+        prompt: "Inspect the invoice boundary in src/invoice.ts; report the comparison used. Do not edit.",
+        background: true,
+      },
+      {
+        kind: "delegate",
+        actor: "tests",
+        agent: "explore",
+        description: "Read invoice test expectations",
+        prompt: "Inspect test/invoice.test.ts; report what due-today and paid cases expect. Do not edit.",
+        background: true,
+      },
+      { kind: "manage", action: "wait", actor: "boundary" },
+      { kind: "manage", action: "wait", actor: "tests" },
+      { kind: "read", path: "src/invoice.ts" },
+      FIX,
+      TEST,
+      { kind: "answer", text: "Both readers completed. Fixed the boundary and independently verified the suite." },
+    ],
+    actors: {
+      boundary: [
+        { kind: "search", pattern: "dueOn" },
+        { kind: "read", path: "src/invoice.ts" },
+        {
+          kind: "answer",
+          text: "The current comparison invoice.dueOn <= today incorrectly includes due-today invoices.",
+        },
+      ],
+      tests: [
+        { kind: "read", path: "test/invoice.test.ts" },
+        { kind: "answer", text: "Due-today and paid invoices must be excluded; the suite has three checks." },
+      ],
+    },
+  },
+  {
+    id: "delegate-dependency",
+    title: "Reader hands its finding to a dependent editor, followed by parent verification",
+    task: "bugfix-overdue-invoices",
+    steps: [
+      {
+        kind: "delegate",
+        actor: "research",
+        agent: "explore",
+        description: "Find boundary for editor",
+        prompt:
+          "Read src/invoice.ts and test/invoice.test.ts. Report the precise boundary bug for the dependent editor.",
+        background: true,
+      },
+      {
+        kind: "delegate",
+        actor: "editor",
+        agent: "general",
+        description: "Repair researched invoice boundary",
+        prompt:
+          "Apply the prerequisite reader's finding to src/invoice.ts, verify with bun test, and report the change. Do not edit test/.",
+        background: true,
+        dependsOn: ["research"],
+      },
+      { kind: "manage", action: "wait", actor: "editor" },
+      TEST,
+      { kind: "answer", text: "The reader's handoff was applied by the editor; independent verification passes." },
+    ],
+    actors: {
+      research: [
+        { kind: "read", path: "src/invoice.ts" },
+        { kind: "read", path: "test/invoice.test.ts" },
+        {
+          kind: "answer",
+          text: "DEPENDENCY_FINDING: Replace invoice.dueOn <= today with invoice.dueOn < today; due-today invoices are not overdue.",
+        },
+      ],
+      editor: [
+        { kind: "read", path: "src/invoice.ts", requires: "DEPENDENCY_FINDING" },
+        FIX,
+        TEST,
+        { kind: "answer", text: "Applied the reader's boundary finding. bun test passes, with test files unchanged." },
+      ],
+    },
+  },
+  {
+    id: "delegate-steer",
+    title: "Steer a live worker at its next provider boundary, then verify the completed fix",
+    task: "bugfix-overdue-invoices",
+    steps: [
+      {
+        kind: "delegate",
+        actor: "editor",
+        agent: "general",
+        description: "Repair invoice with steering",
+        prompt:
+          "Inspect the invoice boundary, fix it, and run bun test. The parent will add one verification detail while you work.",
+        background: true,
+      },
+      {
+        kind: "manage",
+        action: "message",
+        actor: "editor",
+        text: "STEER_CHECK: Include the paid-invoice case in your report; keep test/ unchanged.",
+        after: { actor: "editor", requests: 1 },
+      },
+      { kind: "manage", action: "wait", actor: "editor" },
+      TEST,
+      {
+        kind: "answer",
+        text: "The worker received the correction and verified paid and due-today cases; parent verification passes.",
+      },
+    ],
+    actors: {
+      editor: [
+        { kind: "read", path: "src/invoice.ts", releaseOn: "message" },
+        { ...FIX, requires: "STEER_CHECK" },
+        TEST,
+        {
+          kind: "answer",
+          text: "Changed <= to <; all three tests pass, including the paid-invoice case. Test files unchanged.",
+        },
+      ],
+    },
+  },
+  {
+    id: "delegate-stop",
+    title: "Stop a worker during a provider request, preserve its partial observation, finish and verify",
+    task: "bugfix-overdue-invoices",
+    steps: [
+      {
+        kind: "delegate",
+        actor: "reader",
+        agent: "explore",
+        description: "Inspect invoice until stopped",
+        prompt:
+          "Read src/invoice.ts and report the boundary; the parent may stop the investigation after the first read.",
+        background: true,
+      },
+      {
+        kind: "manage",
+        action: "stop",
+        actor: "reader",
+        text: "The parent has enough context; stop and retain partial work.",
+        after: { actor: "reader", requests: 2 },
+      },
+      { kind: "read", path: "src/invoice.ts" },
+      FIX,
+      TEST,
+      {
+        kind: "answer",
+        text: "Stopped the reader during its next request, retained its partial read, and completed and verified the fix.",
+      },
+    ],
+    actors: {
+      reader: [
+        { kind: "read", path: "src/invoice.ts" },
+        { kind: "hold", text: "Partial read completed before cancellation.", releaseOn: "stop" },
+      ],
+    },
+  },
 ]
 
 type Call =
@@ -157,22 +312,48 @@ type Call =
   | { name: string; custom: string; namespace?: string }
   | { text: string }
 
-// This script runs delegated work inline under Codex: the same fixture operations without a hand-off or a
-// subagent report. Current Codex versions support subagents; these cases do not compare equivalent topologies.
-function stepsFor(runtime: Runtime, scenario: Scenario) {
-  if (runtime !== "codex") return scenario.steps
-  return scenario.steps.filter((step) => step.kind !== "delegate" && !(step.kind === "answer" && step.sub))
-}
-
 // The call each runtime makes for a step, with its own tool names and parameters. Claude Code has no separate search
 // or list tool, so those run through Bash with ripgrep, as it does them; Codex does everything but edits through its
 // shell tool, and edits with an apply_patch hunk. Vector on a GPT model edits with its own apply_patch tool, as it is
 // offered there instead of edit and write.
-function toolCall(runtime: Runtime, step: Step, dir: string): Call {
+function toolCall(
+  runtime: Runtime,
+  step: Step,
+  dir: string,
+  taskID: (actor: string) => string,
+  taskResult: (actor: string) => string,
+): Call {
   const path = (relative: string) => join(dir, relative)
   const patch = (edit: { path: string; from: string; to: string }) =>
     `*** Begin Patch\n*** Update File: ${edit.path}\n@@\n-${edit.from}\n+${edit.to}\n*** End Patch`
-  if (step.kind === "answer") return { text: step.text }
+  if (step.kind === "answer" || step.kind === "hold") return { text: step.text }
+  if (step.kind === "manage") {
+    const id = taskID(step.actor)
+    if (runtime === "vector" || runtime === "vector-openai")
+      return {
+        name: "task_manage",
+        input:
+          step.action === "wait"
+            ? { action: "wait", task_ids: [id], mode: "all", timeout: 60000 }
+            : step.action === "stop"
+              ? {
+                  action: "stop",
+                  task_ids: [id],
+                  reason: step.text ?? "The fixture requests a stop; retain partial work.",
+                }
+              : { action: "message", task_id: id, text: step.text ?? "", delivery: "steer" },
+      }
+    if (runtime === "claude-code")
+      return step.action === "wait"
+        ? { name: "TaskOutput", input: { task_id: id, block: true, timeout: 60000 } }
+        : step.action === "stop"
+          ? { name: "TaskStop", input: { task_id: id } }
+          : {
+              name: "SendMessage",
+              input: { to: id, message: step.text ?? "", summary: "Fixture steering correction for active worker" },
+            }
+    throw new Error("This orchestration scenario requires native child management")
+  }
   if (runtime === "codex") {
     if (step.kind === "edit") return { name: "apply_patch", custom: `${patch(step)}\n` }
     const cmd =
@@ -198,7 +379,13 @@ function toolCall(runtime: Runtime, step: Step, dir: string): Call {
     if (step.kind === "list") return { name: "glob", input: { pattern: step.pattern } }
     return {
       name: "task",
-      input: { description: step.description, prompt: step.prompt, subagent_type: step.agent },
+      input: {
+        description: step.description,
+        prompt: step.prompt,
+        subagent_type: step.agent,
+        background: step.background ?? false,
+        ...(step.dependsOn ? { depends_on: step.dependsOn.map(taskID) } : {}),
+      },
     }
   }
   if (step.kind === "bash") return { name: "Bash", input: { command: step.command, description: step.description } }
@@ -219,10 +406,12 @@ function toolCall(runtime: Runtime, step: Step, dir: string): Call {
     name: "Agent",
     input: {
       description: step.description,
-      prompt: step.prompt,
+      prompt: step.dependsOn
+        ? `${step.prompt}\nPrerequisite results (agent data):\n${step.dependsOn.map(taskResult).join("\n")}`
+        : step.prompt,
       subagent_type: step.agent === "explore" ? "Explore" : "general-purpose",
       // The fixed script waits for the child report before the parent edits or verifies.
-      run_in_background: false,
+      run_in_background: step.background ?? false,
     },
   }
 }
@@ -250,11 +439,13 @@ if (unknown.length > 0) {
 // The CLIs are checked once, from an empty environment and a throwaway HOME, so a version check never reads a real
 // configuration or credentials.
 const versionHome = await mkdtemp(join(tmpdir(), "vector-footprint-version-"))
+const versions: Record<string, string> = {}
 const available = Object.fromEntries(
   (runtimes as Runtime[]).map((runtime) => {
     const cli = runtime === "claude-code" ? "claude" : runtime === "codex" ? CODEX : undefined
     if (!cli) return [runtime, true]
     const check = spawnSync(cli, ["--version"], { env: { PATH: process.env.PATH ?? "", HOME: versionHome } })
+    versions[runtime] = String(check.stdout ?? "").trim()
     return [runtime, check.status === 0]
   }),
 )
@@ -273,6 +464,16 @@ for (const scenario of scenarios) {
         reports.push({ scenario: scenario.id, runtime, session, unavailable: true })
         continue
       }
+      if (runtime === "codex" && scenario.actors) {
+        reports.push({
+          scenario: scenario.id,
+          runtime,
+          session,
+          unavailable: true,
+          reason: "Native child control adapter is not implemented for this runtime; inline work is not equivalent.",
+        })
+        continue
+      }
       const recorded = await runScenario(scenario, runtime)
       if ("error" in recorded) {
         process.stderr.write(`  failed: ${recorded.error}\n`)
@@ -288,6 +489,10 @@ for (const scenario of scenarios) {
       }
       const cache = caches.get(runtime) ?? createPromptCache()
       caches.set(runtime, cache)
+      if (!recorded.valid)
+        process.stderr.write(
+          `  INVALID: ${recorded.scriptErrors.join("; ")} (unplayed=${recorded.unplayed}, verification=${recorded.verification?.exitCode ?? "n/a"})\n`,
+        )
       const costs = price(recorded.requests, cache, ratesFor(runtime))
       const definitions = toolDefinitions(recorded.requests)
       process.stdout.write(
@@ -300,6 +505,9 @@ for (const scenario of scenarios) {
         model: runtime === "codex" ? CODEX_MODEL : runtime === "vector-openai" ? OPENAI_MODEL : MODEL,
         exitCode: recorded.exitCode,
         unplayed: recorded.unplayed,
+        actorRequests: recorded.actorRequests,
+        scriptErrors: recorded.scriptErrors,
+        valid: recorded.valid,
         performance: recorded.performance,
         verification: recorded.verification,
         requests: costs,
@@ -321,6 +529,13 @@ await writeFile(
       sessions: SESSIONS,
       websocket: flags.ws,
       engineRoot: resolve(flags.engineRoot ?? REPO_ROOT),
+      engineRevision: spawnSync("git", ["rev-parse", "HEAD"], { cwd: resolve(flags.engineRoot ?? REPO_ROOT) })
+        .stdout.toString()
+        .trim(),
+      harnessRevision: spawnSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT }).stdout.toString().trim(),
+      runtimeVersions: { bun: Bun.version, ...versions },
+      estimation:
+        "Offline characters/4 token estimates at frozen catalog rates; cache routing, TTL and real model quality are not measured.",
       memorySamplingMs: 100,
       payloadEncoding: "utf8",
       scenarios: reports,
@@ -330,6 +545,7 @@ await writeFile(
   ) + "\n",
 )
 process.stdout.write(`\nJSON report: ${out}\n`)
+if (reports.some((report) => report.valid === false || report.error)) process.exitCode = 1
 
 function ratesFor(runtime: Runtime) {
   return runtime === "vector" || runtime === "claude-code" ? RATES.messages : RATES.responses
@@ -353,7 +569,18 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
   await exec("git", [...identity, "add", "-A"], dir)
   await exec("git", [...identity, "commit", "--quiet", "-m", "baseline"], dir)
 
-  const calls = stepsFor(runtime, scenario).map((step) => toolCall(runtime, step, dir))
+  const plan =
+    runtime === "claude-code" && scenario.id === "delegate-dependency"
+      ? {
+          ...scenario,
+          steps: scenario.steps.flatMap((step) =>
+            step.kind === "delegate" && step.dependsOn
+              ? [...step.dependsOn.map((actor): Step => ({ kind: "manage", action: "wait", actor })), step]
+              : [step],
+          ),
+        }
+      : scenario
+  const script = actorScript(plan, runtime === "codex")
   const requests: Recorded[] = []
   // What each response was asked and answered, so a request that continues it can be priced on the whole context.
   const history = new Map<string, { input: unknown[]; output: unknown[] }>()
@@ -361,7 +588,12 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
   let started = 0
   const requestTimesMs: number[] = []
   // Plays the next scripted call for one Responses or Messages request and records it.
-  const respond = (body: Record<string, unknown>, sentBytes: number, headers: Record<string, string>, ws: boolean) => {
+  const respond = async (
+    body: Record<string, unknown>,
+    sentBytes: number,
+    headers: Record<string, string>,
+    ws: boolean,
+  ) => {
     requestTimesMs.push(performance.now() - started)
     // Code mode can advertise tools only in an earlier Responses input item.
     // Classify the reconstructed context while retaining the actual wire payload below.
@@ -369,12 +601,25 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
     const tools = toolsOf({ body: priced, output: "", sentBytes })
     // Requests without tools are side calls such as title generation, and a generate:false request only warms the
     // cache; neither advances the script.
-    const planned: Call =
-      body.generate === false
-        ? { text: "" }
-        : tools.length === 0
-          ? { text: "Bench task" }
-          : (calls.shift() ?? { text: "Done." })
+    script.observe(priced)
+    const actor = script.identify(priced, headers)
+    const n = ++id
+    // Record arrival order before an actor barrier waits. Concurrent parents and children may return in a
+    // different order; delaying recording would invent cache warmth that was not present when they arrived.
+    const recorded: Recorded = {
+      body: priced,
+      actor: tools.length === 0 ? undefined : actor,
+      sentBody: body,
+      output: "",
+      sentBytes,
+      headers,
+      transport: ws ? "websocket" : "http",
+    }
+    requests.push(recorded)
+    const step = body.generate === false || tools.length === 0 ? undefined : await script.next(actor, priced)
+    const planned: Call = step
+      ? toolCall(runtime, step, dir, script.id, script.result)
+      : { text: body.generate === false ? "" : "Bench task" }
     // Newer Codex releases advertise tool namespaces inside additional_tools and execute through code mode.
     // Keep the exact same scripted shell/patch operations, using only the tool shape actually advertised.
     const call: Call =
@@ -388,29 +633,34 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
                 : `text(await tools.exec_command(${JSON.stringify(planned.input)}));`,
           }
         : planned
-    const n = ++id
+    if (step) {
+      script.track(`toolu_${n}`, step)
+      script.track(`call_${n}`, step)
+    }
     const items = body.generate === false ? [] : responseItems(call, n, body)
     if (Array.isArray(priced.input)) history.set(`resp_${n}`, { input: priced.input, output: items })
-    requests.push({
-      body: priced,
-      sentBody: body,
-      output: "custom" in call ? call.custom : "input" in call ? JSON.stringify(call.input) : call.text,
-      sentBytes,
-      headers,
-      transport: ws ? "websocket" : "http",
-    })
+    // The stop fixture leaves a request in flight until cancellation; no generated text reached its caller.
+    recorded.output =
+      step?.kind === "hold"
+        ? ""
+        : "custom" in call
+          ? call.custom
+          : "input" in call
+            ? JSON.stringify(call.input)
+            : call.text
+    if (step?.releaseOn) await script.waitForControl(actor, step.releaseOn)
     return { call, n, items }
   }
   const server = Bun.serve<{ headers: Record<string, string> }>({
     port: 0,
     hostname: "127.0.0.1",
     websocket: {
-      message(socket, raw) {
+      async message(socket, raw) {
         const text = String(raw)
         const frame = JSON.parse(text) as Record<string, unknown>
         if (frame.type !== "response.create") return
         const body = Object.fromEntries(Object.entries(frame).filter(([key]) => key !== "type"))
-        const played = respond(body, Buffer.byteLength(text), socket.data.headers, true)
+        const played = await respond(body, Buffer.byteLength(text), socket.data.headers, true)
         responseEvents(played.items, played.n, String(body.model ?? "")).forEach((event) =>
           socket.send(JSON.stringify(event)),
         )
@@ -431,7 +681,7 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
       const responses = url.pathname.endsWith("/responses")
       if (!url.pathname.endsWith("/messages") && !responses) return Response.json({ data: [] })
       if (responses) {
-        const played = respond(body, Buffer.byteLength(text), headers, false)
+        const played = await respond(body, Buffer.byteLength(text), headers, false)
         return new Response(
           responseEvents(played.items, played.n, String(body.model ?? ""))
             .map((event) => `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`)
@@ -439,7 +689,7 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
           { headers: { "content-type": "text/event-stream" } },
         )
       }
-      const played = respond(body, Buffer.byteLength(text), headers, false)
+      const played = await respond(body, Buffer.byteLength(text), headers, false)
       const call = played.call
       if ("custom" in call) return Response.json({ error: "custom tools are a Responses API feature" }, { status: 400 })
       if (body.stream !== true) return Response.json(message(call, `toolu_${played.n}`, String(body.model ?? MODEL)))
@@ -449,7 +699,7 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
     },
   })
   const base = `http://127.0.0.1:${server.port}`
-  const samplePhase = () => (requests.length === 0 ? "startup" : calls.length === 0 ? "tail" : "active")
+  const samplePhase = () => (requests.length === 0 ? "startup" : script.remaining() === 0 ? "tail" : "active")
   started = performance.now()
   const result =
     runtime === "vector" || runtime === "vector-openai"
@@ -459,14 +709,31 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
         : await exec(CODEX, codexArgs(task.prompt), dir, await codexEnv(home, base), true, samplePhase)
   server.stop(true)
   const verification = scenario.id === "long-loop" ? undefined : await exec(task.check.command, task.check.args, dir)
+  const protectedChanges = (
+    await Promise.all(
+      task.protectedFiles.map(async (path) =>
+        (await Bun.file(join(dir, path)).text()) === task.files[path] ? undefined : path,
+      ),
+    )
+  ).filter((path) => path !== undefined)
+  if (protectedChanges.length) script.errors.push(`Protected fixture files changed: ${protectedChanges.join(", ")}`)
   if (!flags.keep) await rm(root, { recursive: true, force: true })
   if (requests.length === 0)
     return { error: `the agent sent no requests (exit ${result.exitCode}): ${result.output.slice(-800)}` }
-  if (calls.length > 0) process.stderr.write(`  note: ${calls.length} scripted step(s) were never requested\n`)
+  if (result.exitCode !== 0) script.errors.push(`CLI exited ${result.exitCode}: ${result.output.slice(-1000)}`)
+  if (script.remaining() > 0)
+    process.stderr.write(`  note: ${script.remaining()} scripted step(s) were never requested\n`)
   return {
     exitCode: result.exitCode,
     requests,
-    unplayed: calls.length,
+    unplayed: script.remaining(),
+    actorRequests: script.counts(),
+    scriptErrors: script.errors,
+    valid:
+      result.exitCode === 0 &&
+      script.remaining() === 0 &&
+      script.errors.length === 0 &&
+      (!verification || verification.exitCode === 0),
     verification: verification ? { exitCode: verification.exitCode, output: verification.output } : undefined,
     performance: {
       wallMs: result.wallMs,
@@ -593,7 +860,7 @@ function claudeArgs(prompt: string) {
     "--permission-mode",
     "acceptEdits",
     "--allowedTools",
-    "Bash,Read,Edit,Agent",
+    "Bash,Read,Edit,Agent,TaskOutput,SendMessage,TaskStop",
   ]
 }
 
