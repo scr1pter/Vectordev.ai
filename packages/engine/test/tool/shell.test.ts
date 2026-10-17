@@ -712,6 +712,7 @@ describe("tool.shell permissions", () => {
             ["Get-Content .e*", [/^\.env$/, /^\.env\.local$/]],
             ["Get-Content .en?", [/^\.env$/]],
             ["Get-Content *.ENV", [/^\*\.ENV$/]],
+            ["switch -File .ENV { default { $_ } }", [/^\.env$/i]],
             ['Get-Content ".e$($null)nv"', [/^\.env$/]],
             ['Get-Content "$dir/.en?"', [/^\$dir\/\.env$/]],
           ],
@@ -1777,6 +1778,9 @@ describe("tool.shell read-only allowlist", () => {
                   ['type ".e"nv', ".env"],
                   ["more < .e^nv.local", ".env.local"],
                   ["findstr KEY .e^n^v.production", ".env.production"],
+                  // bash's grammar takes `(.env)` for a subshell, but cmd reads the file.
+                  ['for /f "delims=" %a in (.env) do @echo %a', ".env"],
+                  ["for %f in (.e^nv) do type %f", ".env"],
                 ] as const) {
                   requests.length = 0
                   const error = (yield* fail({ command }, stopAt("read"))).message
@@ -1786,6 +1790,11 @@ describe("tool.shell read-only allowlist", () => {
                     read: [file],
                   })
                 }
+                // A command the bash grammar cannot parse is approved only as written.
+                requests.length = 0
+                const loop = 'for /f "delims=" %a in (notes.txt) do @echo %a'
+                yield* fail({ command: loop }, stopAt("bash"))
+                expect(requests.find((r) => r.permission === "bash")?.always).toContain(loop)
                 // A caret no longer hides a path, or the command that takes it, from the outside-folder check.
                 requests.length = 0
                 const command = `ty^pe ..^/${path.basename(outside)}/notes.txt`

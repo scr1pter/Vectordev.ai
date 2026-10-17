@@ -918,6 +918,14 @@ export const ShellTool = Tool.define(
           if (use.write) scan.writes.add(target)
           if (resolved && !containsPath(resolved, instance)) scan.dirs.add(path.dirname(resolved))
         }
+
+        // `switch -File .env { ... }` reads the file line by line.
+        for (const node of root.descendantsOfType("switch_filename")) {
+          if (!node) continue
+          yield* envRead(node.text)
+          const resolved = yield* argPath(node.text, cwd, ps, shell)
+          if (resolved && !containsPath(resolved, instance)) scan.dirs.add(path.dirname(resolved))
+        }
       }
 
       // A target that cannot be resolved (`> "$OUT"`) is asked for as written, so a rule that denies edits denies it.
@@ -936,6 +944,19 @@ export const ShellTool = Tool.define(
           const text = source(node)
           scan.patterns.add(text)
           scan.always.add(text)
+        }
+      }
+
+      // cmd is read with the bash grammar, which does not know cmd's syntax: in `for /f %a in (.env) do echo %a`, which
+      // reads .env line by line, bash sees `.env` as a command in a subshell. So any cmd word may name an environment
+      // file, and a command the grammar cannot parse is approved only as written.
+      if (shellKind === "cmd") {
+        for (const node of root.descendantsOfType(["word", "string", "raw_string", "concatenation"])) {
+          if (node) yield* envRead(node.text)
+        }
+        if (root.hasError) {
+          scan.patterns.add(root.text.trim())
+          scan.always.add(root.text.trim())
         }
       }
 
