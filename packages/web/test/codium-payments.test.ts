@@ -6,7 +6,12 @@ import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { checkCodiumFunding, CODIUM_FUNDING_MAX_AGE_MS, readCodiumFunding } from "../../../api/_lib/codium-funding"
-import { codiumLedger, codiumLedgerSummary, handleCodiumLedger } from "../../../api/_lib/codium-ledger"
+import {
+  codiumLedger,
+  codiumLedgerSummary,
+  handleCodiumLedger,
+  recordCodiumCharge,
+} from "../../../api/_lib/codium-ledger"
 import {
   modelPlanCheckout,
   modelPlanCredential,
@@ -890,6 +895,32 @@ describe("the private profit ledger", () => {
     await reconcileModelPlanEvent(event("charge.refund.updated", { id: "re_buyer", charge: bought.charge.id }), fetcher)
     expect(await codiumLedger(fetcher)).toHaveLength(2)
     expect(await entry(bought.charge.id)).toMatchObject({ refunded: 500, profit: 177 })
+  })
+
+  test("a slow notification that read the charge before a refund cannot undo the refund's entry", async () => {
+    const bought = await topUp(10)
+    await reconcileModelPlanEvent(event("checkout.session.completed", bought.session), fetcher)
+    // Notification A reads the charge before the refund, then stalls before it writes.
+    let resume = () => {}
+    const stalled = new Promise<void>((resolve) => (resume = resolve))
+    const slow: typeof fetch = Object.assign(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const response = await fetcher(input, init)
+        if (!new URL(input instanceof Request ? input.url : input).pathname.startsWith("/v1/charges/")) return response
+        const body = await response.text()
+        await stalled
+        return new Response(body, { status: response.status, headers: response.headers })
+      },
+      { preconnect: fetch.preconnect },
+    )
+    const first = recordCodiumCharge(user.id, bought.charge.id, slow)
+    await Bun.sleep(50)
+    // The refund lands and its own notification B arrives while A is still stalled.
+    Object.assign(bought.charge, { amount_refunded: 1000, refunded: true })
+    const second = recordCodiumCharge(user.id, bought.charge.id, fetcher)
+    setTimeout(resume, 300)
+    await Promise.all([first, second])
+    expect(await entry(bought.charge.id)).toMatchObject({ refunded: 1000, credits: 0 })
   })
 
   test("a disputed month costs what was spent before it, plus Stripe's dispute fee, until the dispute is won", async () => {

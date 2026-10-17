@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto"
 import { Option, Schema } from "effect"
 import { readCodiumFunding } from "./codium-funding.js"
 import { ApiError, handleApiError, json, queryValue, requireMethod, type ApiRequest, type ApiResponse } from "./http.js"
-import { openRouterManagement, readModelPlanAccount } from "./model-plan-account.js"
+import { openRouterManagement, readModelPlanAccount, withCodiumLease } from "./model-plan-account.js"
 import { modelPlans, modelTopups } from "./model-plan-config.js"
 import { modelPlanStripe, stripeRecord } from "./model-plan-stripe.js"
 import { persistentStore } from "./persistent-store.js"
@@ -36,7 +36,8 @@ const LEDGER_KEY = "vector:codium:ledger"
 /**
  * Writes the ledger entry for one charge from Stripe's current state, so every notification about it (paid, fee
  * settled, refunded, disputed, dispute closed) rewrites the same entry and a replay changes nothing. A charge that is
- * not a paid Codium purchase by this account is left out.
+ * not a paid Codium purchase by this account is left out. The read and the write happen under the account's lease,
+ * so a slower notification that read the charge before a refund cannot land after, and undo, the one that read it.
  */
 export async function recordCodiumCharge(
   id: string,
@@ -44,72 +45,78 @@ export async function recordCodiumCharge(
   fetcher: typeof fetch = fetch,
   now = Date.now(),
 ) {
-  const query = new URLSearchParams([
-    ["expand[]", "balance_transaction"],
-    ["expand[]", "payment_intent"],
-    ["expand[]", "invoice.subscription"],
-  ])
-  const charge = await modelPlanStripe(`charges/${encodeURIComponent(chargeID)}?${query}`, {}, fetcher)
-  const account = await readModelPlanAccount(id, fetcher)
-  if (
-    !account ||
-    charge.id !== chargeID ||
-    charge.customer !== account.customer ||
-    charge.paid !== true ||
-    charge.currency !== "usd" ||
-    !Number.isSafeInteger(charge.amount) ||
-    !Number.isSafeInteger(charge.amount_refunded) ||
-    typeof charge.created !== "number"
+  return withCodiumLease(
+    id,
+    async () => {
+      const query = new URLSearchParams([
+        ["expand[]", "balance_transaction"],
+        ["expand[]", "payment_intent"],
+        ["expand[]", "invoice.subscription"],
+      ])
+      const charge = await modelPlanStripe(`charges/${encodeURIComponent(chargeID)}?${query}`, {}, fetcher)
+      const account = await readModelPlanAccount(id, fetcher)
+      if (
+        !account ||
+        charge.id !== chargeID ||
+        charge.customer !== account.customer ||
+        charge.paid !== true ||
+        charge.currency !== "usd" ||
+        !Number.isSafeInteger(charge.amount) ||
+        !Number.isSafeInteger(charge.amount_refunded) ||
+        typeof charge.created !== "number"
+      )
+        return
+      const price = Number(charge.amount)
+      const refunded = Number(charge.amount_refunded)
+      const disputes = charge.disputed === true ? await chargeDisputes(chargeID, fetcher) : []
+      // A dispute takes the credits away until Stripe says it was won, as the grant itself does.
+      const disputed =
+        charge.disputed === true &&
+        !(disputes.length > 0 && disputes.every((value) => ["won", "warning_closed"].includes(String(value.status))))
+      const sale = topupSale(charge, account, id) ?? subscriptionSale(charge, id)
+      if (!sale) return
+      const reversed = refunded > 0 || disputed
+      const credits =
+        sale.kind === "topup"
+          ? disputed
+            ? 0
+            : Math.floor((sale.credits * (price - refunded)) / price)
+          : reversed
+            ? await revokedMonthlyCost(account, sale, fetcher)
+            : sale.credits
+      const transaction = stripeRecord(charge.balance_transaction) ? charge.balance_transaction : undefined
+      const disputeTransactions = disputes.flatMap((value) =>
+        Array.isArray(value.balance_transactions) ? value.balance_transactions.filter(stripeRecord) : [],
+      )
+      const sum = (field: "fee" | "net") =>
+        disputeTransactions.reduce((total, value) => total + (usdCents(value, field) ?? 0), 0)
+      // Before Stripe settles the charge's balance transaction the fee is unknown and the net is the amount kept so far.
+      const fee = transaction && usdCents(transaction, "fee")
+      const net = transaction && usdCents(transaction, "net")
+      const stripeFee = fee === undefined ? null : fee + sum("fee")
+      const stripeNet = (net ?? price) - refunded + sum("net")
+      const openRouterFee = Math.ceil((credits * openRouterFeePercent()) / 100)
+      const entry: Entry = {
+        charge: chargeID,
+        kind: sale.kind,
+        account: id,
+        product: sale.product,
+        created: Number(charge.created) * 1000,
+        price,
+        refunded,
+        disputed,
+        stripeFee,
+        stripeNet,
+        credits,
+        openRouterFee,
+        profit: stripeNet - credits - openRouterFee,
+        updatedAt: now,
+      }
+      await persistentStore(["HSET", LEDGER_KEY, chargeID, JSON.stringify(entry)], fetcher)
+      return entry
+    },
+    fetcher,
   )
-    return
-  const price = Number(charge.amount)
-  const refunded = Number(charge.amount_refunded)
-  const disputes = charge.disputed === true ? await chargeDisputes(chargeID, fetcher) : []
-  // A dispute takes the credits away until Stripe says it was won, as the grant itself does.
-  const disputed =
-    charge.disputed === true &&
-    !(disputes.length > 0 && disputes.every((value) => ["won", "warning_closed"].includes(String(value.status))))
-  const sale = topupSale(charge, account, id) ?? subscriptionSale(charge, id)
-  if (!sale) return
-  const reversed = refunded > 0 || disputed
-  const credits =
-    sale.kind === "topup"
-      ? disputed
-        ? 0
-        : Math.floor((sale.credits * (price - refunded)) / price)
-      : reversed
-        ? await revokedMonthlyCost(account, sale, fetcher)
-        : sale.credits
-  const transaction = stripeRecord(charge.balance_transaction) ? charge.balance_transaction : undefined
-  const disputeTransactions = disputes.flatMap((value) =>
-    Array.isArray(value.balance_transactions) ? value.balance_transactions.filter(stripeRecord) : [],
-  )
-  const sum = (field: "fee" | "net") =>
-    disputeTransactions.reduce((total, value) => total + (usdCents(value, field) ?? 0), 0)
-  // Before Stripe settles the charge's balance transaction the fee is unknown and the net is the amount kept so far.
-  const fee = transaction && usdCents(transaction, "fee")
-  const net = transaction && usdCents(transaction, "net")
-  const stripeFee = fee === undefined ? null : fee + sum("fee")
-  const stripeNet = (net ?? price) - refunded + sum("net")
-  const openRouterFee = Math.ceil((credits * openRouterFeePercent()) / 100)
-  const entry: Entry = {
-    charge: chargeID,
-    kind: sale.kind,
-    account: id,
-    product: sale.product,
-    created: Number(charge.created) * 1000,
-    price,
-    refunded,
-    disputed,
-    stripeFee,
-    stripeNet,
-    credits,
-    openRouterFee,
-    profit: stripeNet - credits - openRouterFee,
-    updatedAt: now,
-  }
-  await persistentStore(["HSET", LEDGER_KEY, chargeID, JSON.stringify(entry)], fetcher)
-  return entry
 }
 
 /** Every entry, newest first. */
