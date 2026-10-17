@@ -38,6 +38,7 @@ import { DateTime } from "luxon"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { useCloneFromGithub } from "@/components/dialog-clone-github"
+import { ProjectTrustMenuItem } from "@/components/project-trust-prompt"
 import { DialogSelectServer, useServerManagementController } from "@/components/dialog-select-server"
 import { DialogServerV2 } from "@/components/settings-v2/dialog-server-v2"
 import { ServerConnection, serverName, useServer } from "@/context/server"
@@ -1276,6 +1277,7 @@ function HomeProjectCard(props: {
                   Start new session
                 </MenuV2.Item>
                 <MenuV2.Item onSelect={() => props.editProject(server(), props.project)}>Edit repository</MenuV2.Item>
+                <ProjectTrustMenuItem server={server()} directory={props.project.worktree} open={menuOpen()} />
                 <MenuV2.Separator />
                 <MenuV2.Item onSelect={() => props.closeProject(server(), props.project.worktree)}>
                   Close repository

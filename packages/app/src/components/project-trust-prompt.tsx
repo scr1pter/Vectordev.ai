@@ -3,11 +3,14 @@ import { getFilename } from "@vectordevai/core/util/path"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { DialogBody, DialogFooter, DialogHeader, DialogTitleGroup, DialogV2 } from "@vectordevai/ui/v2/dialog-v2"
-import { createEffect, createResource, createSignal, untrack } from "solid-js"
+import { MenuV2 } from "@vectordevai/ui/v2/menu-v2"
+import { createEffect, createMemo, createResource, createSignal, Show, untrack } from "solid-js"
+import { useGlobal } from "@/context/global"
 import { useLanguage } from "@/context/language"
 import { useProjectTrust } from "@/context/project-trust"
 import { projectTrustPrompt, projectTrustRecord, type ProjectTrustPrompt } from "@/context/project-trust-policy"
 import { useSDK } from "@/context/sdk"
+import type { ServerConnection } from "@/context/server"
 import { showToast } from "@/utils/toast"
 import type { ServerScope } from "@/utils/server-scope"
 
@@ -55,6 +58,48 @@ export function ProjectTrustPrompt() {
   })
 
   return null
+}
+
+/**
+ * "Trust this project…" in a project's menu, shown only while the engine ignores that project's own settings. The
+ * status is read when the menu opens, so a closed menu costs nothing.
+ */
+export function ProjectTrustMenuItem(props: { server: ServerConnection.Any; directory: string; open: boolean }) {
+  const global = useGlobal()
+  const trust = useProjectTrust()
+  const language = useLanguage()
+  const ask = useProjectTrustDialog()
+  const target = createMemo(() => {
+    const sdk = global.ensureServerCtx(props.server).sdk
+    return { client: sdk.createClient({ directory: props.directory }), scope: sdk.scope }
+  })
+  const [status] = createResource(
+    () => props.open && { ...target(), version: trust.version() },
+    (input) =>
+      input.client.config.trust
+        .get()
+        .then((result) => result.data)
+        .catch(() => undefined),
+  )
+
+  return (
+    <Show when={status()?.ignored && status()?.settings ? status() : undefined}>
+      {(current) => (
+        <MenuV2.Item
+          onSelect={() =>
+            ask({
+              ...target(),
+              workspace: current().workspace,
+              // Opened by hand, so it asks the first-time question unless the project was trusted before.
+              prompt: trust.answer(target().scope, current().workspace) === "trusted" ? "changed" : "ask",
+            })
+          }
+        >
+          {language.t("project.trust.menu")}
+        </MenuV2.Item>
+      )}
+    </Show>
+  )
 }
 
 /**

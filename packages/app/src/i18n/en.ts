@@ -757,6 +757,7 @@ export const dict = {
     "Until you trust it, Vector ignores these settings. You can trust it later from the project's menu or in Settings, under Project trust.",
   "project.trust.dialog.trust": "Trust this project",
   "project.trust.dialog.notNow": "Not now",
+  "project.trust.menu": "Trust this project…",
   "project.trust.approve.failed": "Could not trust this project",
   "project.trust.approve.failed.description": "Vector could not save the approval. Try again in a moment.",
   "session.header.open.finder": "Finder",
