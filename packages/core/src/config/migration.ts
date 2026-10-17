@@ -238,7 +238,16 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
   // inside the workspace, so a project folder that links out of it is never written. The home folder and the folders
   // above a non-git workspace, whose settings load with the project's, are written only inside themselves.
   const workspace = path.resolve(input.worktree && input.worktree !== "/" ? input.worktree : input.directory)
-  const owner = (directory: string) => (FSUtil.contains(workspace, directory) ? workspace : directory)
+  // Decided under every spelling of the workspace, not only as written: a folder reached through an alias of the
+  // workspace, or through a workspace link that points out, is the workspace's. One that cannot be resolved is held to
+  // the workspace too, which nothing behind a link loop can pass.
+  const owner = (directory: string) => {
+    try {
+      return FSUtil.within([workspace], directory) === undefined ? directory : workspace
+    } catch {
+      return workspace
+    }
+  }
   // The global folder can come from VECTOR_AGENT_CONFIG_DIR, which can name a folder of the project's.
   const global = yield* run(input.global, false, input.global, owner(input.global))
   if (global) results.push(global)

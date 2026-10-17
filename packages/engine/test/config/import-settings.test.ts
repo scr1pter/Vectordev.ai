@@ -302,6 +302,11 @@ it.live("never imports into a global folder that is really a project link pointi
     const input = { directory: workspace, worktree: workspace, home: path.join(root, "home") }
     expect(yield* ConfigMigration.discover({ ...input, global: path.join(workspace, "linked") })).toEqual([])
     expect(yield* fs.exists(path.join(outside, "vector.jsonc"))).toBe(false)
+    // The same folder under another spelling of the workspace, as macOS /tmp, a symlinked checkout or an 8.3 name give.
+    const alias = path.join(root, "alias")
+    yield* Effect.promise(() => nodeFs.symlink(workspace, alias, linkType))
+    expect(yield* ConfigMigration.discover({ ...input, global: path.join(alias, "linked") })).toEqual([])
+    expect(yield* fs.exists(path.join(outside, "vector.jsonc"))).toBe(false)
     // The user's own global folder outside the project still imports.
     const imported = yield* ConfigMigration.discover({ ...input, global: outside })
     expect(imported.map((item) => item.target)).toEqual([path.join(outside, "vector.jsonc")])
