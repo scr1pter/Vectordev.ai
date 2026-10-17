@@ -161,11 +161,26 @@ function parts(node: Node) {
     if (!ARGUMENTS.has(child.type)) continue
     out.push({ type: child.type, text: child.text })
   }
-  return out
+  // bash passes the words after a redirect's file to the command (`cat 2>/dev/null .env` reads `.env`), but the grammar
+  // keeps them with the redirect.
+  return [...out, ...redirectsOf(node).flatMap((item) => bashRedirect(item)?.rest ?? [])]
 }
 
 function source(node: Node) {
-  return (node.parent?.type === "redirected_statement" ? node.parent.text : node.text).trim()
+  if (node.parent?.type === "redirected_statement") return node.parent.text.trim()
+  const redirected = redirectsOf(node)
+  return (redirected.length ? [node.text, ...redirected.map((item) => item.text)].join(" ") : node.text).trim()
+}
+
+// The redirects of a command. bash binds a redirect after `a && b`, `a | b` or `! b` to `b`, but the grammar attaches
+// it to the whole statement.
+function redirectsOf(node: Node): Node[] {
+  const parent = node.parent
+  if (!parent) return []
+  if (parent.type === "redirected_statement")
+    return parent.children.filter((child): child is Node => child?.type === "file_redirect")
+  if (!["list", "pipeline", "negated_command"].includes(parent.type) || parent.lastNamedChild?.id !== node.id) return []
+  return redirectsOf(parent)
 }
 
 function commands(node: Node) {
@@ -199,38 +214,42 @@ const WRITES = new Set([">", ">>", "&>", "&>>", ">|", ">&"])
 const DEVICES = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "$null", "nul"])
 
 // The files a statement's redirects write. A redirect target is never one of the command's arguments, so without
-// this `git status > src/index.ts` would be checked only as `git status`.
+// this `git status > src/index.ts` would be checked only as `git status`. `<>` opens its file for writing too.
 function redirects(node: Node, ps: boolean) {
   const targets = ps
     ? psRedirects(node, false)
     : node.descendantsOfType("file_redirect").flatMap((item) => {
-        const children = item?.children.filter((child): child is Node => Boolean(child)) ?? []
-        const index = children.findIndex((child) => WRITES.has(child.type))
-        if (index === -1) return []
-        const target = children
-          .slice(index + 1)
-          .map((child) => child.text)
-          .join("")
-        if (children[index].type === ">&" && /^(\d+|-)$/.test(target)) return []
-        return [target]
+        const redirect = item && bashRedirect(item)
+        if (!redirect || !(WRITES.has(redirect.operator) || redirect.operator === "<>")) return []
+        if (redirect.operator === ">&" && /^(\d+|-)$/.test(redirect.target)) return []
+        return [redirect.target]
       })
   return targets.filter((target) => target && !DEVICES.has(target.toLowerCase()))
 }
 
-// Input redirects (`< .env`).
+// Input redirects (`< .env`, and `<>`, which reads as well as writes).
 function inputRedirects(node: Node, ps: boolean) {
   if (ps) return psRedirects(node, true)
   return node.descendantsOfType("file_redirect").flatMap((item) => {
-    const children = item?.children.filter((child): child is Node => Boolean(child)) ?? []
-    const index = children.findIndex((child) => child.type === "<")
-    if (index === -1) return []
-    return [
-      children
-        .slice(index + 1)
-        .map((child) => child.text)
-        .join(""),
-    ]
+    const redirect = item && bashRedirect(item)
+    return redirect && (redirect.operator === "<" || redirect.operator === "<>") ? [redirect.target] : []
   })
+}
+
+// A bash redirect's operator, the file it names, and the words after that file, which bash passes to the command
+// although the grammar keeps them with the redirect (`cat < a b`). The grammar splits `<>` around an error node.
+function bashRedirect(item: Node) {
+  const children = item.children.filter((child): child is Node => child !== null && child.type !== "file_descriptor")
+  const index = children.findIndex((child) => child.isNamed && child.type !== "ERROR")
+  if (index === -1) return
+  return {
+    operator: children
+      .slice(0, index)
+      .map((child) => child.text)
+      .join(""),
+    target: children[index].text,
+    rest: children.slice(index + 1).map((child) => ({ type: child.type, text: child.text })),
+  }
 }
 
 // PowerShell's redirect targets, either the ones `<` reads from or the ones every other file operator writes.

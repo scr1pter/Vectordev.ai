@@ -564,6 +564,8 @@ describe("tool.shell permissions", () => {
             ["false && sh -c 'vercel --prod'", "vector_cloud_publish"],
             [`false && bash -lc "cd web && vercel deploy --prod"`, "vector_cloud_publish"],
             [`false && timeout 60 bash -c 'eval "supabase db push"'`, "vector_cloud_database"],
+            // bash passes the words after a redirect to the command.
+            ["false && supabase </dev/null db push", "vector_cloud_database"],
           ] as const
           for (const [command, permission] of cases) {
             requests.length = 0
@@ -704,6 +706,63 @@ describe("tool.shell permissions", () => {
       }
     }),
   )
+
+  // bash passes the words after a redirect's file to the command, so `cat 2>/dev/null .env` reads `.env`, though the
+  // grammar keeps them with the redirect, and with the whole statement after `a && b`. `<>` opens its file for writing.
+  for (const item of shells.filter((item) => !PS.has(item.label) && item.label !== "cmd")) {
+    it.live(`checks the words after a redirect's file as the command's, and <> as a write [${item.label}]`, () =>
+      withShell(
+        item,
+        Effect.gen(function* () {
+          const outside = yield* tmpdirScoped()
+          const away = path.join(outside, "secret.txt").replaceAll("\\", "/")
+          yield* Effect.promise(() => Bun.write(away, "secret"))
+          const tmp = yield* tmpdirScoped({ git: true })
+          yield* Effect.promise(() => Bun.write(path.join(tmp, ".env"), "KEY=1\n"))
+          yield* runIn(
+            tmp,
+            Effect.gen(function* () {
+              const err = new Error("prompt rejected")
+              const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+              const stopAt = (permission: string) => ({
+                ...ctx,
+                ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+                  Effect.sync(() => {
+                    requests.push(req)
+                    if (req.permission === permission) throw err
+                  }),
+              })
+              for (const command of ["cat 2>/dev/null .env", "true && cat < /dev/null .env", "echo | cat >&2 .env"]) {
+                requests.length = 0
+                const error = (yield* fail({ command }, stopAt("read"))).message
+                expect({ command, error, read: requests.find((r) => r.permission === "read")?.patterns }).toEqual({
+                  command,
+                  error: err.message,
+                  read: [".env"],
+                })
+              }
+              requests.length = 0
+              const command = `cat < /dev/null ${away}`
+              expect((yield* fail({ command }, stopAt("external_directory"))).message).toBe(err.message)
+              expect(requests[0]?.patterns).toEqual([glob(path.join(outside, "*"))])
+              // A command's pattern holds the words bash passes it, so a rule for `cat *.env` sees `.env`.
+              requests.length = 0
+              yield* fail({ command: "true && cat 2>/dev/null .env" }, stopAt("bash"))
+              expect(requests[0]?.patterns).toContain("cat 2>/dev/null .env")
+              for (const command of ["cat <> notes.txt", "exec 3<>notes.txt"]) {
+                requests.length = 0
+                yield* fail({ command }, stopAt("edit"))
+                expect({ command, edit: requests.find((r) => r.permission === "edit")?.patterns }).toEqual({
+                  command,
+                  edit: ["notes.txt"],
+                })
+              }
+            }),
+          )
+        }),
+      ),
+    )
+  }
 
   // PowerShell reads a file through a .NET call as easily as through a command, and refuses to parse `<` rather than
   // reading from it, so neither may slip past the read prompt the bash forms get.
