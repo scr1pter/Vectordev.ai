@@ -41,9 +41,11 @@ redacted.
 
 For each fixture, `run.ts` builds the same `PromptInput` the app builds for an
 untrusted pull request (`mode: "full"`, `trust: "untrusted"`, placeholder base
-and head SHAs, the PR title and body, `renderPatch(parseUnifiedDiff(diff))`, the
-full post-change text of every changed file with `exact: true`, `maxComments:
-25`) and renders it with `buildReviewPrompt` from `packages/core/src/review`.
+and head SHAs, the PR title and body, the diff and the full post-change text of
+every changed file packed with `packChanges`, `maxComments: 25`) and renders it
+with `buildReviewPrompt` from `packages/core/src/review`. `packChanges` shows
+each changed file once, as a numbered file with its added and removed lines
+marked, whenever that is no larger than its diff and its text together.
 It sends that prompt to an OpenAI-compatible chat completions endpoint, asking
 for `response_format: json_schema` with `REVIEW_REPORT_JSON_SCHEMA`. If the
 provider rejects the format with a 4xx that names it, the request is repeated
@@ -112,7 +114,7 @@ so it is not overlooked.
 ## What it costs
 
 `--dry-run` prints the prompt size of every fixture. The whole set is about
-29,000 input tokens per repetition (2,600–3,300 per fixture, estimated as
+26,000 input tokens per repetition (2,400–2,900 per fixture, estimated as
 characters / 4). Output is usually a few hundred to a few thousand tokens per
 fixture, and more for models that reason before answering. A full run is
 therefore roughly 30k input and 5k–30k output tokens times `--repeat`; multiply

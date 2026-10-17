@@ -103,7 +103,7 @@ const UNTRUSTED_WORKTREE =
 
 // renderAnnotated's format, explained where it is used.
 const ANNOTATED =
-  'In `annotated="true"` blocks every line starts with its head line number, `+` marks a line the change added, and `-` lines were removed and have no head number. A `⋯` line stands for unchanged lines that were left out and says where they are in the working tree. These blocks replace the file\'s diff. Never copy the numbers or marks into a suggestion.'
+  '`annotated="true"` blocks number each head line and mark added lines `+`; `-` lines were removed and have no number. A `⋯` line stands for unchanged lines left out, with their base line numbers. Such a block replaces the file\'s diff. Never copy the numbers or marks into a suggestion.'
 
 const REVIEW_TASK =
   "You are Vector's code reviewer. Find defects that this change introduces or exposes: bugs, security holes, lost data, broken error handling, races, missing checks and regressions. Report only problems that make the code wrong for someone; a short list of real bugs beats a long list of opinions."
@@ -293,7 +293,8 @@ function data(input: PromptInput, open: PriorFinding[], notInlined: NonNullable<
         ),
       ),
     )
-  out.push(wrapUntrusted("diff", input.diff))
+  // Empty when every inlined file is shown as an annotated file instead.
+  if (input.diff.trim()) out.push(wrapUntrusted("diff", input.diff))
   if (notInlined.length)
     out.push(
       wrapUntrusted(

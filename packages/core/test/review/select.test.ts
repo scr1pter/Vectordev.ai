@@ -186,7 +186,13 @@ describe("selectFindings: filtering", () => {
     const findings = () => [
       finding({ line: 52, severity: "nit", category: "docs", title: "logout has no doc comment" }),
       finding({ path: "src/auth/client.ts", line: 11, category: "style", title: "Prefer a named constant" }),
-      finding({ path: "src/db.ts", line: 101, severity: "blocking", category: "style", title: "Query style hides a bug" }),
+      finding({
+        path: "src/db.ts",
+        line: 101,
+        severity: "blocking",
+        category: "style",
+        title: "Query style hides a bug",
+      }),
     ]
     const quiet = run({ findings: findings() })
     expect(quiet.nits).toEqual([])

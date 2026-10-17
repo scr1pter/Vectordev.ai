@@ -170,7 +170,7 @@ describe("buildReviewPrompt", () => {
         headFiles: [{ path: "src/a.ts", text: "1 + export const a = 1", exact: true, annotated: true }],
       }),
     )
-    expect(text).toContain('In `annotated="true"` blocks every line starts with its head line number')
+    expect(text).toContain('`annotated="true"` blocks number each head line and mark added lines `+`')
     expect(text).toContain('<untrusted_pr_file path="src/a.ts" exact="true" annotated="true">')
     expect(text).toContain("their diff is shown without context lines")
   })
