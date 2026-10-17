@@ -31,7 +31,7 @@ const REMINDER_MS = 24 * 60 * 60_000
 // Every key Codium creates is named after the Vector account it pays for; other keys on the account are not owed.
 const CODIUM_KEY_NAME = /^(?:Vector|Codium) [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12} /i
 // Bounds the key listing; an account this large needs a different store of what is owed.
-const MAX_KEY_PAGES = 500
+const MAX_KEYS = 50_000
 
 export async function readCodiumFunding(fetcher: typeof fetch = fetch) {
   const saved = await persistentStore(["GET", FUNDING_KEY], fetcher)
@@ -148,14 +148,21 @@ async function creditsOwed(fetcher: typeof fetch, now: number) {
   }
 }
 
-async function codiumKeys(fetcher: typeof fetch, offset = 0, page = 0): Promise<Record<string, unknown>[]> {
-  // Without every key, what is owed would read low and could keep sales open, so a listing cut short fails.
-  if (page >= MAX_KEY_PAGES) throw unavailable()
+async function codiumKeys(
+  fetcher: typeof fetch,
+  offset = 0,
+  seen = new Set<unknown>(),
+): Promise<Record<string, unknown>[]> {
+  // Without every key, what is owed would read low and could keep sales open, so a listing cut short fails, as does
+  // one that repeats a page instead of moving on.
+  if (offset >= MAX_KEYS) throw unavailable()
   const data = await openRouter(`/keys?offset=${offset}`, fetcher)
   if (!Array.isArray(data)) throw unavailable()
   const keys = data.filter(stripeRecord)
   if (!keys.length) return []
-  return [...keys, ...(await codiumKeys(fetcher, offset + data.length, page + 1))]
+  if (keys.some((key) => typeof key.hash !== "string" || seen.has(key.hash))) throw unavailable()
+  keys.forEach((key) => seen.add(key.hash))
+  return [...keys, ...(await codiumKeys(fetcher, offset + data.length, seen))]
 }
 
 /** The management key reads the account's balance and its keys. */

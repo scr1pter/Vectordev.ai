@@ -85,16 +85,12 @@ export async function recordCodiumCharge(
     Array.isArray(value.balance_transactions) ? value.balance_transactions.filter(stripeRecord) : [],
   )
   const sum = (field: "fee" | "net") =>
-    disputeTransactions.reduce(
-      (total, value) => total + (Number.isSafeInteger(value[field]) ? Number(value[field]) : 0),
-      0,
-    )
+    disputeTransactions.reduce((total, value) => total + (usdCents(value, field) ?? 0), 0)
   // Before Stripe settles the charge's balance transaction the fee is unknown and the net is the amount kept so far.
-  const stripeFee = transaction && Number.isSafeInteger(transaction.fee) ? Number(transaction.fee) + sum("fee") : null
-  const stripeNet =
-    transaction && Number.isSafeInteger(transaction.net)
-      ? Number(transaction.net) - refunded + sum("net")
-      : price - refunded + sum("net")
+  const fee = transaction && usdCents(transaction, "fee")
+  const net = transaction && usdCents(transaction, "net")
+  const stripeFee = fee === undefined ? null : fee + sum("fee")
+  const stripeNet = (net ?? price) - refunded + sum("net")
   const openRouterFee = Math.ceil((credits * openRouterFeePercent()) / 100)
   const entry: Entry = {
     charge: chargeID,
@@ -136,10 +132,9 @@ export async function codiumLedgerSummary(fetcher: typeof fetch = fetch) {
   }
 }
 
-/** The owner-only summary. Anyone without the owner secret gets the same answer as for a path that does not exist. */
+/** The owner-only summary. Without the owner secret every method answers 404, so the route does not show itself. */
 export async function handleCodiumLedger(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {
   try {
-    requireMethod(request, "GET")
     const secret = process.env.CODIUM_OWNER_SECRET?.trim() ?? ""
     const digest = (value: string) => createHash("sha256").update(value).digest()
     if (
@@ -147,6 +142,7 @@ export async function handleCodiumLedger(request: ApiRequest, response: ApiRespo
       !timingSafeEqual(digest(String(request.headers.authorization ?? "")), digest(`Bearer ${secret}`))
     )
       throw new ApiError(404, "NOT_FOUND", "Not found.")
+    requireMethod(request, "GET")
     const summary = await codiumLedgerSummary(fetcher)
     json(response, 200, queryValue(request, "entries") === "1" ? summary : { ...summary, entries: undefined })
   } catch (error) {
@@ -212,6 +208,18 @@ async function revokedMonthlyCost(
   const usage = stripeRecord(result.data) ? result.data.usage : undefined
   if (typeof usage !== "number" || !Number.isFinite(usage) || usage < 0) return sale.credits
   return Math.min(sale.credits, Math.ceil(usage * 100 - 1e-6))
+}
+
+/**
+ * A balance transaction's amount in US cents. An account that settles in another currency gets Stripe's exchange rate
+ * on each transaction; this converts back with it, which is exact for currencies with two decimal places.
+ */
+function usdCents(transaction: Record<string, unknown>, field: "fee" | "net") {
+  const value = transaction[field]
+  if (!Number.isSafeInteger(value)) return undefined
+  if (transaction.currency === undefined || transaction.currency === "usd") return Number(value)
+  const rate = transaction.exchange_rate
+  return typeof rate === "number" && Number.isFinite(rate) && rate > 0 ? Math.round(Number(value) / rate) : undefined
 }
 
 async function chargeDisputes(charge: string, fetcher: typeof fetch) {

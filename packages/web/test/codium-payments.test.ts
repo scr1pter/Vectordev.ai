@@ -60,7 +60,14 @@ type Charge = {
   refunded: boolean
   disputed: boolean
   created: number
-  balance_transaction: { id: string; amount: number; fee: number; net: number } | null
+  balance_transaction: {
+    id: string
+    amount: number
+    fee: number
+    net: number
+    currency?: string
+    exchange_rate?: number
+  } | null
   refunds: { data: { amount: number; balance_transaction: { fee: number; net: number } }[]; has_more: boolean }
   payment_intent: string | null
   invoice: string | null
@@ -79,6 +86,7 @@ const openRouter = {
   credits: { total_credits: 0, total_usage: 0 },
   unavailable: false,
   pageSize: 2,
+  ignoreOffset: false,
 }
 const emails: Record<string, unknown>[] = []
 const resend = { failing: false }
@@ -252,7 +260,7 @@ const server = Bun.serve({
       expect(request.headers.get("authorization")).toBe("Bearer or_management_fixture")
       if (openRouter.unavailable) return new Response(null, { status: 503 })
       if (url.pathname === "/api/v1/keys" && request.method === "GET") {
-        const offset = Number(url.searchParams.get("offset") ?? 0)
+        const offset = openRouter.ignoreOffset ? 0 : Number(url.searchParams.get("offset") ?? 0)
         const listed = [...openRouter.keys.values()].map((value) => value.data).filter((value) => !value.disabled)
         return Response.json({ data: listed.slice(offset, offset + openRouter.pageSize) })
       }
@@ -298,7 +306,12 @@ beforeEach(async () => {
   stripe.subscriptions = []
   stripe.disputes = []
   openRouter.keys.clear()
-  Object.assign(openRouter, { credits: { total_credits: 1000, total_usage: 0 }, unavailable: false, pageSize: 2 })
+  Object.assign(openRouter, {
+    credits: { total_credits: 1000, total_usage: 0 },
+    unavailable: false,
+    pageSize: 2,
+    ignoreOffset: false,
+  })
   emails.length = 0
   resend.failing = false
   Object.assign(process.env, {
@@ -640,6 +653,18 @@ describe("sales follow Vector's OpenRouter balance", () => {
     expect(await readCodiumFunding(fetcher)).toEqual(checked)
   })
 
+  test("a key listing that repeats a page instead of moving on keeps sales closed", async () => {
+    other("first", { name: "Owner laptop", limit: 1 })
+    other("second", { name: "Owner desktop", limit: 1 })
+    openRouter.ignoreOffset = true
+    await expect(checkCodiumFunding(fetcher)).rejects.toMatchObject({ code: "CODIUM_FUNDING_UNAVAILABLE" })
+    await expect(modelTopupCheckout(user, "codium-topup-10", fetcher)).rejects.toMatchObject({
+      code: "CODIUM_SALES_PAUSED",
+    })
+    openRouter.ignoreOffset = false
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", keys: 0 })
+  })
+
   test("an email that fails to send is retried at the next check", async () => {
     funded(10)
     process.env.CODIUM_FUNDING_MARGIN_USD = "50"
@@ -674,12 +699,13 @@ describe("sales follow Vector's OpenRouter balance", () => {
 })
 
 describe("the private profit ledger", () => {
-  async function owner(authorization?: string, path = "/api/model-plans/ledger") {
+  async function owner(authorization?: string, path = "/api/model-plans/ledger", method = "GET") {
     const route = createServer((request, response) => void handleCodiumLedger(request, response, fetcher))
     await new Promise<void>((resolve) => route.listen(0, "127.0.0.1", resolve))
     const address = route.address()
     if (!address || typeof address === "string") throw new Error("Missing route address")
     const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
+      method,
       headers: authorization ? { authorization } : {},
     })
     route.close()
@@ -790,6 +816,21 @@ describe("the private profit ledger", () => {
     expect((await codiumLedgerSummary(fetcher)).totals).toMatchObject({ payments: 1, feesPending: 1 })
   })
 
+  test("converts Stripe's fees back to dollars for an account that settles in another currency", async () => {
+    await redis(["SET", accountKey, JSON.stringify({ customer: "cus_buyer" })])
+    const monthly = subscribe(10)
+    monthly.charge.balance_transaction = {
+      id: "txn_inr",
+      amount: 83500,
+      fee: 4900,
+      net: 78600,
+      currency: "inr",
+      exchange_rate: 83.5,
+    }
+    await reconcileModelPlanEvent(event("invoice.paid", monthly.invoice), fetcher)
+    expect(await entry(monthly.charge.id)).toMatchObject({ price: 1000, stripeFee: 59, stripeNet: 941 })
+  })
+
   test("only the owner's secret reads the summary; everyone else sees nothing there", async () => {
     await redis(["SET", accountKey, JSON.stringify({ customer: "cus_buyer" })])
     const monthly = subscribe(10)
@@ -798,6 +839,8 @@ describe("the private profit ledger", () => {
     const secret = String(process.env.CODIUM_OWNER_SECRET)
     expect(await owner()).toMatchObject({ status: 404, body: { error: { code: "NOT_FOUND" } } })
     expect((await owner(`Bearer ${secret}x`)).status).toBe(404)
+    expect((await owner(undefined, "/api/model-plans/ledger", "POST")).status).toBe(404)
+    expect((await owner(`Bearer ${secret}`, "/api/model-plans/ledger", "POST")).status).toBe(405)
     expect((await owner(`Bearer ${await mintAccountToken()}`)).status).toBe(404)
 
     const summary = await owner(`Bearer ${secret}`)
