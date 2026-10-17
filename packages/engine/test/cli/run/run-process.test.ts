@@ -312,10 +312,15 @@ describe("vector run (non-interactive subprocess)", () => {
   )
 
   cliIt.concurrent(
-    "--format json reports a subagent's steps so the run's spend is complete",
+    "--format json reports a foreground subagent's steps so the run's spend is complete",
     ({ llm, vector }) =>
       Effect.gen(function* () {
-        yield* llm.tool("task", { description: "inspect", prompt: "Look around.", subagent_type: "general" })
+        yield* llm.tool("task", {
+          description: "inspect",
+          prompt: "Look around.",
+          subagent_type: "general",
+          background: false,
+        })
         yield* llm.text("the child found it")
         yield* llm.text("done")
 
@@ -330,6 +335,50 @@ describe("vector run (non-interactive subprocess)", () => {
         expect(delegated).toHaveLength(1)
         expect((delegated[0]?.part as { sessionID?: string } | undefined)?.sessionID).not.toBe(delegated[0]?.sessionID)
         expect(steps.filter((event) => event.subagent !== true)).toHaveLength(2)
+      }),
+    60_000,
+  )
+
+  cliIt.concurrent(
+    "--format json counts a default background subagent and its completion response exactly once",
+    ({ llm, vector }) =>
+      Effect.gen(function* () {
+        const toolResults = (hit: { body: Record<string, unknown> }) =>
+          (Array.isArray(hit.body.messages) ? hit.body.messages : []).some(
+            (message) => isRecord(message) && message.role === "tool",
+          )
+        const asking = (text: string) => (hit: { body: Record<string, unknown> }) =>
+          lastUserText(hit.body).includes(text)
+        yield* llm.pushMatch(
+          (hit) => asking("launch the spend survey")(hit) && !toolResults(hit),
+          reply().tool("task", {
+            description: "spend survey",
+            prompt: "SPEND_SURVEY_BRIEF: list the handlers.",
+            subagent_type: "general",
+          }),
+        )
+        yield* llm.pushMatch(
+          (hit) => asking("launch the spend survey")(hit) && toolResults(hit),
+          reply().text("launched it"),
+        )
+        yield* llm.pushMatch(asking("SPEND_SURVEY_BRIEF"), reply().wait(later(3_000)).text("found two handlers").stop())
+        yield* llm.pushMatch(asking("task-notification"), reply().text("the survey found two handlers"))
+
+        const result = yield* vector.run("launch the spend survey", {
+          format: "json",
+          extraArgs: ["--dangerously-skip-permissions"],
+          timeoutMs: 50_000,
+        })
+        vector.expectExit(result, 0)
+        const events = vector.parseJsonEvents(result.stdout)
+        const steps = events.filter((event) => event.type === "step_finish")
+        expect(steps.filter((event) => event.subagent === true)).toHaveLength(1)
+        expect(steps.filter((event) => event.subagent !== true)).toHaveLength(3)
+        expect(new Set(steps.map((event) => (event.part as { id: string }).id)).size).toBe(4)
+        expect(yield* llm.hits).toHaveLength(4)
+        expect(
+          events.filter((event) => event.type === "text").map((event) => (event.part as { text: string }).text),
+        ).toEqual(["launched it", "the survey found two handlers"])
       }),
     60_000,
   )
@@ -445,7 +494,8 @@ describe("vector run (non-interactive subprocess)", () => {
           (Array.isArray(hit.body.messages) ? hit.body.messages : []).some(
             (message) => isRecord(message) && message.role === "tool",
           )
-        const asking = (text: string) => (hit: { body: Record<string, unknown> }) => lastUserText(hit.body).includes(text)
+        const asking = (text: string) => (hit: { body: Record<string, unknown> }) =>
+          lastUserText(hit.body).includes(text)
         yield* llm.pushMatch(
           (hit) => asking("launch the survey")(hit) && !toolResults(hit),
           reply().tool("task", {
@@ -482,7 +532,8 @@ describe("vector run (non-interactive subprocess)", () => {
           (Array.isArray(hit.body.messages) ? hit.body.messages : []).some(
             (message) => isRecord(message) && message.role === "tool",
           )
-        const asking = (text: string) => (hit: { body: Record<string, unknown> }) => lastUserText(hit.body).includes(text)
+        const asking = (text: string) => (hit: { body: Record<string, unknown> }) =>
+          lastUserText(hit.body).includes(text)
         yield* llm.pushMatch(
           (hit) => asking("launch the survey")(hit) && !toolResults(hit),
           reply().tool("task", {
@@ -516,7 +567,8 @@ describe("vector run (non-interactive subprocess)", () => {
     "stops waiting on a background subagent that shows no activity, and fails the run",
     ({ llm, vector }) =>
       Effect.gen(function* () {
-        const asking = (text: string) => (hit: { body: Record<string, unknown> }) => lastUserText(hit.body).includes(text)
+        const asking = (text: string) => (hit: { body: Record<string, unknown> }) =>
+          lastUserText(hit.body).includes(text)
         yield* llm.pushMatch(
           asking("launch the survey"),
           reply().tool("task", {
