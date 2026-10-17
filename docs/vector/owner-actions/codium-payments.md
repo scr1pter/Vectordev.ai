@@ -67,15 +67,16 @@ Do all of this in **test mode** first, then repeat it in live mode.
 
 ## 2. OpenRouter
 
-1. **Management key.** Create one under Settings → Management Keys (some OpenRouter pages call these provisioning keys). It goes in `OPENROUTER_MANAGEMENT_KEY`. It creates, caps and switches off each buyer's key, and reads the balance and key list for the funding check.
+1. **Which account.** Use an OpenRouter account other than the one behind `OPENROUTER_FREE_API_KEY`. The free-models account must stay unfunded, with no automatic top-up (see [openrouter.md](openrouter.md)), and Codium's account needs both.
+2. **Management key.** Create one under Settings → Management Keys (some OpenRouter pages call these provisioning keys). It goes in `OPENROUTER_MANAGEMENT_KEY`. It creates, caps and switches off each buyer's key, and reads the balance and key list for the funding check.
    - Do not rename or delete Codium's keys in the OpenRouter dashboard. The check counts keys named `Vector <account id> …` or `Codium <account id> …`.
-2. **Starting balance.** Add enough credits to cover your first customers. The funding check needs the balance to cover every credit customers hold, plus the margin.
-3. **Auto top-up** (Settings → Credits). Turn it on and set:
-   - **Threshold:** above what customers will hold at your busiest point, multiplied by 1.1, plus $20. That is the amount the funding check requires (see the margin variables below). The check can only count the balance OpenRouter reports. If the threshold is below what customers hold, auto top-up never fires and sales stay paused until you add credits yourself.
+3. **Starting balance.** Add enough credits to cover your first customers. The funding check needs the balance to cover every credit customers hold, plus the margin.
+4. **Auto top-up** (Settings → Credits). Turn it on and set:
+   - **Threshold:** above what customers will hold at your busiest point, multiplied by 1.1, plus $20. That is the amount the funding check requires (see the margin variables below). If the threshold is lower than that, the balance can sit between the two: auto top-up does not fire, and sales stay paused until you add credits or raise the threshold.
    - **Amount:** at least a week of expected model spend, so the card is charged in a few large purchases rather than many small ones.
    - Example: customers hold $400 of credits at the busiest point of the month. Set the threshold to at least $400 × 1.1 + $20 = $460.
-4. **Fee.** OpenRouter charges a fee on every credit purchase, auto top-ups included (5.5% by card when this was written). Set `CODIUM_OPENROUTER_FEE_PERCENT` to the fee its credits page shows, so the ledger's estimate stays right.
-5. **Resale terms.** OpenRouter's [terms, section 7](https://openrouter.ai/terms) restrict reselling API access. Confirm Codium is covered by suitable commercial terms before selling.
+5. **Fee.** OpenRouter charges a fee on every credit purchase, auto top-ups included (5.5% by card when this was written). Set `CODIUM_OPENROUTER_FEE_PERCENT` to the fee its credits page shows, so the ledger's estimate stays right.
+6. **Resale terms.** OpenRouter's [terms, section 7](https://openrouter.ai/terms) restrict reselling API access. Confirm Codium is covered by suitable commercial terms before selling.
 
 ## 3. Vercel environment
 
