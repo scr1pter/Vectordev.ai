@@ -79,7 +79,7 @@ describe("Codium pricing page", () => {
     expect(cards(part(html, "monthly"))).toHaveLength(4)
     expect(cards(part(html, "topup"))).toHaveLength(2)
     const source = await page()
-    expect(source.indexOf("root.dataset.codiumMode")).toBeLessThan(source.indexOf('<div class="cx-page">'))
+    expect(source.indexOf("document.documentElement.dataset.codiumMode")).toBeLessThan(source.indexOf('<div class="cx-page">'))
     expect(source).toContain("<CodiumPricing client:load")
     expect(source).toContain("<CodiumQuestions client:load")
   })
@@ -354,42 +354,75 @@ describe("Codium pricing page", () => {
     expect(open).not.toContain("disabled")
   })
 
-  test("the page keeps Vector's own chrome: its logo, links, sign in, download and footer", async () => {
+  test("the page uses the landing page's top bar, without the Vector mark in its corner, and its footer box", async () => {
     const source = await page()
-    expect(source).toContain('<a class="cx-logo" href="/" aria-label="Vector home">')
-    for (const link of ['["Docs", "/docs"]', '["Changelog", "/docs/changelog"]', '["Codium", "/codium"]'])
-      expect(source).toContain(link)
-    expect(source).toContain('<a class="cx-signin" href="/login">Sign in</a>')
-    expect(source).toContain('<a class="cx-btn cx-btn--sm cx-download" href="/download">Download</a>')
-    expect(source).toContain('<a class="cx-skip cx-btn cx-btn--sm" href="#cx-main">Skip to content</a>')
-    expect(source).toContain('<main class="cx-main" id="cx-main" tabindex="-1">')
-    // The theme follows the system until a visitor picks one.
-    expect(source).toContain('theme = localStorage.getItem("vector-codium-theme") || "system";')
+    const lander = await Bun.file(new URL("../../Lander.astro", import.meta.url)).text()
+    // The same components the landing page renders, in the same places around the page's main.
+    expect(lander).toContain('<MarketingNav active="home" />')
+    expect(lander).toContain("<SiteFooter />")
+    expect(source).toContain('import MarketingNav from "../components/marketing/MarketingNav.astro"')
+    expect(source).toContain('import SiteFooter from "../components/marketing/SiteFooter.astro"')
+    const nav = source.indexOf('<MarketingNav active="codium" brand={false} />')
+    expect(nav).toBeGreaterThan(source.indexOf('<div class="cx-page">'))
+    expect(source.indexOf('<main class="cx-main">')).toBeGreaterThan(nav)
+    expect(source.indexOf("<SiteFooter />")).toBeGreaterThan(source.indexOf("</main>"))
     expect(source).toContain("Get started with Vector.")
-    expect([...source.matchAll(/title: "(\w+)"/g)].map((match) => match[1])).toEqual([
-      "Product",
-      "Resources",
-      "Features",
-      "Legal",
-      "Platforms",
-    ])
-    // The page's typeface is scoped to /codium; the rest of the site keeps its own.
-    const css = await Bun.file(new URL("./codium-pricing.css", import.meta.url)).text()
-    expect(css).toContain(".cx-page {\n  --cx-sec")
-    expect(css.match(/font-family:/g)).toHaveLength(1)
+    // The page's own header, menu, footer, theme switch and wordmark are gone.
+    for (const removed of ["cx-header", "cx-logo", "cx-menu", "cx-footer", "cx-theme", "wordmark", "localStorage"])
+      expect(source).not.toContain(removed)
+
+    // The mark is optional and on by default, so every other page keeps it; without it the links stay at the right end.
+    const bar = await Bun.file(new URL("../MarketingNav.astro", import.meta.url)).text()
+    expect(bar).toContain('const { active = "home", brand = true } = Astro.props')
+    expect(bar).toMatch(/brand && \(\s*<a class="site-brand" href="\/" aria-label="Vector home">/)
+    expect(bar).toContain('<div class:list={["site-nav", { "site-nav--bare": !brand }]}>')
+    expect(bar).toMatch(/\.site-nav--bare \{\n    justify-content: flex-end;\n  \}/)
   })
 
-  test("the comparison table stays inside its scroller, and the menu only locks the page while it can be seen", async () => {
+  test("the page is dark only, and its own typeface stops at main so the bar and footer match the landing page", async () => {
+    const css = await Bun.file(new URL("./codium-pricing.css", import.meta.url)).text()
+    expect(css).toContain("--cx-bg: #131017;")
+    expect(css.match(/--cx-bg:/g)).toHaveLength(1)
+    expect(css).toContain("color-scheme: dark;")
+    for (const removed of ["prefers-color-scheme", "data-cx-theme", "color-scheme: light", "data-cx-menu"])
+      expect(css).not.toContain(removed)
+    expect(css).toContain(".cx-page {\n  --cx-sec")
+    expect(css).toMatch(/^\.cx-main \{[^}]*font-family: "Geist Variable"/m)
+    expect(css).toMatch(/^\.cx-page > \.site-header \{\n  font-family: var\(--font-sans\);/m)
+    expect(css).toMatch(/^\.cx-page > \.site-footer \{\n  font-family: var\(--font-landing\);/m)
+    expect(css.match(/font-family:/g)).toHaveLength(3)
+    // The landing page gives its bar Geist and its footer the landing face.
+    const lander = await Bun.file(new URL("../../Lander.astro", import.meta.url)).text()
+    expect(lander).toMatch(/\.vector-marketing > :global\(\.site-header\) \{\n    font-family: var\(--font-sans\);/)
+    expect(lander).toMatch(/\.vector-marketing \{[^}]*font-family: var\(--font-landing\);/)
+    // The bar is painted with the landing page's own underlay at both of its sizes, so the two cannot drift apart.
+    const materials = await Bun.file(new URL("../LanderMaterials.astro", import.meta.url)).text()
+    const paints = css.match(/linear-gradient\(90deg, [^;]+;/g) ?? []
+    expect(paints).toHaveLength(2)
+    for (const paint of paints) expect(materials).toContain(paint)
+  })
+
+  test("the comparison table stays inside its scroller, and the sticky parts stop below the site's top bar", async () => {
     const css = await Bun.file(new URL("./codium-pricing.css", import.meta.url)).text()
     // Positioned, so the cells' visually hidden labels are clipped by the scroller instead of widening the page.
     expect(css).toContain(".cx-compare-scroll {\n  /* Positioned")
     expect(css).toMatch(/\.cx-compare-scroll \{[^}]*position: relative;/)
-    // The header row is sticky at every width, as in the reference layout.
-    expect(css).toMatch(/^\.cx-compare thead th \{\n  position: sticky;\n  top: var\(--cx-header\);/m)
-    expect(css).toMatch(/@media \(max-width: 899\.98px\) \{\n  html\[data-cx-menu\] \{\n    overflow: hidden;/)
-    expect(css).not.toMatch(/^html\[data-cx-menu\] \{/m)
-    const source = await page()
-    expect(source).toContain('wide.addEventListener("change"')
+    // The bar sticks `top` down in a box `height` tall, at both of its sizes; the page keeps exactly that much clear.
+    const bar = await Bun.file(new URL("../MarketingNav.astro", import.meta.url)).text()
+    const wide = bar.match(/\.site-header \{[^}]*position: sticky;\n    top: (\d+)px;\n    z-index: 40;\n    height: (\d+)px;/)
+    const narrow = bar.match(/@media \(max-width: 640px\) \{\n    \.site-header \{[^}]*top: (\d+)px;\n      height: (\d+)px;/)
+    expect(wide).not.toBeNull()
+    expect(narrow).not.toBeNull()
+    expect(css).toContain(`  --cx-nav: ${Number(wide![1]) + Number(wide![2])}px;`)
+    expect(css).toMatch(
+      new RegExp(`@media \\(max-width: 640px\\) \\{\\n  html:has\\(\\.cx-page\\) \\{\\n    --cx-nav: ${Number(narrow![1]) + Number(narrow![2])}px;`),
+    )
+    expect(css).not.toContain("--cx-header")
+    expect(css).toContain("scroll-padding-top: var(--cx-nav);")
+    // From 1140px the header row sticks under the bar; below it the scroller holds the row, so it keeps no offset.
+    expect(css).toMatch(/^\.cx-compare thead th \{\n  position: sticky;\n  top: 0;/m)
+    expect(css).toMatch(/@media \(min-width: 1140px\) \{\n  \.cx-compare-scroll \{\n    overflow: visible;\n  \}\n\n  \.cx-compare thead th \{\n    top: var\(--cx-nav\);/)
+    expect(css).toMatch(/\.cx-faq-title > div \{\n    position: sticky;\n    top: var\(--cx-nav\);/)
   })
 
   test("/pricing sends visitors to the Codium page, which the deploy keeps", async () => {
