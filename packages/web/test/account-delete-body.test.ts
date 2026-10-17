@@ -61,3 +61,30 @@ test("deletion reads the confirmation body and reaches no destructive step witho
     expect((await response.json()).error.code).toBe(code)
   }
 })
+
+test("the account page warns that deletion ends any Codium plan and its credits", async () => {
+  // cancelModelPlanAccount cancels the account's subscriptions and disables its credit keys before the identity goes.
+  const page = (
+    await Bun.file(new URL("../src/components/marketing/account/AccountPage.tsx", import.meta.url)).text()
+  ).replace(/\s+/g, " ")
+  expect(page).toContain("stops the CLI tokens this account has issued.")
+  expect(page).toContain(
+    "Any Vector Codium plan ends at once, and the credits left, this month's or purchased, can no longer be used.",
+  )
+})
+
+test("in production, deletion without the token store stops before anything is destroyed", async () => {
+  // The CLI-token revocation list lives in the same store as the rate limit, which production requires, so a
+  // deletion that succeeds there has always stopped the account's CLI tokens, as the account pages say.
+  process.env.NODE_ENV = "production"
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "fixture-service-role"
+  const response = await fetch(state.origin, {
+    method: "POST",
+    headers: { authorization: "Bearer synthetic-session", "content-type": "application/json" },
+    body: JSON.stringify({ confirm: "fixture@example.test" }),
+  })
+  process.env.NODE_ENV = "development"
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY
+  expect(response.status).toBe(503)
+  expect((await response.json()).error.code).toBe("ABUSE_PROTECTION_UNAVAILABLE")
+})

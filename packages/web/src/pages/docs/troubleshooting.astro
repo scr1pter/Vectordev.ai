@@ -38,7 +38,8 @@ export const prerender = true
           <h2 id="delete-account">Delete your account</h2>
           <p>
             You can delete your Vector account yourself, from the account page. It cannot be undone, so Vector asks you
-            to type your own email address first.
+            to type your own email address first. From desktop 1.99.109, Settings → Account → Delete account… in the app
+            explains what deletion does and opens the account page to finish there.
           </p>
           <ol class="steps">
             <li><span /><div><strong>Open your account</strong><p>Go to <a href="/account">vectordev.ai/account</a> and sign in.</p></div></li>
@@ -50,6 +51,7 @@ export const prerender = true
           <dl class="doc-rows">
             <div><dt>Your sign-in</dt><dd>The account and its email and name are deleted. You can create a new account with the same address afterwards; it will not be the same account, and nothing is restored to it.</dd></div>
             <div><dt>CLI tokens</dt><dd>Revoked, so a terminal already signed in with <code>vector login</code> stops verifying. Without this they would keep working until they expired, up to ninety days later.</dd></div>
+            <div><dt>Vector Codium</dt><dd>Any Codium plan is cancelled at once, and the credits left, this month's or purchased, can no longer be used.</dd></div>
           </dl>
 
           <h3 id="what-deletion-does-not-touch">What deletion does not touch</h3>
