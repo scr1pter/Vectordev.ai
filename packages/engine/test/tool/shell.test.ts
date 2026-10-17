@@ -4,6 +4,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Cause, Deferred, Effect, Exit, Layer, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import type * as Scope from "effect/Scope"
+import fs from "fs/promises"
 import os from "os"
 import path from "path"
 import { Config } from "@/config/config"
@@ -111,6 +112,20 @@ const shells = (() => {
 const PS = new Set(["pwsh", "powershell"])
 const ps = shells.filter((item) => PS.has(item.label))
 const cmdShell = shells.find((item) => item.label === "cmd")
+
+// The command scan does not run the shell, so how it reads a Windows shell's commands is checked on every platform:
+// under the real shells on Windows, elsewhere under a stand-in of the same name that only exits non-zero, so a command
+// the scan wrongly lets through fails the test instead of running.
+const scanShells = Effect.fn("ShellToolTest.scanShells")(function* (name: "pwsh" | "cmd") {
+  if (process.platform === "win32") return name === "pwsh" ? ps : shells.filter((item) => item.label === "cmd")
+  const dir = yield* tmpdirScoped()
+  const shell = path.join(dir, name)
+  yield* Effect.promise(async () => {
+    await Bun.write(shell, "#!/bin/sh\nexit 3\n")
+    await fs.chmod(shell, 0o755)
+  })
+  return [{ label: name, shell }]
+})
 
 const sh = () => Shell.name(Shell.acceptable())
 const evalarg = (text: string) => (sh() === "cmd" ? quote(text) : squote(text))
@@ -619,6 +634,66 @@ describe("tool.shell permissions", () => {
           expect(requests.map((item) => item.permission)).not.toContain("read")
         }),
       )
+    }),
+  )
+
+  // PowerShell reads a file through a .NET call as easily as through a command, and refuses to parse `<` rather than
+  // reading from it, so neither may slip past the read prompt the bash forms get.
+  it.live("asks under read before PowerShell reads an environment file by command, redirect or .NET call", () =>
+    Effect.gen(function* () {
+      for (const item of yield* scanShells("pwsh")) {
+        yield* withShell(
+          item,
+          Effect.gen(function* () {
+            const tmp = yield* tmpdirScoped({ git: true })
+            yield* runIn(
+              tmp,
+              Effect.gen(function* () {
+                const err = new Error("read prompt rejected")
+                const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+                const rejectRead = {
+                  ...ctx,
+                  ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+                    Effect.sync(() => {
+                      requests.push(req)
+                      if (req.permission === "read") throw err
+                    }),
+                }
+                for (const [command, file] of [
+                  ["Get-Content -Path .env -Raw | Select-String KEY", ".env"],
+                  ["gc '.env.local'", ".env.local"],
+                  ['Get-Content "$PWD/.env"', ".env"],
+                  // A name the scan cannot resolve is asked for as written.
+                  ["Get-Content *.env", "*.env"],
+                  ["while read line; do echo $line; done < .env.production", ".env.production"],
+                  ['[IO.File]::ReadAllText(".env")', ".env"],
+                  [
+                    "$lines = [System.IO.File]::ReadAllLines('apps/web/.env.local')",
+                    path.join("apps", "web", ".env.local"),
+                  ],
+                ] as const) {
+                  requests.length = 0
+                  const error = (yield* fail({ command }, rejectRead)).message
+                  expect({
+                    command,
+                    error,
+                    read: requests.find((r) => r.permission === "read")?.patterns,
+                    edit: requests.find((r) => r.permission === "edit")?.patterns,
+                  }).toEqual({ command, error: err.message, read: [file], edit: undefined })
+                }
+                // A .NET call is a statement of its own: checked and approved only as written.
+                requests.length = 0
+                const call = "[IO.File]::Delete('notes.txt')"
+                yield* fail({ command: call }, capture(requests, err))
+                expect(requests.map((r) => [r.permission, r.patterns, r.always])).toEqual([["bash", [call], [call]]])
+                requests.length = 0
+                yield* run({ command: "Get-Content .env.example; [IO.File]::ReadAllText('.envrc')" }, rejectRead)
+                expect(requests.map((r) => r.permission)).not.toContain("read")
+              }),
+            )
+          }),
+        )
+      }
     }),
   )
 
@@ -1427,6 +1502,48 @@ describe("tool.shell read-only allowlist", () => {
     ["f() { rm -rf x; }; git diff", "f() { rm -rf x; }"],
     ["A=1 git diff", "A=1 git diff"],
   ]
+
+  // cmd expands %NAME% before git sees the path, so `%USERPROFILE%\.ssh\id_rsa` may point anywhere: git diff may
+  // compare it whole, the way --no-index does, and naming an environment file that way still asks under read.
+  it.live("denies git diff of a path cmd expands, and asks under read for an environment file named that way", () =>
+    Effect.gen(function* () {
+      for (const item of yield* scanShells("cmd")) {
+        yield* withShell(
+          item,
+          Effect.gen(function* () {
+            const tmp = yield* tmpdirScoped({ git: true })
+            yield* runIn(
+              tmp,
+              Effect.gen(function* () {
+                for (const command of [
+                  "git diff %USERPROFILE%\\.ssh\\id_rsa README.md",
+                  "git diff README.md %HOMEDRIVE%%HOMEPATH%\\.aws\\credentials",
+                ]) {
+                  const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+                  expect(yield* fail({ command }, enforce(requests))).toBeInstanceOf(PermissionV1.DeniedError)
+                  expect(requests.find((r) => r.permission === "bash")?.patterns).toContain(
+                    command.replace("git diff", "git diff --no-index"),
+                  )
+                }
+                const err = new Error("read prompt rejected")
+                const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+                const rejectRead = {
+                  ...ctx,
+                  ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+                    Effect.sync(() => {
+                      requests.push(req)
+                      if (req.permission === "read") throw err
+                    }),
+                }
+                expect((yield* fail({ command: "type %USERPROFILE%\\.env" }, rejectRead)).message).toBe(err.message)
+                expect(requests.find((r) => r.permission === "read")?.patterns).toEqual(["%USERPROFILE%\\.env"])
+              }),
+            )
+          }),
+        )
+      }
+    }),
+  )
 
   // PowerShell parses these as different statements.
   for (const item of shells.filter((item) => !PS.has(item.label))) {

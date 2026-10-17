@@ -172,7 +172,7 @@ const DEVICES = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", 
 // this `git status > src/index.ts` would be checked only as `git status`.
 function redirects(node: Node, ps: boolean) {
   const targets = ps
-    ? node.descendantsOfType("redirected_file_name").flatMap((item) => (item ? [item.text.trim()] : []))
+    ? psRedirects(node, false)
     : node.descendantsOfType("file_redirect").flatMap((item) => {
         const children = item?.children.filter((child): child is Node => Boolean(child)) ?? []
         const index = children.findIndex((child) => WRITES.has(child.type))
@@ -187,9 +187,9 @@ function redirects(node: Node, ps: boolean) {
   return targets.filter((target) => target && !DEVICES.has(target.toLowerCase()))
 }
 
-// Bash input redirects (`< .env`). PowerShell has no input redirect operator.
+// Input redirects (`< .env`).
 function inputRedirects(node: Node, ps: boolean) {
-  if (ps) return []
+  if (ps) return psRedirects(node, true)
   return node.descendantsOfType("file_redirect").flatMap((item) => {
     const children = item?.children.filter((child): child is Node => Boolean(child)) ?? []
     const index = children.findIndex((child) => child.type === "<")
@@ -200,6 +200,18 @@ function inputRedirects(node: Node, ps: boolean) {
         .map((child) => child.text)
         .join(""),
     ]
+  })
+}
+
+// PowerShell's redirect targets, either the ones `<` reads from or the ones every other file operator writes.
+// PowerShell reserves `<` and refuses to parse a script that uses it, so its target is never written, but it still
+// names the file the way bash's `< .env` does.
+function psRedirects(node: Node, input: boolean) {
+  return node.descendantsOfType("redirection").flatMap((item) => {
+    const operator = item?.children.find((child) => child?.type === "file_redirection_operator")?.text
+    const target = item?.children.find((child) => child?.type === "redirected_file_name")?.text.trim()
+    if (!operator || !target || (operator === "<") !== input) return []
+    return [target]
   })
 }
 
@@ -254,10 +266,13 @@ function provider(text: string) {
   return
 }
 
-function dynamic(text: string, ps: boolean) {
+function dynamic(text: string, ps: boolean, cmd: boolean) {
   if (text.startsWith("(") || text.startsWith("@(")) return true
   if (text.includes("$(") || text.includes("${") || text.includes("`")) return true
   if (ps) return /\$(?!env:)/i.test(text)
+  // cmd expands `%USERPROFILE%` (and `!NAME!` under delayed expansion) and drops `^` before the program sees the
+  // word, so `%USERPROFILE%\.ssh\id_rsa` would otherwise pass for a path inside the project.
+  if (cmd && /[%!^]/.test(text)) return true
   // Left over from home(): bash expands `~root`, `~+` and `~-` to directories the scan does not know.
   return text.includes("$") || text.startsWith("~")
 }
@@ -607,7 +622,7 @@ export const ShellTool = Tool.define(
     const argPath = Effect.fn("ShellTool.argPath")(function* (arg: string, cwd: string, ps: boolean, shell: string) {
       const text = ps ? expand(arg, cwd, shell) : home(unquote(arg))
       const file = text && prefix(text)
-      if (!file || dynamic(file, ps)) return
+      if (!file || dynamic(file, ps, Shell.name(shell) === "cmd")) return
       const next = ps ? provider(file) : file
       if (!next) return
       return yield* resolvePath(next, cwd, shell)
@@ -654,6 +669,13 @@ export const ShellTool = Tool.define(
         const tokens = command.map((item) => item.text)
         return { node, command, tokens, cmd: ps || shellKind === "cmd" ? tokens[0]?.toLowerCase() : tokens[0] }
       })
+      // `cat .env`, `grep KEY .env.local` or `source .env` read the same secrets the read tool asks for, so they ask
+      // under read too. A name the scan cannot resolve (`"$HOME/.env"`, `%USERPROFILE%\.env`) is asked for as written.
+      const envRead = Effect.fnUntraced(function* (text: string) {
+        if (!ENV_FILE.test(path.basename(unquote(text)))) return
+        const resolved = yield* argPath(text, cwd, ps, shell)
+        scan.reads.add(resolved ? path.relative(instance.worktree, resolved) : unquote(text))
+      })
       // A directory change anywhere in the command leaves unknown where git diff starts looking for its work tree.
       const moved = list.some((item) => item.cmd !== undefined && CWD.has(item.cmd))
 
@@ -693,13 +715,7 @@ export const ShellTool = Tool.define(
         )
           scan.patterns.add(["git", "diff", "--no-index", ...tokens.slice(2)].join(" "))
 
-        // `cat .env`, `grep KEY .env.local` or `source .env` read the same
-        // secrets the read tool asks for, so they ask under read too.
-        for (const arg of item.command.slice(1)) {
-          if (!ENV_FILE.test(path.basename(unquote(arg.text)))) continue
-          const resolved = yield* argPath(arg.text, cwd, ps, shell)
-          if (resolved) scan.reads.add(path.relative(instance.worktree, resolved))
-        }
+        for (const arg of item.command.slice(1)) yield* envRead(arg.text)
 
         for (const cloud of yield* cloudRequests(tokens, 0)) {
           const text = source(item.node)
@@ -711,10 +727,18 @@ export const ShellTool = Tool.define(
       }
 
       // `while read line; do ...; done < .env`
-      for (const source of inputRedirects(root, ps)) {
-        if (!ENV_FILE.test(path.basename(unquote(source)))) continue
-        const resolved = yield* argPath(source, cwd, ps, shell)
-        if (resolved) scan.reads.add(path.relative(instance.worktree, resolved))
+      for (const source of inputRedirects(root, ps)) yield* envRead(source)
+
+      // A .NET method call runs code without being a command (`[IO.File]::ReadAllText('.env')`), so without this a
+      // statement made only of calls would run with no permission asked at all. Each chain of calls is checked like
+      // a bash statement: approved only as written, and asking under read for an environment file it names.
+      if (ps) {
+        for (const node of root.descendantsOfType("invokation_expression")) {
+          if (!node || node.parent?.type === "invokation_expression") continue
+          scan.patterns.add(node.text)
+          scan.always.add(node.text)
+          for (const text of node.descendantsOfType("string_literal")) if (text) yield* envRead(text.text)
+        }
       }
 
       // A target that cannot be resolved (`> "$OUT"`) is asked for as written, so a rule that denies edits denies it.
