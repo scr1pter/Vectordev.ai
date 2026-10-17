@@ -137,10 +137,10 @@ The 18 candidate cells are the six original families (`general-unavailable`, `pl
 
 These recovered input hashes identify the original gate:
 
-| File | SHA-256 |
-| --- | --- |
-| `scenarios.json` | `931bc371f73acca8e9fd6013abe6b1531d9021608b58622793acacb6d66137cb` |
-| `rubric-v4.json` | `0d19d40cb9e2ccdb45caed3f2fd9f4f7239dd3395d9cffd74a43a52b53b78e5a` |
+| File              | SHA-256                                                            |
+| ----------------- | ------------------------------------------------------------------ |
+| `scenarios.json`  | `931bc371f73acca8e9fd6013abe6b1531d9021608b58622793acacb6d66137cb` |
+| `rubric-v4.json`  | `0d19d40cb9e2ccdb45caed3f2fd9f4f7239dd3395d9cffd74a43a52b53b78e5a` |
 | `completion.json` | `7e10211f8835a657ae4d79c101d068311f72d217007c08357fa124638be51159` |
 
 The exact historical live entry points, from that directory, were `bun run broker.ts --execute-first-block` and then `bun run broker.ts --execute-second-block`. The supplied `execute-first-block.sh` and `execute-second-block.sh` wrap them with macOS `caffeinate`. The first block runs six episodes, capped at 18 sends; the remaining 30 require a separate protocol-feasibility review and are capped at 90 sends. Each episode permits at most three turns, with a 120-second request timeout. Preserve all attempts and protocol failures; do not automatically retry or select successful replacements.
@@ -161,3 +161,42 @@ VECTOR_EVAL_ENGINE="$VECTOR_BENCH_WORK/vector-source" bun script/agent-eval/run.
 ```
 
 Local prompt seams, real-runtime edit-before-check ordering, cancellation, title usage, fixture completion and terminal-usage tests are part of the offline validation. Their passing results do not establish live behavioral parity. Do not publish a "cheaper/faster than Codex" claim unless the matched live data and quality gates support it.
+
+## Subagent orchestration release checks
+
+The October subagent study in `docs/benchmarks/vector-subagents-2026-10/` is offline only. Its scripted provider validates controls, complete work, and request footprint; it does not validate delegation judgment or actual provider cost. Do not infer Claude Code price parity or success on the historical 18-cell behavior gate from it.
+
+After preparing `VECTOR_BENCH_SOURCE`, `VECTOR_BENCH_WORK`, and the `vector-source` launcher above, the owner can run a capped live workflow probe. It consumes provider allowance. Use an explicitly chosen model available in the account, and keep models, effort, agent configuration and plugins fixed for every attempt. Do not substitute an unavailable model or hide failed attempts. This intentionally small fixture tests the orchestration path, not whether a model naturally chooses substantial work worth delegating.
+
+Create a fresh fixture without making any provider call:
+
+```sh
+export VECTOR_SUBAGENT_FIXTURE="$(mktemp -d -t vector-subagent-live)"
+cd "$VECTOR_BENCH_SOURCE"
+bun --no-env-file -e '
+const { taskById } = await import("./script/agent-eval/tasks.ts")
+const task = taskById("bugfix-overdue-invoices")
+const directory = process.env.VECTOR_SUBAGENT_FIXTURE
+if (!task || !directory) throw new Error("Missing fixture or destination")
+for (const [path, content] of Object.entries(task.files)) await Bun.write(`${directory}/${path}`, content)
+'
+cd "$VECTOR_SUBAGENT_FIXTURE"
+git -c init.defaultBranch=bench init
+ git add .
+git -c user.name=Benchmark -c user.email=benchmark@example.invalid commit -m 'test: seed subagent fixture'
+```
+
+The following command is paid. The dollar cap is a catalog-price Run Guard threshold; already-running provider calls may finish beyond it. The step cap also bounds subscription/free routes that have no per-token invoice. No automatic retry is implied.
+
+```sh
+"$VECTOR_BENCH_WORK/vector-source" run --model openai/gpt-6.1-sol --variant medium \
+  --max-cost 2 --max-steps 30 --format json \
+  'This is an explicit orchestration probe. Launch two background read-only workers: one inspects src/invoice.ts, the other test/invoice.test.ts. While they run, explain what each owns in one sentence. Use event-driven waiting, never shell sleeps or status polling. Integrate their findings, make the minimal source fix, run bun test yourself, and report every worker result and verification. Do not edit test/ or add dependencies.' \
+  > "$VECTOR_BENCH_WORK/subagents-live-1.jsonl"
+bun test
+ git diff --exit-code -- test/
+```
+
+Preserve the JSONL and exit codes, every child and helper usage event, exact source revision, model/effort, tool access and all verification. Inspect per-request provider cache-read usage separately for each child's first request and later turns; do not infer it from a shared prefix or cache key. API-equivalent subscription cost is not actual billed dollars. Repeat the complete protocol from fresh fixtures for any before/after comparison, alternating source order and keeping all attempts.
+
+Interactive release checks complement that probe: start substantial background work in the app, send an unrelated user question, ask what one worker is doing, steer it, answer a Needs-you request, and stop another worker while retaining partial work. Verify reconnect/restart displays abandoned execution as stopped rather than silently retrying paid work. Check parent totals against direct parent usage plus descendant usage exactly once, with internal helpers hidden but counted. Those observations require complete transcripts and independent review before making any user-experience or quality claim.

@@ -174,6 +174,44 @@ describe("system prompt layout across sessions", () => {
     expect(stable?.providerOptions?.anthropic).toEqual({ cacheControl: { type: "ephemeral" } })
   })
 
+  test.each([claude, gpt])(
+    "siblings preserve the stable prefix, their distinct brief and their permission cohort on $api.id",
+    async (selected) => {
+      const base = input({ model: selected, directory: "/work/shared", oauth: selected.providerID === "openai" })
+      const prepared = await Promise.all(
+        ["alpha", "beta"].map((name) =>
+          prepare({
+            ...base,
+            sessionID: `ses_${name}`,
+            parentSessionID: "ses_parent",
+            agent: { ...base.agent, name: "explore", mode: "subagent", prompt: "Inspect and report; do not edit." },
+            permission: [{ permission: "edit", pattern: "*", action: "deny" }],
+            tools: {
+              ...base.tools,
+              edit: tool({ description: "Edit a file", inputSchema: jsonSchema({ type: "object", properties: {} }) }),
+            },
+            messages: [
+              {
+                role: "user",
+                content: `Inspect ${name}. Context pack: established finding for ${name}; verify success criteria.`,
+              },
+            ],
+          }),
+        ),
+      )
+      expect(prepared[0]?.system[0]).toBe(prepared[1]?.system[0])
+      expect(prepared[0]?.system[0]).not.toContain("alpha")
+      expect(prepared[1]?.system[0]).not.toContain("beta")
+      expect(Object.keys(prepared[0]?.tools ?? {})).toEqual(["read"])
+      expect(Object.keys(prepared[1]?.tools ?? {})).toEqual(["read"])
+      expect(prepared[0]?.messages.at(-1)?.content).toContain("established finding for alpha")
+      expect(prepared[1]?.messages.at(-1)?.content).toContain("established finding for beta")
+      expect(prepared.map((item) => item.headers["x-parent-session-id"])).toEqual(["ses_parent", "ses_parent"])
+      if (selected.providerID === "openai")
+        expect(prepared.map((item) => item.params.options.promptCacheKey)).toEqual(["ses_alpha", "ses_beta"])
+    },
+  )
+
   test("a text-only helper's wildcard deny removes every tool, including patches and questions", async () => {
     const value = input({ model: gpt, directory: "/work/helper" })
     const schema = jsonSchema({ type: "object", properties: {} })

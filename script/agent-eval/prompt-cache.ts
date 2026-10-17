@@ -20,6 +20,8 @@ const LOOKBACK_BLOCKS = 20
 export type Rates = { input: number; cacheWrite: number; cacheRead: number; output: number }
 
 export type Recorded = {
+  // Logical actor supplied by the fixture router; toolsets alone cannot distinguish a general child.
+  actor?: string
   // What the provider prices: for a request that continues an earlier response (previous_response_id), the whole
   // context the provider rebuilds, not just the new items sent.
   body: Record<string, unknown>
@@ -79,9 +81,13 @@ export function price(requests: Recorded[], cache: PromptCache, rates: Rates): R
           ? "warmup"
           : tools.length === 0
             ? "side"
-            : toolSignature(request) === main
-              ? "agent"
-              : "subagent",
+            : request.actor !== undefined
+              ? request.actor === "parent"
+                ? "agent"
+                : "subagent"
+              : toolSignature(request) === main
+                ? "agent"
+                : "subagent",
       tools: tools.length,
       systemTokens,
       toolTokens,
