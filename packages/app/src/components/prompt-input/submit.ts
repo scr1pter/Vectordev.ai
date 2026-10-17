@@ -38,6 +38,7 @@ import {
   type TaskDifficulty,
 } from "@/utils/task-intelligence"
 import { modelDisplayName } from "@/utils/provider-brand"
+import { FREE_MODEL_POLICY_NOTICE, firstFreeModelPolicyNotice } from "@/utils/free-model-policy-notice"
 import { cachedSpendPolicy, promptRunBudget } from "@/features/economics/spend-limits-api"
 
 type PendingPrompt = {
@@ -622,6 +623,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         duration: 5_000,
       })
     }
+    if (isFreeModelSelection(routed.model) && firstFreeModelPolicyNotice())
+      showToast({ ...FREE_MODEL_POLICY_NOTICE, duration: 15_000 })
     const draft: FollowupDraft = {
       sessionID: session.id,
       sessionDirectory,

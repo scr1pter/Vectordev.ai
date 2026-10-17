@@ -6,6 +6,9 @@ export type FreeModelChoice = {
 }
 
 export const FREE_MODELS_TITLE = "Models included with Vector"
+/** How the providers behind Models included with Vector treat request content, shown wherever they are chosen. */
+export const FREE_MODELS_DATA_POLICY =
+  "Not zero data retention: the allowlisted providers may keep prompts and outputs under their own policies. Every request asks that they are not used for training."
 export const OPENROUTER_ACCOUNT_COPY =
   "Use your own free OpenRouter account: up to 50 requests a day, subject to availability. No payment or credits needed. Keep automatic top-ups, default or enforced account plugins, and external provider keys disabled."
 export const OPENROUTER_REMOTE_COPY =

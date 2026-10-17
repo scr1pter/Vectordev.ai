@@ -103,6 +103,13 @@ function SectionHeading(props: { section: ModelSection }) {
           </span>
         )}
       </Show>
+      <Show when={props.section.policy}>
+        {(policy) => (
+          <span data-slot="model-section-access" data-policy title={policy().title} aria-label={policy().title}>
+            {policy().label}
+          </span>
+        )}
+      </Show>
     </>
   )
 }

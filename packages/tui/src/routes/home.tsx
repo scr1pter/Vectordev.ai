@@ -1,4 +1,4 @@
-import { FREE_MODELS_TITLE, OPENROUTER_ACCOUNT_COPY } from "@vectordevai/core/free-model-choice"
+import { FREE_MODELS_DATA_POLICY, FREE_MODELS_TITLE, OPENROUTER_ACCOUNT_COPY } from "@vectordevai/core/free-model-choice"
 import { createDialogProviderOptions } from "../component/dialog-provider"
 import { useTheme } from "../context/theme"
 import { Prompt, type PromptRef } from "../component/prompt"
@@ -102,6 +102,7 @@ export function Home() {
               Sign in with vector login for a shared allowance, or use /connect to choose OpenRouter.
             </text>
             <text fg={theme.textMuted}>{OPENROUTER_ACCOUNT_COPY}</text>
+            <text fg={theme.textMuted}>{FREE_MODELS_DATA_POLICY}</text>
             <text
               fg={theme.primary}
               onMouseUp={() => {

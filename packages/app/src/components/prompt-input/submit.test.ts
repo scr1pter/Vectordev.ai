@@ -971,3 +971,37 @@ describe("image attachments", () => {
     expect(optimistic).toHaveLength(0)
   })
 })
+
+describe("included model data notice", () => {
+  test("tells the person once how included models handle their data", async () => {
+    globalThis.localStorage?.removeItem("vector.notice.free-model-policy.v1")
+    currentModel = { id: "maker/coder:free", provider: { id: "vector" }, freeModel: { source: "shared" } } as typeof currentModel
+    availableModels = [currentModel!]
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      newSessionWorktree: () => selected,
+      onNewSessionWorktreeReset: () => undefined,
+      onSubmit: () => undefined,
+    })
+    const notices = () => toasts.filter((toast) => toast.title === "How Models included with Vector handle your data")
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    expect(notices()).toHaveLength(1)
+    expect(notices()[0]?.description).toContain("Not zero data retention")
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    expect(notices()).toHaveLength(1)
+  })
+})

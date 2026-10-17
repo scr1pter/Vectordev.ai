@@ -1,4 +1,5 @@
 import {
+  FREE_MODELS_DATA_POLICY,
   FREE_MODELS_TITLE,
   freeModelName,
   freeModelSource,
@@ -243,6 +244,7 @@ export function modelTitle(model: PickerModel) {
     contextTitle(model.limit?.context),
     releaseTitle(model),
     freeModelSource(model) ?? access.title,
+    model.freeModel ? FREE_MODELS_DATA_POLICY : "",
   ]
     .filter(Boolean)
     .join("\n")
@@ -258,6 +260,8 @@ export type PickerSection<T extends PickerModel = PickerModel> = {
   providerID?: string
   /** How every row in the section is paid for, shown once on the label row. */
   access?: ModelAccess
+  /** What the section's providers may do with request content, shown once on the label row. */
+  policy?: { label: string; title: string }
   /** Rows carry their own access caption: the section has no shared one and mixes ways of paying. */
   rowAccess: boolean
   items: T[]
@@ -306,7 +310,15 @@ export function buildModelSections<T extends PickerModel>(input: {
   const taken = new Set<string>()
   const free = models.filter((model) => model.freeModel && matchRank(model, term, input.now) !== undefined)
   if (free.length) {
-    sections.push(pickerSection({ id: "free", kind: "free", label: FREE_MODELS_TITLE, items: free.sort(byRelease) }))
+    sections.push(
+      pickerSection({
+        id: "free",
+        kind: "free",
+        label: FREE_MODELS_TITLE,
+        policy: { label: "No-training policy", title: FREE_MODELS_DATA_POLICY },
+        items: free.sort(byRelease),
+      }),
+    )
     free.forEach((model) => taken.add(pickerModelKey(model)))
   }
 
