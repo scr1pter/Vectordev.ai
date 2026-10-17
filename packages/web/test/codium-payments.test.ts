@@ -572,15 +572,17 @@ describe("sales follow Vector's OpenRouter balance", () => {
     openRouter.keys.set(name, { key: name, data: { name, hash: name, usage: 0, disabled: false, ...data } })
 
   test("pauses new sales when the balance cannot cover what is owed, tells the owner, and reopens when funded", async () => {
-    funded(100)
+    funded(300)
     // Keys that are not Codium's, switched off, or expired are not owed.
     other("owner-laptop", { name: "Owner laptop", limit: 1000 })
     other("expired", { name: `Vector ${user.id} sub_old 1`, limit: 500, expires_at: "2026-01-01T00:00:00.000Z" })
     other("disabled", { name: `Codium ${user.id} purchased credits`, limit: 500, disabled: true })
+    // Nothing is owed yet, but the balance must leave room for the largest purchase ($100 of fixture credits).
     expect(await checkCodiumFunding(fetcher)).toMatchObject({
       status: "open",
       owed: 0,
-      required: 2000,
+      reserved: 0,
+      required: 13000,
       notified: false,
     })
     expect(emails).toHaveLength(0)
@@ -588,12 +590,15 @@ describe("sales follow Vector's OpenRouter balance", () => {
     const bought = await topUp(200)
     await reconcileModelPlanEvent(event("checkout.session.completed", bought.session), fetcher)
     openRouter.keys.get("codium_key_4")!.data.usage = 0.004
-    // Owed $99.996 rounds up to $100.00; with the default 10% and $20 margin $130 is needed and $100 is there.
+    // Owed $99.996 rounds up to $100.00. Its checkout's reservation still counts too, as does room for the largest
+    // purchase: ($100 + $100 + $100) with the default 10% and $20 margin is $350, and $300 is there.
     expect(await checkCodiumFunding(fetcher)).toMatchObject({
       status: "paused",
-      balance: 10000,
+      reason: "short",
+      balance: 30000,
       owed: 10000,
-      required: 13000,
+      reserved: 10000,
+      required: 35000,
       keys: 1,
       notified: true,
     })
@@ -601,7 +606,7 @@ describe("sales follow Vector's OpenRouter balance", () => {
     expect(emails[0]).toMatchObject({
       to: "owner@example.test",
       from: "Vector <support@example.test>",
-      subject: "Vector Codium sales paused: OpenRouter is short $30.00",
+      subject: "Vector Codium sales paused: OpenRouter is short $50.00",
     })
     expect(String(emails[0]!.text)).toContain("Credits customers already bought keep working.")
 
@@ -612,26 +617,76 @@ describe("sales follow Vector's OpenRouter balance", () => {
     // Credits already bought keep working while sales are paused.
     expect((await modelPlanCredential(user.id, fetcher)).key).toBe("codium-secret-4")
 
-    // Later checks while paused stay quiet, then remind the owner once a day.
+    // Later checks while paused stay quiet, then remind the owner once a day. By then the checkout's reservation has
+    // lapsed: ($100 + $100) with the margin is $240.
     await checkCodiumFunding(fetcher)
     expect(emails).toHaveLength(1)
-    await checkCodiumFunding(fetcher, Date.now() + 25 * 60 * 60_000)
+    funded(200)
+    expect(await checkCodiumFunding(fetcher, Date.now() + 25 * 60 * 60_000)).toMatchObject({
+      status: "paused",
+      reserved: 0,
+      required: 24000,
+      notified: true,
+    })
     expect(emails).toHaveLength(2)
 
     // OpenRouter's auto top-up (or the owner) adds credits: sales reopen at the next check by themselves.
     funded(220, 100)
-    expect(await checkCodiumFunding(fetcher, Date.now() + 26 * 60 * 60_000)).toMatchObject({ status: "paused" })
-    funded(300, 100)
-    const now = Date.now()
-    expect(await checkCodiumFunding(fetcher, now)).toMatchObject({ status: "open", balance: 20000, notified: true })
+    expect(await checkCodiumFunding(fetcher, Date.now() + 26 * 60 * 60_000)).toMatchObject({
+      status: "paused",
+      notified: false,
+    })
+    funded(400, 100)
+    const now = Date.now() + 27 * 60 * 60_000
+    expect(await checkCodiumFunding(fetcher, now)).toMatchObject({ status: "open", balance: 30000, notified: true })
     expect(emails.at(-1)).toMatchObject({ subject: "Vector Codium sales reopened" })
     expect((await modelTopupCheckout(user, "codium-topup-10", fetcher, now)).url).toStartWith(
       "https://checkout.stripe.com/",
     )
   })
 
+  test("purchases made between checks cannot together sell more than the balance covers", async () => {
+    funded(300)
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", required: 13000 })
+    // Four buyers open $200 top-ups ($100 of credits each) at the same moment. With the 10% and $20 margin the $300
+    // balance covers two: a third would need ($100 × 3) × 1.1 + $20 = $350.
+    const buyers = ["1", "2", "3", "4"].map((digit) => ({
+      id: user.id.replace(/^4/, digit),
+      email: `${digit}@example.test`,
+    }))
+    const results = await Promise.allSettled(
+      buyers.map((buyer) => modelTopupCheckout(buyer, "codium-topup-200", fetcher)),
+    )
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(2)
+    expect(
+      results.flatMap((result) => (result.status === "rejected" ? [(result.reason as { code: string }).code] : [])),
+    ).toEqual(["CODIUM_SALES_PAUSED", "CODIUM_SALES_PAUSED"])
+    expect(stripe.sessions.size).toBe(2)
+
+    // The next check counts those checkouts, finds no room left for another large purchase, and tells the owner.
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({
+      status: "paused",
+      reserved: 20000,
+      required: 35000,
+      notified: true,
+    })
+    expect(emails).toHaveLength(1)
+  })
+
+  test("a buyer's new checkout replaces their reservation, and a reservation lapses after its checkout closes", async () => {
+    funded(300)
+    await checkCodiumFunding(fetcher)
+    // Switching packs again and again holds only the latest one.
+    await modelTopupCheckout(user, "codium-topup-200", fetcher)
+    await modelTopupCheckout(user, "codium-topup-100", fetcher)
+    await modelTopupCheckout(user, "codium-topup-200", fetcher)
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", reserved: 10000, required: 24000 })
+    // Two hours on, every checkout opened now has closed and its reservation has lapsed.
+    expect(await checkCodiumFunding(fetcher, Date.now() + 2 * 60 * 60_000)).toMatchObject({ reserved: 0 })
+  })
+
   test("a sale without a recent check runs one, and sales stay closed while OpenRouter cannot be read", async () => {
-    funded(100)
+    funded(300)
     openRouter.unavailable = true
     await expect(modelTopupCheckout(user, "codium-topup-10", fetcher)).rejects.toMatchObject({
       code: "CODIUM_SALES_PAUSED",
@@ -648,7 +703,7 @@ describe("sales follow Vector's OpenRouter balance", () => {
     await checkCodiumFunding(fetcher)
     await modelTopupCheckout(user, "codium-topup-10", fetcher)
     const checked = await readCodiumFunding(fetcher)
-    expect(checked).toMatchObject({ status: "open", balance: 10000 })
+    expect(checked).toMatchObject({ status: "open", balance: 30000 })
 
     // A stale reading is checked again before the next sale; a failed check closes sales and is saved as a pause.
     openRouter.unavailable = true
@@ -715,7 +770,7 @@ describe("sales follow Vector's OpenRouter balance", () => {
     funded(10)
     process.env.CODIUM_FUNDING_MARGIN_USD = "50"
     resend.failing = true
-    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "paused", required: 5000, notified: false })
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "paused", required: 16000, notified: false })
     expect(await readCodiumFunding(fetcher)).not.toHaveProperty("notifiedAt")
     resend.failing = false
     expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "paused", notified: true })

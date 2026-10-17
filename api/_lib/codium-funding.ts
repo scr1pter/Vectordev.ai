@@ -1,15 +1,16 @@
 import { randomUUID } from "node:crypto"
 import { Option, Schema } from "effect"
 import { ApiError } from "./http.js"
-import { MODEL_PLAN_ROOT } from "./model-plan-config.js"
+import { MODEL_PLAN_ROOT, modelPlans, modelTopups } from "./model-plan-config.js"
 import { stripeRecord } from "./model-plan-stripe.js"
 import { persistentStore } from "./persistent-store.js"
 
 /**
- * Whether Vector's OpenRouter balance can pay for every Codium credit customers still hold. OpenRouter sells credits
- * only through its dashboard (its auto top-up refills the balance; there is no API to buy credits), so Vector cannot
- * fund itself. Instead this check compares the balance with what is owed and pauses new Codium sales, and tells the
- * owner, until the balance covers it again. Every amount here is in cents and private to the server and the owner.
+ * Whether Vector's OpenRouter balance can pay for every Codium credit customers still hold or are buying. OpenRouter
+ * sells credits only through its dashboard (its auto top-up refills the balance; there is no API to buy credits), so
+ * Vector cannot fund itself. Instead this check compares the balance with what is owed and pauses new Codium sales,
+ * and tells the owner, until the balance covers it again. Every amount here is in cents and private to the server and
+ * the owner.
  */
 const Funding = Schema.Struct({
   status: Schema.Literals(["open", "paused"]),
@@ -21,6 +22,8 @@ const Funding = Schema.Struct({
   since: Schema.Number,
   balance: Schema.NullOr(Schema.Number),
   owed: Schema.NullOr(Schema.Number),
+  // Credits in checkouts opened recently, which may still be paid for (see reserveCodiumSale).
+  reserved: Schema.optional(Schema.NullOr(Schema.Number)),
   required: Schema.NullOr(Schema.Number),
   keys: Schema.NullOr(Schema.Number),
   notifiedAt: Schema.optional(Schema.Number),
@@ -29,6 +32,16 @@ export type CodiumFunding = typeof Funding.Type
 
 const FUNDING_KEY = "vector:codium:funding"
 const LOCK_KEY = "vector:codium:funding:lock"
+// One reservation per account and kind of purchase, "<account>:<kind>" -> "<lapses at>:<cents>": a new checkout
+// replaces the account's last one, so one buyer cannot hold back sales by opening many.
+const RESERVED_KEY = "vector:codium:funding:reserved"
+// Drops lapsed reservations and adds up the others, leaving out ARGV[2]'s own, which the caller is replacing.
+const RESERVATIONS =
+  "local reserved = 0 local entries = redis.call('HGETALL', KEYS[1]) for i = 1, #entries, 2 do local lapses, cents = string.match(entries[i + 1], '^(%d+):(%d+)$') if not lapses or tonumber(lapses) <= tonumber(ARGV[1]) then redis.call('HDEL', KEYS[1], entries[i]) elseif entries[i] ~= ARGV[2] then reserved = reserved + tonumber(cents) end end "
+// Reserves ARGV[3] cents until ARGV[4] only while the reading's balance (ARGV[5]) covers what is owed (ARGV[6]), every
+// other reservation and this one, with the margin (ARGV[7] percent plus ARGV[8] cents), all in one step so purchases
+// made at the same moment cannot each pass against the same balance.
+const RESERVE = `${RESERVATIONS}if tonumber(ARGV[5]) < math.ceil((tonumber(ARGV[6]) + reserved + tonumber(ARGV[3])) * (100 + tonumber(ARGV[7])) / 100) + tonumber(ARGV[8]) then return 0 end redis.call('HSET', KEYS[1], ARGV[2], ARGV[4] .. ':' .. ARGV[3]) return 1`
 // The cron checks every ten minutes. A sale needs a reading from about one interval ago; an older one is stale, so the
 // sale runs a check of its own first.
 export const CODIUM_FUNDING_MAX_AGE_MS = 15 * 60_000
@@ -81,6 +94,7 @@ async function measureFunding(fetcher: typeof fetch, now: number) {
       error: failure instanceof ApiError ? failure.code : "CODIUM_FUNDING_FAILED",
       balance: null,
       owed: null,
+      reserved: null,
       required: null,
       keys: null,
       failure,
@@ -95,6 +109,7 @@ async function measureFunding(fetcher: typeof fetch, now: number) {
     since: previous?.status === reading.status ? previous.since : now,
     balance: reading.balance,
     owed: reading.owed,
+    reserved: reading.reserved,
     required: reading.required,
     keys: reading.keys,
     notifiedAt: changed ? undefined : previous?.notifiedAt,
@@ -112,14 +127,25 @@ async function measureFunding(fetcher: typeof fetch, now: number) {
   return { ...funding, notifiedAt: notified ? now : funding.notifiedAt, notified, ran: true }
 }
 
+/**
+ * Sales stay open only while the balance covers what customers hold, the credits in checkouts that may still be paid
+ * for, and one more of the largest purchase, with the margin. The last term means that whenever reserveCodiumSale has
+ * to refuse a purchase, this check pauses sales and tells the owner.
+ */
 async function fundingReading(fetcher: typeof fetch, now: number) {
   const margin = fundingMargin()
+  const largest = Math.max(0, ...[...modelPlans(), ...modelTopups()].map((value) => Math.round(value.credits * 100)))
   const balance = await openRouterBalance(fetcher)
   const owed = await creditsOwed(fetcher, now)
+  const reserved = Number(
+    await persistentStore(["EVAL", `${RESERVATIONS}return reserved`, 1, RESERVED_KEY, now, ""], fetcher),
+  )
+  if (!Number.isSafeInteger(reserved)) throw unavailable()
   return {
     balance,
     owed: owed.cents,
-    required: Math.ceil((owed.cents * (100 + margin.percent)) / 100) + margin.cents,
+    reserved,
+    required: Math.ceil(((owed.cents + reserved + largest) * (100 + margin.percent)) / 100) + margin.cents,
     keys: owed.keys,
   }
 }
@@ -128,7 +154,7 @@ async function fundingReading(fetcher: typeof fetch, now: number) {
  * New subscriptions and top-ups need a check from the last CODIUM_FUNDING_MAX_AGE_MS that found the balance covering
  * what is owed. A failed check is saved as a pause, and a sale that finds the reading stale runs a check first and
  * refuses unless it succeeds: selling credits Vector may not be able to pay for is the failure to avoid. Credits
- * already bought keep working either way.
+ * already bought keep working either way. Returns the reading reserveCodiumSale measures the purchase against.
  */
 export async function requireCodiumSales(fetcher: typeof fetch = fetch, now = Date.now()) {
   const saved = await readCodiumFunding(fetcher)
@@ -139,13 +165,53 @@ export async function requireCodiumSales(fetcher: typeof fetch = fetch, now = Da
   if (
     funding?.status !== "open" ||
     funding.checkedAt === undefined ||
-    now - funding.checkedAt >= CODIUM_FUNDING_MAX_AGE_MS
+    now - funding.checkedAt >= CODIUM_FUNDING_MAX_AGE_MS ||
+    typeof funding.balance !== "number" ||
+    typeof funding.owed !== "number"
   )
-    throw new ApiError(
-      503,
-      "CODIUM_SALES_PAUSED",
-      "New Codium purchases are temporarily unavailable. Credits you already have keep working. Please try again later.",
-    )
+    throw salesPaused()
+  return { balance: funding.balance, owed: funding.owed }
+}
+
+/**
+ * Holds a purchase's credits against the balance from when its checkout opens until it can no longer be paid, plus
+ * long enough for a check to count a paid purchase among what is owed. Purchases since the last check would otherwise
+ * each pass against the same reading and together sell more than the balance covers. A paid purchase counts twice
+ * until its reservation lapses, which errs towards pausing.
+ */
+export async function reserveCodiumSale(
+  reading: { balance: number; owed: number },
+  sale: { account: string; kind: "subscription" | "topup"; credits: number; closes: number },
+  fetcher: typeof fetch = fetch,
+  now = Date.now(),
+) {
+  const margin = fundingMargin()
+  const reserved = await persistentStore(
+    [
+      "EVAL",
+      RESERVE,
+      1,
+      RESERVED_KEY,
+      now,
+      `${sale.account}:${sale.kind}`,
+      Math.round(sale.credits * 100),
+      sale.closes + 2 * CODIUM_FUNDING_MAX_AGE_MS,
+      reading.balance,
+      reading.owed,
+      margin.percent,
+      margin.cents,
+    ],
+    fetcher,
+  )
+  if (reserved !== 1) throw salesPaused()
+}
+
+function salesPaused() {
+  return new ApiError(
+    503,
+    "CODIUM_SALES_PAUSED",
+    "New Codium purchases are temporarily unavailable. Credits you already have keep working. Please try again later.",
+  )
 }
 
 async function openRouterBalance(fetcher: typeof fetch) {
@@ -231,7 +297,8 @@ async function emailOwner(funding: CodiumFunding, failure: unknown, fetcher: typ
   const amounts = [
     `OpenRouter balance: ${money(funding.balance)}`,
     `Credits customers still hold: ${money(funding.owed)} across ${funding.keys} keys`,
-    `Needed, with the margin: ${money(funding.required)}`,
+    `Credits in checkouts that may still be paid: ${money(funding.reserved ?? null)}`,
+    `Needed, with room for the largest purchase and the margin: ${money(funding.required)}`,
   ]
   const reopen =
     "Credits customers already bought keep working. Sales reopen by themselves at the first check that reads the balance and finds it covers what is needed; checks run every 10 minutes."
@@ -240,7 +307,7 @@ async function emailOwner(funding: CodiumFunding, failure: unknown, fetcher: typ
       ? {
           subject: "Vector Codium sales reopened",
           lines: [
-            "Vector Codium is selling subscriptions and top-ups again. Vector's OpenRouter balance covers the credits customers still hold plus the safety margin.",
+            "Vector Codium is selling subscriptions and top-ups again. Vector's OpenRouter balance covers the credits customers hold or are buying, room for the largest purchase, and the safety margin.",
             "",
             ...amounts,
           ],
@@ -258,7 +325,7 @@ async function emailOwner(funding: CodiumFunding, failure: unknown, fetcher: typ
         : {
             subject: `Vector Codium sales paused: OpenRouter is short ${money((funding.required ?? 0) - (funding.balance ?? 0))}`,
             lines: [
-              "Vector Codium has paused new subscriptions and top-ups. Vector's OpenRouter balance cannot cover the credits customers still hold plus the safety margin.",
+              "Vector Codium has paused new subscriptions and top-ups. Vector's OpenRouter balance cannot cover the credits customers hold or are buying, room for the largest purchase, and the safety margin.",
               "",
               ...amounts,
               `Short by: ${money((funding.required ?? 0) - (funding.balance ?? 0))}`,

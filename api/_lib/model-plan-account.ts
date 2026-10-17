@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import { Option, Schema } from "effect"
 import type { AccountUser } from "./account.js"
 import { withBillingMutation } from "./billing-lock.js"
-import { requireCodiumSales } from "./codium-funding.js"
+import { requireCodiumSales, reserveCodiumSale } from "./codium-funding.js"
 import { modelPlanOrigin, modelPlans, modelTopups, MODEL_PLAN_ROOT } from "./model-plan-config.js"
 import { modelPlanStripe, stripeRecord } from "./model-plan-stripe.js"
 import { ApiError } from "./http.js"
@@ -870,7 +870,7 @@ export async function modelPlanCheckout(
     throw new ApiError(400, "MODEL_PLAN_INVALID", "Choose an available Codium subscription.")
   const priceID = plan.priceID
   // Sell only credits Vector's OpenRouter balance can pay for.
-  await requireCodiumSales(fetcher, now)
+  const funding = await requireCodiumSales(fetcher, now)
   return withBillingMutation(
     `model-plan:${user.id}`,
     async (verify) => {
@@ -939,6 +939,13 @@ export async function modelPlanCheckout(
         recurring.interval_count !== 1
       )
         throw new ApiError(503, "MODEL_PLAN_PRICE_MISMATCH", "This subscription price is not configured correctly.")
+      const closes = (Math.floor(now / 1_800_000) + 2) * 1_800_000
+      await reserveCodiumSale(
+        funding,
+        { account: user.id, kind: "subscription", credits: plan.credits, closes },
+        fetcher,
+        now,
+      )
       await verify()
       const checkout = await modelPlanStripe(
         "checkout/sessions",
@@ -959,7 +966,7 @@ export async function modelPlanCheckout(
             "subscription_data[metadata][vector_model_credits_usd]": String(plan.credits),
             success_url: `${modelPlanOrigin()}/account?model_plan=success`,
             cancel_url: `${modelPlanOrigin()}/account?model_plan=cancelled`,
-            expires_at: String((Math.floor(now / 1_800_000) + 2) * 1_800),
+            expires_at: String(closes / 1000),
           }),
         },
         fetcher,
@@ -1018,7 +1025,7 @@ export async function modelTopupCheckout(
   if (!pack?.priceID || !pack.credits)
     throw new ApiError(400, "MODEL_TOPUP_INVALID", "Choose an available Codium credit pack.")
   const priceID = pack.priceID
-  await requireCodiumSales(fetcher, now)
+  const funding = await requireCodiumSales(fetcher, now)
   await settlePendingTopup(user.id, fetcher)
   return withBillingMutation(
     `model-plan:${user.id}`,
@@ -1083,6 +1090,7 @@ export async function modelTopupCheckout(
         price.recurring
       )
         throw new ApiError(503, "MODEL_TOPUP_PRICE_MISMATCH", "This credit-pack price is not configured correctly.")
+      const closes = (Math.floor(now / 1_800_000) + 2) * 1_800_000
       const body = new URLSearchParams({
         mode: "payment",
         "payment_method_types[0]": "card",
@@ -1092,7 +1100,7 @@ export async function modelTopupCheckout(
         "line_items[0][quantity]": "1",
         success_url: `${modelPlanOrigin()}/account?model_topup=success`,
         cancel_url: `${modelPlanOrigin()}/account?model_topup=cancelled`,
-        expires_at: String((Math.floor(now / 1_800_000) + 2) * 1_800),
+        expires_at: String(closes / 1000),
       })
       Object.entries({
         vector_account_id: user.id,
@@ -1104,6 +1112,7 @@ export async function modelTopupCheckout(
         body.set(`metadata[${key}]`, value)
         body.set(`payment_intent_data[metadata][${key}]`, value)
       })
+      await reserveCodiumSale(funding, { account: user.id, kind: "topup", credits: pack.credits, closes }, fetcher, now)
       await verify()
       const checkout = await modelPlanStripe(
         "checkout/sessions",

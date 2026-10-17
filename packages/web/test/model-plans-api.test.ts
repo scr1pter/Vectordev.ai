@@ -334,7 +334,7 @@ beforeEach(async () => {
       status: "open",
       checkedAt: Date.now(),
       since: Date.now(),
-      balance: 0,
+      balance: 100_000_000,
       owed: 0,
       required: 0,
       keys: 0,
