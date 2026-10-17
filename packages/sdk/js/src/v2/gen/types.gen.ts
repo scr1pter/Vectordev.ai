@@ -5225,6 +5225,7 @@ export type TaskInfo = {
   title: string
   agent?: string
   status: TaskStatus
+  connection?: "connected" | "disconnected"
   batchID?: string
   groupID?: string
   startedAt: number
@@ -5280,6 +5281,50 @@ export type TaskStopResult = {
 export type TaskWaitResult = {
   tasks: Array<TaskInfo>
   timedOut: boolean
+}
+
+export type TaskBridgeRegisterInput = {
+  lease?: string
+  tasks: Array<TaskInfo>
+  truncated?: boolean
+}
+
+export type TaskBridgeRegisterResult = {
+  lease: string
+  expiresAt: number
+}
+
+export type TaskBridgePollInput = {
+  lease: string
+  timeout?: number
+}
+
+export type TaskBridgeCommand = {
+  id: string
+  taskID: string
+  sender: string
+  action: "inspect" | "message" | "stop"
+  text?: string
+  delivery?: "steer" | "queue"
+  reason?: string
+  createdAt: number
+  expiresAt: number
+}
+
+export type TaskBridgePollResult = {
+  commands: Array<TaskBridgeCommand>
+  expiresAt: number
+}
+
+export type TaskBridgeReceiptInput = {
+  lease: string
+  commandID: string
+  result?: TaskInspectResult | TaskMessageResult | TaskStopResult
+  error?: string
+}
+
+export type TaskBridgeReceiptResult = {
+  accepted: boolean
 }
 
 export type ProjectDirectories = Array<{
@@ -9891,6 +9936,113 @@ export type ExperimentalTaskWaitResponses = {
 }
 
 export type ExperimentalTaskWaitResponse = ExperimentalTaskWaitResponses[keyof ExperimentalTaskWaitResponses]
+
+export type ExperimentalTaskBridgeRegisterData = {
+  body?: TaskBridgeRegisterInput
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/{sessionID}/tasks/bridge/register"
+}
+
+export type ExperimentalTaskBridgeRegisterErrors = {
+  /**
+   * TaskApiError | InvalidRequestError
+   */
+  400: TaskApiError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ExperimentalTaskBridgeRegisterError =
+  ExperimentalTaskBridgeRegisterErrors[keyof ExperimentalTaskBridgeRegisterErrors]
+
+export type ExperimentalTaskBridgeRegisterResponses = {
+  /**
+   * TaskBridge.RegisterResult
+   */
+  200: TaskBridgeRegisterResult
+}
+
+export type ExperimentalTaskBridgeRegisterResponse =
+  ExperimentalTaskBridgeRegisterResponses[keyof ExperimentalTaskBridgeRegisterResponses]
+
+export type ExperimentalTaskBridgePollData = {
+  body?: TaskBridgePollInput
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/{sessionID}/tasks/bridge/poll"
+}
+
+export type ExperimentalTaskBridgePollErrors = {
+  /**
+   * TaskApiError | InvalidRequestError
+   */
+  400: TaskApiError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ExperimentalTaskBridgePollError = ExperimentalTaskBridgePollErrors[keyof ExperimentalTaskBridgePollErrors]
+
+export type ExperimentalTaskBridgePollResponses = {
+  /**
+   * TaskBridge.PollResult
+   */
+  200: TaskBridgePollResult
+}
+
+export type ExperimentalTaskBridgePollResponse =
+  ExperimentalTaskBridgePollResponses[keyof ExperimentalTaskBridgePollResponses]
+
+export type ExperimentalTaskBridgeReceiptData = {
+  body?: TaskBridgeReceiptInput
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/{sessionID}/tasks/bridge/receipt"
+}
+
+export type ExperimentalTaskBridgeReceiptErrors = {
+  /**
+   * TaskApiError | InvalidRequestError
+   */
+  400: TaskApiError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ExperimentalTaskBridgeReceiptError =
+  ExperimentalTaskBridgeReceiptErrors[keyof ExperimentalTaskBridgeReceiptErrors]
+
+export type ExperimentalTaskBridgeReceiptResponses = {
+  /**
+   * TaskBridge.ReceiptResult
+   */
+  200: TaskBridgeReceiptResult
+}
+
+export type ExperimentalTaskBridgeReceiptResponse =
+  ExperimentalTaskBridgeReceiptResponses[keyof ExperimentalTaskBridgeReceiptResponses]
 
 export type ExperimentalResourceListData = {
   body?: never

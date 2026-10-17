@@ -72,6 +72,15 @@ import type {
   ExperimentalSessionUsageData,
   ExperimentalSessionUsageErrors,
   ExperimentalSessionUsageResponses,
+  ExperimentalTaskBridgePollData,
+  ExperimentalTaskBridgePollErrors,
+  ExperimentalTaskBridgePollResponses,
+  ExperimentalTaskBridgeReceiptData,
+  ExperimentalTaskBridgeReceiptErrors,
+  ExperimentalTaskBridgeReceiptResponses,
+  ExperimentalTaskBridgeRegisterData,
+  ExperimentalTaskBridgeRegisterErrors,
+  ExperimentalTaskBridgeRegisterResponses,
   ExperimentalTaskInspectData,
   ExperimentalTaskInspectErrors,
   ExperimentalTaskInspectResponses,
@@ -923,6 +932,72 @@ export class Session extends HeyApiClient {
   }
 }
 
+export class Bridge extends HeyApiClient {
+  /**
+   * Register desktop task observations
+   *
+   * Owner-authenticated desktop relay with an expiring lease. No callback URLs are accepted.
+   */
+  public register<ThrowOnError extends boolean = false>(
+    options: Options<ExperimentalTaskBridgeRegisterData, ThrowOnError>,
+  ) {
+    return (options.client ?? this.client).post<
+      ExperimentalTaskBridgeRegisterResponses,
+      ExperimentalTaskBridgeRegisterErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/bridge/register",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  /**
+   * Wait for desktop task commands
+   *
+   * Owner-authenticated desktop relay with an expiring lease. No callback URLs are accepted.
+   */
+  public poll<ThrowOnError extends boolean = false>(options: Options<ExperimentalTaskBridgePollData, ThrowOnError>) {
+    return (options.client ?? this.client).post<
+      ExperimentalTaskBridgePollResponses,
+      ExperimentalTaskBridgePollErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/bridge/poll",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  /**
+   * Confirm a desktop task command
+   *
+   * Owner-authenticated desktop relay with an expiring lease. No callback URLs are accepted.
+   */
+  public receipt<ThrowOnError extends boolean = false>(
+    options: Options<ExperimentalTaskBridgeReceiptData, ThrowOnError>,
+  ) {
+    return (options.client ?? this.client).post<
+      ExperimentalTaskBridgeReceiptResponses,
+      ExperimentalTaskBridgeReceiptErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/bridge/receipt",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+}
+
 export class Task extends HeyApiClient {
   /**
    * List session tasks
@@ -1006,6 +1081,11 @@ export class Task extends HeyApiClient {
         ...options.headers,
       },
     })
+  }
+
+  private _bridge?: Bridge
+  get bridge(): Bridge {
+    return (this._bridge ??= new Bridge({ client: this.client }))
   }
 }
 
