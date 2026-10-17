@@ -103,9 +103,10 @@ export function ProjectTrustMenuItem(props: { server: ServerConnection.Any; dire
 }
 
 /**
- * Opens the trust dialog for one project. When `rememberDismissal` is set, closing it without trusting (Not now,
- * Escape or a click outside) is remembered so the project never asks again; a dialog the user opened from a menu
- * leaves the answer as it was.
+ * Opens the trust dialog for one repository. When `rememberDismissal` is set, closing it without trusting (Not now,
+ * Escape or a click outside) is remembered so the repository never asks again; a dialog the user opened from a menu
+ * leaves the answer as it was. Another dialog that replaces this one (release notes after an update, a spend stop)
+ * is not an answer: nothing is remembered and the claim is released, so the question comes back once it closes.
  */
 export function useProjectTrustDialog() {
   const dialog = useDialog()
@@ -120,7 +121,14 @@ export function useProjectTrustDialog() {
     rememberDismissal?: boolean
   }) => {
     if (!trust.claim(input.scope, input.workspace)) return
-    const state = { trusted: false }
+    const state = { trusted: false, released: false }
+    // Runs on close and again when the dialog is disposed; only the first may release, or a later claim on the same
+    // repository would be dropped.
+    const release = () => {
+      if (state.released) return
+      state.released = true
+      trust.release(input.scope, input.workspace)
+    }
     const approve = async () => {
       const status = await trust.approve(input.client, input.scope)
       if (status) {
@@ -140,17 +148,23 @@ export function useProjectTrustDialog() {
           name={getFilename(input.workspace) || input.workspace}
           changed={input.prompt === "changed"}
           onTrust={approve}
+          onDispose={release}
         />
       ),
       () => {
         if (input.rememberDismissal && !state.trusted) trust.remember(input.scope, input.workspace, "dismissed")
-        trust.release(input.scope, input.workspace)
+        release()
       },
     )
   }
 }
 
-function DialogProjectTrust(props: { name: string; changed: boolean; onTrust: () => Promise<boolean> }) {
+function DialogProjectTrust(props: {
+  name: string
+  changed: boolean
+  onTrust: () => Promise<boolean>
+  onDispose: () => void
+}) {
   const dialog = useDialog()
   const language = useLanguage()
   const [pending, setPending] = createSignal(false)
@@ -158,6 +172,8 @@ function DialogProjectTrust(props: { name: string; changed: boolean; onTrust: ()
   const state = { open: true }
   onCleanup(() => {
     state.open = false
+    // dialog.show() disposes a dialog it replaces without calling its onClose.
+    props.onDispose()
   })
 
   const trust = () => {

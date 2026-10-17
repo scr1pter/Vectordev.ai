@@ -96,3 +96,42 @@ test("never asks about a repository with no Vector settings of its own", async (
   await expectNoTrustDialog(page, trust, 0)
   expect(trust.approvals).toBe(0)
 })
+
+test("asks again when another dialog replaced the question before it was answered", async ({ page }) => {
+  // Release notes after an update open on their own and replace whatever dialog is showing. The question they
+  // replace was never answered, so it must come back once they close, and nothing may be remembered for it.
+  await page.addInitScript(() => localStorage.setItem("highlights.v1", JSON.stringify({ version: "0.0.1" })))
+  const changelog = { release: () => {} }
+  const held = new Promise<void>((resolve) => (changelog.release = resolve))
+  await page.route("https://vectordev.ai/changelog.json", async (route) => {
+    await held
+    await route.fulfill({
+      json: {
+        releases: [
+          {
+            tag: "v99.0.0",
+            highlights: [{ source: "desktop", title: "Something new", description: "A change worth reading." }],
+          },
+          { tag: "v0.0.1", highlights: [] },
+        ],
+      },
+    })
+  })
+  const trust = await openDraft(page, ignoredSettings)
+
+  const question = page.getByRole("dialog", { name: "Trust this repository?" })
+  await expect(question).toBeVisible()
+  changelog.release()
+  await expect(page.getByRole("dialog").filter({ hasText: "Something new" })).toBeVisible()
+  await expect(question).toHaveCount(0)
+
+  await page.keyboard.press("Escape")
+  await expect(question).toBeVisible()
+  await expect(page.getByRole("dialog")).toHaveCount(1)
+  expect(await storedAnswers(page)).not.toContain("dismissed")
+  expect(trust.approvals).toBe(0)
+
+  await question.getByRole("button", { name: "Trust this repository" }).click()
+  await expect(question).toHaveCount(0)
+  expect(trust.approvals).toBe(1)
+})
