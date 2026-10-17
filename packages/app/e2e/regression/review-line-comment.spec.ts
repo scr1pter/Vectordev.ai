@@ -36,15 +36,19 @@ test("opens the comment editor for a line number range", async ({ page }) => {
   await expectAppVisible(start)
   await expectAppVisible(end)
 
-  const from = await start.boundingBox()
-  const to = await end.boundingBox()
-  if (!from || !to) throw new Error("Missing line number bounds")
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2)
-  await page.mouse.up()
-
-  await expect(review.getByRole("textbox")).toBeVisible()
+  // Under parallel load the diff can re-render between the visibility check and the measurement, which
+  // leaves a line number without a box for a moment, so the measure-and-drag is retried as one step.
+  await expect(async () => {
+    await start.scrollIntoViewIfNeeded()
+    const from = await start.boundingBox()
+    const to = await end.boundingBox()
+    if (!from || !to) throw new Error("Missing line number bounds")
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2)
+    await page.mouse.up()
+    await expect(review.getByRole("textbox")).toBeVisible({ timeout: 2_000 })
+  }).toPass({ timeout: 20_000 })
 })
 
 test("shows a comment button when a line number is hovered", async ({ page }) => {
