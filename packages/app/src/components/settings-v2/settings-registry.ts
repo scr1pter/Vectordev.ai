@@ -12,6 +12,7 @@ export type SettingsTab =
   | "voice"
   | "personalization"
   | "rules"
+  | "trust"
   | "subagents"
 
 export type SettingsItem = {
@@ -91,6 +92,12 @@ export const settingsGroups: readonly SettingsGroup[] = [
     title: "Workspace",
     items: [
       { value: "rules", label: "Project rules", icon: "shield", keywords: ["repository", "instructions", "paths"] },
+      {
+        value: "trust",
+        label: "Project trust",
+        icon: "circle-check",
+        keywords: ["trusted", "vector.json", ".vector", "project settings", "security"],
+      },
       { value: "editor", label: "Editor", icon: "code", keywords: ["font", "wrap", "autocomplete", "line numbers"] },
       { value: "chat", label: "Chat", icon: "bubble-5", keywords: ["composer", "conversation", "spacing", "width"] },
       { value: "notifications", label: "Notifications", icon: "status", keywords: ["alerts", "sound", "completion"] },

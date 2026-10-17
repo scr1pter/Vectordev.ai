@@ -13,6 +13,7 @@ import { SettingsAboutV2 } from "./about"
 import { SettingsVoiceV2 } from "./voice"
 import { SettingsPersonalizationV2 } from "./personalization"
 import { SettingsRulesV2 } from "./rules"
+import { SettingsProjectTrustV2 } from "./project-trust"
 import { SettingsSubagentsV2 } from "./subagents"
 import { SettingsSpendLimitsV2 } from "./spend-limits"
 import { spendLimitsApi } from "@/features/economics/spend-limits-api"
@@ -62,6 +63,7 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
     if (item === "voice") return <SettingsVoiceV2 />
     if (item === "personalization") return <SettingsPersonalizationV2 />
     if (item === "rules") return <SettingsRulesV2 repositoryPath={props.repositoryPath} />
+    if (item === "trust") return <SettingsProjectTrustV2 repositoryPath={props.repositoryPath} />
     if (item === "subagents") return <SettingsSubagentsV2 />
     if (item === "providers") return <SettingsProvidersV2 />
     if (item === "models") return <SettingsModelsV2 />
@@ -131,7 +133,10 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
                 {(group) => (
                   <div
                     class="settings-v2-nav-group"
-                    classList={{ "settings-v2-nav-group--hidden": !!query().trim() && !group.items.some((item) => visibleItems().has(item.value)) }}
+                    classList={{
+                      "settings-v2-nav-group--hidden":
+                        !!query().trim() && !group.items.some((item) => visibleItems().has(item.value)),
+                    }}
                   >
                     <TabsV2.SectionTitle>{group.title}</TabsV2.SectionTitle>
                     <div class="settings-v2-nav-items">

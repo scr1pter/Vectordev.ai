@@ -2372,3 +2372,27 @@ html[data-vector-reduce-animations="true"] *::after {
 
 .settings-notice-details summary { cursor: pointer; }
 .settings-notice-details pre { margin-top: 12px; }
+
+/* Project trust: the engine's verdict as a small pill beside the project name. */
+.settings-v2-project-trust-state {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border: 1px solid var(--vx-line);
+  border-radius: 999px;
+  color: var(--vx-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+
+.settings-v2-project-trust-state[data-state="trusted"] {
+  border-color: color-mix(in srgb, var(--vx-green) 45%, transparent);
+  color: var(--vx-green);
+}
+
+.settings-v2-project-trust-state[data-state="untrusted"] {
+  border-color: color-mix(in srgb, var(--vx-amber) 45%, transparent);
+  color: var(--vx-amber);
+}
