@@ -14,7 +14,7 @@ const user = {
   id: "11111111-1111-4111-8111-111111111111",
   email: "fixture@example.test",
   email_confirmed_at: "2026-01-01T00:00:00Z",
-  user_metadata: { full_name: "  Fixture Person  " },
+  user_metadata: { full_name: "  Fixture Person  ", avatar_url: "https://lh3.googleusercontent.com/a/fixture=s96-c" },
 }
 const upstream = Bun.serve({
   hostname: "127.0.0.1",
@@ -126,8 +126,14 @@ test("PKCE and state bind one code to one desktop and concurrent replay has only
   const success = responses.find((item) => item.status === 200)!
   const exchanged = await success.json()
   expect(verifyCliToken(exchanged.token)).toEqual({ id: user.id, email: user.email })
-  // The desktop shows this name in its sidebar; it never enters the token.
-  expect(exchanged.user).toEqual({ id: user.id, email: user.email, name: "Fixture Person" })
+  // The desktop shows this name and photo in its sidebar; neither enters the token.
+  expect(exchanged.user).toEqual({
+    id: user.id,
+    email: user.email,
+    name: "Fixture Person",
+    avatar: "https://lh3.googleusercontent.com/a/fixture=s96-c",
+  })
+  expect(Buffer.from(exchanged.token.slice(4).split(".")[0], "base64url").toString()).not.toContain("googleusercontent")
   const callback = desktopSignInCallback(code, input.state)
   expect(callback).toStartWith("vector://auth/callback?")
   expect(callback).not.toContain(exchanged.token)
@@ -198,6 +204,8 @@ test("desktop start, signed-in website and one-time API exchange complete the sa
       desktop.url = url
     },
     fetch: async (url, init) => {
+      if (url === user.user_metadata.avatar_url)
+        return new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]), { headers: { "content-type": "image/jpeg" } })
       expect(url).toBe("https://vectordev.ai/api/account/cli-exchange")
       return fetch(`${state.origin}/exchange`, init)
     },
@@ -214,7 +222,13 @@ test("desktop start, signed-in website and one-time API exchange complete the sa
   expect(response.status).toBe(200)
   const callback = desktopSignInCallback(await response.json(), login.state)
   expect(await account.consume([callback])).toEqual([])
-  expect(account.status()).toMatchObject({ authenticated: true, pending: false, email: user.email })
+  expect(account.status()).toMatchObject({
+    authenticated: true,
+    pending: false,
+    email: user.email,
+    name: "Fixture Person",
+    avatar: "data:image/jpeg;base64,/9j/4A==",
+  })
   expect(verifyCliToken(desktop.token)).toEqual({ id: user.id, email: user.email })
   expect(JSON.stringify([desktop.url, callback, desktop.stored, desktop.states])).not.toContain(desktop.token)
 })

@@ -4,6 +4,7 @@ export type AccountUser = {
   id: string
   email: string
   name?: string
+  avatar?: string
 }
 
 function accountConfiguration() {
@@ -63,18 +64,82 @@ export async function requireAccountUser(
   ) {
     throw new ApiError(403, "EMAIL_NOT_CONFIRMED", "Confirm your email address before continuing.")
   }
-  const metadata = "user_metadata" in user ? user.user_metadata : undefined
-  const metadataName =
-    metadata && typeof metadata === "object"
-      ? "full_name" in metadata && metadata.full_name
-        ? metadata.full_name
-        : "name" in metadata
-          ? metadata.name
-          : undefined
-      : undefined
+  return { id: user.id, email, ...accountProfile("user_metadata" in user ? user.user_metadata : undefined) }
+}
+
+/**
+ * The account's current name and photo, read with the service role key, which never leaves this server. The
+ * desktop asks for them so a sign-in saved before either was carried still shows them without signing in again.
+ */
+export async function readAccountProfile(id: string, fetcher: typeof fetch = fetch) {
+  const unavailable = new ApiError(503, "PROFILE_UNAVAILABLE", "Your Vector profile is temporarily unavailable.")
+  const url = process.env.SUPABASE_URL?.trim().replace(/\/+$/, "") ?? ""
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? ""
+  const origin = URL.parse(url)
+  const local =
+    process.env.NODE_ENV !== "production" &&
+    process.env.VERCEL_ENV !== "production" &&
+    origin?.protocol === "http:" &&
+    ["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname)
+  if (
+    !key ||
+    !origin ||
+    origin.username ||
+    origin.password ||
+    origin.search ||
+    origin.hash ||
+    origin.pathname !== "/" ||
+    (origin.protocol !== "https:" && !local)
+  )
+    throw unavailable
+  const response = await fetcher(`${url}/auth/v1/admin/users/${encodeURIComponent(id)}`, {
+    headers: { apikey: key, authorization: `Bearer ${key}` },
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => undefined)
+  if (!response?.ok) await response?.body?.cancel().catch(() => undefined)
+  // The token outlived its account.
+  if (response?.status === 404) throw new ApiError(401, "CLI_TOKEN_INVALID", "Sign in to Vector again to continue.")
+  if (!response?.ok) throw unavailable
+  const user: unknown = await response.json().catch(() => undefined)
+  if (!user || typeof user !== "object" || !("id" in user) || user.id !== id) throw unavailable
+  return accountProfile("user_metadata" in user ? user.user_metadata : undefined)
+}
+
+/** Display-only name and photo from Supabase user metadata. Anything odd is left out; it never fails a request. */
+export function accountProfile(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object") return {}
+  const name =
+    "full_name" in metadata && metadata.full_name ? metadata.full_name : "name" in metadata ? metadata.name : undefined
+  const avatar = accountAvatar(
+    "avatar_url" in metadata && metadata.avatar_url
+      ? metadata.avatar_url
+      : "picture" in metadata
+        ? metadata.picture
+        : undefined,
+  )
   return {
-    id: user.id,
-    email,
-    ...(typeof metadataName === "string" && metadataName.trim() ? { name: metadataName.trim() } : {}),
+    ...(typeof name === "string" && name.trim() ? { name: name.trim() } : {}),
+    ...(avatar ? { avatar } : {}),
   }
+}
+
+/**
+ * A profile photo the desktop may download: https on Google's avatar hosts only. People can edit their own
+ * metadata, and other googleusercontent.com names (reverse DNS for cloud VMs, for one) reach servers anyone can
+ * run, so the list stays this narrow.
+ */
+export function accountAvatar(value: unknown) {
+  if (typeof value !== "string" || value.length > 2_048) return undefined
+  const url = URL.parse(value.trim())
+  if (
+    !url ||
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.port ||
+    !/^lh\d\.googleusercontent\.com$/.test(url.hostname)
+  )
+    return undefined
+  return url.href
 }

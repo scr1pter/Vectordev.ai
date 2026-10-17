@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto"
+import { accountAvatar } from "./account.js"
 import { ApiError } from "./http.js"
 import { persistentStore } from "./persistent-store.js"
 import type { CliTokenUser } from "./cli-token.js"
@@ -30,7 +31,7 @@ function binding(value: unknown) {
 }
 
 export async function mintDesktopCode(
-  user: CliTokenUser & { name?: string },
+  user: CliTokenUser & { name?: string; avatar?: string },
   input: unknown,
   fetcher: typeof fetch = fetch,
 ) {
@@ -88,10 +89,11 @@ export async function consumeDesktopCode(input: unknown, fetcher: typeof fetch =
     typeof parsed.user.email !== "string"
   )
     throw invalid()
-  // The name is display-only, so a missing or odd value never fails the exchange.
+  // The name and photo are display-only, so a missing or odd value never fails the exchange.
   const name =
     "name" in parsed.user && typeof parsed.user.name === "string" ? parsed.user.name.trim().slice(0, 120) : ""
-  return { id: parsed.user.id, email: parsed.user.email, ...(name ? { name } : {}) }
+  const avatar = "avatar" in parsed.user ? accountAvatar(parsed.user.avatar) : undefined
+  return { id: parsed.user.id, email: parsed.user.email, ...(name ? { name } : {}), ...(avatar ? { avatar } : {}) }
 }
 
 function codeKey(code: string) {

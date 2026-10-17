@@ -2,6 +2,9 @@ import { expect, test } from "bun:test"
 import { createHash, randomBytes } from "node:crypto"
 import { createVectorAccount, syncVectorAccount } from "./vector-account"
 
+const PHOTO = "https://lh3.googleusercontent.com/a/fixture=s96-c"
+const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+
 function fixture() {
   const state = {
     stored: undefined as unknown,
@@ -13,6 +16,10 @@ function fixture() {
     failSync: false,
     codium: {} as Record<string, unknown>,
     name: undefined as string | undefined,
+    avatar: undefined as string | undefined,
+    ttl: 100_000,
+    profile: undefined as Record<string, unknown> | undefined,
+    photo: () => new Response(png, { headers: { "content-type": "image/png" } }),
   }
   const fetched: string[] = []
   const urls: string[] = []
@@ -48,11 +55,18 @@ function fixture() {
       fetched.push(url)
       requests.push(init)
       if (url === "https://vectordev.ai/api/model-plans/status") return Response.json(state.codium)
+      if (url === "https://vectordev.ai/api/account/profile")
+        return state.profile ? Response.json(state.profile) : new Response(null, { status: 503 })
+      if (url !== "https://vectordev.ai/api/account/cli-exchange") return state.photo()
       await state.fetchDelay
       return Response.json({
         token,
-        expiresAt: state.now + 100_000,
-        user: { email: "fixture@example.test", ...(state.name === undefined ? {} : { name: state.name }) },
+        expiresAt: state.now + state.ttl,
+        user: {
+          email: "fixture@example.test",
+          ...(state.name === undefined ? {} : { name: state.name }),
+          ...(state.avatar === undefined ? {} : { avatar: state.avatar }),
+        },
       })
     },
     sync: async (value) => {
@@ -287,4 +301,166 @@ test("a missing or blank name never fails sign-in", async () => {
   expect(app.controller.status()).toMatchObject({ authenticated: true, email: "fixture@example.test" })
   expect(app.controller.status()).not.toHaveProperty("name")
   expect(app.state.stored).not.toHaveProperty("name")
+})
+
+test("sign-in downloads the photo in the main process and the renderer only ever gets a data URL", async () => {
+  const app = fixture()
+  app.state.avatar = PHOTO
+  await app.controller.start()
+  await app.controller.consume([app.callback()])
+  const photo = `data:image/png;base64,${png.toString("base64")}`
+  expect(app.controller.status()).toMatchObject({ authenticated: true, avatar: photo })
+  expect(app.state.stored).toMatchObject({ avatar: photo, avatarSource: PHOTO, profileAt: app.state.now })
+  expect(app.statuses.at(-1)).toMatchObject({ avatar: photo })
+  expect(app.fetched.at(-1)).toBe(PHOTO)
+  // Google gets a plain image request: no account token, and no redirects to somewhere else.
+  expect(app.requests.at(-1)!.redirect).toBe("error")
+  expect(new Headers(app.requests.at(-1)!.headers).has("authorization")).toBe(false)
+  expect(JSON.stringify(app.statuses)).not.toContain(PHOTO)
+  await app.controller.logout()
+  expect(app.controller.status()).not.toHaveProperty("avatar")
+})
+
+test("a saved sign-in refreshes its name and photo at most once a day and only while signed in", async () => {
+  const app = fixture()
+  app.state.ttl = 90 * 24 * 60 * 60 * 1_000
+  expect(await app.controller.refreshProfile()).toEqual({ authenticated: false, pending: false })
+  expect(app.fetched).toEqual([])
+  await app.controller.start()
+  await app.controller.consume([app.callback()])
+  // A sign-in saved before names and photos were carried.
+  app.state.stored = {
+    ciphertext: (app.state.stored as { ciphertext: string }).ciphertext,
+    email: "fixture@example.test",
+    expiresAt: app.state.now + app.state.ttl,
+  }
+  app.state.profile = { name: "  Ada Lovelace ", avatar: PHOTO }
+  const count = app.fetched.length
+  expect(await app.controller.refreshProfile()).toMatchObject({
+    name: "Ada Lovelace",
+    avatar: `data:image/png;base64,${png.toString("base64")}`,
+  })
+  expect(app.fetched.slice(count)).toEqual(["https://vectordev.ai/api/account/profile", PHOTO])
+  const profile = app.requests[count]
+  expect(new Headers(profile.headers).get("authorization")).toBe(`Bearer ${app.token}`)
+  expect(profile.redirect).toBe("error")
+  await app.controller.refreshProfile()
+  app.state.now += 23 * 60 * 60 * 1_000
+  await app.controller.refreshProfile()
+  expect(app.fetched.length).toBe(count + 2)
+  // A day later the profile is asked again, and the unchanged photo is not downloaded again.
+  app.state.now += 60 * 60 * 1_000
+  await app.controller.refreshProfile()
+  expect(app.fetched.slice(count + 2)).toEqual(["https://vectordev.ai/api/account/profile"])
+  app.state.now += app.state.ttl
+  await app.controller.refreshProfile()
+  expect(app.fetched.length).toBe(count + 3)
+})
+
+test("photos outside Google's avatar hosts, of other types or over 256 KB are never kept", async () => {
+  const sources = [
+    "https://evil.example/photo.png",
+    "http://lh3.googleusercontent.com/a/fixture",
+    "https://lh3.googleusercontent.com.evil.example/a/fixture",
+    "https://1.2.3.4.bc.googleusercontent.com/a/fixture",
+    "https://user@lh3.googleusercontent.com/a/fixture",
+    "https://lh3.googleusercontent.com:8443/a/fixture",
+    `https://lh3.googleusercontent.com/a/${"x".repeat(2_100)}`,
+  ]
+  for (const source of sources) {
+    const app = fixture()
+    app.state.avatar = source
+    await app.controller.start()
+    await app.controller.consume([app.callback()])
+    expect(app.fetched).toEqual(["https://vectordev.ai/api/account/cli-exchange"])
+    expect(app.controller.status()).toMatchObject({ authenticated: true })
+    expect(app.controller.status()).not.toHaveProperty("avatar")
+  }
+  const responses = [
+    () => new Response("<svg onload=alert(1)>", { headers: { "content-type": "image/svg+xml" } }),
+    () => new Response("<html>", { headers: { "content-type": "text/html" } }),
+    () => new Response(png, { status: 404, headers: { "content-type": "image/png" } }),
+    () => new Response(new Uint8Array(0), { headers: { "content-type": "image/png" } }),
+    () => new Response(png, { headers: { "content-type": "image/png", "content-length": String(300 * 1024) } }),
+    // A body larger than it says: the cap holds while reading.
+    () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            Array.from({ length: 5 }, () => controller.enqueue(new Uint8Array(64 * 1024)))
+            controller.close()
+          },
+        }),
+        { headers: { "content-type": "image/jpeg" } },
+      ),
+    () => {
+      throw new TypeError("fetch failed: redirect mode is set to error")
+    },
+  ]
+  for (const response of responses) {
+    const app = fixture()
+    app.state.avatar = PHOTO
+    app.state.photo = response
+    await app.controller.start()
+    await app.controller.consume([app.callback()])
+    expect(app.fetched.at(-1)).toBe(PHOTO)
+    expect(app.controller.status()).toMatchObject({ authenticated: true })
+    expect(app.controller.status()).not.toHaveProperty("avatar")
+    // Not settled, so the next start tries the photo again.
+    expect(app.state.stored).not.toHaveProperty("profileAt")
+  }
+})
+
+test("a failed refresh keeps the last good photo, and a profile without one falls back to the initial", async () => {
+  const app = fixture()
+  app.state.ttl = 90 * 24 * 60 * 60 * 1_000
+  app.state.avatar = PHOTO
+  await app.controller.start()
+  await app.controller.consume([app.callback()])
+  const photo = app.controller.status().avatar
+  expect(photo).toStartWith("data:image/png;base64,")
+  app.state.now += 25 * 60 * 60 * 1_000
+  // vectordev.ai unavailable: nothing changes and nothing is settled.
+  await app.controller.refreshProfile()
+  expect(app.controller.status()).toMatchObject({ avatar: photo })
+  // A new photo that cannot be downloaded keeps the old one.
+  app.state.profile = { name: null, avatar: `${PHOTO}-new` }
+  app.state.photo = () => new Response(null, { status: 500 })
+  await app.controller.refreshProfile()
+  expect(app.controller.status()).toMatchObject({ avatar: photo })
+  expect(app.state.stored).toMatchObject({ avatarSource: PHOTO })
+  // The account has no photo any more.
+  app.state.profile = { name: null, avatar: null }
+  await app.controller.refreshProfile()
+  expect(app.controller.status()).not.toHaveProperty("avatar")
+  expect(app.state.stored).not.toHaveProperty("avatarSource")
+  // A saved value that is not an inline image never reaches the renderer.
+  app.state.stored = { ...(app.state.stored as object), avatar: PHOTO, avatarSource: PHOTO }
+  expect(app.controller.status()).not.toHaveProperty("avatar")
+})
+
+test("signing out while the photo downloads keeps the account signed out", async () => {
+  const app = fixture()
+  app.state.avatar = PHOTO
+  const released = Promise.withResolvers<void>()
+  app.state.photo = () => {
+    void app.controller.logout()
+    return new Response(
+      new ReadableStream({
+        async start(controller) {
+          await released.promise
+          controller.enqueue(png)
+          controller.close()
+        },
+      }),
+      { headers: { "content-type": "image/png" } },
+    )
+  }
+  await app.controller.start()
+  const signingIn = app.controller.consume([app.callback()])
+  for (let count = 0; count < 50 && app.state.stored; count++) await Bun.sleep(1)
+  released.resolve()
+  await signingIn
+  expect(app.state.stored).toBeUndefined()
+  expect(app.controller.status()).toEqual({ authenticated: false, pending: false })
 })

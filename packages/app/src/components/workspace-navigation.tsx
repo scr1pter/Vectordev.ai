@@ -1,6 +1,6 @@
-import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js"
+import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js"
 import { usePlatform } from "@/context/platform"
-import type { VectorAccountStatus } from "../vector-account"
+import { accountChip, type VectorAccountStatus } from "../vector-account"
 
 export type WorkspaceNavigationItem = {
   id: string
@@ -100,8 +100,7 @@ export function WorkspaceNavigation(props: {
   const [helpOpen, setHelpOpen] = createSignal(false)
   const [account, setAccount] = createSignal<VectorAccountStatus>({ authenticated: false, pending: false })
   const mode = () => props.mode ?? localMode()
-  // The signed-in person, as Codex and Claude show it: name from Google or the account, else the email.
-  const accountLabel = () => account().name || account().email || ""
+  const chip = createMemo(() => accountChip(account()))
 
   onMount(() => {
     const vectorAccount = platform.vectorAccount
@@ -739,7 +738,7 @@ export function WorkspaceNavigation(props: {
           }
         >
           <Show
-            when={account().authenticated && accountLabel()}
+            when={account().authenticated && chip().label}
             fallback={
               <button
                 type="button"
@@ -764,16 +763,31 @@ export function WorkspaceNavigation(props: {
               data-vector-account-chip
               class="flex min-w-0 items-center gap-2 rounded-[6px] px-1 py-1 text-left transition hover:bg-white/[0.05]"
               title={account().email}
-              aria-label={`Account: ${accountLabel()}. Open settings`}
+              aria-label={`Account: ${chip().label}. Open settings`}
               onClick={props.onSettings}
             >
-              <span
-                aria-hidden="true"
-                class="grid size-6 shrink-0 place-items-center rounded-full bg-[color:var(--vx-purple)] text-[11px] font-medium uppercase text-white"
+              <Show
+                when={chip().photo}
+                fallback={
+                  <span
+                    aria-hidden="true"
+                    class="grid size-6 shrink-0 place-items-center rounded-full bg-[color:var(--vx-purple)] text-[11px] font-medium uppercase text-[#fff]"
+                  >
+                    {chip().initial}
+                  </span>
+                }
               >
-                {accountLabel().trim().charAt(0)}
-              </span>
-              <span class="truncate text-[12.5px] text-white/85">{accountLabel()}</span>
+                {(photo) => (
+                  <img
+                    src={photo()}
+                    alt=""
+                    decoding="async"
+                    draggable={false}
+                    class="size-6 shrink-0 rounded-full bg-[color:var(--vx-control)] object-cover"
+                  />
+                )}
+              </Show>
+              <span class="truncate text-[12.5px] text-[color:var(--vx-workspace-text-primary)]">{chip().label}</span>
             </button>
           </Show>
         </Show>

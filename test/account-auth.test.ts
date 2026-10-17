@@ -52,6 +52,35 @@ describe("Vector account authentication", () => {
     })
   })
 
+  test("carries a Google profile photo and drops one from any other host without failing sign-in", async () => {
+    process.env.SUPABASE_URL = "https://vector.supabase.co"
+    process.env.SUPABASE_PUBLISHABLE_KEY = "sb_publishable_vector"
+    const signIn = (user_metadata: Record<string, unknown>) =>
+      requireAccountUser(request("session"), () =>
+        Promise.resolve(
+          Response.json({
+            id: "9db2bb31-81d5-43cb-b4a1-f1d3d799c9cb",
+            email: "user@example.com",
+            email_confirmed_at: "2026-09-01T12:00:00.000Z",
+            user_metadata,
+          }),
+        ),
+      )
+    expect(
+      await signIn({ name: "Vector User", avatar_url: "https://lh3.googleusercontent.com/a/photo=s96-c" }),
+    ).toEqual({
+      id: "9db2bb31-81d5-43cb-b4a1-f1d3d799c9cb",
+      email: "user@example.com",
+      name: "Vector User",
+      avatar: "https://lh3.googleusercontent.com/a/photo=s96-c",
+    })
+    expect(await signIn({ picture: "https://lh4.googleusercontent.com/photo.jpg" })).toMatchObject({
+      avatar: "https://lh4.googleusercontent.com/photo.jpg",
+    })
+    expect(await signIn({ avatar_url: "https://avatars.example/photo.png" })).not.toHaveProperty("avatar")
+    expect(await signIn({ avatar_url: "https://storage.googleusercontent.com/photo.png" })).not.toHaveProperty("avatar")
+  })
+
   test("rejects an unconfirmed email", async () => {
     process.env.SUPABASE_URL = "https://vector.supabase.co"
     process.env.SUPABASE_PUBLISHABLE_KEY = "sb_publishable_vector"

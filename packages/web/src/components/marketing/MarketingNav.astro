@@ -3,22 +3,16 @@ import vectorMark from "../../assets/vector-mark.webp"
 
 interface Props {
   active?: "home" | "product" | "docs" | "login" | "codium"
-  /** False leaves the Vector mark out of the bar's left end; the links keep their place at its right end. */
-  brand?: boolean
 }
 
-const { active = "home", brand = true } = Astro.props
+const { active = "home" } = Astro.props
 ---
 
 <header class="site-header">
-  <div class:list={["site-nav", { "site-nav--bare": !brand }]}>
-    {
-      brand && (
-        <a class="site-brand" href="/" aria-label="Vector home">
-          <img src={vectorMark.src} alt="" width="28" height="28" />
-        </a>
-      )
-    }
+  <div class="site-nav">
+    <a class="site-brand" href="/" aria-label="Vector home">
+      <img src={vectorMark.src} alt="" width="28" height="28" />
+    </a>
 
     <nav class="desktop-links" aria-label="Primary navigation">
       <a class:list={{ active: active === "codium" }} href="/codium">Codium</a>
@@ -90,11 +84,6 @@ const { active = "home", brand = true } = Astro.props
     backdrop-filter: blur(28px) saturate(155%);
     -webkit-backdrop-filter: blur(28px) saturate(155%);
     pointer-events: auto;
-  }
-
-  /* With no mark at the left end, the links stay at the right end, where they sit beside it. */
-  .site-nav--bare {
-    justify-content: flex-end;
   }
 
   .site-brand {
