@@ -378,6 +378,32 @@ describe("FSUtil", () => {
       if (process.platform === "win32") expect(FSUtil.contains("C:\\a", "D:\\b")).toBe(false)
     })
 
+    test("within finds a path under every spelling of a root", async () => {
+      const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "vector-within-")))
+      const linkType = process.platform === "win32" ? "junction" : "dir"
+      try {
+        const root = path.join(base, "root")
+        const outside = path.join(base, "outside")
+        await fs.mkdir(root)
+        await fs.mkdir(outside)
+        await fs.symlink(root, path.join(base, "alias"), linkType)
+        await fs.symlink(outside, path.join(root, "away"), linkType)
+        await fs.symlink(path.join(root, "away"), path.join(base, "chain"), linkType)
+
+        expect(FSUtil.within([root], path.join(root, "a.json"))).toBe(path.join(root, "a.json"))
+        // Another spelling of the root, a link of the root's own that points out, and a link to that link.
+        expect(FSUtil.within([root], path.join(base, "alias", "a.json"))).toBe(path.join(root, "a.json"))
+        expect(FSUtil.within([root], path.join(base, "alias", "away", "a.json"))).toBe(
+          path.join(root, "away", "a.json"),
+        )
+        expect(FSUtil.within([root], path.join(base, "chain", "a.json"))).toBe(path.join(root, "away", "a.json"))
+        expect(FSUtil.within([root], path.join(outside, "a.json"))).toBeUndefined()
+        expect(FSUtil.within([root], path.join(base, "alias", "..", "outside", "a.json"))).toBeUndefined()
+      } finally {
+        await fs.rm(base, { recursive: true, force: true })
+      }
+    })
+
     test("writableInside allows only a plain file that really lands inside the root", async () => {
       const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "vector-writable-")))
       const linkType = process.platform === "win32" ? "junction" : "dir"

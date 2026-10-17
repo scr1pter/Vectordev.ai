@@ -1,4 +1,4 @@
-import { basename, dirname, isAbsolute, join, relative, resolve as pathResolve, sep } from "path"
+import { basename, dirname, isAbsolute, join, parse, relative, resolve as pathResolve, sep } from "path"
 import { lstatSync, readlinkSync, realpathSync } from "fs"
 import * as NFS from "fs/promises"
 import { lookup } from "mime-types"
@@ -250,6 +250,72 @@ export namespace FSUtil {
     const parent = dirname(resolved)
     if (parent === resolved) return resolved
     return join(realpath(parent), basename(resolved))
+  }
+
+  /**
+   * The spelling of `file` under the first of `roots` it passes through, under any spelling of either, or undefined
+   * when it passes through none. It passes through a root as written, once any directory on its way is resolved (a
+   * link inside a root stays the root's wherever it points), at any link it passes through on the way (a link outside
+   * to a link inside that points out again), or where it finally lands (a link from outside into a root). It comes
+   * back rebased onto that root as given, so containment checks against the root agree with it. A path that cannot be
+   * resolved, such as a link loop, throws.
+   */
+  export function within(roots: readonly string[], file: string): string | undefined {
+    const requested = pathResolve(windowsPath(file))
+    // As written first, which needs no file system access.
+    const written = rebase(requested, roots, roots)
+    if (written) return written
+    const bases = roots.map((root) => realpath(root))
+    return [
+      ...ancestors(requested).map((parent) => join(realpath(parent), relative(parent, requested))),
+      ...passes(requested),
+      realpath(requested),
+    ]
+      .map((spelling) => rebase(spelling, roots, bases))
+      .find((item) => item !== undefined)
+  }
+
+  // The spelling moved onto the first root whose form in `bases` contains it.
+  function rebase(spelling: string, roots: readonly string[], bases: readonly string[]) {
+    const index = bases.findIndex((base) => contains(base, spelling))
+    if (index === -1) return
+    return join(roots[index], relative(bases[index], spelling))
+  }
+
+  // Every link the path passes through while it resolves, one step at a time, spelled as the link's own location
+  // followed by the rest of the path. Resolving whole parents at once skips the middle of a chain: a user's link to a
+  // project's link that points out of the project would land outside without ever being seen inside it.
+  function passes(file: string) {
+    const split = (value: string) => value.split(process.platform === "win32" ? /[\\/]/ : "/")
+    const start = parse(file).root
+    const walk = (current: string, rest: string[], hops: number): string[] => {
+      if (!rest.length) return []
+      const [name, ...remaining] = rest
+      if (name === "" || name === ".") return walk(current, remaining, hops)
+      // `current` has no links in it, so its parent is the real one.
+      if (name === "..") return walk(dirname(current), remaining, hops)
+      const next = join(current, name)
+      const info = lstatSync(next, { throwIfNoEntry: false })
+      // Nothing below an entry that does not exist can be a link.
+      if (!info) return []
+      if (!info.isSymbolicLink()) return walk(next, remaining, hops)
+      if (hops >= 40) throw new Error(`Too many links in ${file}`)
+      // The target's own `..` is applied after its links, as the kernel does, so it is not collapsed up front.
+      const target = readlinkSync(next)
+      const root = isAbsolute(target) ? parse(target).root : ""
+      return [
+        join(normalizePath(current), name, ...remaining),
+        ...walk(root || current, [...split(target.slice(root.length)), ...remaining], hops + 1),
+      ]
+    }
+    return walk(start, split(file.slice(start.length)), 0)
+  }
+
+  // Deepest first, so the path that comes back is resolved as far as it stays inside a root.
+  function ancestors(file: string): string[] {
+    const parent = dirname(file)
+    if (parent === file) return []
+    return [parent, ...ancestors(parent)]
   }
 
   /**
