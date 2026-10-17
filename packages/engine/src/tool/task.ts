@@ -24,6 +24,8 @@ import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
 import { Cause, Effect, Exit, Option, Schema, Scope, Semaphore } from "effect"
 import { EffectBridge } from "@/effect/bridge"
+import { InstanceState } from "@/effect/instance-state"
+import { realpath } from "./external-directory"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@vectordevai/core/database/database"
 import { Provider } from "@/provider/provider"
@@ -399,7 +401,11 @@ export const TaskTool = Tool.define(
       // A revert started while the notes waited for their batch is waited out here too.
       yield* unreverted(parentID, 1_000)
       const batch = (yield* Effect.forEach(waiting, (note) =>
-        launched(note, parentID).pipe(Effect.map((kept) => (kept ? [note] : []))),
+        Effect.gen(function* () {
+          if (!(yield* launched(note, parentID))) return []
+          const task = yield* sessions.get(note.taskID)
+          return SubagentLifecycle.read(task)?.attempt === note.attempt ? [note] : []
+        }),
       )).flat()
       const first = batch[0]
       if (!first) return
@@ -529,6 +535,7 @@ export const TaskTool = Tool.define(
       // The description is the title on the subagent's card, the child session and the job.
       const title = subagentTitle(params.description, params.prompt)
       const dependencies = [...new Set(params.depends_on?.map((item) => item.trim()).filter(Boolean) ?? [])]
+      const durableDependencies = new Map<string, string>()
       const jobs = yield* background.list()
       if (batch?.multiple && session && jobs.some((job) => job.id === session.id && job.status === "running")) {
         return yield* Effect.fail(
@@ -543,7 +550,17 @@ export const TaskTool = Tool.define(
         }
         const job = jobs.find((item) => item.id === dependency)
         if (!job) {
-          return yield* Effect.fail(new Error(`Dependency ${dependency} was not found in this project runtime.`))
+          const parsed = Schema.decodeUnknownOption(SessionID)(dependency)
+          const saved = parsed._tag === "Some" ? yield* sessions.get(parsed.value).pipe(Effect.option) : Option.none()
+          if (saved._tag === "None") return yield* Effect.fail(new Error(`Dependency ${dependency} was not found in this project runtime.`))
+          const record = SubagentLifecycle.read(saved.value)
+          if (saved.value.internal || saved.value.parentID !== ctx.sessionID || !record)
+            return yield* Effect.fail(new Error(`Dependency ${dependency} does not belong to this task's subagent group.`))
+          if (record.status !== "completed") return yield* Effect.fail(new Error(`Dependency ${dependency} is ${record.status}; explicitly resume interrupted work before depending on it.`))
+          const recent = yield* sessions.messages({ sessionID: saved.value.id, limit: 8 })
+          const report = record.resultSummary ?? recent.findLast((item) => item.info.role === "assistant")?.parts.flatMap((part) => part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []).join("\n\n") ?? "Completed; inspect its saved session for details."
+          durableDependencies.set(dependency, report)
+          continue
         }
         if (job.type !== id || job.metadata?.parentSessionId !== ctx.sessionID) {
           return yield* Effect.fail(
@@ -557,8 +574,16 @@ export const TaskTool = Tool.define(
         }
       }
 
+      const instance = yield* InstanceState.context
       const ownedPaths = yield* Effect.try({
-        try: () => [...new Set(params.owned_paths?.map(normalizedPath).filter(Boolean) ?? [])],
+        try: () => {
+          const canonical = (owned: string) => normalizedPath(path.relative(realpath(instance.directory), realpath(path.resolve(instance.directory, owned))) || ".")
+          const inherited = (SubagentLifecycle.read(parent)?.ownedPaths ?? []).map(canonical)
+          const requested = [...new Set(params.owned_paths?.map(normalizedPath).filter(Boolean).map(canonical) ?? [])]
+          if (inherited.length && requested.some((owned) => !inherited.some((boundary) => boundary === "." || owned === boundary || owned.startsWith(`${boundary}/`))))
+            throw new Error("A nested subagent's owned_paths must stay within its parent's assignment.")
+          return requested.length ? requested : inherited
+        },
         catch: (error) => (error instanceof Error ? error : new Error(String(error))),
       })
       const reserved: Array<{ parentSessionID: SessionID; taskID?: string; title: string; paths: string[] }> = []
@@ -818,7 +843,7 @@ export const TaskTool = Tool.define(
         if (batch && ctx.abort.aborted) return yield* Effect.interrupt
         // tools.ts resets the part's time.start on every metadata write, so the launch time travels as startedAt.
         const startedAt = Date.now()
-        const attempt = (session ? SubagentLifecycle.read(session)?.attempt ?? 0 : 0) + 1
+        let attempt = (session ? SubagentLifecycle.read(session)?.attempt ?? 0 : 0) + 1
         const batchID = `${ctx.sessionID}:${ctx.callID ?? ctx.messageID}`
         const record: SubagentRecord = {
           kind,
@@ -951,7 +976,7 @@ export const TaskTool = Tool.define(
           Object.assign(outcome, SubagentLifecycle.defined(settled))
           if (persist) yield* persistPart()
           else if (batch) yield* ctx.metadata({ title, metadata: partMetadata() })
-        })
+        }, claimLock.withPermits(1))
 
         const runTask = Effect.fn("TaskTool.runTask")(function* () {
           // Observe every prerequisite together so a later failure or stop can settle this task immediately.
@@ -959,6 +984,11 @@ export const TaskTool = Tool.define(
             dependencies,
             (dependency) =>
               Effect.gen(function* () {
+                const saved = durableDependencies.get(dependency)
+                if (saved !== undefined) {
+                  const report = yield* truncate.output(saved, { maxBytes: 2048, maxLines: 40 })
+                  return TaskMailbox.envelope(report.content, { sender: dependency, recipient: nextSession.id })
+                }
                 const waited = yield* background.wait({ id: dependency })
                 if (!waited.info) {
                   return yield* Effect.fail(
@@ -1149,6 +1179,10 @@ export const TaskTool = Tool.define(
             const claim = { taskID: nextSession.id, dependencies }
             const release = Effect.sync(() => dependencyClaims.delete(claim))
             if (dependencies.length > 0) dependencyClaims.add(claim)
+            const assignment = SubagentLifecycle.read(yield* sessions.get(nextSession.id))
+            if (ownedPaths.length) yield* SubagentLifecycle.write(sessions, nextSession.id, {
+              ownedPaths: [...new Set([...(assignment?.ownedPaths ?? []), ...ownedPaths])],
+            }, assignment?.attempt)
             const added = yield* background
               .extend({
                 id: nextSession.id,
@@ -1156,7 +1190,10 @@ export const TaskTool = Tool.define(
                 concurrent: busy,
               })
               .pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) && exit.value ? Effect.void : release)))
-            if (!added) return undefined
+            if (!added) {
+              if (ownedPaths.length) yield* SubagentLifecycle.write(sessions, nextSession.id, { ownedPaths: assignment?.ownedPaths }, assignment?.attempt)
+              return undefined
+            }
             // A queued extension may be cancelled before its run is entered, so its run finalizer cannot release it.
             if (dependencies.length > 0)
               yield* background
@@ -1195,7 +1232,15 @@ export const TaskTool = Tool.define(
         // call refused here leaves the record describing the run it already had.
         const info = yield* claimLock.withPermits(1)(
           Effect.gen(function* () {
+            // Another resume may have won after extendRun released the lock. Never overwrite its assignment.
+            const existing = yield* background.get(nextSession.id)
+            if (existing?.status === "running") return existing
             yield* assertDependencies(nextSession.id, dependencies)
+            if (session) {
+              attempt = (SubagentLifecycle.read(yield* sessions.get(nextSession.id))?.attempt ?? 0) + 1
+              record.attempt = attempt
+              metadata.attempt = attempt
+            }
             yield* guard.link(nextSession.id, ctx.sessionID, {
               budget: params.budget,
               ...(batch ? { batch: { id: batchID, budget: batch.budget } } : {}),

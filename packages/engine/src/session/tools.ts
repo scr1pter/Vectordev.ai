@@ -52,6 +52,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const run = yield* EffectBridge.make()
   const plugin = yield* Plugin.Service
   const permission = yield* Permission.Service
+  const sessions = yield* Session.Service
   const registry = yield* ToolRegistry.Service
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
@@ -63,6 +64,10 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     callID: options.toolCallId,
     extra: { model: input.model, invokedAgents: input.invokedAgents, promptOps: input.promptOps },
     ownedPaths: SubagentLifecycle.read(input.session)?.ownedPaths,
+    getOwnedPaths: () => sessions.get(input.session.id).pipe(
+      Effect.map((session) => SubagentLifecycle.read(session)?.ownedPaths ?? SubagentLifecycle.read(input.session)?.ownedPaths),
+      Effect.orDie,
+    ),
     agent: input.agent.name,
     messages: input.messages,
     metadata: (val) =>

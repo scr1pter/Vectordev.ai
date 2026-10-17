@@ -51,6 +51,7 @@ describe("task management", () => {
     const a = yield* child(root.id, { runtimeID: "previous-process", ownedPaths: ["src/a"], dependsOn: ["previous-task"] })
     yield* child(a.id, { status: "completed" })
     yield* sessions.create({ parentID: root.id, internal: "review" })
+    yield* sessions.create({ parentID: root.id, metadata: { subagent: {} } })
     const direct = yield* manager.list({ sessionID: root.id })
     expect(direct.tasks).toHaveLength(1)
     expect(direct.tasks[0]).toMatchObject({ id: a.id, status: "stopped", ownedPaths: ["src/a"], dependsOn: ["previous-task"], attempt: 1 })
@@ -60,15 +61,29 @@ describe("task management", () => {
     expect(SubagentLifecycle.read(yield* sessions.get(a.id))?.status).toBe("cancelled")
   }))
 
+  it.instance("concurrent lifecycle patches preserve mailbox and outcome fields", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const root = yield* sessions.create()
+    const task = yield* child(root.id)
+    yield* Effect.all([
+      SubagentLifecycle.write(sessions, task.id, { status: "completed", resultRef: "artifact:verified" }, 1),
+      SubagentLifecycle.write(sessions, task.id, { mailbox: [{ id: "msg_test", sender: root.id, text: "correction", delivery: "steer", createdAt: 1 }] }, 1),
+    ], { concurrency: "unbounded" })
+    expect(SubagentLifecycle.read(yield* sessions.get(task.id))).toMatchObject({ status: "completed", resultRef: "artifact:verified", mailbox: [{ text: "correction" }] })
+    yield* SubagentLifecycle.write(sessions, task.id, { status: "running", attempt: 2 })
+    yield* SubagentLifecycle.write(sessions, task.id, { status: "completed" }, 1)
+    expect(SubagentLifecycle.read(yield* sessions.get(task.id))?.status).toBe("running")
+  }))
+
   it.instance("malformed IDs produce typed errors for every control before effects", () => Effect.gen(function* () {
     const sessions = yield* Session.Service
     const manager = yield* TaskManager.Service
     const root = yield* sessions.create()
     const inputs = [
-      manager.inspect({ sessionID: root.id, taskID: "unknown" }),
-      manager.message({ sessionID: root.id, taskID: "unknown", text: "continue" }, ops),
-      manager.stop({ sessionID: root.id, taskIDs: ["unknown"] }, ops),
-      manager.wait({ sessionID: root.id, taskIDs: ["unknown"] }),
+      manager.inspect({ sessionID: root.id, taskID: "unknown" }).pipe(Effect.asVoid),
+      manager.message({ sessionID: root.id, taskID: "unknown", text: "continue" }, ops).pipe(Effect.asVoid),
+      manager.stop({ sessionID: root.id, taskIDs: ["unknown"] }, ops).pipe(Effect.asVoid),
+      manager.wait({ sessionID: root.id, taskIDs: ["unknown"] }).pipe(Effect.asVoid),
     ]
     for (const effect of inputs) {
       const result = yield* effect.pipe(Effect.match({ onFailure: (error) => error, onSuccess: () => undefined }))
@@ -153,6 +168,52 @@ describe("task management", () => {
     yield* manager.stop({ sessionID: root.id, taskIDs: [a.id] }, promptOps)
     expect(received).toEqual([])
     expect(Exit.isFailure(yield* manager.message({ sessionID: root.id, taskID: a.id, text: "Do more" }, promptOps).pipe(Effect.exit))).toBe(true)
+  }))
+
+  it.instance("parent corrections join the active child while completion waits for admitted work", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const statuses = yield* SessionStatus.Service
+    const root = yield* sessions.create()
+    const task = yield* child(root.id)
+    const original = yield* Deferred.make<void>()
+    const correction = yield* Deferred.make<void>()
+    const delivered = yield* Deferred.make<string>()
+    yield* jobs.start({ id: task.id, type: "task", run: Deferred.await(original).pipe(Effect.as("initial answer")) })
+    yield* statuses.set(task.id, { type: "busy" })
+    const receipt = yield* manager.message({ sessionID: root.id, taskID: task.id, text: "User correction: include keyboard access" }, { ...ops, prompt: (input) => Effect.gen(function* () {
+      expect(input.sessionID).toBe(task.id)
+      yield* Deferred.succeed(delivered, input.parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n"))
+      yield* Deferred.await(correction)
+      return reply(input)
+    }) })
+    expect(receipt).toMatchObject({ accepted: true, taskID: task.id, delivery: "steer" })
+    expect(yield* Deferred.await(delivered)).toContain("Apply relevant corrections")
+    yield* Deferred.succeed(original, undefined)
+    expect((yield* manager.wait({ sessionID: root.id, taskIDs: [task.id], timeout: 0 })).timedOut).toBe(true)
+    yield* Deferred.succeed(correction, undefined)
+    expect((yield* manager.wait({ sessionID: root.id, taskIDs: [task.id] })).tasks[0].status).toBe("completed")
+    expect(yield* sessions.children(root.id)).toHaveLength(1)
+  }))
+
+  it.instance("a failed admitted correction cannot make the task look completed", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const manager = yield* TaskManager.Service
+    const jobs = yield* BackgroundJob.Service
+    const root = yield* sessions.create()
+    const task = yield* child(root.id)
+    const original = yield* Deferred.make<void>()
+    yield* jobs.start({ id: task.id, type: "task", run: Deferred.await(original).pipe(Effect.as("partial answer")) })
+    yield* manager.message({ sessionID: root.id, taskID: task.id, text: "Apply correction", delivery: "queue" }, { ...ops, prompt: (input) => Effect.sync(() => {
+      const result = reply(input)
+      if (result.info.role !== "assistant") throw new Error("Expected assistant fixture")
+      return { ...result, info: { ...result.info, error: { name: "UnknownError" as const, data: { message: "Correction failed" } } } }
+    }) })
+    yield* Deferred.succeed(original, undefined)
+    const result = yield* manager.wait({ sessionID: root.id, taskIDs: [task.id] })
+    expect(result.tasks[0].status).toBe("failed")
+    expect(result.tasks[0].reason).toContain("Correction failed")
   }))
 
   it.instance("a sibling can send bounded untrusted data but cannot stop its peer", () => Effect.gen(function* () {

@@ -1,3 +1,5 @@
+import path from "node:path"
+import fs from "node:fs/promises"
 import { afterEach, describe, expect } from "bun:test"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Database } from "@vectordevai/core/database/database"
@@ -24,7 +26,8 @@ import { ToolRegistry } from "@/tool/registry"
 import { Provider } from "@/provider/provider"
 import { Permission } from "@/permission"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { disposeAllInstances } from "../fixture/fixture"
+import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
+import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
@@ -914,6 +917,75 @@ describe("tool.task", () => {
     }),
   )
 
+  background.instance("concurrent explicit resumes preserve the actual winning assignment and budget", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const jobs = yield* BackgroundJob.Service
+    const seeded = yield* seed()
+    const definition = yield* singleTaskDefinition(yield* TaskTool)
+    const initial = yield* definition.execute({ description: "Initial", prompt: "Check" }, taskContext({ sessionID: seeded.chat.id, messageID: seeded.assistant.id, promptOps: stubOps() }))
+    const gate = yield* Deferred.make<void>()
+    const ctx = taskContext({ sessionID: seeded.chat.id, messageID: seeded.assistant.id, promptOps: { ...stubOps(), prompt: (input) => Deferred.await(gate).pipe(Effect.as(reply(input, "verified"))) } })
+    yield* Effect.all([
+      definition.execute({ description: "First resume", prompt: "Check first", task_id: initial.metadata.sessionId, background: true, budget: { steps: 3 } }, { ...ctx, callID: "first_resume" }),
+      definition.execute({ description: "Second resume", prompt: "Check second", task_id: initial.metadata.sessionId, background: true, budget: { steps: 2 } }, { ...ctx, callID: "second_resume" }),
+    ], { concurrency: "unbounded" })
+    const job = yield* jobs.get(initial.metadata.sessionId)
+    const record = SubagentLifecycle.read(yield* sessions.get(initial.metadata.sessionId))!
+    expect(job?.metadata?.callID).toBe(record.callID)
+    expect(job?.metadata?.batchID).toBe(record.batchID)
+    expect(job?.metadata?.attempt).toBe(record.attempt)
+    expect(record.budget?.steps).toBe(record.callID === "first_resume" ? 3 : 2)
+    expect(record.status).toBe("running")
+    yield* Deferred.succeed(gate, undefined)
+    yield* jobs.wait({ id: initial.metadata.sessionId })
+  }))
+
+  it.instance("nested delegation inherits ownership and refuses broader explicit resumes", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const seeded = yield* seed()
+    const definition = yield* singleTaskDefinition(yield* TaskTool)
+    const parent = yield* definition.execute({ description: "Scoped parent", prompt: "Work in src", owned_paths: ["src"] }, taskContext({ sessionID: seeded.chat.id, messageID: seeded.assistant.id, promptOps: stubOps() }))
+    const message = reply({ sessionID: parent.metadata.sessionId, parts: [] }, "Delegate a check")
+    yield* sessions.updateMessage(message.info)
+    const context = taskContext({ sessionID: parent.metadata.sessionId, messageID: message.info.id, promptOps: stubOps() })
+    const nested = yield* definition.execute({ description: "Scoped child", prompt: "Check" }, context)
+    expect(nested.metadata.ownedPaths).toEqual(["src"])
+    const escaped = yield* definition.execute({ description: "Broader child", prompt: "Check elsewhere", task_id: nested.metadata.sessionId, owned_paths: ["other"] }, context).pipe(Effect.exit)
+    expect(Exit.isFailure(escaped)).toBe(true)
+    if (Exit.isFailure(escaped)) expect(Cause.pretty(escaped.cause)).toContain("parent's assignment")
+    expect(SubagentLifecycle.read(yield* sessions.get(nested.metadata.sessionId))?.ownedPaths).toEqual(["src"])
+  }), { trusted: true, config: { agent: { general: { permission: { task: "allow" } } } } })
+
+  background.instance("completed durable dependencies survive a runtime restart without rerunning them", () => Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const seeded = yield* seed()
+    const saved = yield* sessions.create({ parentID: seeded.chat.id, metadata: { subagent: {
+      status: "completed", title: "Foundation", agent: "general", parentSessionID: seeded.chat.id, parentMessageID: seeded.assistant.id, model: ref, startedAt: Date.now(), resultSummary: "Verified foundation artifact", attempt: 1, runtimeID: "previous-process",
+    } } })
+    const prompts: SessionPrompt.PromptInput[] = []
+    const definition = yield* singleTaskDefinition(yield* TaskTool)
+    const result = yield* definition.execute({ description: "Integrate saved result", prompt: "Use the saved foundation", depends_on: [saved.id] }, taskContext({ sessionID: seeded.chat.id, messageID: seeded.assistant.id, promptOps: stubOps({ onPrompt: (input) => prompts.push(input) }) }))
+    expect(result.output).toContain('state="completed"')
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0].sessionID).not.toBe(saved.id)
+    expect(prompts[0].parts.some((part) => part.type === "text" && part.text.includes("Verified foundation artifact"))).toBe(true)
+  }))
+
+  background.instance("symlink aliases cannot hide overlapping sibling ownership", () => Effect.gen(function* () {
+    const instance = yield* TestInstance
+    const seeded = yield* seed()
+    yield* Effect.promise(() => fs.mkdir(path.join(instance.directory, "real")))
+    yield* Effect.promise(() => fs.symlink("real", path.join(instance.directory, "alias")))
+    const definition = yield* singleTaskDefinition(yield* TaskTool)
+    const ctx = taskContext({ sessionID: seeded.chat.id, messageID: seeded.assistant.id, promptOps: { ...stubOps(), prompt: () => Effect.never } })
+    const first = yield* definition.execute({ description: "Own real directory", prompt: "Work", owned_paths: ["real"], background: true }, ctx)
+    const second = yield* definition.execute({ description: "Own alias", prompt: "Work", owned_paths: ["alias/file.ts"], background: true }, ctx).pipe(Effect.exit)
+    expect(Exit.isFailure(second)).toBe(true)
+    if (Exit.isFailure(second)) expect(Cause.pretty(second.cause)).toContain("overlaps")
+    const jobs = yield* BackgroundJob.Service
+    yield* jobs.cancel(first.metadata.sessionId)
+  }))
+
   background.instance("waits for declared dependencies before starting a subagent", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
@@ -1289,6 +1361,8 @@ describe("tool.task", () => {
         busy,
       )
 
+      const sessions = yield* Session.Service
+      expect(SubagentLifecycle.read(yield* sessions.get(started.metadata.sessionId))?.ownedPaths).toEqual(["src/auth", "src/api"])
       const exit = yield* Effect.exit(
         def.execute(
           {
@@ -1392,7 +1466,7 @@ describe("tool.task", () => {
         pollWithTimeout(
           record(sessionID).pipe(
             Effect.map((value) =>
-              value && typeof value === "object" && "status" in value && value.status === "completed"
+              value && typeof value === "object" && "status" in value && value.status === "completed" && "notification" in value
                 ? value
                 : undefined,
             ),
