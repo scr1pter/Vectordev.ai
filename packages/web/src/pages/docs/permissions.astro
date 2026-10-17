@@ -22,10 +22,12 @@ export const prerender = true
             commands, modes, plugins, tools, skills, MCP servers, formatters and language servers) load only after you
             trust the project, because they can run code on your computer. Until then Vector applies the project's
             deny rules, and its run limits, loop pauses and sharing settings only where they are stricter than yours, so
-            a cloned repository cannot raise your spend cap or switch loop pauses off. The app shows
-            <strong>Project settings ignored</strong> with a <strong>Trust project</strong>
-            button. In the TUI, run <code>/trust</code>; in the terminal, run <code>vector trust status</code> or
-            <code>vector trust approve</code> in the project.
+            a cloned repository cannot raise your spend cap or switch loop pauses off. Nothing carries over from
+            earlier versions, so after updating every project asks once. In the app, choose
+            <strong>Trust project</strong> beside <strong>Project settings ignored</strong> in the session header.
+            The TUI's <code>/trust</code> and the terminal's <code>vector trust status</code> and
+            <code>vector trust approve</code> arrive with the next CLI release, 1.99.108 or later; the CLI that npm and
+            <code>vectordev.ai/install</code> serve today has neither.
           </p>
           <p>
             The language servers and formatters you turn on in your own settings also stay off in a project you have not

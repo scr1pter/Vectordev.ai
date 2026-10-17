@@ -1005,7 +1005,12 @@ const layer = Layer.effect(
               type: TuiEvent.ToastShow.type,
               properties: {
                 title: settings ? "Project settings ignored" : "Project not trusted",
-                message: `${held} Use /trust in the TUI, Trust project in the app, or run \`vector trust approve\` in the project.`,
+                // The desktop ships no vector command, and the published CLI predates /trust and `vector trust`.
+                message: `${held} ${
+                  Flag.VECTOR_CLIENT === "desktop"
+                    ? "Choose Trust project in the session header."
+                    : "Use /trust in the TUI, Trust project in the app, or run `vector trust approve` in the project."
+                }`,
                 variant: "warning",
                 duration: 15_000,
               },

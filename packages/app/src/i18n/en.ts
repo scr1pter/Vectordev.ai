@@ -755,7 +755,7 @@ export const dict = {
     "Until you trust this project, your language servers and formatters stay off in it and your MCP servers start outside it, because the project's files can run code on this machine through them. Trust the project to turn them on.",
   "project.trust.approve": "Trust project",
   "project.trust.approve.failed": "Could not trust this project",
-  "project.trust.approve.failed.description": "Run `vector trust approve` in the project instead.",
+  "project.trust.approve.failed.description": "Vector could not save the approval. Try again in a moment.",
   "session.header.open.finder": "Finder",
   "session.header.open.fileExplorer": "File Explorer",
   "session.header.open.fileManager": "File Manager",

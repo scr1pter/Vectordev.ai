@@ -99,11 +99,42 @@ describe("config HttpApi", () => {
       expect(held).toMatchObject({ title: "Project not trusted" })
       expect(held.message).toContain("language servers")
       expect(held.message).not.toContain("vector.json")
+      expect(held.message).toContain("vector trust approve")
 
       const disposed = yield* waitDisposed(tmp.path).pipe(Effect.forkScoped({ startImmediately: true }))
       const approved = yield* request(tmp.path, "/config/trust", { method: "POST" })
       expect(approved).toMatchObject({ status: 200, body: { trusted: true, ignored: false } })
       yield* Fiber.join(disposed)
+    }),
+  )
+
+  it.live(
+    "points the desktop engine's held-back notice at the app's Trust project button only",
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirEffect({})
+      const original = { config: process.env.VECTOR_CONFIG_CONTENT, client: process.env.VECTOR_CLIENT }
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (original.config === undefined) delete process.env.VECTOR_CONFIG_CONTENT
+          else process.env.VECTOR_CONFIG_CONTENT = original.config
+          if (original.client === undefined) delete process.env.VECTOR_CLIENT
+          else process.env.VECTOR_CLIENT = original.client
+        }),
+      )
+      process.env.VECTOR_CONFIG_CONTENT = JSON.stringify({ lsp: true })
+      process.env.VECTOR_CLIENT = "desktop"
+      const notice = yield* waitGlobalBusEvent({
+        message: "timed out waiting for the held-back notice",
+        predicate: (event) => event.payload.type === "tui.toast.show",
+      }).pipe(Effect.forkScoped({ startImmediately: true }))
+
+      yield* Effect.promise(() =>
+        Promise.resolve(app().request("/config/trust", { headers: { "x-vector-directory": tmp.path } })),
+      )
+      const held = (yield* Fiber.join(notice)).payload.properties
+      expect(held.message).toContain("Choose Trust project in the session header.")
+      expect(held.message).not.toContain("vector trust")
+      expect(held.message).not.toContain("/trust")
     }),
   )
 
