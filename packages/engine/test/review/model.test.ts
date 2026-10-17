@@ -284,6 +284,38 @@ describe("free review defaults", () => {
       expect(empty.message).toContain("needs ANTHROPIC_API_KEY. Add it as a repository secret")
     }),
   )
+  it.effect("a workflow's refusal names the setting that chose the model", () =>
+    Effect.gen(function* () {
+      const fromConfig = yield* resolve({
+        trigger: "command",
+        config: "anthropic/claude-2",
+        env: { MODEL: "anthropic/claude-sonnet-4-5" },
+      }).pipe(Effect.flip)
+      expect(fromConfig.message).toBe(
+        "Anthropic has retired claude-2. Set model in .vector/review.json to one of its current models.",
+      )
+      const fromAuto = yield* resolve({
+        trigger: "auto",
+        env: { REVIEW_AUTO_MODEL: "acme/missing", MODEL: "anthropic/claude-sonnet-4-5" },
+      }).pipe(Effect.flip)
+      expect(fromAuto.message).toBe(
+        "Acme has no model missing. Set REVIEW_AUTO_MODEL in .github/workflows/vector.yml to one of its models.",
+      )
+      const freeFromConfig = yield* resolve({
+        trigger: "command",
+        config: "vector/acme/missing:free",
+        env: { VECTOR_CLI_TOKEN: "test-only" },
+      }).pipe(Effect.flip)
+      expect(freeFromConfig.message).toBe(
+        "vectordev.ai did not offer vector/acme/missing:free to this workflow. Check that the VECTOR_CLI_TOKEN secret is current, or set model in .vector/review.json to another model.",
+      )
+      // Reinstalling the workflow rewrites MODEL only, so it is no fix for a model review.json chose.
+      const unlisted = yield* resolve({ trigger: "command", config: "retired/model" }).pipe(Effect.flip)
+      expect(unlisted.message).toBe(
+        "Vector does not list the provider of retired/model. Set model in .vector/review.json to a current model.",
+      )
+    }),
+  )
   it.effect("marks direct OpenRouter free variants free and explains obsolete workflow models", () =>
     Effect.gen(function* () {
       expect((yield* resolve({ trigger: "local", flag: "openrouter/acme/coder:free" })).costKind).toBe("free")

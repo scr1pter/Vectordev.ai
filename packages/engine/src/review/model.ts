@@ -7,6 +7,7 @@ import { Auth } from "@/auth"
 import { Config } from "@/config/config"
 import { Provider } from "@/provider/provider"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
+import { REVIEW_CONFIG_PATH } from "@vectordevai/core/review/config"
 import { contextRefusal, type ReviewPrice } from "@vectordevai/core/review/plan"
 import { WORKFLOW_FILE } from "@vectordevai/core/review/workflow"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
@@ -48,9 +49,23 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
 
   const ci = input.trigger === "auto" || input.trigger === "command"
   const agent = ci ? undefined : (yield* config.get()).agent?.["review"]
-  const chosen = ci
-    ? first([input.trigger === "auto" ? env.REVIEW_AUTO_MODEL : undefined, input.config, env.MODEL])
-    : first([input.flag, input.config, agent?.model])
+  // Each source names its setting, so a workflow's refusal points at the one that chose the model.
+  const picked = (
+    ci
+      ? [
+          { value: input.trigger === "auto" ? env.REVIEW_AUTO_MODEL : undefined, setting: AUTO_SETTING },
+          { value: input.config, setting: CONFIG_SETTING },
+          { value: env.MODEL, setting: MODEL_SETTING },
+        ]
+      : [
+          { value: input.flag, setting: "--model" },
+          { value: input.config, setting: CONFIG_SETTING },
+          { value: agent?.model, setting: "agent.review.model" },
+        ]
+  )
+    .map((source) => ({ ...source, value: source.value?.trim() }))
+    .find((source) => !!source.value)
+  const chosen = picked?.value
   const free =
     chosen || !ci
       ? undefined
@@ -82,7 +97,15 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
           return yield* new ReviewModelError({ message: `${name} is not available. Check the provider and its key.` })
         const listed = (yield* catalog.get())[ref.providerID]
         return yield* new ReviewModelError({
-          message: workflowRefusal({ name, modelID: ref.modelID, listed, error, env }),
+          // Only the free default has no setting; MODEL is the one that replaces it.
+          message: workflowRefusal({
+            name,
+            modelID: ref.modelID,
+            setting: picked?.setting ?? MODEL_SETTING,
+            listed,
+            error,
+            env,
+          }),
         })
       }),
     ),
@@ -110,12 +133,17 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
   } satisfies ResolvedModel
 })
 
+const AUTO_SETTING = `REVIEW_AUTO_MODEL in ${WORKFLOW_FILE}`
+const CONFIG_SETTING = `model in ${REVIEW_CONFIG_PATH}`
+const MODEL_SETTING = `MODEL in ${WORKFLOW_FILE}`
+
 // Why a workflow's model cannot run. A missing secret is the usual cause: the provider is in the catalog but never
 // loaded, because the review step's env does not pass its key. A retired model never loads, key or not. Only a
-// provider Vector no longer lists means the workflow itself is out of date.
+// provider Vector no longer lists in the MODEL that `vector github install` wrote means the workflow is out of date.
 function workflowRefusal(input: {
   name: string
   modelID: string
+  setting: string // the setting that chose the model, such as "MODEL in .github/workflows/vector.yml"
   listed: ModelCatalog.Provider | undefined
   error: Provider.ModelNotFoundError
   env: Record<string, string | undefined>
@@ -124,27 +152,28 @@ function workflowRefusal(input: {
   // Vector's free models come from vectordev.ai for the workflow's Vector account, not from the model catalog.
   if (input.error.providerID === ProviderV2.ID.vector)
     return input.env.VECTOR_CLI_TOKEN
-      ? `vectordev.ai did not offer ${input.name} to this workflow. Check that the VECTOR_CLI_TOKEN secret is current, or set MODEL in ${WORKFLOW_FILE} to another model.`
+      ? `vectordev.ai did not offer ${input.name} to this workflow. Check that the VECTOR_CLI_TOKEN secret is current, or set ${input.setting} to another model.`
       : `${input.name} needs the repository secret VECTOR_CLI_TOKEN. Create one at vectordev.ai/auth/cli.`
-  if (!input.listed) return "This workflow was set up by an older Vector; run vector github install again."
+  // The install writes MODEL; reinstalling changes no other setting.
+  const reinstall = input.setting === MODEL_SETTING
+  if (!input.listed)
+    return reinstall
+      ? "This workflow was set up by an older Vector; run vector github install again."
+      : `Vector does not list the provider of ${input.name}. Set ${input.setting} to a current model.`
   const listed = Object.hasOwn(input.listed.models, input.modelID) ? input.listed.models[input.modelID] : undefined
   if (!listed) {
     const suggestions = input.error.suggestions?.length ? ` Did you mean ${input.error.suggestions.join(", ")}?` : ""
-    return `${input.listed.name} has no model ${input.modelID}.${suggestions} Set MODEL in ${WORKFLOW_FILE} to one of its models, or run vector github install again.`
+    return `${input.listed.name} has no model ${input.modelID}.${suggestions} Set ${input.setting} to one of its models${reinstall ? ", or run vector github install again" : ""}.`
   }
   // Vector drops retired catalog models when it loads a provider.
   if (listed.status === "deprecated")
-    return `${input.listed.name} has retired ${input.modelID}. Set MODEL in ${WORKFLOW_FILE} to one of its current models.`
+    return `${input.listed.name} has retired ${input.modelID}. Set ${input.setting} to one of its current models.`
   // GitHub passes a secret that does not exist as an empty string.
   const key = input.listed.env.find((name) => input.env[name]?.trim())
   if (key)
-    return `Vector could not load ${input.name} in this workflow, although ${key} is set. Set MODEL in ${WORKFLOW_FILE} to another model.`
+    return `Vector could not load ${input.name} in this workflow, although ${key} is set. Set ${input.setting} to another model.`
   const keys = input.listed.env.length ? input.listed.env.join(" or ") : `${input.listed.name}'s credentials`
   return `${input.name} needs ${keys}. Add it as a repository secret and pass it to the Review step in ${WORKFLOW_FILE}.`
-}
-
-function first(values: (string | undefined)[]) {
-  return values.map((value) => value?.trim()).find((value): value is string => !!value)
 }
 
 export * as ReviewModel from "./model"
