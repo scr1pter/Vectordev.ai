@@ -210,7 +210,26 @@ const layer = Layer.effect(
     })
 
     const globalDirectory = AbsolutePath.make(global.config)
-    const locationIsGlobal = path.resolve(location.directory) === path.resolve(global.config)
+    // VECTOR_AGENT_CONFIG_DIR replaces the global folder, and it can name a folder of the project's under any spelling
+    // (as written, through an alias of the workspace, or through a workspace link that points out), the opened folder
+    // itself included: a repository's .envrc can set `VECTOR_AGENT_CONFIG_DIR=.`. Such a folder is the project's: it
+    // loads under project trust after the project's own .vector folders, and nothing loads as global in its place. Only
+    // the user's own config folders stay global wherever the location opens.
+    const fromEnvironment =
+      Flag.VECTOR_AGENT_CONFIG_DIR !== undefined &&
+      path.resolve(Flag.VECTOR_AGENT_CONFIG_DIR) === path.resolve(global.config)
+    const projectGlobal =
+      !fromEnvironment ||
+      [Global.Path.config, path.join(global.home, ".vector")].some((root) => FSUtil.contains(root, global.config))
+        ? undefined
+        : projectSpelling(
+            location.project.directory === path.parse(location.project.directory).root
+              ? [location.directory]
+              : [location.directory, location.project.directory],
+            global.config,
+          )
+    const locationIsGlobal =
+      projectGlobal === undefined && path.resolve(location.directory) === path.resolve(global.config)
     // Read configuration once when this location opens. Later calls reuse these
     // values until the location is reopened.
     const discovered =
@@ -223,24 +242,6 @@ const layer = Layer.effect(
               stop: location.project.directory,
             })
             .pipe(Effect.orDie)
-    // VECTOR_AGENT_CONFIG_DIR replaces the global folder, and it can name a folder of the project's under any spelling
-    // (as written, through an alias of the workspace, or through a workspace link that points out). Such a folder is
-    // the project's: it loads under project trust after the project's own .vector folders, and nothing loads as global
-    // in its place. The user's own config folders stay global, as does the folder a location opened on itself.
-    const fromEnvironment =
-      Flag.VECTOR_AGENT_CONFIG_DIR !== undefined &&
-      path.resolve(Flag.VECTOR_AGENT_CONFIG_DIR) === path.resolve(global.config)
-    const projectGlobal =
-      !fromEnvironment ||
-      locationIsGlobal ||
-      [Global.Path.config, path.join(global.home, ".vector")].some((root) => FSUtil.contains(root, global.config))
-        ? undefined
-        : projectSpelling(
-            location.project.directory === path.parse(location.project.directory).root
-              ? [location.directory]
-              : [location.directory, location.project.directory],
-            global.config,
-          )
     const projectDirectories = Array.from(
       new Set([
         ...discovered.filter((item) => path.basename(item) === ".vector").toReversed(),
@@ -249,8 +250,11 @@ const layer = Layer.effect(
       ]),
     ).map((directory) => AbsolutePath.make(directory))
     // A config closer to the opened directory should win over one higher up.
-    // Search starts nearby, so reverse the results before applying them.
-    const directPaths = discovered.filter((item) => path.basename(item) !== ".vector").toReversed()
+    // Search starts nearby, so reverse the results before applying them. A file in the env-named folder loads with that
+    // folder, last, so it is not loaded twice when the search passes through it.
+    const directPaths = discovered
+      .filter((item) => path.basename(item) !== ".vector" && path.dirname(item) !== projectGlobal)
+      .toReversed()
     const tuiPaths =
       locationIsGlobal || Flag.VECTOR_DISABLE_PROJECT_CONFIG
         ? []

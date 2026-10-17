@@ -1011,27 +1011,27 @@ describe("Config", () => {
                 else process.env.VECTOR_AGENT_CONFIG_DIR = previous
               }),
           )
-        const load = (directory: string) =>
+        // `at` is the folder the location opens and `root` its project; `file` is the env-named folder's vector.json.
+        const load = (directory: string, at = project, root = project, file = path.join(directory, "vector.json")) =>
           withConfigDirectory(
             directory,
             Effect.gen(function* () {
               const config = yield* Config.Service
               const entries = yield* config.entries()
-              const document = entries.find(
-                (entry): entry is Config.Document =>
-                  entry.type === "document" &&
-                  [inside, outside].some((folder) => entry.path === path.join(folder, "vector.json")),
-              )!
+              const documents = entries.filter(
+                (entry): entry is Config.Document => entry.type === "document" && entry.path === file,
+              )
               return {
-                scope: config.scope?.(document),
-                executable: config.executable?.(document),
+                count: documents.length,
+                scope: documents[0] && config.scope?.(documents[0]),
+                executable: documents[0] && config.executable?.(documents[0]),
                 global: entries.filter((entry) => config.scope?.(entry) === "global").map((entry) => entry.path),
               }
-            }).pipe(Effect.provide(testLayer(project, directory, project))),
+            }).pipe(Effect.provide(testLayer(at, directory, root))),
           )
         return Effect.gen(function* () {
           yield* Effect.promise(async () => {
-            for (const directory of [inside, outside]) {
+            for (const directory of [project, inside, outside]) {
               await fs.mkdir(path.join(directory, "plugins"), { recursive: true })
               await fs.writeFile(path.join(directory, "vector.json"), JSON.stringify({ shell: "/fixture/v2-shell" }))
               await fs.writeFile(path.join(directory, "plugins", "marker.ts"), "export default {}\n")
@@ -1039,13 +1039,23 @@ describe("Config", () => {
             await fs.symlink(project, alias, process.platform === "win32" ? "junction" : "dir")
           })
 
-          // Named as written and through another spelling of the project, the folder is the project's.
-          for (const directory of [inside, path.join(alias, "agent-config")]) {
-            const loaded = yield* load(directory)
-            expect({ directory, ...loaded }).toEqual({ directory, scope: "project", executable: false, global: [] })
+          const held = { count: 1, scope: "project" as const, executable: false, global: [] as string[] }
+          // Named as written and through another spelling of the project, the folder is the project's, and so it stays
+          // when it is the very folder that was opened (a repository's .envrc setting `VECTOR_AGENT_CONFIG_DIR=.`) or
+          // the repository root. It loads once, not also as one of the folders the upward search finds.
+          for (const [directory, at, file] of [
+            [inside, project, path.join(inside, "vector.json")],
+            [path.join(alias, "agent-config"), project, path.join(inside, "vector.json")],
+            [inside, inside, path.join(inside, "vector.json")],
+            [project, project, path.join(project, "vector.json")],
+          ] as const) {
+            const loaded = yield* load(directory, at, project, file)
+            expect({ directory, at, ...loaded }).toEqual({ directory, at, ...held })
           }
+          // Opened on itself outside any repository, a named folder is the opened folder's too, as the engine holds it.
+          expect(yield* load(outside, outside, path.parse(outside).root)).toEqual(held)
           // The user's own folder outside the project stays theirs.
-          expect(yield* load(outside)).toMatchObject({ scope: "global", executable: true })
+          expect(yield* load(outside)).toMatchObject({ count: 1, scope: "global", executable: true })
         })
       }),
     ),
