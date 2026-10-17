@@ -4,6 +4,7 @@ import { TabsV2 } from "@vectordevai/ui/v2/tabs-v2"
 import { Icon } from "@vectordevai/ui/icon"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { usePlatform } from "@/context/platform"
+import { SettingsAccountV2 } from "./account"
 import { SettingsGeneralV2 } from "./general"
 import { SettingsProvidersV2 } from "./providers"
 import { SettingsModelsV2 } from "./models"
@@ -44,8 +45,13 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
   let searchInput: HTMLInputElement | undefined
   const [query, setQuery] = createSignal("")
   const [section, setSection] = createSignal<SettingsTab>(props.section ?? "general")
-  // Spend limits live in the desktop ledger, which the web build does not have.
-  const available = (item: SettingsTab) => item !== "spend" || !!spendLimitsApi()
+  // Spend limits live in the desktop ledger and the account in the desktop main process, which the web build does
+  // not have.
+  const available = (item: SettingsTab) => {
+    if (item === "spend") return !!spendLimitsApi()
+    if (item === "account") return !!platform.vectorAccount
+    return true
+  }
   const groups = createMemo(() =>
     filterSettingsGroups(query()).map((group) => ({
       ...group,
@@ -56,6 +62,7 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
   const visibleItems = createMemo(() => new Set(groups().flatMap((group) => group.items.map((item) => item.value))))
 
   const panel = (item: SettingsTab) => {
+    if (item === "account") return <SettingsAccountV2 onUsage={() => setSection("usage")} />
     if (item === "usage") return <SettingsUsageV2 />
     if (item === "spend") return <SettingsSpendLimitsV2 repositoryPath={props.repositoryPath} />
     if (item === "about") return <SettingsAboutV2 />

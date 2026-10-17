@@ -3,8 +3,9 @@ import { filterSettingsGroups, isSettingsTab, settingsGroups, settingsItemCount 
 
 describe("settings registry", () => {
   test("keeps every settings page reachable", () => {
-    expect(settingsItemCount(settingsGroups)).toBe(16)
+    expect(settingsItemCount(settingsGroups)).toBe(17)
     expect(settingsGroups.flatMap((group) => group.items.map((item) => item.value))).toEqual([
+      "account",
       "general",
       "usage",
       "spend",
@@ -38,6 +39,12 @@ describe("settings registry", () => {
   test("finds spend limits by budget vocabulary", () => {
     expect(filterSettingsGroups("budget").flatMap((group) => group.items.map((item) => item.value))).toEqual(["spend"])
     expect(isSettingsTab("spend")).toBe(true)
+  })
+
+  test("finds the account page by sign-in and billing vocabulary", () => {
+    for (const query of ["sign out", "billing", "Codium", "delete"])
+      expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toContain("account")
+    expect(isSettingsTab("account")).toBe(true)
   })
 
   test("returns the complete registry for whitespace", () => {

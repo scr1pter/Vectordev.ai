@@ -24,7 +24,7 @@ export function FreeModelsCard() {
     void platform.vectorAccount
       ?.start()
       .then(setStatus)
-      .catch(() => setStatus("error", "Could not start sign-in. Try again in Settings → Providers."))
+      .catch(() => setStatus("error", "Could not start sign-in. Try again in Settings → Account."))
   }
   const providers = useProviders()
   const dialog = useDialog()
