@@ -1221,6 +1221,9 @@ test("guests load the app's bootstrap routes, narrowed to their workspace", asyn
       )
     expect(await sessions(owner)).toContain(other.path)
     expect(await sessions(guest)).not.toContain(other.path)
+    // Usage is read for the guest's workspace only; the owner's spans every project.
+    expect((await call("/experimental/session/usage", { headers: guest })).status).toBe(200)
+    expect((await call("/experimental/session/usage", { headers: owner })).status).toBe(200)
 
     // The live stream carries the guest's workspace and nothing from the owner's other project.
     await call(`/session?directory=${encodeURIComponent(other.path)}`, { method: "POST", headers: owner, body: "{}" })

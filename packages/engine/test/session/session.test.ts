@@ -307,6 +307,40 @@ describe("forked sessions", () => {
   )
 })
 
+describe("usage by directory", () => {
+  it.instance("counts only the sessions in the directory asked for", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const info = yield* session.create({ title: "usage scope" })
+      yield* session.updateMessage({
+        id: MessageID.ascending(),
+        role: "assistant",
+        parentID: MessageID.ascending(),
+        sessionID: info.id,
+        mode: "build",
+        agent: "build",
+        cost: 0.5,
+        path: { cwd: "/tmp", root: "/tmp" },
+        tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: "test",
+        providerID: "lmstudio",
+        time: { created: Date.now(), completed: Date.now() },
+        finish: "stop",
+      } as unknown as SessionV1.Info)
+
+      const elsewhere = yield* session.usage({ directory: `${info.directory}-elsewhere` })
+      expect(elsewhere.lifetimeCost).toBe(0)
+      expect(elsewhere.lifetimeTokens).toBe(0)
+      expect(elsewhere.modelResponses).toBe(0)
+      const here = yield* session.usage({ directory: info.directory })
+      expect(here.lifetimeCost).toBeCloseTo(0.5)
+      expect(here.modelResponses).toBe(1)
+      expect((yield* session.usage()).lifetimeCost).toBeGreaterThanOrEqual(here.lifetimeCost)
+      yield* session.remove(info.id)
+    }),
+  )
+})
+
 describe("unpriced steps", () => {
   it.instance("a session counts steps that had no price and stops counting them when they are removed", () =>
     Effect.gen(function* () {

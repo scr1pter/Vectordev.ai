@@ -107,7 +107,9 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     })
 
     const sessionUsage = Effect.fn("ExperimentalHttpApi.sessionUsage")(function* () {
-      return yield* sessions.usage()
+      // The owner's usage spans every project; a guest sees only the workspace it was invited to, as with the list.
+      if ((yield* RequestPrincipal).kind === "owner") return yield* sessions.usage()
+      return yield* sessions.usage({ directory: yield* InstanceState.directory })
     })
 
     const sessionBackground = Effect.fn("ExperimentalHttpApi.sessionBackground")(function* (ctx: {

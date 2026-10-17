@@ -541,7 +541,8 @@ export type NotFound = NotFoundError
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<Info[]>
   readonly listGlobal: (input?: GlobalListInput) => Effect.Effect<GlobalInfo[]>
-  readonly usage: () => Effect.Effect<UsageSummary>
+  /** Usage across every project, or only sessions in `directory`. */
+  readonly usage: (input?: { directory?: string }) => Effect.Effect<UsageSummary>
   readonly create: (input?: {
     parentID?: SessionID
     internal?: string
@@ -730,10 +731,15 @@ const layer: Layer.Layer<
       return rows.map((row) => ({ ...fromRow(row), project: projects.get(row.project_id) ?? null }))
     })
 
-    const usage = Effect.fn("Session.usage")(function* () {
+    const usage = Effect.fn("Session.usage")(function* (input?: { directory?: string }) {
+      const inDirectory = input?.directory ? eq(SessionTable.directory, input.directory) : undefined
+      // Without a directory nothing is filtered, so a message whose session row is gone still counts, as before.
+      const sessionIn = (column: typeof MessageTable.session_id | typeof SessionMessageTable.session_id) =>
+        inDirectory && inArray(column, db.select({ id: SessionTable.id }).from(SessionTable).where(inDirectory))
       const rows = yield* db
         .select({ id: MessageTable.id, sessionID: MessageTable.session_id, data: MessageTable.data })
         .from(MessageTable)
+        .where(sessionIn(MessageTable.session_id))
         .orderBy(MessageTable.time_created)
         .all()
         .pipe(Effect.orDie)
@@ -742,13 +748,13 @@ const layer: Layer.Layer<
         .select({ data: EventTable.data })
         .from(EventTable)
         .innerJoin(SessionTable, eq(EventTable.aggregate_id, SessionTable.id))
-        .where(eq(EventTable.type, EventV2.versionedType(SessionEvent.AncillaryUsage.type, 1)))
+        .where(and(eq(EventTable.type, EventV2.versionedType(SessionEvent.AncillaryUsage.type, 1)), inDirectory))
         .all()
         .pipe(Effect.orDie)
       const helpers = yield* db
         .select({ id: SessionTable.id, internal: SessionTable.internal })
         .from(SessionTable)
-        .where(isNotNull(SessionTable.internal))
+        .where(and(isNotNull(SessionTable.internal), inDirectory))
         .all()
         .pipe(Effect.orDie)
       // Sessions prompted through the V2 path (parallel agents, automations, the swarm planner) keep their steps as
@@ -769,7 +775,12 @@ const layer: Layer.Layer<
           error: sql<string | null>`json_extract(${SessionMessageTable.data}, '$.error')`,
         })
         .from(SessionMessageTable)
-        .where(inArray(SessionMessageTable.type, ["user", "assistant", "compaction"]))
+        .where(
+          and(
+            inArray(SessionMessageTable.type, ["user", "assistant", "compaction"]),
+            sessionIn(SessionMessageTable.session_id),
+          ),
+        )
         .orderBy(SessionMessageTable.session_id, SessionMessageTable.seq)
         .all()
         .pipe(Effect.orDie)
