@@ -175,6 +175,137 @@ it.instance("keeps project TUI plugins disabled before workspace trust", () =>
   ),
 )
 
+for (const setting of ["VECTOR_TUI_CONFIG", "VECTOR_AGENT_CONFIG_DIR"] as const) {
+  it.instance(`keeps ${setting} project aliases behind workspace trust`, () =>
+    withCleanState(
+      Effect.gen(function* () {
+        const fs = yield* FSUtil.Service
+        const test = yield* TestInstance
+        const local = path.join(test.directory, "project-settings")
+        const outside = yield* Effect.acquireRelease(
+          Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "vector-tui-alias-"))),
+          (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
+        )
+        const alias = path.join(outside, "project-link")
+        yield* fs.makeDirectory(local, { recursive: true })
+        yield* fs.writeJson(path.join(local, "tui.json"), { theme: "project-alias", plugin: ["./plugin.ts"] })
+        yield* fs.writeFileString(path.join(local, "plugin.ts"), 'export const marker = "approved-alias"\n')
+        yield* Effect.promise(() => symlink(local, alias, process.platform === "win32" ? "junction" : "dir"))
+
+        yield* withEnv(
+          setting,
+          setting === "VECTOR_TUI_CONFIG" ? path.join(alias, "tui.json") : alias,
+          Effect.gen(function* () {
+            const untrusted = yield* withEnv("VECTOR_PURE", "1", getTuiState(test.directory))
+            expect(untrusted.config.theme).toBe("project-alias")
+            expect(untrusted.config.plugin ?? []).toEqual([])
+            expect(untrusted.origins).toEqual([])
+
+            yield* Effect.promise(async () => {
+              await WorkspaceTrust.approve(Global.Path.state, await WorkspaceTrust.snapshot(test.directory, [local]))
+            })
+            const trusted = yield* withEnv("VECTOR_PURE", undefined, getTuiState(test.directory))
+            expect(trusted.origins).toHaveLength(1)
+            expect(trusted.origins[0].scope).toBe("local")
+            const plugin = fileURLToPath(ConfigPlugin.pluginSpecifier(trusted.origins[0].spec))
+            expect(plugin).not.toBe(path.join(alias, "plugin.ts"))
+            expect(plugin).not.toBe(path.join(local, "plugin.ts"))
+            expect(yield* fs.readFileString(plugin)).toContain('marker = "approved-alias"')
+          }),
+        )
+      }),
+    ),
+  )
+
+  it.instance(`preserves ${setting} plugins from an external owner config`, () =>
+    withCleanState(
+      Effect.gen(function* () {
+        const fs = yield* FSUtil.Service
+        const test = yield* TestInstance
+        const outside = yield* Effect.acquireRelease(
+          Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "vector-tui-owner-"))),
+          (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
+        )
+        yield* fs.writeJson(path.join(outside, "tui.json"), { theme: "owner-config", plugin: ["./plugin.ts"] })
+        yield* fs.writeFileString(path.join(outside, "plugin.ts"), 'export const marker = "owner-config"\n')
+        const state = yield* withEnv(
+          setting,
+          setting === "VECTOR_TUI_CONFIG" ? path.join(outside, "tui.json") : outside,
+          withEnv("VECTOR_PURE", "1", getTuiState(test.directory)),
+        )
+        expect(state.config.theme).toBe("owner-config")
+        expect(state.origins).toHaveLength(1)
+        expect(state.origins[0].scope).toBe("global")
+      }),
+    ),
+  )
+
+  it.instance(`keeps ${setting} links inside the project local when they point outside`, () =>
+    withCleanState(
+      Effect.gen(function* () {
+        const fs = yield* FSUtil.Service
+        const test = yield* TestInstance
+        const outside = yield* Effect.acquireRelease(
+          Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "vector-tui-outside-"))),
+          (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
+        )
+        yield* fs.writeJson(path.join(outside, "tui.json"), { plugin: ["./plugin.ts"] })
+        yield* fs.writeFileString(path.join(outside, "plugin.ts"), 'export const marker = "outside"\n')
+        const alias = path.join(test.directory, "outside-settings")
+        yield* Effect.promise(() => symlink(outside, alias, process.platform === "win32" ? "junction" : "dir"))
+        const state = yield* withEnv(
+          setting,
+          setting === "VECTOR_TUI_CONFIG" ? path.join(alias, "tui.json") : alias,
+          withEnv("VECTOR_PURE", "1", getTuiState(test.directory)),
+        )
+        expect(state.config.plugin ?? []).toEqual([])
+        expect(state.origins).toEqual([])
+      }),
+    ),
+  )
+}
+
+for (const owner of ["home", "home alias", "global config"] as const) {
+  it.instance(`preserves known owner TUI plugins when the working directory is ${owner}`, () =>
+    withCleanState(
+      Effect.gen(function* () {
+        const fs = yield* FSUtil.Service
+        const test = yield* TestInstance
+        const directory = owner === "global config" ? Global.Path.config : test.directory
+        const home =
+          owner !== "home alias"
+            ? directory
+            : yield* Effect.gen(function* () {
+                const outside = yield* Effect.acquireRelease(
+                  Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "vector-tui-owner-alias-"))),
+                  (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
+                )
+                const alias = path.join(outside, "home-link")
+                yield* Effect.promise(() =>
+                  symlink(directory, alias, process.platform === "win32" ? "junction" : "dir"),
+                )
+                return alias
+              })
+        const config = owner === "global config" ? directory : path.join(home, ".vector")
+        yield* fs.makeDirectory(config, { recursive: true })
+        yield* fs.writeJson(path.join(config, "tui.json"), { theme: "known-owner", plugin: ["./owner-plugin.ts"] })
+        yield* fs.writeFileString(path.join(config, "owner-plugin.ts"), 'export const marker = "known-owner"\n')
+        yield* Effect.addFinalizer(() =>
+          fs.remove(path.join(config, "owner-plugin.ts"), { force: true }).pipe(Effect.ignore),
+        )
+        const state = yield* withEnv(
+          "VECTOR_TEST_HOME",
+          owner === "global config" ? process.env.VECTOR_TEST_HOME : home,
+          withEnv("VECTOR_PURE", "1", getTuiState(directory)),
+        )
+        expect(state.config.theme).toBe("known-owner")
+        expect(state.origins).toHaveLength(1)
+        expect(state.origins[0].scope).toBe("global")
+      }),
+    ),
+  )
+}
+
 it.instance("loads approved project config and plugins from captured bytes after live mutation", () =>
   withCleanState(
     Effect.gen(function* () {

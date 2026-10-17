@@ -39,6 +39,7 @@ import { ConfigPlugin } from "@/config/plugin"
 import { ConfigPluginV1 } from "@vectordevai/core/v1/config/plugin"
 import { AuthTest } from "../fake/auth"
 import { NpmTest } from "../fake/npm"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 
 const unexpectedHttp = HttpClient.make((request) =>
   Effect.die(`unexpected http request: ${request.method} ${request.url}`),
@@ -1465,6 +1466,72 @@ it.instance("gets config directories", () =>
   Effect.gen(function* () {
     const dirs = yield* Config.use.directories()
     expect(dirs.length).toBeGreaterThanOrEqual(1)
+  }),
+)
+
+it.instance("preserves stored MCP references in an approved aliased config directory", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const outside = yield* tmpdirScoped()
+    const source = path.join(test.directory, "custom-settings")
+    const entry = {
+      type: "remote",
+      url: "https://mcp.example.invalid",
+      headers: { Authorization: "Bearer {env:VECTOR_TEST_MCP_SECRET}" },
+    }
+    yield* writeConfigEffect(source, { mcp: { fixture: entry } })
+    const alias = path.join(outside, "settings-link")
+    yield* Effect.promise(() => fs.symlink(source, alias, process.platform === "win32" ? "junction" : "dir"))
+    yield* Effect.promise(async () => {
+      const snapshot = await WorkspaceTrust.snapshot(test.directory, [source])
+      await WorkspaceTrust.approve(Global.Path.state, snapshot)
+    })
+    yield* withProcessEnvs(
+      { VECTOR_AGENT_CONFIG_DIR: alias, VECTOR_TEST_MCP_SECRET: "fixture-value" },
+      Effect.gen(function* () {
+        const config = yield* Config.Service
+        expect((yield* config.trust()).trusted).toBe(true)
+        expect((yield* config.get()).mcp?.fixture).toBeDefined()
+        expect(yield* config.storedMcp("fixture")).toEqual(entry)
+      }),
+    )
+  }),
+)
+
+it.effect("keeps owner config runtime files when the workspace is the global config directory", () =>
+  withGlobalConfig({ config: { shell: "owner-shell" } }, ({ dir }) =>
+    withInstanceDir(
+      dir,
+      withProcessEnv(
+        "VECTOR_PURE",
+        "true",
+        Effect.gen(function* () {
+          yield* FSUtil.use.writeWithDirs(path.join(dir, "commands", "owner.md"), "Owner command fixture")
+          const config = yield* Config.use.get()
+          expect(config.shell).toBe("owner-shell")
+          expect(config.command?.owner?.template).toContain("Owner command fixture")
+          expect(yield* Config.use.directories()).toContain(dir)
+        }),
+      ),
+    ),
+  ),
+)
+
+it.instance("keeps owner home config runtime files when the workspace is home", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const directory = path.join(test.directory, ".vector")
+    yield* writeConfigEffect(directory, { shell: "owner-home-shell" })
+    yield* FSUtil.use.writeWithDirs(path.join(directory, "commands", "owner.md"), "Owner home command fixture")
+    yield* withProcessEnvs(
+      { VECTOR_PURE: "true", VECTOR_TEST_HOME: test.directory },
+      Effect.gen(function* () {
+        const config = yield* Config.use.get()
+        expect(config.shell).toBe("owner-home-shell")
+        expect(config.command?.owner?.template).toContain("Owner home command fixture")
+        expect(yield* Config.use.directories()).toContain(directory)
+      }),
+    )
   }),
 )
 

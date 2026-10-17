@@ -23,6 +23,8 @@ The selected final reports are `final-*-attempt-2.json`, pinned to clean source 
 
 All **12 final Vector cells** are valid under the scripted fixture protocol. Baseline `bdec3b29e` uses the same request-generating harness and strict verification receipts in `baseline-*-verified.json`. The **12 Claude Code cells** are reused from `candidate-*-attempt-1.json`: the executable harness, fixture operations, frozen rates, CLI version, and cache simulation are unchanged. Bun was 1.3.14 and Claude Code was 2.1.215. These are paired scenario comparisons, not simultaneous runs or live-model measurements.
 
+The later cross-platform follow-up `957669253` changes Windows directory aliases, private Bun configuration materialization, rejected-request CLI teardown, and browser CSP hashing. These changes do not alter the successful macOS scripted scenarios, their provider schemas, or the executable footprint harness. The archived measurements still belong to `947d8ca85`; they are not a new measurement of the follow-up commit. See the [validation record](validation.md) for its separate test and build evidence.
+
 Every dollar below is a modeled offline estimate. Each pair is **cold / second session** within a fresh simulated-cache run. Request counts are the same in both sessions of each selected cell pair.
 
 | Scenario | Vector before | Vector final | Claude Code | Final requests, Vector / Claude |

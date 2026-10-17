@@ -56,3 +56,16 @@ export const directories = Effect.fn("ConfigPaths.directories")(function* (direc
 export function fileInDirectory(dir: string, name: string) {
   return [path.join(dir, `${name}.json`), path.join(dir, `${name}.jsonc`)]
 }
+
+// Config authority follows the workspace even through an external path alias. Keep lexical project paths
+// intact so trust snapshots still bind symlinked config files to their original logical identity.
+export function projectPath(file: string, ctx: { directory: string; worktree?: string }): string | undefined {
+  const roots = [ctx.directory, ...(ctx.worktree && ctx.worktree !== "/" ? [ctx.worktree] : [])]
+  if (roots.some((root) => FSUtil.contains(root, file))) return path.resolve(file)
+  const resolved = FSUtil.resolve(file)
+  if (roots.some((root) => FSUtil.contains(FSUtil.resolve(root), resolved))) return resolved
+}
+
+export function projectContains(file: string, ctx: { directory: string; worktree?: string }) {
+  return projectPath(file, ctx) !== undefined
+}

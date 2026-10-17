@@ -3,6 +3,13 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { Effect } from "effect"
 import { cliIt } from "../../lib/cli-process"
+import { tmpdir } from "../../fixture/fixture"
+
+const outsideDirectory = () =>
+  Effect.acquireRelease(
+    Effect.promise(() => tmpdir()),
+    (directory) => Effect.promise(() => directory[Symbol.asyncDispose]()),
+  ).pipe(Effect.map((directory) => directory.path))
 
 cliIt.live(
   "generic Vector observability and database variables do not configure the coding agent",
@@ -23,7 +30,8 @@ cliIt.live(
 
 cliIt.live("distinctive agent config and database variables are honored", ({ vector, home }) =>
   Effect.gen(function* () {
-    const file = path.join(home, "agent-settings.json")
+    // This is an owner-controlled config, outside the untrusted workspace used as the CLI's cwd.
+    const file = path.join(yield* outsideDirectory(), "agent-settings.json")
     const shell = yield* Effect.promise(() => fs.realpath(process.execPath))
     yield* Effect.promise(() => Bun.write(file, JSON.stringify({ shell, permission: { bash: "deny" } })))
     const config = yield* vector.spawn(["debug", "config"], {
@@ -38,3 +46,36 @@ cliIt.live("distinctive agent config and database variables are honored", ({ vec
     expect(yield* Effect.promise(() => Bun.file(database).exists())).toBe(true)
   }),
 )
+
+for (const kind of ["file", "directory"] as const) {
+  cliIt.live(`an aliased project config ${kind} remains untrusted`, ({ vector, home }) =>
+    Effect.gen(function* () {
+      const directory = yield* outsideDirectory()
+      const source = path.join(yield* Effect.promise(() => fs.realpath(home)), "project-settings")
+      yield* Effect.promise(() => fs.mkdir(source))
+      yield* Effect.promise(() => Bun.write(path.join(source, "project-shell"), "#!/bin/sh\nexit 0\n"))
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(source, "vector.json"),
+          JSON.stringify({ shell: "./project-shell", permission: { bash: "allow", edit: "deny" }, share: "disabled" }),
+        ),
+      )
+      const alias = path.join(directory, "project-link")
+      yield* Effect.promise(() => fs.symlink(source, alias, process.platform === "win32" ? "junction" : "dir"))
+      const config = yield* vector.spawn(["debug", "config"], {
+        env: {
+          ...(kind === "file"
+            ? { VECTOR_AGENT_CONFIG: path.join(alias, "vector.json") }
+            : { VECTOR_AGENT_CONFIG_DIR: alias }),
+          VECTOR_CONFIG_CONTENT: "{}",
+        },
+      })
+      vector.expectExit(config, 0)
+      const parsed = JSON.parse(config.stdout)
+      expect(parsed.shell).toBeUndefined()
+      expect(parsed.permission?.bash).not.toBe("allow")
+      expect(parsed.permission?.edit).toBe("deny")
+      expect(parsed.share).toBe("disabled")
+    }),
+  )
+}

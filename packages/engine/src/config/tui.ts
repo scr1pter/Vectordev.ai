@@ -6,7 +6,7 @@ import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Cause, Context, Effect, Fiber, Layer } from "effect"
 import { ConfigParse } from "@/config/parse"
-import * as ConfigPaths from "@/config/paths"
+import { ConfigPaths } from "@/config/paths"
 import { migrateTuiConfig } from "./tui-migrate"
 import { resolveHostAttentionSoundPaths } from "./tui-host-attention"
 import { Flag } from "@vectordevai/core/flag/flag"
@@ -50,9 +50,10 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@vector/TuiConfig") {}
 
-function pluginScope(file: string, ctx: { directory: string }): ConfigPlugin.Scope {
+function pluginScope(file: string, ctx: { directory: string; worktree?: string }): ConfigPlugin.Scope {
   if (Filesystem.contains(Global.Path.config, file)) return "global"
   if (Filesystem.contains(path.join(Global.Path.home, ".vector"), file)) return "global"
+  if (ConfigPaths.projectContains(file, ctx)) return "local"
   if (Flag.VECTOR_AGENT_CONFIG_DIR && Filesystem.contains(Flag.VECTOR_AGENT_CONFIG_DIR, file)) return "global"
   if (Flag.VECTOR_TUI_CONFIG && Filesystem.resolve(Flag.VECTOR_TUI_CONFIG) === Filesystem.resolve(file)) return "global"
   return "local"
@@ -130,7 +131,18 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
 
   const git = yield* afs.up({ targets: [".git"], start: ctx.directory })
   const workspace = git[0] ? path.dirname(git[0]) : ctx.directory
-  const allDirectories = yield* ConfigPaths.directories(ctx.directory, git[0] ? workspace : undefined)
+  const sourceContext = { directory: ctx.directory, worktree: workspace }
+  const projectPath = (file: string) =>
+    pluginScope(file, sourceContext) === "global" ? undefined : ConfigPaths.projectPath(file, sourceContext)
+  const configDirectory = Flag.VECTOR_AGENT_CONFIG_DIR
+    ? (projectPath(Flag.VECTOR_AGENT_CONFIG_DIR) ?? Flag.VECTOR_AGENT_CONFIG_DIR)
+    : undefined
+  const tuiConfig = Flag.VECTOR_TUI_CONFIG
+    ? (projectPath(Flag.VECTOR_TUI_CONFIG) ?? Flag.VECTOR_TUI_CONFIG)
+    : undefined
+  const allDirectories = (yield* ConfigPaths.directories(ctx.directory, git[0] ? workspace : undefined)).map(
+    (directory) => projectPath(directory) ?? directory,
+  )
   yield* Effect.promise(() => migrateTuiConfig({ directories: allDirectories, cwd: ctx.directory }))
   const projectFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG
     ? []
@@ -138,11 +150,18 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
   const projectVectorFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG
     ? []
     : yield* ConfigPaths.files("vector", ctx.directory, git[0] ? workspace : undefined)
-  const projectDirectories = allDirectories.filter((directory) => pluginScope(directory, ctx) === "local")
+  const projectDirectories = allDirectories.filter((directory) => pluginScope(directory, sourceContext) === "local")
+  const explicitProjectFiles = [Flag.VECTOR_AGENT_CONFIG, tuiConfig].flatMap((file) => {
+    const local = file ? projectPath(file) : undefined
+    return local ? [local] : []
+  })
   const trustSnapshot = yield* Effect.promise(() =>
-    WorkspaceTrust.snapshot(workspace, [...projectFiles, ...projectVectorFiles, ...projectDirectories]).catch((cause) =>
-      WorkspaceTrust.unavailableSnapshot(workspace, cause),
-    ),
+    WorkspaceTrust.snapshot(workspace, [
+      ...projectFiles,
+      ...projectVectorFiles,
+      ...projectDirectories,
+      ...explicitProjectFiles,
+    ]).catch((cause) => WorkspaceTrust.unavailableSnapshot(workspace, cause)),
   )
   const snapshotFailure = WorkspaceTrust.unavailableReason(trustSnapshot)
   if (snapshotFailure) {
@@ -250,7 +269,7 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
 
   const mergeFile = (acc: Acc, file: string) =>
     Effect.gen(function* () {
-      const scope = pluginScope(file, ctx)
+      const scope = pluginScope(file, sourceContext)
       const loaded = yield* scope === "local" ? loadProjectFile(file) : loadFile(file)
       const data = { ...loaded }
       if (Object.keys(data).length) {
@@ -286,10 +305,9 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
   }
 
   // 2. Explicit VECTOR_TUI_CONFIG override, if set.
-  if (Flag.VECTOR_TUI_CONFIG) {
-    const configFile = Flag.VECTOR_TUI_CONFIG
-    yield* mergeFile(acc, configFile)
-    yield* Effect.logDebug("loaded custom tui config", { path: configFile })
+  if (tuiConfig) {
+    yield* mergeFile(acc, tuiConfig)
+    yield* Effect.logDebug("loaded custom tui config", { path: tuiConfig })
   }
 
   // 3. Project tui files, applied root-first so the closest file wins.
@@ -299,10 +317,10 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
 
   // 4. `.vector` directories (and VECTOR_AGENT_CONFIG_DIR) discovered while
   // walking up the tree.
-  const dirs = unique(directories).filter((dir) => dir.endsWith(".vector") || dir === Flag.VECTOR_AGENT_CONFIG_DIR)
+  const dirs = unique(directories).filter((dir) => dir.endsWith(".vector") || dir === configDirectory)
 
   for (const dir of dirs) {
-    if (!dir.endsWith(".vector") && dir !== Flag.VECTOR_AGENT_CONFIG_DIR) continue
+    if (!dir.endsWith(".vector") && dir !== configDirectory) continue
     for (const file of ConfigPaths.fileInDirectory(dir, "tui")) {
       yield* mergeFile(acc, file)
     }

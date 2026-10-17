@@ -23,7 +23,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { Context, Duration, Effect, Fiber, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { EffectFlock } from "@vectordevai/core/util/effect-flock"
-import { containsPath, type InstanceContext } from "../project/instance-context"
+import type { InstanceContext } from "../project/instance-context"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { ConfigMCPV1 } from "@vectordevai/core/v1/config/mcp"
 import { RemoteAuthError } from "@vectordevai/core/v1/config/error"
@@ -354,6 +354,7 @@ type Info = ConfigV1.Info & {
 type State = {
   config: Info
   directories: string[]
+  configDirectory: string | undefined
   deps: Fiber.Fiber<void>[]
   trust: WorkspaceTrust.Snapshot
   trusted: boolean
@@ -621,16 +622,34 @@ const layer = Layer.effect(
     const loadInstanceState = Effect.fn("Config.loadInstanceState")(
       function* (ctx: InstanceContext) {
         const auth = yield* authSvc.all().pipe(Effect.orDie)
+        // These directories belong to the user even when the current workspace is their home or config folder.
+        const projectPath = (file: string) =>
+          [Global.Path.config, path.join(Global.Path.home, ".vector")].some((root) => FSUtil.contains(root, file))
+            ? undefined
+            : ConfigPaths.projectPath(file, ctx)
+        const projectContains = (file: string) => projectPath(file) !== undefined
         const projectFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG
           ? []
           : yield* ConfigPaths.files("vector", ctx.directory, ctx.worktree).pipe(Effect.orDie)
         const projectTuiFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG
           ? []
           : yield* ConfigPaths.files("tui", ctx.directory, ctx.worktree).pipe(Effect.orDie)
-        const allDirectories = yield* ConfigPaths.directories(ctx.directory, ctx.worktree)
-        const projectDirectories = allDirectories.filter((directory) => containsPath(directory, ctx))
-        const localAgentConfig =
-          Flag.VECTOR_AGENT_CONFIG && containsPath(Flag.VECTOR_AGENT_CONFIG, ctx) ? [Flag.VECTOR_AGENT_CONFIG] : []
+        const agentConfig = Flag.VECTOR_AGENT_CONFIG
+          ? (projectPath(Flag.VECTOR_AGENT_CONFIG) ?? Flag.VECTOR_AGENT_CONFIG)
+          : undefined
+        const agentConfigDir = Flag.VECTOR_AGENT_CONFIG_DIR
+          ? (projectPath(Flag.VECTOR_AGENT_CONFIG_DIR) ?? Flag.VECTOR_AGENT_CONFIG_DIR)
+          : undefined
+        const allDirectories = Array.from(
+          new Set(
+            (yield* ConfigPaths.directories(ctx.directory, ctx.worktree)).map(
+              (directory) => projectPath(directory) ?? directory,
+            ),
+          ),
+        )
+        const projectDirectories = allDirectories.filter(projectContains)
+        const localAgentConfig = agentConfig && projectContains(agentConfig) ? [agentConfig] : []
+        const localTuiConfig = Flag.VECTOR_TUI_CONFIG ? projectPath(Flag.VECTOR_TUI_CONFIG) : undefined
         const prepareProjectFile = Effect.fnUntraced(function* (filepath: string) {
           const text = yield* readConfigFile(filepath)
           if (!text) return
@@ -646,6 +665,7 @@ const layer = Layer.effect(
             ...projectTuiFiles,
             ...projectDirectories,
             ...localAgentConfig,
+            ...(localTuiConfig ? [localTuiConfig] : []),
           ]).catch((cause) => WorkspaceTrust.unavailableSnapshot(trustWorkspace, cause))
         const existingTrustSnapshot = yield* Effect.promise(captureTrustSnapshot)
         const snapshotFailure = WorkspaceTrust.unavailableReason(existingTrustSnapshot)
@@ -723,7 +743,7 @@ const layer = Layer.effect(
         const pluginScopeForSource = Effect.fnUntraced(function* (source: string) {
           if (source.startsWith("http://") || source.startsWith("https://")) return "global"
           if (source === "VECTOR_CONFIG_CONTENT") return "local"
-          if (containsPath(source, ctx)) return "local"
+          if (projectContains(source)) return "local"
           return "global"
         })
 
@@ -753,7 +773,7 @@ const layer = Layer.effect(
         let projectGrants = false
 
         const merge = (source: string, next: Info, kind?: ConfigPlugin.Scope) => {
-          const scope = kind ?? (containsPath(source, ctx) ? "local" : "global")
+          const scope = kind ?? (projectContains(source) ? "local" : "global")
           const projectSource = scope === "local" && source !== "VECTOR_CONFIG_CONTENT"
           const safe = projectSource ? projectExecutableConfig(next, trusted, result) : next
           if (projectSource) projectGrants ||= grantsPermission(safe)
@@ -826,12 +846,12 @@ const layer = Layer.effect(
         const global = Object.keys(authEnv).length ? yield* loadGlobal(authEnv) : yield* getGlobal()
         yield* merge(Global.Path.config, global, "global")
 
-        if (Flag.VECTOR_AGENT_CONFIG) {
-          const next = containsPath(Flag.VECTOR_AGENT_CONFIG, ctx)
-            ? yield* loadProjectFile(Flag.VECTOR_AGENT_CONFIG, authEnv, !trusted)
-            : yield* loadFile(Flag.VECTOR_AGENT_CONFIG, authEnv, true)
-          yield* merge(Flag.VECTOR_AGENT_CONFIG, next)
-          yield* Effect.logDebug("loaded custom config", { path: Flag.VECTOR_AGENT_CONFIG })
+        if (agentConfig) {
+          const next = projectContains(agentConfig)
+            ? yield* loadProjectFile(agentConfig, authEnv, !trusted)
+            : yield* loadFile(agentConfig, authEnv, true)
+          yield* merge(agentConfig, next)
+          yield* Effect.logDebug("loaded custom config", { path: agentConfig })
         }
 
         if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
@@ -845,24 +865,24 @@ const layer = Layer.effect(
         result.plugin = result.plugin || []
 
         const directories = allDirectories
-          .filter((directory) => !containsPath(directory, ctx) || trusted)
+          .filter((directory) => !projectContains(directory) || trusted)
           .map((directory) =>
-            containsPath(directory, ctx) && trustedSnapshot
+            projectContains(directory) && trustedSnapshot
               ? WorkspaceTrust.materializedPath(trustedSnapshot, directory)
               : directory,
           )
 
-        if (Flag.VECTOR_AGENT_CONFIG_DIR) {
-          yield* Effect.logDebug("loading config from VECTOR_AGENT_CONFIG_DIR", { path: Flag.VECTOR_AGENT_CONFIG_DIR })
+        if (agentConfigDir) {
+          yield* Effect.logDebug("loading config from VECTOR_AGENT_CONFIG_DIR", { path: agentConfigDir })
         }
 
         const deps: Fiber.Fiber<void>[] = []
 
         for (const dir of allDirectories) {
-          const local = containsPath(dir, ctx)
+          const local = projectContains(dir)
           const runtimeDir = local && trustedSnapshot ? WorkspaceTrust.materializedPath(trustedSnapshot, dir) : dir
-          if (dir.endsWith(".vector") || dir === Flag.VECTOR_AGENT_CONFIG_DIR) {
-            if (dir === Flag.VECTOR_AGENT_CONFIG_DIR) yield* importSettings(dir)
+          if (dir.endsWith(".vector") || dir === agentConfigDir) {
+            if (dir === agentConfigDir) yield* importSettings(dir)
             if (!local || trusted) yield* importSettings(dir, true)
             // Local files merge after the shared ones so machine-local settings win.
             for (const file of ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES]) {
@@ -881,7 +901,7 @@ const layer = Layer.effect(
           // The desktop also owns .vector directories containing repository state and rules.
           const runtimeFiles =
             dir === Global.Path.config ||
-            dir === Flag.VECTOR_AGENT_CONFIG_DIR ||
+            dir === agentConfigDir ||
             (yield* fs.isFile(path.join(runtimeDir, "package.json"))) ||
             (yield* Effect.forEach(["plugin", "plugins", "tool", "tools"], (name) =>
               fs.isDir(path.join(runtimeDir, name)),
@@ -1021,6 +1041,10 @@ const layer = Layer.effect(
         return {
           config: result,
           directories,
+          configDirectory:
+            agentConfigDir && trustedSnapshot && projectContains(agentConfigDir)
+              ? WorkspaceTrust.materializedPath(trustedSnapshot, agentConfigDir)
+              : agentConfigDir,
           deps,
           trust: trustSnapshot,
           trusted,
@@ -1147,7 +1171,7 @@ const layer = Layer.effect(
     // resolved secret into a file in place of its reference.
     const storedMcp = Effect.fn("Config.storedMcp")(function* (name: string) {
       const ctx = yield* InstanceState.context
-      const dirs = yield* directories()
+      const settings = yield* InstanceState.use(state, (s) => s)
       const project = Flag.VECTOR_DISABLE_PROJECT_CONFIG
         ? []
         : yield* ConfigPaths.files("vector", ctx.directory, ctx.worktree).pipe(
@@ -1159,8 +1183,8 @@ const layer = Layer.effect(
         ...["config.json", "vector.json", "vector.jsonc"].map((file) => path.join(Global.Path.config, file)),
         ...(Flag.VECTOR_AGENT_CONFIG ? [Flag.VECTOR_AGENT_CONFIG] : []),
         ...project,
-        ...dirs
-          .filter((dir) => dir.endsWith(".vector") || dir === Flag.VECTOR_AGENT_CONFIG_DIR)
+        ...settings.directories
+          .filter((dir) => dir.endsWith(".vector") || dir === settings.configDirectory)
           .flatMap((dir) => ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES].map((file) => path.join(dir, file))),
         ...(Flag.VECTOR_DISABLE_PROJECT_CONFIG
           ? []

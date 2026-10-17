@@ -18,6 +18,9 @@ import { Provider } from "../../src/provider/provider"
 import { Skill } from "../../src/skill"
 import { Truncate } from "../../src/tool/truncate"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { assertExternalDirectoryEffect } from "../../src/tool/external-directory"
+import { SessionID, MessageID } from "../../src/session/schema"
+import type { Tool } from "../../src/tool/tool"
 
 const agentLayer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   LayerNode.compile(
@@ -35,6 +38,31 @@ function evalPerm(agent: Agent.Info | undefined, permission: string): Permission
 
 function load<A>(fn: (svc: Agent.Interface) => Effect.Effect<A>) {
   return Agent.Service.use(fn)
+}
+
+function externalActions(agent: Agent.Info, target: string) {
+  return Effect.gen(function* () {
+    const actions: PermissionV1.Action[] = []
+    const ctx: Tool.Context = {
+      sessionID: SessionID.make("ses_agent_permissions"),
+      messageID: MessageID.make("msg_agent_permissions"),
+      callID: "agent_permissions",
+      agent: agent.name,
+      abort: AbortSignal.any([]),
+      messages: [],
+      metadata: () => Effect.void,
+      ask: (request) =>
+        Effect.sync(() => {
+          actions.push(
+            ...request.patterns.map(
+              (pattern) => Permission.evaluate(request.permission, pattern, agent.permission).action,
+            ),
+          )
+        }),
+    }
+    yield* assertExternalDirectoryEffect(ctx, target)
+    return actions
+  })
 }
 
 const expectDefaultAgentError = Effect.fn("AgentTest.expectDefaultAgentError")(function* (message: string) {
@@ -145,9 +173,7 @@ it.instance("explore agent asks for external directories and allows whitelisted 
     expect(explore).toBeDefined()
     expect(Permission.evaluate("external_directory", "/some/other/path", explore!.permission).action).toBe("ask")
     expect(Permission.evaluate("external_directory", Truncate.GLOB, explore!.permission).action).toBe("allow")
-    expect(
-      Permission.evaluate("external_directory", path.join(Global.Path.tmp, "agent-work"), explore!.permission).action,
-    ).toBe("allow")
+    expect(yield* externalActions(explore!, path.join(Global.Path.tmp, "agent-work"))).toEqual(["allow"])
   }),
 )
 
@@ -931,6 +957,7 @@ it.instance(
           build!.permission,
         ).action,
       ).toBe("deny")
+      expect(yield* externalActions(build!, path.join(Global.Path.tmp, "scratch"))).toEqual(["deny"])
     }),
   {
     trusted: true,
@@ -1010,6 +1037,7 @@ description: Permission skill.
 `,
         ),
       )
+      yield* Effect.promise(() => Bun.write(path.join(skillDir, "reference", "notes.md"), "Skill reference notes."))
       yield* Effect.promise(() => trustWorkspace(test.directory))
 
       const home = process.env.VECTOR_TEST_HOME
@@ -1024,7 +1052,8 @@ description: Permission skill.
       // A trusted project's skills load from the approved snapshot, so that copy is the directory the agent reads.
       const skill = yield* Skill.Service.use((svc) => svc.get("perm-skill"))
       const target = path.join(path.dirname(skill!.location), "reference", "notes.md")
-      expect(Permission.evaluate("external_directory", target, build!.permission).action).toBe("allow")
+      expect(yield* Effect.promise(() => Bun.file(target).text())).toBe("Skill reference notes.")
+      expect(yield* externalActions(build!, target)).toEqual(["allow"])
     }),
   { git: true },
 )
