@@ -110,4 +110,3 @@ function roots(ctx: { directory: string; worktree?: string }) {
 export function userOwned(file: string) {
   return [Global.Path.config, path.join(Global.Path.home, ".vector")].some((root) => FSUtil.contains(root, file))
 }
-
