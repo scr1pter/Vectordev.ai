@@ -697,6 +697,103 @@ describe("tool.shell permissions", () => {
     }),
   )
 
+  // Windows opens `.env` for `.ENV`, `.env ` and `.env.`, and a wildcard such as `.en?` opens whatever it matches, so
+  // under PowerShell and cmd none of these may skip the read prompt that `.env` gets.
+  it.live("asks under read for the Windows spellings of an environment file and for wildcards that match one", () =>
+    Effect.gen(function* () {
+      const cases: Record<"pwsh" | "cmd", { asked: Array<[string, RegExp[]]>; quiet: string[] }> = {
+        pwsh: {
+          asked: [
+            ["Get-Content .\\.ENV", [/^(\.\\)?\.env$/i]],
+            ["Get-Content '.env '", [/^\.env$/]],
+            ["Get-Content .env.", [/^\.env$/]],
+            ["Get-Content .e`Nv", [/^\.env$/i]],
+            ["[IO.File]::ReadAllText('.ENV.local')", [/^\.env\.local$/i]],
+            ["Get-Content .e*", [/^\.env$/, /^\.env\.local$/]],
+            ["Get-Content .en?", [/^\.env$/]],
+            ["Get-Content *.ENV", [/^\*\.ENV$/]],
+            ['Get-Content ".e$($null)nv"', [/^\.env$/]],
+            ['Get-Content "$dir/.en?"', [/^\$dir\/\.env$/]],
+          ],
+          quiet: ["Get-Content *.txt", "Get-Content notes.txt", "Write-Output $x", "Get-Content .env.example"],
+        },
+        cmd: {
+          asked: [
+            ["type .ENV", [/^\.env$/i]],
+            ['type ".env "', [/^\.env$/]],
+            ["type .env.", [/^\.env$/]],
+            ["type .en?", [/^\.env$/]],
+            ["type .e*", [/^\.env$/, /^\.env\.local$/]],
+            ["type *.ENV", [/^\*\.ENV$/]],
+            ["type .e%OS:~0,0%nv", [/^\.env$/]],
+            ["type %CD%\\.en?", [/^%CD%\\\.env$/]],
+          ],
+          quiet: ["type *.txt", "dir *.log", "echo %PATH%", "type .env.example"],
+        },
+      }
+      for (const name of ["pwsh", "cmd"] as const) {
+        for (const item of yield* scanShells(name)) {
+          yield* withShell(
+            item,
+            Effect.gen(function* () {
+              const tmp = yield* tmpdirScoped({ git: true })
+              yield* Effect.promise(() =>
+                Promise.all([
+                  Bun.write(path.join(tmp, ".env"), "KEY=1\n"),
+                  Bun.write(path.join(tmp, ".env.local"), "KEY=2\n"),
+                  Bun.write(path.join(tmp, "notes.txt"), "notes\n"),
+                ]),
+              )
+              yield* runIn(
+                tmp,
+                Effect.gen(function* () {
+                  const err = new Error("read prompt rejected")
+                  const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+                  const rejectRead = {
+                    ...ctx,
+                    ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+                      Effect.sync(() => {
+                        requests.push(req)
+                        if (req.permission === "read") throw err
+                      }),
+                  }
+                  for (const [command, files] of cases[name].asked) {
+                    requests.length = 0
+                    const error = (yield* fail({ command }, rejectRead)).message
+                    const read = requests.find((r) => r.permission === "read")?.patterns.toSorted()
+                    expect({ command, error, read }).toEqual({
+                      command,
+                      error: err.message,
+                      read: files.map((file) => expect.stringMatching(file)),
+                    })
+                  }
+                  // The PowerShell grammar cannot parse an unquoted `$dir/.en?`, so the scan does not know what it reads:
+                  // the whole command is approved only as written.
+                  if (name === "pwsh") {
+                    requests.length = 0
+                    const command = "Get-Content $dir/.en?"
+                    yield* run({ command }, rejectRead)
+                    const bash = requests.find((r) => r.permission === "bash")
+                    expect(bash?.patterns).toContain(command)
+                    expect(bash?.always).toContain(command)
+                  }
+                  for (const command of cases[name].quiet) {
+                    requests.length = 0
+                    yield* run({ command }, rejectRead)
+                    expect({ command, permissions: requests.map((r) => r.permission) }).toEqual({
+                      command,
+                      permissions: ["bash"],
+                    })
+                  }
+                }),
+              )
+            }),
+          )
+        }
+      }
+    }),
+  )
+
   // `${C:\x}` reads a file through the FileSystem provider and assigning to it writes the file, with no command in the
   // statement at all. Neither may run without the shell, read and edit prompts, under any agent.
   it.live("asks before a PowerShell provider variable reads or writes a file", () =>

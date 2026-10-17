@@ -245,6 +245,23 @@ function psRedirects(node: Node, input: boolean) {
 // The environment files the read tool asks for by default (`*.env`, `*.env.*`,
 // but not `*.env.example`), so a shell command that names one asks the same way.
 const ENV_FILE = /\.env(\.(?!example$)[^/\\]*)?$/
+// The names a Windows wildcard is tested against when the scan cannot list the folder it would match in.
+const ENV_NAMES = [".env", ".env.local", ".env.development", ".env.production", ".env.test"]
+// What PowerShell (`$name`, `${name}`, `$(...)`) and cmd (`%NAME%`, `!NAME!`) expand inside a word.
+const PS_EXPANSION = /\$\([^)]*\)?|\$\{[^}]*\}?|\$[\w:?]+/g
+const CMD_EXPANSION = /%[^%]*%|![^!]*!/g
+
+// A PowerShell or cmd wildcard as a regular expression over lower-case names. `?` may also match nothing, as cmd lets
+// a trailing one do, and a PowerShell `[...]` set stands for any one character, so the test can only match more.
+function winGlob(glob: string) {
+  const source = glob.toLowerCase().replace(/\[[^\]]*\]|[*?]|[^*?[]+|\[/g, (part) => {
+    if (part === "*") return ".*"
+    if (part === "?") return ".?"
+    if (part.length > 1 && part.startsWith("[")) return "."
+    return part.replace(/[.+^${}()|[\]\\]/g, "\\$&")
+  })
+  return new RegExp(`^${source}$`, "s")
+}
 
 function unquote(text: string) {
   if (text.length < 2) return text
@@ -290,10 +307,11 @@ function expand(text: string, cwd: string, shell: string) {
   return home(out)
 }
 
-// A word as the program it is passed to gets it: unquoted, with PowerShell's `$env:`, `$HOME` and `$PWD` expanded and
-// cmd's `^` escapes and double quotes removed, so a path rule tests the file the program opens.
+// A word as the program it is passed to gets it: unquoted, with PowerShell's `$env:`, `$HOME` and `$PWD` expanded,
+// PowerShell's backtick escapes and cmd's `^` escapes and double quotes removed, so a path rule tests the file the
+// program opens.
 function shellWord(arg: string, cwd: string, ps: boolean, shell: string) {
-  if (ps) return expand(arg, cwd, shell)
+  if (ps) return expand(arg, cwd, shell).replace(/`([\s\S])/g, "$1")
   if (Shell.name(shell) === "cmd") return home(cmdWord(unquote(arg)))
   return home(unquote(arg))
 }
@@ -744,6 +762,7 @@ export const ShellTool = Tool.define(
         cloud: new Map(),
       }
       const shellKind = ShellID.toKind(Shell.name(shell))
+      const win = ps || shellKind === "cmd"
       const list = commands(root).map((node) => {
         const command = parts(node)
         const tokens = command.map((item) => item.text)
@@ -766,8 +785,36 @@ export const ShellTool = Tool.define(
       // The name is tested as the program gets it, so cmd's `type .e^nv` asks as `type .env` does.
       const envRead = Effect.fnUntraced(function* (text: string) {
         const word = shellWord(text, cwd, ps, shell)
-        if (!ENV_FILE.test(shellKind === "cmd" ? path.win32.basename(word) : path.basename(word))) return
-        const resolved = yield* wordPath(word, cwd, ps, shell)
+        if (!win) {
+          if (ENV_FILE.test(path.basename(word))) yield* readTarget(word)
+          return
+        }
+        // Windows opens a name whatever its case and without its trailing spaces and dots: `.ENV` and `'.env '` are
+        // `.env`. These rules hold for PowerShell and cmd on any system, so the scan does not depend on where it runs.
+        const base = path.win32.basename(word)
+        const dir = word.slice(0, word.length - base.length)
+        const name = base.replace(/[ .]+$/, "")
+        if (ENV_FILE.test(name.toLowerCase())) return yield* readTarget(dir + name)
+        // A wildcard (`.en?`, `.e*`) or an expansion inside the name (`.e%X:~0,0%nv`) asks for each environment file
+        // it would open in its folder or, when the scan cannot list that folder, for one it could open. A name that is
+        // only an expansion (`$file`) may be anything, as `cat $file` may be in bash.
+        const expansion = ps ? PS_EXPANSION : CMD_EXPANSION
+        const glob = name.replace(expansion, "*")
+        if (!name.replace(expansion, "") || !/[*?[]/.test(glob)) return
+        const folder = /[*?[]/.test(dir) ? undefined : yield* wordPath(dir || ".", cwd, ps, shell)
+        const names = folder
+          ? yield* fs.readDirectoryEntries(folder).pipe(
+              Effect.map((entries) => entries.map((entry) => entry.name)),
+              Effect.catch(() => Effect.succeed([] as string[])),
+            )
+          : ENV_NAMES
+        const match = winGlob(glob)
+        const found = names.filter((item) => ENV_FILE.test(item.toLowerCase()) && match.test(item.toLowerCase()))
+        for (const item of folder ? found : found.slice(0, 1)) yield* readTarget(dir + item)
+      })
+      // A name with a wildcard (`*.env`) is asked for as written, not as the folder it starts in.
+      const readTarget = Effect.fnUntraced(function* (word: string) {
+        const resolved = /[*?[]/.test(word) ? undefined : yield* wordPath(word, cwd, ps, shell)
         scan.reads.add(resolved ? path.relative(instance.worktree, resolved) : word)
       })
       // A directory change anywhere in the command leaves unknown where git diff starts looking for its work tree.
@@ -847,6 +894,8 @@ export const ShellTool = Tool.define(
             .descendantsOfType(["assignment_expression", "function_statement"])
             .filter((node): node is Node => Boolean(node)),
         ]
+        // A command the grammar cannot parse (`Get-Content $dir/.en?`) may do anything the scan did not see.
+        if (root.hasError) exact.push(root)
         const ids = new Set(exact.map((node) => node.id))
         for (const node of exact) {
           let outer = node.parent
