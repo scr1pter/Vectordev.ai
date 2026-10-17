@@ -3233,6 +3233,13 @@ export default function NewLayout(props: ParentProps) {
     })
   }
 
+  const openProjectTrustSettings = () => {
+    closeWorkspacePanel()
+    void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
+      dialog.show(() => <x.DialogSettings section="trust" repositoryPath={activeWorkspaceScope().sourcePath} />)
+    })
+  }
+
   // Rules were reachable only by knowing they lived in Settings, which is the
   // same as not shipping them. This opens that panel directly.
   const activeParallelCount = createMemo(
@@ -7014,6 +7021,10 @@ export default function NewLayout(props: ParentProps) {
                 <button type="button" class="vector-engineering-row" onClick={openProviderSettings}>
                   <span>Model provider</span>
                   <small>{parallelModelState.current()?.provider.name || "Configure BYOK"}</small>
+                </button>
+                <button type="button" class="vector-engineering-row" onClick={openProjectTrustSettings}>
+                  <span>Project trust</span>
+                  <small>The project's own Vector settings</small>
                 </button>
               </div>
             </section>
