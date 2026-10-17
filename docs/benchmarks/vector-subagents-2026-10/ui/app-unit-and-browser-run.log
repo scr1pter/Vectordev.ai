@@ -1,0 +1,105 @@
+$ bun run test:unit && bun run test:browser
+$ bun test --only-failures --preload ./happydom.ts ./src
+bun test v1.3.14 (0d9b296a)
+
+src/theme-preload.test.ts:
+Vector restored your earlier theme preferences. Original preferences were kept.
+Vector restored your earlier theme preferences. Original preferences were kept.
+Vector restored your earlier theme preferences. Original preferences were kept.
+Vector restored your earlier theme preferences. Original preferences were kept.
+Vector restored your earlier theme preferences. Original preferences were kept.
+Vector restored your earlier theme preferences. Original preferences were kept.
+Vector restored your earlier theme preferences. Original preferences were kept.
+Vector restored your earlier theme preferences. Original preferences were kept.
+Vector restored your earlier theme preferences. Original preferences were kept.
+
+src/markdown-security.test.ts:
+Warning: KaTeX doesn't work in quirks mode. Make sure your website has a suitable doctype.
+
+src/utils/notification-click.test.ts:
+notification-click: navigate function not set, falling back to window.location.assign
+
+ 1706 pass
+ 0 fail
+ 4843 expect() calls
+Ran 1706 tests across 175 files. [14.14s]
+$ bun test --conditions=browser --preload ./happydom.ts ./test-browser
+bun test v1.3.14 (0d9b296a)
+
+test-browser/session-ownership.test.ts:
+(pass) createSessionOwnership > invalidates captured work when its Solid owner is disposed [0.43ms]
+(pass) createSessionOwnership > does not run a continuation after navigation [0.20ms]
+(pass) createSessionOwnership > does not revive a continuation after A to B to A navigation [0.04ms]
+
+test-browser/prompt-submission-state.test.ts:
+(pass) prompt submission state > keeps failed submission restoration with the prompt where it started [1.59ms]
+(pass) prompt submission state > moves first-submit restoration and context to the promoted session [0.46ms]
+(pass) prompt submission state > clears the original first-submit prompt after retargeting [0.21ms]
+(pass) prompt submission state > does not restore over a prompt edited after submission [0.08ms]
+
+test-browser/prompt-persistence.test.ts:
+(pass) prompt persistence > waits for an async draft to hydrate before reporting ready [3.32ms]
+
+test-browser/session-lineage.test.ts:
+(pass) resolves an uncached session and exposes its lineage [0.50ms]
+(pass) re-resolves when navigating to an uncached session without a remount [0.21ms]
+(pass) ignores a stale resolution failure after the target changes [0.16ms]
+(pass) returning to a pruned session re-resolves instead of throwing not found [0.31ms]
+(pass) revisiting a session whose resolution failed while unfocused retries cleanly [0.33ms]
+(pass) re-resolves against a replaced lineage store [0.14ms]
+(pass) throws not found when the settled session is deleted [0.22ms]
+
+test-browser/toast-owner.test.ts:
+(pass) showToastV2 > creates no reactive computations at call time [0.98ms]
+
+test-browser/prompt-attachments.test.ts:
+(pass) prompt attachment session ownership > adds an asynchronously read image to the session where the read started [5.55ms]
+(pass) prompt attachment session ownership > finishes the captured attachment after the active editor is removed [3.50ms]
+(pass) prompt attachment session ownership > keeps every file in a batch on the session where the batch started [8.41ms]
+(pass) prompt attachment session ownership > keeps a delayed native clipboard image on the session where paste started [3.60ms]
+(pass) prompt paste > attaches a picture once when one paste carries it in two formats [5.56ms]
+(pass) prompt paste > keeps different pictures from one paste and the same picture pasted again [8.94ms]
+(pass) prompt paste > inserts the text copied with a picture unless it only names the file [6.46ms]
+
+test-browser/cloud-overview.test.ts:
+(pass) live cloud overview > follows cloud changes, window focus and the session's directory, and stops when disposed [7.31ms]
+(pass) live cloud overview > drops an answer for a directory the session has already left [2.85ms]
+
+test-browser/motion-spring.test.ts:
+(pass) snaps spring progress when the session changes [0.90ms]
+
+test-browser/solid-virtual.test.ts:
+(pass) reactive count updates preserve measured row sizes [1.54ms]
+(pass) logical scroll offset includes pending measurement adjustments [0.32ms]
+(pass) stale pinned indexes do not produce missing virtual items after count shrinks [0.28ms]
+
+test-browser/background-tasks.test.ts:
+(pass) Background tasks after the event stream dropped > an unavailable task-list shape preserves the last valid observation [317.21ms]
+(pass) Background tasks after the event stream dropped > a reconnect reloads what the stream missed and settles the card [40.34ms]
+(pass) Background tasks after the event stream dropped > settles from the child alone when the task part never received the outcome [8.49ms]
+(pass) Background tasks after the event stream dropped > an agent the settle pass could not reload is tried again after a reconnect [34.41ms]
+(pass) Stop > an incomplete board refuses Stop all before touching any visible worker [158.66ms]
+(pass) Stop > settles an agent whose run the engine lost, and reloads the stopped agent and the root [36.49ms]
+(pass) Stop > still reloads the agents when the engine refuses to stop them [33.23ms]
+
+test-browser/pull-request-actions.test.ts:
+(pass) pull request project actions > builds the exact create and merge bridge payloads [0.07ms]
+(pass) pull request project actions > requires one confirmation step before a merge action [0.04ms]
+(pass) pull request project actions > rejects stale repository responses and preserves useful errors [0.04ms]
+(pass) pull request project actions > discards an older selection response that finishes after the newest one in the same repository [0.13ms]
+(pass) pull request project actions > invalidates a response when the panel closes or the repository changes and returns [0.03ms]
+
+test-browser/prompt-scope.test.ts:
+(pass) selects the explicitly scoped session tab instead of the active tab [0.08ms]
+
+test-browser/workspace-revisions.test.ts:
+(pass) polled agent workspaces > a poll that returns the same records at the same revisions rebuilds nothing [0.27ms]
+(pass) polled agent workspaces > polled swarm runs and background tasks rebuild only when a poll brings new content [0.11ms]
+
+test-browser/prompt-transient-state.test.ts:
+(pass) resets transient prompt input state when the prompt session changes [0.21ms]
+
+ 45 pass
+ 0 fail
+ 110 expect() calls
+Ran 45 tests across 14 files. [1031.00ms]

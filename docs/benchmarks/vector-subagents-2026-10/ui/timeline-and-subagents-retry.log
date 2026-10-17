@@ -1,0 +1,29 @@
+[WebServer] $ vite --host "0.0.0.0" --port "4567"
+
+[WebServer] (node:43423) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+
+Running 12 tests using 1 worker
+
+(node:43469) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:43469) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/12] [chromium] › e2e/regression/subagent-child-navigation.spec.ts:19:1 › navigates to a subagent child session missing from the session list
+[2/12] [chromium] › e2e/regression/subagent-child-navigation.spec.ts:30:1 › shows the not found fallback when the viewed session is deleted
+[3/12] [chromium] › e2e/regression/subagent-child-navigation.spec.ts:47:3 › keeps indexed child outcomes and navigation when the batch is completed
+[4/12] [chromium] › e2e/regression/subagent-child-navigation.spec.ts:47:3 › keeps indexed child outcomes and navigation when the batch is error
+[5/12] [chromium] › e2e/regression/subagent-child-navigation.spec.ts:84:1 › surfaces a blocked subagent alongside running siblings and opens its question
+[6/12] [chromium] › e2e/regression/subagent-child-navigation.spec.ts:105:1 › manages a background subagent without leaving the parent or replacing its draft
+[7/12] [chromium] › e2e/smoke/session-timeline.spec.ts:33:3 › smoke: session timeline › keeps the visible message fixed while prepending history
+[8/12] [chromium] › e2e/smoke/session-timeline.spec.ts:92:3 › smoke: session timeline › preserves the timeline gap above the composer
+[9/12] [chromium] › e2e/smoke/session-timeline.spec.ts:118:3 › smoke: session timeline › loads older history when task navigation lands on a short initial page
+[10/12] [chromium] › e2e/smoke/session-timeline.spec.ts:153:3 › smoke: session timeline › paints cached sessions at the latest message when switching tasks
+[11/12] [chromium] › e2e/smoke/session-timeline.spec.ts:263:3 › smoke: session timeline › paints a cold session at the latest message when switching tasks
+[12/12] [chromium] › e2e/smoke/session-timeline.spec.ts:325:3 › smoke: session timeline › renders seeded timeline in order while paging through history
+  12 passed (1.0m)

@@ -1222,6 +1222,10 @@ it.instance(
       const body = yield* firstRequestBody({})
       expect(body).toContain("Do the work yourself by default, multi-file changes included")
       expect(body).toContain("Launch a general Subagent (omit subagent_type) only when that costs less")
+      expect(body).toContain("small fixes, single-file changes and lookups you do yourself")
+      expect(body).toContain("Delegated batches run in the background by default")
+      expect(body).toContain("Use task_manage")
+      expect(body).toContain("never poll")
       expect(body).not.toContain("MUST launch general Subagents")
       expect(body).not.toContain("General Subagents are turned off")
       expect(body).not.toContain("You are a Subagent working on a brief")
@@ -1992,6 +1996,7 @@ it.instance(
         permission: [{ permission: "*", pattern: "*", action: "allow" }],
       })
       yield* llm.tool("task", {
+        background: false,
         description: "inspect bug",
         prompt: "look into the cache key path",
         subagent_type: "general",
@@ -3936,6 +3941,7 @@ it.instance(
       })
       const gate = yield* Deferred.make<void>()
       yield* llm.tool("task", {
+        background: false,
         tasks: [
           {
             description: "Inspect alpha",
@@ -4022,6 +4028,7 @@ for (const mode of ["legacy", "hybrid", "plugin-schema", "plugin-inplace", "lega
           permission: [{ permission: "*", pattern: "*", action: "allow" }],
         })
         const brief = {
+          background: false,
           description: "Inspect legacy",
           prompt: "Inspect this independent area.",
           subagent_type: "general",
@@ -4592,6 +4599,7 @@ it.instance(
       const guard = yield* SpendGuard.Service
       const chat = yield* guardedChat({ usd: 1 })
       yield* llm.tool("task", {
+        background: false,
         description: "inspect bug",
         prompt: "look into the cache key path",
         subagent_type: "general",

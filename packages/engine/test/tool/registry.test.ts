@@ -170,7 +170,7 @@ describe("tool.registry", () => {
     }),
   )
 
-  it.instance("offers foreground task batches while accepting legacy background input by default", () =>
+  it.instance("offers background task batches with budgets while accepting legacy input", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
       const agent = yield* Agent.Service
@@ -191,7 +191,7 @@ describe("tool.registry", () => {
           tasks: { type: "array", minItems: 1, maxItems: 8, items: { required: ["description", "prompt"] } },
         },
       })
-      expect(Object.keys(schema.properties ?? {})).toEqual(["tasks", "background"])
+      expect(Object.keys(schema.properties ?? {})).toEqual(["tasks", "budget", "background"])
       expect(schema).not.toHaveProperty("properties.tasks.items.properties.background")
       const legacy = { description: "Inspect the registry", prompt: "Inspect the registry.", background: true }
       expect(Schema.decodeUnknownSync(task.parameters)(legacy)).toEqual(legacy)

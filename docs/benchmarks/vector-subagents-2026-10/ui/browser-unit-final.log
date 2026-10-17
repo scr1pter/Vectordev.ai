@@ -1,0 +1,81 @@
+$ bun test --conditions=browser --preload ./happydom.ts ./test-browser
+bun test v1.3.14 (0d9b296a)
+
+test-browser/session-ownership.test.ts:
+(pass) createSessionOwnership > invalidates captured work when its Solid owner is disposed [0.74ms]
+(pass) createSessionOwnership > does not run a continuation after navigation [0.46ms]
+(pass) createSessionOwnership > does not revive a continuation after A to B to A navigation [0.05ms]
+
+test-browser/prompt-submission-state.test.ts:
+(pass) prompt submission state > keeps failed submission restoration with the prompt where it started [2.18ms]
+(pass) prompt submission state > moves first-submit restoration and context to the promoted session [4.05ms]
+(pass) prompt submission state > clears the original first-submit prompt after retargeting [0.53ms]
+(pass) prompt submission state > does not restore over a prompt edited after submission [0.19ms]
+
+test-browser/prompt-persistence.test.ts:
+(pass) prompt persistence > waits for an async draft to hydrate before reporting ready [6.73ms]
+
+test-browser/session-lineage.test.ts:
+(pass) resolves an uncached session and exposes its lineage [1.33ms]
+(pass) re-resolves when navigating to an uncached session without a remount [0.63ms]
+(pass) ignores a stale resolution failure after the target changes [2.07ms]
+(pass) returning to a pruned session re-resolves instead of throwing not found [0.69ms]
+(pass) revisiting a session whose resolution failed while unfocused retries cleanly [0.35ms]
+(pass) re-resolves against a replaced lineage store [0.29ms]
+(pass) throws not found when the settled session is deleted [0.44ms]
+
+test-browser/toast-owner.test.ts:
+(pass) showToastV2 > creates no reactive computations at call time [0.67ms]
+
+test-browser/prompt-attachments.test.ts:
+(pass) prompt attachment session ownership > adds an asynchronously read image to the session where the read started [16.62ms]
+(pass) prompt attachment session ownership > finishes the captured attachment after the active editor is removed [7.91ms]
+(pass) prompt attachment session ownership > keeps every file in a batch on the session where the batch started [9.36ms]
+(pass) prompt attachment session ownership > keeps a delayed native clipboard image on the session where paste started [7.58ms]
+(pass) prompt paste > attaches a picture once when one paste carries it in two formats [8.23ms]
+(pass) prompt paste > keeps different pictures from one paste and the same picture pasted again [10.51ms]
+(pass) prompt paste > inserts the text copied with a picture unless it only names the file [7.96ms]
+
+test-browser/cloud-overview.test.ts:
+(pass) live cloud overview > follows cloud changes, window focus and the session's directory, and stops when disposed [9.42ms]
+(pass) live cloud overview > drops an answer for a directory the session has already left [3.36ms]
+
+test-browser/motion-spring.test.ts:
+(pass) snaps spring progress when the session changes [1.47ms]
+
+test-browser/solid-virtual.test.ts:
+(pass) reactive count updates preserve measured row sizes [1.56ms]
+(pass) logical scroll offset includes pending measurement adjustments [1.18ms]
+(pass) stale pinned indexes do not produce missing virtual items after count shrinks [0.74ms]
+
+test-browser/background-tasks.test.ts:
+(pass) Background tasks after the event stream dropped > an unavailable task-list shape preserves the last valid observation [332.03ms]
+(pass) Background tasks after the event stream dropped > a reconnect reloads what the stream missed and settles the card [50.23ms]
+(pass) Background tasks after the event stream dropped > settles from the child alone when the task part never received the outcome [23.46ms]
+(pass) Background tasks after the event stream dropped > an agent the settle pass could not reload is tried again after a reconnect [40.03ms]
+(pass) Stop > a failed desktop refresh cannot clear its retained snapshot's truncation [312.80ms]
+(pass) Stop > an incomplete board refuses Stop all before touching any visible worker [154.25ms]
+(pass) Stop > settles an agent whose run the engine lost, and reloads the stopped agent and the root [67.32ms]
+(pass) Stop > still reloads the agents when the engine refuses to stop them [43.55ms]
+
+test-browser/pull-request-actions.test.ts:
+(pass) pull request project actions > builds the exact create and merge bridge payloads [0.12ms]
+(pass) pull request project actions > requires one confirmation step before a merge action [0.04ms]
+(pass) pull request project actions > rejects stale repository responses and preserves useful errors [0.07ms]
+(pass) pull request project actions > discards an older selection response that finishes after the newest one in the same repository [0.43ms]
+(pass) pull request project actions > invalidates a response when the panel closes or the repository changes and returns [0.06ms]
+
+test-browser/prompt-scope.test.ts:
+(pass) selects the explicitly scoped session tab instead of the active tab [0.25ms]
+
+test-browser/workspace-revisions.test.ts:
+(pass) polled agent workspaces > a poll that returns the same records at the same revisions rebuilds nothing [1.67ms]
+(pass) polled agent workspaces > polled swarm runs and background tasks rebuild only when a poll brings new content [0.50ms]
+
+test-browser/prompt-transient-state.test.ts:
+(pass) resets transient prompt input state when the prompt session changes [0.75ms]
+
+ 46 pass
+ 0 fail
+ 112 expect() calls
+Ran 46 tests across 14 files. [1.68s]
