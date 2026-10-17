@@ -2,9 +2,9 @@
 
 ## Current candidate: 1.99.108 (16 October 2026)
 
-The subagent orchestration candidate supersedes the unpublished 1.99.107 desktop candidate below. Follow [the 1.99.108 handoff](subagents-199108.md): publish and verify the matching CLI prerequisites first, then dispatch **Vector desktop release** from the reviewed `main` commit with tag `v1.99.108`, `allow_unsigned=true` and `prerelease=false`, then approve `production-release`. Publication and live benchmarks remain owner actions.
+The subagent orchestration candidate supersedes the unpublished 1.99.107 desktop candidate below. Follow [the 1.99.108 handoff](subagents-199108.md): dispatch **Vector desktop release** from the reviewed `main` commit with tag `v1.99.108`, `allow_unsigned=true` and `prerelease=false`, then approve `production-release`. Publication and live benchmarks remain owner actions.
 
-The required CLI version is now 1.99.108 so WSL receives the same task controls. Publish and verify all twelve standalone targets plus the plugin, umbrella CLI and all six npm platform packages at 1.99.108 before dispatching the desktop workflow, as detailed in the handoff. Keep `publishedDesktopVersion` at 1.99.106 until the new installers and feeds are verified. The earlier version-specific dispatch commands below are historical and do not supersede this handoff.
+The required CLI compatibility version remains 1.99.99, but the new terminal task controls require a separately published CLI built from this candidate. Keep `publishedDesktopVersion` at 1.99.106 until the new installers and feeds are verified. The earlier version-specific dispatch commands below are historical and do not supersede this handoff.
 
 ## Previous candidate: 1.99.107 (11 October 2026)
 
