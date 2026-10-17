@@ -416,8 +416,9 @@ export const run: (
       const finalStructured = final?.info.role === "assistant" ? final.info.structured : undefined
       const finalValue = spec.decode(finalStructured !== undefined ? finalStructured : lastText(final))
       if (finalValue === undefined && track.denied) return done(undefined, "stopped", track.stop, track.stop)
+      // The first turn's error is the cause; a finalize turn after it fails because of it, and says less.
       if (finalValue === undefined)
-        return done(undefined, "failed", track.stop, errorOf(final) ?? errorOf(message) ?? "no report")
+        return done(undefined, "failed", track.stop, errorOf(message) ?? errorOf(final) ?? "no report")
       const status = track.stop === "timeout" ? "timeout" : track.stop ? "stopped" : "ok"
       return done(finalValue, status, track.stop, track.stop)
     }).pipe(

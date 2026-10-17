@@ -1197,6 +1197,23 @@ describe("Review.run", () => {
   )
 
   it.instance(
+    "a failed reviewer reports its first turn's error, not the finalizer's that followed from it",
+    () =>
+      Effect.gen(function* () {
+        const { llm, directory } = yield* useServer()
+        yield* llm.pushMatch(REVIEW, httpError(400, { error: { message: "This model does not support tools" } }))
+        yield* llm.pushMatch(FINALIZE, reply().text("Nothing to add.").stop())
+
+        const outcome = yield* Review.run(input(directory))
+
+        expect(outcome.specialists[0]).toMatchObject({ name: "review", status: "failed" })
+        expect(outcome.specialists[0]?.detail).toContain("This model does not support tools")
+        expect(outcome.specialists[0]?.detail).not.toContain("structured output")
+      }),
+    TIMEOUT,
+  )
+
+  it.instance(
     "marks a run whose model fails as a model error and leaves every file unreviewed",
     () =>
       Effect.gen(function* () {

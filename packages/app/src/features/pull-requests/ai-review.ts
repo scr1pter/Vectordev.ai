@@ -997,11 +997,12 @@ async function runSpecialist(input: {
       })
       .then(
         (result) => {
-          failure = errorText(result.data?.info.error) ?? failure
+          // The first error is the cause; a finalize turn after it fails because of it, and says less.
+          failure ??= errorText(result.data?.info.error)
           return result.data
         },
         (cause: unknown) => {
-          failure = errorText(cause) ?? failure
+          failure ??= errorText(cause)
           return undefined
         },
       )

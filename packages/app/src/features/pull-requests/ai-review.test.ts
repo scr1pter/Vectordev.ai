@@ -494,6 +494,21 @@ describe("runReview", () => {
     })
   })
 
+  test("a failed review names its first turn's error, not the finalize turn's that followed from it", async () => {
+    const { client } = fakeClient({
+      files: { "src/list.ts": HEAD, ...NO_VERIFY },
+      reply: (call) => {
+        const message = answer(undefined, 0)
+        const finalize = call.parts?.[0]?.text === buildFinalizePrompt()
+        const error = finalize
+          ? { name: "StructuredOutputError", data: { message: "Model did not produce structured output" } }
+          : { name: "APIError", data: { message: "This model does not support tools" } }
+        return { ...message, info: { ...message.info, error } }
+      },
+    })
+    await expect(run(client)).rejects.toThrow("Vector could not finish this review: This model does not support tools")
+  })
+
   test("a failed review whose security reviewer's history is unreadable states its spend as a floor", async () => {
     const progress: Parameters<NonNullable<ReviewRunInput["onProgress"]>>[0][] = []
     const { client } = fakeClient({
