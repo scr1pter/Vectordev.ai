@@ -15,7 +15,7 @@ import { Teams } from "@vectordevai/core/teams"
 import { Env } from "../env"
 import { applyEdits, modify, parse } from "jsonc-parser"
 import { InstallationLocal } from "@vectordevai/core/installation/version"
-import { existsSync } from "fs"
+import { existsSync, lstatSync } from "fs"
 import { isRecord } from "@/util/record"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Redaction } from "@vectordevai/core/redaction"
@@ -650,7 +650,18 @@ const layer = Layer.effect(
         const projectDirectories = allDirectories.filter(projectContains)
         const localAgentConfig = agentConfig && projectContains(agentConfig) ? [agentConfig] : []
         const localTuiConfig = Flag.VECTOR_TUI_CONFIG ? projectPath(Flag.VECTOR_TUI_CONFIG) : undefined
+        const trustWorkspace = ctx.worktree === "/" ? ctx.directory : ctx.worktree
         const prepareProjectFile = Effect.fnUntraced(function* (filepath: string) {
+          // This runs before any trust decision, and writing follows links: a project's vector.json linked to
+          // ../../.codex/config.toml would turn that file into JSON. Only a regular file really inside the workspace
+          // is rewritten.
+          const inside = yield* Effect.try({
+            try: () =>
+              lstatSync(filepath, { throwIfNoEntry: false })?.isFile() === true &&
+              FSUtil.contains(FSUtil.realpath(trustWorkspace), FSUtil.realpath(filepath)),
+            catch: (cause) => cause,
+          }).pipe(Effect.orElseSucceed(() => false))
+          if (!inside) return
           const text = yield* readConfigFile(filepath)
           if (!text) return
           const normalized = /^\s*[{/]/.test(text) ? text : JSON.stringify(ConfigMigration.parseConfig(text, filepath))
@@ -658,7 +669,6 @@ const layer = Layer.effect(
           if (updated === normalized) return
           yield* fs.writeFileString(filepath, updated).pipe(Effect.catch(() => Effect.void))
         })
-        const trustWorkspace = ctx.worktree === "/" ? ctx.directory : ctx.worktree
         const captureTrustSnapshot = () =>
           WorkspaceTrust.snapshot(trustWorkspace, [
             ...projectFiles,

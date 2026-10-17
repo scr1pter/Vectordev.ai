@@ -109,6 +109,9 @@ const configIt = (options?: Parameters<typeof configLayer>[0]) => testEffect(con
 
 const schemaConfig = (config: object) => ({ $schema: "https://vectordev.ai/config.json", ...config })
 
+// Directory links that need no privilege on Windows, so the same spellings are built on every platform.
+const linkType = process.platform === "win32" ? "junction" : "dir"
+
 const provideCurrentInstance = <A, E, R>(effect: Effect.Effect<A, E, R>, ctx: InstanceContext) =>
   effect.pipe(Effect.provideService(InstanceRef, ctx))
 
@@ -749,6 +752,35 @@ it.instance("keeps the safe settings of a project vector.json that is a symlink"
     yield* Effect.promise(() => fs.symlink(shared, path.join(test.directory, "vector.json")))
 
     expect(yield* Config.use.get()).toMatchObject({ permission: { bash: "deny" }, username: "shared" })
+  }),
+)
+
+it.instance("never rewrites a file outside the project that a project vector.json links to", () =>
+  Effect.gen(function* () {
+    // File links need a privilege Windows does not grant by default; the .vector case below covers it there.
+    if (process.platform === "win32") return
+    const test = yield* TestInstance
+    const outside = path.join(yield* tmpdirScoped(), "config.toml")
+    const toml = 'username = "outside"\n'
+    yield* FSUtil.use.writeFileString(outside, toml)
+    yield* Effect.promise(() => fs.symlink(outside, path.join(test.directory, "vector.json"), "file"))
+
+    // Still read as the project's config, but the other tool's file is not turned into JSON before trust.
+    expect((yield* Config.use.get()).username).toBe("outside")
+    expect(yield* FSUtil.use.readFileString(outside)).toBe(toml)
+  }),
+)
+
+it.instance("never rewrites files in a project .vector that links outside the project", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const outside = yield* tmpdirScoped()
+    const toml = 'username = "outside"\n'
+    yield* FSUtil.use.writeFileString(path.join(outside, "vector.json"), toml)
+    yield* Effect.promise(() => fs.symlink(outside, path.join(test.directory, ".vector"), linkType))
+
+    yield* Config.use.get()
+    expect(yield* FSUtil.use.readFileString(path.join(outside, "vector.json"))).toBe(toml)
   }),
 )
 
