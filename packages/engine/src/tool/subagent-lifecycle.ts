@@ -27,6 +27,8 @@ export const METADATA_KEY = "subagent"
 export const RUNTIME_ID = randomUUID()
 // Admission, messaging and Stop share one short critical section; execution runs outside it.
 export const controlLock = Semaphore.makeUnsafe(1)
+// Stop releases the admission lock while interrupting nested runners; these claims block new work until cleanup ends.
+export const stopping = new Set<SessionID>()
 // Independent of admission: callers may already hold controlLock. Serialize metadata read/merge/write.
 const metadataLock = Semaphore.makeUnsafe(1)
 

@@ -1167,6 +1167,7 @@ export const TaskTool = Tool.define(
         // one of them failing must not stop the run already going.
         const extendRun = Effect.fn("TaskTool.extendRun")(
           function* () {
+            if (SubagentLifecycle.stopping.has(nextSession.id)) return yield* Effect.fail(new Error("This task is stopping; wait for cancellation to finish before resuming it."))
             if (batch?.multiple) return undefined
             if ((yield* background.get(nextSession.id))?.status !== "running") return undefined
             // A Stop pressed while this call was setting up is meant for its message too. A launch is started and then
@@ -1232,6 +1233,7 @@ export const TaskTool = Tool.define(
         // call refused here leaves the record describing the run it already had.
         const info = yield* claimLock.withPermits(1)(
           Effect.gen(function* () {
+            if (SubagentLifecycle.stopping.has(nextSession.id)) return yield* Effect.fail(new Error("This task is stopping; wait for cancellation to finish before resuming it."))
             // Another resume may have won after extendRun released the lock. Never overwrite its assignment.
             const existing = yield* background.get(nextSession.id)
             if (existing?.status === "running") return existing
@@ -1253,6 +1255,7 @@ export const TaskTool = Tool.define(
                 batchIndex: batch?.index,
                 completedAt: undefined,
                 usage: undefined,
+                budgetScopes: undefined,
                 error: undefined,
                 notification: undefined,
                 resultRef: undefined,
