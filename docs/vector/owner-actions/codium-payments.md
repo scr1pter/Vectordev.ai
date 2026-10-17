@@ -7,7 +7,7 @@ Once the steps below are done, Codium runs without anyone acting on a payment. U
 1. **A buyer pays.** Stripe Checkout takes the card payment for a monthly plan ($10, $50, $100 or $200) or a top-up of the same amounts. Stripe pays the money out to your bank on its normal payout schedule.
 2. **Credits are granted at once.** Stripe's signed notification reaches `/api/model-plans/webhook`. vectordev.ai asks Stripe whether the money was really paid, then sets the buyer's OpenRouter key limit:
    - A monthly plan gets a new key capped at the month's credits that expires at the end of the paid period. Each renewal gets a fresh key, so monthly credits reset rather than roll over.
-   - A top-up raises the buyer's purchased-credit key, which never expires, by that top-up's credits.
+   - A top-up adds its credits to the buyer's purchased-credit key, which never expires. The first top-up creates that key.
 3. **Credits come off on their own.** Each of these switches the month's key off or lowers the purchased-credit limit:
    - a failed renewal (the subscription goes past due);
    - a cancellation, once the paid period ends;
