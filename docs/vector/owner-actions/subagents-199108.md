@@ -1,6 +1,8 @@
 # Subagent orchestration release 1.99.108
 
-The desktop version, lockfile, unsigned-release policy and release notes are prepared for 1.99.108. The desktop ships first and keeps required CLI 1.99.99, which is already published on npm and as standalone archives, so the desktop workflow's CLI checks pass without a new CLI release. `publishedDesktopVersion` remains 1.99.106 until installers are actually published. This work does not dispatch a release, approve production, publish npm packages or run paid models.
+The desktop version, lockfile, unsigned-release policy and release notes are prepared for 1.99.108. The desktop ships first and keeps required CLI 1.99.99, which is already published on npm and as standalone archives, so the desktop workflow's CLI checks pass without a new CLI release. This work did not dispatch a release, approve production, publish npm packages or run paid models.
+
+**Status, 17 October 2026:** desktop 1.99.108 is published (release run #88), all four update feeds report 1.99.108, and `publishedDesktopVersion` is 1.99.108. Step 1's dispatch and approval are done; CLI 1.99.108 (step 2) and the matched live checks (step 3) are not.
 
 ## Owner release steps
 

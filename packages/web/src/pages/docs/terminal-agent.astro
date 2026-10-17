@@ -61,7 +61,7 @@ vector whoami</code><button class="doc-cmd-copy" type="button" aria-label="Copy 
           <p class="doc-cmd"><code>vector run "why is the checkout test flaky?" --format json
 vector run -c "now fix it" --variant high</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
           <p class="note">
-            In the next release, <code>--max-cost</code> caps one run in US dollars, counted at the charge the provider
+            From the next CLI release, <code>--max-cost</code> caps one run in US dollars, counted at the charge the provider
             reported for a step, as OpenRouter does, or else from its tokens at catalog list price, and
             <code>--max-steps</code> caps its model steps. Steps a plan pays for, such as a ChatGPT sign-in, are not
             counted in dollars, and Vector Codium steps, which spend Codium credits, count as unpriced. Vector stops within one step of the cap for each agent
@@ -100,7 +100,7 @@ vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-
             Keep the existing database file when migrating an ambiguous historical override.
           </p>
           <p>
-            From the next release, a server with a password stays on loopback unless you say the network is trusted:
+            From the next CLI release, a server with a password stays on loopback unless you say the network is trusted:
             plain HTTP carries the password in every request. Pass <code>--trusted-network</code> with a non-loopback
             <code>--hostname</code> for a container's bridge or a private LAN; from anywhere else, keep the server on
             loopback behind a TLS reverse proxy or tunnel. Without a password, a passwordless server answers only its

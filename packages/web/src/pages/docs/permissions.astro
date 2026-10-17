@@ -18,11 +18,11 @@ export const prerender = true
 
           <h2 id="project-trust">Repository trust</h2>
           <p>
-            A repository's own <code>vector.json</code> and <code>.vector</code> folder (its agents, commands, modes,
-            plugins, tools, skills, MCP servers, formatters and language servers) load only after you trust the
-            repository, because they can run code on your computer. Until then Vector applies the repository's deny
-            rules, and its run limits, loop pauses and sharing settings only where they are stricter than yours, so a
-            cloned repository cannot raise your spend cap or switch loop pauses off.
+            From desktop 1.99.108, a repository's own <code>vector.json</code> and <code>.vector</code> folder (its
+            agents, commands, modes, plugins, tools, skills, MCP servers, formatters and language servers) load only
+            after you trust the repository, because they can run code on your computer. Until then Vector applies the
+            repository's deny rules, and its run limits, loop pauses and sharing settings only where they are stricter
+            than yours, so a cloned repository cannot raise your spend cap or switch loop pauses off.
           </p>
           <p>
             From desktop 1.99.109, the app asks once, the first time you open a repository that has settings of its
@@ -33,7 +33,8 @@ export const prerender = true
             its menu on Home, or open Settings, <strong>Repository trust</strong>. In desktop 1.99.108 the same
             approval is the button in the session header. The TUI's <code>/trust</code> and the terminal's
             <code>vector trust status</code> and <code>vector trust approve</code> arrive with the next CLI release; the
-            CLI that npm and <code>vectordev.ai/install</code> serve today has neither.
+            CLI that npm and <code>vectordev.ai/install</code> serve today has neither, and Windows WSL servers keep the
+            1.99.99 engine, without repository trust, until a later desktop release requires that CLI.
           </p>
           <p>
             The language servers and formatters you turn on in your own settings also stay off in a repository you have
@@ -55,22 +56,25 @@ export const prerender = true
 
           <h2 id="read-only-specialists">Read-only specialists</h2>
           <p>
-            From the next release, the read-only specialists (explore, review and security) ask before they run a test
+            From desktop 1.99.108, the read-only specialists (explore, review and security) ask before they run a test
             or build command such as <code>bun test</code>, <code>npm test</code>, <code>pytest</code>,
             <code>cargo test</code> or <code>go test</code>, because those run the repository's own code. Approve once,
             or approve always for the rest of the session. In an unattended <code>vector run</code> they are refused
-            unless you pass <code>--auto</code>, and git and pull request reads still need no approval.
+            unless you pass <code>--auto</code>, and git and pull request reads still need no approval. The terminal
+            agent gets this with the next CLI release, and Windows WSL servers once a later desktop release requires
+            that CLI.
           </p>
 
           <h2 id="private-network">Your own network</h2>
           <p>
-            From the next release, when an agent's web fetch would reach your own computer or network (a dev server on
+            From desktop 1.99.108, when an agent's web fetch would reach your own computer or network (a dev server on
             <code>localhost</code>, an intranet page, a cloud metadata address), Vector asks for
             <code>private_network</code> as well as <code>webfetch</code>, so a hostile page cannot steer the agent
             into your network. Approve it once for that address, or allow it in your settings, for example
             <code>"permission": {"{"} "private_network": {"{"} "http://localhost:3000": "allow" {"}"} {"}"}</code>.
             Addresses you put in your own settings (remote instructions, skill catalogs, providers such as a LAN Ollama
-            host, MCP servers, references) are reached without asking.
+            host, MCP servers, references) are reached without asking. The terminal agent gets this with the next CLI
+            release, and Windows WSL servers once a later desktop release requires that CLI.
           </p>
 
           <h2 id="shell-sandbox">The shell sandbox</h2>

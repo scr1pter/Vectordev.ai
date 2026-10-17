@@ -29,12 +29,16 @@ export const prerender = true
             the longest run and the peak day. It also keeps a daily streak with your current and longest run, seven
             days of activity, and your top five models by share of all-time token use.
           </p>
-          <h3>The Run Guard, in the next release</h3>
+          <h3>The Run Guard, from desktop 1.99.108</h3>
           <p>
-            The next release holds runs to a live cap instead of checking only before they start. Vector checks spend
-            after every model step and stops within one step of the cap for each agent running at the time. Dollars
-            are the reported tokens at catalog
-            list price unless the provider reported what the step cost, so discounts are not reflected.
+            From desktop 1.99.108, Vector holds runs to a live cap instead of checking only before they start. Vector
+            checks spend after every model step and stops within one step of the cap for each agent running at the
+            time. Dollars are the reported tokens at catalog
+            list price unless the provider reported what the step cost, so discounts are not reflected. The npm CLI
+            (1.99.99) and the CLI that <code>vectordev.ai/install</code> serves predate it, so the terminal UI and
+            <code>vector run</code> with <code>--max-cost</code> and <code>--max-steps</code> get the Run Guard with the
+            next CLI release, and Windows WSL servers, which run the 1.99.99 engine desktop 1.99.108 requires, get it
+            once a later desktop release requires that CLI.
           </p>
           <dl class="doc-rows">
             {runGuardRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}

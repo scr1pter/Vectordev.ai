@@ -323,7 +323,7 @@ const stack = [
         <div class="ip-cap"><h3>Tokenomics</h3><p>Vector prices each session from the tokens the provider reported wherever the model has a price, subagents included. Free models, ChatGPT plan, Codium and unpriced steps are labelled instead of priced. Vector recommends models once a task type has three measured runs.</p></div>
         <div class="ip-cap"><h3>Test and ship from the task</h3><p>A browser agent tests the running app. Environment variables, Supabase migrations with a dry run, and Vercel publishing with health and browser checks.</p></div>
       </div>
-      <p class="ip-footnote"><strong>In the next release (1.99.108, prepared, installers not published yet):</strong> fuller Vercel and Supabase controls, with approval for every account change and the exact SQL shown for database changes; Models included with Vector under a no-training policy, through your own free OpenRouter account or, while Vector's service has it on, Vector's shared allowance for a free Vector account; Codium plans, with sales marked Coming soon until payments are connected; and helper sessions such as reviews kept out of the session list while their tokens and cost stay visible.</p>
+      <p class="ip-footnote"><strong>New in desktop 1.99.108, published 17 October 2026:</strong> fuller Vercel and Supabase controls, with approval for every account change and the exact SQL shown for database changes; Models included with Vector under a no-training policy, through your own free OpenRouter account or, while Vector's service has it on, Vector's shared allowance for a free Vector account; Codium plans, with sales marked Coming soon until payments are connected; and helper sessions such as reviews kept out of the session list while their tokens and cost stay visible.</p>
     </div>
   </section>
 
@@ -584,12 +584,12 @@ const stack = [
       <div class="ip-milestone">
         <span class="ip-stage">Early version live</span>
         <h3>Multiplayer</h3>
-        <p>Today a teammate can join a live workspace with one invite link. Built but not yet published: guests stay inside the workspace, while terminals, shell commands and approvals stay with the host. Next: Vector Teams with shared defaults, already in the code and waiting on service setup.</p>
+        <p>Today a teammate can join a live workspace with one invite link. Built but not yet in a published CLI: guests stay inside the workspace, while terminals, shell commands and approvals stay with the host; vector invite runs from the CLI, so this arrives with the next CLI release. Next: Vector Teams with shared defaults, already in the code and waiting on service setup.</p>
       </div>
       <div class="ip-milestone">
         <span class="ip-stage">In development</span>
         <h3>Vector Codium</h3>
-        <p>Managed coding models on one Vector account, with no provider keys: monthly plans or top-ups. The plans are built into the next release; sales open once payments are connected.</p>
+        <p>Managed coding models on one Vector account, with no provider keys: monthly plans or top-ups. The plans are built into desktop 1.99.108; sales open once payments are connected.</p>
       </div>
       <div class="ip-milestone">
         <span class="ip-stage">Planned</span>
@@ -610,7 +610,7 @@ const stack = [
         <p>The line itself would live in the repository, so a team reviews and versions it like code and sees what each run cost. Several stations already run on the desktop: scheduled agents with spend caps, issue comments that become pull requests, Vectorscope review, and Vercel and Supabase controls.</p>
       </div>
     </div>
-    <p class="ip-footnote"><strong>Also on the way:</strong> live spend caps for interactive runs (built, not in 1.99.106 or any earlier release; scheduled agents already stop at $5 a run and $25 a day by default), signed installers, and one-click sign-in for Vercel and Supabase (waiting on app registration).</p>
+    <p class="ip-footnote"><strong>Also on the way:</strong> the Run Guard in the terminal, with the next CLI release (desktop 1.99.108 already holds interactive runs to a live spend cap once you set one, and scheduled agents already stop at $5 a run and $25 a day by default), signed installers, and one-click sign-in for Vercel and Supabase (waiting on app registration).</p>
   </section>
 
   <section class="ip-split" aria-label="Business model and limitations">
@@ -636,14 +636,14 @@ const stack = [
       <h2>What is not there yet</h2>
       <ul class="ip-clean ip-limits">
         <li><strong>Very early.</strong> The first desktop previews shipped in July 2026, the app became free on 4 October 2026, and daily usage counts started on 10 October 2026, so there is no retention data yet.</li>
-        <li><strong>Codex still wins on cost, speed and memory.</strong> In Vector's own matched live test (October 2026), Codex used less time, cost and memory per task. The next release cuts what Vector sends per request; no matched live re-run has been done yet.</li>
+        <li><strong>Codex still wins on cost, speed and memory.</strong> In Vector's own matched live test (October 2026), Codex used less time, cost and memory per task. Desktop 1.99.108 cuts what Vector sends per request; the terminal's vector run, which the matched test used, gets the cuts with the next CLI release, and no matched live re-run has been done yet.</li>
         <li><strong>Claude Code is faster and lighter offline.</strong> In the archived later runs of the offline harness, on the integrated code they measured, Claude Code finished each scripted task in 0.4–1.0 seconds against Vector's 3.0–3.8, with about half the peak memory (326–350 MiB against 656–804); Vector's baseline there was slower still. Vector ran from source there, the others as installed builds.</li>
         <li><strong>Velocity is a plan, not a model yet:</strong> no weights and no benchmarks.</li>
         <li><strong>Vectorscope reviews GitHub only,</strong> with no GitLab or Bitbucket review yet.</li>
         <li><strong>Unsigned installers.</strong> macOS and Windows show a warning on first launch until code signing is set up.</li>
         <li><strong>Windows and Linux trail macOS</strong> in testing and maturity.</li>
         <li><strong>No SOC 2, SSO or admin console</strong> for larger companies yet.</li>
-        <li><strong>Through 1.99.106, interactive Vector sessions have no spend cap,</strong> and parallel agents have none by default; only scheduled agents stop at a default cap. Vercel and Supabase connect with pasted tokens until hosted sign-in is approved.</li>
+        <li><strong>Interactive spend caps are opt-in.</strong> Desktop 1.99.108 holds interactive sessions and parallel agents to a live spend cap only once you set one, in Settings, Spend limits or a project's budget.run; none is set by default, and only scheduled agents stop at a default cap. In the terminal, the vector run --max-cost and --max-steps flags arrive with the next CLI release, and Windows WSL servers keep the 1.99.99 engine, without the cap, until a later desktop release requires the new CLI. Vercel and Supabase connect with pasted tokens until hosted sign-in is approved.</li>
         <li><strong>Built on open source.</strong> The agent core is adapted from an MIT-licensed open-source coding agent; the workspace, orchestration, cost and review layers are Vector's own.</li>
       </ul>
     </div>

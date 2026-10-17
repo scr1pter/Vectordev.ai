@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import path from "node:path"
 import { DEFAULT_REVIEW_CONFIG } from "../packages/core/src/review/types"
 import { DEFAULT_SPEND_POLICY } from "../packages/desktop/src/main/spend-limits"
-import { publishedDesktopVersion } from "../packages/web/src/data/vector-releases"
+import { publishedDesktopVersion, release199 } from "../packages/web/src/data/vector-releases"
 import summary from "../docs/benchmarks/vector-efficiency-2026-10/summary.json"
 
 const root = path.join(import.meta.dir, "..")
@@ -19,11 +19,23 @@ test("the investor page gives the default spend caps that ship, and only for sch
   expect(page).not.toMatch(/parallel agents[^.]*stop at \$/i)
 })
 
-test("the investor page dates the missing spend caps to the published desktop release", () => {
-  // The live caps are built on a separate branch. Naming the release keeps these lines true when that branch merges;
-  // publishing the next installers changes publishedDesktopVersion, which is when the lines must be re-checked.
-  expect(page).toContain(`not in ${publishedDesktopVersion} or any earlier release`)
-  expect(page).toContain(`Through ${publishedDesktopVersion}, interactive Vector sessions have no spend cap`)
+test("the investor page says interactive spend caps shipped in desktop 1.99.108 and stay off until set", () => {
+  // The Run Guard shipped in desktop 1.99.108, and its notes say where the cap is set. The interactive policy still
+  // ships with no caps, so the page calls them opt-in; a default interactive cap, or a rollback of the published
+  // desktop version, makes these lines untrue and has to change them.
+  expect(Bun.semver.order(publishedDesktopVersion, "1.99.108")).toBeGreaterThanOrEqual(0)
+  expect(release199.find((release) => release.version === "1.99.108")?.summary).toContain(
+    "The Run Guard caps what one run spends: set it in Settings, Spend limits.",
+  )
+  expect(DEFAULT_SPEND_POLICY.interactive).toEqual({})
+  expect(page).toContain(
+    "Desktop 1.99.108 holds interactive sessions and parallel agents to a live spend cap only once you set one, in Settings, Spend limits or a project's budget.run; none is set by default",
+  )
+  expect(page).toContain("desktop 1.99.108 already holds interactive runs to a live spend cap once you set one")
+  // The CLI flags and WSL engines did not ship with the desktop, so the page must not present them as shipped.
+  expect(page).toContain("--max-cost and --max-steps flags arrive with the next CLI release")
+  expect(page).not.toMatch(/not in [\d.]+ or any earlier release/)
+  expect(page).not.toMatch(/Through [\d.]+, interactive Vector sessions have no spend cap/)
 })
 
 test("the investor page quotes the archived offline runs' wall time and memory", () => {
