@@ -256,6 +256,22 @@ describe("Truncate", () => {
   describe("cleanup", () => {
     const DAY_MS = 24 * 60 * 60 * 1000
 
+    it.live("preserves foreign artifact filenames without aborting cleanup", () =>
+      Effect.gen(function* () {
+        const svc = yield* Truncate.Service
+        const fs = yield* FileSystem.FileSystem
+        const names = ["tool_result_fixture", "tool_", "tool_000000000000", "tool_000000000000retained-artifact"]
+        yield* Effect.forEach(names, (name) => writeFileStringScoped(path.join(Truncate.DIR, name), "retained result"))
+        const old = yield* writeFileStringScoped(
+          path.join(Truncate.DIR, Identifier.create("tool", "ascending", Date.now() - 10 * DAY_MS)),
+          "expired tool output",
+        )
+        yield* svc.cleanup()
+        expect(yield* fs.exists(old)).toBe(false)
+        for (const name of names) expect(yield* fs.exists(path.join(Truncate.DIR, name))).toBe(true)
+      }),
+    )
+
     it.live("deletes files older than 7 days and preserves recent files", () =>
       Effect.gen(function* () {
         const svc = yield* Truncate.Service
