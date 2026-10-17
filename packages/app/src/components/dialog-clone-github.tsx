@@ -9,7 +9,6 @@ import { createStore } from "solid-js/store"
 
 import { useGlobal } from "@/context/global"
 import { usePlatform } from "@/context/platform"
-import { useProjectTrust } from "@/context/project-trust"
 import { ServerConnection } from "@/context/server"
 import { useTabs } from "@/context/tabs"
 import { showToast } from "@/utils/toast"
@@ -49,7 +48,6 @@ export function useCloneFromGithub() {
     open(conn: ServerConnection.Any, onOpened?: (directory: string) => void) {
       dialog.show(() => (
         <DialogCloneGithub
-          server={conn}
           onOpened={
             onOpened ??
             ((directory) => {
@@ -65,10 +63,8 @@ export function useCloneFromGithub() {
   }
 }
 
-export function DialogCloneGithub(props: { server: ServerConnection.Any; onOpened: (directory: string) => void }) {
+export function DialogCloneGithub(props: { onOpened: (directory: string) => void }) {
   const dialog = useDialog()
-  const global = useGlobal()
-  const trust = useProjectTrust()
   const api = githubApi()
 
   const [store, setStore] = createStore({
@@ -233,14 +229,6 @@ export function DialogCloneGithub(props: { server: ServerConnection.Any; onOpene
     runId = undefined
     if (disposed) return
     if (result.ok) {
-      // A folder Vector just cloned is a project the user made here, so it opens trusted, approved as it is now. An
-      // existing clone Vector reused may hold changes made outside Vector, so it keeps whatever trust it had and asks
-      // on open like any other project.
-      if (!result.reused) {
-        const server = global.ensureServerCtx(props.server).sdk
-        await trust.approve(server.createClient({ directory: result.directory }), server.scope)
-        if (disposed) return
-      }
       dialog.close()
       props.onOpened(result.directory)
       showToast({

@@ -30,7 +30,7 @@ export function projectTrustPrompt(
 
 /**
  * The answer to keep after seeing a status. A project the engine trusts is remembered as trusted however it was
- * approved (the dialog, Settings, the project's menu, a clone made in Vector or `vector trust approve`), so a later
+ * approved (the dialog, Settings, the repository's menu or `vector trust approve`), so a later
  * change to its settings asks again even after an earlier "Not now".
  */
 export function projectTrustRecord(

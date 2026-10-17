@@ -1,5 +1,31 @@
 import { describe, expect, test } from "bun:test"
+import path from "node:path"
 import { projectTrustAnswer, projectTrustPrompt, projectTrustRecord } from "./project-trust-policy"
+
+describe("who may trust a repository", () => {
+  // A clone can come from any pasted link, so its vector.json and .vector settings are a stranger's code. Only the
+  // user's own answer approves trust: the trust dialog and Settings, Repository trust. Nothing approves on the
+  // user's behalf after a clone, an open or any other flow, so every clone asks like any other repository.
+  test("only the trust dialog and Settings approve trust, never a clone or any other flow", async () => {
+    const root = path.join(import.meta.dir, "..")
+    const files = await Array.fromAsync(new Bun.Glob("**/*.{ts,tsx}").scan({ cwd: root }))
+    const callers = await Promise.all(
+      files
+        .filter((file) => !file.includes(".test."))
+        .map(async (file) => ({ file, text: await Bun.file(path.join(root, file)).text() })),
+    )
+    expect(
+      callers
+        .filter((item) => /\btrust\s*\.\s*approve\s*\(/.test(item.text))
+        .map((item) => item.file)
+        .toSorted(),
+    ).toEqual([
+      "components/project-trust-prompt.tsx",
+      "components/settings-v2/project-trust.tsx",
+      "context/project-trust.tsx",
+    ])
+  })
+})
 
 const ignored = { ignored: true, settings: true }
 
