@@ -2,9 +2,12 @@ import { RedisClient } from "bun"
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
 import { mkdtemp, rm, stat } from "node:fs/promises"
+import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { checkCodiumFunding, CODIUM_FUNDING_MAX_AGE_MS, readCodiumFunding } from "../../../api/_lib/codium-funding"
 import {
+  modelPlanCheckout,
   modelPlanCredential,
   modelTopupCheckout,
   readModelPlanAccount,
@@ -299,7 +302,7 @@ beforeEach(async () => {
   stripe.subscriptions = []
   stripe.disputes = []
   openRouter.keys.clear()
-  Object.assign(openRouter, { credits: { total_credits: 0, total_usage: 0 }, unavailable: false, pageSize: 2 })
+  Object.assign(openRouter, { credits: { total_credits: 1000, total_usage: 0 }, unavailable: false, pageSize: 2 })
   emails.length = 0
   resend.failing = false
   Object.assign(process.env, {
@@ -551,5 +554,125 @@ describe("payment notifications grant and remove credits without anyone acting",
     expect(verifyModelPlanWebhook(raw, `t=${timestamp},v1=${signature}`)).toMatchObject({ type: "invoice.paid" })
     expect(() => verifyModelPlanWebhook(raw, `t=${timestamp},v1=${"0".repeat(64)}`)).toThrow()
     expect(() => verifyModelPlanWebhook(raw, `t=${timestamp - 600},v1=${signature}`)).toThrow()
+  })
+})
+
+describe("sales follow Vector's OpenRouter balance", () => {
+  const funded = (dollars: number, used = 0) => (openRouter.credits = { total_credits: dollars, total_usage: used })
+  const other = (name: string, data: Record<string, unknown>) =>
+    openRouter.keys.set(name, { key: name, data: { name, hash: name, usage: 0, disabled: false, ...data } })
+
+  test("pauses new sales when the balance cannot cover what is owed, tells the owner, and reopens when funded", async () => {
+    funded(100)
+    // Keys that are not Codium's, switched off, or expired are not owed.
+    other("owner-laptop", { name: "Owner laptop", limit: 1000 })
+    other("expired", { name: `Vector ${user.id} sub_old 1`, limit: 500, expires_at: "2026-01-01T00:00:00.000Z" })
+    other("disabled", { name: `Codium ${user.id} purchased credits`, limit: 500, disabled: true })
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({
+      status: "open",
+      owed: 0,
+      required: 2000,
+      notified: false,
+    })
+    expect(emails).toHaveLength(0)
+
+    const bought = await topUp(200)
+    await reconcileModelPlanEvent(event("checkout.session.completed", bought.session), fetcher)
+    openRouter.keys.get("codium_key_4")!.data.usage = 0.004
+    // Owed $99.996 rounds up to $100.00; with the default 10% and $20 margin $130 is needed and $100 is there.
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({
+      status: "paused",
+      balance: 10000,
+      owed: 10000,
+      required: 13000,
+      keys: 1,
+      notified: true,
+    })
+    expect(emails).toHaveLength(1)
+    expect(emails[0]).toMatchObject({
+      to: "owner@example.test",
+      from: "Vector <support@example.test>",
+      subject: "Vector Codium sales paused: OpenRouter is short $30.00",
+    })
+    expect(String(emails[0]!.text)).toContain("Credits customers already bought keep working.")
+
+    const paused = { code: "CODIUM_SALES_PAUSED", statusCode: 503 }
+    await expect(modelTopupCheckout(user, "codium-topup-10", fetcher)).rejects.toMatchObject(paused)
+    await expect(modelPlanCheckout(user, "vector-10", fetcher)).rejects.toMatchObject(paused)
+    expect(stripe.sessions.size).toBe(1)
+    // Credits already bought keep working while sales are paused.
+    expect((await modelPlanCredential(user.id, fetcher)).key).toBe("codium-secret-4")
+
+    // Later checks while paused stay quiet, then remind the owner once a day.
+    await checkCodiumFunding(fetcher)
+    expect(emails).toHaveLength(1)
+    await checkCodiumFunding(fetcher, Date.now() + 25 * 60 * 60_000)
+    expect(emails).toHaveLength(2)
+
+    // OpenRouter's auto top-up (or the owner) adds credits: sales reopen at the next check by themselves.
+    funded(220, 100)
+    expect(await checkCodiumFunding(fetcher, Date.now() + 26 * 60 * 60_000)).toMatchObject({ status: "paused" })
+    funded(300, 100)
+    const now = Date.now()
+    expect(await checkCodiumFunding(fetcher, now)).toMatchObject({ status: "open", balance: 20000, notified: true })
+    expect(emails.at(-1)).toMatchObject({ subject: "Vector Codium sales reopened" })
+    expect((await modelTopupCheckout(user, "codium-topup-10", fetcher, now)).url).toStartWith(
+      "https://checkout.stripe.com/",
+    )
+  })
+
+  test("a sale without a recent check runs one, and sales stay closed while OpenRouter cannot be read", async () => {
+    funded(100)
+    openRouter.unavailable = true
+    await expect(modelTopupCheckout(user, "codium-topup-10", fetcher)).rejects.toMatchObject({
+      code: "CODIUM_SALES_PAUSED",
+    })
+    expect(stripe.sessions.size).toBe(0)
+    expect(await readCodiumFunding(fetcher)).toBeUndefined()
+
+    openRouter.unavailable = false
+    await modelTopupCheckout(user, "codium-topup-10", fetcher)
+    const checked = await readCodiumFunding(fetcher)
+    expect(checked).toMatchObject({ status: "open", balance: 10000 })
+
+    // A check older than half an hour is repeated before the next sale; a failed repeat closes sales.
+    openRouter.unavailable = true
+    const later = Date.now() + CODIUM_FUNDING_MAX_AGE_MS + 1000
+    await expect(modelTopupCheckout(user, "codium-topup-50", fetcher, later)).rejects.toMatchObject({
+      code: "CODIUM_SALES_PAUSED",
+    })
+    expect(await readCodiumFunding(fetcher)).toEqual(checked)
+  })
+
+  test("an email that fails to send is retried at the next check", async () => {
+    funded(10)
+    process.env.CODIUM_FUNDING_MARGIN_USD = "50"
+    resend.failing = true
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "paused", required: 5000, notified: false })
+    expect(await readCodiumFunding(fetcher)).not.toHaveProperty("notifiedAt")
+    resend.failing = false
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "paused", notified: true })
+    expect(emails).toHaveLength(1)
+    process.env.CODIUM_FUNDING_MARGIN_PERCENT = "-5"
+    await expect(checkCodiumFunding(fetcher)).rejects.toMatchObject({ code: "CODIUM_FUNDING_CONFIGURATION" })
+  })
+
+  test("the scheduled check needs the cron secret and does nothing while Codium is off", async () => {
+    const { default: handler } = await import("../../../api/model-plans/funding")
+    const route = createServer((request, response) => void handler(request, response))
+    await new Promise<void>((resolve) => route.listen(0, "127.0.0.1", resolve))
+    const address = route.address()
+    if (!address || typeof address === "string") throw new Error("Missing route address")
+    const call = (authorization?: string) =>
+      fetch(`http://127.0.0.1:${address.port}/api/model-plans/funding`, {
+        headers: authorization ? { authorization } : {},
+      })
+    expect((await call()).status).toBe(401)
+    expect((await call("Bearer wrong")).status).toBe(401)
+    process.env.MODEL_PLANS_ENABLED = "false"
+    const response = await call("Bearer cron-fixture-secret")
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ enabled: false })
+    route.close()
   })
 })

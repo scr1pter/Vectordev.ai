@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import { Option, Schema } from "effect"
 import type { AccountUser } from "./account.js"
 import { withBillingMutation } from "./billing-lock.js"
+import { requireCodiumSales } from "./codium-funding.js"
 import { modelPlanOrigin, modelPlans, modelTopups, MODEL_PLAN_ROOT } from "./model-plan-config.js"
 import { modelPlanStripe, stripeRecord } from "./model-plan-stripe.js"
 import { ApiError } from "./http.js"
@@ -868,6 +869,8 @@ export async function modelPlanCheckout(
   if (!plan?.priceID || !plan.credits)
     throw new ApiError(400, "MODEL_PLAN_INVALID", "Choose an available Codium subscription.")
   const priceID = plan.priceID
+  // Sell only credits Vector's OpenRouter balance can pay for.
+  await requireCodiumSales(fetcher, now)
   return withBillingMutation(
     `model-plan:${user.id}`,
     async (verify) => {
@@ -1015,6 +1018,7 @@ export async function modelTopupCheckout(
   if (!pack?.priceID || !pack.credits)
     throw new ApiError(400, "MODEL_TOPUP_INVALID", "Choose an available Codium credit pack.")
   const priceID = pack.priceID
+  await requireCodiumSales(fetcher, now)
   await settlePendingTopup(user.id, fetcher)
   return withBillingMutation(
     `model-plan:${user.id}`,
