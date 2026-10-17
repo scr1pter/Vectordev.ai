@@ -99,7 +99,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
   {
     kicker: "Vector Cloud",
     intro:
-      "One repository-scoped console for releases, health, domains, environment, data, and build configuration, on your own Vercel and Supabase accounts. Open it from Vector Home, or from the Cloud button in a session. The agent can do the same work from chat and asks before anything changes.",
+      "One repository-scoped console for releases, health, domains, environment, data, and build configuration, on your own Vercel and Supabase accounts. Open it from Vector Home and pick a repository. The agent can do the same work from chat and asks before anything changes.",
     entries: [
       {
         title: "Connections",
@@ -109,7 +109,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       },
       {
         title: "Deployments",
-        where: "Vector Cloud → Deployments, or Publish in a session's preview.",
+        where: "Vector Cloud → Deployments.",
         body: "Publish a preview first: Vector installs, builds, scans for exposed secrets, deploys to the Vercel project you connected and linked once in Vector Cloud → Connections, and checks that the preview responds and renders. Production changes only when you ask for it: Vector builds production, checks it, and promotes it only if the checks pass. Every deployment Vercel has for the project is listed, git pushes included, with logs, promote and roll back. Your code is never proxied through Vector: the build runs on your account. When a release fails, Fix this deploy starts the agent on it with the failing check's evidence.",
         tip: "Deploy a preview early, even half-finished: a live URL makes every change after it feel real.",
       },

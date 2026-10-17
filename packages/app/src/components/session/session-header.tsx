@@ -31,7 +31,6 @@ import { BranchPicker } from "./branch-picker"
 import { PresenceBanner } from "../presence-banner"
 import { ProjectTrustNotice } from "../project-trust-notice"
 import { BackgroundTasksButton } from "@/features/background-tasks/background-tasks-button"
-import { CloudSessionButton } from "@/features/cloud/cloud-session-card"
 
 const OPEN_APPS = [
   "vscode",
@@ -334,7 +333,6 @@ export function SessionHeader() {
                 <StatusPopover />
               </Tooltip>
             </Show>
-            <CloudSessionButton />
             <BackgroundTasksButton variant="v2" />
             <TooltipKeybind title={language.t("command.review.toggle")} keybind={command.keybind("review.toggle")}>
               <button

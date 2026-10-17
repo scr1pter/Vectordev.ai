@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createRoot, createSignal } from "solid-js"
 import type { CloudOverview } from "@/features/cloud/cloud-api"
-import { cloudStatus } from "@/features/cloud/cloud-handoff"
 import { createCloudOverview } from "@/features/cloud/cloud-overview"
 
 function snapshot(directory: string, input: Partial<CloudOverview> = {}): CloudOverview {
@@ -49,7 +48,7 @@ describe("live cloud overview", () => {
     const [directory, setDirectory] = createSignal<string | undefined>("/work/shop")
     const live = createRoot((dispose) => ({ ...createCloudOverview({ api: cloud.api, directory }), dispose }))
     await settle()
-    expect(cloudStatus(live.overview())).toEqual({ tone: "idle", label: "Not published yet" })
+    expect(live.overview()?.latest).toBeUndefined()
 
     // The agent published and promoted a release: the desktop reports a change.
     const release = {
@@ -64,7 +63,7 @@ describe("live cloud overview", () => {
     cloud.state.set("/work/shop", snapshot("/work/shop", { latest: release, production: release }))
     cloud.change()
     await settle()
-    expect(cloudStatus(live.overview())).toEqual({ tone: "success", label: "Live in production" })
+    expect(live.overview()?.production?.releaseStatus).toBe("current")
 
     cloud.state.set("/work/shop", snapshot("/work/shop", { database: { ...snapshot("/").database, connected: true } }))
     globalThis.window.dispatchEvent(new Event("focus"))

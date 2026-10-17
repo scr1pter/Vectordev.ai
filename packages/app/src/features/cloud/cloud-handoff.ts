@@ -1,9 +1,9 @@
-import type { CloudDeployment, CloudOverview, PublishTarget } from "./cloud-api"
+import type { CloudOverview, PublishTarget } from "./cloud-api"
 import type { SecurityReport } from "./supabase/supabase-api"
 
-// How the rest of Vector hands work to Vector Cloud and back: deep links into
-// the Cloud screens, prompts that start the agent on a cloud task, and the
-// readiness a publish needs.
+// How Vector Cloud hands work to the rest of Vector: deep links into the Cloud
+// screens, prompts that start the agent on a cloud task, and the readiness a
+// publish needs. Cloud is reached from Home; a task's own view has no Cloud UI.
 
 /** Every Vector Cloud screen a link can open. */
 export const CLOUD_SECTIONS = [
@@ -39,45 +39,6 @@ export function cloudHref(projectPath?: string, section?: CloudSection) {
   return query ? `/cloud?${query}` : "/cloud"
 }
 
-export const COMPOSER_PROMPT_EVENT = "vector:composer-prompt"
-
-export type ComposerPrompt = {
-  text: string
-  /** Send it straight away, starting the agent, instead of leaving it in the composer. */
-  send: boolean
-}
-
-/** Hands a prompt to the session composer on screen. False when no composer took it. */
-export function requestComposerPrompt(request: ComposerPrompt) {
-  const event = new CustomEvent<ComposerPrompt>(COMPOSER_PROMPT_EVENT, { detail: request, cancelable: true })
-  return !(globalThis.window?.dispatchEvent(event) ?? true)
-}
-
-/**
- * Lets a composer take the prompts other surfaces hand it. `take` returns false
- * to decline one (a composer holding an unsent draft keeps it), and the surface
- * then starts a new session with the prompt instead. Returns the unsubscribe.
- */
-export function onComposerPrompt(take: (request: ComposerPrompt) => boolean) {
-  const listener = (event: Event) => {
-    // One composer takes each request, so two mounted at once never both send it.
-    if (event.defaultPrevented || !(event instanceof CustomEvent)) return
-    if (take(event.detail)) event.preventDefault()
-  }
-  globalThis.window?.addEventListener(COMPOSER_PROMPT_EVENT, listener)
-  return () => globalThis.window?.removeEventListener(COMPOSER_PROMPT_EVENT, listener)
-}
-
-/**
- * Whether a composer can take a handed-over prompt. It declines while it holds
- * work the user has not sent (text, images, or line comments, which a submit
- * sends and then clears), and while its session takes no input: a subagent
- * session, or one waiting on a permission or a question, shows no message box.
- */
-export function composerTakes(input: { dirty: boolean; context: readonly { comment?: string }[]; open: boolean }) {
-  return input.open && !input.dirty && !input.context.some((item) => item.comment?.trim())
-}
-
 /**
  * Whether a composer still holds exactly the prompt handed to it. Only then is
  * it sent: never a composer the user has changed since, and never an empty
@@ -88,9 +49,6 @@ export function holdsHandoff(prompt: readonly { type: string; content?: string }
   if (prompt.some((part) => part.type !== "text")) return false
   return prompt.map((part) => part.content ?? "").join("") === text
 }
-
-export const DATABASE_SETUP_PROMPT =
-  "Set up the database for this project with Vector Cloud. Run vector_cloud database_status first. If a database is connected, prepare it (prepare_database, or prepare_auth when this needs sign-in) and continue. If none is connected, ask me whether to use a Supabase project I already have or create a new one. If I choose one I have, find it with supabase_projects and link it with link_database (I can also link it in Vector Cloud > Database). If I choose a new one, run create_database. Vector asks me to confirm before it links or creates anything."
 
 export type DeployEvidence = {
   project: string
@@ -209,33 +167,6 @@ export function publishRan(result: { checks?: readonly unknown[]; log?: string }
   return Boolean(result.checks?.length || result.log?.trim())
 }
 
-/** The evidence a recorded release carries: its failed checks, and the end of its log. */
-export function deploymentEvidence(deployment: CloudDeployment): DeployEvidence {
-  return {
-    project: deployment.name,
-    environment: deployment.environment,
-    url: deployment.productionUrl ?? deployment.url,
-    git: deployment.git && {
-      branch: deployment.git.branch,
-      commit: deployment.git.commitShort,
-      dirty: deployment.git.dirty,
-    },
-    checks: deployment.checks,
-    log: deployment.runtimeLog ?? deployment.log,
-  }
-}
-
-/**
- * A failed publish that left no release behind (a failed build, a rejected
- * deploy), when it is newer than the latest release.
- */
-export function currentFailure(overview: CloudOverview) {
-  const failure = overview.failure
-  if (!failure) return
-  if (overview.latest && failure.at <= overview.latest.createdAt) return
-  return failure
-}
-
 /**
  * The warning shown before a publish from a folder with uncommitted changes:
  * a release is built from the files on disk, so it includes them.
@@ -243,27 +174,6 @@ export function currentFailure(overview: CloudOverview) {
 export function uncommittedNote(git?: { branch: string; commit: string; dirty: boolean }) {
   if (!git?.dirty) return
   return `This folder has uncommitted changes. It is built from the files as they are on disk, not from ${git.branch} at ${git.commit}.`
-}
-
-/**
- * The preview's publish sheet after a failed Promote. The preview did publish
- * and is still live, so the sheet keeps its link and Promote can be tried
- * again. The note carries the last line of what Vercel said: the whole log
- * would crowd the sheet.
- */
-export function promoteFailed<T extends { promote?: "confirm" | "working" }>(
-  done: T,
-  error: unknown,
-): Omit<T, "promote"> & { promote?: undefined; promoteError: string } {
-  const said =
-    error instanceof Error
-      ? error.message
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .at(-1)
-      : undefined
-  return { ...done, promote: undefined, promoteError: said || "Vercel did not promote the preview." }
 }
 
 export type PublishPlan =
@@ -293,22 +203,4 @@ export function publishPlan(hosting: CloudOverview["hosting"], target?: PublishT
     return { ready: false, reason: target.loginHint || "This machine cannot run the Vercel deploy.", connect: false }
   }
   return { ready: true, project: hosting.project.name, account: hosting.account }
-}
-
-export type CloudStatus = { tone: "success" | "warning" | "error" | "idle"; label: string }
-
-/** One line for the session's Cloud button: the state that most needs attention. */
-export function cloudStatus(overview?: CloudOverview): CloudStatus {
-  if (!overview) return { tone: "idle", label: "Checking Vector Cloud" }
-  const latest = overview.latest
-  if (currentFailure(overview)) return { tone: "error", label: "Last publish failed" }
-  if (latest?.failedChecks.length) return { tone: "error", label: "Latest release failed its checks" }
-  if (overview.production?.status === "unreachable") return { tone: "error", label: "Production is unreachable" }
-  if (overview.production?.status === "degraded") return { tone: "warning", label: "Production is degraded" }
-  if (overview.production) return { tone: "success", label: "Live in production" }
-  if (latest) return { tone: "success", label: "Preview published" }
-  if (overview.hosting.connected && !overview.hosting.project) {
-    return { tone: "warning", label: "Link a Vercel project to publish" }
-  }
-  return { tone: "idle", label: "Not published yet" }
 }
