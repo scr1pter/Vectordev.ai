@@ -13,6 +13,8 @@ The original `before-explore.json` and `before-general.json` were captured befor
 
 These figures are modeled USD, not invoices. The original scripts used implicit Vector foreground execution. The revised scripts explicitly request `background: false` for these two cases so they continue to measure the same topology after the default changes. This adds a few serialized tokens. Matched before/after reports use the revised harness on both source revisions; the original reports remain as provenance.
 
+`baseline-explore.json` and `baseline-general.json` are the immutable baseline rerun: the revised harness at `44d81a5be` drove a separate, dependency-installed checkout at exactly `bdec3b29e`. All eight cells were valid. Explore measured $0.0645 cold / $0.0258 second-session for Vector and $0.2137 / $0.1037 for Claude Code; General measured $0.0681 / $0.0245 and $0.2213 / $0.1005 respectively. These are the matched baseline cells for the final comparison.
+
 `router-smoke-invalid.json` preserves an early harness validation failure: the actor router incorrectly required a task ID from foreground results, although Claude Code returns the report directly. The operation scripts and fixture checks completed, but those cells were invalid under that router. The router now requires IDs only for background launches. They must not be selected as final comparison evidence.
 
 ## Revised scenarios
