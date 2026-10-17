@@ -1,11 +1,12 @@
 import { RedisClient } from "bun"
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
-import { mkdtemp, rm, stat } from "node:fs/promises"
+import { mkdtemp, rm } from "node:fs/promises"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { checkCodiumFunding, CODIUM_FUNDING_MAX_AGE_MS, readCodiumFunding } from "../../../api/_lib/codium-funding"
+import { codiumLedger, codiumLedgerSummary, handleCodiumLedger } from "../../../api/_lib/codium-ledger"
 import {
   modelPlanCheckout,
   modelPlanCredential,
@@ -19,17 +20,19 @@ import { reconcileModelPlanEvent } from "../../../api/model-plans/webhook"
 // The money pipeline end to end against local fakes: Stripe, OpenRouter and Resend are one local HTTP server, and
 // leases, accounts and the ledger live in a real, isolated Valkey database.
 const directory = await mkdtemp(join(tmpdir(), "codium-payments-test-"))
-const socket = join(directory, "redis.sock")
-const database = process.env.VECTOR_TEST_REDIS_URL ? new RedisClient(process.env.VECTOR_TEST_REDIS_URL) : undefined
-const processHandle = database
+// A spawned Valkey listens on a free local port so the native client, not a process per command, talks to it.
+const probe = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
+const port = probe.port
+probe.stop(true)
+const processHandle = process.env.VECTOR_TEST_REDIS_URL
   ? undefined
   : Bun.spawn(
       [
         process.env.VECTOR_TEST_VALKEY_SERVER ?? "valkey-server",
         "--port",
-        "0",
-        "--unixsocket",
-        socket,
+        String(port),
+        "--bind",
+        "127.0.0.1",
         "--save",
         "",
         "--appendonly",
@@ -39,16 +42,9 @@ const processHandle = database
       ],
       { stdout: "ignore", stderr: "pipe" },
     )
-async function redis(command: readonly (string | number)[]) {
-  if (database) return database.send(String(command[0]), command.slice(1).map(String))
-  const child = Bun.spawn(
-    [process.env.VECTOR_TEST_VALKEY_CLI ?? "valkey-cli", "-s", socket, "--json", ...command.map(String)],
-    { stdout: "pipe", stderr: "pipe" },
-  )
-  const output = await new Response(child.stdout).text()
-  if (await child.exited) throw new Error(await new Response(child.stderr).text())
-  return JSON.parse(output) as unknown
-}
+const database = new RedisClient(process.env.VECTOR_TEST_REDIS_URL ?? `redis://127.0.0.1:${port}`)
+const redis = (command: readonly (string | number)[]) =>
+  database.send(String(command[0]), command.slice(1).map(String)) as Promise<unknown>
 
 const user = { id: "44444444-4444-4444-8444-444444444444", email: "buyer@example.test" }
 const accountKey = `vector:model-plans:account:${user.id}`
@@ -109,6 +105,7 @@ const environment = [
   "CODIUM_FUNDING_MARGIN_USD",
   "CODIUM_OPENROUTER_FEE_PERCENT",
   "CRON_SECRET",
+  "VECTOR_CLI_TOKEN_SECRET",
   ...[10, 50, 100, 200].flatMap((price) => [
     `STRIPE_MODEL_TOPUP_${price}_PRICE_ID`,
     `MODEL_TOPUP_${price}_CREDITS_USD`,
@@ -288,8 +285,7 @@ const fetcher: typeof fetch = Object.assign(
 )
 
 beforeAll(async () => {
-  if (!database)
-    for (let count = 0; count < 300 && !(await stat(socket).catch(() => undefined)); count++) await Bun.sleep(10)
+  for (let count = 0; count < 300 && !(await redis(["PING"]).catch(() => undefined)); count++) await Bun.sleep(10)
   expect(await redis(["PING"])).toBe("PONG")
 })
 beforeEach(async () => {
@@ -341,8 +337,8 @@ beforeEach(async () => {
 })
 afterAll(async () => {
   server.stop(true)
+  database.close()
   processHandle?.kill()
-  database?.close()
   await processHandle?.exited
   await rm(directory, { recursive: true, force: true })
   previous.forEach((value, key) => {
@@ -676,3 +672,150 @@ describe("sales follow Vector's OpenRouter balance", () => {
     route.close()
   })
 })
+
+describe("the private profit ledger", () => {
+  async function owner(authorization?: string, path = "/api/model-plans/ledger") {
+    const route = createServer((request, response) => void handleCodiumLedger(request, response, fetcher))
+    await new Promise<void>((resolve) => route.listen(0, "127.0.0.1", resolve))
+    const address = route.address()
+    if (!address || typeof address === "string") throw new Error("Missing route address")
+    const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
+      headers: authorization ? { authorization } : {},
+    })
+    route.close()
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> }
+  }
+  const entry = async (charge: string) => (await codiumLedger(fetcher)).find((value) => value.charge === charge)
+
+  test("records each payment's price, Stripe fee, credits, OpenRouter fee and profit, once", async () => {
+    await redis(["SET", accountKey, JSON.stringify({ customer: "cus_buyer" })])
+    const monthly = subscribe(50)
+    await reconcileModelPlanEvent(event("invoice.paid", monthly.invoice), fetcher)
+    await reconcileModelPlanEvent(event("invoice.paid", monthly.invoice), fetcher)
+    // $50 paid, Stripe's fixture fee 2.9% + 30c, $25 of model credit, OpenRouter's 5.5% on buying it.
+    expect(await entry(monthly.charge.id)).toMatchObject({
+      kind: "subscription",
+      account: user.id,
+      product: "vector-50",
+      price: 5000,
+      refunded: 0,
+      disputed: false,
+      stripeFee: 175,
+      stripeNet: 4825,
+      credits: 2500,
+      openRouterFee: 138,
+      profit: 2187,
+    })
+    const bought = await topUp(10)
+    await reconcileModelPlanEvent(event("charge.succeeded", { ...bought.charge }), fetcher)
+    await reconcileModelPlanEvent(event("checkout.session.completed", bought.session), fetcher)
+    expect(await entry(bought.charge.id)).toMatchObject({
+      kind: "topup",
+      product: "codium-topup-10",
+      price: 1000,
+      stripeFee: 59,
+      stripeNet: 941,
+      credits: 500,
+      openRouterFee: 28,
+      profit: 413,
+    })
+    expect(await codiumLedger(fetcher)).toHaveLength(2)
+
+    // Half the top-up refunded: half its credits and the refunded money leave the books.
+    Object.assign(bought.charge, { amount_refunded: 500 })
+    await reconcileModelPlanEvent(event("charge.refunded", { ...bought.charge }), fetcher)
+    expect(await entry(bought.charge.id)).toMatchObject({
+      refunded: 500,
+      stripeNet: 441,
+      credits: 250,
+      openRouterFee: 14,
+      profit: 177,
+    })
+    expect(openRouter.keys.get("codium_key_2")?.data.limit).toBe(2.5)
+  })
+
+  test("a disputed month costs what was spent before it, plus Stripe's dispute fee, until the dispute is won", async () => {
+    await redis(["SET", accountKey, JSON.stringify({ customer: "cus_buyer" })])
+    const monthly = subscribe(50)
+    await reconcileModelPlanEvent(event("invoice.paid", monthly.invoice), fetcher)
+    openRouter.keys.get("codium_key_1")!.data.usage = 3.2
+    monthly.charge.disputed = true
+    const withdrawal = { amount: -5000, fee: 1500, net: -6500 }
+    stripe.disputes = [{ charge: monthly.charge.id, status: "needs_response", balance_transactions: [withdrawal] }]
+    await reconcileModelPlanEvent(event("charge.dispute.created", { charge: monthly.charge.id }), fetcher)
+    expect(activeKeys()).toHaveLength(0)
+    expect(await entry(monthly.charge.id)).toMatchObject({
+      disputed: true,
+      stripeFee: 1675,
+      stripeNet: -1675,
+      credits: 320,
+      openRouterFee: 18,
+      profit: -2013,
+    })
+    stripe.disputes = [
+      {
+        charge: monthly.charge.id,
+        status: "won",
+        balance_transactions: [withdrawal, { amount: 5000, fee: 0, net: 5000 }],
+      },
+    ]
+    await reconcileModelPlanEvent(event("charge.dispute.closed", { charge: monthly.charge.id }), fetcher)
+    expect(activeKeys()).toHaveLength(1)
+    expect(await entry(monthly.charge.id)).toMatchObject({
+      disputed: false,
+      stripeFee: 1675,
+      stripeNet: 3325,
+      credits: 2500,
+      profit: 687,
+    })
+  })
+
+  test("leaves out other charges and marks a fee Stripe has not settled yet", async () => {
+    await redis(["SET", accountKey, JSON.stringify({ customer: "cus_buyer" })])
+    const unrelated = charge({ amount: 4200 })
+    await reconcileModelPlanEvent(event("charge.succeeded", { ...unrelated }), fetcher)
+    const failed = subscribe(10)
+    Object.assign(failed.charge, { paid: false })
+    await reconcileModelPlanEvent(event("charge.failed", { ...failed.charge }), fetcher)
+    expect(await codiumLedger(fetcher)).toEqual([])
+
+    const pending = subscribe(10)
+    pending.charge.balance_transaction = null
+    await reconcileModelPlanEvent(event("invoice.paid", pending.invoice), fetcher)
+    expect(await entry(pending.charge.id)).toMatchObject({ stripeFee: null, stripeNet: 1000, credits: 500 })
+    expect((await codiumLedgerSummary(fetcher)).totals).toMatchObject({ payments: 1, feesPending: 1 })
+  })
+
+  test("only the owner's secret reads the summary; everyone else sees nothing there", async () => {
+    await redis(["SET", accountKey, JSON.stringify({ customer: "cus_buyer" })])
+    const monthly = subscribe(10)
+    await reconcileModelPlanEvent(event("invoice.paid", monthly.invoice), fetcher)
+    await checkCodiumFunding(fetcher)
+    const secret = String(process.env.CODIUM_OWNER_SECRET)
+    expect(await owner()).toMatchObject({ status: 404, body: { error: { code: "NOT_FOUND" } } })
+    expect((await owner(`Bearer ${secret}x`)).status).toBe(404)
+    expect((await owner(`Bearer ${await mintAccountToken()}`)).status).toBe(404)
+
+    const summary = await owner(`Bearer ${secret}`)
+    expect(summary.status).toBe(200)
+    expect(summary.body).toMatchObject({
+      currency: "usd",
+      unit: "cents",
+      totals: { payments: 1, price: 1000, stripeFee: 59, credits: 500, openRouterFee: 28, profit: 413 },
+      months: [{ month: "2026-10", payments: 1, profit: 413 }],
+      funding: { status: "open", owed: 500 },
+    })
+    expect(summary.body).not.toHaveProperty("entries")
+    expect((await owner(`Bearer ${secret}`, "/api/model-plans/ledger?entries=1")).body.entries).toHaveLength(1)
+
+    // A short secret is treated as unset.
+    process.env.CODIUM_OWNER_SECRET = "short"
+    expect((await owner("Bearer short")).status).toBe(404)
+  })
+})
+
+async function mintAccountToken() {
+  process.env.VECTOR_CLI_TOKEN_SECRET = "fixture-token-secret".repeat(3)
+  const { mintCliToken } = await import("../../../api/_lib/cli-token")
+  return mintCliToken(user).token
+}

@@ -1,3 +1,4 @@
+import { recordCodiumCharge } from "../_lib/codium-ledger.js"
 import { reconcileModelPlanAccount, reconcileModelTopup, readModelPlanAccount } from "../_lib/model-plan-account.js"
 import { modelPlanStripe, stripeRecord, verifyModelPlanWebhook } from "../_lib/model-plan-stripe.js"
 import {
@@ -42,6 +43,17 @@ export async function reconcileModelPlanEvent(event: Record<string, unknown>, fe
   // Read current Stripe state instead of applying webhook deltas: event retries
   // and out-of-order refund/dispute notifications cannot grant credits twice.
   await reconcileModelPlanAccount(id, fetcher)
+  const charge = String(event.type).startsWith("charge.dispute.")
+    ? data.charge
+    : String(event.type).startsWith("charge.")
+      ? data.id
+      : String(event.type).startsWith("invoice.")
+        ? data.charge
+        : String(event.type).startsWith("payment_intent.")
+          ? data.latest_charge
+          : undefined
+  // The private profit ledger rewrites the charge's entry from Stripe's current state on each notification about it.
+  if (typeof charge === "string" && /^(ch|py)_[a-zA-Z0-9]+$/.test(charge)) await recordCodiumCharge(id, charge, fetcher)
 }
 
 export default async function handler(request: ApiRequest, response: ApiResponse) {
