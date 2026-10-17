@@ -1369,7 +1369,9 @@ describe("applying a fix", () => {
     path: "src/list.ts",
     line: 2,
     endLine: 2,
+    above: ["export function last(items: number[]) {"],
     before: ["  return items[items.length]"],
+    below: ["}"],
     after: ["  if (!items.length) return undefined", "  return items[items.length - 1]"],
   }
 
@@ -1387,6 +1389,46 @@ describe("applying a fix", () => {
 
   test("refuses when the lines are not in the file any more", () => {
     expect(applyFix(BASE, fix)).toBeUndefined()
+  })
+
+  // Two functions end in the same line. The reviewed one was edited since; the other must not take its fix.
+  const twoFunctions = [
+    "export function a(x: string) {",
+    "  if (x) return x",
+    '  log("a")',
+    "  return null",
+    "}",
+    "",
+    "export function b(y: string) {",
+    "  if (y) return y",
+    '  log("b")',
+    "  return null",
+    "}",
+    "",
+  ].join("\n")
+  const nullFix: ReviewFix = {
+    path: "src/two.ts",
+    line: 4,
+    endLine: 4,
+    above: ["export function a(x: string) {", "  if (x) return x", '  log("a")'],
+    before: ["  return null"],
+    below: ["}", "", "export function b(y: string) {"],
+    after: ["  return undefined"],
+  }
+
+  test("never moves a fix onto the same text somewhere else once the reviewed lines changed", () => {
+    expect(applyFix(twoFunctions, nullFix)).toBe(twoFunctions.replace("  return null\n}\n\nexport", "  return undefined\n}\n\nexport"))
+    const edited = twoFunctions.replace("  return null\n}\n\nexport", "  return fallback(x)\n}\n\nexport")
+    expect(applyFix(edited, nullFix)).toBeUndefined()
+    // Without the lines around it, a fix applies only exactly where it was reviewed.
+    const bare = { ...nullFix, above: [], below: [] }
+    expect(applyFix(edited, bare)).toBeUndefined()
+    expect(applyFix("// moved\n" + twoFunctions, bare)).toBeUndefined()
+  })
+
+  test("refuses a moved fix when the reviewed lines now appear more than once nearby", () => {
+    expect(applyFix("// moved\n" + HEAD + "\n" + HEAD, fix)).toBeUndefined()
+    expect(applyFix("// moved\n" + HEAD, fix)).toContain("// moved\nexport function last(items: number[]) {\n  if")
   })
 
   test("writes the fixed file through the engine, and writes nothing when the file changed", async () => {
@@ -1443,7 +1485,9 @@ describe("applying a fix", () => {
       path: "src/list.ts",
       line: 2,
       endLine: 2,
+      above: ["export function last(items: number[]) {"],
       before: ["  return items[items.length]"],
+      below: ["}"],
       after: ["  return items[items.length - 1]"],
     })
     // On a pull request, a fix the double-check did not confirm is shown but not offered.

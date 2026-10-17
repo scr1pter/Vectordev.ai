@@ -232,8 +232,17 @@ export type ReviewOutcomeLite = {
   fixes?: Record<string, ReviewFix> // finding id → its suggestion as an edit to the reviewed lines
 }
 
-// A suggestion as an edit: the head lines line..endLine as the review read them, and what replaces them.
-export type ReviewFix = { path: string; line: number; endLine: number; before: string[]; after: string[] }
+// A suggestion as an edit: the head lines line..endLine as the review read them, and what replaces them. above and
+// below are the head lines the diff showed next to them, so the edit lands only where all of them still read so.
+export type ReviewFix = {
+  path: string
+  line: number
+  endLine: number
+  above: string[]
+  before: string[]
+  below: string[]
+  after: string[]
+}
 
 // What a review reads: a pull request with its diff, or the uncommitted changes in the user's own checkout, whose
 // diff the engine reads.
@@ -1045,14 +1054,25 @@ function fixOf(index: AnchorIndex, finding: Finding): ReviewFix | undefined {
   )
   const before = Array.from({ length: end - finding.line + 1 }, (_, offset) => known.get(finding.line + offset))
   if (before.some((line) => line === undefined)) return undefined
+  // The diff's own context lines next to the edit, nearest first, up to the first line the diff does not show.
+  const around = (step: number, from: number) =>
+    Array.from({ length: FIX_CONTEXT }, (_, offset) => known.get(from + step * offset)).reduce<string[]>(
+      (out, line, offset) => (line === undefined || out.length < offset ? out : [...out, line]),
+      [],
+    )
   return {
     path: file.path,
     line: finding.line,
     endLine: end,
+    above: around(-1, finding.line - 1).toReversed(),
     before: before as string[],
+    below: around(1, end + 1),
     after: finding.suggestion.replace(/\r\n?/g, "\n").split("\n"),
   }
 }
+
+// How many of the diff's lines above and below a fix must still read as they did for the fix to apply.
+const FIX_CONTEXT = 3
 
 const FAILED_CHECK = new Set(["failure", "timed_out", "cancelled", "action_required", "startup_failure"])
 const VERIFY_SKIPPED_NOTE =
@@ -1677,18 +1697,26 @@ export function askAgentPrompt(
 // How far a fix's lines may have moved since the review, after another fix above them changed the line count.
 const FIX_DRIFT = 200
 
-// Applies a fix to a file's current text: the lines it replaces must still read as they did when the review read
-// them, at their line or the nearest place they moved to. undefined when they are not there any more. The file's
-// own line endings are kept.
+// Applies a fix to a file's current text. The lines it replaces, and the diff's lines around them, must read exactly
+// as the review read them: at their line, or, when lines above were added or removed since, at the one place nearby
+// they moved to. undefined otherwise, so a short common line such as `return null` elsewhere never takes the fix.
+// The file's own line endings are kept.
 export function applyFix(text: string, fix: ReviewFix): string | undefined {
   const eol = text.includes("\r\n") ? "\r\n" : "\n"
   const ending = text.endsWith("\n")
   const lines = text.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n")
-  const at = (start: number) => fix.before.every((line, offset) => lines[start + offset] === line)
+  const block = [...fix.above, ...fix.before, ...fix.below]
+  const at = (start: number) =>
+    start - fix.above.length >= 0 &&
+    start - fix.above.length + block.length <= lines.length &&
+    block.every((line, offset) => lines[start - fix.above.length + offset] === line)
   const wanted = fix.line - 1
-  const start = Array.from({ length: FIX_DRIFT * 2 + 1 }, (_, step) =>
-    step % 2 ? wanted + (step + 1) / 2 : wanted - step / 2,
-  ).find((candidate) => candidate >= 0 && candidate + fix.before.length <= lines.length && at(candidate))
+  // Without lines around it, nothing tells a moved copy from another place with the same text.
+  const moved =
+    fix.above.length + fix.below.length > 0
+      ? Array.from({ length: FIX_DRIFT * 2 + 1 }, (_, step) => wanted - FIX_DRIFT + step).filter(at)
+      : []
+  const start = at(wanted) ? wanted : moved.length === 1 ? moved[0] : undefined
   if (start === undefined) return undefined
   const next = [...lines.slice(0, start), ...fix.after, ...lines.slice(start + fix.before.length)]
   return next.join(eol) + (ending ? eol : "")
