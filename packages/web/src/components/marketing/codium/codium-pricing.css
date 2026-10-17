@@ -1,13 +1,123 @@
-/* The plans, usage table and questions on /codium. Plain black page, white type, hairline borders. */
-.cx-pricing {
-  --cx-hairline: rgba(255, 255, 255, 0.05);
-  --cx-line: rgba(255, 255, 255, 0.15);
-  --cx-soft: rgb(205, 205, 205);
-  --cx-quiet: rgba(255, 255, 255, 0.6);
+/*
+ * /codium: the whole page, chrome included. Every size is in rem on a 15px root that becomes 16px at 900px, so the
+ * layout scales as one piece. Spacing runs on two units: g (0.625rem, horizontal) and v (1.4rem, vertical).
+ * Neutrals carry a faint violet hue; the translucent tones are mixes of the text colour, so they follow the theme.
+ */
+html:has(.cx-page) {
+  --cx-bg: #121118;
+  --cx-card: #19181e;
+  --cx-card-02: #1e1d23;
+  --cx-card-03: #242329;
+  --cx-card-04: #29282e;
+  --cx-fg: #ececed;
+  --cx-fg-02: #d6d6d7;
   --cx-accent: #aa8cff;
-  /* Section and card headings, 30px at every width as the reference measures. */
-  --cx-heading-size: 30px;
-  --cx-heading-line: 39.6px;
+  --cx-header: 56px;
+  color-scheme: dark;
+  font-size: 15px;
+  background: var(--cx-bg);
+  scroll-behavior: auto;
+  scroll-padding-top: 64px;
+  text-size-adjust: none;
+  -webkit-text-size-adjust: none;
+}
+
+/* The light accent is darker than the reference's mapping so the 12px badge keeps AA contrast on its tint. */
+html[data-cx-theme="light"]:has(.cx-page) {
+  --cx-bg: #f7f6f9;
+  --cx-card: #f1f0f5;
+  --cx-card-02: #eae9ee;
+  --cx-card-03: #e5e4e9;
+  --cx-card-04: #e0dfe4;
+  --cx-fg: #25242b;
+  --cx-fg-02: #3a3940;
+  --cx-accent: #6646c4;
+  color-scheme: light;
+}
+
+/* System is the default, so the light palette also applies before the theme script runs. */
+@media (prefers-color-scheme: light) {
+  html:not([data-cx-theme="dark"]):has(.cx-page) {
+    --cx-bg: #f7f6f9;
+    --cx-card: #f1f0f5;
+    --cx-card-02: #eae9ee;
+    --cx-card-03: #e5e4e9;
+    --cx-card-04: #e0dfe4;
+    --cx-fg: #25242b;
+    --cx-fg-02: #3a3940;
+    --cx-accent: #6646c4;
+    color-scheme: light;
+  }
+}
+
+@media (min-width: 900px) {
+  html:has(.cx-page) {
+    --cx-header: 52px;
+    font-size: 16px;
+  }
+}
+
+html:has(.cx-page),
+body:has(.cx-page) {
+  background: var(--cx-bg);
+}
+
+body:has(.cx-page)::before {
+  content: none;
+}
+
+.cx-page {
+  --cx-sec: color-mix(in oklab, var(--cx-fg) 60%, transparent);
+  --cx-hover: color-mix(in oklab, var(--cx-fg) 75%, transparent);
+  --cx-border-01: color-mix(in oklab, var(--cx-fg) 2.5%, transparent);
+  --cx-fg-05: color-mix(in oklab, var(--cx-fg) 5%, transparent);
+  --cx-border-02: color-mix(in oklab, var(--cx-fg) 10%, transparent);
+  --cx-border-03: color-mix(in oklab, var(--cx-fg) 20%, transparent);
+  --cx-pad: 0.89em 1.45em 0.91em;
+  --cx-pad-md-sm: 0.64em 1.2em 0.66em;
+  --cx-pad-sm: 0.45em 0.8em 0.46em;
+  --cx-g: 0.625rem;
+  --cx-v: 1.4rem;
+  min-height: 100vh;
+  color: var(--cx-fg);
+  background: var(--cx-bg);
+  font-family: "Geist Variable", Geist, ui-sans-serif, system-ui, sans-serif;
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: normal;
+  font-feature-settings: normal;
+  font-synthesis: none;
+  text-rendering: auto;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (min-width: 900px) {
+  .cx-page {
+    --cx-pad: 0.78em 1.35em 0.8em;
+    --cx-pad-md-sm: 0.6em 1.25em 0.62em;
+    --cx-pad-sm: 0.4em 0.75em 0.42em;
+  }
+}
+
+.cx-page ::selection {
+  background: color-mix(in oklab, var(--cx-fg) 15%, transparent);
+}
+
+:where(.cx-page) a {
+  color: inherit;
+  text-decoration: none;
+}
+
+:where(.cx-page) button {
+  color: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+.cx-page :focus-visible {
+  outline: 2px solid var(--cx-fg);
+  outline-offset: 0.3ch;
 }
 
 .cx-visually-hidden {
@@ -19,447 +129,1100 @@
   white-space: nowrap;
 }
 
-.cx-pricing a {
-  color: inherit;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-}
-
-.cx-pricing a:hover {
-  color: var(--cx-accent);
-}
-
-/* Individual / Top-ups */
-.cx-toggle {
+.cx-container {
   width: 100%;
-  max-width: 512px;
-  margin: 48px auto 0;
-  padding: 6px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
-  background: rgb(47, 47, 47);
-  border: 1px solid var(--cx-line);
-  border-radius: 20px;
+  max-width: 1300px;
+  margin-inline: auto;
 }
 
-.cx-toggle button {
-  min-height: 44px;
-  padding: 10px 24px;
+.cx-section {
+  padding: calc(var(--cx-v) * 3) calc(var(--cx-g) * 2);
+}
+
+/* Type scale. The display sizes carry extra negative tracking where Geist runs wider than the measured reference. */
+.cx-type-2xl {
+  font-size: 3.25rem;
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+}
+
+@media (min-width: 420px) {
+  .cx-type-2xl {
+    font-size: 4.5rem;
+    line-height: 1.1;
+    letter-spacing: -0.04em;
+  }
+}
+
+.cx-type-xl {
+  font-size: 3.25rem;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+.cx-type-lg {
+  font-size: 2.25rem;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.cx-type-md {
+  font-size: 1.375rem;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
+}
+
+.cx-type-base {
+  font-size: 1rem;
+  line-height: 1.5;
+  letter-spacing: 0.005em;
+}
+
+.cx-type-sm {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+}
+
+.cx-type-xs {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+}
+
+.cx-sec {
+  color: var(--cx-sec);
+}
+
+/* Buttons: pill shaped, sized in em of their own text, colour changes on hover are instant. */
+.cx-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--cx-pad);
+  color: var(--cx-bg);
+  background: var(--cx-fg);
+  border: 1px solid var(--cx-fg);
+  border-radius: 3.4e38px;
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: normal;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cx-btn:hover {
+  background: var(--cx-fg-02);
+  border-color: var(--cx-fg-02);
+}
+
+.cx-btn--secondary {
+  color: var(--cx-fg);
+  background: var(--cx-card-03);
+  border-color: var(--cx-border-01);
+}
+
+.cx-btn--secondary:hover {
+  background: var(--cx-card-04);
+  border-color: var(--cx-border-01);
+}
+
+.cx-btn--ghost {
+  color: var(--cx-fg);
+  background: transparent;
+  border-color: var(--cx-border-03);
+}
+
+.cx-btn--ghost:hover {
+  background: var(--cx-card);
+  border-color: var(--cx-border-03);
+}
+
+.cx-btn--sm {
+  padding: var(--cx-pad-sm);
+  font-size: 0.875rem;
+}
+
+/* While sales are off the buttons keep their fill and size, and only stop reacting. */
+.cx-btn:disabled {
+  cursor: not-allowed;
+}
+
+.cx-btn:disabled:hover {
+  background: var(--cx-fg);
+  border-color: var(--cx-fg);
+}
+
+.cx-btn--secondary:disabled:hover {
+  background: var(--cx-card-03);
+  border-color: var(--cx-border-01);
+}
+
+.cx-btn-icon {
+  display: inline-flex;
+  padding-inline-start: 0.25em;
+}
+
+.cx-btn-icon svg {
+  width: 0.7825em;
+  height: 1em;
+}
+
+/* Header */
+.cx-header {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 50;
+  height: var(--cx-header);
+  padding: 0 calc(var(--cx-g) * 2);
+  background: var(--cx-bg);
+}
+
+.cx-header-grid {
+  position: relative;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+}
+
+.cx-logo {
+  position: relative;
+  left: -2px;
+  width: 95.75px;
+  height: 23.78px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+}
+
+.cx-logo-mark {
+  width: 23.78px;
+  height: 23.78px;
+  flex: none;
+}
+
+.cx-logo-word {
+  width: 64px;
+  height: 11.2px;
+  flex: none;
+}
+
+/* Hidden until the first Tab reaches it; then a small light pill over the logo. */
+.cx-skip {
+  position: absolute;
+  top: 0.82rem;
+  left: -0.2rem;
+  z-index: 50;
+}
+
+.cx-skip:not(:focus) {
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+}
+
+.cx-page .cx-skip:focus-visible {
+  outline-offset: 2px;
+}
+
+.cx-nav {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: none;
+  transform: translate(-50%, -50%);
+}
+
+.cx-nav a {
+  display: inline-flex;
+  padding: 0.35rem 0.9375rem;
+  border: 1px solid transparent;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.cx-nav a:hover,
+.cx-signin:hover {
+  color: var(--cx-hover);
+}
+
+.cx-actions {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--cx-g) * 0.75);
+}
+
+.cx-signin {
+  display: flex;
+  padding: 0.25rem;
+  border: 1px solid transparent;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.cx-actions .cx-download,
+.cx-actions .cx-report,
+.cx-report-long {
+  display: none;
+}
+
+.cx-burger {
+  position: relative;
+  width: 2.1rem;
+  height: 2.1rem;
+  margin: 0 -0.3rem 0 var(--cx-g);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  color: rgb(175, 175, 175);
-  background: transparent;
-  border-radius: 16px;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 20px;
-  cursor: pointer;
-  transition:
-    color 150ms ease,
-    background-color 150ms ease;
 }
 
-.cx-toggle button svg {
-  flex: none;
-  opacity: 0.8;
-}
-
-.cx-toggle button:hover {
-  color: #fff;
-}
-
-html:not([data-codium-mode="topup"]) .cx-toggle button[data-mode="monthly"],
-html[data-codium-mode="topup"] .cx-toggle button[data-mode="topup"] {
-  color: #fff;
-  background: rgb(33, 33, 33);
-}
-
-html:not([data-codium-mode="topup"]) .cx-toggle button[data-mode="monthly"] svg,
-html[data-codium-mode="topup"] .cx-toggle button[data-mode="topup"] svg {
-  color: var(--cx-accent);
-  opacity: 1;
-}
-
-/* Four cards whose name, price, button and list line up across the row. */
-.cx-cards {
+.cx-burger svg {
   width: 100%;
-  max-width: 1143px;
-  margin: 32px auto 0;
+  height: 100%;
+}
+
+@media (min-width: 420px) {
+  .cx-actions .cx-download {
+    display: flex;
+  }
+}
+
+@media (min-width: 900px) {
+  .cx-header-grid {
+    grid-template-columns: auto 1fr auto;
+  }
+
+  .cx-nav {
+    display: flex;
+  }
+
+  .cx-actions {
+    grid-column: 3;
+  }
+
+  .cx-actions .cx-report {
+    display: inline-flex;
+  }
+
+  .cx-burger {
+    display: none;
+  }
+}
+
+@media (min-width: 1140px) {
+  .cx-report-long {
+    display: inline;
+  }
+
+  .cx-report-short {
+    display: none;
+  }
+}
+
+/* The small-screen menu covers the page; its own close button sits where the menu button was. */
+.cx-menu {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  padding: calc(var(--cx-header) + var(--cx-v) * 3) calc(var(--cx-g) * 2) 12.25px;
+  display: flex;
+  flex-direction: column;
+  background: var(--cx-bg);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.14s cubic-bezier(0.25, 1, 0.5, 1),
+    visibility 0s 0.14s;
+}
+
+html[data-cx-menu] .cx-menu {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.14s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* Only while the menu can be seen: from 900px it is hidden, and a locked page there would have no way to unlock. */
+@media (max-width: 899.98px) {
+  html[data-cx-menu] {
+    overflow: hidden;
+  }
+}
+
+.cx-menu-close {
+  position: absolute;
+  top: calc((var(--cx-header) - 2.1rem) / 2);
+  right: calc(var(--cx-g) * 2 - 0.3rem);
+  width: 2.1rem;
+  height: 2.1rem;
+}
+
+.cx-menu-close svg {
+  width: 100%;
+  height: 100%;
+}
+
+.cx-menu nav a {
+  display: block;
+  padding: calc(var(--cx-v) * 0.25) 0;
+}
+
+.cx-menu-actions {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cx-g);
+}
+
+.cx-menu-actions .cx-btn {
+  width: 100%;
+}
+
+@media (min-width: 900px) {
+  .cx-menu {
+    display: none;
+  }
+}
+
+.cx-main {
+  min-height: 70vh;
+  padding-top: var(--cx-header);
+}
+
+/* Pricing: title, plan toggle, cards, the note under them, and the comparison table. */
+.cx-pricing h1 {
+  text-align: center;
+}
+
+.cx-toggle-wrap {
+  margin-top: var(--cx-v);
+  display: flex;
+  justify-content: center;
+}
+
+/* Pill radio groups: the plan type toggle under the title, and the top-up amount picker in its card. */
+.cx-seg {
+  --cx-seg-fill: var(--cx-card);
+  position: relative;
+  display: flex;
+  padding: 0.125rem;
+  background: var(--cx-fg-05);
+  border-radius: 3.4e38px;
+  text-align: center;
+}
+
+.cx-seg-indicator {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  background: var(--cx-seg-fill);
+  border-radius: 3.4e38px;
+  box-shadow:
+    0 1px 3px 0 rgb(0 0 0 / 0.1),
+    0 1px 2px -1px rgb(0 0 0 / 0.1);
+  transition: all 0.14s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.cx-seg label {
+  position: relative;
+  padding: var(--cx-pad-md-sm);
+  border: 1px solid transparent;
+  border-radius: 3.4e38px;
+  font-size: 1rem;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cx-seg input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  appearance: none;
+  border-radius: inherit;
+  cursor: pointer;
+}
+
+/* Focus follows the checked option, whose fill already marks it, so the radios draw no ring of their own. */
+.cx-seg input:focus-visible {
+  outline: none;
+}
+
+.cx-seg span {
+  position: relative;
+  color: var(--cx-sec);
+  pointer-events: none;
+}
+
+.cx-seg label:hover span,
+.cx-seg label:has(input:checked) span {
+  color: var(--cx-fg);
+}
+
+/* Until the island measures the labels, the chosen label carries the fill itself. */
+.cx-seg:not([data-ready]) label:has(input:checked) {
+  background: var(--cx-seg-fill);
+  box-shadow:
+    0 1px 3px 0 rgb(0 0 0 / 0.1),
+    0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+
+/* A direct top-ups link is chosen before the island loads, while its markup still has the plans checked. */
+html[data-codium-mode="topup"] .cx-toggle:not([data-ready]) label[data-value="monthly"] {
+  background: none;
+  box-shadow: none;
+}
+
+html[data-codium-mode="topup"] .cx-toggle:not([data-ready]) label[data-value="monthly"] span {
+  color: var(--cx-sec);
+}
+
+html[data-codium-mode="topup"] .cx-toggle:not([data-ready]) label[data-value="topup"] {
+  background: var(--cx-seg-fill);
+  box-shadow:
+    0 1px 3px 0 rgb(0 0 0 / 0.1),
+    0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+
+html[data-codium-mode="topup"] .cx-toggle:not([data-ready]) label[data-value="topup"] span {
+  color: var(--cx-fg);
+}
+
+.cx-picker {
+  --cx-seg-fill: var(--cx-card-03);
+  flex: none;
+}
+
+.cx-picker label {
+  padding: 0.25rem 0.75rem;
+}
+
+.cx-plans {
+  margin-top: calc(var(--cx-v) * 2);
+}
+
+html[data-codium-mode="topup"] .cx-plans {
+  max-width: 840px;
+  margin-inline: auto;
+}
+
+html[data-codium-mode="topup"] .cx-panel[data-mode="monthly"],
+html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"] {
+  display: none;
+}
+
+.cx-cards {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-template-rows: repeat(3, auto);
-  column-gap: 24px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--cx-g);
+}
+
+@media (min-width: 660px) {
+  .cx-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1140px) {
+  .cx-cards:not(.cx-cards--pair) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .cx-card {
-  grid-row: span 3;
-  display: grid;
-  grid-template-rows: subgrid;
-  row-gap: 0;
-  min-width: 0;
+  position: relative;
+  padding: calc(var(--cx-g) * 1.5 - 0.1rem) calc(var(--cx-g) * 1.5) calc(var(--cx-g) * 1.5);
+  background: var(--cx-card);
+  border-radius: 4px;
 }
 
-.cx-card-top {
-  grid-row: span 2;
-  display: grid;
-  grid-template-rows: subgrid;
-  row-gap: 32px;
-  padding: 16px 16px 24px;
-  border: 1px solid var(--cx-hairline);
-  border-bottom: 0;
-  border-radius: 6px 6px 0 0;
+.cx-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  border: 1px solid var(--cx-border-01);
+  border-radius: 4px;
+  pointer-events: none;
 }
 
-.cx-card-bottom {
+.cx-card-inner {
+  height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  padding: 0 16px 24px;
-  border: 1px solid var(--cx-hairline);
-  border-top: 0;
-  border-radius: 0 0 6px 6px;
 }
 
-.cx-card-head h3 {
-  font-size: var(--cx-heading-size);
-  font-weight: 500;
-  line-height: var(--cx-heading-line);
-  letter-spacing: -0.01em;
-}
-
-.cx-card-kind {
-  display: block;
-}
-
-.cx-card-head p {
-  font-size: 17px;
-  line-height: 28px;
-  letter-spacing: -0.17px;
-}
-
-.cx-card-buy {
-  align-self: end;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.cx-price {
-  margin-top: 4px;
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-}
-
-/* Fluid from 32px on a 375px phone to 48px at 1440px, tracking loosening as it shrinks. */
-.cx-amount {
-  font-size: clamp(32px, 26.3662px + 1.50235vw, 48px);
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: clamp(-0.03em, calc(-0.03em + 0.02 * ((1440px - 100vw) / 66.5625)), -0.01em);
-  font-variant-numeric: tabular-nums;
-}
-
-.cx-period {
-  padding-bottom: 3.5px;
-  color: var(--cx-soft);
-  font-size: 14px;
-  line-height: 17.5px;
-}
-
-.cx-button {
-  width: 100%;
-  height: 44px;
-  padding: 0 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  color: rgb(13, 13, 13);
-  background: rgb(249, 249, 249);
-  border-radius: 999px;
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 20px;
-  cursor: pointer;
-  transition: background-color 150ms ease;
-}
-
-.cx-button:hover:not(:disabled) {
-  background: rgb(226, 226, 226);
-}
-
-.cx-button:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-
-.cx-error {
-  color: #ffb4b4;
-  font-size: 14px;
-  line-height: 20px;
-}
-
-.cx-card-list {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.cx-everything {
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--cx-line);
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 22.96px;
-  letter-spacing: -0.14px;
-}
-
-.cx-card-list ul {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.cx-card-list li {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  font-size: 14px;
-  line-height: 22.96px;
-  letter-spacing: -0.14px;
-}
-
-.cx-card-list li svg {
-  flex: none;
-  margin-top: 1.5px;
-  color: var(--cx-accent);
-}
-
-.cx-fine {
-  margin-top: auto;
-  color: var(--cx-soft);
-  font-size: 14px;
-  line-height: 17.5px;
-  text-wrap: pretty;
-}
-
-.cx-fine a {
-  white-space: nowrap;
-}
-
-/* Usage estimates */
-.cx-usage {
-  margin-top: 128px;
-}
-
-.cx-usage h2,
-.cx-faq h2 {
-  font-size: var(--cx-heading-size);
-  font-weight: 500;
-  line-height: var(--cx-heading-line);
-  letter-spacing: -0.01em;
-  text-align: center;
-}
-
-.cx-table {
-  width: fit-content;
-  max-width: 100%;
-  margin: 40px auto 0;
-  overflow-x: auto;
-}
-
-.cx-table table {
-  border-collapse: collapse;
-  font-size: 17px;
-  line-height: 28px;
-  letter-spacing: -0.17px;
-  white-space: nowrap;
-}
-
-.cx-table th,
-.cx-table td {
-  padding: 8px;
-  font-weight: 400;
-  text-align: left;
-  font-variant-numeric: tabular-nums;
-}
-
-.cx-table thead th {
-  font-weight: 700;
-}
-
-.cx-table tr {
-  border-bottom: 1px solid var(--cx-line);
-}
-
-.cx-table tbody tr:last-child {
-  border-bottom: 0;
-}
-
-.cx-notes {
-  margin-top: 40px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  color: var(--cx-soft);
-  font-size: 14px;
-  line-height: 22.96px;
-  text-align: center;
-}
-
-/* Questions */
-.cx-faq {
-  margin-top: 128px;
-}
-
-/* Faint hairlines above the list and under each question. */
-.cx-faq-list {
-  max-width: 535px;
-  margin: 40px auto 0;
-  border-top: 1px solid var(--cx-hairline);
-}
-
-.cx-faq-item button {
-  width: 100%;
-  min-height: 60px;
-  padding: 16px 0;
+.cx-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  font-size: 17px;
-  font-weight: 400;
-  line-height: 28px;
-  letter-spacing: -0.17px;
-  text-align: left;
-  cursor: pointer;
+  gap: 0.5rem;
 }
 
-.cx-faq-item button svg {
+/* Cards in a pair have room for a picker beside the name, and keep its height either way. */
+.cx-cards--pair .cx-card-head {
+  min-height: 2.375rem;
+}
+
+.cx-divider {
+  height: 0;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--cx-border-02);
+}
+
+.cx-badge {
+  padding: 0.125rem 0.5rem;
+  color: var(--cx-accent);
+  background: color-mix(in oklab, var(--cx-accent) 10%, transparent);
+  border-radius: 3.4e38px;
+  white-space: nowrap;
+}
+
+.cx-price {
+  margin-top: calc(var(--cx-v) * 0.5);
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+.cx-amount {
+  letter-spacing: -0.047em;
+}
+
+.cx-per {
+  color: var(--cx-sec);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.cx-card-buy {
+  margin-top: calc(var(--cx-v) * 0.5);
+}
+
+.cx-card-buy .cx-btn {
+  width: 100%;
+}
+
+.cx-error {
+  margin-top: calc(var(--cx-v) * 0.25);
+  color: var(--cx-sec);
+}
+
+.cx-error a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cx-lead {
+  margin-top: calc(var(--cx-v) * 0.75);
+  color: var(--cx-sec);
+}
+
+.cx-usage {
+  margin-top: calc(var(--cx-v) / 6);
+}
+
+.cx-group {
+  margin-top: calc(var(--cx-v) * 0.75);
+}
+
+.cx-group-label {
+  padding-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--cx-sec);
+  border-bottom: 1px solid var(--cx-border-02);
+}
+
+.cx-list {
+  margin-top: calc(var(--cx-v) * 0.5);
+}
+
+.cx-list li {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--cx-g) * 0.75);
+}
+
+.cx-list li + li {
+  margin-top: calc(var(--cx-v) / 6);
+}
+
+.cx-tick {
+  width: 1rem;
+  height: 1rem;
   flex: none;
 }
 
-.cx-faq-answer {
-  display: grid;
-  grid-template-rows: 0fr;
-  opacity: 0;
-  transition:
-    grid-template-rows 300ms ease,
-    opacity 300ms ease;
+.cx-footnote {
+  margin-top: auto;
+  padding-top: var(--cx-v);
+  color: var(--cx-sec);
 }
 
-.cx-faq-answer[data-open="true"] {
-  grid-template-rows: 1fr;
-  opacity: 1;
-}
-
-.cx-faq-answer > div {
-  min-height: 0;
-  overflow: hidden;
-  color: var(--cx-quiet);
-  font-size: 14px;
-  line-height: 22.96px;
-}
-
-.cx-faq-answer > div > :last-child {
-  margin-bottom: 24px;
-}
-
-.cx-faq-answer p + p,
-.cx-faq-answer p + ul,
-.cx-faq-answer ul + p {
-  margin-top: 12px;
-}
-
-.cx-faq-answer ul {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.cx-faq-answer strong {
-  color: #fff;
-  font-weight: 500;
-}
-
-@media (max-width: 1279px) {
-  .cx-cards {
-    max-width: none;
-  }
-}
-
-@media (max-width: 1023px) {
-  .cx-cards {
-    max-width: 760px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: repeat(6, auto);
-    row-gap: 24px;
-  }
-}
-
-@media (max-width: 639px) {
-  .cx-toggle {
-    margin-top: 32px;
-  }
-
-  .cx-toggle button svg {
-    display: none;
-  }
-
-  .cx-cards {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: none;
-    grid-auto-rows: auto;
-    row-gap: 0;
-  }
-
-  .cx-usage,
-  .cx-faq {
-    margin-top: 128px;
-  }
-
-  /* The table is wider than a phone, so it scrolls edge to edge with its first column on the page gutter. */
-  .cx-table {
-    width: auto;
-    max-width: none;
-    margin-right: -16px;
-    margin-left: -16px;
-    padding: 0 8px;
-  }
-
-  .cx-faq-list {
-    max-width: none;
-    margin-right: 20px;
-    margin-left: 20px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .cx-faq-answer {
-    transition: none;
-  }
-}
-
-.cx-card-list li,
-.cx-faq-answer {
-  text-wrap: pretty;
-}
-
-/* A card's one-line pitch breaks into two even lines rather than leaving a word behind. */
-.cx-card-head p {
+.cx-note {
+  max-width: 30.8587rem;
+  margin-top: calc(var(--cx-v) * 2);
+  color: var(--cx-sec);
   text-wrap: balance;
 }
 
-.cx-faq-item {
-  border-bottom: 1px solid var(--cx-hairline);
+.cx-note a {
+  text-decoration: underline;
 }
 
-html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"],
-html[data-codium-mode="topup"] .cx-panel[data-mode="monthly"] {
+.cx-prose a {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.125em;
+  text-decoration-color: color-mix(in oklab, currentColor 50%, transparent);
+}
+
+@media (min-width: 900px) {
+  .cx-note {
+    max-width: min(80%, 960px);
+    margin-inline: auto;
+    text-align: center;
+  }
+}
+
+/*
+ * Comparison table: from 660px; scrolls sideways below 1140px. The header row is sticky at every width. Below 1140px
+ * the sideways scroller is its scroll container, so the row sits one header height lower there and covers the first
+ * row under it.
+ */
+.cx-compare {
+  margin-top: calc(var(--cx-v) * 4);
   display: none;
+}
+
+@media (min-width: 660px) {
+  .cx-compare {
+    display: block;
+  }
+}
+
+.cx-compare h2 {
+  text-align: center;
+  text-wrap: balance;
+}
+
+.cx-compare-scroll {
+  /* Positioned, so the cells' visually hidden labels are clipped by the scroller instead of widening the page. */
+  position: relative;
+  margin-top: calc(var(--cx-v) * 2);
+  overflow-x: auto;
+}
+
+.cx-compare table {
+  width: 100%;
+  min-width: 1040px;
+  border-collapse: separate;
+  border-spacing: 0;
+  text-align: left;
+}
+
+.cx-compare th,
+.cx-compare td {
+  border-bottom: 1px solid var(--cx-border-02);
+}
+
+.cx-compare thead th {
+  position: sticky;
+  top: var(--cx-header);
+  z-index: 20;
+  padding: 0.75rem 0.5rem;
+  background: var(--cx-bg);
+  text-align: center;
+  vertical-align: bottom;
+  font-weight: 400;
+}
+
+.cx-compare thead th:first-child {
+  padding: 0 0 0.75rem;
+  text-align: left;
+}
+
+@media (min-width: 1140px) {
+  .cx-compare-scroll {
+    overflow: visible;
+  }
+}
+
+.cx-compare-plan {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cx-compare-price {
+  margin-top: 2px;
+  color: var(--cx-sec);
+  white-space: nowrap;
+}
+
+.cx-compare tbody th {
+  padding: 0.75rem 1rem 0.75rem 0;
+  font-weight: 400;
+}
+
+.cx-compare tbody td {
+  padding: 0.75rem 0.5rem;
+  text-align: center;
+}
+
+.cx-compare .cx-compare-group {
+  padding: 1.5rem 0 0.75rem;
+}
+
+.cx-compare-group div {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cx-group-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+}
+
+.cx-compare-text {
+  color: var(--cx-sec);
+  text-wrap: balance;
+}
+
+.cx-mark {
+  display: inline-block;
+  vertical-align: top;
+}
+
+.cx-mark svg {
+  display: inline-block;
+  width: 0.6973em;
+  height: 1.1818em;
+  vertical-align: top;
+}
+
+.cx-mark--no {
+  color: var(--cx-sec);
+}
+
+/* Questions & Answers */
+.cx-faq {
+  margin-top: calc(var(--cx-v) * 3);
+  padding-block: calc(var(--cx-v) * 4);
+  background: var(--cx-card);
+}
+
+.cx-faq-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+.cx-faq-title,
+.cx-faq-list {
+  grid-column: 1 / -1;
+}
+
+.cx-faq-title h2 {
+  margin-bottom: calc(var(--cx-v) * 2);
+  text-wrap: pretty;
+}
+
+@media (min-width: 900px) {
+  .cx-faq-title {
+    grid-column: 1 / 7;
+  }
+
+  .cx-faq-title > div {
+    position: sticky;
+    top: 64px;
+  }
+
+  .cx-faq-title h2 {
+    margin-bottom: 0;
+  }
+
+  .cx-faq-list {
+    grid-column: 7 / -1;
+  }
+}
+
+.cx-faq-item {
+  border-top: 1px solid var(--cx-border-02);
+}
+
+.cx-faq-item:last-child {
+  border-bottom: 1px solid var(--cx-border-02);
+}
+
+.cx-faq-item h3 {
+  display: flex;
+}
+
+.cx-faq-item button {
+  flex: 1;
+  padding: 0.98rem 0 1.05rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.cx-faq-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-left: var(--cx-g);
+  flex: none;
+}
+
+.cx-faq-region {
+  overflow: hidden;
+}
+
+/* Before the island takes over, closed answers stay out of the layout. */
+.cx-faq:not([data-ready]) .cx-faq-item[data-state="closed"] .cx-faq-region {
+  display: none;
+}
+
+.cx-faq-answer {
+  padding-bottom: var(--cx-v);
+}
+
+.cx-prose {
+  letter-spacing: 0.005em;
+}
+
+.cx-prose p,
+.cx-prose ul {
+  margin-bottom: var(--cx-v);
+}
+
+.cx-prose > :last-child {
+  margin-bottom: 0;
+}
+
+.cx-prose ul {
+  padding-left: 1.25em;
+  list-style: disc;
+}
+
+/* Get started */
+.cx-cta {
+  padding-block: calc(var(--cx-v) * 6);
+}
+
+.cx-cta-inner {
+  max-width: 50.64rem;
+  margin-inline: auto;
+  text-align: center;
+}
+
+.cx-cta h2 {
+  margin-bottom: var(--cx-v);
+  text-wrap: balance;
+}
+
+.cx-cta-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cx-g);
+}
+
+/* Footer */
+.cx-footer {
+  position: relative;
+  padding: calc(var(--cx-v) * 3) calc(var(--cx-g) * 2);
+  background: var(--cx-card);
+}
+
+.cx-footer-top {
+  margin-bottom: calc(var(--cx-v) * 4.5);
+}
+
+.cx-footer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(var(--cx-v) * 2) var(--cx-g);
+}
+
+.cx-footer h2 {
+  padding-bottom: calc(var(--cx-v) * 2.5 / 12);
+  color: var(--cx-sec);
+}
+
+.cx-footer li a {
+  display: inline-block;
+  padding: calc(var(--cx-v) * 2.5 / 12) 0;
+}
+
+.cx-footer-external {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+@media (hover: hover) {
+  .cx-footer li a:hover .cx-footer-external,
+  .cx-footer li a:focus-visible .cx-footer-external {
+    opacity: 1;
+  }
+}
+
+.cx-footer-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: calc(var(--cx-v) * 2);
+}
+
+.cx-footer-legal {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--cx-g) * 1.5);
+  color: var(--cx-sec);
+}
+
+.cx-theme {
+  position: relative;
+  display: flex;
+  padding: 0.125rem;
+  background: var(--cx-card-03);
+  border-radius: 3.4e38px;
+}
+
+.cx-theme-indicator {
+  position: absolute;
+  top: 0.125rem;
+  bottom: 0.125rem;
+  left: 0.125rem;
+  width: calc((100% - 0.25rem) / 3);
+  background: var(--cx-border-02);
+  border-radius: 3.4e38px;
+  transition: transform 0.14s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+html[data-cx-theme="light"] .cx-theme-indicator {
+  transform: translateX(100%);
+}
+
+html[data-cx-theme="dark"] .cx-theme-indicator {
+  transform: translateX(200%);
+}
+
+.cx-theme button {
+  position: relative;
+  padding: var(--cx-pad-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cx-sec);
+  border-radius: 3.4e38px;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+@media (min-width: 660px) {
+  .cx-theme button {
+    font-size: 0.875rem;
+  }
+}
+
+.cx-theme button:hover,
+.cx-theme button[aria-pressed="true"] {
+  color: var(--cx-fg);
+}
+
+.cx-theme svg {
+  width: 1em;
+  height: 1em;
+}
+
+@media (min-width: 660px) {
+  .cx-footer {
+    padding-bottom: calc(var(--cx-g) * 3);
+  }
+
+  .cx-footer-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .cx-footer-bottom {
+    flex-direction: row;
+    align-items: center;
+  }
+}
+
+.cx-footer-type {
+  font-size: 1rem;
+  line-height: 1.5;
+  letter-spacing: 0.005em;
+}
+
+@media (min-width: 660px) {
+  .cx-footer-type {
+    font-size: 0.875rem;
+    letter-spacing: 0.01em;
+  }
+}
+
+/* The footer's theme switch and language pill. Vector's site is in English only, so the pill's list has one entry. */
+.cx-footer-tools {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--cx-g) * 1.5);
+}
+
+.cx-lang {
+  position: relative;
+  gap: calc(var(--cx-g) * 0.5);
+  font-size: 1rem;
+  letter-spacing: 0.005em;
+}
+
+@media (min-width: 660px) {
+  .cx-lang {
+    font-size: 0.875rem;
+    letter-spacing: 0.01em;
+  }
+}
+
+.cx-lang-globe {
+  width: 0.9386em;
+  height: 1em;
+}
+
+.cx-lang-chevron {
+  width: 0.7207em;
+  height: 1em;
+}
+
+.cx-lang select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  appearance: none;
+  border: 0;
+  border-radius: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.cx-lang:has(select:focus-visible) {
+  outline: 2px solid var(--cx-fg);
+  outline-offset: 0.3ch;
 }
