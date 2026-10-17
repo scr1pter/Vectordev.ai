@@ -1,4 +1,5 @@
 import type { Event, Message, Part, PermissionRequest, QuestionRequest, ToolPart } from "@vectordevai/sdk/v2"
+import { isRecord } from "@/util/record"
 import * as Locale from "@/util/locale"
 import {
   bootstrapSessionData,
@@ -296,7 +297,9 @@ function taskStatus(part: ToolPart): FooterSubagentTab["status"] {
   // The subagent's lifecycle, not the tool call's: a background launch returns at once while the subagent runs, and a
   // subagent that failed or was stopped still returns its result normally.
   const lifecycle = metadata(part, "status")
-  if (lifecycle === "queued" || lifecycle === "running") return "running"
+  if (lifecycle === "queued" || lifecycle === "running" || lifecycle === "waiting_on_user") return "running"
+  if (lifecycle === "failed") return "error"
+  if (lifecycle === "stopped") return "cancelled"
   if (lifecycle === "completed" || lifecycle === "error" || lifecycle === "cancelled") return lifecycle
 
   if (part.state.status === "completed") {
@@ -336,9 +339,41 @@ function taskSessionID(part: ToolPart) {
   return text(metadata(part, "sessionId")) ?? text(metadata(part, "sessionID"))
 }
 
-function syncTaskTab(data: SubagentData, part: ToolPart, children?: Set<string>) {
+function syncTaskTab(data: SubagentData, part: ToolPart, children?: Set<string>): boolean {
   if (part.tool !== "task") {
     return false
+  }
+
+  const entries = metadata(part, "tasks")
+  if (metadata(part, "taskBatch") === 1 && Array.isArray(entries)) {
+    if (part.state.status === "pending") return false
+    const state = part.state
+    const rows = entries
+      .filter(isRecord)
+      .filter((entry) => Number.isSafeInteger(entry.index) && Number(entry.index) >= 0)
+    return rows
+      .toSorted((left, right) => Number(left.index) - Number(right.index))
+      .map((entry) => {
+        if (rows.filter((row) => row.index === entry.index).length !== 1) return false
+        const value = Array.isArray(state.input.tasks) ? state.input.tasks[Number(entry.index)] : undefined
+        const input = isRecord(value) ? value : {}
+        return syncTaskTab(
+          data,
+          {
+            ...part,
+            state: {
+              ...state,
+              input,
+              metadata: { ...entry, taskBatch: undefined },
+              ...(state.status !== "error"
+                ? { title: text(entry.title) ?? text(input.description) ?? "Subagent task" }
+                : {}),
+            },
+          },
+          children,
+        )
+      })
+      .some(Boolean)
   }
 
   const sessionID = taskSessionID(part)

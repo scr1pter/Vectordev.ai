@@ -30,6 +30,7 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { Database } from "@vectordevai/core/database/database"
 import { httpApiLayer } from "./httpapi-layer"
+import { executeTaskCommand } from "../../src/cli/cmd/tasks"
 
 const noopBootstrapLayer = Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void }))
 const appLayer = AppNodeBuilder.build(
@@ -914,3 +915,102 @@ describe("HttpApi SDK", () => {
     ),
   )
 })
+
+httpapiInstance(
+  "task management SDK and CLI preserve ownership and stopped work",
+  { serverPath: "default" },
+  ({ sdk }) =>
+    Effect.gen(function* () {
+      const parent = (yield* call(() => sdk.session.create({ title: "Parent" }))).data!
+      const other = (yield* call(() => sdk.session.create({ title: "Other parent" }))).data!
+      const child = (yield* call(() =>
+        sdk.session.create({
+          parentID: parent.id,
+          title: "Completed worker",
+          metadata: {
+            subagent: {
+              kind: "specialist",
+              agent: "explore",
+              custom: false,
+              title: "Completed worker",
+              parentSessionID: parent.id,
+              parentMessageID: "msg_launch",
+              model: { providerID: "fixture", modelID: "offline" },
+              background: true,
+              status: "completed",
+              startedAt: 1000,
+              completedAt: 2000,
+              ownedPaths: ["src/auth"],
+              dependsOn: [],
+              attempt: 1,
+            },
+          },
+        }),
+      )).data!
+      const interrupted = (yield* call(() =>
+        sdk.session.create({
+          parentID: parent.id,
+          title: "Interrupted worker",
+          metadata: {
+            subagent: {
+              kind: "subagent",
+              agent: "general",
+              custom: false,
+              title: "Interrupted worker",
+              parentSessionID: parent.id,
+              parentMessageID: "msg_launch",
+              model: { providerID: "fixture", modelID: "offline" },
+              background: true,
+              status: "running",
+              startedAt: 1000,
+              runtimeID: "previous-process",
+              attempt: 1,
+            },
+          },
+        }),
+      )).data!
+      const listed = yield* call(() => executeTaskCommand(sdk, { action: "list", session: parent.id }))
+      expect(listed).toMatchObject({
+        tasks: expect.arrayContaining([
+          expect.objectContaining({ id: child.id, status: "completed", ownedPaths: ["src/auth"] }),
+          expect.objectContaining({ id: interrupted.id, status: "stopped" }),
+        ]),
+        truncated: false,
+      })
+      expect(
+        (yield* call(() => sdk.session.get({ sessionID: interrupted.id }))).data?.metadata?.subagent,
+      ).toMatchObject({ status: "cancelled" })
+      expect(
+        yield* call(() => executeTaskCommand(sdk, { action: "inspect", session: parent.id, taskID: child.id })),
+      ).toMatchObject({ task: { id: child.id, status: "completed" }, output: "" })
+      expect(
+        yield* call(() =>
+          executeTaskCommand(sdk, {
+            action: "wait",
+            session: parent.id,
+            task: [child.id, interrupted.id],
+            mode: "all",
+            timeout: 0,
+          }),
+        ),
+      ).toMatchObject({ timedOut: false })
+      const foreign = yield* call(() => sdk.experimental.task.inspect({ sessionID: other.id, taskID: child.id }))
+      expect(foreign.response.status).toBe(400)
+      expect(foreign.error).toMatchObject({ code: "forbidden" })
+      const finished = yield* call(() =>
+        sdk.experimental.task.message({ sessionID: parent.id, taskID: child.id, text: "continue" }),
+      )
+      expect(finished.response.status).toBe(400)
+      expect(finished.error).toMatchObject({ code: "finished" })
+      const before = (yield* call(() => sdk.session.children({ sessionID: parent.id }))).data!.length
+      const unknown = yield* call(() =>
+        sdk.experimental.task.message({ sessionID: parent.id, taskID: "ses_missing", text: "continue" }),
+      )
+      expect(unknown.response.status).toBe(400)
+      expect((yield* call(() => sdk.session.children({ sessionID: parent.id }))).data).toHaveLength(before)
+      const invalid = yield* call(() =>
+        sdk.experimental.task.wait({ sessionID: parent.id, taskIDs: [child.id], timeout: 60_001 }),
+      )
+      expect(invalid.response.status).toBe(400)
+    }),
+)

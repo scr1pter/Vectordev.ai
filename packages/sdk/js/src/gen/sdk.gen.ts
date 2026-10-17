@@ -72,6 +72,21 @@ import type {
   ExperimentalSessionUsageData,
   ExperimentalSessionUsageErrors,
   ExperimentalSessionUsageResponses,
+  ExperimentalTaskInspectData,
+  ExperimentalTaskInspectErrors,
+  ExperimentalTaskInspectResponses,
+  ExperimentalTaskListData,
+  ExperimentalTaskListErrors,
+  ExperimentalTaskListResponses,
+  ExperimentalTaskMessageData,
+  ExperimentalTaskMessageErrors,
+  ExperimentalTaskMessageResponses,
+  ExperimentalTaskStopData,
+  ExperimentalTaskStopErrors,
+  ExperimentalTaskStopResponses,
+  ExperimentalTaskWaitData,
+  ExperimentalTaskWaitErrors,
+  ExperimentalTaskWaitResponses,
   ExperimentalWorkspaceAdapterListData,
   ExperimentalWorkspaceAdapterListErrors,
   ExperimentalWorkspaceAdapterListResponses,
@@ -908,6 +923,92 @@ export class Session extends HeyApiClient {
   }
 }
 
+export class Task extends HeyApiClient {
+  /**
+   * List session tasks
+   *
+   * Read compact child task status and measured usage without starting model work.
+   */
+  public list<ThrowOnError extends boolean = false>(options: Options<ExperimentalTaskListData, ThrowOnError>) {
+    return (options.client ?? this.client).get<ExperimentalTaskListResponses, ExperimentalTaskListErrors, ThrowOnError>(
+      { url: "/experimental/session/{sessionID}/tasks", ...options },
+    )
+  }
+
+  /**
+   * Inspect a session task
+   *
+   * Read bounded recent steps and partial output with a full-result reference.
+   */
+  public inspect<ThrowOnError extends boolean = false>(options: Options<ExperimentalTaskInspectData, ThrowOnError>) {
+    return (options.client ?? this.client).get<
+      ExperimentalTaskInspectResponses,
+      ExperimentalTaskInspectErrors,
+      ThrowOnError
+    >({ url: "/experimental/session/{sessionID}/tasks/{taskID}", ...options })
+  }
+
+  /**
+   * Message a running task
+   *
+   * Admit a bounded correction for the next safe boundary; finished tasks are never restarted implicitly.
+   */
+  public message<ThrowOnError extends boolean = false>(options: Options<ExperimentalTaskMessageData, ThrowOnError>) {
+    return (options.client ?? this.client).post<
+      ExperimentalTaskMessageResponses,
+      ExperimentalTaskMessageErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/{taskID}/message",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  /**
+   * Stop session tasks
+   *
+   * Stop selected children or all children, preserving the reason and partial work.
+   */
+  public stop<ThrowOnError extends boolean = false>(options: Options<ExperimentalTaskStopData, ThrowOnError>) {
+    return (options.client ?? this.client).post<
+      ExperimentalTaskStopResponses,
+      ExperimentalTaskStopErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/stop",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  /**
+   * Wait for session tasks
+   *
+   * Wait for any or all selected children with a bounded timeout and no polling or model requests.
+   */
+  public wait<ThrowOnError extends boolean = false>(options: Options<ExperimentalTaskWaitData, ThrowOnError>) {
+    return (options.client ?? this.client).post<
+      ExperimentalTaskWaitResponses,
+      ExperimentalTaskWaitErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/wait",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+}
+
 export class Resource extends HeyApiClient {
   /**
    * Get MCP resources
@@ -1088,6 +1189,11 @@ export class Experimental extends HeyApiClient {
   private _session?: Session
   get session(): Session {
     return (this._session ??= new Session({ client: this.client }))
+  }
+
+  private _task?: Task
+  get task(): Task {
+    return (this._task ??= new Task({ client: this.client }))
   }
 
   private _resource?: Resource

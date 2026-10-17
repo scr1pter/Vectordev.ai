@@ -5,6 +5,9 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { MCP } from "@/mcp"
 import { Project } from "@/project/project"
 import { Session } from "@/session/session"
+import { SessionPrompt } from "@/session/prompt"
+import { TaskManager } from "@/task/manager"
+import type { TaskPromptOps } from "@/tool/task"
 import type { SessionID } from "@/session/schema"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
@@ -13,8 +16,19 @@ import { Effect, Option } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
-import { SessionListQuery, ToolListQuery, WorktreeApiError } from "../groups/experimental"
-import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
+import {
+  SessionListQuery,
+  ToolListQuery,
+  WorktreeApiError,
+  TaskApiError,
+  TaskListQuery,
+  TaskMessageInput,
+  TaskStopInput,
+  TaskWaitInput,
+} from "../groups/experimental"
+import { RequestPrincipal, allowsSession } from "@vectordevai/protocol/middleware/authorization"
+import { ForbiddenError } from "@vectordevai/protocol/errors"
+import { allowsSessionID } from "./session-access"
 
 function mapWorktreeError<A, R>(self: Effect.Effect<A, Worktree.Error, R>) {
   return self.pipe(
@@ -32,6 +46,63 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const sessions = yield* Session.Service
     const background = yield* BackgroundJob.Service
     const flags = yield* RuntimeFlags.Service
+    const tasks = yield* TaskManager.Service
+    const prompts = yield* SessionPrompt.Service
+    const taskPrompts: TaskPromptOps = {
+      cancel: prompts.cancel,
+      resolvePromptParts: prompts.resolvePromptParts,
+      prompt: (input) => prompts.prompt(input).pipe(Effect.orDie),
+    }
+
+    const access = Effect.fn("ExperimentalHttpApi.taskAccess")(function* (sessionID: SessionID, control = false) {
+      const principal = yield* RequestPrincipal
+      // Workspace visibility does not grant control over another participant's workers.
+      if (control ? allowsSession(principal, sessionID) : yield* allowsSessionID(sessions, principal, sessionID)) return
+      return yield* new ForbiddenError({ message: "This session's tasks are outside your authorized sessions" })
+    })
+    const taskError = <A, R>(effect: Effect.Effect<A, TaskManager.Error, R>) =>
+      effect.pipe(Effect.mapError((error) => new TaskApiError({ code: error.code, message: error.message })))
+
+    const taskList = Effect.fn("ExperimentalHttpApi.taskList")(function* (ctx: {
+      params: { sessionID: SessionID }
+      query: typeof TaskListQuery.Type
+    }) {
+      yield* access(ctx.params.sessionID)
+      return yield* taskError(
+        tasks.list({ sessionID: ctx.params.sessionID, descendants: ctx.query.descendants, limit: ctx.query.limit }),
+      )
+    })
+
+    const taskInspect = Effect.fn("ExperimentalHttpApi.taskInspect")(function* (ctx: {
+      params: { sessionID: SessionID; taskID: string }
+    }) {
+      yield* access(ctx.params.sessionID)
+      return yield* taskError(tasks.inspect(ctx.params))
+    })
+
+    const taskMessage = Effect.fn("ExperimentalHttpApi.taskMessage")(function* (ctx: {
+      params: { sessionID: SessionID; taskID: string }
+      payload: typeof TaskMessageInput.Type
+    }) {
+      yield* access(ctx.params.sessionID, true)
+      return yield* taskError(tasks.message({ ...ctx.params, ...ctx.payload }, taskPrompts))
+    })
+
+    const taskStop = Effect.fn("ExperimentalHttpApi.taskStop")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof TaskStopInput.Type
+    }) {
+      yield* access(ctx.params.sessionID, true)
+      return yield* taskError(tasks.stop({ ...ctx.params, ...ctx.payload }, taskPrompts))
+    })
+
+    const taskWait = Effect.fn("ExperimentalHttpApi.taskWait")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof TaskWaitInput.Type
+    }) {
+      yield* access(ctx.params.sessionID)
+      return yield* taskError(tasks.wait({ ...ctx.params, ...ctx.payload }))
+    })
 
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
       return { backgroundSubagents: flags.backgroundSubagents }
@@ -146,6 +217,11 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       .handle("session", session)
       .handle("sessionUsage", sessionUsage)
       .handle("sessionBackground", sessionBackground)
+      .handle("taskList", taskList)
+      .handle("taskInspect", taskInspect)
+      .handle("taskMessage", taskMessage)
+      .handle("taskStop", taskStop)
+      .handle("taskWait", taskWait)
       .handle("resource", resource)
   }),
 )

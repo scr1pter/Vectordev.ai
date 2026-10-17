@@ -2548,6 +2548,11 @@ export type SessionUsageSummary = {
   helpers?: Array<SessionUsageHelper>
 }
 
+export type TaskApiError = {
+  code: "not_found" | "forbidden" | "invalid" | "finished" | "rate_limited"
+  message: string
+}
+
 export type McpResource = {
   name: string
   uri: string
@@ -5178,6 +5183,89 @@ export type ConfigV2ExperimentalPolicy = {
 }
 
 export type TeamsId = string
+
+export type TaskStatus = "queued" | "running" | "waiting_on_user" | "completed" | "failed" | "stopped"
+
+export type TaskUsage = {
+  cost: number
+  tokens: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  total: number
+  toolUses: number
+  steps: number
+  unpricedSteps?: number
+}
+
+export type TaskInfo = {
+  id: string
+  sessionID?: string
+  parentSessionID: string
+  source: "subagent" | "team" | "swarm" | "external"
+  title: string
+  agent?: string
+  status: TaskStatus
+  batchID?: string
+  groupID?: string
+  startedAt: number
+  completedAt?: number
+  elapsedMs: number
+  currentStep?: string
+  lastTool?: string
+  usage?: TaskUsage
+  measuredCost?: number
+  costKind?: CostKind
+  ownedPaths: Array<string>
+  dependsOn: Array<string>
+  resultAvailable: boolean
+  resultRef?: string
+  reason?: string
+  attempt: number
+  budget?: RunBudget
+  controls: {
+    inspect: boolean
+    message: boolean
+    stop: boolean
+  }
+}
+
+export type TaskListResult = {
+  tasks: Array<TaskInfo>
+  truncated: boolean
+}
+
+export type TaskInspectResult = {
+  task: TaskInfo
+  steps: Array<{
+    tool?: string
+    status?: string
+    text: string
+  }>
+  output: string
+  truncated: boolean
+}
+
+export type TaskMessageResult = {
+  taskID: string
+  messageID: string
+  delivery: "steer" | "queue"
+  accepted: true
+}
+
+export type TaskStopResult = {
+  tasks: Array<TaskInfo>
+}
+
+export type TaskWaitResult = {
+  tasks: Array<TaskInfo>
+  timedOut: boolean
+}
 
 export type ProjectDirectories = Array<{
   directory: string
@@ -9603,6 +9691,191 @@ export type ExperimentalSessionBackgroundResponses = {
 
 export type ExperimentalSessionBackgroundResponse =
   ExperimentalSessionBackgroundResponses[keyof ExperimentalSessionBackgroundResponses]
+
+export type ExperimentalTaskListData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    descendants?: "true" | "false"
+    limit?: string
+  }
+  url: "/experimental/session/{sessionID}/tasks"
+}
+
+export type ExperimentalTaskListErrors = {
+  /**
+   * TaskApiError | InvalidRequestError
+   */
+  400: TaskApiError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ExperimentalTaskListError = ExperimentalTaskListErrors[keyof ExperimentalTaskListErrors]
+
+export type ExperimentalTaskListResponses = {
+  /**
+   * Session task board
+   */
+  200: TaskListResult
+}
+
+export type ExperimentalTaskListResponse = ExperimentalTaskListResponses[keyof ExperimentalTaskListResponses]
+
+export type ExperimentalTaskInspectData = {
+  body?: never
+  path: {
+    sessionID: string
+    taskID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/{sessionID}/tasks/{taskID}"
+}
+
+export type ExperimentalTaskInspectErrors = {
+  /**
+   * TaskApiError | InvalidRequestError
+   */
+  400: TaskApiError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ExperimentalTaskInspectError = ExperimentalTaskInspectErrors[keyof ExperimentalTaskInspectErrors]
+
+export type ExperimentalTaskInspectResponses = {
+  /**
+   * Bounded task progress
+   */
+  200: TaskInspectResult
+}
+
+export type ExperimentalTaskInspectResponse = ExperimentalTaskInspectResponses[keyof ExperimentalTaskInspectResponses]
+
+export type ExperimentalTaskMessageData = {
+  body?: {
+    text: string
+    delivery?: "steer" | "queue"
+  }
+  path: {
+    sessionID: string
+    taskID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/{sessionID}/tasks/{taskID}/message"
+}
+
+export type ExperimentalTaskMessageErrors = {
+  /**
+   * TaskApiError | InvalidRequestError
+   */
+  400: TaskApiError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ExperimentalTaskMessageError = ExperimentalTaskMessageErrors[keyof ExperimentalTaskMessageErrors]
+
+export type ExperimentalTaskMessageResponses = {
+  /**
+   * Task message receipt
+   */
+  200: TaskMessageResult
+}
+
+export type ExperimentalTaskMessageResponse = ExperimentalTaskMessageResponses[keyof ExperimentalTaskMessageResponses]
+
+export type ExperimentalTaskStopData = {
+  body?: {
+    taskIDs?: Array<string>
+    all?: boolean
+    reason?: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/{sessionID}/tasks/stop"
+}
+
+export type ExperimentalTaskStopErrors = {
+  /**
+   * TaskApiError | InvalidRequestError
+   */
+  400: TaskApiError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ExperimentalTaskStopError = ExperimentalTaskStopErrors[keyof ExperimentalTaskStopErrors]
+
+export type ExperimentalTaskStopResponses = {
+  /**
+   * Settled tasks
+   */
+  200: TaskStopResult
+}
+
+export type ExperimentalTaskStopResponse = ExperimentalTaskStopResponses[keyof ExperimentalTaskStopResponses]
+
+export type ExperimentalTaskWaitData = {
+  body?: {
+    taskIDs: Array<string>
+    mode?: "any" | "all"
+    timeout?: number
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/{sessionID}/tasks/wait"
+}
+
+export type ExperimentalTaskWaitErrors = {
+  /**
+   * TaskApiError | InvalidRequestError
+   */
+  400: TaskApiError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ExperimentalTaskWaitError = ExperimentalTaskWaitErrors[keyof ExperimentalTaskWaitErrors]
+
+export type ExperimentalTaskWaitResponses = {
+  /**
+   * Task wait result
+   */
+  200: TaskWaitResult
+}
+
+export type ExperimentalTaskWaitResponse = ExperimentalTaskWaitResponses[keyof ExperimentalTaskWaitResponses]
 
 export type ExperimentalResourceListData = {
   body?: never

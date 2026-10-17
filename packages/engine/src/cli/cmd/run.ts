@@ -1,5 +1,6 @@
 import type { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { nextBackgroundEvent } from "./run/background-wait"
 // CLI entry point for `vector run` and `vector --mini`.
 //
 // Handles three modes:
@@ -25,7 +26,14 @@ import { effectCmd } from "../effect-cmd"
 import { EOL } from "os"
 import { Filesystem } from "@/util/filesystem"
 import { isRecord } from "@/util/record"
-import { createVectorClient, type Message, type RunBudget, type VectorClient, type ToolPart } from "@vectordevai/sdk/v2"
+import {
+  createVectorClient,
+  type Event,
+  type Message,
+  type RunBudget,
+  type VectorClient,
+  type ToolPart,
+} from "@vectordevai/sdk/v2"
 import { FormatError, FormatUnknownError } from "../error"
 import { INTERACTIVE_INPUT_ERROR, resolveInteractiveStdin } from "./run/runtime.stdin"
 import { MODEL_SETUP_GUIDANCE } from "@/provider/setup"
@@ -851,18 +859,42 @@ export const RunCommand = effectCmd({
             }
           }
 
-          for await (const event of events.stream) {
-            // The server sends a heartbeat every few seconds, which the typed union leaves out, so a wait that nothing
-            // else moves still gets checked.
-            const type: string = event.type
-            if (type !== "server.heartbeat") activeAt = Date.now()
-            // Exiting stops what is still running, so giving up fails the run.
-            if (idle && Date.now() - activeAt > backgroundWait) {
+          const iterator = events.stream[Symbol.asyncIterator]()
+          while (true) {
+            const next: Awaited<ReturnType<typeof nextBackgroundEvent<Event>>> = await nextBackgroundEvent(
+              iterator,
+              idle && !waited() ? backgroundWait - (Date.now() - activeAt) : undefined,
+            )
+            if (next.timedOut) {
               const message = `Stopped waiting for ${background.running.size + background.unanswered.size} background subagent(s) after ${Math.round(backgroundWait / 1000)}s without activity`
               error = error ? error + EOL + message : message
               if (!emit("error", { error: { name: "BackgroundSubagentTimeout", data: { message } } })) UI.error(message)
+              if (background.running.size)
+                await client.experimental.task
+                  .stop(
+                    {
+                      sessionID,
+                      taskIDs: [...background.running],
+                      reason: message,
+                    },
+                    { signal: AbortSignal.timeout(5_000) },
+                  )
+                  .catch(() => undefined)
               break
             }
+            if (next.event.done) break
+            const event: Event = next.event.value
+            const properties: unknown = "properties" in event ? event.properties : undefined
+            const owner = isRecord(properties)
+              ? isRecord(properties.info) && typeof properties.info.sessionID === "string"
+                ? properties.info.sessionID
+                : typeof properties.sessionID === "string"
+                  ? properties.sessionID
+                  : isRecord(properties.part) && typeof properties.part.sessionID === "string"
+                    ? properties.part.sessionID
+                    : undefined
+              : undefined
+            if (owner && tree.has(owner)) activeAt = Date.now()
 
             if (
               (event.type === "session.created" || event.type === "session.updated") &&
@@ -870,6 +902,8 @@ export const RunCommand = effectCmd({
             ) {
               const status = backgroundStatus(event.properties.info, runStartedAt)
               const id = event.properties.info.id
+              tree.add(id)
+              activeAt = Date.now()
               if (status === "running" || status === "queued") {
                 background.running.add(id)
                 background.unanswered.delete(id)
@@ -912,7 +946,8 @@ export const RunCommand = effectCmd({
 
             if (event.type === "message.part.updated") {
               const part = event.properties.part
-              const note = part.sessionID === sessionID && part.type === "text" ? part.metadata?.taskNotification : undefined
+              const note =
+                part.sessionID === sessionID && part.type === "text" ? part.metadata?.taskNotification : undefined
               if (isRecord(note) && typeof note.taskID === "string") background.noted.set(note.taskID, part.messageID)
               if (part.sessionID !== sessionID) {
                 // A subagent's steps bill this run too. JSON output reports them, marked as a subagent's, so a
@@ -1061,13 +1096,15 @@ export const RunCommand = effectCmd({
         }
 
         if (!interactive) {
-          const events = await client.event.subscribe()
-          const completed = loop(client, events).catch((e) => {
-            console.error(e)
-            process.exitCode = 1
-          })
+          const streamAbort = new AbortController()
+          const events = await client.event.subscribe(undefined, { signal: streamAbort.signal })
+          const completed = loop(client, events)
+            .catch((e) => {
+              console.error(e)
+              process.exitCode = 1
+            })
+            .finally(() => streamAbort.abort())
           async function finish() {
-            if (args.attach) return
             const error = await completed
             if (error) process.exitCode = 1
           }

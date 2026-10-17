@@ -56,6 +56,16 @@ import type {
   ExperimentalSessionListResponses,
   ExperimentalSessionUsageErrors,
   ExperimentalSessionUsageResponses,
+  ExperimentalTaskInspectErrors,
+  ExperimentalTaskInspectResponses,
+  ExperimentalTaskListErrors,
+  ExperimentalTaskListResponses,
+  ExperimentalTaskMessageErrors,
+  ExperimentalTaskMessageResponses,
+  ExperimentalTaskStopErrors,
+  ExperimentalTaskStopResponses,
+  ExperimentalTaskWaitErrors,
+  ExperimentalTaskWaitResponses,
   ExperimentalWorkspaceAdapterListErrors,
   ExperimentalWorkspaceAdapterListResponses,
   ExperimentalWorkspaceCreateErrors,
@@ -1008,6 +1018,227 @@ export class Session extends HeyApiClient {
   }
 }
 
+export class Task extends HeyApiClient {
+  /**
+   * List session tasks
+   *
+   * Read compact child task status and measured usage without starting model work.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      descendants?: "true" | "false"
+      limit?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "descendants" },
+            { in: "query", key: "limit" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ExperimentalTaskListResponses,
+      ExperimentalTaskListErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Inspect a session task
+   *
+   * Read bounded recent steps and partial output with a full-result reference.
+   */
+  public inspect<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      taskID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "taskID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ExperimentalTaskInspectResponses,
+      ExperimentalTaskInspectErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/{taskID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Message a running task
+   *
+   * Admit a bounded correction for the next safe boundary; finished tasks are never restarted implicitly.
+   */
+  public message<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      taskID: string
+      directory?: string
+      workspace?: string
+      text?: string
+      delivery?: "steer" | "queue"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "taskID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "text" },
+            { in: "body", key: "delivery" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalTaskMessageResponses,
+      ExperimentalTaskMessageErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/{taskID}/message",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Stop session tasks
+   *
+   * Stop selected children or all children, preserving the reason and partial work.
+   */
+  public stop<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      taskIDs?: Array<string>
+      all?: boolean
+      reason?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "taskIDs" },
+            { in: "body", key: "all" },
+            { in: "body", key: "reason" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalTaskStopResponses,
+      ExperimentalTaskStopErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/stop",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Wait for session tasks
+   *
+   * Wait for any or all selected children with a bounded timeout and no polling or model requests.
+   */
+  public wait<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      taskIDs?: Array<string>
+      mode?: "any" | "all"
+      timeout?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "taskIDs" },
+            { in: "body", key: "mode" },
+            { in: "body", key: "timeout" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalTaskWaitResponses,
+      ExperimentalTaskWaitErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/session/{sessionID}/tasks/wait",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Resource extends HeyApiClient {
   /**
    * Get MCP resources
@@ -1381,6 +1612,11 @@ export class Experimental extends HeyApiClient {
   private _session?: Session
   get session(): Session {
     return (this._session ??= new Session({ client: this.client }))
+  }
+
+  private _task?: Task
+  get task(): Task {
+    return (this._task ??= new Task({ client: this.client }))
   }
 
   private _resource?: Resource
