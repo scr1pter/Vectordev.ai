@@ -1,6 +1,7 @@
 import { describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import { ModelV2 } from "@vectordevai/core/model"
+import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { Auth } from "@/auth"
 import { Provider } from "@/provider/provider"
@@ -94,6 +95,19 @@ const services = (setup: Setup) =>
             ),
     }),
     TestConfig.layer({ get: () => Effect.succeed(setup.agent ? { agent: { review: setup.agent } } : {}) }),
+    // The catalog lists acme and anthropic, whose key is not set in these tests; "retired" is in no catalog.
+    Layer.mock(ModelCatalog.Service, {
+      get: () =>
+        Effect.succeed({
+          acme: { id: "acme", name: "Acme", env: ["ACME_API_KEY"], models: {} },
+          anthropic: {
+            id: "anthropic",
+            name: "Anthropic",
+            env: ["ANTHROPIC_API_KEY"],
+            models: { "claude-sonnet-4-5": { id: "claude-sonnet-4-5" } },
+          },
+        } as unknown as Record<string, ModelCatalog.Provider>),
+    }),
     Layer.mock(Auth.Service, {
       get: (providerID) =>
         Effect.succeed(
@@ -209,6 +223,20 @@ describe("free review defaults", () => {
       expect(result.costKind).toBe("free")
       expect(result.price).toBeUndefined()
       expect(yield* chosen({ trigger: "auto", env: { MODEL: "acme/env" } }, { free: true })).toBe("acme/env")
+    }),
+  )
+  it.effect("a workflow's model names the secret it is missing, or the model its provider does not have", () =>
+    Effect.gen(function* () {
+      const missingKey = yield* resolve({ trigger: "auto", env: { MODEL: "anthropic/claude-sonnet-4-5" } }).pipe(
+        Effect.flip,
+      )
+      expect(missingKey.message).toBe(
+        "anthropic/claude-sonnet-4-5 needs ANTHROPIC_API_KEY. Add it as a repository secret and pass it to the Review step in .github/workflows/vector.yml.",
+      )
+      const missingModel = yield* resolve({ trigger: "command", env: { MODEL: "acme/missing" } }).pipe(Effect.flip)
+      expect(missingModel.message).toBe(
+        "Acme has no model missing. Set MODEL in .github/workflows/vector.yml to one of its models, or run vector github install again.",
+      )
     }),
   )
   it.effect("marks direct OpenRouter free variants free and explains obsolete workflow models", () =>

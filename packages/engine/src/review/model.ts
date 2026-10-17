@@ -6,7 +6,9 @@ import { Effect, Schema } from "effect"
 import { Auth } from "@/auth"
 import { Config } from "@/config/config"
 import { Provider } from "@/provider/provider"
+import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { contextRefusal, type ReviewPrice } from "@vectordevai/core/review/plan"
+import { WORKFLOW_FILE } from "@vectordevai/core/review/workflow"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import type { CostKind, Trigger } from "@vectordevai/core/review/types"
 import type { ProviderV2 } from "@vectordevai/core/provider"
@@ -42,6 +44,7 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
   const provider = yield* Provider.Service
   const config = yield* Config.Service
   const auth = yield* Auth.Service
+  const catalog = yield* ModelCatalog.Service
 
   const ci = input.trigger === "auto" || input.trigger === "command"
   const agent = ci ? undefined : (yield* config.get()).agent?.["review"]
@@ -73,14 +76,13 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
       message: `Invalid model ${name}. Model must be in the format "provider/model".`,
     })
   const model = yield* provider.getModel(ref.providerID, ref.modelID).pipe(
-    Effect.catch(() =>
-      Effect.fail(
-        new ReviewModelError({
-          message: ci
-            ? "This workflow was set up by an older Vector; run vector github install again."
-            : `${name} is not available. Check the provider and its key.`,
-        }),
-      ),
+    Effect.catch((error) =>
+      Effect.gen(function* () {
+        if (!ci)
+          return yield* new ReviewModelError({ message: `${name} is not available. Check the provider and its key.` })
+        const listed = (yield* catalog.get())[ref.providerID]
+        return yield* new ReviewModelError({ message: workflowRefusal(name, ref.modelID, listed, error) })
+      }),
     ),
   )
   const refusal = contextRefusal(name, model.limit.context)
@@ -105,6 +107,25 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
     costKind,
   } satisfies ResolvedModel
 })
+
+// Why a workflow's model cannot run. A missing secret is the usual cause: the provider is in the catalog but never
+// loaded, because the review step's env does not pass its key. Only a provider Vector no longer lists means the
+// workflow itself is out of date.
+function workflowRefusal(
+  name: string,
+  modelID: string,
+  listed: ModelCatalog.Provider | undefined,
+  error: Provider.ModelNotFoundError,
+) {
+  if (error.unavailable) return `${name} cannot run in this workflow. ${error.unavailable.message}`
+  if (!listed) return "This workflow was set up by an older Vector; run vector github install again."
+  if (!Object.hasOwn(listed.models, modelID)) {
+    const suggestions = error.suggestions?.length ? ` Did you mean ${error.suggestions.join(", ")}?` : ""
+    return `${listed.name} has no model ${modelID}.${suggestions} Set MODEL in ${WORKFLOW_FILE} to one of its models, or run vector github install again.`
+  }
+  const keys = listed.env.length ? listed.env.join(" or ") : `${listed.name}'s credentials`
+  return `${name} needs ${keys}. Add it as a repository secret and pass it to the Review step in ${WORKFLOW_FILE}.`
+}
 
 function first(values: (string | undefined)[]) {
   return values.map((value) => value?.trim()).find((value): value is string => !!value)

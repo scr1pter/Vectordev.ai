@@ -7,10 +7,16 @@ import { $ } from "bun"
 import { afterAll, describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
-import { ManagedRuntime, type Effect } from "effect"
+import { Effect, ManagedRuntime } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { buildAnchorIndex, fromGitHubFiles, parseUnifiedDiff, type GitHubPrFile } from "@vectordevai/core/review/diff"
-import { noteCommitGone, noteMonthBudget, noteRebase, noteSuperseded } from "@vectordevai/core/review/format"
+import {
+  noteCannotStart,
+  noteCommitGone,
+  noteMonthBudget,
+  noteRebase,
+  noteSuperseded,
+} from "@vectordevai/core/review/format"
 import { selectFindings } from "@vectordevai/core/review/select"
 import { SUMMARY_MARKER, emptyState, parseFindingMarker, readState, stateMarker } from "@vectordevai/core/review/state"
 import type { ModelFinding, ModelReport, ReviewCost, ReviewOutcome, ReviewState } from "@vectordevai/core/review/types"
@@ -21,6 +27,9 @@ import { Git } from "../../src/git"
 import type { ResolvedModel } from "../../src/review/model"
 import { normalizeFindings, type RunInput } from "../../src/review/run"
 import { tmpdir } from "../fixture/fixture"
+import { cliIt, type CliFixture } from "../lib/cli-process"
+import { reply } from "../lib/llm-server"
+import { testProviderConfig } from "../lib/test-provider"
 
 const OWNER = "o"
 const REPO = "r"
@@ -1634,3 +1643,166 @@ describe("vector github review: ids, failures and edge cases", () => {
     TIMEOUT,
   )
 })
+
+// The workflow's review job as it runs in Actions: the real `vector github review` command, the real reviewer on the
+// fake LLM, and the fake GitHub above.
+describe("vector github review: the workflow's command end to end", () => {
+  const actions = (w: World, llmUrl: string, event: { name: string; path: string }) => ({
+    GITHUB_ACTIONS: "true",
+    GITHUB_REPOSITORY: `${OWNER}/${REPO}`,
+    GITHUB_EVENT_NAME: event.name,
+    GITHUB_EVENT_PATH: event.path,
+    GITHUB_API_URL: w.fake.url,
+    GITHUB_RUN_ID: "1",
+    GITHUB_TOKEN: "test-token-placeholder",
+    VECTOR_WORKFLOW_VERSION: "2",
+    VECTOR_DISABLE_USAGE: "1",
+    VECTOR_REVIEW_PR: String(PR),
+    VECTOR_REVIEW_REF: w.head,
+    MODEL: "lmstudio/test-model",
+    VECTOR_PURE: "1",
+    VECTOR_DISABLE_PROJECT_CONFIG: "1",
+    VECTOR_CONFIG_CONTENT: JSON.stringify({ ...testProviderConfig(llmUrl), snapshot: false }),
+  })
+  const setup = (home: string, payload: (w: World) => Json) =>
+    Effect.gen(function* () {
+      const w = yield* Effect.acquireRelease(
+        Effect.promise(() => world()),
+        (w) => Effect.promise(() => w[Symbol.asyncDispose]()),
+      )
+      const runner = yield* Effect.promise(() => w.repo.runner(w.head))
+      const event = path.join(home, "event.json")
+      yield* Effect.promise(() => Bun.write(event, JSON.stringify(payload(w))))
+      return { w, runner, event }
+    })
+  const opened = (w: World): Json => ({
+    action: "opened",
+    number: PR,
+    pull_request: {
+      number: PR,
+      draft: false,
+      user: { login: "carol" },
+      labels: [],
+      head: { sha: w.head, ref: "feature", repo: { full_name: `${OWNER}/${REPO}` } },
+      base: { sha: w.base, ref: "main", repo: { full_name: `${OWNER}/${REPO}` } },
+    },
+    repository: { full_name: `${OWNER}/${REPO}` },
+  })
+  const answers = (llm: CliFixture["llm"]) =>
+    Effect.gen(function* () {
+      yield* llm.pushMatch(
+        (hit) => lastUserText(hit.body).includes("You are Vector's code reviewer"),
+        reply()
+          .tool("StructuredOutput", {
+            summary: "Adds page() to the list helpers.",
+            risk: "medium",
+            files: [{ path: "src/list.ts", note: "page() added" }],
+            findings: [OFF_BY_ONE],
+          })
+          .usage({ input: 1200, output: 300 }),
+      )
+      yield* llm.pushMatch(
+        (hit) => lastUserText(hit.body).includes("You are Vector's security reviewer"),
+        reply()
+          .tool("StructuredOutput", { summary: "Nothing else.", risk: "low", files: [], findings: [] })
+          .usage({ input: 900, output: 40 }),
+      )
+      yield* llm.pushMatch(
+        (hit) => lastUserText(hit.body).includes("You are checking candidate findings"),
+        reply().tool("StructuredOutput", { results: [] }).usage({ input: 500, output: 20 }),
+      )
+    })
+
+  cliIt.live(
+    "an opened pull request is reviewed on the real reviewer, and the review and its tokens are posted",
+    ({ llm, vector, home }) =>
+      Effect.gen(function* () {
+        const { w, runner, event } = yield* setup(home, opened)
+        yield* answers(llm)
+        const result = yield* vector.spawn(["github", "review"], {
+          cwd: runner,
+          timeoutMs: 100_000,
+          env: actions(w, llm.url, { name: "pull_request", path: event }),
+        })
+        vector.expectExit(result, 0, "the review job")
+        const reviews = posts(w, /\/pulls\/7\/reviews$/)
+        expect(reviews).toHaveLength(1)
+        const comments = reviews[0]!.body!["comments"] as Json[]
+        expect(comments.map((comment) => [comment["path"], comment["line"]])).toEqual([["src/list.ts", 22]])
+        const body = sticky(w)!.body
+        expect(body).toContain("## Vectorscope review · Risk: High")
+        expect(body).toContain("**1 blocking** on the changed lines")
+        // What the reviewers spent reaches the pull request, not just the job's log.
+        expect(body).toContain("(2.6k in / 360 out)")
+        expect(state(w)).toMatchObject({ head: w.head, reviews: 1, inlinePosted: 1 })
+      }),
+    120_000,
+  )
+
+  cliIt.live(
+    "a writer's /vectorscope review comment is answered with eyes, the review, then +1",
+    ({ llm, vector, home }) =>
+      Effect.gen(function* () {
+        const { w, runner, event } = yield* setup(home, (w) => {
+          const comment = w.fake.addIssueComment(PR, "/vectorscope review", { login: "alice", type: "User" }, 5001)
+          return {
+            action: "created",
+            comment: { id: comment.id, body: comment.body, user: comment.user },
+            issue: { number: PR, pull_request: { url: `${w.fake.url}/repos/${OWNER}/${REPO}/pulls/${PR}` } },
+            repository: { full_name: `${OWNER}/${REPO}` },
+          }
+        })
+        yield* answers(llm)
+        const result = yield* vector.spawn(["github", "review"], {
+          cwd: runner,
+          timeoutMs: 100_000,
+          env: actions(w, llm.url, { name: "issue_comment", path: event }),
+        })
+        vector.expectExit(result, 0, "the review job")
+        expect(posts(w, /\/pulls\/7\/reviews$/)).toHaveLength(1)
+        expect(posts(w, /\/issues\/comments\/5001\/reactions$/).map((request) => request.body?.["content"])).toEqual([
+          "eyes",
+          "+1",
+        ])
+      }),
+    120_000,
+  )
+
+  cliIt.live(
+    "a model whose key the workflow does not pass fails the job and says which secret on the pull request",
+    ({ llm, vector, home }) =>
+      Effect.gen(function* () {
+        const { w, runner, event } = yield* setup(home, opened)
+        const result = yield* vector.spawn(["github", "review"], {
+          cwd: runner,
+          timeoutMs: 100_000,
+          env: {
+            ...actions(w, llm.url, { name: "pull_request", path: event }),
+            MODEL: "anthropic/claude-sonnet-4-5",
+          },
+        })
+        vector.expectExit(result, 1, "the review job")
+        const reason =
+          "anthropic/claude-sonnet-4-5 needs ANTHROPIC_API_KEY. Add it as a repository secret and pass it to the Review step in .github/workflows/vector.yml."
+        expect(result.stderr).toContain(reason)
+        expect(result.stderr).not.toContain("older Vector")
+        expect(sticky(w)!.body).toContain(noteCannotStart(reason))
+        expect(posts(w, /\/pulls\/7\/reviews$/)).toHaveLength(0)
+        expect(yield* llm.hits).toHaveLength(0)
+      }),
+    120_000,
+  )
+})
+
+function lastUserText(body: Record<string, unknown>) {
+  const messages: unknown[] = Array.isArray(body["messages"]) ? body["messages"] : []
+  const user = messages.findLast((message) => isJson(message) && message["role"] === "user")
+  const content = isJson(user) ? user["content"] : undefined
+  if (typeof content === "string") return content
+  const parts: unknown[] = Array.isArray(content) ? content : []
+  return parts.map((part) => (isJson(part) && typeof part["text"] === "string" ? part["text"] : "")).join("\n")
+}
+
+function isJson(value: unknown): value is Json {
+  return typeof value === "object" && value !== null
+}

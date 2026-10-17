@@ -27,6 +27,7 @@ import {
   buildSummaryBody,
   inlineLeads,
   noteAlreadyReviewed,
+  noteCannotStart,
   noteCommitGone,
   noteFailed,
   noteForcePush,
@@ -284,7 +285,25 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
     (value) => value,
     (error: unknown) => new Error(messageOf(error)),
   )
-  if (model instanceof Error) return configError(model.message)
+  if (model instanceof Error) {
+    // The job fails either way; without a note the pull request shows only a red check, and a person who commented
+    // `/vector review` sees nothing at all.
+    const found = await gh
+      .listIssueComments(ctx.pr)
+      .then((list) => findSticky(list, ctx.botLogin) ?? findSticky(list, ACTIONS_BOT))
+    const body = clean(
+      buildNoteBody({
+        previous: found?.body,
+        note: noteCannotStart(model.message),
+        state: found ? readState(found.body) : undefined,
+      }),
+    )
+    await (found ? gh.updateIssueComment(found.id, body) : gh.createIssueComment(ctx.pr, body)).then(
+      () => undefined,
+      (error: unknown) => log(`Could not post why the review cannot start: ${messageOf(error)}`),
+    )
+    return configError(model.message)
+  }
 
   // 3. Earlier state.
   const comments = await gh.listIssueComments(ctx.pr)
