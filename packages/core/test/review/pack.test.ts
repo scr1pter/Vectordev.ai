@@ -124,6 +124,39 @@ function rewritten(count: number) {
   return [rewrittenFile(count).file]
 }
 
+describe("packChanges: long files", () => {
+  // A 300-line file with line 150 changed: the numbered view keeps 20 lines either side and folds the rest, with the
+  // base line numbers a reviewer needs to read the folded lines from the base branch.
+  test("folds a long file around its change and still numbers every shown line", () => {
+    const base = Array.from({ length: 300 }, (_, index) => `const v${index + 1} = ${index + 1}`)
+    const head = base.map((line, index) => (index === 149 ? "const v150 = 0" : line))
+    const [file] = parseUnifiedDiff(
+      [
+        "diff --git a/src/long.ts b/src/long.ts",
+        "--- a/src/long.ts",
+        "+++ b/src/long.ts",
+        "@@ -147,7 +147,7 @@",
+        ...base.slice(146, 149).map((line) => " " + line),
+        "-" + base[149],
+        "+" + head[149],
+        ...base.slice(150, 153).map((line) => " " + line),
+        "",
+      ].join("\n"),
+    )
+    const text = head.join("\n") + "\n"
+    const packed = packChanges({ inline: [file!], headFiles: [{ path: "src/long.ts", text, exact: true }] })
+    const view = packed.headFiles[0]!
+    expect(view.annotated).toBe(true)
+    expect(packed.diff).toBe("")
+    const rows = view.text.split("\n")
+    expect(rows[0]).toBe("⋯ lines 1-128 unchanged (base lines 1-128)")
+    expect(rows).toContain("150 - const v150 = 150")
+    expect(rows).toContain("150 + const v150 = 0")
+    expect(rows.at(-1)).toBe("⋯ lines 171-300 unchanged (base lines 171-300)")
+    expect(view.text.length).toBeLessThan(text.length / 4)
+  })
+})
+
 describe("packChanges: size", () => {
   test("keeps the diff and the full text when a small change to a file would not repay the line numbers", () => {
     const small = rewrittenFile(1)
