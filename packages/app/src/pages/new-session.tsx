@@ -19,6 +19,7 @@ import { useSessionKey } from "@/pages/session/session-layout"
 import { useComposerCommands } from "@/pages/session/use-composer-commands"
 import { NEW_SESSION_CONTENT_WIDTH } from "@/pages/session/new-session-layout"
 import { PromptWorkspaceSelector } from "@/components/prompt-workspace-selector"
+import { ProjectTrustPrompt } from "@/components/project-trust-prompt"
 import { composerTakes, onComposerPrompt } from "@/features/cloud/cloud-handoff"
 
 const showWorkspaceBar = import.meta.env.VITE_VECTOR_CHANNEL !== "prod"
@@ -109,6 +110,10 @@ export default function NewSessionPage() {
 
   return (
     <div class="relative size-full overflow-hidden flex flex-col">
+      {/* A new session is usually where a project is first opened, so the trust question comes before its first run. */}
+      <Show when={projectController.selected()}>
+        <ProjectTrustPrompt />
+      </Show>
       <div class="flex-1 min-h-0 flex flex-col gap-2 p-2">
         <div class="@container relative flex flex-col min-h-0 h-full bg-background-stronger flex-1">
           <div class="flex-1 min-h-0 overflow-hidden rounded-[14px]">
