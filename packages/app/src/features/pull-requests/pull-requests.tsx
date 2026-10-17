@@ -782,8 +782,6 @@ export function PullRequests(props: {
   }
   // One section per severity; dismissed findings sink to the bottom of theirs.
   const sections = () => findingSections(groups(), { filter: severityFilter(), dismissed: dismissed() })
-  // The agent in the open task works on the user's checkout, so it is offered only when that is what was reviewed.
-  const canAsk = () => Boolean(props.onAskAgent) && review()?.checkout.mode === "in-place"
   const canFix = () =>
     Boolean(
       (globalThis.window as unknown as { api?: { parallelWorkspaces?: unknown } } | undefined)?.api?.parallelWorkspaces,
@@ -1651,7 +1649,7 @@ export function PullRequests(props: {
                             canRemember={Boolean(rulesApi() && props.projectPath)}
                             applyState={applied()[finding.id] ?? "idle"}
                             onApply={finding.apply && props.onApplyFix ? () => void applyFix(finding) : undefined}
-                            onAsk={canAsk() ? () => askAgent(finding) : undefined}
+                            onAsk={finding.ask && props.onAskAgent ? () => askAgent(finding) : undefined}
                             onMenu={(open) => setMenuFor(open ? finding.id : undefined)}
                             onDismiss={(reason) => void dismiss(finding, reason)}
                             onRestore={() => restore(finding)}
