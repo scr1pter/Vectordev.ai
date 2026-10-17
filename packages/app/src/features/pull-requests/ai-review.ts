@@ -966,7 +966,7 @@ async function runSpecialist(input: {
   stop: Promise<StopReason>
 }): Promise<SpecialistResult> {
   const { client, directory, name } = input
-  let failure: string | undefined
+  const errors: unknown[] = []
   // A helper session: out of every session list, its spend counted towards the session the review started from.
   const created = await client.session
     .create({
@@ -977,12 +977,17 @@ async function runSpecialist(input: {
       ...(input.parentID ? { parentID: input.parentID } : {}),
     })
     .catch((cause: unknown) => {
-      failure = errorText(cause)
+      errors.push(cause)
       return undefined
     })
   const sessionID = created?.data?.id
   if (!sessionID)
-    return { name, status: "failed", detail: failure ?? "Vector could not create a review session.", usage: NO_USAGE }
+    return {
+      name,
+      status: "failed",
+      detail: failureOf(errors) ?? "Vector could not create a review session.",
+      usage: NO_USAGE,
+    }
   input.onSession(sessionID)
 
   const ask = (text: string) =>
@@ -997,12 +1002,11 @@ async function runSpecialist(input: {
       })
       .then(
         (result) => {
-          // The first error is the cause; a finalize turn after it fails because of it, and says less.
-          failure ??= errorText(result.data?.info.error)
+          errors.push(result.data?.info.error)
           return result.data
         },
         (cause: unknown) => {
-          failure ??= errorText(cause)
+          errors.push(cause)
           return undefined
         },
       )
@@ -1046,7 +1050,21 @@ async function runSpecialist(input: {
   }
   const usage = await usageOf(client, sessionID, directory)
   if (report) return { name, status, sessionID, report, usage, ...(guarded ? { detail: guarded } : {}) }
-  return { name, status: "failed", sessionID, detail: failure ?? "No review came back.", usage }
+  return { name, status: "failed", sessionID, detail: failureOf(errors) ?? "No review came back.", usage }
+}
+
+// Why a reviewer failed, from its turns' errors in order. A turn that only missed the report or was stopped says less
+// than a provider's own error, which can come from either turn: a first turn the provider refused makes the finalize
+// turn miss the report too, and a stop or a first turn that answered in prose leaves the finalize turn to hit, say, an
+// empty balance.
+function failureOf(errors: unknown[]) {
+  const known = errors.flatMap((error) => {
+    const text = errorText(error)
+    if (!text) return []
+    const name = typeof error === "object" && error && "name" in error ? error.name : undefined
+    return [{ text, vague: name === "StructuredOutputError" || name === "MessageAbortedError" }]
+  })
+  return (known.find((error) => !error.vague) ?? known[0])?.text
 }
 
 // What the run guard said when it stopped a reviewer's turn.

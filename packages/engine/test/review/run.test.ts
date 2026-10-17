@@ -1214,6 +1214,23 @@ describe("Review.run", () => {
   )
 
   it.instance(
+    "a failed reviewer whose first turn only missed the report names the finalizer's provider error",
+    () =>
+      Effect.gen(function* () {
+        const { llm, directory } = yield* useServer()
+        yield* llm.pushMatch(REVIEW, reply().text("Looks fine to me.").stop())
+        yield* llm.pushMatch(FINALIZE, httpError(400, { error: { message: "Your credit balance is too low" } }))
+
+        const outcome = yield* Review.run(input(directory))
+
+        expect(outcome.specialists[0]).toMatchObject({ name: "review", status: "failed" })
+        expect(outcome.specialists[0]?.detail).toContain("Your credit balance is too low")
+        expect(outcome.specialists[0]?.detail).not.toContain("structured output")
+      }),
+    TIMEOUT,
+  )
+
+  it.instance(
     "marks a run whose model fails as a model error and leaves every file unreviewed",
     () =>
       Effect.gen(function* () {
