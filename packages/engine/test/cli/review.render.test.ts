@@ -211,6 +211,25 @@ describe("renderLocalReview", () => {
     expect(unknown).toContain("x/y · cost unknown: no price is listed for this model · 48.2k in / 3.1k out")
   })
 
+  test("a free model's review says so, and a review with several passes lists what each spent", () => {
+    const free = render({
+      outcome: outcome({ cost: { ...outcome().cost!, kind: "free", model: "openrouter/m:free" } }),
+    })
+    expect(free).toContain("openrouter/m:free · free · 48.2k in / 3.1k out")
+    const text = render({
+      outcome: outcome({
+        cost: { ...outcome().cost!, kind: "priced", costUsd: 0.0154, model: "a/cheap + b/strong" },
+        passes: [
+          { name: "review", model: "a/cheap", costUsd: 0.0123, input: 40_100, output: 2_000, cacheRead: 0 },
+          { name: "verify", model: "b/strong", costUsd: 0.0031, input: 9_200, output: 400, cacheRead: 0 },
+        ],
+      }),
+    })
+    expect(text.trimEnd().split("\n").at(-1)).toBe(
+      "By pass: review $0.01 (40.1k in / 2.0k out) · double-check $0.0031 (9.2k in / 400 out)",
+    )
+  })
+
   test("a partial review names the files it did not reach and how to continue", () => {
     const text = render({
       resumable: true,

@@ -190,6 +190,17 @@ export interface ReviewOutcome {
   sessions: string[]
   stats: { files: number; additions: number; deletions: number }
   notes: string[] // deterministic summary notes (generated header, moved comments, superseded)
+  // What each pass spent, from its session's recorded usage. Absent when no pass reported usage.
+  passes?: ReviewPass[]
+}
+
+export interface ReviewPass {
+  name: "review" | "security" | "verify"
+  model: string // "provider/model"
+  costUsd?: number // absent when the pass's usage carried no price
+  input: number // cache reads and writes included
+  output: number
+  cacheRead: number
 }
 
 // `.vector/review.json`. Environment variables override it, and it overrides DEFAULT_REVIEW_CONFIG.

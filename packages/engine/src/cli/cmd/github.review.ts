@@ -177,7 +177,7 @@ export interface ReviewJobDeps {
   gh: ReviewGitHub
   git: ReviewGit
   runReview: (input: RunInput) => Promise<ReviewOutcome>
-  resolveModel: (input: { trigger: Trigger; config?: string }) => Promise<ResolvedModel>
+  resolveModel: (input: { trigger: Trigger; config?: string; exact?: string }) => Promise<ResolvedModel>
   log: (line: string) => void
   now: () => number
   dryRun?: boolean
@@ -285,6 +285,14 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
     (error: unknown) => new Error(messageOf(error)),
   )
   if (model instanceof Error) return configError(model.message)
+  // review.json's cheaper first pass; the double-check stays on `model`.
+  const triage = config.triageModel
+    ? await deps.resolveModel({ trigger: ctx.trigger, exact: config.triageModel }).then(
+        (value) => value,
+        (error: unknown) => new Error(`triageModel: ${messageOf(error)}`),
+      )
+    : undefined
+  if (triage instanceof Error) return configError(triage.message)
 
   // 3. Earlier state.
   const comments = await gh.listIssueComments(ctx.pr)
@@ -636,6 +644,7 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
       ),
       config,
       model,
+      ...(triage ? { triage } : {}),
       knownPath: known,
       onProgress: (event) =>
         log(event.type === "cost" ? `Spent $${event.costUsd.toFixed(4)}` : `${event.name}: ${event.status}`),

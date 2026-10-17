@@ -1197,6 +1197,104 @@ describe("Review.run", () => {
   )
 
   it.instance(
+    "runs the first pass on the triage model and double-checks every concern on the review model",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const llm = yield* TestLLMServer
+        const fs = yield* FSUtil.Service
+        const provider = testProviderConfig(llm.url)
+        Object.assign(provider.provider.lmstudio.models, {
+          "cheap-model": { ...provider.provider.lmstudio.models["test-model"], id: "cheap-model", name: "Cheap" },
+        })
+        yield* fs.writeWithDirs(
+          path.join(test.directory, "vector.json"),
+          JSON.stringify({ $schema: "https://vectordev.ai/config.json", ...provider }),
+        )
+        yield* fs.writeWithDirs(path.join(test.directory, "src/list.ts"), LIST_SOURCE)
+        yield* Effect.promise(() => trustWorkspace(test.directory))
+        const cheap = { ...ref, modelID: ModelV2.ID.make("cheap-model"), context: 100_000, costKind: "free" as const }
+
+        yield* llm.pushMatch(
+          REVIEW,
+          reply()
+            .tool("StructuredOutput", report([finding({ severity: "concern" })]))
+            .usage({ input: 2_000, output: 100 }),
+        )
+        yield* llm.pushMatch(
+          VERIFY,
+          reply().tool("StructuredOutput", { results: [] }).usage({ input: 1_000, output: 50 }),
+        )
+        const outcome = yield* Review.run(
+          input(test.directory, { triage: cheap, config: config({ verify: "blocking" }) }),
+        )
+        const hits = yield* llm.hits
+        expect(hits.filter(REVIEW).map((hit) => hit.body.model)).toEqual(["cheap-model"])
+        expect(hits.filter(VERIFY).map((hit) => hit.body.model)).toEqual(["test-model"])
+        expect(outcome.specialists.map((item) => [item.name, item.status])).toEqual([
+          ["review", "ok"],
+          ["verify", "ok"],
+        ])
+        expect(outcome.passes?.map((pass) => [pass.name, pass.model, pass.input, pass.output])).toEqual([
+          ["review", "lmstudio/cheap-model", 2_000, 100],
+          ["verify", "lmstudio/test-model", 1_000, 50],
+        ])
+        expect(outcome.cost?.model).toBe("lmstudio/cheap-model + lmstudio/test-model")
+
+        // Without a triage model the same concern is not double-checked under verify "blocking".
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", report([finding({ severity: "concern" })])))
+        const plain = yield* Review.run(input(test.directory, { config: config({ verify: "blocking" }) }))
+        expect(plain.specialists.map((item) => item.name)).toEqual(["review"])
+        expect((yield* llm.hits).filter(VERIFY)).toHaveLength(1)
+      }),
+    TIMEOUT,
+  )
+
+  it.instance(
+    "sends an untrusted change once, annotated, and only the changed lines of a file with nothing new",
+    () =>
+      Effect.gen(function* () {
+        const { llm, directory } = yield* useServer()
+        const other = parseUnifiedDiff(
+          [
+            "diff --git a/src/other.ts b/src/other.ts",
+            "--- a/src/other.ts",
+            "+++ b/src/other.ts",
+            "@@ -1,3 +1,3 @@",
+            " export function other() {",
+            "-  return 1",
+            "+  return 2",
+            " }",
+          ].join("\n"),
+        )
+        const files = [...LIST, ...other]
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", report()))
+        yield* Review.run(
+          input(directory, {
+            trust: "untrusted",
+            mode: "incremental",
+            since: "3".repeat(40),
+            files,
+            anchors: files,
+            focus: [{ path: "src/list.ts", start: 1, end: 4 }],
+            headFiles: [
+              { path: "src/list.ts", text: LIST_SOURCE, exact: true },
+              { path: "src/other.ts", text: "export function other() {\n  return 2\n}\n", exact: true },
+            ],
+          }),
+        )
+        const text = lastUserText((yield* llm.hits).find(REVIEW)!.body)
+        expect(text).toContain('<untrusted_pr_file path="src/list.ts" exact="true" annotated="true">')
+        expect(text).toContain("2 +   const index = items.length")
+        expect(text).not.toContain('<untrusted_pr_file path="src/other.ts"')
+        expect(text).toContain("@@ -2,1 +2,1 @@\n-  return 1\n+  return 2")
+        expect(text).not.toContain(" export function other() {")
+        expect(text).toContain("their diff is shown without context lines")
+      }),
+    TIMEOUT,
+  )
+
+  it.instance(
     "marks a run whose model fails as a model error and leaves every file unreviewed",
     () =>
       Effect.gen(function* () {

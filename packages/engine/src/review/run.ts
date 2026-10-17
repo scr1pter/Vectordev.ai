@@ -14,7 +14,6 @@ import {
   budgetDiff,
   buildAnchorIndex,
   lookupFile,
-  renderPatch,
   resolveAnchor,
   type DiffFile,
 } from "@vectordevai/core/review/diff"
@@ -22,12 +21,15 @@ import { fingerprint, normalizeCode, normalizeTitle } from "@vectordevai/core/re
 import { noteVerifySkipped } from "@vectordevai/core/review/format"
 import { classifyPath, isSensitivePath } from "@vectordevai/core/review/ignore"
 import { reviewPermissionRules } from "@vectordevai/core/review/permission"
+import { packChanges, verifyHeadFiles } from "@vectordevai/core/review/pack"
 import {
+  combineCostKinds,
   diffBudgetChars,
   estimateCostUsd,
   NEXT_STEP_SLACK,
   nextStepCostUsd,
   planSpecialists,
+  type ReviewPrice,
 } from "@vectordevai/core/review/plan"
 import {
   buildFinalizePrompt,
@@ -42,7 +44,7 @@ import {
   REVIEW_REPORT_JSON_SCHEMA,
   VERIFY_JSON_SCHEMA,
 } from "@vectordevai/core/review/schema"
-import { selectFindings } from "@vectordevai/core/review/select"
+import { selectFindings, wantsNits } from "@vectordevai/core/review/select"
 import type {
   Finding,
   FocusHunk,
@@ -52,6 +54,7 @@ import type {
   ReviewConfig,
   ReviewCost,
   ReviewOutcome,
+  ReviewPass,
   Risk,
   SkippedFile,
   Trigger,
@@ -89,6 +92,9 @@ export interface RunInput {
   rules: string
   config: ReviewConfig
   model: ResolvedModel
+  // A cheaper model for the review and security passes. The double-check then runs on `model` for every finding
+  // above a nit, so what reaches the pull request was confirmed by the stronger model.
+  triage?: ResolvedModel
   allowDirs?: string[]
   checks?: boolean
   knownPath: (path: string) => Promise<boolean>
@@ -106,6 +112,7 @@ type Progress = Parameters<NonNullable<RunInput["onProgress"]>>[0]
 interface Track {
   name: Name
   sessionID: SessionID
+  price?: ReviewPrice // set when this session's model is priced and the review has a dollar cap
   cap: number
   steps: number
   seen: Set<string>
@@ -120,6 +127,7 @@ interface Track {
 
 interface Spec<T> {
   name: Name
+  model: ResolvedModel
   cap: number
   text: string
   schema: Record<string, unknown>
@@ -165,7 +173,12 @@ export const run: (
   const started = Date.now()
   const deadline = started + input.config.timeoutMinutes * 60_000
   const config = input.config
-  const price = input.model.costKind === "priced" && config.maxCostUsd > 0 ? input.model.price : undefined
+  const priceOf = (model: ResolvedModel) =>
+    model.costKind === "priced" && config.maxCostUsd > 0 ? model.price : undefined
+  const triage = input.triage ?? input.model
+  const triaged = nameOf(triage) !== nameOf(input.model)
+  // The dollar cap applies when any pass runs on a priced model.
+  const capped = priceOf(input.model) !== undefined || priceOf(triage) !== undefined
   // The saved long outputs hold every session the user ever ran, so a review of someone else's pull request, which its
   // author can steer, cannot read them back; it only loses the cut-off end of a long tool output.
   const rules = reviewPermissionRules({
@@ -185,7 +198,7 @@ export const run: (
   // Reservations are estimates, not billed spend. Replace this specialist's old reservation in one synchronous
   // operation: parallel specialists must not each spend the same remainder, including a pending finalization.
   const reserve = (name: Name, turn: number, finalize: number) => {
-    if (!price) return true
+    if (!capped) return true
     const others = [...reservations].reduce(
       (total, [owner, amount]) => total + (owner === name ? 0 : amount.turn + amount.finalize),
       0,
@@ -194,8 +207,8 @@ export const run: (
     reservations.set(name, { turn, finalize })
     return true
   }
-  const nextCost = (track: Pick<Track, "context" | "cached">) =>
-    price ? nextStepCostUsd(track.context + NEXT_STEP_SLACK, price, track.cached) : 0
+  const nextCost = (track: Pick<Track, "context" | "cached" | "price">) =>
+    track.price ? nextStepCostUsd(track.context + NEXT_STEP_SLACK, track.price, track.cached) : 0
   // Usage is settled by the processor lease before retry/continuation admission. Events only report progress.
   const unsubscribe = yield* events.listen((event) => {
     if (event.type === SessionV1.Event.PartUpdated.type) {
@@ -240,9 +253,11 @@ export const run: (
     const incomplete =
       messages.some((entry) => !entry.complete) ||
       assistant.some((message) => message.unpriced || !Number.isFinite(message.cost) || message.cost < 0)
-    const sameModel = assistant.every(
-      (message) => message.providerID === input.model.providerID && message.modelID === input.model.modelID,
-    )
+    // Each model a reply came from, with its cost kind when it is one this review chose.
+    const chosen = triaged ? [input.model, triage] : [input.model]
+    const used = [...new Set(assistant.map((message) => `${message.providerID}/${message.modelID}`))]
+    const kinds = used.map((name) => chosen.find((model) => nameOf(model) === name)?.costKind)
+    const known = kinds.every((kind) => kind !== undefined)
     return {
       costUsd: measured && Number.isFinite(measured.costUsd) ? measured.costUsd : 0,
       input: measured?.input ?? 0,
@@ -254,13 +269,39 @@ export const run: (
       kind:
         (!measured && !unused) || incomplete || (measured !== undefined && !Number.isFinite(measured.costUsd))
           ? "unknown"
-          : sameModel
+          : !used.length
             ? input.model.costKind
-            : (measured?.costUsd ?? 0) > 0
-              ? "priced"
-              : "unknown",
-      model: sameModel ? `${input.model.providerID}/${input.model.modelID}` : "Multiple models",
+            : known
+              ? combineCostKinds(kinds.filter((kind) => kind !== undefined))
+              : (measured?.costUsd ?? 0) > 0
+                ? "priced"
+                : "unknown",
+      model: !used.length ? nameOf(input.model) : known ? used.join(" + ") : "Multiple models",
     } satisfies ReviewCost
+  })
+
+  // What each pass spent, from its own session's recorded messages.
+  const passes = Effect.fnUntraced(function* () {
+    const measured = yield* Effect.forEach([...tracks.values()], (track) =>
+      sessions.messages({ sessionID: track.sessionID }).pipe(
+        Effect.map((messages) => {
+          const cost = measureCost(messages)
+          if (!cost) return []
+          return [
+            {
+              name: track.name,
+              model: `${cost.provider}/${cost.model}`,
+              ...(Number.isFinite(cost.costUsd) && cost.unpriced === 0 ? { costUsd: cost.costUsd } : {}),
+              input: cost.input + cost.cacheRead + cost.cacheWrite,
+              output: cost.output + cost.reasoning,
+              cacheRead: cost.cacheRead,
+            } satisfies ReviewPass,
+          ]
+        }),
+        Effect.catch(() => Effect.succeed([])),
+      ),
+    )
+    return measured.flat()
   })
 
   const checkpoint = Effect.fnUntraced(function* () {
@@ -277,7 +318,8 @@ export const run: (
       // Include the structured-output schema and a fixed context allowance. The first turn has no reported usage
       // yet, so this is only an admission estimate; provider usage replaces it as soon as it arrives.
       const context = Math.ceil((spec.text.length + JSON.stringify(spec.schema).length) / 3.5)
-      const firstCost = nextCost({ context, cached: 0 })
+      const price = priceOf(spec.model)
+      const firstCost = nextCost({ context, cached: 0, price })
       if (!reserve(spec.name, firstCost, firstCost))
         return { name: spec.name, status: "stopped", stop: "budget", detail: "budget", steps: 0 } satisfies Asked<T>
       // A helper session: it stays out of session lists, and the review reports what it spent.
@@ -290,6 +332,7 @@ export const run: (
       const track: Track = {
         name: spec.name,
         sessionID: session.id,
+        ...(price ? { price } : {}),
         cap: spec.cap,
         steps: 0,
         seen: new Set(),
@@ -342,7 +385,7 @@ export const run: (
             },
             settle: (result) => {
               state.spent += result.cost
-              if (price && !result.complete) {
+              if (track.price && !result.complete) {
                 // No usage, partial usage, and unpriced usage cannot turn an accepted attempt into free capacity.
                 state.uncertain += Math.max(
                   0,
@@ -352,7 +395,7 @@ export const run: (
               }
               track.context = result.complete ? result.context : Math.max(track.context, result.context)
               track.cached = result.complete ? result.cached : 0
-              if (price) reservations.set(track.name, { turn: 0, finalize: track.finalizing ? 0 : nextCost(track) })
+              if (capped) reservations.set(track.name, { turn: 0, finalize: track.finalizing ? 0 : nextCost(track) })
             },
           }
         },
@@ -365,8 +408,8 @@ export const run: (
             .prompt({
               sessionID: session.id,
               agent: spec.name === "security" ? "security" : "review",
-              model: { providerID: input.model.providerID, modelID: input.model.modelID },
-              ...(input.model.variant ? { variant: input.model.variant } : {}),
+              model: { providerID: spec.model.providerID, modelID: spec.model.modelID },
+              ...(spec.model.variant ? { variant: spec.model.variant } : {}),
               // A class instance: the stored user message only accepts the schema class, not a plain object.
               format: new SessionV1.OutputFormatJsonSchema({ type: "json_schema", schema: spec.schema, retryCount: 0 }),
               parts: [{ type: "text", text }],
@@ -447,7 +490,18 @@ export const run: (
             ...input.files.filter((file) => !focused.has(file.path)),
           ]
         : input.files
-    const split = budgetDiff(ordered, diffBudgetChars(input.model.context, config.maxDiffChars))
+    const split = budgetDiff(
+      ordered,
+      diffBudgetChars(Math.min(input.model.context, triage.context), config.maxDiffChars),
+    )
+    // Each changed file once: annotated when its pull request text is at hand, and only its changed lines when an
+    // incremental review has nothing new in it.
+    const packed = packChanges({
+      inline: split.inline,
+      changed: input.files,
+      ...(input.headFiles ? { headFiles: input.headFiles } : {}),
+      ...(input.mode === "incremental" && input.focus ? { focus: input.focus } : {}),
+    })
     const promptInput: PromptInput = {
       mode: input.mode,
       trust: input.trust,
@@ -456,14 +510,15 @@ export const run: (
       ...(input.baseRef ? { baseRef: input.baseRef } : {}),
       ...(input.since ? { since: input.since } : {}),
       ...(input.pr ? { pr: input.pr } : {}),
-      diff: renderPatch(split.inline),
+      diff: packed.diff,
       notInlined: split.notInlined.map((file) => ({
         path: file.path,
         additions: file.additions,
         deletions: file.deletions,
       })),
       ...(input.focus ? { focus: input.focus } : {}),
-      ...(input.headFiles ? { headFiles: input.headFiles } : {}),
+      ...(packed.settled.length ? { settled: packed.settled } : {}),
+      ...(input.headFiles ? { headFiles: packed.headFiles } : {}),
       ...input.context,
       rules: input.rules,
       rulesSource:
@@ -471,6 +526,7 @@ export const run: (
         (input.trigger === "local" || input.trigger === "desktop" ? "working tree" : "base branch"),
       prior: input.prior,
       maxComments: config.maxComments,
+      nits: wantsNits(config),
     }
 
     // 1–5. The specialists, in parallel, one session each.
@@ -479,6 +535,7 @@ export const run: (
       (name) =>
         ask({
           name,
+          model: triage,
           cap: name === "security" ? Math.ceil((config.maxSteps * 2) / 3) : config.maxSteps,
           text: name === "security" ? buildSecurityPrompt(promptInput) : buildReviewPrompt(promptInput),
           schema: REVIEW_REPORT_JSON_SCHEMA,
@@ -496,12 +553,14 @@ export const run: (
     const report = mergeReports(reports.map((entry) => entry.report))
     const normalized = reports.flatMap((entry) => normalizeFindings(entry.report.findings, entry.source, input.anchors))
 
-    // 7. Verify: blocking findings (and every suggestion when untrusted), or everything of concern or above.
+    // 7. Verify: blocking findings (and every suggestion when untrusted), or everything of concern or above. After a
+    // cheaper triage pass, everything of concern or above is confirmed on the review model.
+    const all = config.verify === "all" || (config.verify === "blocking" && triaged)
     const candidates = [
       ...new Map(
         (config.verify === "off" ? [] : normalized)
           .filter((finding) =>
-            config.verify === "all"
+            all
               ? finding.severity !== "nit" && finding.confidence >= config.minConfidence
               : (finding.severity === "blocking" && finding.confidence >= config.minConfidence) ||
                 (input.trust === "untrusted" && finding.suggestion !== undefined),
@@ -510,12 +569,22 @@ export const run: (
       ).values(),
     ]
     const verifyText = candidates.length
-      ? buildVerifyPrompt({ trust: input.trust, head: input.head, candidates, headFiles: input.headFiles })
+      ? buildVerifyPrompt({
+          trust: input.trust,
+          head: input.head,
+          candidates,
+          headFiles: verifyHeadFiles(input.files, input.headFiles, candidates),
+        })
       : ""
-    const estimate = price
-      ? estimateCostUsd({ promptTokens: Math.ceil(verifyText.length / 3.5), maxSteps: VERIFY_STEPS, price }).low
+    const verifyPrice = priceOf(input.model)
+    const estimate = verifyPrice
+      ? estimateCostUsd({
+          promptTokens: Math.ceil(verifyText.length / 3.5),
+          maxSteps: VERIFY_STEPS,
+          price: verifyPrice,
+        }).low
       : 0
-    const unaffordable = price !== undefined && state.spent + state.uncertain + estimate > config.maxCostUsd
+    const unaffordable = capped && state.spent + state.uncertain + estimate > config.maxCostUsd
     const late = deadline - Date.now() < VERIFY_MIN_MS
     const verify: Asked<ReturnType<typeof decodeVerify>> | undefined = !candidates.length
       ? undefined
@@ -523,6 +592,7 @@ export const run: (
         ? { name: "verify", status: "skipped", steps: 0, detail: unaffordable ? "budget" : "time" }
         : yield* ask({
             name: "verify",
+            model: input.model,
             cap: VERIFY_STEPS,
             text: verifyText,
             schema: VERIFY_JSON_SCHEMA,
@@ -596,11 +666,13 @@ export const run: (
       })
     }
 
+    const spentByPass = yield* passes()
     return {
       report,
       selection,
       skipped: input.skipped,
       cost: yield* measure(),
+      ...(spentByPass.length ? { passes: spentByPass } : {}),
       durationMs: Date.now() - started,
       base: input.base,
       head: input.head,
@@ -651,6 +723,10 @@ export function normalizeFindings(findings: ModelFinding[], source: Finding["sou
       id: fingerprint(file, finding.category, normalizeTitle(finding.title), normalizeCode(code)),
     }
   })
+}
+
+function nameOf(model: Pick<ResolvedModel, "providerID" | "modelID">) {
+  return `${model.providerID}/${model.modelID}`
 }
 
 function lastText(message: SessionV1.WithParts | undefined) {

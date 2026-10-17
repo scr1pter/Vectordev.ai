@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  combineCostKinds,
   contextRefusal,
   diffBudgetChars,
   estimateCostUsd,
@@ -98,5 +99,17 @@ describe("nextStepCostUsd", () => {
     const price = { input: 3, output: 15, cacheRead: 0.3 }
     expect(nextStepCostUsd(10_000, price, 99_000)).toBeCloseTo(nextStepCostUsd(10_000, price, 10_000), 10)
     expect(nextStepCostUsd(0, { input: 0, output: 0 })).toBe(0)
+  })
+})
+
+describe("combineCostKinds", () => {
+  test("free passes add nothing to a priced or a subscription pass; other mixes have no single price", () => {
+    expect(combineCostKinds(["priced", "priced"])).toBe("priced")
+    expect(combineCostKinds(["free", "priced"])).toBe("priced")
+    expect(combineCostKinds(["free", "plan"])).toBe("plan")
+    expect(combineCostKinds(["free"])).toBe("free")
+    expect(combineCostKinds(["priced", "plan"])).toBe("unknown")
+    expect(combineCostKinds(["free", "unknown"])).toBe("unknown")
+    expect(combineCostKinds([])).toBe("unknown")
   })
 })

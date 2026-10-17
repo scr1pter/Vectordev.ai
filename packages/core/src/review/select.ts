@@ -205,7 +205,9 @@ export function selectFindings(input: SelectInput): Selection {
 
   // 4b. The same defect at several places in one file is one finding. The strongest keeps its line and names the
   // others in its body, so a repeated pattern is one comment instead of one per occurrence.
+  // A finding carried from an earlier review keeps the places it already names; only new ones are added.
   const folded: Finding[] = []
+  const repeated = new Map<Finding, string[]>()
   for (const finding of unique) {
     const first = folded.find((entry) => repeats(entry, finding))
     if (!first) {
@@ -213,9 +215,12 @@ export function selectFindings(input: SelectInput): Selection {
       continue
     }
     drop("duplicate")
-    first.also = [...(first.also ?? []), `${finding.path}:${finding.line}`]
+    repeated.set(first, [...(repeated.get(first) ?? []), `${finding.path}:${finding.line}`])
   }
-  for (const finding of folded) if (finding.also) finding.body = withAlso(finding.body, finding.also)
+  for (const [finding, also] of repeated) {
+    finding.also = [...(finding.also ?? []), ...also]
+    finding.body = withAlso(finding.body, also)
+  }
 
   // 5. Team memory, then the threshold again.
   const team = input.teamDismissed ?? []
