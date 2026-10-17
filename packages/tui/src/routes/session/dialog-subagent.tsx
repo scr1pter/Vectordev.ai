@@ -106,7 +106,7 @@ export function DialogSubagent(props: { sessionID: string; parentSessionID?: str
                 title: "Open",
                 value: "subagent.view",
                 description: "the subagent's session",
-                onSelect: (dialog) => {
+                onSelect: () => {
                   route.navigate({
                     type: "session",
                     sessionID: props.task?.sessionID ?? props.sessionID,

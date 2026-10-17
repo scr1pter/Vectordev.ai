@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.99.108",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Keep chatting while Vector coordinates your agents",
+              "description": "Vector now starts batches of up to eight subagents in the background by default, leaving the conversation available while they work. It can explicitly wait when it needs their results, inspect their latest activity, give them new instructions at a safe step, and stop selected tasks or the whole batch. Results that finish together arrive in one notification. The Background tasks panel brings subagents, team members, swarm workers and outside agents into one view, with activity, dependencies, elapsed time and recorded spend. Talk to this subagent sends a correction to a supported running agent; Ask Vector about this adds a progress question to your conversation. Unsupported controls stay unavailable, and missing outside-agent token or cost data is shown as unknown. Individual swarm workers can be stopped, including before they start; their dependent work stops too, and completed changes are retained. Subagents can receive compact context and dependency results instead of rereading whole conversations. Scoped messages have size and rate limits, explicit file edits respect assigned paths, and child and batch spend caps stay under the launching run's Run Guard. After an engine restart, interrupted tasks keep their records and partial results and require an explicit continuation. The new vector tasks commands and the TUI's /tasks panel inspect, message and stop work; headless vector run waits for background results with a finite timeout. These terminal features need the new standalone CLI release and are not added to an already installed older CLI or WSL engine by a desktop update. Offline scripted comparisons are published with the benchmark method; they do not establish live price, speed or quality parity. This release is not yet code-signed, so a new install may show an operating-system warning on first launch."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.99.107",
       "highlights": [
         {

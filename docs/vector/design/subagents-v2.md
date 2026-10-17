@@ -36,6 +36,8 @@ Keep a fixed, documented 500 ms window starting with the first completion. Compl
 
 V1 uses its own prompt admission adapter and serialized provider-turn boundary. Synthetic notifications must not become the user's selected model/format/budget or displace a pending human message. V2 continues to admit durable inputs through `SessionV2.prompt` and `SessionExecution`; never bridge its runner to the legacy loop. Steer promotes at a safe provider-turn boundary; queue promotes only when the session would otherwise become idle.
 
+The current app conversation uses the engine's V1 task tools. Its desktop bridge controls native V2 workspace workers through their durable prompt API. Pure SDK-next V2 parent sessions do not automatically receive `task` or `task_manage`; their canonical application-tool registration remains a separate integration surface. Native V2 team members retain their scoped teammate mailbox. This release does not claim identical tool catalogs across the two runners.
+
 Persist observation across restarts. A persisted running state is not evidence of a surviving executor: reconcile abandoned work as stopped with an interruption reason, retain partial results, and require an explicit continuation. Do not retry paid provider work automatically after a crash.
 
 ## Collaboration and file ownership
