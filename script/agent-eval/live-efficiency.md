@@ -182,7 +182,7 @@ for (const [path, content] of Object.entries(task.files)) await Bun.write(`${dir
 '
 cd "$VECTOR_SUBAGENT_FIXTURE"
 git -c init.defaultBranch=bench init
- git add .
+git add .
 git -c user.name=Benchmark -c user.email=benchmark@example.invalid commit -m 'test: seed subagent fixture'
 ```
 
@@ -194,7 +194,7 @@ The following command is paid. The dollar cap is a catalog-price Run Guard thres
   'This is an explicit orchestration probe. Launch two background read-only workers: one inspects src/invoice.ts, the other test/invoice.test.ts. While they run, explain what each owns in one sentence. Use event-driven waiting, never shell sleeps or status polling. Integrate their findings, make the minimal source fix, run bun test yourself, and report every worker result and verification. Do not edit test/ or add dependencies.' \
   > "$VECTOR_BENCH_WORK/subagents-live-1.jsonl"
 bun test
- git diff --exit-code -- test/
+git diff --exit-code -- test/
 ```
 
 Preserve the JSONL and exit codes, every child and helper usage event, exact source revision, model/effort, tool access and all verification. Inspect per-request provider cache-read usage separately for each child's first request and later turns; do not infer it from a shared prefix or cache key. API-equivalent subscription cost is not actual billed dollars. Repeat the complete protocol from fresh fixtures for any before/after comparison, alternating source order and keeping all attempts.
