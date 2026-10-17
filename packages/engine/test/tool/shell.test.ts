@@ -697,6 +697,114 @@ describe("tool.shell permissions", () => {
     }),
   )
 
+  // `${C:\x}` reads a file through the FileSystem provider and assigning to it writes the file, with no command in the
+  // statement at all. Neither may run without the shell, read and edit prompts, under any agent.
+  it.live("asks before a PowerShell provider variable reads or writes a file", () =>
+    Effect.gen(function* () {
+      for (const item of yield* scanShells("pwsh")) {
+        yield* withShell(
+          item,
+          Effect.gen(function* () {
+            const tmp = yield* tmpdirScoped({ git: true })
+            const outside = yield* tmpdirScoped()
+            yield* runIn(
+              tmp,
+              Effect.gen(function* () {
+                const err = new Error("prompt rejected")
+                const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+                const stopAt = (permission: string) => ({
+                  ...ctx,
+                  ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+                    Effect.sync(() => {
+                      requests.push(req)
+                      if (req.permission === permission) throw err
+                    }),
+                })
+                const cases: Array<{ command: string; bash: string[]; read?: RegExp; edit?: RegExp }> = [
+                  { command: "${C:\\Users\\me\\proj\\.env}", bash: ["${C:\\Users\\me\\proj\\.env}"], read: /\.env$/ },
+                  {
+                    command: "$k = ${C:\\Users\\me\\.ssh\\id_rsa}; $k",
+                    bash: ["$k = ${C:\\Users\\me\\.ssh\\id_rsa}", "$k"],
+                    read: /id_rsa$/,
+                  },
+                  {
+                    command: "${C:\\Users\\me\\.bashrc} = 'evil'",
+                    bash: ["${C:\\Users\\me\\.bashrc} = 'evil'"],
+                    edit: /\.bashrc$/,
+                  },
+                  {
+                    command: "${C:\\Users\\me\\.bashrc} += 'evil'",
+                    bash: ["${C:\\Users\\me\\.bashrc} += 'evil'"],
+                    read: /\.bashrc$/,
+                    edit: /\.bashrc$/,
+                  },
+                  {
+                    command: "${Microsoft.PowerShell.Core\\FileSystem::C:\\Users\\me\\.ssh\\id_rsa}",
+                    bash: ["${Microsoft.PowerShell.Core\\FileSystem::C:\\Users\\me\\.ssh\\id_rsa}"],
+                    read: /id_rsa$/,
+                  },
+                  { command: "$c:id_rsa", bash: ["$c:id_rsa"], read: /id_rsa$/ },
+                  {
+                    command: 'Write-Output "${C:\\Users\\me\\.ssh\\id_rsa}"',
+                    bash: ['Write-Output "${C:\\Users\\me\\.ssh\\id_rsa}"'],
+                    read: /id_rsa$/,
+                  },
+                  { command: "foreach (${C:\\x} in 1) {}", bash: ["foreach (${C:\\x} in 1) {}"], edit: /x$/ },
+                  {
+                    command: "${function:git} = { Get-Date }; git status",
+                    bash: ["${function:git} = { Get-Date }", "Get-Date", "git status"],
+                    edit: /^function:git$/,
+                  },
+                ]
+                for (const entry of cases) {
+                  requests.length = 0
+                  const error = (yield* fail({ command: entry.command }, stopAt(entry.read ? "read" : "bash"))).message
+                  const bash = requests.find((r) => r.permission === "bash")
+                  const read = requests.find((r) => r.permission === "read")?.patterns
+                  const edit = requests.find((r) => r.permission === "edit")?.patterns
+                  expect({ command: entry.command, error, bash: bash?.patterns.toSorted() }).toEqual({
+                    command: entry.command,
+                    error: err.message,
+                    bash: entry.bash.toSorted(),
+                  })
+                  if (entry.read) expect(read).toEqual([expect.stringMatching(entry.read)])
+                  else expect(read).toBeUndefined()
+                  if (entry.edit) expect(edit).toEqual([expect.stringMatching(entry.edit)])
+                  else expect(edit).toBeUndefined()
+                }
+                // A statement without a command is approved only as written.
+                requests.length = 0
+                yield* fail({ command: "${C:\\Users\\me\\proj\\.env}" }, stopAt("read"))
+                expect(requests.find((r) => r.permission === "bash")?.always).toEqual(["${C:\\Users\\me\\proj\\.env}"])
+
+                // A file outside the project asks for its folder, as the read and edit tools do.
+                for (const command of [
+                  `\${FileSystem::${outside}/notes.txt} = 'evil'`,
+                  `sc ${outside}/notes.txt evil`,
+                  `gi ${outside}/notes.txt`,
+                  `Microsoft.PowerShell.Management\\Get-Content ${outside}/notes.txt`,
+                  `Get-Content Microsoft.PowerShell.Core\\FileSystem::${outside}/notes.txt`,
+                ]) {
+                  requests.length = 0
+                  expect((yield* fail({ command }, stopAt("external_directory"))).message).toBe(err.message)
+                  expect({ command, dirs: requests[0]?.patterns }).toEqual({
+                    command,
+                    dirs: [glob(path.join(outside, "*"))],
+                  })
+                }
+
+                // Environment, scoped and plain variables are not files.
+                requests.length = 0
+                yield* run({ command: "$env:PATH; ${env:PATH}; $global:a = 1; $b = $a; $variable:b" }, capture(requests))
+                expect(requests.map((r) => r.permission)).toEqual(["bash"])
+              }),
+            )
+          }),
+        )
+      }
+    }),
+  )
+
   each("asks for edit permission for the files a redirect writes", () =>
     Effect.gen(function* () {
       const outside = yield* tmpdirScoped()

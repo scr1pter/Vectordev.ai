@@ -39,18 +39,45 @@ const FILES = new Set([
   "chmod",
   "chown",
   "cat",
-  // Leave PowerShell aliases out for now. Common ones like cat/cp/mv/rm/mkdir
-  // already hit the entries above, and alias normalization should happen in one
-  // place later so we do not risk double-prompting.
   "get-content",
   "set-content",
   "add-content",
+  "clear-content",
+  "get-item",
+  "set-item",
   "copy-item",
   "move-item",
   "remove-item",
   "new-item",
   "rename-item",
 ])
+// PowerShell's built-in aliases for the cmdlets above that do not share a name with the bash entries, so `gc`, `sc`
+// or `gi` is checked as the cmdlet it runs. The scan maps a command name through this once, where it lowercases it.
+const PS_ALIASES = new Map([
+  ["ac", "add-content"],
+  ["clc", "clear-content"],
+  ["copy", "copy-item"],
+  ["cpi", "copy-item"],
+  ["del", "remove-item"],
+  ["erase", "remove-item"],
+  ["gc", "get-content"],
+  ["gi", "get-item"],
+  ["md", "new-item"],
+  ["mi", "move-item"],
+  ["move", "move-item"],
+  ["ni", "new-item"],
+  ["rd", "remove-item"],
+  ["ren", "rename-item"],
+  ["ri", "remove-item"],
+  ["rmdir", "remove-item"],
+  ["rni", "rename-item"],
+  ["sc", "set-content"],
+  ["si", "set-item"],
+  ["sl", "set-location"],
+  ["type", "get-content"],
+])
+// Variable qualifiers that name plain variables or environment variables rather than an item of another provider.
+const PS_SCOPES = new Set(["env", "variable", "global", "local", "script", "private", "using", "workflow"])
 const CMD_FILES = new Set([
   "copy",
   "del",
@@ -254,8 +281,9 @@ function expand(text: string, cwd: string, shell: string) {
   return home(out)
 }
 
+// A provider may be named with its module (`Microsoft.PowerShell.Core\FileSystem::C:\x`).
 function provider(text: string) {
-  const match = text.match(/^([A-Za-z]+)::(.*)$/)
+  const match = text.match(/^(?:[\w.]+\\)?([A-Za-z]+)::(.*)$/s)
   if (match) {
     if (match[1].toLowerCase() !== "filesystem") return
     return match[2]
@@ -264,6 +292,37 @@ function provider(text: string) {
   if (!prefix) return text
   if (prefix[1].length === 1) return text
   return
+}
+
+// The item a PowerShell variable reaches through a provider: `${C:\x}`, `$c:x` and `${FileSystem::C:\x}` read and
+// write a file, `${function:git}` a function. `file` is the file system path, when there is one. Environment
+// variables (`$env:A`) and scoped variables (`$global:a`) are plain variables.
+function providerItem(text: string) {
+  const name = text.startsWith("${") ? text.slice(2, -1).replace(/`([\s\S])/g, "$1") : text.slice(1)
+  const qualified = name.match(/^(?:[\w.]+\\)?(\w+)::(.*)$/s)
+  if (qualified) {
+    const kind = qualified[1].toLowerCase()
+    if (kind === "environment" || kind === "variable") return
+    return { name, file: kind === "filesystem" ? qualified[2] : undefined }
+  }
+  const drive = name.match(/^(\w+):/)
+  if (!drive || PS_SCOPES.has(drive[1].toLowerCase())) return
+  return { name, file: drive[1].length === 1 ? name : undefined }
+}
+
+// How a statement uses a variable: `${C:\x} = 'v'` and a foreach loop only write it, `+=`, `++` and `--` read and
+// write it, and anywhere else it is read.
+function variableUse(node: Node) {
+  if (node.parent?.type === "foreach_statement") return { read: false, write: true }
+  for (let item = node.parent; item && item.type !== "statement_list"; item = item.parent) {
+    if (/^(pre|post)_(increment|decrement)_expression$/.test(item.type)) return { read: true, write: true }
+    // Reached from the value side of an assignment.
+    if (item.type === "assignment_expression") break
+    if (item.type !== "left_assignment_expression") continue
+    const operator = item.parent?.children.find((child) => child?.type === "assignement_operator")?.text
+    return { read: operator !== "=" || item.text.trim() !== node.text, write: true }
+  }
+  return { read: true, write: false }
 }
 
 function dynamic(text: string, ps: boolean, cmd: boolean) {
@@ -667,7 +726,14 @@ export const ShellTool = Tool.define(
       const list = commands(root).map((node) => {
         const command = parts(node)
         const tokens = command.map((item) => item.text)
-        return { node, command, tokens, cmd: ps || shellKind === "cmd" ? tokens[0]?.toLowerCase() : tokens[0] }
+        // PowerShell runs `Microsoft.PowerShell.Management\Get-Content` and its alias `gc` as Get-Content.
+        const name = ps ? tokens[0]?.toLowerCase().replace(/^[\w.]+\\/, "") : tokens[0]
+        return {
+          node,
+          command,
+          tokens,
+          cmd: ps ? name && (PS_ALIASES.get(name) ?? name) : shellKind === "cmd" ? name?.toLowerCase() : name,
+        }
       })
       // `cat .env`, `grep KEY .env.local` or `source .env` read the same secrets the read tool asks for, so they ask
       // under read too. A name the scan cannot resolve (`"$HOME/.env"`, `%USERPROFILE%\.env`) is asked for as written.
@@ -738,6 +804,42 @@ export const ShellTool = Tool.define(
           scan.patterns.add(node.text)
           scan.always.add(node.text)
           for (const text of node.descendantsOfType("string_literal")) if (text) yield* envRead(text.text)
+        }
+
+        // A PowerShell statement need not run a command to act: `${C:\x}` reads a file and `$env:A = 1` changes what a
+        // later command does. So a statement without a command, as well as every assignment and function definition,
+        // is checked like bash's are, approved only as written. One nested in another is part of that one's text.
+        const exact = [
+          ...root
+            .descendantsOfType("statement_list")
+            .flatMap((list) => list?.namedChildren ?? [])
+            .filter((node): node is Node => node !== null && node.type !== "comment" && node.type !== "empty_statement")
+            .filter((node) => node.descendantsOfType("command").length === 0),
+          ...root
+            .descendantsOfType(["assignment_expression", "function_statement"])
+            .filter((node): node is Node => Boolean(node)),
+        ]
+        const ids = new Set(exact.map((node) => node.id))
+        for (const node of exact) {
+          let outer = node.parent
+          while (outer && !ids.has(outer.id)) outer = outer.parent
+          if (outer) continue
+          scan.patterns.add(node.text.trim())
+          scan.always.add(node.text.trim())
+        }
+
+        // A provider variable is a file read or write without a command (`$k = ${C:\Users\me\.ssh\id_rsa}`,
+        // `${C:\Users\me\.bashrc} = 'evil'`), so it asks what the read and edit tools ask for that file, outside
+        // the project too. An item of another provider (`${function:git} = { ... }`) is asked for as written.
+        for (const node of root.descendantsOfType("variable")) {
+          const item = node && providerItem(node.text)
+          if (!node || !item) continue
+          const use = variableUse(node)
+          const resolved = item.file ? yield* resolvePath(item.file, cwd, shell) : undefined
+          const target = resolved ? path.relative(instance.worktree, resolved) : item.name
+          if (use.read) scan.reads.add(target)
+          if (use.write) scan.writes.add(target)
+          if (resolved && !containsPath(resolved, instance)) scan.dirs.add(path.dirname(resolved))
         }
       }
 
