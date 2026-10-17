@@ -44,7 +44,9 @@ export function taskProgress(result: Task.InspectResult) {
     ...result.steps.map((step) => `${step.tool ?? "Step"}${step.status ? ` (${step.status})` : ""}: ${step.text}`),
     result.output,
     ...(result.truncated
-      ? [`Showing bounded progress. Full result: ${result.task.resultRef ?? result.task.sessionID}`]
+      ? [
+          `Showing bounded progress. Result reference: ${result.task.resultRef ?? result.task.sessionID ?? result.task.id}`,
+        ]
       : []),
   ]
     .filter(Boolean)
