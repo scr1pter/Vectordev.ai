@@ -38,6 +38,9 @@ const layer = Layer.effect(
     const loading = new Set<ID>()
     const waiters = new Map<ID, Set<Deferred.Deferred<void>>>()
     const failures = new Map<ID, Exit.Exit<void, never>>()
+    // Plugins whose enclosing batch has ended, so a reader sees what they changed. A failed batch never applies its
+    // reloads, but its waiters are still released rather than left hanging.
+    const ready = new Set<ID>()
     let host: Parameters<PluginRuntime["effect"]>[0]
 
     const add = Effect.fn("Plugin.add")(function* (id: ID, effect: PluginRuntime["effect"]) {
@@ -47,6 +50,7 @@ const layer = Layer.effect(
         Effect.sync(() => {
           loading.add(id)
           failures.delete(id)
+          ready.delete(id)
         }).pipe(
           Effect.andThen(
             State.batch(
@@ -63,10 +67,21 @@ const layer = Layer.effect(
                 )
                 yield* events.publish(Event.Added, { id })
                 active.set(id, child)
-                yield* Effect.forEach(waiters.get(id) ?? [], (waiter) => Deferred.succeed(waiter, undefined), {
-                  discard: true,
-                })
-                waiters.delete(id)
+                // Waiters go on to read what the plugin changed, which an enclosing batch (boot adds every built-in
+                // plugin in one) applies only when it ends, so they are released then rather than now.
+                yield* State.settled(
+                  Effect.sync(() => {
+                    if (active.get(id) !== child) return []
+                    ready.add(id)
+                    const current = waiters.get(id) ?? []
+                    waiters.delete(id)
+                    return current
+                  }).pipe(
+                    Effect.flatMap((current) =>
+                      Effect.forEach(current, (waiter) => Deferred.succeed(waiter, undefined), { discard: true }),
+                    ),
+                  ),
+                )
               }),
             ),
           ),
@@ -90,6 +105,7 @@ const layer = Layer.effect(
           Effect.gen(function* () {
             const current = active.get(id)
             active.delete(id)
+            ready.delete(id)
             failures.delete(id)
             if (current) yield* Scope.close(current, Exit.void).pipe(Effect.ignore)
           }),
@@ -101,7 +117,7 @@ const layer = Layer.effect(
       const waiter = yield* Deferred.make<void>()
       const pending = yield* locks.withLock(id)(
         Effect.sync(() => {
-          if (active.has(id)) return false
+          if (ready.has(id)) return false
           const failure = failures.get(id)
           if (failure) return failure
           const current = waiters.get(id) ?? new Set()
@@ -128,6 +144,7 @@ const layer = Layer.effect(
     yield* Effect.addFinalizer((exit) =>
       Effect.gen(function* () {
         active.clear()
+        ready.clear()
         yield* State.batch(Scope.close(scope, exit))
       }),
     )

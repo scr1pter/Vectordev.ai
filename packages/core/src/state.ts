@@ -26,18 +26,48 @@ export interface Transformable<DraftApi> {
   readonly reload: Reload
 }
 
-const CurrentBatch = Context.Reference<Set<Reload> | undefined>("@vector/State/CurrentBatch", {
+// `open` is false once the batch has applied its reloads. A fiber forked inside the batch keeps it in its context and may
+// outlive it, so a closed batch counts as no batch at all.
+type Batch = { readonly reloads: Set<Reload>; readonly settled: Effect.Effect<void>[]; open: boolean }
+
+const CurrentBatch = Context.Reference<Batch | undefined>("@vector/State/CurrentBatch", {
   defaultValue: () => undefined,
 })
 
 export function batch<A, E, R>(effect: Effect.Effect<A, E, R>) {
   return Effect.gen(function* () {
     const current = yield* CurrentBatch
-    if (current) return yield* effect
-    const reloads = new Set<Reload>()
-    const result = yield* effect.pipe(Effect.provideService(CurrentBatch, reloads))
-    yield* Effect.forEach(reloads, (reload) => reload(), { discard: true })
-    return result
+    if (current?.open) return yield* effect
+    const next: Batch = { reloads: new Set(), settled: [], open: true }
+    return yield* Effect.gen(function* () {
+      const result = yield* effect.pipe(Effect.provideService(CurrentBatch, next))
+      // A reload can queue more reloads; apply them until none are left, then close in the same step.
+      while (next.reloads.size > 0) {
+        const pending = [...next.reloads]
+        next.reloads.clear()
+        yield* Effect.forEach(pending, (reload) => reload(), { discard: true })
+      }
+      next.open = false
+      return result
+    }).pipe(
+      // Waiters are released however the batch ends: a failed or interrupted one never applies its reloads, but
+      // leaving them waiting would hang them for good.
+      Effect.ensuring(
+        Effect.suspend(() => {
+          next.open = false
+          return Effect.forEach(next.settled, (item) => item, { discard: true })
+        }),
+      ),
+    )
+  })
+}
+
+/** Runs once the current batch has ended, after its reloads when it succeeds; immediately outside a batch. */
+export function settled(effect: Effect.Effect<void>) {
+  return Effect.gen(function* () {
+    const current = yield* CurrentBatch
+    if (!current?.open) return yield* effect
+    current.settled.push(effect)
   })
 }
 
@@ -100,8 +130,8 @@ export function create<State, DraftApi>(options: Options<State, DraftApi>): Inte
                 transforms = transforms.filter((item) => item !== transform)
                 return Effect.gen(function* () {
                   const batch = yield* CurrentBatch
-                  if (batch) {
-                    batch.add(reload)
+                  if (batch?.open) {
+                    batch.reloads.add(reload)
                     return
                   }
                   yield* materialize()
@@ -116,7 +146,7 @@ export function create<State, DraftApi>(options: Options<State, DraftApi>): Inte
           )
           yield* Scope.addFinalizer(scope, dispose)
           const batch = yield* CurrentBatch
-          if (batch) batch.add(reload)
+          if (batch?.open) batch.reloads.add(reload)
           else yield* reload()
           return { dispose }
         }),

@@ -3,6 +3,7 @@ import { Effect, Exit, Fiber } from "effect"
 import { define } from "@vectordevai/plugin/v2/effect"
 import { AgentV2 } from "@vectordevai/core/agent"
 import { PluginV2 } from "@vectordevai/core/plugin"
+import { State } from "@vectordevai/core/state"
 import { testEffect } from "./lib/effect"
 import { PluginTestLayer } from "./plugin/fixture"
 
@@ -18,6 +19,92 @@ describe("PluginV2", () => {
       yield* plugins.add(id, () => Effect.void)
       yield* Fiber.join(waiting)
       yield* plugins.wait(id)
+    }),
+  )
+
+  it.effect("a waiter sees the plugin's state even while the batch that added it is still running", () =>
+    Effect.gen(function* () {
+      const plugins = yield* PluginV2.Service
+      const agents = yield* AgentV2.Service
+      const id = PluginV2.ID.make("batched")
+      const seen = yield* plugins.wait(id).pipe(
+        Effect.andThen(agents.get(AgentV2.ID.make("from-batched"))),
+        Effect.forkChild,
+      )
+      // Boot adds every built-in plugin inside one batch, which applies their state only when it ends. A waiter
+      // released while the batch is still adding plugins must not read the state before that.
+      yield* State.batch(
+        Effect.gen(function* () {
+          yield* plugins.add(id, (ctx) =>
+            ctx.agent
+              .transform((draft) =>
+                draft.update("from-batched", (agent) => {
+                  agent.description = "ready"
+                }),
+              )
+              .pipe(Effect.asVoid),
+          )
+          yield* Effect.yieldNow
+          yield* Effect.yieldNow
+        }),
+      )
+      expect((yield* Fiber.join(seen))?.description).toBe("ready")
+    }),
+  )
+
+  it.live("releases waiters even when the batch that added the plugin fails while applying its state", () =>
+    Effect.gen(function* () {
+      const plugins = yield* PluginV2.Service
+      const good = PluginV2.ID.make("released-good")
+      const waiting = yield* plugins.wait(good).pipe(Effect.timeout("2 seconds"), Effect.exit, Effect.forkChild)
+      // The transform runs only when the batch applies its reloads at the end, and there it throws.
+      const batch = yield* State.batch(
+        Effect.gen(function* () {
+          yield* plugins.add(good, () => Effect.void)
+          yield* plugins.add(PluginV2.ID.make("released-bad"), (ctx) =>
+            ctx.agent
+              .transform(() => {
+                throw new Error("boom")
+              })
+              .pipe(Effect.asVoid),
+          )
+        }),
+      ).pipe(Effect.exit)
+      expect(Exit.isFailure(batch)).toBe(true)
+      expect(Exit.isSuccess(yield* Fiber.join(waiting))).toBe(true)
+      expect(Exit.isSuccess(yield* plugins.wait(good).pipe(Effect.timeout("2 seconds"), Effect.exit))).toBe(true)
+    }),
+  )
+
+  it.live("a plugin added after its batch ended, as external plugins are, is ready and applied", () =>
+    Effect.gen(function* () {
+      const plugins = yield* PluginV2.Service
+      const agents = yield* AgentV2.Service
+      const inner = PluginV2.ID.make("late-inner")
+      // The same shape as an external config plugin: fork inside the batch, finish loading after it has ended.
+      yield* State.batch(
+        plugins.add(PluginV2.ID.make("late-outer"), (ctx) =>
+          Effect.sleep("50 millis").pipe(
+            Effect.andThen(
+              ctx.plugin.add({
+                id: inner,
+                effect: (late) =>
+                  late.agent
+                    .transform((draft) =>
+                      draft.update("from-late", (agent) => {
+                        agent.description = "late"
+                      }),
+                    )
+                    .pipe(Effect.asVoid),
+              }),
+            ),
+            Effect.forkScoped,
+            Effect.asVoid,
+          ),
+        ),
+      )
+      expect(Exit.isSuccess(yield* plugins.wait(inner).pipe(Effect.timeout("2 seconds"), Effect.exit))).toBe(true)
+      expect((yield* agents.get(AgentV2.ID.make("from-late")))?.description).toBe("late")
     }),
   )
 
