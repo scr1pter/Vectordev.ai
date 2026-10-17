@@ -168,7 +168,11 @@ describe("config HttpApi", () => {
       const response = yield* Effect.promise(() =>
         Promise.resolve(app().request("/config/trust", { headers: { "x-vector-directory": tmp.path } })),
       )
-      expect(yield* Effect.promise(() => response.json())).toMatchObject({ trusted: false, ignored: true, settings: true })
+      expect(yield* Effect.promise(() => response.json())).toMatchObject({
+        trusted: false,
+        ignored: true,
+        settings: true,
+      })
       // The app asks once and remembers "Not now"; a warning on every load would undo that answer.
       expect(toasts).toEqual([])
     }),

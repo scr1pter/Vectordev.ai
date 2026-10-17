@@ -42,9 +42,9 @@ describe("settings registry", () => {
   })
 
   test("finds repository trust by what people call it", () => {
-    expect(
-      settingsGroups.flatMap((group) => group.items).find((item) => item.value === "trust")?.label,
-    ).toBe("Repository trust")
+    expect(settingsGroups.flatMap((group) => group.items).find((item) => item.value === "trust")?.label).toBe(
+      "Repository trust",
+    )
     for (const query of ["trust", "vector.json", "repository settings", "project settings"])
       expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toEqual(["trust"])
     expect(isSettingsTab("trust")).toBe(true)
