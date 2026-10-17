@@ -1,6 +1,12 @@
 # Release approval and external prerequisites
 
-## Current candidate: 1.99.107 (11 October 2026)
+## Current candidate: 1.99.108 (16 October 2026)
+
+The subagent orchestration candidate supersedes the unpublished 1.99.107 desktop candidate below. Follow [the 1.99.108 handoff](subagents-199108.md): dispatch **Vector desktop release** from the reviewed `main` commit with tag `v1.99.108`, `allow_unsigned=true` and `prerelease=false`, then approve `production-release`. Publication and live benchmarks remain owner actions.
+
+The required CLI compatibility version remains 1.99.99, but the new terminal task controls require a separately published CLI built from this candidate. Keep `publishedDesktopVersion` at 1.99.106 until the new installers and feeds are verified. The earlier version-specific dispatch commands below are historical and do not supersede this handoff.
+
+## Previous candidate: 1.99.107 (11 October 2026)
 
 The owner authorized finishing the handoff, landing the verified integration on
 `main`, and dispatching the desktop release. Desktop **1.99.107** is prepared;

@@ -44,7 +44,7 @@ test("bounded inspection includes ownership, dependencies, partial output and th
   expect(text).toContain("Depends on: explore")
   expect(text).toContain("read (completed): src/auth/permissions.ts")
   expect(text).toContain("Found an unchecked owner")
-  expect(text).toContain("Full result: session:child")
+  expect(text).toContain("Result reference: session:child")
 })
 
 test("unpriced steps cannot be presented as a complete zero-dollar bill", () => {

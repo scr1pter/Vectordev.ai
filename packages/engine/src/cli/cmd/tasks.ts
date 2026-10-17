@@ -71,7 +71,9 @@ export const TasksCommand = cmd({
       result.steps.forEach((step) => console.log(`${step.tool ?? "step"}: ${step.text}`))
       if (result.output) console.log(result.output)
       if (result.truncated)
-        console.log(`Output is bounded. Full result: ${result.task.resultRef ?? result.task.sessionID}`)
+        console.log(
+          `Output is bounded. Result reference: ${result.task.resultRef ?? result.task.sessionID ?? result.task.id}`,
+        )
       return
     }
     console.log(`Message ${result.messageID} accepted for ${result.taskID} (${result.delivery}).`)

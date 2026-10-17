@@ -255,6 +255,15 @@ describe("a Vector-runtime parallel agent's spend", () => {
       teamId: team.id,
     })
     addTeamMember(team.id, created.id)
+    const lead = await createParallelWorkspace({
+      name: "Lead",
+      taskPrompt: "Coordinate the task",
+      runtime: "vector",
+      parentSessionId: "session-spend",
+      sourcePath,
+      teamId: team.id,
+    })
+    addTeamMember(team.id, lead.id)
     // The drain runs under the cap its prompt was sent with and has spent $0.30 of it so far.
     let busy = true
     engineState.busy = () => busy
@@ -281,7 +290,7 @@ describe("a Vector-runtime parallel agent's spend", () => {
 
     postTeamMessage({
       teamId: team.id,
-      fromWorkspaceId: "ws-lead",
+      fromWorkspaceId: lead.id,
       fromName: "Lead",
       toWorkspaceId: created.id,
       text: "The auth module moved to src/auth.",

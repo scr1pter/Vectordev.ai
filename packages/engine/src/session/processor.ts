@@ -1,4 +1,5 @@
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { createHash } from "node:crypto"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Image } from "@/image/image"
 import { SessionV1 } from "@vectordevai/core/v1/session"
@@ -281,9 +282,9 @@ const layer = Layer.effect(
         if (!match || match.part.state.status !== "running") return
         // A digest of what the call returned, so the spend guard's loop rules can tell a repeat from a call that got
         // a new answer.
-        const digest = Bun.hash(
-          [output.output, ...(output.attachments ?? []).map((attachment) => attachment.url)].join("\n"),
-        ).toString(36)
+        const digest = createHash("sha256")
+          .update([output.output, ...(output.attachments ?? []).map((attachment) => attachment.url)].join("\n"))
+          .digest("hex")
         ctx.stepTools = ctx.stepTools.map((item) => (item.callID === toolCallID ? { ...item, output: digest } : item))
         yield* session.updatePart({
           ...match.part,

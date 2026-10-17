@@ -3,89 +3,16 @@ import { publicModelPlans } from "../../../../api/_lib/model-plan-config"
 import { CodiumPricing, CodiumQuestions } from "../components/marketing/codium/CodiumPricing"
 import "../components/marketing/codium/codium-pricing.css"
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import MarketingNav from "../components/marketing/MarketingNav.astro"
+import SiteFooter from "../components/marketing/SiteFooter.astro"
 import { codiumPricing } from "../lib/codium-pricing"
 import { readModelPlanConfig } from "../lib/model-plans"
-import { wordmarkCells, wordmarkWidth } from "../lib/wordmark"
 
 export const prerender = true
 
 // The public view carries only names, prices, relative tiers and precomputed coarse task ranges.
 const pricing = codiumPricing(readModelPlanConfig(publicModelPlans()))
 const prices = pricing.monthly.map((plan) => plan.price)
-const links = [
-  ["Docs", "/docs"],
-  ["Changelog", "/docs/changelog"],
-  ["Codium", "/codium"],
-]
-const columns = [
-  {
-    title: "Product",
-    links: [
-      ["Desktop", "/download"],
-      ["CLI", "/docs/terminal-agent"],
-      ["Code review", "/docs/vectorscope"],
-      ["Models", "/docs/models"],
-      ["Codium", "/codium"],
-      ["Parallel agents", "/docs/parallel-agents"],
-      ["Multiplayer", "/docs/multiplayer"],
-      ["Vector Cloud", "/docs/cloud-services"],
-      ["Browser agent", "/docs/browser-agent"],
-    ],
-  },
-  {
-    title: "Resources",
-    links: [
-      ["Docs", "/docs"],
-      ["Changelog", "/docs/changelog"],
-      ["Download", "/download"],
-      ["Install", "/docs/install"],
-      ["First task", "/docs/first-task"],
-      ["Troubleshooting", "/docs/troubleshooting"],
-      ["Checksums", "/download/checksums"],
-      ["Report a problem", "/support/report"],
-    ],
-  },
-  {
-    title: "Features",
-    links: [
-      ["Vector Agent", "/docs/vector-agent"],
-      ["Subagents", "/docs/subagents"],
-      ["Skills and commands", "/docs/skills-and-commands"],
-      ["MCP and plugins", "/docs/mcp-and-plugins"],
-      ["Automations", "/docs/automations"],
-      ["Checkpoints", "/docs/checkpoints"],
-      ["Run Guard", "/docs/tokenomics"],
-    ],
-  },
-  {
-    title: "Legal",
-    links: [
-      ["Terms", "/legal/terms"],
-      ["Privacy", "/legal/privacy"],
-      ["Software license", "/legal/license"],
-      ["Third-party notices", "/legal/third-party"],
-    ],
-  },
-  {
-    title: "Platforms",
-    links: [
-      ["macOS", "/login?returnTo=%2Faccount%3Ftarget%3Dmac-arm64"],
-      ["Windows", "/login?returnTo=%2Faccount%3Ftarget%3Dwindows-x64"],
-      ["Linux", "/login?returnTo=%2Faccount%3Ftarget%3Dlinux-x64"],
-      // The platform links above need a free Vector account; GitHub releases carry every installer without one.
-      ["All installers", "https://github.com/scr1pter/Vectordev.ai/releases/latest"],
-    ],
-  },
-]
-const themes = [
-  ["system", "System", "M2.5 3.5h11v7h-11zM6 13.5h4M8 10.5v3"],
-  [
-    "light",
-    "Light",
-    "M8 5.25a2.75 2.75 0 1 1 0 5.5 2.75 2.75 0 0 1 0-5.5zM8 1.5v1.25M8 13.25v1.25M14.5 8h-1.25M2.75 8H1.5M12.6 3.4l-.9.9M4.3 11.7l-.9.9M12.6 12.6l-.9-.9M4.3 4.3l-.9-.9",
-  ],
-  ["dark", "Dark", "M13.2 9.6A5.5 5.5 0 0 1 6.4 2.8a5.5 5.5 0 1 0 6.8 6.8z"],
-]
 ---
 
 <MarketingLayout
@@ -93,84 +20,13 @@ const themes = [
   description={`Vector is free. Vector Codium adds low-cost coding models with credits: monthly plans or one-time top-ups${prices.length ? ` from $${Math.min(...prices)} to $${Math.max(...prices)}` : ""}, with no automatic overages.`}
 >
 <script is:inline>
-  (function () {
-    var root = document.documentElement;
-    root.dataset.codiumMode = new URLSearchParams(location.search).get("type") === "topups" ? "topup" : "monthly";
-    var theme = "system";
-    try {
-      theme = localStorage.getItem("vector-codium-theme") || "system";
-    } catch (error) {}
-    root.dataset.cxTheme = ["system", "light", "dark"].indexOf(theme) === -1 ? "system" : theme;
-  })();
+  document.documentElement.dataset.codiumMode = new URLSearchParams(location.search).get("type") === "topups" ? "topup" : "monthly";
 </script>
   <div class="cx-page">
-    <header class="cx-header">
-      <div class="cx-container cx-header-grid">
-        <a class="cx-skip cx-btn cx-btn--sm" href="#cx-main">Skip to content</a>
-        <a class="cx-logo" href="/" aria-label="Vector home">
-          <svg class="cx-logo-mark" viewBox="0 0 512 512" aria-hidden="true">
-            <mask id="cx-logo-cut">
-              <rect width="512" height="512" rx="78" fill="#fff"></rect>
-              <g fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="139" y="130" width="234" height="242" rx="52" stroke-width="30"></rect>
-                <rect x="213" y="210" width="86" height="86" rx="14" stroke-width="24"></rect>
-                <path
-                  d="M190 86v58M256 78v54M322 86v58M190 368v58M256 380v54M322 368v58M86 190h58M80 256h52M86 322h58M368 190h58M380 256h54M368 322h58"
-                  stroke-width="30"></path>
-              </g>
-            </mask>
-            <rect width="512" height="512" rx="78" fill="currentColor" mask="url(#cx-logo-cut)"></rect>
-          </svg>
-          <svg class="cx-logo-word" viewBox={`0 0 ${wordmarkWidth} 7`} fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">
-            {wordmarkCells.map((cell) => <rect x={cell.x} y={cell.y} width="1" height="1" />)}
-          </svg>
-        </a>
-        <nav class="cx-nav" aria-label="Primary navigation">
-          {
-            links.map(([label, href]) => (
-              <a href={href} aria-current={href === "/codium" ? "page" : undefined}>
-                {label}
-              </a>
-            ))
-          }
-        </nav>
-        <div class="cx-actions">
-          <a class="cx-signin" href="/login">Sign in</a>
-          <a class="cx-btn cx-btn--ghost cx-btn--sm cx-report" href="/support/report">
-            <span class="cx-report-long">Report issues</span><span class="cx-report-short">Support</span>
-          </a>
-          <a class="cx-btn cx-btn--sm cx-download" href="/download">Download</a>
-        </div>
-        <button class="cx-burger" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="cx-menu">
-          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-            <path d="M4.4 8.8h23M4.4 15.9h23M4.4 22.9h23"></path>
-          </svg>
-        </button>
-      </div>
-    </header>
+    {/* The landing page's own top bar and footer box; the bar leaves out the Vector mark in its corner. */}
+    <MarketingNav active="codium" brand={false} />
 
-    <div class="cx-menu" id="cx-menu" role="dialog" aria-modal="true" aria-label="Navigation">
-      <button class="cx-menu-close" type="button" aria-label="Close navigation">
-        <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-          <path d="M7 7l18 18M25 7 7 25"></path>
-        </svg>
-      </button>
-      <nav aria-label="Menu">
-        {
-          links.map(([label, href]) => (
-            <a class="cx-type-lg" href={href} aria-current={href === "/codium" ? "page" : undefined}>
-              {label}
-            </a>
-          ))
-        }
-      </nav>
-      <div class="cx-menu-actions">
-        <a class="cx-btn" href="/download">Download</a>
-        <a class="cx-btn cx-btn--ghost" href="/login">Sign in</a>
-      </div>
-    </div>
-
-    <main class="cx-main" id="cx-main" tabindex="-1">
+    <main class="cx-main">
       <section class="cx-section cx-pricing">
         <div class="cx-container">
           <h1 class="cx-type-xl">Pricing</h1>
@@ -200,114 +56,6 @@ const themes = [
       </section>
     </main>
 
-    <footer class="cx-footer">
-      <div class="cx-container cx-footer-top">
-        <div class="cx-footer-grid">
-          {
-            columns.map((column) => (
-              <nav aria-labelledby={`cx-footer-${column.title.toLowerCase()}`}>
-                <h2 class="cx-footer-type" id={`cx-footer-${column.title.toLowerCase()}`}>
-                  {column.title}
-                </h2>
-                <ul class="cx-footer-type">
-                  {column.links.map(([label, href]) => (
-                    <li>
-                      <a href={href}>
-                        {label}
-                        {href.startsWith("https://") && <span class="cx-footer-external" aria-hidden="true">&nbsp;↗</span>}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </nav>
-            ))
-          }
-        </div>
-      </div>
-      <div class="cx-container cx-footer-bottom">
-        <div class="cx-footer-legal cx-footer-type">
-          <span>© 2026 Vector</span>
-          <span>Local-first. Your repositories. Your accounts. Your models.</span>
-        </div>
-        <div class="cx-footer-tools">
-          <div class="cx-theme" role="group" aria-label="Theme">
-            <div class="cx-theme-indicator" aria-hidden="true"></div>
-            {
-              themes.map(([value, label, path]) => (
-                <button type="button" data-theme={value} aria-label={label} aria-pressed={value === "system" ? "true" : "false"}>
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d={path} />
-                  </svg>
-                </button>
-              ))
-            }
-          </div>
-          <div class="cx-lang cx-btn cx-btn--secondary cx-btn--sm">
-            <svg class="cx-lang-globe" viewBox="0 0 13 14" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true">
-              <circle cx="6.5" cy="7" r="5.6"></circle>
-              <path d="M0.9 7h11.2M6.5 1.4c-1.6 1.6-2.4 3.5-2.4 5.6s.8 4 2.4 5.6M6.5 1.4c1.6 1.6 2.4 3.5 2.4 5.6s-.8 4-2.4 5.6"></path>
-            </svg>
-            <span aria-hidden="true">English</span>
-            <svg class="cx-lang-chevron" viewBox="0 0 10 14" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M1.5 5.5 5 9l3.5-3.5"></path>
-            </svg>
-            {/* The site is in English only; the native list says so instead of offering languages it doesn't have. */}
-            <select aria-label="Language">
-              <option value="en" selected>English</option>
-            </select>
-          </div>
-        </div>
-      </div>
-    </footer>
+    <SiteFooter />
   </div>
 </MarketingLayout>
-
-<script is:inline>
-  (function () {
-    var root = document.documentElement;
-    var burger = document.querySelector(".cx-burger");
-    var menu = document.getElementById("cx-menu");
-    var wide = matchMedia("(min-width: 900px)");
-    // While the menu covers the page, everything behind it is inert, so Tab stays inside the menu.
-    var behind = document.querySelectorAll(".cx-header, .cx-main, .cx-footer");
-    var setMenu = function (open) {
-      if (open) root.setAttribute("data-cx-menu", "");
-      if (!open) root.removeAttribute("data-cx-menu");
-      behind.forEach(function (element) {
-        element.inert = open;
-      });
-      burger.setAttribute("aria-expanded", String(open));
-      if (open) menu.querySelector(".cx-menu-close").focus();
-      if (!open && !wide.matches) burger.focus();
-    };
-    // The menu only exists below 900px; widening past it closes the menu instead of leaving the page locked.
-    wide.addEventListener("change", function () {
-      if (wide.matches && root.hasAttribute("data-cx-menu")) setMenu(false);
-    });
-    burger.addEventListener("click", function () {
-      setMenu(true);
-    });
-    menu.querySelector(".cx-menu-close").addEventListener("click", function () {
-      setMenu(false);
-    });
-    document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape" && root.hasAttribute("data-cx-menu")) setMenu(false);
-    });
-    var buttons = document.querySelectorAll(".cx-theme button");
-    var showTheme = function () {
-      buttons.forEach(function (button) {
-        button.setAttribute("aria-pressed", String(button.dataset.theme === root.dataset.cxTheme));
-      });
-    };
-    buttons.forEach(function (button) {
-      button.addEventListener("click", function () {
-        root.dataset.cxTheme = button.dataset.theme;
-        try {
-          localStorage.setItem("vector-codium-theme", button.dataset.theme);
-        } catch (error) {}
-        showTheme();
-      });
-    });
-    showTheme();
-  })();
-</script>
