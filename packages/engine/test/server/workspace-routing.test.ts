@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   isLocalWorkspaceRoute,
   getWorkspaceRouteSessionID,
+  matchedRoutePath,
   workspaceProxyURL,
 } from "../../src/server/shared/workspace-routing"
 import { SessionID } from "../../src/session/schema"
@@ -77,5 +78,27 @@ describe("workspaceProxyURL", () => {
     const target = new URL("http://remote:3000/api")
     const result = workspaceProxyURL(target, new URL("http://localhost/users"))
     expect(result.toString()).toBe("http://remote:3000/api/users")
+  })
+})
+
+describe("matchedRoutePath", () => {
+  test("rebuilds the path the router matched from its template and params", () => {
+    expect(matchedRoutePath("/session/:sessionID/message", { sessionID: "ses_abc" })).toBe("/session/ses_abc/message")
+    expect(matchedRoutePath("/config", {})).toBe("/config")
+    expect(matchedRoutePath("/file/*", { "*": "src/a b.ts" })).toBe("/file/src/a%20b.ts")
+  })
+
+  test("a param cannot add segments to the forwarded path", () => {
+    expect(matchedRoutePath("/session/:sessionID", { sessionID: "ses_abc/../../config" })).toBe(
+      "/session/ses_abc%2F..%2F..%2Fconfig",
+    )
+    expect(matchedRoutePath("/session/:sessionID", { sessionID: "ses_abc;x" })).toBe("/session/ses_abc%3Bx")
+  })
+
+  test("the proxy forwards the matched path, not the re-parsed one", () => {
+    const url = new URL("http://localhost/SESSION/ses_abc/./message;x?keep=yes")
+    const result = workspaceProxyURL("http://remote:8080/base", url, "/session/ses_abc/message")
+    expect(result.pathname).toBe("/base/session/ses_abc/message")
+    expect(result.searchParams.get("keep")).toBe("yes")
   })
 })

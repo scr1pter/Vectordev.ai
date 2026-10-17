@@ -6,7 +6,12 @@ import { WorkspaceAdapterRuntime } from "@/control-plane/workspace-adapter-runti
 import { Session } from "@/session/session"
 import { HttpApiProxy } from "./proxy"
 import * as Fence from "@/server/shared/fence"
-import { getWorkspaceRouteSessionID, isLocalWorkspaceRoute, workspaceProxyURL } from "@/server/shared/workspace-routing"
+import {
+  getWorkspaceRouteSessionID,
+  isLocalWorkspaceRoute,
+  matchedRoutePath,
+  workspaceProxyURL,
+} from "@/server/shared/workspace-routing"
 import { NotFoundError } from "@/storage/storage"
 import { Flag } from "@vectordevai/core/flag/flag"
 import { Context, Data, Effect, Layer, Option, Schema } from "effect"
@@ -46,6 +51,8 @@ type RequestPlan = Data.TaggedEnum<{
     readonly workspace: Workspace.Info
     readonly target: RemoteTarget
     readonly url: URL
+    /** The path the router matched and the guest gate judged; the proxy forwards this, not the re-parsed URL's. */
+    readonly path: string
     readonly sessionID?: string
     readonly sessionDirectory?: string
   }
@@ -131,6 +138,7 @@ function proxyRemote(
   workspace: Workspace.Info,
   target: RemoteTarget,
   url: URL,
+  path: string,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, never, Socket.WebSocketConstructor | Workspace.Service> {
   return Effect.gen(function* () {
     const syncing = yield* Workspace.Service.use((svc) => svc.isSyncing(workspace.id))
@@ -140,7 +148,7 @@ function proxyRemote(
         contentType: "text/plain; charset=utf-8",
       })
     }
-    const proxyURL = workspaceProxyURL(target.url, url)
+    const proxyURL = workspaceProxyURL(target.url, url, path)
     const headers = request.headers as Record<string, string>
     if (headers["upgrade"]?.toLowerCase() === "websocket") return yield* HttpApiProxy.websocket(request, proxyURL)
     const response = yield* HttpApiProxy.http(client, proxyURL, target.headers, request)
@@ -163,6 +171,7 @@ function proxyRemote(
 function planWorkspaceRequest(
   request: HttpServerRequest.HttpServerRequest,
   url: URL,
+  path: string,
   workspace: Workspace.Info,
   session?: Session.Info,
 ): Effect.Effect<RequestPlan, never, Workspace.Service> {
@@ -174,6 +183,7 @@ function planWorkspaceRequest(
         workspace,
         target,
         url,
+        path,
         sessionID: session?.id,
         sessionDirectory: session?.directory,
       })
@@ -187,7 +197,7 @@ function planWorkspaceRequest(
 
 function planRequest(
   request: HttpServerRequest.HttpServerRequest,
-  routePath: string,
+  route: { readonly template: string; readonly path: string },
   session?: Session.Info,
 ): Effect.Effect<RequestPlan, never, Workspace.Service> {
   return Effect.gen(function* () {
@@ -195,7 +205,7 @@ function planRequest(
     const envWorkspaceID = configuredWorkspaceID()
     const workspaceID = selectedWorkspaceID(request, url, session?.workspaceID)
     if (workspaceID === InvalidWorkspaceID) {
-      if (routePath.startsWith("/api/")) return RequestPlan.InvalidWorkspace()
+      if (route.template.startsWith("/api/")) return RequestPlan.InvalidWorkspace()
       return RequestPlan.MissingWorkspace({ workspaceID: url.searchParams.get("workspace") ?? "unknown" })
     }
     const workspace = yield* resolveWorkspace(workspaceID, envWorkspaceID)
@@ -204,8 +214,8 @@ function planRequest(
       return RequestPlan.MissingWorkspace({ workspaceID })
     }
 
-    if (workspace !== undefined && !envWorkspaceID && !shouldStayOnControlPlane(request, routePath)) {
-      return yield* planWorkspaceRequest(request, url, workspace, session)
+    if (workspace !== undefined && !envWorkspaceID && !shouldStayOnControlPlane(request, route.template)) {
+      return yield* planWorkspaceRequest(request, url, route.path, workspace, session)
     }
 
     return RequestPlan.Local({
@@ -234,7 +244,8 @@ function routePtyTicket<E>(
     return yield* RequestPlan.$match(plan, {
       InvalidWorkspace: () => Effect.succeed(invalidPtyTicket()),
       MissingWorkspace: () => Effect.succeed(invalidPtyTicket()),
-      Remote: ({ request, workspace, target, url }) => proxyRemote(client, request, workspace, target, url),
+      Remote: ({ request, workspace, target, url, path }) =>
+        proxyRemote(client, request, workspace, target, url, path),
       Local: ({ directory, workspaceID }) =>
         Effect.gen(function* () {
           const valid = yield* tickets.consume({
@@ -297,7 +308,8 @@ function routeWorkspace<E>(
           ),
         ),
       MissingWorkspace: ({ workspaceID }) => Effect.succeed(missingWorkspaceResponse(workspaceID)),
-      Remote: ({ request, workspace, target, url }) => proxyRemote(client, request, workspace, target, url),
+      Remote: ({ request, workspace, target, url, path }) =>
+        proxyRemote(client, request, workspace, target, url, path),
       Local: ({ directory, workspaceID, sessionID }) =>
         effect.pipe(
           Effect.provideService(
@@ -351,7 +363,11 @@ function routeHttpApiWorkspace<E>(
           Effect.catchDefect(() => Effect.succeed(undefined)),
         )
       : undefined
-    const plan = yield* planRequest(request, route.route.path, session)
+    const plan = yield* planRequest(
+      request,
+      { template: route.route.path, path: matchedRoutePath(route.route.path, route.params) },
+      session,
+    )
     return yield* routeWorkspace(client, effect, plan)
   })
 }

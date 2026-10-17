@@ -29,9 +29,20 @@ export function getWorkspaceRouteSessionID(params: Readonly<Record<string, strin
   return Option.isSome(decoded) ? decoded.value : null
 }
 
-export function workspaceProxyURL(target: string | URL, requestURL: URL) {
+/**
+ * The path the router matched, rebuilt from its template and params. Scope is judged on these, while the URL parser
+ * can read another path from the same request (dot segments, ';', case), so a proxy forwards this one.
+ */
+export function matchedRoutePath(template: string, params: Readonly<Record<string, string | undefined>>) {
+  return template.replace(/:(\w+)\??|\*/g, (_, name?: string) => {
+    const value = params[name ?? "*"] ?? ""
+    return name ? encodeURIComponent(value) : value.split("/").map(encodeURIComponent).join("/")
+  })
+}
+
+export function workspaceProxyURL(target: string | URL, requestURL: URL, path = requestURL.pathname) {
   const proxyURL = new URL(target)
-  proxyURL.pathname = `${proxyURL.pathname.replace(/\/$/, "")}${requestURL.pathname}`
+  proxyURL.pathname = `${proxyURL.pathname.replace(/\/$/, "")}${path}`
   proxyURL.search = requestURL.search
   proxyURL.hash = requestURL.hash
   proxyURL.searchParams.delete("workspace")
