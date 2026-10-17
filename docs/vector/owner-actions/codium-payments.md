@@ -179,4 +179,4 @@ Anyone without the secret, signed-in buyers included, gets a 404. The ledger sho
 - Stripe drafts each renewal invoice and charges it about an hour later. The new month's credits start when that charge succeeds, so for about an hour after each renewal a subscriber has only their purchased credits.
 - A checkout page opened before a pause can still be paid for until it expires, up to an hour later. The pause stops new checkouts; the open one's credits were already reserved when it opened.
 - Renewals still charge and grant credits while sales are paused, because those subscribers are already owed them.
-- Credits that were paid for but whose key could not yet be created (Stripe retries the notification until it succeeds) are not counted as owed until the key exists. The margin covers this.
+- Credits that were paid for but whose key could not yet be created (Stripe retries the notification until it succeeds) count only through their checkout's reservation. Once that lapses, half an hour after the checkout closes, they are not counted until the key exists. The margin covers this.
