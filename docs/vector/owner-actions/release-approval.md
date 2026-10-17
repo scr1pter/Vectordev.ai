@@ -1,10 +1,12 @@
 # Release approval and external prerequisites
 
-## Current candidate: 1.99.108 (16 October 2026)
+## Published: 1.99.108 (17 October 2026)
 
-The subagent orchestration candidate supersedes the unpublished 1.99.107 desktop candidate below. Follow [the 1.99.108 handoff](subagents-199108.md): dispatch **Vector desktop release** from the reviewed `main` commit with tag `v1.99.108`, `allow_unsigned=true` and `prerelease=false`, then approve `production-release`. Publication and live benchmarks remain owner actions.
+Desktop 1.99.108 was published by release run #88 on 17 October 2026; all four update feeds report 1.99.108 and the website's `publishedDesktopVersion` is 1.99.108. CLI 1.99.108 is not published: the npm CLI (`@vectordevai/cli`) stays at 1.99.99 and `vectordev.ai/install` serves the 11 October standalone build numbered 1.99.107. The handoff below is kept as the record of how it was prepared.
 
-The required CLI compatibility version remains 1.99.99, but the new terminal task controls require a separately published CLI built from this candidate. Keep `publishedDesktopVersion` at 1.99.106 until the new installers and feeds are verified. The earlier version-specific dispatch commands below are historical and do not supersede this handoff.
+The subagent orchestration candidate supersedes the unpublished 1.99.107 desktop candidate below. Follow [the 1.99.108 handoff](subagents-199108.md): dispatch **Vector desktop release** from the reviewed `main` commit with tag `v1.99.108`, `allow_unsigned=true` and `prerelease=false`, then approve `production-release`. Desktop publication is done; publishing CLI 1.99.108 and the matched live benchmarks remain owner actions.
+
+The required CLI compatibility version remains 1.99.99, but the new terminal task controls require a separately published CLI built from this candidate. The earlier version-specific dispatch commands below are historical and do not supersede this handoff.
 
 ## Previous candidate: 1.99.107 (11 October 2026)
 

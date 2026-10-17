@@ -1,6 +1,6 @@
 # Models included with Vector
 
-This describes the guarded personal-account setup, available from desktop and CLI **1.99.99** (the current downloads are desktop 1.99.106 and npm CLI 1.99.99), and Vector's shared allowance. Whether the shared allowance serves models is set on Vector's service with `FREE_MODELS_ENABLED`, not by the release; see [Shared allowance for Vector accounts](#shared-allowance-for-vector-accounts).
+This describes the guarded personal-account setup, available from desktop and CLI **1.99.99** (the current downloads are desktop 1.99.108 and npm CLI 1.99.99), and Vector's shared allowance. Whether the shared allowance serves models is set on Vector's service with `FREE_MODELS_ENABLED`, not by the release; see [Shared allowance for Vector accounts](#shared-allowance-for-vector-accounts).
 
 Connect your own free OpenRouter account, then choose an eligible model under **Models included with Vector**. The personal section works independently of the shared service flag. Its selection is limited to the explicit `:free` models on Vector's allowlist, each with online, tool-capable, zero-price endpoints from the provider allowlisted for it. Discovery reads each model's public OpenRouter endpoint list and matches each model ID and endpoint tag; it does not include every model advertised as free. Names omit the `:free` suffix; routing IDs retain it. A failed catalog check does not authorize an unlisted endpoint or a paid fallback.
 
