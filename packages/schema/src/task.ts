@@ -40,6 +40,10 @@ export const Info = Schema.Struct({
   currentStep: optional(Schema.String),
   lastTool: optional(Schema.String),
   usage: optional(Usage),
+  // External runtimes may report dollars without a token breakdown. Missing
+  // usage stays unknown; a measured cost must not synthesize zero token counts.
+  measuredCost: optional(Schema.Finite),
+  costKind: optional(RunBudget.CostKind),
   ownedPaths: Schema.Array(Schema.String),
   dependsOn: Schema.Array(Schema.String),
   resultAvailable: Schema.Boolean,
