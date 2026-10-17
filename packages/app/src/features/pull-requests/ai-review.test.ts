@@ -430,7 +430,7 @@ describe("runReview", () => {
     const text = calls.prompt[0]!.parts![0]!.text
     // Sent once, as the numbered pull request version with the change marked, in place of its diff and its text.
     expect(text).toContain(
-      '<untrusted_pr_file path="src/list.ts" exact="true" annotated="true">\n1   export function last(items: number[]) {\n  -   return items[items.length - 1]\n2 +   return items[items.length]\n3   }\n</untrusted_pr_file>',
+      '<untrusted_pr_file path="src/list.ts" exact="true" annotated="true">\n1   export function last(items: number[]) {\n2 -   return items[items.length - 1]\n2 +   return items[items.length]\n3   }\n</untrusted_pr_file>',
     )
     expect(text).not.toContain("<untrusted_diff>")
     expect(text).toContain("The working tree is the base branch.")
