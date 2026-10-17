@@ -1040,8 +1040,9 @@ description: Permission skill.
       yield* Effect.promise(() => Bun.write(path.join(skillDir, "reference", "notes.md"), "Skill reference notes."))
       yield* Effect.promise(() => trustWorkspace(test.directory))
 
+      yield* Effect.promise(() => fs.mkdir(path.join(test.directory, "empty-home"), { recursive: true }))
       const home = process.env.VECTOR_TEST_HOME
-      process.env.VECTOR_TEST_HOME = test.directory
+      process.env.VECTOR_TEST_HOME = path.join(test.directory, "empty-home")
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           process.env.VECTOR_TEST_HOME = home

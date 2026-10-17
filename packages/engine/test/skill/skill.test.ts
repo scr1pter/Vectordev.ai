@@ -136,8 +136,9 @@ Instructions here.
     provideTmpdirInstance(
       (dir) =>
         withHome(
-          dir,
+          path.join(dir, "empty-home"),
           Effect.gen(function* () {
+            yield* Effect.promise(() => fs.mkdir(path.join(dir, "empty-home"), { recursive: true }))
             yield* Effect.promise(() =>
               Bun.write(
                 path.join(dir, ".vector", "skill", "dir-skill", "SKILL.md"),
