@@ -147,6 +147,7 @@ export function buildVerifyPrompt(input: VerifyPromptInput): string {
     [
       `You are checking candidate findings from an earlier review pass of ${input.uncommitted ? "the uncommitted changes in the working tree" : `\`${short(input.head)}\``}.`,
       "For each candidate, re-read the code at the cited location. Answer confirmed only when the defect is real and triggered as described; otherwise rejected, with a one-sentence reason.",
+      "Reject style or naming preferences and refactor ideas, which are not defects, and any claim you cannot confirm in the code.",
     ].join(" "),
     [
       TOOLS,

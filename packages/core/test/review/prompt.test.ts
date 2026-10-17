@@ -353,6 +353,7 @@ describe("buildVerifyPrompt", () => {
   test("asks for a verdict per candidate, each inside its own untrusted tag", () => {
     const text = buildVerifyPrompt({ trust: "trusted", head: HEAD, candidates: [candidate] })
     expect(text).toContain("For each candidate, re-read the code at the cited location.")
+    expect(text).toContain("Reject style or naming preferences and refactor ideas, which are not defects")
     expect(text).toContain(
       '<untrusted_candidate id="3f9a1c07be21" path="src/auth/refresh.ts" line="52" side="RIGHT" severity="blocking" category="bug">',
     )
