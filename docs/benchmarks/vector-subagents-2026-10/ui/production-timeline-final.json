@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 2,
+  "runID": "subagents-after-final",
+  "name": "performance: session timeline streaming > streams assistant text in v2 with review pane closed",
+  "status": "passed",
+  "expectedStatus": "passed",
+  "retry": 0,
+  "repeatEachIndex": 0,
+  "context": {
+    "project": "chromium",
+    "platform": "darwin",
+    "cpuThrottle": 4,
+    "profileCPU": false,
+    "profileVisual": false,
+    "minimal": false,
+    "queuedDeltas": 40,
+    "historyTurns": 80,
+    "eventBatch": 1,
+    "newLayoutDesigns": true,
+    "reviewPane": "closed",
+    "reviewDiffs": 0
+  },
+  "metrics": {
+    "endToEndInitialContentObservedMs": 444.564292,
+    "capabilities": {
+      "visual": false,
+      "geometry": true
+    },
+    "completionObservedMs": 10132.5,
+    "deltasPerSecond": 3.9476930668640513,
+    "rafGapSamples": 1222,
+    "rafCallbackRate": 120.04047191047367,
+    "observedProgressWindowRafCallbackRate": 119.89202067782162,
+    "observedProgressWindowRafGapP95Ms": 9.200000000000273,
+    "observedProgressWindowRafGaps": 1097,
+    "maxObservedProgressIndex": 40,
+    "observedProgressTransitions": 15,
+    "rafGapP50Ms": 8.300000000000182,
+    "rafGapP95Ms": 9.200000000000045,
+    "rafGapP99Ms": 9.300000000001091,
+    "maxRafGapMs": 16.5,
+    "rafGapsOver33Ms": 0,
+    "rafGapsOver50Ms": 0,
+    "missedFrameBudgetEquivalents": 0,
+    "longestRafGapOver33MsStreak": 0,
+    "longTaskCount": 0,
+    "longTaskTimeMs": 0,
+    "visual": null,
+    "geometry": {
+      "maxDistancePx": 0,
+      "finalDistancePx": 0,
+      "final": {
+        "scrollTop": 20748,
+        "scrollHeight": 21334,
+        "clientHeight": 586,
+        "distance": 0,
+        "virtualHeight": 21288,
+        "headerHeight": 46
+      },
+      "distanceTransitionsPx": [
+        0
+      ],
+      "bottomDriftTransitions": 0,
+      "blankSamples": 0
+    },
+    "rowReplaced": false,
+    "markdownReplaced": false,
+    "domTextCharacters": 1110,
+    "deliveredDeltas": 40,
+    "pendingDeltas": 0,
+    "reviewPane": null
+  }
+}

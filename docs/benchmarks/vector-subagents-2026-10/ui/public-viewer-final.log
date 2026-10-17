@@ -1,0 +1,28 @@
+[WebServer] $ bun scripts/build-changelog.ts
+
+[WebServer] $ astro build
+
+[WebServer] (node:2515) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+[WebServer] (node:2515) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+
+[WebServer] (node:3261) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+
+Running 4 tests using 1 worker
+
+(node:3341) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:3341) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/4] [public-viewer] › e2e/regression/public-share-viewer.spec.ts:49:1 › pruned production viewer renders ordered inert content and checks deletion
+[2/4] [public-viewer] › e2e/regression/public-share-viewer.spec.ts:108:1 › expiry removes a snapshot even when subsequent requests fail
+[3/4] [public-viewer] › e2e/regression/public-share-viewer.spec.ts:126:1 › expiry wins over a delayed in-flight refresh
+[4/4] [public-viewer] › e2e/regression/public-share-viewer.spec.ts:152:1 › large content stays readable as inert text
+  4 passed (20.7s)

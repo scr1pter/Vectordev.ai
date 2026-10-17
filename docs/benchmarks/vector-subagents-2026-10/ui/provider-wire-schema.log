@@ -1,0 +1,10 @@
+bun test v1.3.14 (0d9b296a)
+
+test/tool/task-manage-schema.test.ts:
+(pass) task_manage provider schema > advertises every registered action through all three provider wire lowerers [279.77ms]
+(pass) task_manage provider schema > validates action-specific requirements before invoking task controls [43.55ms]
+
+ 2 pass
+ 0 fail
+ 29 expect() calls
+Ran 2 tests across 1 file. [2.18s]

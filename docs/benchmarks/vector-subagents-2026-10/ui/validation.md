@@ -8,6 +8,8 @@ All UI scenarios use fixture data and local fake servers. No paid model requests
 - App browser unit suite: 46 passed across 14 files (1.68 seconds).
 - Final full app Playwright suite: 127 passed, one existing `remote-tab-busy` skip, zero failures (6.5 minutes); see [browser-final.log](browser-final.log).
 - App and browser-test TypeScript checks passed.
+- Latest merged account-profile tests: three passed, nine assertions; see [account-profile-final.log](account-profile-final.log).
+- Production public-viewer suite: four passed, zero failures (20.7 seconds), including deletion, expiry races, and large inert content; see [public-viewer-final.log](public-viewer-final.log).
 - Desktop focused adapter, mailbox, and swarm suite: 63 passed, 346 assertions.
 - Engine bridge focused suite at its initial integration: 10 passed, 61 assertions. Later integration coverage is recorded in the parent validation report.
 
@@ -38,7 +40,44 @@ The production timeline comparison uses the same fixture: 80 history turns, 40 s
 
 Baseline: initial content observed at 432.125 ms; completion 10,113.2 ms; 40/40 deltas; RAF p95 9.2 ms, p99 9.3 ms, maximum 9.4 ms; no long tasks, row replacement, markdown replacement, blank samples, or viewport drift. The first attempted final build hit the existing 120-second server-start timeout while other checks were active; its output is retained in [production-build-timeout-attempt.log](production-build-timeout-attempt.log).
 
-Final production comparison and the public-viewer suite are pending the shared build slot.
+The final production build and timeline scenario passed in 48.3 seconds on integration source `7fc99001a` (the only concurrent commit, `50f9359c8`, changed benchmark documentation). The final [raw output](production-timeline-final.log) and [structured metrics](production-timeline-final.json) are retained.
+
+| Measurement | Before app changes | Final integration |
+| --- | ---: | ---: |
+| Initial content observed | 432.125 ms | 444.564 ms |
+| Stream completion observed | 10,113.2 ms | 10,132.5 ms |
+| Delivered deltas | 40/40 | 40/40 |
+| RAF gap p95 / p99 | 9.2 / 9.3 ms | 9.2 / 9.3 ms |
+| Maximum RAF gap | 9.4 ms | 16.5 ms |
+| Long tasks | 0 | 0 |
+| Blank samples / viewport drift | 0 / 0 px | 0 / 0 px |
+| Row or markdown replacement | Neither | Neither |
+
+Final initial content was 12.439 ms slower and stream completion 19.3 ms slower. The maximum frame gap increased, with no final gap above 33 ms; p95 and p99 were unchanged. These are single runs on a shared machine, not a statistically controlled performance improvement claim. The measured timeline stability checks passed.
+
+Run these final production checks serially from `packages/app`:
+
+```sh
+bun --no-env-file test src/vector-account.test.ts
+PLAYWRIGHT_VIEWER_PORT=4569 PLAYWRIGHT_WORKERS=1 bunx playwright test --config e2e/public-viewer.playwright.config.ts
+PLAYWRIGHT_PORT=4568 PLAYWRIGHT_WORKERS=1 TIMELINE_CPU_THROTTLE=4 TIMELINE_DELTA_COUNT=40 TIMELINE_HISTORY_TURNS=80 VECTOR_PERFORMANCE_RUN_ID=subagents-after-final bunx playwright test --config e2e/performance/playwright.config.ts e2e/performance/timeline/session-timeline-benchmark.spec.ts --grep 'streams assistant text in v2 with review pane closed'
+```
+
+Owned test-server ports 4567, 4568, and 4569 were verified closed after the checks.
+
+## Independent review closure
+
+The runtime, cost, and integration reviewers checked the adapters and controls independently of their implementation. The following confirmed findings were fixed before the final functional run or the later integration gates:
+
+| Finding | Resolution and retained coverage |
+| --- | --- |
+| Swarm workspaces disappeared after provisioning because their internal scope differed from the user's parent task. | The desktop board joins workspace IDs through the authorized swarm run and projects the real parent scope; inspect, message, and stop use the same lookup. Synthetic scopes are excluded from relay registration. |
+| Waiting for desktop receipts or nested native cancellation while holding the admission lock could block unrelated work. | Controls validate selection under the lock, then release it before cancellation and receipt waits. Engine bridge tests cover pending remote controls and cancellation finalizers acquiring that lock. |
+| An expired lease could falsely imply an executor had stopped or leave stale controls visible. | Expiry preserves the last known task state, marks it disconnected, disables write controls, rejects stale leases, and emits an automatic parent update. Tests cover renewal and deadline notification without a subsequent read. |
+| Truncated snapshots or an unsupported task-list response could hide active work or enable an incomplete Stop all. | Active tasks are prioritized, truncation propagates across the relay, retained app snapshots keep per-source truncation, and Stop all rejects incomplete boards before mutation. Engine and browser regressions cover these cases. |
+| Provider projection of the action union advertised only `list`. | The registered tool now advertises a flat public object with all five actions, while runtime validation keeps the action-specific union. The focused provider-wire regression passes for OpenAI Chat, Responses, and Anthropic and rejects nine malformed control payloads: two tests and 29 assertions; see [provider-wire-schema.log](provider-wire-schema.log). |
+
+The screenshots above show the implemented panel, not a design mockup. Historical relay scaling and desktop spend scope remain explicit limits below; they were not represented as solved by these checks.
 
 ## Explicit boundaries
 

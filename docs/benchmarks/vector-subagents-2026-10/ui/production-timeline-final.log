@@ -1,0 +1,51 @@
+[WebServer] $ vite build
+
+[WebServer] (node:3752) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+[WebServer] [plugin vite:reporter] 
+[WebServer] (!) <worktree>/packages/ui/src/theme/themes/vector-modern.json is dynamically imported by <worktree>/packages/ui/src/theme/context.tsx but also statically imported by <worktree>/packages/ui/src/theme/context.tsx, dynamic import will not move module into another chunk.
+[WebServer] 
+
+[WebServer] [plugin vite:reporter] 
+[WebServer] (!) <worktree>/packages/app/src/components/dialog-connect-provider.tsx is dynamically imported by <worktree>/packages/app/src/components/prompt-input/free-model-start.tsx, <worktree>/packages/app/src/pages/layout-new.tsx but also statically imported by <worktree>/packages/app/src/components/dialog-select-provider.tsx, <worktree>/packages/app/src/components/free-models-card.tsx, <worktree>/packages/app/src/components/free-models-limit.tsx, <worktree>/packages/app/src/components/settings-providers.tsx, <worktree>/packages/app/src/components/settings-v2/providers.tsx, dynamic import will not move module into another chunk.
+[WebServer] 
+[WebServer] [plugin vite:reporter] 
+[WebServer] (!) <worktree>/packages/app/src/components/dialog-select-model.tsx is dynamically imported by <worktree>/packages/app/src/pages/session/use-composer-commands.tsx but also statically imported by <worktree>/packages/app/src/pages/layout-new.tsx, dynamic import will not move module into another chunk.
+[WebServer] 
+[WebServer] [plugin vite:reporter] 
+[WebServer] (!) <worktree>/packages/app/src/components/dialog-select-mcp.tsx is dynamically imported by <worktree>/packages/app/src/pages/session/use-session-commands.tsx but also statically imported by <worktree>/packages/app/src/pages/layout-new.tsx, dynamic import will not move module into another chunk.
+[WebServer] 
+[WebServer] [plugin vite:reporter] 
+[WebServer] (!) <worktree>/packages/app/src/components/dialog-select-plugins.tsx is dynamically imported by <worktree>/packages/app/src/pages/session/use-session-commands.tsx but also statically imported by <worktree>/packages/app/src/pages/layout-new.tsx, dynamic import will not move module into another chunk.
+[WebServer] 
+
+[WebServer] 
+[WebServer] (!) Some chunks are larger than 500 kB after minification. Consider:
+[WebServer] - Using dynamic import() to code-split the application
+[WebServer] - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+[WebServer] - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+[WebServer] $ vite preview --host "0.0.0.0" --port "4568" --strictPort
+
+[WebServer] (node:4557) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+
+Running 1 test using 1 worker
+
+(node:4591) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:4591) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/1] [chromium] › e2e/performance/timeline/session-timeline-benchmark.spec.ts:49:3 › performance: session timeline streaming › streams assistant text in v2 with review pane closed
+[chromium] › e2e/performance/timeline/session-timeline-benchmark.spec.ts:49:3 › performance: session timeline streaming › streams assistant text in v2 with review pane closed
+BENCHMARK_PAGE {"schemaVersion":2,"runID":"subagents-after-final","name":"performance: session timeline streaming > streams assistant text in v2 with review pane closed","test":"performance: session timeline streaming > streams assistant text in v2 with review pane closed","retry":0,"repeatEachIndex":0,"context":{"platform":"darwin","selectorTrace":false},"navigations":["http://127.0.0.1:4568/QzovVmVjdG9yL1RpbWVsaW5lU3RhdGVSZWdyZXNzaW9u/session/ses_timeline_state_regression","http://127.0.0.1:4568/QzovVmVjdG9yL1RpbWVsaW5lU3RhdGVSZWdyZXNzaW9u/session/ses_timeline_state_regression","http://127.0.0.1:4568/server/aHR0cDovLzEyNy4wLjAuMTo0NTY4/session/ses_timeline_state_regression"]}
+
+BENCHMARK {"schemaVersion":2,"runID":"subagents-after-final","name":"performance: session timeline streaming > streams assistant text in v2 with review pane closed","status":"passed","expectedStatus":"passed","retry":0,"repeatEachIndex":0,"context":{"project":"chromium","platform":"darwin","cpuThrottle":4,"profileCPU":false,"profileVisual":false,"minimal":false,"queuedDeltas":40,"historyTurns":80,"eventBatch":1,"newLayoutDesigns":true,"reviewPane":"closed","reviewDiffs":0},"metrics":{"endToEndInitialContentObservedMs":444.564292,"capabilities":{"visual":false,"geometry":true},"completionObservedMs":10132.5,"deltasPerSecond":3.9476930668640513,"rafGapSamples":1222,"rafCallbackRate":120.04047191047367,"observedProgressWindowRafCallbackRate":119.89202067782162,"observedProgressWindowRafGapP95Ms":9.200000000000273,"observedProgressWindowRafGaps":1097,"maxObservedProgressIndex":40,"observedProgressTransitions":15,"rafGapP50Ms":8.300000000000182,"rafGapP95Ms":9.200000000000045,"rafGapP99Ms":9.300000000001091,"maxRafGapMs":16.5,"rafGapsOver33Ms":0,"rafGapsOver50Ms":0,"missedFrameBudgetEquivalents":0,"longestRafGapOver33MsStreak":0,"longTaskCount":0,"longTaskTimeMs":0,"visual":null,"geometry":{"maxDistancePx":0,"finalDistancePx":0,"final":{"scrollTop":20748,"scrollHeight":21334,"clientHeight":586,"distance":0,"virtualHeight":21288,"headerHeight":46},"distanceTransitionsPx":[0],"bottomDriftTransitions":0,"blankSamples":0},"rowReplaced":false,"markdownReplaced":false,"domTextCharacters":1110,"deliveredDeltas":40,"pendingDeltas":0,"reviewPane":null}}
+
+  1 passed (48.3s)

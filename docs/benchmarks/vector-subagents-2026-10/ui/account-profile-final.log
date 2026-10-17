@@ -1,0 +1,11 @@
+bun test v1.3.14 (0d9b296a)
+
+src/vector-account.test.ts:
+(pass) the account chip shows the photo beside the name when the desktop has one [0.42ms]
+(pass) without a photo the chip falls back to the first letter, of the email when there is no name [0.02ms]
+(pass) the chip never loads a URL or a non-raster image, whatever the status carries [0.03ms]
+
+ 3 pass
+ 0 fail
+ 9 expect() calls
+Ran 3 tests across 1 file. [129.00ms]
