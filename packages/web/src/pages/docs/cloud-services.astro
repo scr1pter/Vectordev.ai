@@ -124,11 +124,13 @@ export const prerender = true
     permissions, a permission rule that allows it and an earlier approval never skip these prompts, and none of them
     offers Always allow. Only the read-only migration dry run can be answered by auto-accept. Vector also looks for
     direct calls to the Vercel or Supabase command-line tool in the agent's shell commands, such as vercel --prod,
-    vercel env add or supabase db push, including calls behind wrappers such as timeout or xargs, package runners and
-    sh -c, and asks for those the same way every time. Local work such as supabase start does not ask; vercel dev
-    does, since it downloads the project's Development variables. This is a best-effort check on direct calls, not a
-    boundary: a call it cannot see, such as one inside a project script (npm run deploy), behind a variable, or in a
-    program that uses the command-line tool's stored login itself, runs without that prompt. Only the shell sandbox
+    vercel env add or supabase db push, including quoted or escaped spellings such as ve''rcel, calls behind
+    wrappers such as timeout, xargs, script, arch or strace, package runners such as npx, pnpm dlx, corepack or deno
+    run npm:vercel, node running the CLI's own file, and sh -c, and asks for those the same way every time. Local work
+    such as supabase start does not ask; vercel dev does, since it downloads the project's Development variables.
+    This is a best-effort check on the command line, not a boundary: a call it cannot see, such as one inside a
+    project script (npm run deploy), behind a variable, an alias or a wrapper it does not know, or in a program that
+    uses the command-line tool's stored login itself, runs without that prompt. Only the shell sandbox
     (VECTOR_SHELL_SANDBOX=1, off by default), which hides those stored logins from the agent's commands, closes that
     route. Vercel's and Supabase's own MCP servers, added from Plugins or by hand, follow the same rule: a tool that
     changes the account, runs SQL or returns keys asks every time and shows its input, while plain list and read tools

@@ -7,11 +7,12 @@ import path from "node:path"
 // auto-accept, permission rules and earlier approvals never answer
 // (PermissionPolicy). Typed into the shell instead, it would run on the CLI's
 // own login without a prompt, so the shell asks under that same permission.
-// This is a best-effort reading of the command line: it sees the CLI behind
-// wrappers, package runners and `sh -c` strings (`script`), but not behind a
-// project script (`npm run deploy`), a variable (`$CLI --prod`) or a program
-// that calls the API itself. Only the shell sandbox, which hides the CLI
-// logins, closes those routes.
+// This is a best-effort reading of the command line: it reads words as the
+// shell does (`ve''rcel`), and sees the CLI behind wrappers, package runners,
+// node running its entry file and `sh -c` strings (`script`), but not behind a
+// project script (`npm run deploy`), a variable (`$CLI --prod`), an alias, a
+// wrapper it does not list or a program that calls the API itself. Only the
+// shell sandbox, which hides the CLI logins, closes those routes.
 
 export type Permission =
   | "vector_cloud_publish"
@@ -30,10 +31,11 @@ export type Request = {
 
 /** What a shell command's tokens ask for, or undefined when it touches no cloud account. */
 export function request(tokens: readonly string[]): Request | undefined {
-  const invocation = unwrap(tokens.map(unquote))
-  if (!invocation || "script" in invocation) return
-  if (invocation.cli === "vercel") return vercel(invocation.args)
-  return supabase(invocation.args)
+  return readings(tokens)
+    .map(unwrap)
+    .flatMap((invocation) => (invocation && !("script" in invocation) ? [invocation] : []))
+    .map((invocation) => (invocation.cli === "vercel" ? vercel(invocation.args) : supabase(invocation.args)))
+    .find((found) => found !== undefined)
 }
 
 /**
@@ -42,8 +44,16 @@ export function request(tokens: readonly string[]): Request | undefined {
  * checks each command in it as its own.
  */
 export function script(tokens: readonly string[]): string | undefined {
-  const invocation = unwrap(tokens.map(unquote))
-  if (invocation && "script" in invocation) return invocation.script
+  return readings(tokens)
+    .map(unwrap)
+    .flatMap((invocation) => (invocation && "script" in invocation ? [invocation.script] : []))[0]
+}
+
+// The words as a POSIX shell runs them, with quotes and backslash escapes removed (`ve''rcel`, `v\ercel`,
+// `"supa"base`), and as written apart from enclosing quotes, where a backslash separates Windows folders
+// (`C:\tools\vercel.cmd`).
+function readings(tokens: readonly string[]) {
+  return [tokens.map(word), tokens.map(unquote)]
 }
 
 type Invocation = { cli: "vercel" | "supabase"; args: string[] } | { script: string }
@@ -92,6 +102,14 @@ const WRAPPERS: Record<string, { values: Set<string>; positional?: number }> = {
   chronic: { values: new Set() },
   unbuffer: { values: new Set() },
   setsid: { values: new Set() },
+  // Run the command under another architecture, a tracer or a package manager shim:
+  // `arch -arm64 vercel`, `strace -f vercel`, `corepack pnpm dlx vercel`.
+  arch: { values: new Set(["-e", "-d"]) },
+  strace: {
+    values: new Set(["-e", "-o", "-p", "-s", "-u", "-E", "-P", "-I", "-a", "-b", "-X", "-O", "-S", "-U"]),
+  },
+  ltrace: { values: new Set(["-e", "-o", "-p", "-s", "-u", "-a", "-n", "-l", "-L", "-x", "-F", "-A", "-D"]) },
+  corepack: { values: new Set() },
   // Package runners that run a package's binary: `npx --yes vercel@59 deploy`.
   // Their `-c` runs a command line, which the quoted-program rule below reads.
   npx: { values: new Set(["-p", "--package"]) },
@@ -109,7 +127,16 @@ const RUNNERS: Record<string, { verbs: Set<string>; values: Set<string> }> = {
   },
   yarn: { verbs: new Set(["dlx", "exec", "run"]), values: new Set(["--cwd", "-p", "--package"]) },
   bun: { verbs: new Set(["x", "run"]), values: new Set(["--cwd", "-c", "--config", "--env-file", "-r", "--preload"]) },
+  // `deno run -A npm:vercel --prod`
+  deno: {
+    verbs: new Set(["run", "x"]),
+    values: new Set(["-c", "--config", "--import-map", "--location", "--seed", "--cert", "-L", "--log-level"]),
+  },
 }
+// Node's options that take a value, before the script it runs: `node -r ./hook.js node_modules/vercel/dist/index.js`.
+const NODE_VALUE_FLAGS = new Set(["-r", "--require", "--import", "--loader", "--experimental-loader", "--conditions", "-C"])
+// `script -q /dev/null vercel --prod` (BSD) runs the command after its log file; `script -c "..."` (Linux) runs a string.
+const SCRIPT_VALUE_FLAGS = new Set(["-t", "-T", "-F", "-E", "--echo", "-I", "--log-in", "-O", "--log-out", "-B", "--log-io", "-m", "--logging-format"])
 // Shells whose `-c` runs the argument after it as a command line.
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"])
 const SHELL_VALUE_FLAGS = new Set(["-o", "+o", "-O", "+O", "--rcfile", "--init-file"])
@@ -127,6 +154,8 @@ function unwrap(tokens: string[]): Invocation | undefined {
   if (name === "watch") return { script: skipOptions(rest, WATCH_VALUE_FLAGS).join(" ") }
   if (SHELLS.has(name)) return shell(rest, false)
   if (name === "find") return find(rest)
+  if (name === "node" || name === "nodejs") return node(rest)
+  if (name === "script") return scriptCommand(rest)
   // `command -v vercel` only looks the program up.
   if (name === "command" && (rest[0] === "-v" || rest[0] === "-V")) return
   const wrapper = WRAPPERS[name]
@@ -145,6 +174,23 @@ function run(tokens: string[], runner: { verbs: Set<string>; values: Set<string>
   if (next === "vercel" || next === "vc" || next === "supabase") return unwrap(rest)
   if (!runner.verbs.has(next)) return
   return unwrap(skipOptions(rest.slice(1), runner.values))
+}
+
+// `node node_modules/vercel/dist/index.js deploy` runs the CLI's own entry point; `node -e` runs code, not a command.
+function node(tokens: string[]): Invocation | undefined {
+  const [file, ...rest] = skipOptions(tokens, NODE_VALUE_FLAGS)
+  if (!file) return
+  const cli = file.replaceAll("\\", "/").match(/(?:^|\/)node_modules\/(?:\.bin\/)?(vercel|supabase)(?:\/|$)/)?.[1]
+  if (cli === "vercel" || cli === "supabase") return { cli, args: rest }
+  return unwrap([file, ...rest])
+}
+
+function scriptCommand(tokens: string[]): Invocation | undefined {
+  const command = tokens.findIndex((token) => token === "-c" || token === "--command")
+  if (command !== -1) return tokens[command + 1] !== undefined ? { script: tokens[command + 1] } : undefined
+  const inline = tokens.find((token) => token.startsWith("--command="))
+  if (inline) return { script: inline.slice("--command=".length) }
+  return unwrap(skipOptions(tokens, SCRIPT_VALUE_FLAGS).slice(1))
 }
 
 // `bash -lc "vercel --prod"` runs its argument; `bash deploy.sh` runs a file,
@@ -182,14 +228,24 @@ function skipOptions(tokens: string[], values: ReadonlySet<string>): string[] {
   return skipOptions(rest, values)
 }
 
-// The program a token names: a path's file name, without a Windows extension
-// or an npm version (`vercel@59.26.0`).
+// The program a token names: a path's file name, without a Windows extension,
+// an npm: specifier (`deno run npm:vercel`) or an npm version (`vercel@59.26.0`).
 function program(token: string) {
   return path
-    .basename(token.replaceAll("\\", "/"))
+    .basename(token.replaceAll("\\", "/").replace(/^npm:/i, ""))
     .toLowerCase()
     .replace(/\.(cmd|exe|ps1|bat|js|mjs|cjs)$/, "")
     .replace(/@[^@/]*$/, "")
+}
+
+// A word as a POSIX shell reads it: single quotes keep everything literally, double quotes keep all but a
+// backslash before $ ` " \ or a newline, and outside quotes a backslash keeps the next character.
+function word(text: string) {
+  return text.replace(
+    /'([^']*)'|"((?:[^"\\]|\\.)*)"|\\(.)/gs,
+    (_, single?: string, double?: string, escaped?: string) =>
+      single ?? (double === undefined ? escaped : double.replace(/\\([$`"\\\n])/g, "$1")) ?? "",
+  )
 }
 
 function unquote(text: string) {

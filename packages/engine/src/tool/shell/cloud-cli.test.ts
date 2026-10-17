@@ -241,5 +241,38 @@ describe("cloud CLI commands in the shell", () => {
 
   test("reads quoted program names and arguments as the shell does", () => {
     expect(CloudCli.request(['"vercel"', "'--prod'"])).toMatchObject({ environment: "production" })
+    // Tokens arrive as the raw shell text, so quotes and escapes inside a word are the shell's to remove.
+    const cases: Array<[string[], string]> = [
+      [["ve''rcel", "--prod"], "production"],
+      [['v"ercel"', "--prod"], "production"],
+      [["v\\ercel", "--prod"], "production"],
+      [["vercel", "--pr''od"], "production"],
+      [["supa''base", "db", "push"], "linked project"],
+      [["C:\\tools\\vercel.cmd", "--prod"], "production"],
+    ]
+    for (const [tokens, environment] of cases) {
+      expect({ tokens, environment: CloudCli.request(tokens)?.environment }).toEqual({ tokens, environment })
+    }
+  })
+
+  test("sees the CLI run by node, deno, corepack, script, arch and tracers", () => {
+    const cases: Array<[string, string]> = [
+      ["node node_modules/vercel/dist/index.js deploy --prod", "production"],
+      ["node --require ./hook.js node_modules/.bin/vercel --prod", "production"],
+      ["node node_modules/supabase/bin/supabase db push", "linked project"],
+      ["deno run -A npm:vercel --prod", "production"],
+      ["deno run -A npm:vercel@59 deploy", "preview"],
+      ["corepack pnpm dlx vercel --prod", "production"],
+      ["script -q /dev/null vercel --prod", "production"],
+      ["arch -arm64 vercel --prod", "production"],
+      ["strace -f -o trace.txt vercel --prod", "production"],
+    ]
+    for (const [command, environment] of cases) {
+      expect({ command, environment: ask(command)?.environment }).toEqual({ command, environment })
+    }
+    expect(CloudCli.script(["script", "-q", "-c", '"vercel --prod"', "/dev/null"])).toBe("vercel --prod")
+    for (const command of ["node build.js", "node -e 1", "script -q /dev/null ls", "deno run main.ts", "echo vercel"]) {
+      expect({ command, request: ask(command) }).toEqual({ command, request: undefined })
+    }
   })
 })
