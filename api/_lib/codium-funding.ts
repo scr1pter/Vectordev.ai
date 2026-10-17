@@ -129,8 +129,8 @@ async function measureFunding(fetcher: typeof fetch, now: number) {
 
 /**
  * Sales stay open only while the balance covers what customers hold, the credits in checkouts that may still be paid
- * for, and one more of the largest purchase, with the margin. The last term means that whenever reserveCodiumSale has
- * to refuse a purchase, this check pauses sales and tells the owner.
+ * for, and one more of the largest purchase, with the margin. The last term means that once reserveCodiumSale has had
+ * to refuse a purchase, the next check pauses sales and tells the owner, unless the balance has grown since.
  */
 async function fundingReading(fetcher: typeof fetch, now: number) {
   const margin = fundingMargin()
