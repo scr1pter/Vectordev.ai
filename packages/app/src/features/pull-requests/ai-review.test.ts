@@ -494,6 +494,24 @@ describe("runReview", () => {
     })
   })
 
+  test("a reviewer the run guard paused is a partial review, with the guard's reason", async () => {
+    const paused =
+      "Paused a repeating loop: `read` returned the same result for the same input 3 times, with no new results or file changes in between."
+    const { client } = fakeClient({
+      files: { "src/list.ts": HEAD, ...NO_VERIFY },
+      reply: (call) => {
+        if (call.parts?.[0]?.text === buildFinalizePrompt()) return answer(report())
+        const message = answer(undefined)
+        const error = { name: "BudgetStopError", data: { reason: "loop", message: paused } }
+        return { ...message, info: { ...message.info, error } }
+      },
+    })
+    const outcome = (await run(client))!
+    expect(outcome.specialists[0]).toMatchObject({ name: "review", status: "stopped", detail: paused })
+    expect(outcome.banners.join("\n")).toContain("**Partial review.** Vector's run guard stopped the review reviewer:")
+    expect(outcome.selection.inline).toHaveLength(1)
+  })
+
   test("a failed review names its first turn's error, not the finalize turn's that followed from it", async () => {
     const { client } = fakeClient({
       files: { "src/list.ts": HEAD, ...NO_VERIFY },
