@@ -299,13 +299,21 @@ describe("HttpApi workspace routing middleware", () => {
               query: WorkspaceRoutingQuery,
               success: Schema.Boolean,
             }),
-            ...(["register", "poll", "receipt"] as const).map((action) =>
-              HttpApiEndpoint.post(action, `/experimental/session/:sessionID/tasks/bridge/${action}`, {
-                params: Schema.Struct({ sessionID: SessionID }),
-                query: WorkspaceRoutingQuery,
-                success: Schema.Boolean,
-              }),
-            ),
+            HttpApiEndpoint.post("register", "/experimental/session/:sessionID/tasks/bridge/register", {
+              params: Schema.Struct({ sessionID: SessionID }),
+              query: WorkspaceRoutingQuery,
+              success: Schema.Boolean,
+            }),
+            HttpApiEndpoint.post("poll", "/experimental/session/:sessionID/tasks/bridge/poll", {
+              params: Schema.Struct({ sessionID: SessionID }),
+              query: WorkspaceRoutingQuery,
+              success: Schema.Boolean,
+            }),
+            HttpApiEndpoint.post("receipt", "/experimental/session/:sessionID/tasks/bridge/receipt", {
+              params: Schema.Struct({ sessionID: SessionID }),
+              query: WorkspaceRoutingQuery,
+              success: Schema.Boolean,
+            }),
           )
           .middleware(WorkspaceRoutingMiddleware),
       )
