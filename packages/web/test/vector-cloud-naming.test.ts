@@ -19,3 +19,15 @@ test("the docs and landing page never call it Cloud Services or send people to I
   expect(files).toContain("pages/docs/cloud-services.astro")
   expect(texts.filter((item) => OLD_NAMES.test(item.text)).map((item) => item.file)).toEqual([])
 })
+
+test("the Cloud docs say where Cloud opens in terms of the repository, not a project", async () => {
+  const text = (await Bun.file(path.join(import.meta.dir, "../src/pages/docs/cloud-services.astro")).text()).replace(
+    /\s+/g,
+    " ",
+  )
+  // The note on what desktop 1.99.108 and earlier still show describes the repository's own Cloud state.
+  expect(text).toContain(
+    "a Cloud button in each session that shows the repository's hosting, database and latest release.",
+  )
+  expect(text).toContain("Open Vector Cloud from Home, pick the repository, then open Connections.")
+})
