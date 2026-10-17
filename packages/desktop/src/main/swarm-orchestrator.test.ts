@@ -71,7 +71,7 @@ describe("swarm lifecycle", () => {
   let server: ReturnType<typeof Bun.serve>
   let prompted = Promise.withResolvers<void>()
   // A test can answer engine requests itself; anything it returns undefined for gets the planner defaults below.
-  let route: (url: URL, request: Request) => Response | Promise<Response> | undefined = () => undefined
+  let route: (url: URL, request: Request) => Response | Promise<Response | undefined> | undefined = () => undefined
   const requests: string[] = []
   const created: unknown[] = []
 
@@ -92,7 +92,7 @@ describe("swarm lifecycle", () => {
         requests.push(`${request.method} ${path}`)
         // A clone, so a test's own route can still read the body.
         if (request.method === "POST" && path === "/api/session") created.push(await request.clone().json())
-        const routed = route(url, request)
+        const routed = await route(url, request)
         if (routed) return routed
         if (path === "/api/session") return Response.json({ data: { id: "planner" } })
         if (path === "/session") return Response.json({ id: "planner" })
