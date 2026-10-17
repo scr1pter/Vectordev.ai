@@ -49,7 +49,9 @@ const layer = Layer.effect(
         Identifier.create("tool", "ascending", Date.now() - Duration.toMillis(RETENTION)),
       )
       const entries = yield* fs.readDirectory(TRUNCATION_DIR).pipe(
-        Effect.map((all) => all.filter((name) => name.startsWith("tool_"))),
+        // The directory also holds retained artifacts. Only generated tool IDs
+        // encode a timestamp; unrelated names must not abort or enter cleanup.
+        Effect.map((all) => all.filter((name) => /^tool_[0-9a-f]{12}[0-9A-Za-z]{14}$/.test(name))),
         Effect.catch(() => Effect.succeed([])),
       )
       for (const entry of entries) {
