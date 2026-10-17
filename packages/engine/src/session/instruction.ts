@@ -14,7 +14,6 @@ import { Global } from "@vectordevai/core/global"
 import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import { collectBoundedResponseBody } from "@vectordevai/core/tool/http-body"
 import { containsPath } from "@/project/instance-context"
-import { realpath } from "@/tool/external-directory"
 import type { MessageID } from "./schema"
 
 function extract(messages: SessionV1.WithParts[]) {
@@ -113,10 +112,18 @@ const layer: Layer.Layer<
       const ctx = yield* InstanceState.context
       if (!containsPath(file, ctx)) return true
       // A link that cannot be resolved (a loop) cannot be read either, and the read reports it.
-      const resolved = yield* Effect.try({ try: () => realpath(file), catch: (error) => error }).pipe(Effect.option)
+      const resolved = yield* Effect.try({ try: () => FSUtil.realpath(file), catch: (error) => error }).pipe(
+        Effect.option,
+      )
       if (Option.isNone(resolved)) return true
       const target = resolved.value
-      if (containsPath(target, { ...ctx, directory: realpath(ctx.directory), worktree: realpath(ctx.worktree) }))
+      if (
+        containsPath(target, {
+          ...ctx,
+          directory: FSUtil.realpath(ctx.directory),
+          worktree: FSUtil.realpath(ctx.worktree),
+        })
+      )
         return true
       yield* Effect.logWarning("not loading a project instruction file that links outside the project", { file, target })
       return false

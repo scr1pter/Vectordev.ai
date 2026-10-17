@@ -1,5 +1,5 @@
-import { dirname, isAbsolute, join, relative, resolve as pathResolve, sep } from "path"
-import { realpathSync } from "fs"
+import { basename, dirname, isAbsolute, join, relative, resolve as pathResolve, sep } from "path"
+import { lstatSync, readlinkSync, realpathSync } from "fs"
 import * as NFS from "fs/promises"
 import { lookup } from "mime-types"
 import { Context, Effect, FileSystem, Layer, Schema } from "effect"
@@ -233,6 +233,23 @@ export namespace FSUtil {
       if (e?.code === "ENOENT") return normalizePath(resolved)
       throw e
     }
+  }
+
+  /** Where a path really lands, following links in it and in its parents, even when the file does not exist yet. */
+  export function realpath(target: string): string {
+    const resolved = resolve(target)
+    const link = lstatSync(resolved, { throwIfNoEntry: false })
+    // A dangling symlink cannot be resolved by realpath, but writing through it
+    // still lands wherever it points, so follow the link by hand.
+    if (link?.isSymbolicLink()) return realpath(pathResolve(dirname(resolved), readlinkSync(resolved)))
+    if (link) return resolved
+    // resolve hands back the lexical path for something that does not exist
+    // yet, which still looks project-local when a parent is a link pointing out of
+    // the project. Resolve the deepest existing ancestor and re-attach the rest so
+    // creating a file cannot escape either.
+    const parent = dirname(resolved)
+    if (parent === resolved) return resolved
+    return join(realpath(parent), basename(resolved))
   }
 
   export function windowsPath(p: string): string {
