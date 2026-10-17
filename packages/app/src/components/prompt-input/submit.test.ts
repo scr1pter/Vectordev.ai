@@ -109,13 +109,6 @@ beforeAll(async () => {
     useSearchParams: () => [search, () => undefined],
   }))
 
-  mock.module("@vectordevai/sdk/v2/client", () => ({
-    createVectorClient: (input: { directory: string }) => {
-      createdClients.push(input.directory)
-      return clientFor(input.directory)
-    },
-  }))
-
   mock.module("@vectordevai/ui/toast", () => ({
     Toast: { Region: () => null },
     showToast: (options: { title?: string; description?: string }) => {

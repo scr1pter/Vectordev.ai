@@ -1,7 +1,22 @@
-import { describe, expect, test } from "bun:test"
+import { beforeAll, describe, expect, mock, test } from "bun:test"
 import type { PermissionRequest, QuestionRequest, Session } from "@vectordevai/sdk/v2/client"
-import { todoDockAtBoundary, todoState } from "./session-composer-state"
 import { sessionPermissionRequest, sessionQuestionRequest } from "./session-request-tree"
+
+let todoDockAtBoundary: typeof import("./session-composer-state").todoDockAtBoundary
+let todoState: typeof import("./session-composer-state").todoState
+
+// The router registers browser event handlers when it loads, which solid's server build rejects outside a browser.
+beforeAll(async () => {
+  mock.module("@solidjs/router", () => ({
+    useNavigate: () => () => undefined,
+    useParams: () => ({}),
+    useLocation: () => ({}),
+    useSearchParams: () => [{}, () => undefined],
+  }))
+  const mod = await import("./session-composer-state")
+  todoDockAtBoundary = mod.todoDockAtBoundary
+  todoState = mod.todoState
+})
 
 const session = (input: { id: string; parentID?: string }) =>
   ({
