@@ -27,7 +27,7 @@ These figures are modeled USD, not invoices. The original scripts used implicit 
 
 The fake provider routes independent scripts by each child's original brief and observed session identity. It does not use a global step cursor or identify children by a different toolset. Barriers are event-driven, with no status polling or model-generated waiting turns. Parent and child operations can interleave freely. Every request, including side/title requests and extra notification turns, contributes to the report.
 
-A cell is valid only if the CLI exits successfully, all required script steps are consumed, management tools succeed, required dependency/steer evidence reaches the child, the fixture tests pass, and protected test files are unchanged. Invalid cells remain in the JSON, and the harness exits unsuccessfully. Missing runtime adapters are unavailable, not zero-cost successes. The Codex inline delegate adapter remains a different topology and the new management scenarios are unavailable there.
+A cell is valid only if the CLI exits successfully, all required script steps are consumed, management tools succeed, required dependency/steer evidence reaches the child, every scripted success-verification step returns a passing test receipt, the independent fixture tests pass, and protected test files are unchanged. The fixture's initial failing test is explicitly allowed. The `baseline-*-verified.json` reruns use this stricter receipt check; earlier archives are retained. Invalid cells remain in the JSON, and the harness exits unsuccessfully. Missing runtime adapters are unavailable, not zero-cost successes. The Codex inline delegate adapter remains a different topology and the new management scenarios are unavailable there.
 
 ## Reproduction
 

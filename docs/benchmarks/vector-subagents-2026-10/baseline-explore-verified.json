@@ -1,0 +1,2678 @@
+{
+  "models": {
+    "anthropic": "claude-sonnet-4-5",
+    "openai": "gpt-5.5",
+    "codex": "gpt-5.5"
+  },
+  "rates": {
+    "messages": {
+      "input": 3,
+      "cacheWrite": 3.75,
+      "cacheRead": 0.3,
+      "output": 15
+    },
+    "responses": {
+      "input": 2,
+      "cacheWrite": 0,
+      "cacheRead": 0.1,
+      "output": 10
+    }
+  },
+  "sessions": 2,
+  "websocket": false,
+  "engineRoot": "/Users/Krishna/.codex/worktrees/subagent-baseline/Vectordev.ai",
+  "engineRevision": "bdec3b29ea0dd4b5a01b6be184b6423ae095b0b0",
+  "harnessRevision": "081d93a0dd07e060d4c407697822612f37feb217",
+  "runtimeVersions": {
+    "bun": "1.3.14",
+    "claude-code": "2.1.215 (Claude Code)"
+  },
+  "estimation": "Offline characters/4 token estimates at frozen catalog rates; cache routing, TTL and real model quality are not measured.",
+  "memorySamplingMs": 100,
+  "payloadEncoding": "utf8",
+  "scenarios": [
+    {
+      "scenario": "delegate-explore",
+      "runtime": "vector",
+      "session": 1,
+      "model": "claude-sonnet-4-5",
+      "exitCode": 0,
+      "unplayed": 0,
+      "actorRequests": {
+        "parent": 5,
+        "worker-0": 3
+      },
+      "scriptErrors": [],
+      "valid": true,
+      "performance": {
+        "wallMs": 27625.067,
+        "timeToFirstRequestMs": 9674.19075,
+        "requestTimesMs": [
+          9674.19075,
+          10313.843583,
+          10949.613083,
+          12152.161375,
+          14470.411416,
+          16284.285082999999,
+          21197.022041,
+          24573.075083
+        ],
+        "postTerminalMs": 3051.9919169999994,
+        "sampledPeakProcessTreeRssKiB": 303360,
+        "samples": [
+          {
+            "atMs": 211.43033300000002,
+            "phase": "startup",
+            "rssKiB": 47248
+          },
+          {
+            "atMs": 250.82841699999994,
+            "phase": "startup",
+            "rssKiB": 64384
+          },
+          {
+            "atMs": 368.6023749999997,
+            "phase": "startup",
+            "rssKiB": 73744
+          },
+          {
+            "atMs": 480.345,
+            "phase": "startup",
+            "rssKiB": 93872
+          },
+          {
+            "atMs": 622.512583,
+            "phase": "startup",
+            "rssKiB": 104176
+          },
+          {
+            "atMs": 677.8290420000001,
+            "phase": "startup",
+            "rssKiB": 103024
+          },
+          {
+            "atMs": 774.4780829999997,
+            "phase": "startup",
+            "rssKiB": 111168
+          },
+          {
+            "atMs": 873.673333,
+            "phase": "startup",
+            "rssKiB": 117584
+          },
+          {
+            "atMs": 1128.2425419999997,
+            "phase": "startup",
+            "rssKiB": 111632
+          },
+          {
+            "atMs": 1368.010208,
+            "phase": "startup",
+            "rssKiB": 99632
+          },
+          {
+            "atMs": 1426.613208,
+            "phase": "startup",
+            "rssKiB": 112304
+          },
+          {
+            "atMs": 1566.6947499999999,
+            "phase": "startup",
+            "rssKiB": 117616
+          },
+          {
+            "atMs": 1642.134042,
+            "phase": "startup",
+            "rssKiB": 115696
+          },
+          {
+            "atMs": 1750.716542,
+            "phase": "startup",
+            "rssKiB": 118000
+          },
+          {
+            "atMs": 1845.9281669999998,
+            "phase": "startup",
+            "rssKiB": 116960
+          },
+          {
+            "atMs": 1957.424792,
+            "phase": "startup",
+            "rssKiB": 123728
+          },
+          {
+            "atMs": 2083.098083,
+            "phase": "startup",
+            "rssKiB": 142048
+          },
+          {
+            "atMs": 2151.3989169999995,
+            "phase": "startup",
+            "rssKiB": 141792
+          },
+          {
+            "atMs": 2292.58,
+            "phase": "startup",
+            "rssKiB": 141616
+          },
+          {
+            "atMs": 2337.8,
+            "phase": "startup",
+            "rssKiB": 139520
+          },
+          {
+            "atMs": 2463.5099170000003,
+            "phase": "startup",
+            "rssKiB": 136096
+          },
+          {
+            "atMs": 2649.565458,
+            "phase": "startup",
+            "rssKiB": 139600
+          },
+          {
+            "atMs": 2766.4249580000005,
+            "phase": "startup",
+            "rssKiB": 152384
+          },
+          {
+            "atMs": 2887.742292,
+            "phase": "startup",
+            "rssKiB": 162544
+          },
+          {
+            "atMs": 3054.2594580000004,
+            "phase": "startup",
+            "rssKiB": 145504
+          },
+          {
+            "atMs": 3233.971375,
+            "phase": "startup",
+            "rssKiB": 148368
+          },
+          {
+            "atMs": 3333.5562500000005,
+            "phase": "startup",
+            "rssKiB": 143344
+          },
+          {
+            "atMs": 3587.458125,
+            "phase": "startup",
+            "rssKiB": 138352
+          },
+          {
+            "atMs": 3858.267667,
+            "phase": "startup",
+            "rssKiB": 134704
+          },
+          {
+            "atMs": 3992.2302500000005,
+            "phase": "startup",
+            "rssKiB": 138208
+          },
+          {
+            "atMs": 4166.976708,
+            "phase": "startup",
+            "rssKiB": 136928
+          },
+          {
+            "atMs": 4255.589667,
+            "phase": "startup",
+            "rssKiB": 162336
+          },
+          {
+            "atMs": 4446.810583,
+            "phase": "startup",
+            "rssKiB": 171120
+          },
+          {
+            "atMs": 4625.822667,
+            "phase": "startup",
+            "rssKiB": 150240
+          },
+          {
+            "atMs": 4819.6296250000005,
+            "phase": "startup",
+            "rssKiB": 150032
+          },
+          {
+            "atMs": 5004.440375,
+            "phase": "startup",
+            "rssKiB": 148160
+          },
+          {
+            "atMs": 5110.669458,
+            "phase": "startup",
+            "rssKiB": 156144
+          },
+          {
+            "atMs": 5204.941167,
+            "phase": "startup",
+            "rssKiB": 154880
+          },
+          {
+            "atMs": 5292.8648330000005,
+            "phase": "startup",
+            "rssKiB": 147360
+          },
+          {
+            "atMs": 5411.292083,
+            "phase": "startup",
+            "rssKiB": 139008
+          },
+          {
+            "atMs": 5463.693042,
+            "phase": "startup",
+            "rssKiB": 143200
+          },
+          {
+            "atMs": 5639.2480000000005,
+            "phase": "startup",
+            "rssKiB": 159376
+          },
+          {
+            "atMs": 5787.410958,
+            "phase": "startup",
+            "rssKiB": 162944
+          },
+          {
+            "atMs": 5888.314375,
+            "phase": "startup",
+            "rssKiB": 153600
+          },
+          {
+            "atMs": 5987.284167,
+            "phase": "startup",
+            "rssKiB": 152960
+          },
+          {
+            "atMs": 6119.319083,
+            "phase": "startup",
+            "rssKiB": 152768
+          },
+          {
+            "atMs": 6190.06425,
+            "phase": "startup",
+            "rssKiB": 153056
+          },
+          {
+            "atMs": 6381.1085,
+            "phase": "startup",
+            "rssKiB": 169456
+          },
+          {
+            "atMs": 6499.9169999999995,
+            "phase": "startup",
+            "rssKiB": 294496
+          },
+          {
+            "atMs": 6608.106958,
+            "phase": "startup",
+            "rssKiB": 303360
+          },
+          {
+            "atMs": 6705.945917000001,
+            "phase": "startup",
+            "rssKiB": 271104
+          },
+          {
+            "atMs": 6799.864958,
+            "phase": "startup",
+            "rssKiB": 277184
+          },
+          {
+            "atMs": 6905.136917,
+            "phase": "startup",
+            "rssKiB": 278624
+          },
+          {
+            "atMs": 7018.610917,
+            "phase": "startup",
+            "rssKiB": 275088
+          },
+          {
+            "atMs": 7126.908125,
+            "phase": "startup",
+            "rssKiB": 262016
+          },
+          {
+            "atMs": 7223.775750000001,
+            "phase": "startup",
+            "rssKiB": 265712
+          },
+          {
+            "atMs": 7331.046417,
+            "phase": "startup",
+            "rssKiB": 266368
+          },
+          {
+            "atMs": 7478.715542,
+            "phase": "startup",
+            "rssKiB": 265376
+          },
+          {
+            "atMs": 7556.550542000001,
+            "phase": "startup",
+            "rssKiB": 263392
+          },
+          {
+            "atMs": 7617.383417000001,
+            "phase": "startup",
+            "rssKiB": 261856
+          },
+          {
+            "atMs": 7762.207417,
+            "phase": "startup",
+            "rssKiB": 283472
+          },
+          {
+            "atMs": 7832.555542,
+            "phase": "startup",
+            "rssKiB": 287808
+          },
+          {
+            "atMs": 8018.530375,
+            "phase": "startup",
+            "rssKiB": 288848
+          },
+          {
+            "atMs": 8112.655917,
+            "phase": "startup",
+            "rssKiB": 285376
+          },
+          {
+            "atMs": 8211.632083,
+            "phase": "startup",
+            "rssKiB": 278768
+          },
+          {
+            "atMs": 8310.460917,
+            "phase": "startup",
+            "rssKiB": 274128
+          },
+          {
+            "atMs": 8379.824875,
+            "phase": "startup",
+            "rssKiB": 271488
+          },
+          {
+            "atMs": 8474.803625,
+            "phase": "startup",
+            "rssKiB": 280912
+          },
+          {
+            "atMs": 8649.440208,
+            "phase": "startup",
+            "rssKiB": 282624
+          },
+          {
+            "atMs": 8822.043917,
+            "phase": "startup",
+            "rssKiB": 288704
+          },
+          {
+            "atMs": 8915.168833,
+            "phase": "startup",
+            "rssKiB": 294560
+          },
+          {
+            "atMs": 9007.25225,
+            "phase": "startup",
+            "rssKiB": 293664
+          },
+          {
+            "atMs": 9117.130000000001,
+            "phase": "startup",
+            "rssKiB": 289344
+          },
+          {
+            "atMs": 9257.571125,
+            "phase": "startup",
+            "rssKiB": 289568
+          },
+          {
+            "atMs": 9367.145042,
+            "phase": "startup",
+            "rssKiB": 289216
+          },
+          {
+            "atMs": 9439.456417,
+            "phase": "startup",
+            "rssKiB": 285792
+          },
+          {
+            "atMs": 9536.946125,
+            "phase": "startup",
+            "rssKiB": 290624
+          },
+          {
+            "atMs": 9623.316667000001,
+            "phase": "startup",
+            "rssKiB": 292416
+          },
+          {
+            "atMs": 9728.621417,
+            "phase": "active",
+            "rssKiB": 279952
+          },
+          {
+            "atMs": 9831.732583,
+            "phase": "active",
+            "rssKiB": 258496
+          },
+          {
+            "atMs": 9958.598750000001,
+            "phase": "active",
+            "rssKiB": 222112
+          },
+          {
+            "atMs": 10084.141542,
+            "phase": "active",
+            "rssKiB": 219104
+          },
+          {
+            "atMs": 10141.243583,
+            "phase": "active",
+            "rssKiB": 208544
+          },
+          {
+            "atMs": 10240.774208,
+            "phase": "active",
+            "rssKiB": 225216
+          },
+          {
+            "atMs": 10333.384792,
+            "phase": "active",
+            "rssKiB": 237328
+          },
+          {
+            "atMs": 10420.182583,
+            "phase": "active",
+            "rssKiB": 234336
+          },
+          {
+            "atMs": 10596.067375,
+            "phase": "active",
+            "rssKiB": 236608
+          },
+          {
+            "atMs": 10637.546208,
+            "phase": "active",
+            "rssKiB": 237504
+          },
+          {
+            "atMs": 10774.69775,
+            "phase": "active",
+            "rssKiB": 236096
+          },
+          {
+            "atMs": 10913.981833,
+            "phase": "active",
+            "rssKiB": 235216
+          },
+          {
+            "atMs": 11070.851417,
+            "phase": "active",
+            "rssKiB": 230288
+          },
+          {
+            "atMs": 11169.261792,
+            "phase": "active",
+            "rssKiB": 231248
+          },
+          {
+            "atMs": 11286.909208000001,
+            "phase": "active",
+            "rssKiB": 230528
+          },
+          {
+            "atMs": 11400.650583,
+            "phase": "active",
+            "rssKiB": 231072
+          },
+          {
+            "atMs": 11497.795583000001,
+            "phase": "active",
+            "rssKiB": 219104
+          },
+          {
+            "atMs": 11598.725,
+            "phase": "active",
+            "rssKiB": 218880
+          },
+          {
+            "atMs": 11725.429292,
+            "phase": "active",
+            "rssKiB": 221632
+          },
+          {
+            "atMs": 11786.960375,
+            "phase": "active",
+            "rssKiB": 219120
+          },
+          {
+            "atMs": 11880.55125,
+            "phase": "active",
+            "rssKiB": 225312
+          },
+          {
+            "atMs": 12008.107292,
+            "phase": "active",
+            "rssKiB": 219104
+          },
+          {
+            "atMs": 12108.790625,
+            "phase": "active",
+            "rssKiB": 218624
+          },
+          {
+            "atMs": 12207.23825,
+            "phase": "active",
+            "rssKiB": 209072
+          },
+          {
+            "atMs": 12328.141667,
+            "phase": "active",
+            "rssKiB": 212544
+          },
+          {
+            "atMs": 12444.683875,
+            "phase": "active",
+            "rssKiB": 208048
+          },
+          {
+            "atMs": 12545.999417,
+            "phase": "active",
+            "rssKiB": 204176
+          },
+          {
+            "atMs": 12594.413208,
+            "phase": "active",
+            "rssKiB": 201376
+          },
+          {
+            "atMs": 12730.339750000001,
+            "phase": "active",
+            "rssKiB": 198336
+          },
+          {
+            "atMs": 12942.49325,
+            "phase": "active",
+            "rssKiB": 199120
+          },
+          {
+            "atMs": 13088.291625,
+            "phase": "active",
+            "rssKiB": 203088
+          },
+          {
+            "atMs": 13249.5845,
+            "phase": "active",
+            "rssKiB": 194192
+          },
+          {
+            "atMs": 13340.524458,
+            "phase": "active",
+            "rssKiB": 192656
+          },
+          {
+            "atMs": 13429.404333,
+            "phase": "active",
+            "rssKiB": 194144
+          },
+          {
+            "atMs": 13538.170833,
+            "phase": "active",
+            "rssKiB": 191392
+          },
+          {
+            "atMs": 13656.020667,
+            "phase": "active",
+            "rssKiB": 189200
+          },
+          {
+            "atMs": 13755.625083,
+            "phase": "active",
+            "rssKiB": 192624
+          },
+          {
+            "atMs": 13853.754917,
+            "phase": "active",
+            "rssKiB": 183552
+          },
+          {
+            "atMs": 14016.490458,
+            "phase": "active",
+            "rssKiB": 199952
+          },
+          {
+            "atMs": 14249.2945,
+            "phase": "active",
+            "rssKiB": 193568
+          },
+          {
+            "atMs": 14400.849167,
+            "phase": "active",
+            "rssKiB": 179792
+          },
+          {
+            "atMs": 14513.706583000001,
+            "phase": "active",
+            "rssKiB": 186384
+          },
+          {
+            "atMs": 14705.53125,
+            "phase": "active",
+            "rssKiB": 185552
+          },
+          {
+            "atMs": 14803.347042000001,
+            "phase": "active",
+            "rssKiB": 186624
+          },
+          {
+            "atMs": 14894.619917,
+            "phase": "active",
+            "rssKiB": 184784
+          },
+          {
+            "atMs": 15017.247792000002,
+            "phase": "active",
+            "rssKiB": 186800
+          },
+          {
+            "atMs": 15099.724167,
+            "phase": "active",
+            "rssKiB": 183584
+          },
+          {
+            "atMs": 15255.668333000001,
+            "phase": "active",
+            "rssKiB": 182736
+          },
+          {
+            "atMs": 15458.092874999998,
+            "phase": "active",
+            "rssKiB": 186464
+          },
+          {
+            "atMs": 15542.017333,
+            "phase": "active",
+            "rssKiB": 195008
+          },
+          {
+            "atMs": 15625.632542,
+            "phase": "active",
+            "rssKiB": 186176
+          },
+          {
+            "atMs": 15753.203792,
+            "phase": "active",
+            "rssKiB": 186112
+          },
+          {
+            "atMs": 15864.949541999998,
+            "phase": "active",
+            "rssKiB": 189488
+          },
+          {
+            "atMs": 15999.376832999998,
+            "phase": "active",
+            "rssKiB": 188224
+          },
+          {
+            "atMs": 16171.462833000001,
+            "phase": "active",
+            "rssKiB": 186496
+          },
+          {
+            "atMs": 16254.442542,
+            "phase": "active",
+            "rssKiB": 190464
+          },
+          {
+            "atMs": 16349.660375,
+            "phase": "active",
+            "rssKiB": 188528
+          },
+          {
+            "atMs": 16480.126083,
+            "phase": "active",
+            "rssKiB": 191504
+          },
+          {
+            "atMs": 16558.7265,
+            "phase": "active",
+            "rssKiB": 193600
+          },
+          {
+            "atMs": 16648.978292,
+            "phase": "active",
+            "rssKiB": 184640
+          },
+          {
+            "atMs": 16800.060458,
+            "phase": "active",
+            "rssKiB": 185712
+          },
+          {
+            "atMs": 17016.855917,
+            "phase": "active",
+            "rssKiB": 185152
+          },
+          {
+            "atMs": 17359.737625,
+            "phase": "active",
+            "rssKiB": 182080
+          },
+          {
+            "atMs": 18662.777625,
+            "phase": "active",
+            "rssKiB": 171552
+          },
+          {
+            "atMs": 19469.867792,
+            "phase": "active",
+            "rssKiB": 140320
+          },
+          {
+            "atMs": 19727.286583,
+            "phase": "active",
+            "rssKiB": 138416
+          },
+          {
+            "atMs": 19998.622583,
+            "phase": "active",
+            "rssKiB": 146496
+          },
+          {
+            "atMs": 20191.073625,
+            "phase": "active",
+            "rssKiB": 174720
+          },
+          {
+            "atMs": 20605.431458,
+            "phase": "active",
+            "rssKiB": 181920
+          },
+          {
+            "atMs": 20900.628583,
+            "phase": "active",
+            "rssKiB": 178144
+          },
+          {
+            "atMs": 21021.726458,
+            "phase": "active",
+            "rssKiB": 181424
+          },
+          {
+            "atMs": 21263.248792,
+            "phase": "active",
+            "rssKiB": 186016
+          },
+          {
+            "atMs": 21510.103792,
+            "phase": "active",
+            "rssKiB": 193504
+          },
+          {
+            "atMs": 21639.509000000002,
+            "phase": "active",
+            "rssKiB": 180720
+          },
+          {
+            "atMs": 21822.07575,
+            "phase": "active",
+            "rssKiB": 183712
+          },
+          {
+            "atMs": 21999.205083,
+            "phase": "active",
+            "rssKiB": 181968
+          },
+          {
+            "atMs": 22213.404375000002,
+            "phase": "active",
+            "rssKiB": 162208
+          },
+          {
+            "atMs": 22357.107167000002,
+            "phase": "active",
+            "rssKiB": 163952
+          },
+          {
+            "atMs": 22572.539583,
+            "phase": "active",
+            "rssKiB": 169376
+          },
+          {
+            "atMs": 22766.58125,
+            "phase": "active",
+            "rssKiB": 169776
+          },
+          {
+            "atMs": 22991.808,
+            "phase": "active",
+            "rssKiB": 158240
+          },
+          {
+            "atMs": 23178.5615,
+            "phase": "active",
+            "rssKiB": 156368
+          },
+          {
+            "atMs": 23303.769042,
+            "phase": "active",
+            "rssKiB": 174208
+          },
+          {
+            "atMs": 23472.470708,
+            "phase": "active",
+            "rssKiB": 166560
+          },
+          {
+            "atMs": 23687.91075,
+            "phase": "active",
+            "rssKiB": 175392
+          },
+          {
+            "atMs": 23841.531292,
+            "phase": "active",
+            "rssKiB": 265552
+          },
+          {
+            "atMs": 23960.454542,
+            "phase": "active",
+            "rssKiB": 257936
+          },
+          {
+            "atMs": 24056.864,
+            "phase": "active",
+            "rssKiB": 270256
+          },
+          {
+            "atMs": 24192.454,
+            "phase": "active",
+            "rssKiB": 266288
+          },
+          {
+            "atMs": 24365.243875,
+            "phase": "active",
+            "rssKiB": 255872
+          },
+          {
+            "atMs": 24472.854417,
+            "phase": "active",
+            "rssKiB": 258144
+          },
+          {
+            "atMs": 24622.907083000002,
+            "phase": "tail",
+            "rssKiB": 261056
+          },
+          {
+            "atMs": 24851.380875,
+            "phase": "tail",
+            "rssKiB": 258736
+          },
+          {
+            "atMs": 25017.675625,
+            "phase": "tail",
+            "rssKiB": 254368
+          },
+          {
+            "atMs": 25188.54325,
+            "phase": "tail",
+            "rssKiB": 255456
+          },
+          {
+            "atMs": 25319.512583,
+            "phase": "tail",
+            "rssKiB": 256176
+          },
+          {
+            "atMs": 25488.374,
+            "phase": "tail",
+            "rssKiB": 254928
+          },
+          {
+            "atMs": 25624.325125,
+            "phase": "tail",
+            "rssKiB": 249936
+          },
+          {
+            "atMs": 25786.450417,
+            "phase": "tail",
+            "rssKiB": 248432
+          },
+          {
+            "atMs": 25858.058208,
+            "phase": "tail",
+            "rssKiB": 232800
+          },
+          {
+            "atMs": 26010.442458,
+            "phase": "tail",
+            "rssKiB": 206288
+          },
+          {
+            "atMs": 26078.446958,
+            "phase": "tail",
+            "rssKiB": 210464
+          },
+          {
+            "atMs": 26211.219167,
+            "phase": "tail",
+            "rssKiB": 197392
+          },
+          {
+            "atMs": 26300.921792,
+            "phase": "tail",
+            "rssKiB": 200144
+          },
+          {
+            "atMs": 26500.972042,
+            "phase": "tail",
+            "rssKiB": 194320
+          },
+          {
+            "atMs": 26586.976167,
+            "phase": "tail",
+            "rssKiB": 193392
+          },
+          {
+            "atMs": 26724.8875,
+            "phase": "tail",
+            "rssKiB": 194608
+          },
+          {
+            "atMs": 26873.950625,
+            "phase": "tail",
+            "rssKiB": 194864
+          },
+          {
+            "atMs": 27036.187083,
+            "phase": "tail",
+            "rssKiB": 195824
+          },
+          {
+            "atMs": 27098.859583,
+            "phase": "tail",
+            "rssKiB": 198896
+          },
+          {
+            "atMs": 27279.237083,
+            "phase": "tail",
+            "rssKiB": 198880
+          },
+          {
+            "atMs": 27472.574417,
+            "phase": "tail",
+            "rssKiB": 210400
+          },
+          {
+            "atMs": 27671.267875,
+            "phase": "tail",
+            "rssKiB": 0
+          }
+        ]
+      },
+      "verification": {
+        "exitCode": 0,
+        "output": "bun test v1.3.14 (0d9b296a)\n\ntest/invoice.test.ts:\n(pass) an invoice due today is not overdue yet [0.60ms]\n(pass) paid invoices are never overdue [0.10ms]\n(pass) the overdue total sums only overdue invoices [0.12ms]\n\n 3 pass\n 0 fail\n 3 expect() calls\nRan 3 tests across 1 file. [357.00ms]\n"
+      },
+      "requests": [
+        {
+          "index": 1,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 97,
+          "inputTokens": 9027,
+          "cacheRead": 0,
+          "cacheWrite": 9027,
+          "uncached": 0,
+          "outputTokens": 47,
+          "sentBytes": 36336,
+          "costUsd": 0.034556,
+          "uncachedCostUsd": 0.027786
+        },
+        {
+          "index": 2,
+          "who": "subagent",
+          "tools": 5,
+          "systemTokens": 426,
+          "toolTokens": 2243,
+          "messageTokens": 35,
+          "inputTokens": 2704,
+          "cacheRead": 0,
+          "cacheWrite": 2704,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 11047,
+          "costUsd": 0.010545,
+          "uncachedCostUsd": 0.008517
+        },
+        {
+          "index": 3,
+          "who": "subagent",
+          "tools": 5,
+          "systemTokens": 426,
+          "toolTokens": 2243,
+          "messageTokens": 220,
+          "inputTokens": 2889,
+          "cacheRead": 2704,
+          "cacheWrite": 185,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 11825,
+          "costUsd": 0.00191,
+          "uncachedCostUsd": 0.009072
+        },
+        {
+          "index": 4,
+          "who": "subagent",
+          "tools": 5,
+          "systemTokens": 426,
+          "toolTokens": 2243,
+          "messageTokens": 468,
+          "inputTokens": 3137,
+          "cacheRead": 2889,
+          "cacheWrite": 248,
+          "uncached": 0,
+          "outputTokens": 22,
+          "sentBytes": 12816,
+          "costUsd": 0.002127,
+          "uncachedCostUsd": 0.009741
+        },
+        {
+          "index": 5,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 236,
+          "inputTokens": 9166,
+          "cacheRead": 9027,
+          "cacheWrite": 139,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 36931,
+          "costUsd": 0.003634,
+          "uncachedCostUsd": 0.027903
+        },
+        {
+          "index": 6,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 484,
+          "inputTokens": 9414,
+          "cacheRead": 9166,
+          "cacheWrite": 248,
+          "uncached": 0,
+          "outputTokens": 74,
+          "sentBytes": 37922,
+          "costUsd": 0.00479,
+          "uncachedCostUsd": 0.029352
+        },
+        {
+          "index": 7,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 610,
+          "inputTokens": 9540,
+          "cacheRead": 9414,
+          "cacheWrite": 126,
+          "uncached": 0,
+          "outputTokens": 15,
+          "sentBytes": 38423,
+          "costUsd": 0.003522,
+          "uncachedCostUsd": 0.028845
+        },
+        {
+          "index": 8,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 696,
+          "inputTokens": 9626,
+          "cacheRead": 9540,
+          "cacheWrite": 86,
+          "uncached": 0,
+          "outputTokens": 14,
+          "sentBytes": 38765,
+          "costUsd": 0.003395,
+          "uncachedCostUsd": 0.029088
+        }
+      ],
+      "totals": {
+        "requests": 8,
+        "subagentRequests": 3,
+        "sideRequests": 0,
+        "warmupRequests": 0,
+        "inputTokens": 55503,
+        "cacheRead": 42740,
+        "cacheWrite": 12763,
+        "uncached": 0,
+        "outputTokens": 253,
+        "sentBytes": 224065,
+        "cacheReadShare": 0.77,
+        "fixedTokensPerRequest": 6582,
+        "firstRequest": {
+          "inputTokens": 9027,
+          "cacheRead": 0,
+          "uncached": 0,
+          "costUsd": 0.034556
+        },
+        "costUsd": 0.064479,
+        "uncachedCostUsd": 0.170304
+      },
+      "toolDefinitions": {
+        "agent": {
+          "task": 1685,
+          "bash": 940,
+          "todowrite": 618,
+          "edit": 490,
+          "read": 449,
+          "grep": 302,
+          "glob": 279,
+          "webfetch": 273,
+          "write": 257,
+          "skill": 150
+        },
+        "subagent": {
+          "bash": 940,
+          "read": 449,
+          "grep": 302,
+          "glob": 279,
+          "webfetch": 273
+        }
+      }
+    },
+    {
+      "scenario": "delegate-explore",
+      "runtime": "vector",
+      "session": 2,
+      "model": "claude-sonnet-4-5",
+      "exitCode": 0,
+      "unplayed": 0,
+      "actorRequests": {
+        "parent": 5,
+        "worker-0": 3
+      },
+      "scriptErrors": [],
+      "valid": true,
+      "performance": {
+        "wallMs": 20302.54175,
+        "timeToFirstRequestMs": 15658.469082999996,
+        "requestTimesMs": [
+          15658.469082999996,
+          16023.571417,
+          16319.378208000002,
+          16828.795082999997,
+          17667.730582999997,
+          18069.747208,
+          18449.559999999998,
+          19333.279333
+        ],
+        "postTerminalMs": 969.2624170000017,
+        "sampledPeakProcessTreeRssKiB": 426768,
+        "samples": [
+          {
+            "atMs": 480.29025000000183,
+            "phase": "startup",
+            "rssKiB": 16384
+          },
+          {
+            "atMs": 804.0703330000033,
+            "phase": "startup",
+            "rssKiB": 46176
+          },
+          {
+            "atMs": 911.7883750000001,
+            "phase": "startup",
+            "rssKiB": 63968
+          },
+          {
+            "atMs": 1031.8676250000026,
+            "phase": "startup",
+            "rssKiB": 60736
+          },
+          {
+            "atMs": 1111.5361250000024,
+            "phase": "startup",
+            "rssKiB": 77248
+          },
+          {
+            "atMs": 1218.9085000000014,
+            "phase": "startup",
+            "rssKiB": 92000
+          },
+          {
+            "atMs": 1341.6052080000009,
+            "phase": "startup",
+            "rssKiB": 107200
+          },
+          {
+            "atMs": 1473.5112910000025,
+            "phase": "startup",
+            "rssKiB": 98640
+          },
+          {
+            "atMs": 1844.1812910000044,
+            "phase": "startup",
+            "rssKiB": 93648
+          },
+          {
+            "atMs": 2064.813833000004,
+            "phase": "startup",
+            "rssKiB": 105840
+          },
+          {
+            "atMs": 2187.5516250000037,
+            "phase": "startup",
+            "rssKiB": 107680
+          },
+          {
+            "atMs": 2407.529541,
+            "phase": "startup",
+            "rssKiB": 112896
+          },
+          {
+            "atMs": 2613.748875000001,
+            "phase": "startup",
+            "rssKiB": 119072
+          },
+          {
+            "atMs": 2880.753625000001,
+            "phase": "startup",
+            "rssKiB": 125296
+          },
+          {
+            "atMs": 3042.4997079999994,
+            "phase": "startup",
+            "rssKiB": 120992
+          },
+          {
+            "atMs": 3223.657041000002,
+            "phase": "startup",
+            "rssKiB": 123664
+          },
+          {
+            "atMs": 3498.775958000002,
+            "phase": "startup",
+            "rssKiB": 131984
+          },
+          {
+            "atMs": 3686.777791000004,
+            "phase": "startup",
+            "rssKiB": 127264
+          },
+          {
+            "atMs": 3790.534625000004,
+            "phase": "startup",
+            "rssKiB": 114960
+          },
+          {
+            "atMs": 3908.524291000005,
+            "phase": "startup",
+            "rssKiB": 121072
+          },
+          {
+            "atMs": 3988.408040999999,
+            "phase": "startup",
+            "rssKiB": 124112
+          },
+          {
+            "atMs": 4187.169875000003,
+            "phase": "startup",
+            "rssKiB": 109936
+          },
+          {
+            "atMs": 4332.198500000002,
+            "phase": "startup",
+            "rssKiB": 104704
+          },
+          {
+            "atMs": 4421.613791,
+            "phase": "startup",
+            "rssKiB": 103504
+          },
+          {
+            "atMs": 4562.627791000003,
+            "phase": "startup",
+            "rssKiB": 113088
+          },
+          {
+            "atMs": 4848.915250000002,
+            "phase": "startup",
+            "rssKiB": 116816
+          },
+          {
+            "atMs": 4981.070208000001,
+            "phase": "startup",
+            "rssKiB": 122784
+          },
+          {
+            "atMs": 5392.331041000001,
+            "phase": "startup",
+            "rssKiB": 128176
+          },
+          {
+            "atMs": 6486.810750000001,
+            "phase": "startup",
+            "rssKiB": 113504
+          },
+          {
+            "atMs": 6623.445666000003,
+            "phase": "startup",
+            "rssKiB": 116256
+          },
+          {
+            "atMs": 7035.041207999999,
+            "phase": "startup",
+            "rssKiB": 114592
+          },
+          {
+            "atMs": 7314.904707999998,
+            "phase": "startup",
+            "rssKiB": 110704
+          },
+          {
+            "atMs": 7457.478916000004,
+            "phase": "startup",
+            "rssKiB": 108400
+          },
+          {
+            "atMs": 7767.2826250000035,
+            "phase": "startup",
+            "rssKiB": 102096
+          },
+          {
+            "atMs": 7978.697666000004,
+            "phase": "startup",
+            "rssKiB": 119872
+          },
+          {
+            "atMs": 8142.349166000004,
+            "phase": "startup",
+            "rssKiB": 150704
+          },
+          {
+            "atMs": 8270.516790999998,
+            "phase": "startup",
+            "rssKiB": 156640
+          },
+          {
+            "atMs": 8347.781166000004,
+            "phase": "startup",
+            "rssKiB": 157232
+          },
+          {
+            "atMs": 8440.560375000005,
+            "phase": "startup",
+            "rssKiB": 158624
+          },
+          {
+            "atMs": 8563.322415999999,
+            "phase": "startup",
+            "rssKiB": 161808
+          },
+          {
+            "atMs": 8661.899166,
+            "phase": "startup",
+            "rssKiB": 161424
+          },
+          {
+            "atMs": 8776.065625,
+            "phase": "startup",
+            "rssKiB": 155088
+          },
+          {
+            "atMs": 8901.529333000002,
+            "phase": "startup",
+            "rssKiB": 151328
+          },
+          {
+            "atMs": 8955.169250000003,
+            "phase": "startup",
+            "rssKiB": 154400
+          },
+          {
+            "atMs": 9102.425040999999,
+            "phase": "startup",
+            "rssKiB": 154624
+          },
+          {
+            "atMs": 9234.259458000004,
+            "phase": "startup",
+            "rssKiB": 154384
+          },
+          {
+            "atMs": 9388.985540999998,
+            "phase": "startup",
+            "rssKiB": 150016
+          },
+          {
+            "atMs": 9464.515458000005,
+            "phase": "startup",
+            "rssKiB": 152064
+          },
+          {
+            "atMs": 9641.688665999998,
+            "phase": "startup",
+            "rssKiB": 156752
+          },
+          {
+            "atMs": 9844.987540999999,
+            "phase": "startup",
+            "rssKiB": 159936
+          },
+          {
+            "atMs": 10032.416666000001,
+            "phase": "startup",
+            "rssKiB": 159152
+          },
+          {
+            "atMs": 10162.801333,
+            "phase": "startup",
+            "rssKiB": 154736
+          },
+          {
+            "atMs": 10414.932166000002,
+            "phase": "startup",
+            "rssKiB": 152000
+          },
+          {
+            "atMs": 10552.278999999999,
+            "phase": "startup",
+            "rssKiB": 146368
+          },
+          {
+            "atMs": 10684.681083,
+            "phase": "startup",
+            "rssKiB": 145184
+          },
+          {
+            "atMs": 10847.480916000004,
+            "phase": "startup",
+            "rssKiB": 145856
+          },
+          {
+            "atMs": 11169.796875000004,
+            "phase": "startup",
+            "rssKiB": 145904
+          },
+          {
+            "atMs": 11315.127041000003,
+            "phase": "startup",
+            "rssKiB": 138144
+          },
+          {
+            "atMs": 11553.871750000002,
+            "phase": "startup",
+            "rssKiB": 139856
+          },
+          {
+            "atMs": 11762.376165999998,
+            "phase": "startup",
+            "rssKiB": 119440
+          },
+          {
+            "atMs": 11885.378791,
+            "phase": "startup",
+            "rssKiB": 116352
+          },
+          {
+            "atMs": 12078.159750000003,
+            "phase": "startup",
+            "rssKiB": 195024
+          },
+          {
+            "atMs": 12292.665708000004,
+            "phase": "startup",
+            "rssKiB": 268672
+          },
+          {
+            "atMs": 12435.029041000005,
+            "phase": "startup",
+            "rssKiB": 272768
+          },
+          {
+            "atMs": 12598.345375,
+            "phase": "startup",
+            "rssKiB": 246240
+          },
+          {
+            "atMs": 12792.969416000004,
+            "phase": "startup",
+            "rssKiB": 226464
+          },
+          {
+            "atMs": 13002.635665999998,
+            "phase": "startup",
+            "rssKiB": 245568
+          },
+          {
+            "atMs": 13140.588,
+            "phase": "startup",
+            "rssKiB": 254432
+          },
+          {
+            "atMs": 13235.0615,
+            "phase": "startup",
+            "rssKiB": 247696
+          },
+          {
+            "atMs": 13386.783958000004,
+            "phase": "startup",
+            "rssKiB": 244448
+          },
+          {
+            "atMs": 13600.368583,
+            "phase": "startup",
+            "rssKiB": 241440
+          },
+          {
+            "atMs": 13828.331041000001,
+            "phase": "startup",
+            "rssKiB": 241808
+          },
+          {
+            "atMs": 14009.122583,
+            "phase": "startup",
+            "rssKiB": 242224
+          },
+          {
+            "atMs": 14258.936708000005,
+            "phase": "startup",
+            "rssKiB": 247744
+          },
+          {
+            "atMs": 14352.497124999998,
+            "phase": "startup",
+            "rssKiB": 250560
+          },
+          {
+            "atMs": 14465.333500000004,
+            "phase": "startup",
+            "rssKiB": 256864
+          },
+          {
+            "atMs": 14551.782958,
+            "phase": "startup",
+            "rssKiB": 253504
+          },
+          {
+            "atMs": 14685.497040999999,
+            "phase": "startup",
+            "rssKiB": 272384
+          },
+          {
+            "atMs": 14766.859291000004,
+            "phase": "startup",
+            "rssKiB": 280240
+          },
+          {
+            "atMs": 14867.798125000005,
+            "phase": "startup",
+            "rssKiB": 282992
+          },
+          {
+            "atMs": 14968.400208000003,
+            "phase": "startup",
+            "rssKiB": 289056
+          },
+          {
+            "atMs": 15140.183583000002,
+            "phase": "startup",
+            "rssKiB": 292416
+          },
+          {
+            "atMs": 15303.351375000002,
+            "phase": "startup",
+            "rssKiB": 298240
+          },
+          {
+            "atMs": 15403.349291000002,
+            "phase": "startup",
+            "rssKiB": 299728
+          },
+          {
+            "atMs": 15505.991665999998,
+            "phase": "startup",
+            "rssKiB": 299344
+          },
+          {
+            "atMs": 15581.302666,
+            "phase": "startup",
+            "rssKiB": 301520
+          },
+          {
+            "atMs": 15689.732416000003,
+            "phase": "active",
+            "rssKiB": 309568
+          },
+          {
+            "atMs": 15796.520165999998,
+            "phase": "active",
+            "rssKiB": 317168
+          },
+          {
+            "atMs": 15886.408291000003,
+            "phase": "active",
+            "rssKiB": 318752
+          },
+          {
+            "atMs": 16008.046791000004,
+            "phase": "active",
+            "rssKiB": 330096
+          },
+          {
+            "atMs": 16092.647207999998,
+            "phase": "active",
+            "rssKiB": 332304
+          },
+          {
+            "atMs": 16214.721791,
+            "phase": "active",
+            "rssKiB": 334464
+          },
+          {
+            "atMs": 16314.759541000003,
+            "phase": "active",
+            "rssKiB": 339216
+          },
+          {
+            "atMs": 16418.894208,
+            "phase": "active",
+            "rssKiB": 344128
+          },
+          {
+            "atMs": 16523.8475,
+            "phase": "active",
+            "rssKiB": 337456
+          },
+          {
+            "atMs": 16617.725333,
+            "phase": "active",
+            "rssKiB": 337968
+          },
+          {
+            "atMs": 16754.196458000002,
+            "phase": "active",
+            "rssKiB": 341984
+          },
+          {
+            "atMs": 16807.324583000005,
+            "phase": "active",
+            "rssKiB": 344464
+          },
+          {
+            "atMs": 16904.175250000004,
+            "phase": "active",
+            "rssKiB": 352592
+          },
+          {
+            "atMs": 17028.229375,
+            "phase": "active",
+            "rssKiB": 348848
+          },
+          {
+            "atMs": 17162.054208000005,
+            "phase": "active",
+            "rssKiB": 348336
+          },
+          {
+            "atMs": 17212.110458,
+            "phase": "active",
+            "rssKiB": 347808
+          },
+          {
+            "atMs": 17320.063333000002,
+            "phase": "active",
+            "rssKiB": 354848
+          },
+          {
+            "atMs": 17427.393041,
+            "phase": "active",
+            "rssKiB": 349248
+          },
+          {
+            "atMs": 17545.139041,
+            "phase": "active",
+            "rssKiB": 355104
+          },
+          {
+            "atMs": 17640.414666,
+            "phase": "active",
+            "rssKiB": 351744
+          },
+          {
+            "atMs": 17735.845958,
+            "phase": "active",
+            "rssKiB": 357152
+          },
+          {
+            "atMs": 17832.808583,
+            "phase": "active",
+            "rssKiB": 357424
+          },
+          {
+            "atMs": 17935.243791000004,
+            "phase": "active",
+            "rssKiB": 358576
+          },
+          {
+            "atMs": 18044.996583000004,
+            "phase": "active",
+            "rssKiB": 359120
+          },
+          {
+            "atMs": 18137.065625,
+            "phase": "active",
+            "rssKiB": 360128
+          },
+          {
+            "atMs": 18236.695791000002,
+            "phase": "active",
+            "rssKiB": 364592
+          },
+          {
+            "atMs": 18332.536666000004,
+            "phase": "active",
+            "rssKiB": 372096
+          },
+          {
+            "atMs": 18431.725000000002,
+            "phase": "active",
+            "rssKiB": 363136
+          },
+          {
+            "atMs": 18555.406791000005,
+            "phase": "active",
+            "rssKiB": 369888
+          },
+          {
+            "atMs": 18667.351833000004,
+            "phase": "active",
+            "rssKiB": 371184
+          },
+          {
+            "atMs": 18757.862166000003,
+            "phase": "active",
+            "rssKiB": 366432
+          },
+          {
+            "atMs": 18860.895333000004,
+            "phase": "active",
+            "rssKiB": 367200
+          },
+          {
+            "atMs": 18952.151416000004,
+            "phase": "active",
+            "rssKiB": 365728
+          },
+          {
+            "atMs": 19062.514791000005,
+            "phase": "active",
+            "rssKiB": 370192
+          },
+          {
+            "atMs": 19207.95825,
+            "phase": "active",
+            "rssKiB": 385104
+          },
+          {
+            "atMs": 19256.671833000004,
+            "phase": "active",
+            "rssKiB": 426768
+          },
+          {
+            "atMs": 19387.409958,
+            "phase": "tail",
+            "rssKiB": 404304
+          },
+          {
+            "atMs": 19502.109708,
+            "phase": "tail",
+            "rssKiB": 411776
+          },
+          {
+            "atMs": 19576.220125000003,
+            "phase": "tail",
+            "rssKiB": 402864
+          },
+          {
+            "atMs": 19678.696291000004,
+            "phase": "tail",
+            "rssKiB": 415328
+          },
+          {
+            "atMs": 19772.234208000005,
+            "phase": "tail",
+            "rssKiB": 405632
+          },
+          {
+            "atMs": 19884.828708000005,
+            "phase": "tail",
+            "rssKiB": 406272
+          },
+          {
+            "atMs": 19977.802541,
+            "phase": "tail",
+            "rssKiB": 406768
+          },
+          {
+            "atMs": 20099.482166000005,
+            "phase": "tail",
+            "rssKiB": 411008
+          },
+          {
+            "atMs": 20227.984208000005,
+            "phase": "tail",
+            "rssKiB": 407424
+          },
+          {
+            "atMs": 20307.974083000005,
+            "phase": "tail",
+            "rssKiB": 406560
+          }
+        ]
+      },
+      "verification": {
+        "exitCode": 0,
+        "output": "bun test v1.3.14 (0d9b296a)\n\ntest/invoice.test.ts:\n(pass) an invoice due today is not overdue yet [0.24ms]\n(pass) paid invoices are never overdue [0.04ms]\n(pass) the overdue total sums only overdue invoices [0.10ms]\n\n 3 pass\n 0 fail\n 3 expect() calls\nRan 3 tests across 1 file. [24.00ms]\n"
+      },
+      "requests": [
+        {
+          "index": 1,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 97,
+          "inputTokens": 9027,
+          "cacheRead": 8651,
+          "cacheWrite": 376,
+          "uncached": 0,
+          "outputTokens": 47,
+          "sentBytes": 36336,
+          "costUsd": 0.00471,
+          "uncachedCostUsd": 0.027786
+        },
+        {
+          "index": 2,
+          "who": "subagent",
+          "tools": 5,
+          "systemTokens": 426,
+          "toolTokens": 2243,
+          "messageTokens": 35,
+          "inputTokens": 2704,
+          "cacheRead": 2564,
+          "cacheWrite": 140,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 11047,
+          "costUsd": 0.001699,
+          "uncachedCostUsd": 0.008517
+        },
+        {
+          "index": 3,
+          "who": "subagent",
+          "tools": 5,
+          "systemTokens": 426,
+          "toolTokens": 2243,
+          "messageTokens": 220,
+          "inputTokens": 2889,
+          "cacheRead": 2704,
+          "cacheWrite": 185,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 11825,
+          "costUsd": 0.00191,
+          "uncachedCostUsd": 0.009072
+        },
+        {
+          "index": 4,
+          "who": "subagent",
+          "tools": 5,
+          "systemTokens": 426,
+          "toolTokens": 2243,
+          "messageTokens": 468,
+          "inputTokens": 3137,
+          "cacheRead": 2889,
+          "cacheWrite": 248,
+          "uncached": 0,
+          "outputTokens": 22,
+          "sentBytes": 12816,
+          "costUsd": 0.002127,
+          "uncachedCostUsd": 0.009741
+        },
+        {
+          "index": 5,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 236,
+          "inputTokens": 9166,
+          "cacheRead": 9027,
+          "cacheWrite": 139,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 36931,
+          "costUsd": 0.003634,
+          "uncachedCostUsd": 0.027903
+        },
+        {
+          "index": 6,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 484,
+          "inputTokens": 9414,
+          "cacheRead": 9166,
+          "cacheWrite": 248,
+          "uncached": 0,
+          "outputTokens": 74,
+          "sentBytes": 37922,
+          "costUsd": 0.00479,
+          "uncachedCostUsd": 0.029352
+        },
+        {
+          "index": 7,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 610,
+          "inputTokens": 9540,
+          "cacheRead": 9414,
+          "cacheWrite": 126,
+          "uncached": 0,
+          "outputTokens": 15,
+          "sentBytes": 38423,
+          "costUsd": 0.003522,
+          "uncachedCostUsd": 0.028845
+        },
+        {
+          "index": 8,
+          "who": "agent",
+          "tools": 10,
+          "systemTokens": 3487,
+          "toolTokens": 5443,
+          "messageTokens": 696,
+          "inputTokens": 9626,
+          "cacheRead": 9540,
+          "cacheWrite": 86,
+          "uncached": 0,
+          "outputTokens": 14,
+          "sentBytes": 38765,
+          "costUsd": 0.003395,
+          "uncachedCostUsd": 0.029088
+        }
+      ],
+      "totals": {
+        "requests": 8,
+        "subagentRequests": 3,
+        "sideRequests": 0,
+        "warmupRequests": 0,
+        "inputTokens": 55503,
+        "cacheRead": 53955,
+        "cacheWrite": 1548,
+        "uncached": 0,
+        "outputTokens": 253,
+        "sentBytes": 224065,
+        "cacheReadShare": 0.972,
+        "fixedTokensPerRequest": 6582,
+        "firstRequest": {
+          "inputTokens": 9027,
+          "cacheRead": 8651,
+          "uncached": 0,
+          "costUsd": 0.00471
+        },
+        "costUsd": 0.025787,
+        "uncachedCostUsd": 0.170304
+      },
+      "toolDefinitions": {
+        "agent": {
+          "task": 1685,
+          "bash": 940,
+          "todowrite": 618,
+          "edit": 490,
+          "read": 449,
+          "grep": 302,
+          "glob": 279,
+          "webfetch": 273,
+          "write": 257,
+          "skill": 150
+        },
+        "subagent": {
+          "bash": 940,
+          "read": 449,
+          "grep": 302,
+          "glob": 279,
+          "webfetch": 273
+        }
+      }
+    },
+    {
+      "scenario": "delegate-explore",
+      "runtime": "claude-code",
+      "session": 1,
+      "model": "claude-sonnet-4-5",
+      "exitCode": 0,
+      "unplayed": 0,
+      "actorRequests": {
+        "parent": 5,
+        "worker-0": 3
+      },
+      "scriptErrors": [],
+      "valid": true,
+      "performance": {
+        "wallMs": 2132.2793329999986,
+        "timeToFirstRequestMs": 1697.9469590000008,
+        "requestTimesMs": [
+          1697.9469590000008,
+          1724.2270839999983,
+          1838.7427919999973,
+          1881.9906249999985,
+          1906.7253749999945,
+          1939.226333999999,
+          1961.9487089999966,
+          2081.983499999995
+        ],
+        "postTerminalMs": 50.29583300000377,
+        "sampledPeakProcessTreeRssKiB": 336768,
+        "samples": [
+          {
+            "atMs": 136.6108749999985,
+            "phase": "startup",
+            "rssKiB": 34848
+          },
+          {
+            "atMs": 235.03604199999972,
+            "phase": "startup",
+            "rssKiB": 94768
+          },
+          {
+            "atMs": 338.5509999999995,
+            "phase": "startup",
+            "rssKiB": 126320
+          },
+          {
+            "atMs": 446.45824999999604,
+            "phase": "startup",
+            "rssKiB": 152576
+          },
+          {
+            "atMs": 572.5432079999955,
+            "phase": "startup",
+            "rssKiB": 183792
+          },
+          {
+            "atMs": 664.7114169999986,
+            "phase": "startup",
+            "rssKiB": 202080
+          },
+          {
+            "atMs": 799.2759579999984,
+            "phase": "startup",
+            "rssKiB": 222512
+          },
+          {
+            "atMs": 931.469041999997,
+            "phase": "startup",
+            "rssKiB": 230128
+          },
+          {
+            "atMs": 1054.8617499999964,
+            "phase": "startup",
+            "rssKiB": 266080
+          },
+          {
+            "atMs": 1165.471666999998,
+            "phase": "startup",
+            "rssKiB": 273008
+          },
+          {
+            "atMs": 1262.3869999999952,
+            "phase": "startup",
+            "rssKiB": 285264
+          },
+          {
+            "atMs": 1406.1138749999955,
+            "phase": "startup",
+            "rssKiB": 292208
+          },
+          {
+            "atMs": 1486.3368749999936,
+            "phase": "startup",
+            "rssKiB": 296432
+          },
+          {
+            "atMs": 1585.447291999997,
+            "phase": "startup",
+            "rssKiB": 298784
+          },
+          {
+            "atMs": 1700.5045829999945,
+            "phase": "active",
+            "rssKiB": 315648
+          },
+          {
+            "atMs": 1778.3612499999945,
+            "phase": "active",
+            "rssKiB": 332224
+          },
+          {
+            "atMs": 1876.1916669999991,
+            "phase": "active",
+            "rssKiB": 328992
+          },
+          {
+            "atMs": 1977.0657079999946,
+            "phase": "active",
+            "rssKiB": 333984
+          },
+          {
+            "atMs": 2088.246457999994,
+            "phase": "tail",
+            "rssKiB": 336768
+          }
+        ]
+      },
+      "verification": {
+        "exitCode": 0,
+        "output": "bun test v1.3.14 (0d9b296a)\n\ntest/invoice.test.ts:\n(pass) an invoice due today is not overdue yet [0.35ms]\n(pass) paid invoices are never overdue [0.12ms]\n(pass) the overdue total sums only overdue invoices [0.13ms]\n\n 3 pass\n 0 fail\n 3 expect() calls\nRan 3 tests across 1 file. [42.00ms]\n"
+      },
+      "requests": [
+        {
+          "index": 1,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 1940,
+          "inputTokens": 29857,
+          "cacheRead": 0,
+          "cacheWrite": 29857,
+          "uncached": 0,
+          "outputTokens": 49,
+          "sentBytes": 120390,
+          "costUsd": 0.112699,
+          "uncachedCostUsd": 0.090306
+        },
+        {
+          "index": 2,
+          "who": "subagent",
+          "tools": 17,
+          "systemTokens": 978,
+          "toolTokens": 10997,
+          "messageTokens": 1421,
+          "inputTokens": 13396,
+          "cacheRead": 0,
+          "cacheWrite": 13396,
+          "uncached": 0,
+          "outputTokens": 16,
+          "sentBytes": 54237,
+          "costUsd": 0.050475,
+          "uncachedCostUsd": 0.040428
+        },
+        {
+          "index": 3,
+          "who": "subagent",
+          "tools": 17,
+          "systemTokens": 978,
+          "toolTokens": 10997,
+          "messageTokens": 1601,
+          "inputTokens": 13576,
+          "cacheRead": 13396,
+          "cacheWrite": 180,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 54956,
+          "costUsd": 0.005099,
+          "uncachedCostUsd": 0.041133
+        },
+        {
+          "index": 4,
+          "who": "subagent",
+          "tools": 17,
+          "systemTokens": 978,
+          "toolTokens": 10997,
+          "messageTokens": 1805,
+          "inputTokens": 13780,
+          "cacheRead": 13576,
+          "cacheWrite": 204,
+          "uncached": 0,
+          "outputTokens": 22,
+          "sentBytes": 55771,
+          "costUsd": 0.005168,
+          "uncachedCostUsd": 0.04167
+        },
+        {
+          "index": 5,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 2061,
+          "inputTokens": 29978,
+          "cacheRead": 29857,
+          "cacheWrite": 121,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 120875,
+          "costUsd": 0.009816,
+          "uncachedCostUsd": 0.090339
+        },
+        {
+          "index": 6,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 2265,
+          "inputTokens": 30182,
+          "cacheRead": 29978,
+          "cacheWrite": 204,
+          "uncached": 0,
+          "outputTokens": 75,
+          "sentBytes": 121690,
+          "costUsd": 0.010883,
+          "uncachedCostUsd": 0.091671
+        },
+        {
+          "index": 7,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 2440,
+          "inputTokens": 30357,
+          "cacheRead": 30182,
+          "cacheWrite": 175,
+          "uncached": 0,
+          "outputTokens": 15,
+          "sentBytes": 122388,
+          "costUsd": 0.009936,
+          "uncachedCostUsd": 0.091296
+        },
+        {
+          "index": 8,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 2529,
+          "inputTokens": 30446,
+          "cacheRead": 30357,
+          "cacheWrite": 89,
+          "uncached": 0,
+          "outputTokens": 14,
+          "sentBytes": 122745,
+          "costUsd": 0.009651,
+          "uncachedCostUsd": 0.091548
+        }
+      ],
+      "totals": {
+        "requests": 8,
+        "subagentRequests": 3,
+        "sideRequests": 0,
+        "warmupRequests": 0,
+        "inputTokens": 191572,
+        "cacheRead": 147346,
+        "cacheWrite": 44226,
+        "uncached": 0,
+        "outputTokens": 245,
+        "sentBytes": 773052,
+        "cacheReadShare": 0.769,
+        "fixedTokensPerRequest": 21939,
+        "firstRequest": {
+          "inputTokens": 29857,
+          "cacheRead": 0,
+          "uncached": 0,
+          "costUsd": 0.112699
+        },
+        "costUsd": 0.213727,
+        "uncachedCostUsd": 0.578391
+      },
+      "toolDefinitions": {
+        "agent": {
+          "Workflow": 5260,
+          "Bash": 2854,
+          "Agent": 2042,
+          "ScheduleWakeup": 1017,
+          "CronCreate": 1008,
+          "EnterWorktree": 1004,
+          "TaskUpdate": 878,
+          "TaskCreate": 704,
+          "Read": 659,
+          "ExitWorktree": 627,
+          "ReportFindings": 545,
+          "Skill": 528,
+          "WebSearch": 469,
+          "WebFetch": 467,
+          "Edit": 426,
+          "NotebookEdit": 406,
+          "TaskOutput": 387,
+          "SendMessage": 322,
+          "TaskList": 298,
+          "Write": 256,
+          "TaskGet": 255,
+          "TaskStop": 202,
+          "CronDelete": 107,
+          "CronList": 70
+        },
+        "subagent": {
+          "Bash": 2854,
+          "CronCreate": 1008,
+          "EnterWorktree": 1004,
+          "TaskUpdate": 878,
+          "TaskCreate": 704,
+          "Read": 659,
+          "ExitWorktree": 627,
+          "ReportFindings": 545,
+          "Skill": 528,
+          "WebSearch": 469,
+          "WebFetch": 467,
+          "SendMessage": 322,
+          "TaskList": 298,
+          "TaskGet": 255,
+          "TaskStop": 202,
+          "CronDelete": 107,
+          "CronList": 70
+        }
+      }
+    },
+    {
+      "scenario": "delegate-explore",
+      "runtime": "claude-code",
+      "session": 2,
+      "model": "claude-sonnet-4-5",
+      "exitCode": 0,
+      "unplayed": 0,
+      "actorRequests": {
+        "parent": 5,
+        "worker-0": 3
+      },
+      "scriptErrors": [],
+      "valid": true,
+      "performance": {
+        "wallMs": 972.0995830000029,
+        "timeToFirstRequestMs": 652.1840000000011,
+        "requestTimesMs": [
+          652.1840000000011,
+          671.3551670000015,
+          799.0999589999992,
+          820.9470000000001,
+          834.1429590000043,
+          862.6540840000016,
+          892.6981670000023,
+          956.4575420000037
+        ],
+        "postTerminalMs": 15.642040999999153,
+        "sampledPeakProcessTreeRssKiB": 353840,
+        "samples": [
+          {
+            "atMs": 165.87099999999919,
+            "phase": "startup",
+            "rssKiB": 199312
+          },
+          {
+            "atMs": 248.14133299999958,
+            "phase": "startup",
+            "rssKiB": 233792
+          },
+          {
+            "atMs": 369.52045799999905,
+            "phase": "startup",
+            "rssKiB": 272672
+          },
+          {
+            "atMs": 460.422166999997,
+            "phase": "startup",
+            "rssKiB": 285360
+          },
+          {
+            "atMs": 561.5827920000011,
+            "phase": "startup",
+            "rssKiB": 296032
+          },
+          {
+            "atMs": 662.3859999999986,
+            "phase": "active",
+            "rssKiB": 313904
+          },
+          {
+            "atMs": 762.8242919999975,
+            "phase": "active",
+            "rssKiB": 332704
+          },
+          {
+            "atMs": 859.9075830000002,
+            "phase": "active",
+            "rssKiB": 331216
+          },
+          {
+            "atMs": 961.7510830000028,
+            "phase": "tail",
+            "rssKiB": 353840
+          }
+        ]
+      },
+      "verification": {
+        "exitCode": 0,
+        "output": "bun test v1.3.14 (0d9b296a)\n\ntest/invoice.test.ts:\n(pass) an invoice due today is not overdue yet [0.26ms]\n(pass) paid invoices are never overdue [0.03ms]\n(pass) the overdue total sums only overdue invoices [0.06ms]\n\n 3 pass\n 0 fail\n 3 expect() calls\nRan 3 tests across 1 file. [22.00ms]\n"
+      },
+      "requests": [
+        {
+          "index": 1,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 1940,
+          "inputTokens": 29857,
+          "cacheRead": 20838,
+          "cacheWrite": 9019,
+          "uncached": 0,
+          "outputTokens": 49,
+          "sentBytes": 120390,
+          "costUsd": 0.040808,
+          "uncachedCostUsd": 0.090306
+        },
+        {
+          "index": 2,
+          "who": "subagent",
+          "tools": 17,
+          "systemTokens": 978,
+          "toolTokens": 10997,
+          "messageTokens": 1421,
+          "inputTokens": 13396,
+          "cacheRead": 11049,
+          "cacheWrite": 2347,
+          "uncached": 0,
+          "outputTokens": 16,
+          "sentBytes": 54237,
+          "costUsd": 0.012356,
+          "uncachedCostUsd": 0.040428
+        },
+        {
+          "index": 3,
+          "who": "subagent",
+          "tools": 17,
+          "systemTokens": 978,
+          "toolTokens": 10997,
+          "messageTokens": 1601,
+          "inputTokens": 13576,
+          "cacheRead": 13396,
+          "cacheWrite": 180,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 54956,
+          "costUsd": 0.005099,
+          "uncachedCostUsd": 0.041133
+        },
+        {
+          "index": 4,
+          "who": "subagent",
+          "tools": 17,
+          "systemTokens": 978,
+          "toolTokens": 10997,
+          "messageTokens": 1805,
+          "inputTokens": 13780,
+          "cacheRead": 13576,
+          "cacheWrite": 204,
+          "uncached": 0,
+          "outputTokens": 22,
+          "sentBytes": 55771,
+          "costUsd": 0.005168,
+          "uncachedCostUsd": 0.04167
+        },
+        {
+          "index": 5,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 2061,
+          "inputTokens": 29978,
+          "cacheRead": 29857,
+          "cacheWrite": 121,
+          "uncached": 0,
+          "outputTokens": 27,
+          "sentBytes": 120875,
+          "costUsd": 0.009816,
+          "uncachedCostUsd": 0.090339
+        },
+        {
+          "index": 6,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 2265,
+          "inputTokens": 30182,
+          "cacheRead": 29978,
+          "cacheWrite": 204,
+          "uncached": 0,
+          "outputTokens": 75,
+          "sentBytes": 121690,
+          "costUsd": 0.010883,
+          "uncachedCostUsd": 0.091671
+        },
+        {
+          "index": 7,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 2440,
+          "inputTokens": 30357,
+          "cacheRead": 30182,
+          "cacheWrite": 175,
+          "uncached": 0,
+          "outputTokens": 15,
+          "sentBytes": 122388,
+          "costUsd": 0.009936,
+          "uncachedCostUsd": 0.091296
+        },
+        {
+          "index": 8,
+          "who": "agent",
+          "tools": 24,
+          "systemTokens": 7126,
+          "toolTokens": 20791,
+          "messageTokens": 2529,
+          "inputTokens": 30446,
+          "cacheRead": 30357,
+          "cacheWrite": 89,
+          "uncached": 0,
+          "outputTokens": 14,
+          "sentBytes": 122745,
+          "costUsd": 0.009651,
+          "uncachedCostUsd": 0.091548
+        }
+      ],
+      "totals": {
+        "requests": 8,
+        "subagentRequests": 3,
+        "sideRequests": 0,
+        "warmupRequests": 0,
+        "inputTokens": 191572,
+        "cacheRead": 179233,
+        "cacheWrite": 12339,
+        "uncached": 0,
+        "outputTokens": 245,
+        "sentBytes": 773052,
+        "cacheReadShare": 0.936,
+        "fixedTokensPerRequest": 21939,
+        "firstRequest": {
+          "inputTokens": 29857,
+          "cacheRead": 20838,
+          "uncached": 0,
+          "costUsd": 0.040808
+        },
+        "costUsd": 0.103717,
+        "uncachedCostUsd": 0.578391
+      },
+      "toolDefinitions": {
+        "agent": {
+          "Workflow": 5260,
+          "Bash": 2854,
+          "Agent": 2042,
+          "ScheduleWakeup": 1017,
+          "CronCreate": 1008,
+          "EnterWorktree": 1004,
+          "TaskUpdate": 878,
+          "TaskCreate": 704,
+          "Read": 659,
+          "ExitWorktree": 627,
+          "ReportFindings": 545,
+          "Skill": 528,
+          "WebSearch": 469,
+          "WebFetch": 467,
+          "Edit": 426,
+          "NotebookEdit": 406,
+          "TaskOutput": 387,
+          "SendMessage": 322,
+          "TaskList": 298,
+          "Write": 256,
+          "TaskGet": 255,
+          "TaskStop": 202,
+          "CronDelete": 107,
+          "CronList": 70
+        },
+        "subagent": {
+          "Bash": 2854,
+          "CronCreate": 1008,
+          "EnterWorktree": 1004,
+          "TaskUpdate": 878,
+          "TaskCreate": 704,
+          "Read": 659,
+          "ExitWorktree": 627,
+          "ReportFindings": 545,
+          "Skill": 528,
+          "WebSearch": 469,
+          "WebFetch": 467,
+          "SendMessage": 322,
+          "TaskList": 298,
+          "TaskGet": 255,
+          "TaskStop": 202,
+          "CronDelete": 107,
+          "CronList": 70
+        }
+      }
+    }
+  ]
+}
