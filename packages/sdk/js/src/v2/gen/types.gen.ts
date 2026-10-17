@@ -5203,6 +5203,20 @@ export type TaskUsage = {
   unpricedSteps?: number
 }
 
+export type TaskBudgetScope = {
+  kind: "run" | "batch" | "child"
+  id: string
+  budget: RunBudget
+  spentUsd: number
+  steps: number
+  unpricedSteps: number
+  costKind?: CostKind
+  stopped?: {
+    reason: RunBudgetStopReason
+    message: string
+  }
+}
+
 export type TaskInfo = {
   id: string
   sessionID?: string
@@ -5228,6 +5242,7 @@ export type TaskInfo = {
   reason?: string
   attempt: number
   budget?: RunBudget
+  budgetScopes?: Array<TaskBudgetScope>
   controls: {
     inspect: boolean
     message: boolean

@@ -36144,6 +36144,48 @@
         "required": ["cost", "tokens", "total", "toolUses", "steps"],
         "additionalProperties": false
       },
+      "TaskBudgetScope": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["run", "batch", "child"]
+          },
+          "id": {
+            "type": "string"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/RunBudget"
+          },
+          "spentUsd": {
+            "type": "number"
+          },
+          "steps": {
+            "type": "number"
+          },
+          "unpricedSteps": {
+            "type": "number"
+          },
+          "costKind": {
+            "$ref": "#/components/schemas/CostKind"
+          },
+          "stopped": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "$ref": "#/components/schemas/RunBudgetStopReason"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["reason", "message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["kind", "id", "budget", "spentUsd", "steps", "unpricedSteps"],
+        "additionalProperties": false
+      },
       "TaskInfo": {
         "type": "object",
         "properties": {
@@ -36225,6 +36267,12 @@
           },
           "budget": {
             "$ref": "#/components/schemas/RunBudget"
+          },
+          "budgetScopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskBudgetScope"
+            }
           },
           "controls": {
             "type": "object",

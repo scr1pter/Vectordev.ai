@@ -864,11 +864,26 @@ export const RunCommand = effectCmd({
             const next: Awaited<ReturnType<typeof nextBackgroundEvent<Event>>> = await nextBackgroundEvent(
               iterator,
               idle && !waited() ? backgroundWait - (Date.now() - activeAt) : undefined,
+              !idle || !waited(),
             )
-            if (next.timedOut) {
-              const message = `Stopped waiting for ${background.running.size + background.unanswered.size} background subagent(s) after ${Math.round(backgroundWait / 1000)}s without activity`
+            if (next.timedOut || next.disconnected) {
+              const message = next.timedOut
+                ? `Stopped waiting for ${background.running.size + background.unanswered.size} background subagent(s) after ${Math.round(backgroundWait / 1000)}s without activity`
+                : "The event stream ended before the parent and its background subagents finished. Completion could not be confirmed."
               error = error ? error + EOL + message : message
-              if (!emit("error", { error: { name: "BackgroundSubagentTimeout", data: { message } } })) UI.error(message)
+              if (
+                !emit("error", {
+                  error: {
+                    name: next.timedOut ? "BackgroundSubagentTimeout" : "EventStreamDisconnected",
+                    data: { message },
+                  },
+                })
+              )
+                UI.error(message)
+              if (!next.timedOut && !idle)
+                await client.session
+                  .abort({ sessionID }, { signal: AbortSignal.timeout(5_000), throwOnError: true })
+                  .catch(() => undefined)
               if (background.running.size)
                 await client.experimental.task
                   .stop(
@@ -877,7 +892,7 @@ export const RunCommand = effectCmd({
                       taskIDs: [...background.running],
                       reason: message,
                     },
-                    { signal: AbortSignal.timeout(5_000) },
+                    { signal: AbortSignal.timeout(5_000), throwOnError: true },
                   )
                   .catch(() => undefined)
               break

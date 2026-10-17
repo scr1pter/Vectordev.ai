@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import { createVectorClient } from "@vectordevai/sdk/v2"
+import type { Task } from "@vectordevai/schema/task"
 import { executeTaskCommand, formatTasks } from "@/cli/cmd/tasks"
 
 test("task CLI uses the owning server and preserves control payloads", async () => {
@@ -63,22 +64,25 @@ test("invalid task selections do not send requests", async () => {
 
 test("task CLI never renders missing usage as zero spend", () => {
   expect(formatTasks([])).toBe("No subagent tasks.")
-  expect(
-    formatTasks([
-      {
-        id: "child",
-        parentSessionID: "parent",
-        source: "subagent",
-        title: "Work",
-        status: "running",
-        startedAt: 1,
-        elapsedMs: 1,
-        ownedPaths: [],
-        dependsOn: [],
-        resultAvailable: false,
-        attempt: 1,
-        controls: { inspect: true, message: true, stop: true },
-      },
-    ]),
-  ).toContain("usage unavailable")
+  const task: Task.Info = {
+    id: "child",
+    parentSessionID: "parent",
+    source: "subagent",
+    title: "Work",
+    status: "running",
+    startedAt: 1,
+    elapsedMs: 1,
+    ownedPaths: [],
+    dependsOn: [],
+    resultAvailable: false,
+    attempt: 1,
+    controls: { inspect: true, message: true, stop: true },
+  }
+  expect(formatTasks([task])).toContain("usage unavailable")
+  expect(formatTasks([{ ...task, source: "external", measuredCost: 0.125, costKind: "priced" }])).toContain(
+    "$0.1250 reported · tokens unavailable",
+  )
+  expect(formatTasks([{ ...task, source: "external", costKind: "plan" }])).toContain(
+    "covered by plan · tokens unavailable",
+  )
 })

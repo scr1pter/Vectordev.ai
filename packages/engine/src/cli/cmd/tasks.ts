@@ -136,7 +136,29 @@ export function formatTasks(tasks: readonly Task.Info[]) {
     .map((task) =>
       [
         `${task.id}  ${task.status}  ${task.title}`,
-        `  ${Math.round(task.elapsedMs / 1000)}s${task.usage ? ` · ${task.usage.total} tokens · ${task.usage.unpricedSteps ? "cost partly unknown" : `$${task.usage.cost.toFixed(4)}`}` : " · usage unavailable"}${task.currentStep ? ` · ${task.currentStep}` : ""}`,
+        "  " +
+          [
+            `${Math.round(task.elapsedMs / 1000)}s`,
+            ...(task.usage
+              ? [
+                  `${task.usage.total} tokens`,
+                  task.usage.unpricedSteps
+                    ? "cost partly unknown"
+                    : task.costKind === "plan"
+                      ? "covered by plan"
+                      : task.costKind === "free"
+                        ? "free model"
+                        : `$${task.usage.cost.toFixed(4)}`,
+                ]
+              : task.measuredCost !== undefined
+                ? [`$${task.measuredCost.toFixed(4)} reported`, "tokens unavailable"]
+                : task.costKind === "plan"
+                  ? ["covered by plan", "tokens unavailable"]
+                  : task.costKind === "free"
+                    ? ["free model", "tokens unavailable"]
+                    : ["usage unavailable"]),
+            ...(task.currentStep ? [task.currentStep] : []),
+          ].join(" · "),
         ...(task.dependsOn.length ? [`  Depends on: ${task.dependsOn.join(", ")}`] : []),
         ...(task.reason ? [`  ${task.reason}`] : []),
       ].join("\n"),

@@ -7,11 +7,27 @@ export function taskDescription(task: Task.Info) {
     ...(task.usage
       ? [
           `${task.usage.total.toLocaleString("en-US")} tokens`,
-          task.usage.unpricedSteps ? "cost partly unknown" : `$${task.usage.cost.toFixed(4)}`,
+          task.usage.unpricedSteps
+            ? "cost partly unknown"
+            : task.costKind === "plan"
+              ? "covered by plan"
+              : task.costKind === "free"
+                ? "free model"
+                : `$${task.usage.cost.toFixed(4)}`,
         ]
-      : []),
+      : task.measuredCost !== undefined
+        ? [`$${task.measuredCost.toFixed(4)} reported`, "tokens unavailable"]
+        : [
+            task.costKind === "plan"
+              ? "covered by plan"
+              : task.costKind === "free"
+                ? "free model"
+                : "usage unavailable",
+          ]),
     ...(task.currentStep ? [task.currentStep] : []),
-    ...(task.dependsOn.length ? [`${task.dependsOn.length} dependencies`] : []),
+    ...(task.dependsOn.length
+      ? [`${task.dependsOn.length} ${task.dependsOn.length === 1 ? "dependency" : "dependencies"}`]
+      : []),
   ].join(" · ")
 }
 

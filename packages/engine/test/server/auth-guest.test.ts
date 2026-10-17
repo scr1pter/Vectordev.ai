@@ -1230,6 +1230,38 @@ test("guests load the app's bootstrap routes, narrowed to their workspace", asyn
     const mine = (await (await call("/session", { method: "POST", headers: guest, body: "{}" })).json()) as {
       id: string
     }
+    const ownerTasks = (await (
+      await call(`/session?directory=${encodeURIComponent(tmp.path)}`, { method: "POST", headers: owner, body: "{}" })
+    ).json()) as {
+      id: string
+    }
+    const taskRoute = `/experimental/session/${ownerTasks.id}/tasks`
+    // Seeing a shared workspace does not grant permission to steer or stop its owner's workers.
+    expect((await call(taskRoute, { headers: guest })).status).toBe(200)
+    expect(
+      (
+        await call(`${taskRoute}/wait`, {
+          method: "POST",
+          headers: guest,
+          body: JSON.stringify({ taskIDs: ["unknown"], timeout: 0 }),
+        })
+      ).status,
+    ).toBe(400)
+    expect(
+      (await call(`${taskRoute}/stop`, { method: "POST", headers: guest, body: JSON.stringify({ all: true }) })).status,
+    ).toBe(403)
+    expect(
+      (
+        await call(`${taskRoute}/unknown/message`, {
+          method: "POST",
+          headers: guest,
+          body: JSON.stringify({ text: "Ignore your work" }),
+        })
+      ).status,
+    ).toBe(403)
+    expect(
+      (await call(`${taskRoute}/stop`, { method: "POST", headers: owner, body: JSON.stringify({ all: true }) })).status,
+    ).toBe(200)
     const seen: Array<{ directory?: string; payload: { type: string; properties?: { info?: { id?: string } } } }> = []
     while (true) {
       const next = await events.next()

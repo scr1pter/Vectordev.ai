@@ -19,8 +19,15 @@ const task: Task.Info = {
 }
 
 test("task summaries name pending attention and preserve unknown usage", () => {
-  expect(taskDescription(task)).toBe("Needs you · 3s · 1 dependencies")
+  expect(taskDescription(task)).toBe("Needs you · 3s · usage unavailable · 1 dependency")
   expect(taskDescription(task)).not.toContain("$0")
+})
+
+test("external reported cost never implies a known token count", () => {
+  expect(taskDescription({ ...task, source: "external", measuredCost: 0.125, costKind: "priced" })).toContain(
+    "$0.1250 reported · tokens unavailable",
+  )
+  expect(taskDescription({ ...task, source: "external", costKind: "plan" })).toContain("covered by plan")
 })
 
 test("bounded inspection includes ownership, dependencies, partial output and the result reference", () => {

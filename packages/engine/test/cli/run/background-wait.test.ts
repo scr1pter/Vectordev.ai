@@ -11,12 +11,20 @@ test("an event wins without waiting out the background timeout", async () => {
   const pending = Promise.withResolvers<IteratorResult<string>>()
   const result = nextBackgroundEvent({ next: () => pending.promise }, 10_000)
   pending.resolve({ value: "completed", done: false })
-  expect(await result).toEqual({ timedOut: false, event: { value: "completed", done: false } })
+  expect(await result).toEqual({ timedOut: false, disconnected: false, event: { value: "completed", done: false } })
 })
 
 test("a normal end and unbounded active provider stream preserve their result", async () => {
   expect(await nextBackgroundEvent({ next: async () => ({ value: undefined, done: true }) })).toEqual({
     timedOut: false,
+    disconnected: false,
     event: { value: undefined, done: true },
+  })
+})
+
+test("an ended stream with an unfinished parent or child is a disconnect, never completion", async () => {
+  expect(await nextBackgroundEvent({ next: async () => ({ value: undefined, done: true }) }, 10_000, true)).toEqual({
+    timedOut: false,
+    disconnected: true,
   })
 })
