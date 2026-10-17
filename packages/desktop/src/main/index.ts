@@ -500,6 +500,8 @@ const main = Effect.gen(function* () {
     setDesktopWorkBlocker(blocker)
 
     yield* Effect.promise(() => vectorAccount.restore())
+    // The sidebar's name and photo; never holds up startup.
+    void vectorAccount.refreshProfile()
     if (process.platform === "win32") {
       yield* Effect.promise(() => wslServers.initialize())
     }
