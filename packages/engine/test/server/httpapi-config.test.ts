@@ -5,6 +5,7 @@ import { Effect, Fiber } from "effect"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
 import { it } from "../lib/effect"
+import { GlobalBus, type GlobalEvent } from "@/bus/global"
 import { waitGlobalBusEvent } from "./global-bus"
 
 function app() {
@@ -50,7 +51,9 @@ describe("config HttpApi", () => {
       // The project's settings are not loaded, and clients can see why.
       expect((yield* request("/config")).body.model).not.toBe("test/project-model")
       expect((yield* request("/config/trust")).body).toMatchObject({ trusted: false, ignored: true, settings: true })
-      expect((yield* Fiber.join(notice)).payload.properties).toMatchObject({ title: "Project settings ignored" })
+      const ignored = (yield* Fiber.join(notice)).payload.properties
+      expect(ignored).toMatchObject({ title: "Repository settings ignored" })
+      expect(`${ignored.title} ${ignored.message}`).not.toMatch(/project/i)
 
       const disposed = yield* waitDisposed(tmp.path).pipe(Effect.forkScoped({ startImmediately: true }))
       const approved = yield* request("/config/trust", { method: "POST" })
@@ -96,7 +99,8 @@ describe("config HttpApi", () => {
         settings: false,
       })
       const held = (yield* Fiber.join(notice)).payload.properties
-      expect(held).toMatchObject({ title: "Project not trusted" })
+      expect(held).toMatchObject({ title: "Repository not trusted" })
+      expect(`${held.title} ${held.message}`).not.toMatch(/project/i)
       expect(held.message).toContain("language servers")
       expect(held.message).not.toContain("vector.json")
       expect(held.message).toContain("vector trust approve")
@@ -109,7 +113,7 @@ describe("config HttpApi", () => {
   )
 
   it.live(
-    "points the desktop engine's held-back notice at the app's Trust project button only",
+    "points the desktop engine's held-back notice at Settings, Repository trust only",
     Effect.gen(function* () {
       const tmp = yield* tmpdirEffect({})
       const original = { config: process.env.VECTOR_CONFIG_CONTENT, client: process.env.VECTOR_CLIENT }
@@ -132,9 +136,41 @@ describe("config HttpApi", () => {
         Promise.resolve(app().request("/config/trust", { headers: { "x-vector-directory": tmp.path } })),
       )
       const held = (yield* Fiber.join(notice)).payload.properties
-      expect(held.message).toContain("Choose Trust project in the session header.")
+      // The app never asks about a repository without settings of its own, so the notice says where trust lives.
+      expect(held).toMatchObject({ title: "Repository not trusted" })
+      expect(held.message).toContain("Trust it in Settings, under Repository trust.")
+      expect(held.message).not.toContain("session header")
       expect(held.message).not.toContain("vector trust")
       expect(held.message).not.toContain("/trust")
+    }),
+  )
+
+  it.live(
+    "leaves a desktop repository's ignored settings to the app's one-time question",
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirEffect({ config: { model: "test/project-model", formatter: false }, trusted: false })
+      const original = process.env.VECTOR_CLIENT
+      const toasts: unknown[] = []
+      const listener = (event: GlobalEvent) => {
+        if (event.payload.type === "tui.toast.show") toasts.push(event.payload.properties)
+      }
+      GlobalBus.on("event", listener)
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          GlobalBus.off("event", listener)
+          if (original === undefined) delete process.env.VECTOR_CLIENT
+          else process.env.VECTOR_CLIENT = original
+        }),
+      )
+      process.env.VECTOR_CLIENT = "desktop"
+
+      // Reading the status loads the config, which is where the notice would be sent.
+      const response = yield* Effect.promise(() =>
+        Promise.resolve(app().request("/config/trust", { headers: { "x-vector-directory": tmp.path } })),
+      )
+      expect(yield* Effect.promise(() => response.json())).toMatchObject({ trusted: false, ignored: true, settings: true })
+      // The app asks once and remembers "Not now"; a warning on every load would undo that answer.
+      expect(toasts).toEqual([])
     }),
   )
 
