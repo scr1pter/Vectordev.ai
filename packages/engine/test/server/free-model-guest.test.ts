@@ -8,6 +8,7 @@ import {
   FREE_MODEL_TRAINING_CONSENT_REQUIRED,
   FREE_MODEL_TRAINING_GUEST_SESSION,
   FREE_MODEL_TRAINING_OWNER_ONLY,
+  FREE_MODEL_UNLISTED,
 } from "@vectordevai/core/free-model-choice"
 import { Global } from "@vectordevai/core/global"
 import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
@@ -652,6 +653,78 @@ test("a free OpenRouter model configured under another name, or under a provider
               "poolside/laguna-xs-2.1:free": { name: "Laguna XS" },
               renamed: { id: "thinkingmachines/inkling:free", name: "Renamed" },
             },
+          },
+        },
+      }),
+    },
+  )
+}, 90_000)
+
+test("a request to OpenRouter outside the free-model checks never lets another model answer, nor names a free one", async () => {
+  // The verifier's medium of 18 October 2026: a model named like a paid one reached the owner's OpenRouter key with
+  // fallbacks onto free endpoints in its options (`models`), or with `model` in its options, which replaces the model
+  // the SDK sends; and a provider at "openrouter.ai." (a trailing dot) skipped the host check.
+  const paid = {
+    "acme/paid-fallback": {
+      name: "Paid with a free fallback",
+      options: { models: ["poolside/laguna-s-2.1:free"], provider: { data_collection: "allow" } },
+    },
+    "acme/paid-override": { name: "Paid with a free override", options: { model: "poolside/laguna-s-2.1:free" } },
+    "acme/paid-router": { name: "Paid with the router as fallback", options: { models: ["openrouter/free"] } },
+    "acme/paid-preset": { id: "acme/paid@preset/free-coding", name: "Paid with a preset" },
+    "acme/paid-plugins": { name: "Paid with plugins", options: { plugins: [{ id: "auto-router" }] } },
+  }
+  await serve(
+    async (h) => {
+      const listed = (await (await h.get("/provider", h.owner)).json()) as {
+        all: { id: string; models: Record<string, unknown> }[]
+      }
+      // A free model under a provider at a trailing-dot host is held to the free-model list like any other.
+      expect(Object.keys(listed.all.find((provider) => provider.id === "dot-proxy")?.models ?? {})).toEqual([])
+      for (const [who, headers] of [
+        ["guest", h.guest],
+        ["owner", h.owner],
+      ] as const) {
+        const session = await newSession(h, headers)
+        for (const modelID of [...Object.keys(paid), "poolside/laguna-xs-2.1:free"])
+          await h.send(`/session/${session}/message`, headers, {
+            model: { providerID: modelID.includes(":free") ? "dot-proxy" : "or-proxy", modelID },
+            parts: [{ type: "text", text: `${who} secret via ${modelID}` }],
+          })
+        const errors = (await messages(h, session)).flatMap((item) => item.info.error?.data?.message ?? [])
+        expect(errors.some((message) => message.includes("lets OpenRouter answer with another model"))).toBe(true)
+        expect(errors.some((message) => message.includes(FREE_MODEL_UNLISTED))).toBe(true)
+      }
+      expect(h.outbound.filter((item) => item.text.includes("secret via"))).toEqual([])
+      // The control: the same provider and key with provider preferences only still sends.
+      const session = await newSession(h, h.owner)
+      await h.send(`/session/${session}/message`, h.owner, {
+        model: { providerID: "or-proxy", modelID: "acme/paid-plain" },
+        parts: [{ type: "text", text: "owner prompt on a paid model" }],
+      })
+      expect(
+        h.outbound.filter(
+          (item) => item.url.startsWith("https://openrouter.ai/api/v1") && item.model === "acme/paid-plain",
+        ).length,
+      ).toBeGreaterThan(0)
+    },
+    {
+      config: (base) => ({
+        provider: {
+          ...testProviderConfig(base).provider,
+          // Providers of other names sending to openrouter.ai, which this test refuses and records.
+          "or-proxy": {
+            npm: "@ai-sdk/openai-compatible",
+            options: { apiKey: "sk-or-synthetic-not-a-key", baseURL: "https://openrouter.ai/api/v1" },
+            models: {
+              ...paid,
+              "acme/paid-plain": { name: "Paid", options: { provider: { data_collection: "deny" } } },
+            },
+          },
+          "dot-proxy": {
+            npm: "@ai-sdk/openai-compatible",
+            options: { apiKey: "sk-or-synthetic-not-a-key", baseURL: "https://openrouter.ai./api/v1" },
+            models: { "poolside/laguna-xs-2.1:free": { name: "Laguna XS" } },
           },
         },
       }),

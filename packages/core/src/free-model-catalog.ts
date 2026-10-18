@@ -165,7 +165,8 @@ export function isOpenRouterFreeModel(
 /** Whether a request to this URL goes to OpenRouter. */
 export function isOpenRouterURL(url: unknown) {
   if (typeof url !== "string" || !URL.canParse(url.trim())) return false
-  const host = new URL(url.trim()).hostname.toLowerCase()
+  // A fully qualified name ends in a dot (`openrouter.ai.`, also spelled `openrouter.ai%2E`), and resolves the same.
+  const host = new URL(url.trim()).hostname.toLowerCase().replace(/\.+$/, "")
   return host === "openrouter.ai" || host.endsWith(".openrouter.ai")
 }
 
@@ -184,12 +185,36 @@ export function sendsToOpenRouterFree(model: {
   readonly destinations: readonly unknown[]
   readonly price: { readonly input: number; readonly output: number } | undefined
 }) {
-  if (
-    model.providerID !== "openrouter" &&
-    !model.destinations.some((item) => item === "@openrouter/ai-sdk-provider" || isOpenRouterURL(item))
-  )
-    return false
+  if (!sendsToOpenRouter(model)) return false
   return [model.id, model.apiID].some((id) => typeof id === "string" && isOpenRouterFreeModel(id, model.price))
+}
+
+/** Whether a model's requests go to OpenRouter: the openrouter provider, or any provider pointed at openrouter.ai. */
+export function sendsToOpenRouter(model: { readonly providerID: string; readonly destinations: readonly unknown[] }) {
+  return (
+    model.providerID === "openrouter" ||
+    model.destinations.some((item) => item === "@openrouter/ai-sdk-provider" || isOpenRouterURL(item))
+  )
+}
+
+// OpenRouter request fields that let it answer with a model other than the one a request names: fallback models
+// (`models`, with `route`), presets, and plugins, such as the Auto Router's list of models it may pick. Provider
+// preferences (`provider`) only choose among the endpoints of the model named, and are how a request asks for no
+// training or zero retention, so they stay.
+const OPENROUTER_MODEL_ROUTING_FIELDS = ["models", "route", "preset", "plugins"]
+
+/**
+ * The settings in a request to OpenRouter, outside the free-model route, that could let OpenRouter answer with another
+ * model, a free one included: the guest rule, the training notice and data_collection would not apply to it. `body`
+ * is what the request body carries beyond the protocol's own fields, and `modelID` the model it names, which can name
+ * a preset (`@preset/…`). Configuration of a model or its provider can set all of these, so such a request is refused.
+ */
+export function openRouterModelRouting(body: unknown, modelID: unknown) {
+  const fields =
+    typeof body === "object" && body !== null && !Array.isArray(body)
+      ? OPENROUTER_MODEL_ROUTING_FIELDS.filter((key) => Object.hasOwn(body, key))
+      : []
+  return typeof modelID === "string" && modelID.includes("@preset/") ? [...fields, "preset"] : fields
 }
 
 /** Why a free model is never offered, when its terms bar Vector's use. */

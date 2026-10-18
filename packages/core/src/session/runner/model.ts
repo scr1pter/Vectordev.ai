@@ -10,8 +10,8 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { produce } from "immer"
 import { FreeModels } from "../../free-models"
 import { FreeModelGuests } from "../../free-model-guests"
-import { freeModelMayTrain } from "../../free-model-choice"
-import { sendsToOpenRouterFree } from "../../free-model-catalog"
+import { freeModelMayTrain, openRouterRoutingRefused } from "../../free-model-choice"
+import { openRouterModelRouting, sendsToOpenRouter, sendsToOpenRouterFree } from "../../free-model-catalog"
 import { ModelPlans } from "../../model-plans"
 import { freeModelRoute } from "./free-model-route"
 import { modelPlanRoute } from "./model-plan-route"
@@ -88,12 +88,26 @@ export class UnsafeEndpointError extends Schema.TaggedErrorClass<UnsafeEndpointE
   }
 }
 
+export class OpenRouterRoutingError extends Schema.TaggedErrorClass<OpenRouterRoutingError>()(
+  "SessionRunnerModel.OpenRouterRoutingError",
+  {
+    providerID: ProviderV2.ID,
+    modelID: ModelV2.ID,
+    fields: Schema.Array(Schema.String),
+  },
+) {
+  override get message() {
+    return openRouterRoutingRefused(this.fields)
+  }
+}
+
 export type Error =
   | ModelNotSelectedError
   | ModelUnavailableError
   | VariantUnavailableError
   | UnsupportedApiError
   | UnsafeEndpointError
+  | OpenRouterRoutingError
   | Integration.AuthorizationError
 
 export interface Interface {
@@ -273,7 +287,7 @@ const apiName = (model: ModelV2.Info) =>
 export const fromCatalogModel = (
   model: ModelV2.Info,
   credential?: Credential.Value,
-): Effect.Effect<Model, UnsupportedApiError | UnsafeEndpointError> => {
+): Effect.Effect<Model, UnsupportedApiError | UnsafeEndpointError | OpenRouterRoutingError> => {
   const resolved =
     credential?.type !== "key" || credential.metadata === undefined
       ? model
@@ -286,6 +300,15 @@ export const fromCatalogModel = (
       new UnsafeEndpointError({ providerID: resolved.providerID, modelID: resolved.id, url: resolved.api.url }),
     )
   }
+  // The request body overlay, with the variant's and the credential's, is sent as is: on OpenRouter it must not let
+  // another model answer, which could be a free one outside the free-model checks.
+  const routing = sendsToOpenRouter({ providerID: resolved.providerID, destinations: destinations(resolved) })
+    ? openRouterModelRouting(resolved.request.body, resolved.api.id)
+    : []
+  if (routing.length)
+    return Effect.fail(
+      new OpenRouterRoutingError({ providerID: resolved.providerID, modelID: resolved.id, fields: routing }),
+    )
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai") {
     return Effect.succeed(
       withPricing(
@@ -346,14 +369,15 @@ function requiresFreeRoute(model: ModelV2.Info) {
       providerID: model.providerID,
       id: model.id,
       apiID: model.api.id,
-      destinations: [
-        model.api.url,
-        model.request.body.baseURL,
-        model.api.type === "aisdk" ? model.api.package : undefined,
-      ],
+      destinations: destinations(model),
       price: model.cost.find((cost) => !cost.tier),
     })
   )
+}
+
+// Whatever decides where a model's requests go.
+function destinations(model: ModelV2.Info) {
+  return [model.api.url, model.request.body.baseURL, model.api.type === "aisdk" ? model.api.package : undefined]
 }
 
 /** Resolves models from the catalog belonging to the current Location runtime. */

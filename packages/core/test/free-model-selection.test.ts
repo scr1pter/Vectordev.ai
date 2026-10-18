@@ -363,3 +363,168 @@ for (const scenario of [
     }),
   )
 }
+
+// The verifier's medium of 18 October 2026: a model named like a paid one went out on the generic route with fallbacks
+// onto OpenRouter's free endpoints in its request body, with the owner's key and a guest's text, and a provider at
+// "openrouter.ai." (a trailing dot) skipped the host check.
+for (const scenario of [
+  {
+    name: "a paid-named OpenRouter model whose request body falls back to a free model is refused before it is sent",
+    providerID: "openrouter",
+    modelID: "acme/paid-model",
+    model: {
+      api: { id: "acme/paid-model", url: "https://openrouter.ai/api/v1" },
+      request: { body: { models: ["poolside/laguna-s-2.1:free"], provider: { data_collection: "allow" } } },
+    },
+    refused: ["models"],
+  },
+  {
+    name: "a paid-named model under another provider whose variant falls back to the free router is refused",
+    providerID: "or-proxy",
+    modelID: "acme/paid-model",
+    variant: "cheap",
+    model: {
+      api: { id: "acme/paid-model", url: "https://eu.openrouter.ai/api/v1" },
+      variants: [{ id: "cheap", body: { models: ["openrouter/free"], route: "fallback" } }],
+    },
+    refused: ["models", "route"],
+  },
+  {
+    name: "fallbacks set on the provider rather than the model are refused too",
+    providerID: "openrouter",
+    modelID: "acme/paid-model",
+    providerBody: { models: ["thinkingmachines/inkling:free"] },
+    model: { api: { id: "acme/paid-model", url: "https://openrouter.ai/api/v1" } },
+    refused: ["models"],
+  },
+  {
+    name: "an OpenRouter preset named in the model ID is refused",
+    providerID: "or-proxy",
+    modelID: "acme/paid-preset",
+    model: { api: { id: "acme/paid@preset/free-coding", url: "https://openrouter.ai/api/v1" } },
+    refused: ["preset"],
+  },
+  {
+    name: "a free model under a provider at a trailing-dot OpenRouter host takes the free route, which refuses it",
+    providerID: "proxy",
+    modelID: "renamed",
+    model: { api: { id: "poolside/laguna-s-2.1:free", url: "https://openrouter.ai./api/v1" } },
+    unlisted: true,
+  },
+  {
+    name: "provider preferences alone still send a paid OpenRouter model on the generic route",
+    providerID: "or-proxy",
+    modelID: "acme/paid-model",
+    model: {
+      api: { id: "acme/paid-model", url: "https://openrouter.ai/api/v1" },
+      request: { body: { provider: { data_collection: "deny", zdr: true } } },
+    },
+  },
+] as {
+  name: string
+  providerID: string
+  modelID: string
+  variant?: string
+  providerBody?: Record<string, unknown>
+  model: Record<string, unknown> & { api: Record<string, unknown> }
+  refused?: string[]
+  unlisted?: boolean
+}[]) {
+  it.effect(scenario.name, () =>
+    Effect.gen(function* () {
+      const host = yield* PluginHost.make(yield* PluginV2.Service)
+      yield* VectorPlugin.effect(host).pipe(
+        Effect.provideService(FreeModels.Service, freeModels),
+        Effect.provideService(FreeModels.CredentialsService, credentials),
+      )
+      yield* ConfigProviderPlugin.Plugin.effect(host).pipe(
+        Effect.provideService(Config.Service, {
+          entries: () =>
+            Effect.succeed([
+              new Config.Document({
+                type: "document",
+                info: Schema.decodeUnknownSync(Config.Info)({
+                  providers: {
+                    [scenario.providerID]: {
+                      request: { body: { apiKey: "sk-or-synthetic-not-a-key", ...scenario.providerBody } },
+                      models: {
+                        [scenario.modelID]: {
+                          ...scenario.model,
+                          api: { ...scenario.model.api, type: "aisdk", package: "@ai-sdk/openai-compatible" },
+                        },
+                      },
+                    },
+                  },
+                }),
+              }),
+            ]),
+        }),
+      )
+      const session = SessionV2.Info.make({
+        id: SessionV2.ID.make("ses_openrouter_routing"),
+        projectID: ProjectV2.ID.global,
+        title: "openrouter routing",
+        model: {
+          id: ModelV2.ID.make(scenario.modelID),
+          providerID: ProviderV2.ID.make(scenario.providerID),
+          ...(scenario.variant ? { variant: ModelV2.VariantID.make(scenario.variant) } : {}),
+        },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: DateTime.makeUnsafe(0), updated: DateTime.makeUnsafe(0) },
+        location: { directory: AbsolutePath.make("/synthetic-project") },
+      })
+      // An invited guest has worked in this session, and the owner has accepted the notice.
+      const resolved = yield* Effect.gen(function* () {
+        const resolver = yield* SessionRunnerModel.Service
+        return yield* resolver.resolve(session)
+      }).pipe(
+        Effect.provide(SessionRunnerModel.locationLayer),
+        Effect.provideService(
+          FreeModelGuests.Service,
+          FreeModelGuests.Service.of({ mark: () => Effect.void, marked: () => Effect.succeed(true) }),
+        ),
+        Effect.provideService(
+          ModelPlans.Service,
+          ModelPlans.Service.of({
+            catalog: () => Effect.succeed({ enabled: false, models: [] }),
+            request: () => Promise.reject(new Error("Codium is off in this test")),
+          }),
+        ),
+        Effect.provideService(FreeModels.Service, { ...freeModels, trainingConsent: () => Effect.succeed(true) }),
+        Effect.provideService(FreeModels.CredentialsService, credentials),
+        Effect.result,
+      )
+      if (scenario.refused) {
+        expect(resolved).toMatchObject({
+          _tag: "Failure",
+          failure: { _tag: "SessionRunnerModel.OpenRouterRoutingError", fields: scenario.refused },
+        })
+        if (resolved._tag === "Failure") expect(resolved.failure.message).toContain("Nothing was sent")
+        return
+      }
+      if (resolved._tag === "Failure") throw new Error(`Unexpected failure: ${resolved.failure.message}`)
+      const prepared = yield* resolved.success.route
+        .prepareTransport(
+          { model: resolved.success.id, messages: [{ role: "user", content: "guest secret" }], stream: true },
+          LLM.request({ model: resolved.success, prompt: "guest secret" }),
+        )
+        .pipe(Effect.result)
+      if (scenario.unlisted) {
+        expect(prepared).toMatchObject({
+          _tag: "Failure",
+          failure: { reason: { _tag: "InvalidRequest", message: FREE_MODEL_UNLISTED } },
+        })
+        // The guard after configuration keeps it out of the lists too.
+        const catalog = yield* Catalog.Service
+        yield* FreeModelGuardPlugin.effect(host)
+        expect(
+          yield* catalog.model.get(ProviderV2.ID.make(scenario.providerID), ModelV2.ID.make(scenario.modelID)),
+        ).toBeUndefined()
+        return
+      }
+      // The control: nothing here names another model, so the generic route builds the request.
+      expect(prepared._tag).toBe("Success")
+    }),
+  )
+}

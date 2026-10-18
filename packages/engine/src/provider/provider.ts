@@ -17,8 +17,14 @@ import {
   type FreeModelCatalog,
   type FreeModelInfo,
 } from "@vectordevai/schema/free-model"
-import { freeModelDataPolicy, sendsToOpenRouterFree } from "@vectordevai/core/free-model-catalog"
-import { FREE_MODEL_UNLISTED, freeModelMayTrain } from "@vectordevai/core/free-model-choice"
+import {
+  freeModelDataPolicy,
+  isOpenRouterFreeModel,
+  isOpenRouterURL,
+  openRouterModelRouting,
+  sendsToOpenRouterFree,
+} from "@vectordevai/core/free-model-catalog"
+import { FREE_MODEL_UNLISTED, freeModelMayTrain, openRouterRoutingRefused } from "@vectordevai/core/free-model-choice"
 import { ProviderUnavailable, providerRetired, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
 import {
@@ -2213,6 +2219,20 @@ const layer = Layer.effect(
             init?.body,
           )
           if (body !== undefined) opts.body = body
+          // A request that reaches OpenRouter here skips every free-model check, so it must name one model and not a
+          // free one. Model and provider options can replace the model the SDK sends (`model` in them overrides it),
+          // or let OpenRouter answer with another (openRouterModelRouting).
+          if (isOpenRouterURL(input instanceof Request ? input.url : String(input))) {
+            const sent =
+              typeof opts.body === "string"
+                ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(opts.body))
+                : undefined
+            const sentModel = isRecord(sent) ? sent.model : undefined
+            if (typeof sentModel === "string" && isOpenRouterFreeModel(sentModel, undefined))
+              throw new Error(FREE_MODEL_UNLISTED)
+            const routing = openRouterModelRouting(sent, sentModel)
+            if (routing.length) throw new Error(openRouterRoutingRefused(routing))
+          }
           if (consent) {
             requirePluginDestination(consent, input instanceof Request ? input.url : String(input))
             const current = await runtimeBridge.promise(auth.get(model.providerID).pipe(Effect.orDie))

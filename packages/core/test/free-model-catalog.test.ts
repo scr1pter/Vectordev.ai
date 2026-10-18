@@ -11,6 +11,7 @@ import {
   isFreeModelID,
   isOpenRouterURL,
   offeredFreeModel,
+  openRouterModelRouting,
   personalOnlyFreeModel,
   sendsToOpenRouterFree,
   zeroFreeModelPricing,
@@ -268,4 +269,47 @@ test("a model reaches OpenRouter's free endpoints by its name or the ID it sends
   for (const destinations of [[], ["https://openrouter.ai.example.com/v1"], ["https://example.com/openrouter.ai"]])
     expect(free({ providerID: "acme", apiID: "maker/coder:free", destinations })).toBe(false)
   expect(isOpenRouterURL("not a url")).toBe(false)
+})
+
+test("a fully qualified OpenRouter host, ending in a dot, is still OpenRouter", () => {
+  // The verifier's low of 18 October 2026: "openrouter.ai." resolves like "openrouter.ai" but missed the host check.
+  for (const url of [
+    "https://openrouter.ai./api/v1",
+    "https://openrouter.ai%2E/api/v1",
+    "https://OpenRouter.AI../api/v1",
+    "https://eu.openrouter.ai./api/v1",
+  ])
+    expect({ url, openRouter: isOpenRouterURL(url) }).toEqual({ url, openRouter: true })
+  expect(
+    sendsToOpenRouterFree({
+      providerID: "proxy",
+      id: "renamed",
+      apiID: "poolside/laguna-s-2.1:free",
+      destinations: ["https://openrouter.ai./api/v1"],
+      price: undefined,
+    }),
+  ).toBe(true)
+  for (const url of ["https://openrouter.ai.example.com./v1", "https://notopenrouter.ai./v1"])
+    expect(isOpenRouterURL(url)).toBe(false)
+})
+
+test("OpenRouter settings that let another model answer are named, and provider preferences are not", () => {
+  // The verifier's medium of 18 October 2026: fallbacks in a paid-named model's request body reached free endpoints.
+  expect(
+    openRouterModelRouting(
+      { models: ["poolside/laguna-s-2.1:free"], provider: { data_collection: "allow" } },
+      "acme/paid-model",
+    ),
+  ).toEqual(["models"])
+  expect(openRouterModelRouting({ route: "fallback", preset: "coding", plugins: [] }, "acme/paid")).toEqual([
+    "route",
+    "preset",
+    "plugins",
+  ])
+  // A preset can also be named in the model ID.
+  expect(openRouterModelRouting({}, "acme/paid@preset/free-coding")).toEqual(["preset"])
+  expect(openRouterModelRouting(undefined, "@preset/free-coding")).toEqual(["preset"])
+  // Provider preferences only choose among the named model's endpoints, and are how a request asks for no training.
+  for (const body of [{}, { provider: { data_collection: "deny", zdr: true } }, { usage: { include: true } }, "x", []])
+    expect(openRouterModelRouting(body, "acme/paid")).toEqual([])
 })
