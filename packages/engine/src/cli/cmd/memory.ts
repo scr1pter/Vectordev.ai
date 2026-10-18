@@ -35,6 +35,7 @@ export const MemoryCommand = cmd({
   async handler() {},
 })
 
+// The brain and where the current directory sits in it.
 const where = Effect.gen(function* () {
   const instruction = yield* Instruction.Service
   return { brain: yield* Brain.Service, place: yield* instruction.place() }
@@ -53,15 +54,15 @@ export const MemoryListCommand = effectCmd({
       .option("all", { describe: "every entry, whatever its state", type: "boolean", default: false })
       .option("json", { describe: "print JSON", type: "boolean", default: false }),
   handler: Effect.fn("Cli.memory.list")(function* (args) {
-    const { brain, place } = yield* where
-    const entries = yield* brain.list(place, {
+    const memory = yield* where
+    const entries = yield* memory.brain.list(memory.place, {
       filter: args.all ? "all" : args.review ? "review" : args.archived ? "archived" : "active",
       ...(args.personal ? { scope: "personal" as const } : {}),
     })
     if (args.json) return void process.stdout.write(`${JSON.stringify(entries, null, 2)}${EOL}`)
     if (entries.length === 0) return UI.println(args.review ? "Nothing waits for your review." : "Nothing in memory yet.")
     for (const entry of entries) UI.println(line(entry))
-    const stats = yield* brain.stats(place)
+    const stats = yield* memory.brain.stats(memory.place)
     UI.empty()
     UI.println(
       UI.Style.TEXT_DIM +
@@ -76,8 +77,8 @@ export const MemorySearchCommand = effectCmd({
   describe: "search memory the way the agent does",
   builder: (yargs) => yargs.positional("query", { type: "string", array: true, demandOption: true }),
   handler: Effect.fn("Cli.memory.search")(function* (args) {
-    const { brain, place } = yield* where
-    const entries = yield* brain.list(place, { query: args.query.join(" ") })
+    const memory = yield* where
+    const entries = yield* memory.brain.list(memory.place, { query: args.query.join(" ") })
     if (entries.length === 0) return UI.println("Nothing in memory matches.")
     for (const entry of entries.slice(0, 20)) UI.println(line(entry))
   }),
@@ -88,8 +89,8 @@ export const MemoryShowCommand = effectCmd({
   describe: "show one entry with its evidence",
   builder: (yargs) => yargs.positional("id", { type: "string", demandOption: true }),
   handler: Effect.fn("Cli.memory.show")(function* (args) {
-    const { brain, place } = yield* where
-    const detail = yield* brain.get(place, args.id, { personal: true })
+    const memory = yield* where
+    const detail = yield* memory.brain.get(memory.place, args.id, { personal: true })
     if (!detail) return yield* fail(`No memory ${args.id} here.`)
     UI.println(line(detail.entry))
     for (const item of detail.evidence)
@@ -112,8 +113,8 @@ export const MemoryAddCommand = effectCmd({
         default: "lesson" as const,
       }),
   handler: Effect.fn("Cli.memory.add")(function* (args) {
-    const { brain, place } = yield* where
-    const result = yield* brain.propose(place, {
+    const memory = yield* where
+    const result = yield* memory.brain.propose(memory.place, {
       kind: args.kind,
       text: args.text.join(" "),
       scope: args.personal ? "personal" : "repository",
@@ -163,8 +164,8 @@ export const MemoryRejectCommand = simple(
 )
 
 const change = Effect.fnUntraced(function* (id: string, update: Brain.Change, done: string) {
-  const { brain, place } = yield* where
-  const result = yield* brain.update(place, id, update, "user")
+  const memory = yield* where
+  const result = yield* memory.brain.update(memory.place, id, update, "user")
   if (!result) return yield* fail(`No memory ${id} here.`)
   if (result.type === "refused") return yield* fail(result.message)
   UI.println(UI.Style.TEXT_SUCCESS_BOLD + `${done} ${id}` + UI.Style.TEXT_NORMAL)
@@ -175,8 +176,8 @@ export const MemoryForgetCommand = effectCmd({
   describe: "delete an entry for good; Vector will not learn it again",
   builder: (yargs) => yargs.positional("id", { type: "string", demandOption: true }),
   handler: Effect.fn("Cli.memory.forget")(function* (args) {
-    const { brain, place } = yield* where
-    const result = yield* brain.forget(place, args.id)
+    const memory = yield* where
+    const result = yield* memory.brain.forget(memory.place, args.id)
     if (result === "not-found") return yield* fail(`No memory ${args.id} here.`)
     if (result === "file-entry") return yield* fail("That entry comes from a file you wrote; change it in that file.")
     UI.println(UI.Style.TEXT_SUCCESS_BOLD + `Forgot ${args.id}` + UI.Style.TEXT_NORMAL)
@@ -187,8 +188,8 @@ export const MemoryTidyCommand = effectCmd({
   command: "tidy",
   describe: "merge duplicates, confirm or drop proposals, archive what goes unused",
   handler: Effect.fn("Cli.memory.tidy")(function* () {
-    const { brain, place } = yield* where
-    const report = yield* brain.consolidate(place, { force: true })
+    const memory = yield* where
+    const report = yield* memory.brain.consolidate(memory.place, { force: true })
     UI.println(
       `Merged ${report.merged}, confirmed ${report.promoted}, archived ${report.archived}, dropped ${report.dropped}, marked ${report.stale} stale.`,
     )
@@ -211,8 +212,8 @@ export const MemoryEraseCommand = effectCmd({
           ? "what Vector learned about you"
           : "what Vector learned in this repository, its failure memory included"
     if (!args.yes) return yield* fail(`This erases ${what}. Run it again with --yes to confirm.`)
-    const { brain, place } = yield* where
-    const count = yield* brain.erase(place, scope)
+    const memory = yield* where
+    const count = yield* memory.brain.erase(memory.place, scope)
     UI.println(UI.Style.TEXT_SUCCESS_BOLD + `Erased ${count} entr${count === 1 ? "y" : "ies"}` + UI.Style.TEXT_NORMAL)
   }),
 })
@@ -234,8 +235,8 @@ export const MemoryExportCommand = effectCmd({
   describe: "print memory as Markdown, entries with their evidence",
   builder: (yargs) => scopeOption(yargs),
   handler: Effect.fn("Cli.memory.export")(function* (args) {
-    const { brain, place } = yield* where
-    const entries = yield* brain.list(place, { filter: "all", ...(args.personal ? { scope: "personal" as const } : {}) })
+    const memory = yield* where
+    const entries = yield* memory.brain.list(memory.place, { filter: "all", ...(args.personal ? { scope: "personal" as const } : {}) })
     const kinds: readonly BrainSchema.Kind[] = ["rule", "preference", "decision", "lesson", "fact", "failure", "review"]
     const sections = yield* Effect.forEach(kinds, (kind) =>
       Effect.gen(function* () {
@@ -243,7 +244,7 @@ export const MemoryExportCommand = effectCmd({
         if (items.length === 0) return []
         const body = yield* Effect.forEach(items, (entry) =>
           Effect.gen(function* () {
-            const detail = yield* brain.get(place, entry.id, { personal: true })
+            const detail = yield* memory.brain.get(memory.place, entry.id, { personal: true })
             return [
               `- **${entry.id}** ${entry.text}${entry.status === "active" ? "" : ` _(${entry.status})_`}`,
               ...(entry.source ? [`  - from ${path.basename(entry.source.file)}`] : []),
