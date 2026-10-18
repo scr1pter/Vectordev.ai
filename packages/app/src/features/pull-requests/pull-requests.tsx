@@ -7,6 +7,7 @@ import {
   buildDesktopReview,
   checksForReview,
   dismissalRule,
+  REMEMBER_COPY,
   fixMission,
   withoutDismissed,
   countBySeverity,
@@ -16,6 +17,7 @@ import {
   keptDismissals,
   passLines,
   REBUILT_HINT,
+  rememberedRules,
   repoOf,
   reviewEvents,
   reviewFooter,
@@ -33,6 +35,7 @@ import {
   type ReviewOutcomeLite,
   type ReviewRequest,
   type ReviewTarget,
+  type RepoRulesApi,
   type WorkingTreeChanges,
 } from "./ai-review"
 import {
@@ -148,17 +151,13 @@ function api(): PullRequestsApi | undefined {
   return (globalThis.window as unknown as { api?: { pullRequests?: PullRequestsApi } } | undefined)?.api?.pullRequests
 }
 
-type RepoRulesApi = {
-  save: (input: { description: string; repositoryPath: string; filePatterns: string[] }) => Promise<unknown>
-}
-
 function rulesApi(): RepoRulesApi | undefined {
   return (globalThis.window as unknown as { api?: { repoRules?: RepoRulesApi } } | undefined)?.api?.repoRules
 }
 
 const DISMISS_REASONS = ["Not a bug", "Intended behaviour", "Fixed elsewhere"]
-const REMEMBER = "Don't flag this again"
-const REMEMBERED = "Won't be flagged again · saved to Project rules"
+const REMEMBER = REMEMBER_COPY.action
+const REMEMBERED = REMEMBER_COPY.saved
 
 type CiRun = {
   id: number
@@ -413,7 +412,7 @@ function Grounding(props: { outcome: ReviewOutcomeLite }) {
             title="AGENTS.md and .vector/RULES.md from your checkout, including findings you chose not to see again."
           >
             <Icon name="rule" class="size-3" />
-            Project rules applied
+            {REMEMBER_COPY.applied}
           </span>
         </Show>
       </div>
@@ -456,7 +455,7 @@ function FindingCard(props: {
             <Show when={props.dismissed === REMEMBER || props.dismissed === REMEMBERED}>
               <Icon name="rule" class="size-3" />
             </Show>
-            {props.dismissed === REMEMBER ? "Saving as a project rule…" : props.dismissed}
+            {props.dismissed === REMEMBER ? REMEMBER_COPY.saving : props.dismissed}
           </span>
           <button
             type="button"
@@ -627,7 +626,7 @@ function FindingCard(props: {
                           {REMEMBER}
                         </span>
                         <span class="mt-0.5 block text-[10.5px] text-[color:var(--vx-text-muted)]">
-                          Saves a project rule that every review reads
+                          {REMEMBER_COPY.hint}
                         </span>
                       </button>
                     </Show>
@@ -737,6 +736,8 @@ export function PullRequests(props: {
   const [postedNote, setPostedNote] = createSignal<string>()
   // Finding id → why it was dismissed. Dismissed findings stay visible, struck through, and are never posted.
   const [dismissed, setDismissed] = createSignal<Record<string, string>>({})
+  // The repository rules "Don't flag this again" saved, so Undo can delete them.
+  const remembered = rememberedRules()
   const [menuFor, setMenuFor] = createSignal<string>()
   // Finding id → where applying its fix stands.
   const [applied, setApplied] = createSignal<Record<string, "applying" | "applied" | "changed" | "failed">>({})
@@ -1299,8 +1300,12 @@ export function PullRequests(props: {
     const rules = rulesApi()
     if (!rules || !projectPath) return
     // The rule lands in .vector/RULES.md, which every later review reads as the repository's instructions.
-    await rules
-      .save({ description: dismissalRule(finding), repositoryPath: projectPath, filePatterns: [finding.path] })
+    await remembered
+      .save(finding.id, rules, {
+        description: dismissalRule(finding),
+        repositoryPath: projectPath,
+        filePatterns: [finding.path],
+      })
       .then(
         () =>
           setDismissed((current) =>
@@ -1310,13 +1315,19 @@ export function PullRequests(props: {
           setDismissed((current) =>
             current[finding.id] === REMEMBER ? { ...current, [finding.id]: "Dismissed" } : current,
           )
-          setError(`Vector could not save the project rule: ${pullRequestErrorMessage(cause)}`)
+          setError(`${REMEMBER_COPY.failed}: ${pullRequestErrorMessage(cause)}`)
         },
       )
   }
 
-  const restore = (finding: ReviewFindingView) =>
+  const restore = (finding: ReviewFindingView) => {
+    const reason = dismissed()[finding.id]
     setDismissed((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== finding.id)))
+    if (reason !== REMEMBER && reason !== REMEMBERED) return
+    void remembered
+      .undo(finding.id)
+      .catch((cause: unknown) => setError(`${REMEMBER_COPY.undoFailed}: ${pullRequestErrorMessage(cause)}`))
+  }
 
   // Hands the finding to an isolated agent workspace. The launcher opens with the task filled in; nothing runs until
   // the user starts it there.

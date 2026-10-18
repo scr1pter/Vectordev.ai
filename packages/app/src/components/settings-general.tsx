@@ -1,11 +1,9 @@
-import { Component, Show, createMemo, createResource, onMount, type JSX } from "solid-js"
+import { Component, Show, createMemo, createResource, type JSX } from "solid-js"
 import { Button } from "@vectordevai/ui/button"
 import { Icon } from "@vectordevai/ui/icon"
 import { Select } from "@vectordevai/ui/select"
 import { Switch } from "@vectordevai/ui/switch"
-import { TextField } from "@vectordevai/ui/text-field"
 import { Tooltip } from "@vectordevai/ui/tooltip"
-import { useTheme, type ColorScheme } from "@vectordevai/ui/theme/context"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { useParams } from "@solidjs/router"
 import { useLanguage } from "@/context/language"
@@ -14,32 +12,15 @@ import { usePlatform, type DisplayBackend } from "@/context/platform"
 import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
 import { useUpdaterAction } from "./updater-action"
-import {
-  monoDefault,
-  monoFontFamily,
-  monoInput,
-  sansDefault,
-  sansFontFamily,
-  sansInput,
-  terminalDefault,
-  terminalFontFamily,
-  terminalInput,
-  useSettings,
-} from "@/context/settings"
+import { useSettings } from "@/context/settings"
 import { decode64 } from "@/utils/base64"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
-import { Link } from "./link"
 import { SettingsList } from "./settings-list"
 
 let demoSoundState = {
   cleanup: undefined as (() => void) | undefined,
   timeout: undefined as NodeJS.Timeout | undefined,
   run: 0,
-}
-
-type ThemeOption = {
-  id: string
-  name: string
 }
 
 type ShellOption = {
@@ -82,7 +63,6 @@ const playDemoSound = (id: string | undefined) => {
 }
 
 export const SettingsGeneral: Component = () => {
-  const theme = useTheme()
   const language = useLanguage()
   const permission = usePermission()
   const platform = usePlatform()
@@ -120,8 +100,6 @@ export const SettingsGeneral: Component = () => {
   }
   const desktop = createMemo(() => platform.platform === "desktop")
 
-  const themeOptions = createMemo<ThemeOption[]>(() => theme.ids().map((id) => ({ id, name: theme.name(id) })))
-
   const serverSync = useServerSync()
   const serverSdk = useServerSDK()
 
@@ -145,10 +123,6 @@ export const SettingsGeneral: Component = () => {
     () => Promise.resolve(platform.getPinchZoomEnabled?.() ?? false).catch(() => false),
     { initialValue: false },
   )
-
-  onMount(() => {
-    void theme.loadThemes()
-  })
 
   const autoOption = { id: "auto", value: "", label: language.t("settings.general.row.shell.autoDefault") }
   const currentShell = createMemo(() => serverSync().data.config.shell ?? "")
@@ -199,24 +173,8 @@ export const SettingsGeneral: Component = () => {
     void update.catch(() => setPinchZoom(!checked))
   }
 
-  const colorSchemeOptions = createMemo((): { value: ColorScheme; label: string }[] => [
-    { value: "system", label: language.t("theme.scheme.system") },
-    { value: "light", label: language.t("theme.scheme.light") },
-    { value: "dark", label: language.t("theme.scheme.dark") },
-  ])
-
-  const languageOptions = createMemo(() =>
-    language.locales.map((locale) => ({
-      value: locale,
-      label: language.label(locale),
-    })),
-  )
-
   const noneSound = { id: "none", label: "sound.option.none" } as const
   const soundOptions = [noneSound, ...SOUND_OPTIONS]
-  const mono = () => monoInput(settings.appearance.font())
-  const sans = () => sansInput(settings.appearance.uiFont())
-  const terminal = () => terminalInput(settings.appearance.terminalFont())
 
   const soundSelectProps = (
     enabled: () => boolean,
@@ -251,23 +209,6 @@ export const SettingsGeneral: Component = () => {
   const GeneralSection = () => (
     <div class="flex flex-col gap-1">
       <SettingsList>
-        <SettingsRow
-          title={language.t("settings.general.row.language.title")}
-          description={language.t("settings.general.row.language.description")}
-        >
-          <Select
-            data-action="settings-language"
-            options={languageOptions()}
-            current={languageOptions().find((o) => o.value === language.locale())}
-            value={(o) => o.value}
-            label={(o) => o.label}
-            onSelect={(option) => option && language.setLocale(option.value)}
-            variant="secondary"
-            size="small"
-            triggerVariant="settings"
-          />
-        </SettingsRow>
-
         <SettingsRow
           title={language.t("command.permissions.autoaccept.enable")}
           description={language.t("toast.permissions.autoaccept.on.description")}
@@ -417,136 +358,6 @@ export const SettingsGeneral: Component = () => {
             <Switch
               checked={settings.general.showCustomAgents()}
               onChange={(checked) => settings.general.setShowCustomAgents(checked)}
-            />
-          </div>
-        </SettingsRow>
-      </SettingsList>
-    </div>
-  )
-
-  const AppearanceSection = () => (
-    <div class="flex flex-col gap-1">
-      <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.appearance")}</h3>
-
-      <SettingsList>
-        <SettingsRow
-          title={language.t("settings.general.row.colorScheme.title")}
-          description={language.t("settings.general.row.colorScheme.description")}
-        >
-          <Select
-            data-action="settings-color-scheme"
-            options={colorSchemeOptions()}
-            current={colorSchemeOptions().find((o) => o.value === theme.colorScheme())}
-            value={(o) => o.value}
-            label={(o) => o.label}
-            onSelect={(option) => option && theme.setColorScheme(option.value)}
-            onHighlight={(option) => {
-              if (!option) return
-              theme.previewColorScheme(option.value)
-              return () => theme.cancelPreview()
-            }}
-            variant="secondary"
-            size="small"
-            triggerVariant="settings"
-            triggerStyle={{ "min-width": "220px" }}
-          />
-        </SettingsRow>
-
-        <SettingsRow
-          title={language.t("settings.general.row.theme.title")}
-          description={
-            <>
-              {language.t("settings.general.row.theme.description")}{" "}
-              <Link href="https://vectordev.ai/docs/desktop-app#settings-appearance">{language.t("common.learnMore")}</Link>
-            </>
-          }
-        >
-          <Select
-            data-action="settings-theme"
-            options={themeOptions()}
-            current={themeOptions().find((o) => o.id === theme.themeId())}
-            value={(o) => o.id}
-            label={(o) => o.name}
-            onSelect={(option) => {
-              if (!option) return
-              theme.setTheme(option.id)
-            }}
-            onHighlight={(option) => {
-              if (!option) return
-              theme.previewTheme(option.id)
-              return () => theme.cancelPreview()
-            }}
-            variant="secondary"
-            size="small"
-            triggerVariant="settings"
-          />
-        </SettingsRow>
-
-        <SettingsRow
-          title={language.t("settings.general.row.uiFont.title")}
-          description={language.t("settings.general.row.uiFont.description")}
-        >
-          <div class="w-full sm:w-[220px]">
-            <TextField
-              data-action="settings-ui-font"
-              label={language.t("settings.general.row.uiFont.title")}
-              hideLabel
-              type="text"
-              value={sans()}
-              onChange={(value) => settings.appearance.setUIFont(value)}
-              placeholder={sansDefault}
-              spellcheck={false}
-              autocorrect="off"
-              autocomplete="off"
-              autocapitalize="off"
-              class="text-12-regular"
-              style={{ "font-family": sansFontFamily(settings.appearance.uiFont()) }}
-            />
-          </div>
-        </SettingsRow>
-
-        <SettingsRow
-          title={language.t("settings.general.row.font.title")}
-          description={language.t("settings.general.row.font.description")}
-        >
-          <div class="w-full sm:w-[220px]">
-            <TextField
-              data-action="settings-code-font"
-              label={language.t("settings.general.row.font.title")}
-              hideLabel
-              type="text"
-              value={mono()}
-              onChange={(value) => settings.appearance.setFont(value)}
-              placeholder={monoDefault}
-              spellcheck={false}
-              autocorrect="off"
-              autocomplete="off"
-              autocapitalize="off"
-              class="text-12-regular"
-              style={{ "font-family": monoFontFamily(settings.appearance.font()) }}
-            />
-          </div>
-        </SettingsRow>
-
-        <SettingsRow
-          title={language.t("settings.general.row.terminalFont.title")}
-          description={language.t("settings.general.row.terminalFont.description")}
-        >
-          <div class="w-full sm:w-[220px]">
-            <TextField
-              data-action="settings-terminal-font"
-              label={language.t("settings.general.row.terminalFont.title")}
-              hideLabel
-              type="text"
-              value={terminal()}
-              onChange={(value) => settings.appearance.setTerminalFont(value)}
-              placeholder={terminalDefault}
-              spellcheck={false}
-              autocorrect="off"
-              autocomplete="off"
-              autocapitalize="off"
-              class="text-12-regular"
-              style={{ "font-family": terminalFontFamily(settings.appearance.terminalFont()) }}
             />
           </div>
         </SettingsRow>
@@ -736,8 +547,6 @@ export const SettingsGeneral: Component = () => {
 
       <div class="flex flex-col gap-8 w-full">
         <GeneralSection />
-
-        <AppearanceSection />
 
         <NotificationsSection />
 

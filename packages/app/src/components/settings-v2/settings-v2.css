@@ -1480,29 +1480,6 @@ html[data-vector-reduce-animations="true"] *::after {
   text-align: right;
 }
 
-.settings-v2-color-input {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid var(--vx-line);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.045);
-  padding: 6px 10px 6px 6px;
-  color: rgba(255, 255, 255, 0.68);
-  font-size: 12px;
-  font-weight: 560;
-}
-
-.settings-v2-color-input input {
-  width: 30px;
-  height: 30px;
-  overflow: hidden;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  padding: 0;
-}
-
 .settings-v2-action-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -1,8 +1,6 @@
 import * as i18n from "@solid-primitives/i18n"
-import { createEffect, createMemo, createResource } from "solid-js"
-import { createStore } from "solid-js/store"
+import { createEffect, createMemo, createResource, createSignal } from "solid-js"
 import { createSimpleContext } from "@vectordevai/ui/context"
-import { Persist, persisted } from "@/utils/persist"
 import { dict as en } from "@/i18n/en"
 import { dict as uiEn } from "@vectordevai/ui/i18n/en"
 
@@ -162,7 +160,9 @@ const localeMatchers: Array<{ locale: Locale; match: (language: string) => boole
   { locale: "tr", match: (language) => language.startsWith("tr") },
 ]
 
-function detectLocale(): Locale {
+// The computer's language, or English. Vector's language follows the computer: Settings has no language picker, so a
+// language saved by an earlier version is not read (whoever picked one could never change it back).
+export function detectLocale(): Locale {
   if (typeof navigator !== "object") return "en"
 
   const languages = navigator.languages?.length ? navigator.languages : [navigator.language]
@@ -180,35 +180,17 @@ export function normalizeLocale(value: string): Locale {
   return LOCALES.includes(value as Locale) ? (value as Locale) : "en"
 }
 
-function readStoredLocale() {
-  if (typeof localStorage !== "object") return
-  try {
-    const raw = localStorage.getItem("vector.global.dat:language")
-    if (!raw) return
-    const next = JSON.parse(raw) as { locale?: string }
-    if (typeof next?.locale !== "string") return
-    return normalizeLocale(next.locale)
-  } catch {
-    return
-  }
-}
-
-const warm = readStoredLocale() ?? detectLocale()
+const warm = detectLocale()
 if (warm !== "en") void loadDict(warm)
 
 export const { use: useLanguage, provider: LanguageProvider } = createSimpleContext({
   name: "Language",
   gate: false,
   init: (props: { locale?: Locale }) => {
-    const initial = props.locale ?? readStoredLocale() ?? detectLocale()
-    const [store, setStore, _, ready] = persisted(
-      Persist.global("language", ["language.v1"]),
-      createStore({
-        locale: initial,
-      }),
-    )
+    const initial = props.locale ?? detectLocale()
+    const [current, setCurrent] = createSignal<Locale>(initial)
 
-    const locale = createMemo<Locale>(() => normalizeLocale(store.locale))
+    const locale = createMemo<Locale>(() => normalizeLocale(current()))
     const intl = createMemo(() => INTL[locale()])
 
     const [dict] = createResource(locale, loadDict, {
@@ -229,14 +211,14 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
     })
 
     return {
-      ready,
       locale,
       intl,
       locales: LOCALES,
       label,
       t,
+      // For this run only; nothing is saved.
       setLocale(next: Locale) {
-        setStore("locale", normalizeLocale(next))
+        setCurrent(normalizeLocale(next))
       },
     }
   },

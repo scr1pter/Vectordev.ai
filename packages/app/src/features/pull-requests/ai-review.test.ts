@@ -14,6 +14,8 @@ import {
   buildDesktopSummary,
   checksForReview,
   dismissalRule,
+  REMEMBER_COPY,
+  rememberedRules,
   fixMission,
   checkoutLabel,
   chooseCheckout,
@@ -1335,6 +1337,73 @@ describe("fixMission", () => {
     expect(dismissalRule({ title: 'Uses `any`\nfor "speed"', path: "src/a.ts" })).toBe(
       "Code review: do not flag \"Uses 'any' for 'speed'\" in src/a.ts; it was reviewed and is not a problem.",
     )
+  })
+
+  test("Don't flag this again says the rule goes to .vector/RULES.md, not to a Project rules page", () => {
+    expect(REMEMBER_COPY.action).toBe("Don't flag this again")
+    expect(REMEMBER_COPY.hint).toBe("Saves a repository rule in .vector/RULES.md that every review reads")
+    expect(REMEMBER_COPY.saved).toBe("Won't be flagged again · saved to .vector/RULES.md")
+    // Vector has repositories, not projects, and no rules page to point at.
+    for (const copy of Object.values(REMEMBER_COPY)) expect(copy).not.toMatch(/project/i)
+  })
+
+  // A fake of the desktop's repository rules, recording what Undo deletes.
+  function rulesBridge() {
+    const calls = { saved: [] as string[], removed: [] as string[] }
+    const pending: (() => void)[] = []
+    return {
+      calls,
+      finishSaves: () => pending.splice(0).forEach((finish) => finish()),
+      rules: {
+        save: (input: { description: string }) =>
+          new Promise<{ id: string }>((resolve) => {
+            calls.saved.push(input.description)
+            pending.push(() => resolve({ id: `rule-${calls.saved.length}` }))
+          }),
+        remove: async (id: string) => {
+          calls.removed.push(id)
+        },
+      },
+    }
+  }
+  const input = { description: "do not flag it", repositoryPath: "/repo", filePatterns: ["src/a.ts"] }
+
+  test("Undo after Don't flag this again deletes the rule it saved", async () => {
+    const bridge = rulesBridge()
+    const remembered = rememberedRules()
+    const saving = remembered.save("finding-1", bridge.rules, input)
+    bridge.finishSaves()
+    expect(await saving).toBe("rule-1")
+
+    await remembered.undo("finding-1")
+    expect(bridge.calls.removed).toEqual(["rule-1"])
+    // A second Undo, or one for a finding that saved nothing, deletes nothing.
+    await remembered.undo("finding-1")
+    await remembered.undo("finding-2")
+    expect(bridge.calls.removed).toEqual(["rule-1"])
+  })
+
+  test("Undo before the save finishes still deletes the rule once it is saved", async () => {
+    const bridge = rulesBridge()
+    const remembered = rememberedRules()
+    void remembered.save("finding-1", bridge.rules, input)
+    const undo = remembered.undo("finding-1")
+    expect(bridge.calls.removed).toEqual([])
+    bridge.finishSaves()
+    await undo
+    expect(bridge.calls.removed).toEqual(["rule-1"])
+  })
+
+  test("Undo after a failed save has nothing to delete", async () => {
+    const removed: string[] = []
+    const remembered = rememberedRules()
+    const rules = {
+      save: () => Promise.reject(new Error("disk full")),
+      remove: async (id: string) => void removed.push(id),
+    }
+    await expect(remembered.save("finding-1", rules, input)).rejects.toThrow("disk full")
+    await remembered.undo("finding-1")
+    expect(removed).toEqual([])
   })
 })
 

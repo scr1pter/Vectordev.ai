@@ -9,8 +9,6 @@ export const dict = {
   "command.category.provider": "提供商",
   "command.category.server": "服务器",
   "command.category.session": "会话",
-  "command.category.theme": "主题",
-  "command.category.language": "语言",
   "command.category.file": "文件",
   "command.category.context": "上下文",
   "command.category.terminal": "终端",
@@ -42,14 +40,6 @@ export const dict = {
   "command.session.archive": "归档会话",
 
   "command.palette": "命令面板",
-
-  "command.theme.cycle": "切换主题",
-  "command.theme.set": "使用主题：{{theme}}",
-  "command.theme.scheme.cycle": "切换配色方案",
-  "command.theme.scheme.set": "使用配色方案：{{scheme}}",
-
-  "command.language.cycle": "切换语言",
-  "command.language.set": "使用语言：{{language}}",
 
   "command.session.new": "新建会话",
 
@@ -420,10 +410,6 @@ export const dict = {
   "language.th": "ไทย",
   "language.tr": "Türkçe",
 
-  "toast.language.title": "语言",
-  "toast.language.description": "已切换到{{language}}",
-  "toast.theme.title": "主题已切换",
-  "toast.scheme.title": "颜色方案",
   "toast.workspace.enabled.title": "工作区已启用",
   "toast.workspace.enabled.description": "侧边栏现在显示多个工作树",
   "toast.workspace.disabled.title": "工作区已禁用",

@@ -1,9 +1,17 @@
 import { randomUUID } from "node:crypto"
+import { readFileSync } from "node:fs"
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { vectorConfigDir } from "./config-path"
 import { getStore } from "./store"
-import { mergeRulesFile, rulesForRepository, selectRules, type RepoRule } from "./repo-rules-model"
+import {
+  managesRule,
+  mergeRulesFile,
+  reconcileRules,
+  rulesForRepository,
+  selectRules,
+  type RepoRule,
+} from "./repo-rules-model"
 
 const STORE_NAME = "repo-rules-state"
 const STORE_KEY = "rules"
@@ -23,10 +31,38 @@ export function globalRulesFilePath() {
   return join(vectorConfigDir(), "RULES.md")
 }
 
-function readAll(): RepoRule[] {
+// The saved list as the rules files say it is now: a line someone deleted from Vector's block, or the whole file, takes
+// that rule away, and a line they added or edited there is a rule. The saved list alone would keep handing deleted
+// rules to Claude Code, Codex and Cursor and write them back into the file on the next save. Pass the repositories a
+// caller is about to read or write so their files count even when nothing is saved for them yet.
+function readAll(...repositoryPaths: string[]): RepoRule[] {
+  const stored = readStored()
+  const targets = new Set(
+    [...stored.filter((rule) => rule.enabled).map((rule) => rule.repositoryPath), ...repositoryPaths].map((path) =>
+      path.replace(/[\\/]+$/, ""),
+    ),
+  )
+  return [...targets].reduce((rules, target) => {
+    const content = readRulesFileForReconcile(target)
+    return content === undefined ? rules : reconcileRules(rules, target, content)
+  }, stored)
+}
+
+function readStored(): RepoRule[] {
   const raw = getStore(STORE_NAME).get(STORE_KEY)
   if (!Array.isArray(raw)) return []
   return raw.filter((item): item is RepoRule => Boolean(item) && typeof item === "object" && "id" in item)
+}
+
+// Synchronous because the agent prompt is built synchronously; these files are a few lines each. A missing file reads
+// as empty. A file that cannot be read for any other reason leaves its rules as saved: reading must not drop rules on
+// a permissions error, and saving to that file still fails loudly in syncRulesFile.
+function readRulesFileForReconcile(repositoryPath: string) {
+  try {
+    return readFileSync(repositoryPath ? rulesFilePath(repositoryPath) : globalRulesFilePath(), "utf8")
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "" : undefined
+  }
 }
 
 function writeAll(rules: RepoRule[]) {
@@ -34,8 +70,8 @@ function writeAll(rules: RepoRule[]) {
 }
 
 export function listRepoRules(repositoryPath?: string): RepoRule[] {
-  const all = readAll()
-  if (!repositoryPath) return all
+  if (!repositoryPath) return readAll()
+  const all = readAll(repositoryPath, "")
   // rulesForRepository, not selectRules: selectRules is the prompt filter and
   // drops disabled rules, which would make a disabled rule impossible to find
   // and re-enable from the panel that manages it.
@@ -54,7 +90,7 @@ export async function saveRepoRule(input: SaveRepoRuleInput) {
   const description = input.description.trim()
   if (!description) throw new Error("Write what the rule is before saving it.")
   const now = new Date().toISOString()
-  const all = readAll()
+  const all = readAll(input.repositoryPath.trim())
   const existing = input.id ? all.find((rule) => rule.id === input.id) : undefined
   const patterns = input.filePatterns.map((pattern) => pattern.trim()).filter(Boolean)
   const saved: RepoRule = {
@@ -90,13 +126,11 @@ export async function deleteRepoRule(id: string) {
 // a teammate authored outside that block.
 export async function syncRulesFile(repositoryPath: string, rules = readAll(), previousRules = rules) {
   const target = repositoryPath ? rulesFilePath(repositoryPath) : globalRulesFilePath()
-  const applies = (rule: RepoRule) =>
-    rule.enabled && (repositoryPath ? rule.repositoryPath === repositoryPath : !rule.repositoryPath)
   const body = mergeRulesFile(
     (await readOptionalFile(target, "utf8")) ?? "",
-    rules.filter(applies),
-    previousRules.filter(applies),
-    repositoryPath ? "Project rules" : "Global rules",
+    rules.filter((rule) => managesRule(rule, repositoryPath)),
+    previousRules.filter((rule) => managesRule(rule, repositoryPath)),
+    repositoryPath ? "Repository rules" : "Global rules",
   )
   if (!body.trim()) {
     await rm(target, { force: true })
@@ -145,5 +179,5 @@ function readOptionalFile(path: string, encoding?: "utf8"): Promise<Buffer | str
 // file above because a prompt can be scoped to the files a run will touch,
 // while an instruction file is always loaded whole.
 export function repoRulesForPrompt(repositoryPath: string, files?: readonly string[]) {
-  return selectRules(readAll(), { repositoryPath, files })
+  return selectRules(readAll(repositoryPath, ""), { repositoryPath, files })
 }

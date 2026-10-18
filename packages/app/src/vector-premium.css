@@ -51,11 +51,11 @@
   --vx-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* Settings > Appearance > Theme ("Light" or "Follow system" resolved to light
- * by context/settings.tsx, which stamps the resolved value onto
- * documentElement as data-vector-theme). Overrides the token ramp above so
- * chrome built from --vx-* tokens (cards, controls, dialogs, borders, focus
- * rings) actually flips — the product otherwise ships dark-only. */
+/* The light ramp, from when Settings > Appearance could choose a light theme.
+ * Settings has no Appearance page any more: Vector always uses its dark look
+ * and context/settings.tsx stamps data-vector-theme="dark", so this block and
+ * the other [data-vector-theme="light"] rules below no longer match. They are
+ * left for a dead-code sweep rather than removed one by one. */
 :root[data-vector-theme="light"] {
   color-scheme: light;
   --vx-canvas: #f3f2f6;
@@ -1776,24 +1776,23 @@ html[data-vector-navigation-resizing] * {
 }
 
 :is(
-    [data-component="dialog-v2"]:not([data-variant="settings"]) [data-slot="dialog-container"],
-    [data-component="dialog"] [data-slot="dialog-content"]
-  ) {
+  [data-component="dialog-v2"]:not([data-variant="settings"]) [data-slot="dialog-container"],
+  [data-component="dialog"] [data-slot="dialog-content"]
+) {
   position: relative;
   border: 1px solid var(--vx-line-strong) !important;
   border-radius: 14px !important;
   background:
-    radial-gradient(120% 96px at 50% 0%, var(--vx-purple-soft), transparent 72%),
-    var(--vx-surface) !important;
+    radial-gradient(120% 96px at 50% 0%, var(--vx-purple-soft), transparent 72%), var(--vx-surface) !important;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
     var(--vx-shadow-float) !important;
 }
 
 :is(
-    [data-component="dialog-v2"]:not([data-variant="settings"]) [data-slot="dialog-container"],
-    [data-component="dialog"] [data-slot="dialog-content"]
-  )::before {
+  [data-component="dialog-v2"]:not([data-variant="settings"]) [data-slot="dialog-container"],
+  [data-component="dialog"] [data-slot="dialog-content"]
+)::before {
   content: "";
   position: absolute;
   top: 0;
@@ -1818,7 +1817,8 @@ html[data-vector-navigation-resizing] * {
   letter-spacing: -0.01em !important;
 }
 
-:is([data-component="dialog-v2"]:not([data-variant="settings"]), [data-component="dialog"]) [data-slot="dialog-description"] {
+:is([data-component="dialog-v2"]:not([data-variant="settings"]), [data-component="dialog"])
+  [data-slot="dialog-description"] {
   color: var(--vx-text-muted) !important;
   font-size: 13px !important;
   line-height: 19px !important;
@@ -1834,9 +1834,7 @@ html[data-vector-navigation-resizing] * {
 
 /* Footer actions read as buttons, not text: a quiet outlined secondary and a
  * gradient primary, both one size up from the library's 28px. */
-[data-component="dialog-v2"]:not([data-variant="settings"])
-  [data-slot="dialog-footer"]
-  [data-component="button-v2"] {
+[data-component="dialog-v2"]:not([data-variant="settings"]) [data-slot="dialog-footer"] [data-component="button-v2"] {
   height: 32px !important;
   padding: 0 14px !important;
   border-radius: 8px !important;
@@ -1857,9 +1855,9 @@ html[data-vector-navigation-resizing] * {
 }
 
 :is(
-    [data-component="dialog-v2"]:not([data-variant="settings"]) [data-component="button-v2"][data-variant="contrast"],
-    [data-component="dialog"] [data-component="button"][data-variant="primary"]
-  ) {
+  [data-component="dialog-v2"]:not([data-variant="settings"]) [data-component="button-v2"][data-variant="contrast"],
+  [data-component="dialog"] [data-component="button"][data-variant="primary"]
+) {
   border-color: transparent !important;
   background: var(--vx-gradient) !important;
   color: #fff !important;
@@ -1877,9 +1875,9 @@ html[data-vector-navigation-resizing] * {
 }
 
 :is(
-    [data-component="dialog-v2"]:not([data-variant="settings"]) [data-component="button-v2"][data-variant="contrast"],
-    [data-component="dialog"] [data-component="button"][data-variant="primary"]
-  ):disabled {
+  [data-component="dialog-v2"]:not([data-variant="settings"]) [data-component="button-v2"][data-variant="contrast"],
+  [data-component="dialog"] [data-component="button"][data-variant="primary"]
+):disabled {
   opacity: 0.45;
   box-shadow: none !important;
 }
@@ -1904,7 +1902,9 @@ html[data-vector-navigation-resizing] * {
 }
 
 .vector-dialog-field:focus,
-[data-component="dialog"] [data-component="input"][data-variant="normal"] [data-slot="input-wrapper"]:focus-within:not(:has([data-readonly])),
+[data-component="dialog"]
+  [data-component="input"][data-variant="normal"]
+  [data-slot="input-wrapper"]:focus-within:not(:has([data-readonly])),
 [data-component="dialog-v2"]:not([data-variant="settings"])
   [data-slot="dialog-content"]:not(.vector-select-model-dialog)
   [data-component="text-input-v2"]:focus-within {
@@ -2946,6 +2946,145 @@ html[data-vector-glass="false"] [data-vector-help-menu] {
 
   [data-vector-help-menu] .vector-help-menu-item:is(:hover, :focus-visible) [data-help-menu-external] {
     transform: none;
+  }
+}
+
+/* ---- Sidebar Update button --------------------------------------------------
+   Takes the Settings gear's place in the sidebar footer (workspace-navigation.tsx)
+   once an update has downloaded; Settings stays on the account chip, the Help
+   menu and Cmd+,. A labelled lavender pill rather than an icon the gear's size,
+   so a click meant for the gear does not restart Vector: the footer's one
+   accent. Its confirmation, shown when agents in the workspace are running,
+   floats where the Help menu does. */
+
+[data-vector-update] {
+  display: inline-flex;
+  height: 32px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--vx-purple) 40%, transparent);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: color-mix(in srgb, var(--vx-purple) 18%, transparent);
+  color: var(--vx-purple-bright);
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+[data-vector-update]:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--vx-purple) 56%, transparent);
+  background: color-mix(in srgb, var(--vx-purple) 26%, transparent);
+  color: var(--vx-text);
+}
+
+[data-vector-update]:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--vx-purple) 76%, white 6%);
+  outline-offset: 2px;
+}
+
+[data-vector-update]:disabled {
+  cursor: progress;
+}
+
+[data-vector-update-spinner] {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border: 2px solid color-mix(in srgb, var(--vx-purple-bright) 30%, transparent);
+  border-top-color: var(--vx-purple-bright);
+  border-radius: 9999px;
+  animation: vector-update-spin 0.67s linear infinite;
+}
+
+@keyframes vector-update-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+html[data-vector-reduce-animations="true"] [data-vector-update-spinner] {
+  animation: none;
+}
+
+[data-vector-update-confirm] {
+  padding: 12px;
+  border: 1px solid var(--vx-line-strong);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--vx-surface-raised) 92%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow: var(--vx-shadow-float);
+  color: var(--vx-text);
+  font-size: 13px;
+}
+
+[data-vector-update-confirm] [data-update-confirm-title] {
+  margin: 0;
+  font-weight: 560;
+  line-height: 18px;
+}
+
+[data-vector-update-confirm] [data-update-confirm-detail] {
+  margin: 4px 0 0;
+  color: var(--vx-text-subtle);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+[data-vector-update-confirm] [data-update-confirm-actions] {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+[data-vector-update-confirm] button {
+  height: 28px;
+  border: 1px solid var(--vx-line-strong);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--vx-text);
+  font-size: 12px;
+  font-weight: 520;
+}
+
+[data-vector-update-confirm] button:hover {
+  background: color-mix(in srgb, var(--vx-text) 6%, transparent);
+}
+
+[data-vector-update-confirm] [data-update-confirm-restart] {
+  border-color: color-mix(in srgb, var(--vx-purple) 56%, transparent);
+  background: color-mix(in srgb, var(--vx-purple) 24%, transparent);
+}
+
+[data-vector-update-confirm] [data-update-confirm-restart]:hover {
+  background: color-mix(in srgb, var(--vx-purple) 32%, transparent);
+}
+
+[data-vector-update-confirm] button:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--vx-purple) 76%, white 6%);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-vector-update-spinner] {
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-vector-update-confirm] {
+    background: var(--vx-surface-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 }
 

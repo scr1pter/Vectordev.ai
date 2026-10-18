@@ -86,11 +86,6 @@ const api: ElectronAPI = {
     save: (input) => ipcRenderer.invoke("repo-rules-save", input),
     remove: (id) => ipcRenderer.invoke("repo-rules-delete", id),
   },
-  customInstructions: {
-    read: () => ipcRenderer.invoke("custom-instructions-read"),
-    write: (content) => ipcRenderer.invoke("custom-instructions-write", content),
-    clear: () => ipcRenderer.invoke("custom-instructions-clear"),
-  },
   pullRequests: {
     status: () => ipcRenderer.invoke("pr-access-status"),
     list: (cwd, options) => ipcRenderer.invoke("pr-list", cwd, options),

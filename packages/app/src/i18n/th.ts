@@ -5,8 +5,6 @@ export const dict = {
   "command.category.provider": "ผู้ให้บริการ",
   "command.category.server": "เซิร์ฟเวอร์",
   "command.category.session": "เซสชัน",
-  "command.category.theme": "ธีม",
-  "command.category.language": "ภาษา",
   "command.category.file": "ไฟล์",
   "command.category.context": "บริบท",
   "command.category.terminal": "เทอร์มินัล",
@@ -33,14 +31,6 @@ export const dict = {
   "command.session.archive": "จัดเก็บเซสชัน",
 
   "command.palette": "คำสั่งค้นหา",
-
-  "command.theme.cycle": "เปลี่ยนธีม",
-  "command.theme.set": "ใช้ธีม: {{theme}}",
-  "command.theme.scheme.cycle": "เปลี่ยนโทนสี",
-  "command.theme.scheme.set": "ใช้โทนสี: {{scheme}}",
-
-  "command.language.cycle": "เปลี่ยนภาษา",
-  "command.language.set": "ใช้ภาษา: {{language}}",
 
   "command.session.new": "เซสชันใหม่",
   "command.file.open": "เปิดไฟล์",
@@ -404,12 +394,6 @@ export const dict = {
   "language.bs": "Bosanski",
   "language.th": "ไทย",
   "language.tr": "Türkçe",
-
-  "toast.language.title": "ภาษา",
-  "toast.language.description": "สลับไปที่ {{language}}",
-
-  "toast.theme.title": "สลับธีมแล้ว",
-  "toast.scheme.title": "โทนสี",
 
   "toast.workspace.enabled.title": "เปิดใช้งานพื้นที่ทำงานแล้ว",
   "toast.workspace.enabled.description": "ตอนนี้จะแสดง worktree หลายรายการในแถบด้านข้าง",

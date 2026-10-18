@@ -8,8 +8,6 @@ export const dict = {
   "command.category.provider": "Leverandør",
   "command.category.server": "Server",
   "command.category.session": "Sesjon",
-  "command.category.theme": "Tema",
-  "command.category.language": "Språk",
   "command.category.file": "Fil",
   "command.category.context": "Kontekst",
   "command.category.terminal": "Terminal",
@@ -36,14 +34,6 @@ export const dict = {
   "command.session.archive": "Arkiver sesjon",
 
   "command.palette": "Kommandopalett",
-
-  "command.theme.cycle": "Bytt tema",
-  "command.theme.set": "Bruk tema: {{theme}}",
-  "command.theme.scheme.cycle": "Bytt fargevalg",
-  "command.theme.scheme.set": "Bruk fargevalg: {{scheme}}",
-
-  "command.language.cycle": "Bytt språk",
-  "command.language.set": "Bruk språk: {{language}}",
 
   "command.session.new": "Ny sesjon",
   "command.file.open": "Åpne fil",
@@ -408,12 +398,6 @@ export const dict = {
   "language.bs": "Bosanski",
   "language.th": "ไทย",
   "language.tr": "Türkçe",
-
-  "toast.language.title": "Språk",
-  "toast.language.description": "Byttet til {{language}}",
-
-  "toast.theme.title": "Tema byttet",
-  "toast.scheme.title": "Fargevalg",
 
   "toast.workspace.enabled.title": "Arbeidsområder aktivert",
   "toast.workspace.enabled.description": "Flere worktrees vises nå i sidefeltet",

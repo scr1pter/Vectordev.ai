@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, type JSX } from "solid-js"
 import { usePlatform } from "@/context/platform"
 import { accountChip, type VectorAccountStatus } from "../vector-account"
 
@@ -51,6 +51,19 @@ const BranchIcon = () => (
   </svg>
 )
 
+const SettingsIcon = (props: { class: string }) => (
+  <svg viewBox="0 0 16 16" class={props.class} aria-hidden="true">
+    <path
+      d="M8 10.35A2.35 2.35 0 1 0 8 5.65a2.35 2.35 0 0 0 0 4.7Zm4.72-1.35a4.8 4.8 0 0 0 0-2l1.2-.92-1.2-2.08-1.42.58a5.1 5.1 0 0 0-1.72-1L9.4 2H6.6l-.18 1.58a5.1 5.1 0 0 0-1.72 1L3.28 4l-1.2 2.08 1.2.92a4.8 4.8 0 0 0 0 2l-1.2.92L3.28 12l1.42-.58a5.1 5.1 0 0 0 1.72 1L6.6 14h2.8l.18-1.58a5.1 5.1 0 0 0 1.72-1l1.42.58 1.2-2.08-1.2-.92Z"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.15"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </svg>
+)
+
 export function WorkspaceNavigation(props: {
   width: number
   minimumWidth: number
@@ -94,15 +107,68 @@ export function WorkspaceNavigation(props: {
   onReportBug: () => void
   onGettingStarted: () => void
   onSettings: () => void
-  /** Settings at its Account page, for the signed-in account chip. */
+  /** Settings' shortcut as the command palette shows it, for the Help menu's Settings item. */
+  settingsKeybind?: string
+  /** Settings at its Account page, for the account chip, signed in or out. */
   onAccount: () => void
+  /** A downloaded update, or one installing. The Update button then takes the Settings gear's place. */
+  update?: { version: string; installing: boolean }
+  /** Restarts Vector into the downloaded update. */
+  onUpdate?: () => void
+  /** Counts, when Update is clicked, the agents a restart would stop in every repository; above zero, Update asks first. */
+  runningAgents?: () => number | Promise<number>
 }) {
   const platform = usePlatform()
   const [localMode, setLocalMode] = createSignal<"agent" | "editor">(props.mode ?? "agent")
   const [helpOpen, setHelpOpen] = createSignal(false)
+  const [updateConfirmOpen, setUpdateConfirmOpen] = createSignal(false)
+  const [updateAnnouncement, setUpdateAnnouncement] = createSignal("")
   const [account, setAccount] = createSignal<VectorAccountStatus>({ authenticated: false, pending: false })
   const mode = () => props.mode ?? localMode()
   const chip = createMemo(() => accountChip(account()))
+  // The account chip opens Settings whenever the desktop's account bridge is there, so Update can take the gear's place
+  // and Settings stays one click away. Without the bridge the chip is plain text, and the gear stays beside Update.
+  const showGear = () => !props.update || !platform.vectorAccount
+  // The agents counted when Update was clicked. The confirmation keeps that number rather than a live one, so agents
+  // that finish while it is open never turn it into "0 agents will stop".
+  const [stopping, setStopping] = createSignal(0)
+  let counting = false
+  let updateButton: HTMLButtonElement | undefined
+  let updateLater: HTMLButtonElement | undefined
+
+  // Said once when an update becomes ready, never for what was already on screen at launch.
+  createEffect(
+    on(
+      () => (props.update && !props.update.installing ? props.update.version : undefined),
+      (version) => setUpdateAnnouncement(version ? `Vector ${version} is ready. Restart to update.` : ""),
+      { defer: true },
+    ),
+  )
+  createEffect(() => {
+    if (!props.update || props.update.installing) setUpdateConfirmOpen(false)
+  })
+
+  const update = async () => {
+    if (!props.update || props.update.installing || counting) return
+    counting = true
+    const running = await Promise.resolve()
+      .then(() => props.runningAgents?.() ?? 0)
+      .catch(() => 0)
+    counting = false
+    if (!props.update || props.update.installing) return
+    if (running > 0) {
+      setStopping(running)
+      setHelpOpen(false)
+      setUpdateConfirmOpen(true)
+      queueMicrotask(() => updateLater?.focus())
+      return
+    }
+    props.onUpdate?.()
+  }
+  const closeUpdateConfirm = () => {
+    setUpdateConfirmOpen(false)
+    updateButton?.focus()
+  }
 
   onMount(() => {
     const vectorAccount = platform.vectorAccount
@@ -597,32 +663,15 @@ export function WorkspaceNavigation(props: {
           <button
             type="button"
             class="vector-help-menu-item"
+            data-help-menu-settings
             onClick={() => {
               setHelpOpen(false)
               props.onSettings()
             }}
           >
-            <svg viewBox="0 0 16 16" class="size-4 shrink-0" aria-hidden="true">
-              <rect
-                x="2.3"
-                y="3.2"
-                width="11.4"
-                height="8.6"
-                rx="1.5"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.05"
-              />
-              <path
-                d="M4.4 6h.01M6.1 6h.01M7.8 6h.01M9.5 6h.01M11.2 6h.01M4.9 8.7h6.2"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.15"
-                stroke-linecap="round"
-              />
-            </svg>
-            <span class="min-w-0 flex-1">Keyboard shortcuts</span>
-            <kbd>⌘/</kbd>
+            <SettingsIcon class="size-4 shrink-0" />
+            <span class="min-w-0 flex-1">Settings</span>
+            <Show when={props.settingsKeybind}>{(keybind) => <kbd>{keybind()}</kbd>}</Show>
           </button>
 
           <div data-help-menu-group role="group" aria-label="Resources">
@@ -727,10 +776,57 @@ export function WorkspaceNavigation(props: {
         </div>
       </Show>
 
+      <Show when={updateConfirmOpen() && props.update}>
+        {(pending) => (
+          <div
+            data-vector-update-confirm
+            role="dialog"
+            aria-label="Restart to update"
+            aria-describedby="vector-update-confirm-detail"
+            class="absolute bottom-[58px] left-3 right-3 z-40"
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return
+              event.preventDefault()
+              event.stopPropagation()
+              closeUpdateConfirm()
+            }}
+          >
+            <p data-update-confirm-title>Restart to update to Vector {pending().version}?</p>
+            <p id="vector-update-confirm-detail" data-update-confirm-detail>
+              {stopping() === 1
+                ? "1 agent in the workspace is still running and will stop."
+                : `${stopping()} agents in the workspace are still running and will stop.`}
+            </p>
+            <div data-update-confirm-actions>
+              <button type="button" data-update-confirm-later ref={updateLater} onClick={closeUpdateConfirm}>
+                Later
+              </button>
+              <button
+                type="button"
+                data-update-confirm-restart
+                onClick={() => {
+                  setUpdateConfirmOpen(false)
+                  props.onUpdate?.()
+                }}
+              >
+                Restart now
+              </button>
+            </div>
+          </div>
+        )}
+      </Show>
+
       <div
         data-vector-nav-footer
-        class="grid min-h-[50px] shrink-0 grid-cols-[1fr_auto_auto] items-center gap-1 border-t border-[color:var(--vx-line)] px-3 py-2"
+        class="grid min-h-[50px] shrink-0 items-center gap-1 border-t border-[color:var(--vx-line)] px-3 py-2"
+        classList={{
+          "grid-cols-[1fr_auto_auto]": showGear() !== Boolean(props.update),
+          "grid-cols-[1fr_auto_auto_auto]": showGear() && Boolean(props.update),
+        }}
       >
+        <span data-vector-update-status role="status" aria-live="polite" class="sr-only">
+          {updateAnnouncement()}
+        </span>
         <Show
           when={platform.vectorAccount}
           fallback={
@@ -745,14 +841,9 @@ export function WorkspaceNavigation(props: {
               <button
                 type="button"
                 data-vector-account-chip
-                class="flex min-w-0 items-center gap-2 rounded-[6px] px-1 py-1 text-left text-[12px] text-white/60 transition hover:bg-white/[0.05] hover:text-white disabled:opacity-60"
-                disabled={account().pending}
-                onClick={() =>
-                  void platform.vectorAccount
-                    ?.start()
-                    .then(setAccount)
-                    .catch(() => undefined)
-                }
+                class="flex min-w-0 items-center gap-2 rounded-[6px] px-1 py-1 text-left text-[12px] text-white/60 transition hover:bg-white/[0.05] hover:text-white"
+                aria-label={`${account().pending ? "Finish signing in in your browser" : "Sign in to Vector"}. Open account settings`}
+                onClick={props.onAccount}
               >
                 <span class="truncate">
                   {account().pending ? "Finish signing in in your browser" : "Sign in to Vector"}
@@ -797,7 +888,10 @@ export function WorkspaceNavigation(props: {
           type="button"
           data-tour="nav-getting-started"
           class="grid size-8 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.05] hover:text-white"
-          onClick={() => setHelpOpen((open) => !open)}
+          onClick={() => {
+            setUpdateConfirmOpen(false)
+            setHelpOpen((open) => !open)
+          }}
           title="Help"
           aria-label="Help"
           aria-expanded={helpOpen()}
@@ -814,25 +908,62 @@ export function WorkspaceNavigation(props: {
             <circle cx="8" cy="11.35" r="0.7" fill="currentColor" />
           </svg>
         </button>
-        <button
-          type="button"
-          data-vector-settings
-          class="grid size-8 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.05] hover:text-white"
-          onClick={props.onSettings}
-          title="Settings"
-          aria-label="Settings"
-        >
-          <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-            <path
-              d="M8 10.35A2.35 2.35 0 1 0 8 5.65a2.35 2.35 0 0 0 0 4.7Zm4.72-1.35a4.8 4.8 0 0 0 0-2l1.2-.92-1.2-2.08-1.42.58a5.1 5.1 0 0 0-1.72-1L9.4 2H6.6l-.18 1.58a5.1 5.1 0 0 0-1.72 1L3.28 4l-1.2 2.08 1.2.92a4.8 4.8 0 0 0 0 2l-1.2.92L3.28 12l1.42-.58a5.1 5.1 0 0 0 1.72 1L6.6 14h2.8l.18-1.58a5.1 5.1 0 0 0 1.72-1l1.42.58 1.2-2.08-1.2-.92Z"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.15"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </button>
+        <Show when={props.update}>
+          {(pending) => (
+            <button
+              type="button"
+              ref={updateButton}
+              data-vector-update
+              data-state={pending().installing ? "installing" : "ready"}
+              disabled={pending().installing}
+              aria-busy={pending().installing ? "true" : undefined}
+              aria-haspopup={!pending().installing && props.runningAgents ? "dialog" : undefined}
+              aria-expanded={!pending().installing && props.runningAgents ? updateConfirmOpen() : undefined}
+              aria-label={
+                pending().installing
+                  ? `Updating to Vector ${pending().version}`
+                  : `Restart to update to Vector ${pending().version}`
+              }
+              title={
+                pending().installing
+                  ? `Updating to Vector ${pending().version}`
+                  : `Restart to update to Vector ${pending().version}`
+              }
+              onClick={() => void update()}
+            >
+              <Show
+                when={pending().installing}
+                fallback={
+                  <svg viewBox="0 0 14 14" class="size-3.5 shrink-0" aria-hidden="true">
+                    <path
+                      d="M7 11V3M3.5 7.63128L7 11L10.5 7.63128"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.3"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                }
+              >
+                <span data-vector-update-spinner aria-hidden="true" />
+              </Show>
+              <span>{pending().installing ? "Updating…" : "Update"}</span>
+            </button>
+          )}
+        </Show>
+        <Show when={showGear()}>
+          <button
+            type="button"
+            data-vector-settings
+            class="grid size-8 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.05] hover:text-white"
+            onClick={props.onSettings}
+            title="Settings"
+            aria-label="Settings"
+          >
+            <SettingsIcon class="size-3.5" />
+          </button>
+        </Show>
       </div>
 
       <div

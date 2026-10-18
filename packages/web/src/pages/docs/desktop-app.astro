@@ -64,16 +64,18 @@ export const prerender = true
             land before it touches the primary checkout. See <a href="/docs/checkpoints#review">Review and recovery</a>.
           </p>
 
-          <h2 id="settings-appearance">Appearance and workspace settings</h2>
+          <h2 id="settings">Settings</h2>
           <p>
-            <strong>Appearance</strong> sets the colour scheme, theme, language and Vector's own palette — accent, workspace, sidebar and chat colours — with no external service involved. A layout card tunes sizing, motion and corner rounding, and interface font size lives here too. Changes apply at once and are remembered on that computer.
+            Click your name at the bottom of the sidebar to open <strong>Settings</strong> at <strong>Account</strong>, or use the gear beside it, <strong>Settings</strong> in the Help menu, or Cmd+, (Ctrl+, on Windows and Linux). When an update has downloaded, an <strong>Update</strong> button takes the gear's place: it restarts Vector into the new version, and first asks whether to stop any agents in the workspace that are still running.
           </p>
           <ul class="feature-list">
-            <li><strong>Editor</strong><span>Code font size, family and line height; word wrap, line numbers, active-line highlight, whitespace rendering, AI autocomplete, and whether the editor follows the agent.</span></li>
-            <li><strong>Chat</strong><span>Conversation width and the spacing between messages.</span></li>
+            <li><strong>Account</strong><span>Your Vector sign-in, your Vector Codium plan with the share of this month's credits left, and the way to delete your account. Desktop app only; signed out, it offers Sign in.</span></li>
             <li><strong>Notifications</strong><span>Desktop alerts, error alerts and sound effects.</span></li>
             <li><strong>Accessibility</strong><span>Interface scaling, high contrast, reduced motion, visible focus indicators and larger click targets.</span></li>
           </ul>
+          <p>
+            Vector has one look, its own dark theme, and shows its interface in your computer's language. <strong>Vector Tab</strong>, the AI suggestions in the editor, is switched on and off from its label in the editor's status bar; the suggestions use the selected model.
+          </p>
           <p>
             <strong>General</strong> holds the <strong>Share usage counts</strong> switch, on by default. While the app is open it reports how many sessions and subagent sessions were active that day (in UTC) and the totals from <strong>Usage &amp; streaks</strong>: tokens by type, recorded cost, tokens and tasks per day, the models and providers you use with their share of tokens, effort levels, chats and streaks. It checks about once an hour and sends only when something has gone up. Each report carries a random install ID, your Vector account when you are signed in, the app version, operating system and CPU architecture, and never your prompts, code, file names or model output. Turn it off there to stop sending.
           </p>

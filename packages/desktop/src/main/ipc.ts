@@ -16,7 +16,6 @@ import { write } from "./logging"
 import { sendBugReport } from "./bug-report"
 import { askHelpAssistant, type HelpInput } from "./help-assistant"
 import { clearLocalMemory, readLocalMemory, writeLocalMemory } from "./local-memory"
-import { clearCustomInstructions, readCustomInstructions, writeCustomInstructions } from "./custom-instructions"
 import { deleteRepoRule, listRepoRules, saveRepoRule, type SaveRepoRuleInput } from "./repo-rules"
 import { ensureRuntime, preparePluginCommand, type RuntimeName } from "./runtime-bootstrap"
 import { convertHeicToJpeg } from "./image-convert"
@@ -353,9 +352,6 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle("repo-rules-save", (_event: IpcMainInvokeEvent, input: SaveRepoRuleInput) => saveRepoRule(input))
   handle("repo-rules-delete", (_event: IpcMainInvokeEvent, id: string) => deleteRepoRule(String(id)))
-  handle("custom-instructions-read", () => readCustomInstructions())
-  handle("custom-instructions-write", (_event, content: string) => writeCustomInstructions(String(content ?? "")))
-  handle("custom-instructions-clear", () => clearCustomInstructions())
   handle("pr-access-status", () => pullRequestAccessStatus())
   handle("pr-list", (_event, cwd: string, options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number }) =>
     listPullRequests(cwd, options),

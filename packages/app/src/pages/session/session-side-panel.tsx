@@ -3300,10 +3300,25 @@ export function CodespaceWorkbench(props: {
                               <span class="truncate">{path()}</span>
                             </div>
                             <div class="flex items-center gap-3">
+                              {/* The only switch for Vector Tab since Settings lost its Editor page. Suggestions
+                                  spend the selected model's tokens, so the choice is remembered. */}
                               <Show when={!props.externalAgent}>
-                                <span classList={{ "text-[#ad95f5]": settings.editor.aiAutocomplete() }}>
+                                <button
+                                  type="button"
+                                  data-vector-tab-toggle
+                                  class="rounded-[3px] px-1 transition-colors hover:bg-[#262626] hover:text-[#c8c8c8] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#ad95f5]"
+                                  classList={{ "text-[#ad95f5]": settings.editor.aiAutocomplete() }}
+                                  aria-label="Vector Tab"
+                                  aria-pressed={settings.editor.aiAutocomplete()}
+                                  title={
+                                    settings.editor.aiAutocomplete()
+                                      ? "Turn off Vector Tab, the AI suggestions shown as you type. They use the selected model."
+                                      : "Turn on Vector Tab: AI suggestions as you type, accepted with Tab. They use the selected model."
+                                  }
+                                  onClick={() => settings.editor.setAiAutocomplete(!settings.editor.aiAutocomplete())}
+                                >
                                   Vector Tab {settings.editor.aiAutocomplete() ? "on" : "off"}
-                                </span>
+                                </button>
                               </Show>
                               <span>Ln {lineCount()}, Col 1</span>
                               <span>Spaces: 2</span>

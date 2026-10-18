@@ -5,8 +5,6 @@ export const dict = {
   "command.category.provider": "Provajder",
   "command.category.server": "Server",
   "command.category.session": "Sesija",
-  "command.category.theme": "Tema",
-  "command.category.language": "Jezik",
   "command.category.file": "Datoteka",
   "command.category.context": "Kontekst",
   "command.category.terminal": "Terminal",
@@ -33,14 +31,6 @@ export const dict = {
   "command.session.archive": "Arhiviraj sesiju",
 
   "command.palette": "Paleta komandi",
-
-  "command.theme.cycle": "Promijeni temu",
-  "command.theme.set": "Koristi temu: {{theme}}",
-  "command.theme.scheme.cycle": "Promijeni šemu boja",
-  "command.theme.scheme.set": "Koristi šemu boja: {{scheme}}",
-
-  "command.language.cycle": "Promijeni jezik",
-  "command.language.set": "Koristi jezik: {{language}}",
 
   "command.session.new": "Nova sesija",
   "command.file.open": "Otvori datoteku",
@@ -407,12 +397,6 @@ export const dict = {
   "language.bs": "Bosanski",
   "language.th": "ไทย",
   "language.tr": "Türkçe",
-
-  "toast.language.title": "Jezik",
-  "toast.language.description": "Prebačeno na {{language}}",
-
-  "toast.theme.title": "Tema promijenjena",
-  "toast.scheme.title": "Šema boja",
 
   "toast.workspace.enabled.title": "Radni prostori omogućeni",
   "toast.workspace.enabled.description": "Više worktree-ova se sada prikazuje u bočnoj traci",

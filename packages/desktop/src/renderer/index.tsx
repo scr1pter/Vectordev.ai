@@ -4,9 +4,9 @@ import {
   ACCEPTED_FILE_EXTENSIONS,
   AppBaseProviders,
   AppInterface,
+  detectLocale,
   handleNotificationClick,
   loadLocaleDict,
-  normalizeLocale,
   observeTelemetryPreference,
   scrubDiagnosticEvent,
   telemetryEnabled,
@@ -17,15 +17,15 @@ import {
   useCommand,
   useWslServers,
 } from "@vectordevai/app"
-import type { UpdaterState } from "@vectordevai/app/updater"
 import * as Sentry from "@sentry/solid"
 import type { AsyncStorage } from "@solid-primitives/storage"
 import { createMemoryHistory, MemoryRouter, type BaseRouterProps } from "@solidjs/router"
-import { createEffect, createMemo, createResource, createSignal, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createMemo, createResource, onCleanup, onMount, Show } from "solid-js"
 import { render } from "solid-js/web"
 import pkg from "../../package.json"
-import { initI18n, t } from "./i18n"
+import { t } from "./i18n"
 import { initializationData, initializationReady } from "./initialization"
+import { subscribeUpdater } from "./updater-state"
 import { resetZoom, setPinchZoomEnabled, webviewZoom, zoomIn, zoomOut } from "./webview-zoom"
 import { availableStartupServer, readyWslConnections } from "./wsl/connections"
 import { openPathApplication } from "../main/open-path"
@@ -88,10 +88,7 @@ const configureCrashDiagnostics = () => {
 configureCrashDiagnostics()
 observeTelemetryPreference(configureCrashDiagnostics)
 
-void initI18n()
-
-const [updaterState, setUpdaterState] = createSignal<UpdaterState>({ status: "disabled" })
-void window.api.updater.subscribe(setUpdaterState)
+const updater = subscribeUpdater(window.api.updater.subscribe)
 
 const deepLinkEvent = "vector:deep-link"
 
@@ -258,7 +255,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     storage,
 
     updater: {
-      state: updaterState,
+      state: updater.state,
       check: () => window.api.updater.check(),
       install: () => window.api.updater.install(),
     },
@@ -362,14 +359,10 @@ function LoadingSplash() {
 
 function DesktopRoot(props: { windowState: DesktopWindowState }) {
   const platform = createPlatform(props.windowState)
+  // Vector's language follows the computer, never a language saved by an earlier version. Its dictionary loads before
+  // the first render so the window never shows English first.
   const loadLocale = async () => {
-    const current = await platform.storage?.("vector.global.dat").getItem("language")
-    const legacy = current ? undefined : await platform.storage?.().getItem("language.v1")
-    const raw = current ?? legacy
-    if (!raw) return
-    const locale = raw.match(/"locale"\s*:\s*"([^"]+)"/)?.[1]
-    if (!locale) return
-    const next = normalizeLocale(locale)
+    const next = detectLocale()
     if (next !== "en") await loadLocaleDict(next)
     return next satisfies Locale
   }
@@ -381,6 +374,7 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
 
   const [defaultServer] = createResource(() => platform.getDefaultServer?.())
   const [locale] = createResource(loadLocale)
+  const [updaterSettled] = createResource(() => updater.settled)
   const router = (props: BaseRouterProps) => (
     <DesktopMemoryRouter {...props} windowID={platform.windowID ?? "browser"} />
   )
@@ -414,7 +408,12 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
   function App() {
     const wslServers = useWslServers()
     const ready = createMemo(
-      () => !defaultServer.loading && !sidecar.loading && !windowCount.loading && !locale.loading,
+      () =>
+        !defaultServer.loading &&
+        !sidecar.loading &&
+        !windowCount.loading &&
+        !locale.loading &&
+        !updaterSettled.loading,
     )
     const servers = createMemo(() => {
       const data = initializationData(sidecar)

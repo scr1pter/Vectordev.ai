@@ -9,8 +9,6 @@ export const dict = {
   "command.category.provider": "提供者",
   "command.category.server": "伺服器",
   "command.category.session": "工作階段",
-  "command.category.theme": "主題",
-  "command.category.language": "語言",
   "command.category.file": "檔案",
   "command.category.context": "上下文",
   "command.category.terminal": "終端機",
@@ -37,14 +35,6 @@ export const dict = {
   "command.session.archive": "封存工作階段",
 
   "command.palette": "命令面板",
-
-  "command.theme.cycle": "循環主題",
-  "command.theme.set": "使用主題: {{theme}}",
-  "command.theme.scheme.cycle": "循環配色方案",
-  "command.theme.scheme.set": "使用配色方案: {{scheme}}",
-
-  "command.language.cycle": "循環語言",
-  "command.language.set": "使用語言: {{language}}",
 
   "command.session.new": "新增工作階段",
   "command.file.open": "開啟檔案",
@@ -401,12 +391,6 @@ export const dict = {
   "language.bs": "Bosanski",
   "language.th": "ไทย",
   "language.tr": "Türkçe",
-
-  "toast.language.title": "語言",
-  "toast.language.description": "已切換到 {{language}}",
-
-  "toast.theme.title": "主題已切換",
-  "toast.scheme.title": "顏色方案",
 
   "toast.workspace.enabled.title": "工作區已啟用",
   "toast.workspace.enabled.description": "側邊欄現在顯示多個工作樹",

@@ -158,7 +158,7 @@ export const docsOrder: DocLink[] = docsNav.flatMap((group) => group.links)
 // old /docs/<id> or /docs#<id> link still lands on its subject.
 export const docsMoved: Record<string, string> = {
   "open-repository": "first-task#open-repository",
-  "project-rules": "vector-agent#project-rules",
+  "project-rules": "vector-agent#repository-rules",
   tools: "vector-agent#tools",
   context: "vector-agent#context",
   "why-vector": "vector-agent",
@@ -189,7 +189,7 @@ export const docsMoved: Record<string, string> = {
   composer: "desktop-app#composer",
   transcript: "desktop-app#transcript",
   "workspace-rail": "desktop-app#workspace-rail",
-  "settings-appearance": "desktop-app#settings-appearance",
+  "settings-appearance": "desktop-app#settings",
   "help-assistant": "desktop-app#help-assistant",
   "terminal-review": "desktop-app#terminal-review",
   "cli-terminal": "terminal-agent",

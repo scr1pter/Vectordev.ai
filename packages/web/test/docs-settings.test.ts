@@ -1,0 +1,68 @@
+import { expect, test } from "bun:test"
+import { docsMoved } from "../src/data/docs-nav"
+
+const page = (name: string) => Bun.file(new URL(`../src/pages/docs/${name}.astro`, import.meta.url)).text()
+
+// A section as readers see it: from its heading to the next one, without markup.
+async function section(name: string, id: string) {
+  const text = await page(name)
+  const start = text.indexOf(`<h2 id="${id}">`)
+  expect(start).toBeGreaterThan(-1)
+  const end = text.indexOf("<h2", start + 1)
+  return text
+    .slice(start, end === -1 ? undefined : end)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+}
+
+test("the desktop app docs describe today's Settings, not the removed pages", async () => {
+  const text = await section("desktop-app", "settings")
+  expect(text).toContain("Click your name at the bottom of the sidebar to open Settings at Account")
+  expect(text).toContain("Settings in the Help menu, or Cmd+,")
+  expect(text).toContain("an Update button takes the gear's place")
+  expect(text).toContain(
+    "Vector has one look, its own dark theme, and shows its interface in your computer's language.",
+  )
+  expect(text).toContain("Vector Tab")
+  // Codium shows shares of credits, never amounts.
+  expect(text).toContain("the share of this month's credits left")
+  for (const removed of [
+    "Appearance",
+    "colour scheme",
+    "Chat",
+    "Personalization",
+    "Voice",
+    "Keybinds",
+    "Project rules",
+  ])
+    expect(text).not.toContain(removed)
+  expect(text).not.toMatch(/project/i)
+})
+
+test("repository rules live in .vector/RULES.md, with no Project rules screen to open", async () => {
+  const text = await section("vector-agent", "repository-rules")
+  expect(text).toContain("Repository rules live in .vector/RULES.md")
+  expect(text).toContain("Don't flag this again")
+  // The file is where rules change now: a deleted line is a removed rule, for Vector's agents and the external CLIs.
+  expect(text).toContain("delete a line to remove the rule, or edit it to change the rule")
+  expect(text).toContain("Undo takes it out again")
+  expect(text).toContain("as the file has them now")
+  expect(text).not.toMatch(/workspace rail|home screen|Settings/)
+  expect(text).not.toMatch(/project/i)
+  expect(await page("external-agents")).toContain('href="/docs/vector-agent#repository-rules"')
+})
+
+test("the old settings-appearance and project-rules links still land on a heading that exists", async () => {
+  const vercel = (await Bun.file(new URL("../../../vercel.json", import.meta.url)).json()) as {
+    redirects: { source: string; destination: string }[]
+  }
+  for (const [id, target] of [
+    ["settings-appearance", "desktop-app#settings"],
+    ["project-rules", "vector-agent#repository-rules"],
+  ]) {
+    expect(docsMoved[id]).toBe(target)
+    expect(vercel.redirects.find((redirect) => redirect.source === `/docs/${id}`)?.destination).toBe(`/docs/${target}`)
+    const [name, anchor] = target.split("#")
+    expect(await page(name)).toContain(`<h2 id="${anchor}">`)
+  }
+})

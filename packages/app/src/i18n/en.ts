@@ -23,8 +23,6 @@ export const dict = {
   "command.category.provider": "Provider",
   "command.category.server": "Server",
   "command.category.session": "Session",
-  "command.category.theme": "Theme",
-  "command.category.language": "Language",
   "command.category.file": "File",
   "command.category.context": "Context",
   "command.category.terminal": "Terminal",
@@ -55,14 +53,6 @@ export const dict = {
   "command.session.archive": "Archive session",
 
   "command.palette": "Command palette",
-
-  "command.theme.cycle": "Cycle theme",
-  "command.theme.set": "Use theme: {{theme}}",
-  "command.theme.scheme.cycle": "Cycle color scheme",
-  "command.theme.scheme.set": "Use color scheme: {{scheme}}",
-
-  "command.language.cycle": "Cycle language",
-  "command.language.set": "Use language: {{language}}",
 
   "command.session.new": "New task",
   "command.file.open": "Open file",
@@ -554,12 +544,6 @@ export const dict = {
   "language.uk": "Українська",
   "language.th": "ไทย",
   "language.tr": "Türkçe",
-
-  "toast.language.title": "Language",
-  "toast.language.description": "Switched to {{language}}",
-
-  "toast.theme.title": "Theme switched",
-  "toast.scheme.title": "Color scheme",
 
   "toast.workspace.enabled.title": "Workspaces enabled",
   "toast.workspace.enabled.description": "Multiple worktrees are now shown in the sidebar",

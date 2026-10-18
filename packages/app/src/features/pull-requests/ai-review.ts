@@ -115,8 +115,8 @@ const VERIFY_FORMAT = { type: "json_schema" as const, schema: VERIFY_JSON_SCHEMA
 const MAX_SYMBOLS = 10
 const MAX_HITS = 15
 const MAX_HIT_CHARS = 200
-// AGENTS.md (or CLAUDE.md) and .vector/RULES.md, the repository's standing instructions, which project rules and
-// "Don't flag this again" write to.
+// AGENTS.md (or CLAUDE.md) and .vector/RULES.md, the repository's standing instructions, which "Don't flag this
+// again" writes to.
 const INSTRUCTION_FILES = [["AGENTS.md", "CLAUDE.md"], [".vector/RULES.md"]] as const
 // GitHub refuses more than this many line comments in one review from the desktop's IPC.
 const MAX_LINE_COMMENTS = 60
@@ -1886,7 +1886,44 @@ export async function applyReviewFix(
   return "applied"
 }
 
-// The project rule "Don't flag this again" saves; it lives in .vector/RULES.md, which every review reads.
+// What "Don't flag this again" says. It saves a repository rule in .vector/RULES.md, which every review reads. Vector has
+// no page for those rules any more, so the copy names the file, where they are read and changed.
+export const REMEMBER_COPY = {
+  action: "Don't flag this again",
+  hint: "Saves a repository rule in .vector/RULES.md that every review reads",
+  saving: "Saving to .vector/RULES.md…",
+  saved: "Won't be flagged again · saved to .vector/RULES.md",
+  failed: "Vector could not save the repository rule",
+  undoFailed: "Vector could not remove the repository rule from .vector/RULES.md",
+  applied: "Repository rules applied",
+} as const
+
+export type RepoRulesApi = {
+  save: (input: { description: string; repositoryPath: string; filePatterns: string[] }) => Promise<{ id: string }>
+  remove: (id: string) => Promise<unknown>
+}
+
+// Undo after "Don't flag this again" has to delete the rule it saved, or the finding stays hidden from every later
+// review. Undo can come before the save finishes, so it waits for the saved rule's id before removing it.
+export function rememberedRules() {
+  const saved = new Map<string, { rules: RepoRulesApi; id: Promise<string | undefined> }>()
+  return {
+    save(key: string, rules: RepoRulesApi, input: Parameters<RepoRulesApi["save"]>[0]) {
+      const id = rules.save(input).then((rule) => rule.id)
+      saved.set(key, { rules, id: id.catch(() => undefined) })
+      return id
+    },
+    async undo(key: string) {
+      const entry = saved.get(key)
+      if (!entry) return
+      saved.delete(key)
+      const id = await entry.id
+      if (id) await entry.rules.remove(id)
+    },
+  }
+}
+
+// The repository rule "Don't flag this again" saves.
 export function dismissalRule(finding: Pick<ReviewFindingView, "title" | "path">) {
   const title = oneLine(finding.title).replace(/["`]/g, "'").slice(0, 120)
   return `Code review: do not flag "${title}" in ${finding.path}; it was reviewed and is not a problem.`

@@ -30,7 +30,8 @@ mock.module("./store", () => ({
   removeStoreFileIfEmpty: () => undefined,
 }))
 
-const { globalRulesFilePath, listRepoRules, rulesFilePath, saveRepoRule } = await import("./repo-rules")
+const { deleteRepoRule, globalRulesFilePath, listRepoRules, repoRulesForPrompt, rulesFilePath, saveRepoRule } =
+  await import("./repo-rules")
 
 const originalConfig = process.env.VECTOR_AGENT_CONFIG_DIR
 const originalXdg = process.env.XDG_CONFIG_HOME
@@ -126,6 +127,66 @@ describe("repository rule persistence", () => {
     expect(await readFile(rulesFilePath(repositoryPath), "utf8")).toBe(before)
     expect(listRepoRules(repositoryPath).map((rule) => rule.id)).toEqual([saved.id])
     expect(await stat(rulesFilePath(blockedPath)).catch(() => undefined)).toBeUndefined()
+  })
+
+  test("a rule deleted from RULES.md by hand stays deleted for every agent and after the next save", async () => {
+    const repositoryPath = join(userDataPath, "project")
+    const sql = 'Code review: do not flag "SQL injection" in src/db.ts; it was reviewed and is not a problem.'
+    await saveRepoRule({ description: sql, repositoryPath, filePatterns: ["src/db.ts"] })
+    const file = rulesFilePath(repositoryPath)
+    await writeFile(file, (await readFile(file, "utf8")).replace(/^- Code review.*\n/m, ""), "utf8")
+
+    // Claude Code, Codex and Cursor get rules from Vector, not the file, so the deletion has to reach them too.
+    expect(repoRulesForPrompt(repositoryPath)).toEqual([])
+    await saveRepoRule({ description: "Rule B", repositoryPath, filePatterns: [] })
+
+    const content = await readFile(file, "utf8")
+    expect(content).not.toContain("SQL injection")
+    expect(content).toContain("- Rule B")
+    expect(listRepoRules(repositoryPath).map((rule) => rule.description)).toEqual(["Rule B"])
+  })
+
+  test("deleting RULES.md removes its rules instead of bringing them back", async () => {
+    const repositoryPath = join(userDataPath, "project")
+    await saveRepoRule({ description: "Old rule", repositoryPath, filePatterns: [] })
+    await rm(rulesFilePath(repositoryPath))
+
+    expect(repoRulesForPrompt(repositoryPath)).toEqual([])
+    await saveRepoRule({ description: "New rule", repositoryPath, filePatterns: [] })
+    expect(await readFile(rulesFilePath(repositoryPath), "utf8")).not.toContain("Old rule")
+  })
+
+  test("a rule edited or added inside the block by hand reaches every agent and survives the next save", async () => {
+    const repositoryPath = join(userDataPath, "project")
+    await saveRepoRule({ description: "Use the service layer", repositoryPath, filePatterns: ["src/**"] })
+    const file = rulesFilePath(repositoryPath)
+    const edited = (await readFile(file, "utf8"))
+      .replace("Use the service layer", "Use the domain services")
+      .replace("<!-- vector:managed-rules:end -->", "- Keep migrations reversible\n\n<!-- vector:managed-rules:end -->")
+    await writeFile(file, edited, "utf8")
+
+    expect(repoRulesForPrompt(repositoryPath).map((rule) => rule.description)).toEqual([
+      "Use the domain services",
+      "Keep migrations reversible",
+    ])
+    await saveRepoRule({ description: "Rule B", repositoryPath, filePatterns: [] })
+    const content = await readFile(file, "utf8")
+    expect(content).toContain("- Use the domain services (applies to src/**)")
+    expect(content).toContain("- Keep migrations reversible")
+    expect(content).not.toContain("Use the service layer")
+  })
+
+  test("removing a saved rule by id takes it out of the file, as Vectorscope's Undo does", async () => {
+    const repositoryPath = join(userDataPath, "project")
+    await saveRepoRule({ description: "Keep this", repositoryPath, filePatterns: [] })
+    const saved = await saveRepoRule({ description: "Undo this", repositoryPath, filePatterns: ["src/a.ts"] })
+
+    await deleteRepoRule(saved.id)
+
+    const content = await readFile(rulesFilePath(repositoryPath), "utf8")
+    expect(content).toContain("- Keep this")
+    expect(content).not.toContain("Undo this")
+    expect(repoRulesForPrompt(repositoryPath).map((rule) => rule.description)).toEqual(["Keep this"])
   })
 
   test("an unreadable existing rules path is never treated as an empty file", async () => {

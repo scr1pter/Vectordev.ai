@@ -10,9 +10,6 @@ export type SettingsTab =
   | "usage"
   | "spend"
   | "about"
-  | "voice"
-  | "personalization"
-  | "rules"
   | "trust"
   | "subagents"
 
@@ -36,7 +33,18 @@ export const settingsGroups: readonly SettingsGroup[] = [
         value: "account",
         label: "Account",
         icon: "user",
-        keywords: ["sign in", "sign out", "email", "codium", "plan", "credits", "billing", "subscription", "delete"],
+        keywords: [
+          "sign in",
+          "sign out",
+          "profile",
+          "email",
+          "codium",
+          "plan",
+          "credits",
+          "billing",
+          "subscription",
+          "delete",
+        ],
       },
       {
         value: "general",
@@ -55,19 +63,6 @@ export const settingsGroups: readonly SettingsGroup[] = [
         label: "Spend limits",
         icon: "shield",
         keywords: ["budget", "cap", "cost", "limit"],
-      },
-      {
-        value: "appearance",
-        label: "Appearance",
-        icon: "photo",
-        keywords: ["theme", "font", "color", "density", "motion"],
-      },
-      { value: "voice", label: "Voice", icon: "comment", keywords: ["speech", "microphone", "audio"] },
-      {
-        value: "personalization",
-        label: "Personalization",
-        icon: "brain",
-        keywords: ["profile", "memory", "instructions"],
       },
     ],
   },
@@ -98,15 +93,12 @@ export const settingsGroups: readonly SettingsGroup[] = [
   {
     title: "Workspace",
     items: [
-      { value: "rules", label: "Project rules", icon: "shield", keywords: ["repository", "instructions", "paths"] },
       {
         value: "trust",
         label: "Repository trust",
         icon: "circle-check",
         keywords: ["trusted", "vector.json", ".vector", "repository settings", "project settings", "security"],
       },
-      { value: "editor", label: "Editor", icon: "code", keywords: ["font", "wrap", "autocomplete", "line numbers"] },
-      { value: "chat", label: "Chat", icon: "bubble-5", keywords: ["composer", "conversation", "spacing", "width"] },
       { value: "notifications", label: "Notifications", icon: "status", keywords: ["alerts", "sound", "completion"] },
       {
         value: "accessibility",

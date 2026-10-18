@@ -1,59 +1,17 @@
 import { Component, JSX, Show, createResource, createSignal, onCleanup } from "solid-js"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
-import { SelectV2 } from "@vectordevai/ui/v2/select-v2"
 import { Switch } from "@vectordevai/ui/v2/switch-v2"
 import { Icon, type IconProps } from "@vectordevai/ui/icon"
-import {
-  type VectorChatWidthPreference,
-  type VectorThemePreference,
-  type VectorMessageSpacingPreference,
-  useSettings,
-} from "@/context/settings"
+import { useSettings } from "@/context/settings"
 import "./settings-v2.css"
 
-import { useTheme } from "@vectordevai/ui/theme/context"
-import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { LocalMemoryPanel } from "@/features/memory/local-memory-panel"
 import { observeTelemetryPreference, setTelemetryEnabled, telemetryEnabled } from "@/features/privacy/telemetry"
 
-export type SettingsSection = "general" | "appearance" | "editor" | "chat" | "notifications" | "accessibility"
-
-type Option = {
-  value: string
-  label: string
-}
-
-const chatWidthOptions: Option[] = [
-  { value: "focused", label: "Focused" },
-  { value: "wide", label: "Wide" },
-  { value: "full", label: "Full" },
-]
-
-const messageSpacingOptions: Option[] = [
-  { value: "compact", label: "Compact" },
-  { value: "comfortable", label: "Comfortable" },
-  { value: "relaxed", label: "Relaxed" },
-]
-
-const fontFamilyOptions: Option[] = [
-  { value: "", label: "System mono" },
-  { value: "JetBrains Mono", label: "JetBrains Mono" },
-  { value: "SF Mono", label: "SF Mono" },
-  { value: "Fira Code", label: "Fira Code" },
-  { value: "Geist Mono", label: "Geist Mono" },
-]
-
-const defaultSettingsPreview = {
-  accent: "#9b6cff",
-  workspace: "#1d1d1f",
-  sidebar: "#242428",
-  chat: "#202024",
-}
+export type SettingsSection = "general" | "notifications" | "accessibility"
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
-
-const pickOption = (options: Option[], value: string) => options.find((option) => option.value === value) ?? options[0]
 
 const localKeys = () => {
   if (typeof localStorage === "undefined") return []
@@ -131,33 +89,6 @@ const ToggleRow: Component<{
   </div>
 )
 
-const SelectRow: Component<{
-  title: string
-  description?: string
-  options: Option[]
-  value: string
-  onChange: (value: string) => void
-}> = (props) => (
-  <div class="settings-v2-row-modern">
-    <div class="settings-v2-row-copy">
-      <div class="settings-v2-row-title">{props.title}</div>
-      <Show when={props.description}>
-        <div class="settings-v2-row-description">{props.description}</div>
-      </Show>
-    </div>
-    <div class="settings-v2-row-control">
-      <SelectV2
-        appearance="inline"
-        options={props.options}
-        current={pickOption(props.options, props.value)}
-        value={(option) => option.value}
-        label={(option) => option.label}
-        onSelect={(option) => option && props.onChange(option.value)}
-      />
-    </div>
-  </div>
-)
-
 const RangeRow: Component<{
   title: string
   description?: string
@@ -190,33 +121,11 @@ const RangeRow: Component<{
   </div>
 )
 
-const ColorRow: Component<{
-  title: string
-  description?: string
-  value: string
-  onInput: (value: string) => void
-}> = (props) => (
-  <div class="settings-v2-row-modern">
-    <div class="settings-v2-row-copy">
-      <div class="settings-v2-row-title">{props.title}</div>
-      <Show when={props.description}>
-        <div class="settings-v2-row-description">{props.description}</div>
-      </Show>
-    </div>
-    <label class="settings-v2-color-input">
-      <input type="color" value={props.value} onInput={(event) => props.onInput(event.currentTarget.value)} />
-      <span>{props.value}</span>
-    </label>
-  </div>
-)
-
 export const SettingsGeneralV2: Component<{
   sessionID?: string
   section?: SettingsSection
 }> = (props) => {
   const settings = useSettings()
-  const theme = useTheme()
-  const language = useLanguage()
   const platform = usePlatform()
   const [status, setStatus] = createSignal("")
   const [crashDiagnostics, setCrashDiagnostics] = createSignal(telemetryEnabled())
@@ -298,7 +207,7 @@ export const SettingsGeneralV2: Component<{
         <Card
           icon="reset"
           title="Local data"
-          description="Preferences and caches stored on this device. Project files are never touched."
+          description="Preferences and caches stored on this device. Repository files are never touched."
         >
           <div class="settings-v2-action-grid">
             <ButtonV2 variant="outline" icon="trash" onClick={clearApplicationCache}>
@@ -325,209 +234,6 @@ export const SettingsGeneralV2: Component<{
             description="When Vector finishes, a separate judge compares the result against your request and the checks it ran. On a failed verdict it names the specific repair and Vector fixes it, up to three rounds. Applies to every prompt and every agent workspace, and costs extra model calls."
             checked={settings.general.llmJudge()}
             onChange={settings.general.setLlmJudge}
-          />
-        </Card>
-      </div>
-    </Page>
-  )
-
-  const renderAppearance = () => (
-    <Page
-      eyebrow="Appearance"
-      title="Shape the workspace"
-      description="Every visual choice below applies instantly and persists locally."
-    >
-      <div class="settings-v2-section-grid">
-        {/* Theme, colour scheme and language were only ever reachable from the
-            legacy shell's command palette, which the hardcoded newLayoutDesigns
-            flag made unreachable — so the shipped app had no way to change any
-            of them. The contexts always supported it; nothing exposed it. */}
-        <Card icon="photo" title="Appearance" description="Applies immediately and is remembered on this computer.">
-          <SelectRow
-            title="Color scheme"
-            description="Follow the system, or pin light or dark."
-            options={[
-              { value: "system", label: "Match system" },
-              { value: "light", label: "Light" },
-              { value: "dark", label: "Dark" },
-            ]}
-            // settings.appearance.theme is the source of truth, not the theme
-            // context: VectorThemeSync in app.tsx continuously pushes this
-            // preference into the context, so writing to the context directly
-            // is immediately overwritten and the control appears to do nothing.
-            value={settings.appearance.theme()}
-            onChange={(value) => settings.appearance.setTheme(value as VectorThemePreference)}
-          />
-          <SelectRow
-            title="Theme"
-            description="Editor and interface colors."
-            options={theme.ids().map((id) => ({ value: id, label: theme.name(id) }))}
-            value={theme.themeId()}
-            onChange={(value) => void theme.setTheme(value)}
-          />
-          <SelectRow
-            title="Language"
-            description="Interface language."
-            options={language.locales.map((locale) => ({ value: locale, label: language.label(locale) }))}
-            value={language.locale()}
-            onChange={(value) => language.setLocale(value as never)}
-          />
-        </Card>
-        <Card icon="photo" title="Workspace colors" description="Set Vector's tone without external services.">
-          <ColorRow
-            title="Accent color"
-            description="Used for focused controls, highlights, and Vector actions."
-            value={settings.appearance.accentColor()}
-            onInput={settings.appearance.setAccentColor}
-          />
-          <ColorRow
-            title="Workspace color"
-            value={settings.appearance.workspaceColor()}
-            onInput={settings.appearance.setWorkspaceColor}
-          />
-          <ColorRow
-            title="Sidebar color"
-            value={settings.appearance.sidebarColor()}
-            onInput={settings.appearance.setSidebarColor}
-          />
-          <ColorRow
-            title="Chat color"
-            value={settings.appearance.chatColor()}
-            onInput={settings.appearance.setChatColor}
-          />
-          <ButtonV2
-            variant="outline"
-            icon="reset"
-            onClick={() => {
-              settings.appearance.setAccentColor(defaultSettingsPreview.accent)
-              settings.appearance.setWorkspaceColor(defaultSettingsPreview.workspace)
-              settings.appearance.setSidebarColor(defaultSettingsPreview.sidebar)
-              settings.appearance.setChatColor(defaultSettingsPreview.chat)
-            }}
-          >
-            Restore default colors
-          </ButtonV2>
-        </Card>
-        <Card icon="sliders" title="Layout feel" description="Tune sizing, motion, and rounding.">
-          <RangeRow
-            title="Interface font size"
-            value={settings.appearance.fontSize()}
-            min={12}
-            max={20}
-            format={(value) => `${value}px`}
-            onInput={settings.appearance.setFontSize}
-          />
-          <ToggleRow
-            title="Collapse sidebar by default"
-            checked={settings.appearance.sidebarCollapsed()}
-            onChange={settings.appearance.setSidebarCollapsed}
-          />
-          <ToggleRow
-            title="Rounded corners"
-            checked={settings.appearance.roundedCorners()}
-            onChange={settings.appearance.setRoundedCorners}
-          />
-          <ToggleRow
-            title="Reduce motion"
-            checked={settings.appearance.reduceAnimations()}
-            onChange={settings.appearance.setReduceAnimations}
-          />
-          <ToggleRow
-            title="Soft glass panels"
-            description="Adds subtle transparency where the renderer supports it."
-            checked={settings.appearance.glassmorphism()}
-            onChange={settings.appearance.setGlassmorphism}
-          />
-        </Card>
-      </div>
-    </Page>
-  )
-
-  const renderEditor = () => (
-    <Page
-      eyebrow="Editor"
-      title="Code editor preferences"
-      description="Local editor behavior for readable, calm coding sessions."
-    >
-      <div class="settings-v2-section-grid">
-        <Card icon="code" title="Typography" description="Tune how code is displayed.">
-          <RangeRow
-            title="Font size"
-            value={settings.editor.fontSize()}
-            min={10}
-            max={24}
-            format={(value) => `${value}px`}
-            onInput={settings.editor.setFontSize}
-          />
-          <SelectRow
-            title="Font family"
-            options={fontFamilyOptions}
-            value={settings.editor.fontFamily()}
-            onChange={settings.editor.setFontFamily}
-          />
-          <RangeRow
-            title="Line height"
-            value={settings.editor.lineHeight()}
-            min={1.1}
-            max={2.2}
-            step={0.1}
-            format={(value) => value.toFixed(1)}
-            onInput={settings.editor.setLineHeight}
-          />
-        </Card>
-        <Card
-          icon="sliders"
-          title="Editing behavior"
-          description="Local editor flags, applied to the file editor live."
-        >
-          <ToggleRow title="Word wrap" checked={settings.editor.wordWrap()} onChange={settings.editor.setWordWrap} />
-          <ToggleRow
-            title="Show line numbers"
-            checked={settings.editor.showLineNumbers()}
-            onChange={settings.editor.setShowLineNumbers}
-          />
-          <ToggleRow
-            title="Highlight active line"
-            checked={settings.editor.highlightActiveLine()}
-            onChange={settings.editor.setHighlightActiveLine}
-          />
-          <ToggleRow
-            title="Render whitespace"
-            checked={settings.editor.renderWhitespace()}
-            onChange={settings.editor.setRenderWhitespace}
-          />
-          <ToggleRow
-            title="AI autocomplete"
-            description="Cursor-style ghost-text suggestions as you type in the editor. Tab to accept."
-            checked={settings.editor.aiAutocomplete()}
-            onChange={settings.editor.setAiAutocomplete}
-          />
-          <ToggleRow
-            title="Follow the agent in the editor"
-            description="Open the file an agent is editing and scroll to the lines it changes, live. Turn off to keep the editor where you left it."
-            checked={settings.editor.followAgent()}
-            onChange={settings.editor.setFollowAgent}
-          />
-        </Card>
-      </div>
-    </Page>
-  )
-
-  const renderChat = () => (
-    <Page eyebrow="Chat" title="Conversation flow" description="Control how the conversation canvas is laid out.">
-      <div class="settings-v2-section-grid">
-        <Card icon="sliders" title="Conversation layout" description="Keep the chat canvas comfortable.">
-          <SelectRow
-            title="Chat width"
-            options={chatWidthOptions}
-            value={settings.chat.chatWidth()}
-            onChange={(value) => settings.chat.setChatWidth(value as VectorChatWidthPreference)}
-          />
-          <SelectRow
-            title="Message spacing"
-            options={messageSpacingOptions}
-            value={settings.chat.messageSpacing()}
-            onChange={(value) => settings.chat.setMessageSpacing(value as VectorMessageSpacingPreference)}
           />
         </Card>
       </div>
@@ -608,9 +314,6 @@ export const SettingsGeneralV2: Component<{
 
   const pages: Record<SettingsSection, () => JSX.Element> = {
     general: renderGeneral,
-    appearance: renderAppearance,
-    editor: renderEditor,
-    chat: renderChat,
     notifications: renderNotifications,
     accessibility: renderAccessibility,
   }

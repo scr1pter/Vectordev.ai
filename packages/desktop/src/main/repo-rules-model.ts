@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+
 // Per-repository rules the user writes in plain English — "we don't put
 // database query logic in the controller" — scoped to a repository and
 // optionally to file patterns inside it. Pure so matching and prompt
@@ -6,7 +8,7 @@
 export type RepoRule = {
   id: string
   description: string
-  // Absolute path of the repository this applies to. Empty means every project,
+  // Absolute path of the repository this applies to. Empty means every repository,
   // which is how a personal standard is expressed without repeating it.
   repositoryPath: string
   // Globs the rule is scoped to. Empty means the whole repository.
@@ -82,9 +84,14 @@ export function selectRules(
   })
 }
 
-function scopeSentence(rule: RepoRule) {
+function scopeSentence(rule: Pick<RepoRule, "filePatterns">) {
   if (!rule.filePatterns.length) return ""
   return ` (applies to ${rule.filePatterns.join(", ")})`
+}
+
+// A rule's bullet in the managed block, on one line so it reads back as the same rule after a round trip.
+function ruleLine(rule: Pick<RepoRule, "description" | "filePatterns">) {
+  return `${rule.description.replace(/\s+/g, " ").trim()}${scopeSentence(rule)}`
 }
 
 export function formatRulesForPrompt(rules: readonly RepoRule[]) {
@@ -104,15 +111,15 @@ export function formatRulesForPrompt(rules: readonly RepoRule[]) {
 const MANAGED_START = "<!-- vector:managed-rules:start -->"
 const MANAGED_END = "<!-- vector:managed-rules:end -->"
 
-export function formatRulesFile(rules: readonly RepoRule[], title = "Project rules") {
+export function formatRulesFile(rules: readonly RepoRule[], title = "Repository rules") {
   if (!rules.length) return ""
   return [
     MANAGED_START,
     `# ${title}`,
     "",
-    "<!-- Managed by Vector. Edit this section in Vector under Rules; content outside the markers is preserved. -->",
+    "<!-- Managed by Vector: Vectorscope's Don't flag this again adds rules here. Each line starting with - is a rule: delete the line to remove the rule, or edit it to change the rule. Vector rewrites everything else in this section, so keep notes of your own outside the markers. -->",
     "",
-    ...rules.map((rule) => `- ${rule.description.trim()}${scopeSentence(rule)}`),
+    ...rules.map((rule) => `- ${ruleLine(rule)}`),
     "",
     MANAGED_END,
     "",
@@ -139,17 +146,84 @@ export function mergeRulesFile(
   existing: string,
   rules: readonly RepoRule[],
   previousRules: readonly RepoRule[] = rules,
-  title = "Project rules",
+  title = "Repository rules",
 ) {
   const managed = formatRulesFile(rules, title).trim()
-  const start = existing.indexOf(MANAGED_START)
-  const end = existing.indexOf(MANAGED_END, Math.max(0, start))
-  if (start >= 0 && end >= start) {
-    const before = existing.slice(0, start).trimEnd()
-    const after = existing.slice(end + MANAGED_END.length).trimStart()
+  const range = managedRange(existing)
+  if (range) {
+    const before = existing.slice(0, range.start).trimEnd()
+    const after = existing.slice(range.end + MANAGED_END.length).trimStart()
     return [before, managed, after].filter(Boolean).join("\n\n") + ([before, managed, after].some(Boolean) ? "\n" : "")
   }
-  if (existing.trim() === legacyRulesFile(previousRules, title).trim()) return managed ? `${managed}\n` : ""
+  if (isLegacyRulesFile(existing, previousRules, title)) return managed ? `${managed}\n` : ""
   if (!managed) return existing
   return existing.trim() ? `${existing.trimEnd()}\n\n${managed}\n` : `${managed}\n`
+}
+
+// The rules one file holds: a repository's .vector/RULES.md, or the global file when repositoryPath is empty.
+export function managesRule(rule: RepoRule, repositoryPath: string) {
+  return rule.enabled && rule.repositoryPath.replace(/[\\/]+$/, "") === repositoryPath.replace(/[\\/]+$/, "")
+}
+
+// Vector has no page for these rules, so the managed block in the file is where people change them, and it wins over
+// the saved list. A rule whose line was deleted is dropped and a line someone added or rewrote becomes a rule, so a
+// hand edit survives the next save and reaches Claude Code, Codex and Cursor, which get rules from Vector rather than
+// from the file. A missing file, or one without the block, holds no managed rules, except an untouched file from
+// before the markers, which the next save migrates. Disabled rules are never in the file, so they are left alone.
+export function reconcileRules(
+  rules: readonly RepoRule[],
+  repositoryPath: string,
+  existing: string,
+  now = new Date().toISOString(),
+): RepoRule[] {
+  const title = repositoryPath ? "Repository rules" : "Global rules"
+  const managed = rules.filter((rule) => managesRule(rule, repositoryPath))
+  if (existing.trim() && isLegacyRulesFile(existing, managed, title)) return [...rules]
+  const unclaimed = [...managed]
+  const kept = managedLines(existing).map((line, position) => {
+    const index = unclaimed.findIndex((rule) => ruleLine(rule) === line)
+    if (index >= 0) return unclaimed.splice(index, 1)[0]
+    return ruleFromLine(line, position, repositoryPath.replace(/[\\/]+$/, ""), now)
+  })
+  return [...rules.filter((rule) => !managesRule(rule, repositoryPath)), ...kept]
+}
+
+function managedRange(existing: string) {
+  const start = existing.indexOf(MANAGED_START)
+  const end = existing.indexOf(MANAGED_END, Math.max(0, start))
+  if (start < 0 || end < start) return undefined
+  return { start, end }
+}
+
+// Files from before the markers were titled "Project rules"; match that exact text so they migrate, not duplicate.
+function isLegacyRulesFile(existing: string, rules: readonly RepoRule[], title: string) {
+  return existing.trim() === legacyRulesFile(rules, title === "Repository rules" ? "Project rules" : title).trim()
+}
+
+// Only bullets are rules; the heading and the comment inside the block are Vector's own.
+function managedLines(existing: string) {
+  const range = managedRange(existing)
+  if (!range) return []
+  return existing
+    .slice(range.start + MANAGED_START.length, range.end)
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const text = /^\s*[-*+]\s+(.*)$/.exec(line)?.[1]?.replace(/\s+/g, " ").trim()
+      return text ? [text] : []
+    })
+}
+
+// A line someone wrote by hand. Its scope reads back from the "(applies to ...)" Vector writes after each rule. The id
+// comes from the line, so it stays the same on every read until a save stores the rule.
+function ruleFromLine(line: string, position: number, repositoryPath: string, now: string): RepoRule {
+  const scoped = /^(.*\S) \(applies to (.+)\)$/.exec(line)
+  return {
+    id: `file-${createHash("sha256").update(`${repositoryPath}\n${position}\n${line}`).digest("hex").slice(0, 32)}`,
+    description: scoped?.[1] ?? line,
+    repositoryPath,
+    filePatterns: scoped?.[2].split(", ").flatMap((pattern) => (pattern.trim() ? [pattern.trim()] : [])) ?? [],
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  }
 }

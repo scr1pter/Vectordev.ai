@@ -5,8 +5,6 @@ export const dict = {
   "command.category.provider": "Провайдер",
   "command.category.server": "Сервер",
   "command.category.session": "Сесія",
-  "command.category.theme": "Тема",
-  "command.category.language": "Мова",
   "command.category.file": "Файл",
   "command.category.context": "Контекст",
   "command.category.terminal": "Термінал",
@@ -36,14 +34,6 @@ export const dict = {
   "command.session.archive": "Архівувати сесію",
 
   "command.palette": "Палітра команд",
-
-  "command.theme.cycle": "Перемкнути тему",
-  "command.theme.set": "Використати тему: {{theme}}",
-  "command.theme.scheme.cycle": "Перемкнути кольорову схему",
-  "command.theme.scheme.set": "Використати кольорову схему: {{scheme}}",
-
-  "command.language.cycle": "Перемкнути мову",
-  "command.language.set": "Використати мову: {{language}}",
 
   "command.session.new": "Нова сесія",
   "command.file.open": "Відкрити файл",
@@ -426,12 +416,6 @@ export const dict = {
   "language.uk": "Українська",
   "language.th": "ไทย",
   "language.tr": "Türkçe",
-
-  "toast.language.title": "Мова",
-  "toast.language.description": "Перемкнено на {{language}}",
-
-  "toast.theme.title": "Тему змінено",
-  "toast.scheme.title": "Кольорова схема",
 
   "toast.workspace.enabled.title": "Робочі області увімкнено",
   "toast.workspace.enabled.description": "Кілька робочих дерев тепер відображаються на бічній панелі",

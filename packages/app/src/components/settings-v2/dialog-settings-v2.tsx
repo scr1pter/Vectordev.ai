@@ -11,9 +11,6 @@ import { SettingsModelsV2 } from "./models"
 import { SettingsServersV2 } from "./servers"
 import { SettingsUsageV2 } from "./usage"
 import { SettingsAboutV2 } from "./about"
-import { SettingsVoiceV2 } from "./voice"
-import { SettingsPersonalizationV2 } from "./personalization"
-import { SettingsRulesV2 } from "./rules"
 import { SettingsProjectTrustV2 } from "./project-trust"
 import { SettingsSubagentsV2 } from "./subagents"
 import { SettingsSpendLimitsV2 } from "./spend-limits"
@@ -69,9 +66,6 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
     if (item === "usage") return <SettingsUsageV2 />
     if (item === "spend") return <SettingsSpendLimitsV2 />
     if (item === "about") return <SettingsAboutV2 />
-    if (item === "voice") return <SettingsVoiceV2 />
-    if (item === "personalization") return <SettingsPersonalizationV2 />
-    if (item === "rules") return <SettingsRulesV2 repositoryPath={props.repositoryPath} />
     if (item === "trust")
       return <SettingsProjectTrustV2 repositoryPath={props.repositoryPath} sessionDirectory={props.sessionDirectory} />
     if (item === "subagents") return <SettingsSubagentsV2 />
