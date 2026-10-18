@@ -79,7 +79,8 @@ export function originLabel(entry: Pick<MemoryEntryView, "origin" | "source" | "
 
 /** Why an entry waits for the user before Vector uses it. */
 export function holdLabel(hold: MemoryHold | undefined) {
-  if (hold === "web") return "Learned in a session that read web content or ran a command that reaches outside this computer."
+  if (hold === "web")
+    return "Learned in a session that read web content, held an imported transcript or an issue's text, or ran a command that reaches outside this computer."
   if (hold === "mcp") return "Learned in a session that used an MCP tool or an MCP server's prompt."
   if (hold === "subagent") return "Learned from a subagent's report."
   if (hold === "guest") return "Learned while an invited guest was in the session."
