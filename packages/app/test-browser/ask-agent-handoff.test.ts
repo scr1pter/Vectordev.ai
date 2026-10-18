@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import path from "node:path"
 import { createRoot } from "solid-js"
 import { createPromptState } from "@/context/prompt"
-import { composerTakes, onComposerPrompt } from "@/features/cloud/cloud-handoff"
+import { composerTakes, onComposerPrompt } from "@/utils/composer-handoff"
 import { askAgent } from "@/features/pull-requests/ai-review"
 
 // Vectorscope's "Ask the agent" hands its prompt to the task on screen through the generic composer hand-off. A

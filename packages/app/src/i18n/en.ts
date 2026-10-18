@@ -747,14 +747,30 @@ export const dict = {
   "session.header.open.ariaLabel": "Open in {{app}}",
   "session.header.open.menu": "Open options",
   "session.header.open.copyPath": "Copy path",
-  "project.trust.ignored": "Project settings ignored",
-  "project.trust.ignored.description":
-    "Vector is not loading this project's vector.json or .vector agents, commands, plugins and MCP servers, because they can run code on this machine. Until you trust the project, your language servers and formatters stay off in it and your MCP servers start outside it. Trust the project to load them as they are now.",
-  "project.trust.untrusted": "Project not trusted",
-  "project.trust.untrusted.description":
-    "Until you trust this project, your language servers and formatters stay off in it and your MCP servers start outside it, because the project's files can run code on this machine through them. Trust the project to turn them on.",
-  "project.trust.approve": "Trust project",
-  "project.trust.approve.failed": "Could not trust this project",
+  "project.trust.dialog.title": "Trust this repository?",
+  "project.trust.dialog.changed.title": "Trust this repository's new settings?",
+  "project.trust.dialog.description":
+    "Trusting {{name}} lets Vector load the settings it comes with, like its own agents, commands, plugins and MCP servers, which can run code on this computer.",
+  "project.trust.dialog.changed.description":
+    "{{name}}'s Vector settings changed after you trusted it, so trusting it again lets Vector load the new settings, which can run code on this computer.",
+  "project.trust.dialog.later":
+    "Until you trust it, Vector ignores these settings, your language servers and formatters stay off in it and your MCP servers start outside it. You can trust it later from the repository's menu on Home or in Settings, under Repository trust.",
+  "project.trust.dialog.trust": "Trust this repository",
+  "project.trust.dialog.workspace.title": "Trust this workspace?",
+  "project.trust.dialog.workspace.changed.title": "Trust this workspace's new settings?",
+  "project.trust.dialog.workspace.description":
+    "This workspace of {{name}} is a folder of its own, which Vector trusts apart from the repository. Trusting it lets Vector load the settings it comes with, like its own agents, commands, plugins and MCP servers, which can run code on this computer.",
+  "project.trust.dialog.workspace.changed.description":
+    "The Vector settings in this workspace of {{name}} changed after you trusted it, so trusting it again lets Vector load the new settings, which can run code on this computer.",
+  "project.trust.dialog.workspace.later":
+    "Until you trust it, Vector ignores these settings, your language servers and formatters stay off in it and your MCP servers start outside it. You can trust it later in Settings, under Repository trust, while one of its sessions is open.",
+  "project.trust.dialog.workspace.trust": "Trust this workspace",
+  "project.trust.dialog.notNow": "Not now",
+  "project.trust.menu": "Trust this repository…",
+  "project.trust.host.title": "Only the host can trust this repository",
+  "project.trust.host.description":
+    "{{name}} has its own Vector settings, which Vector ignores until the person who invited you trusts it.",
+  "project.trust.approve.failed": "Could not trust this repository",
   "project.trust.approve.failed.description": "Vector could not save the approval. Try again in a moment.",
   "session.header.open.finder": "Finder",
   "session.header.open.fileExplorer": "File Explorer",

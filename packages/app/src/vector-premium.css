@@ -1912,6 +1912,46 @@ html[data-vector-navigation-resizing] * {
   box-shadow: 0 0 0 3px var(--vx-purple-soft) !important;
 }
 
+/* Project trust: asked once when a project with its own Vector settings opens. A small shield mark beside the
+ * title, and the "until you trust it" note as quiet body copy above the footer tray. */
+.vector-project-trust-dialog [data-slot="dialog-header"] {
+  gap: 12px !important;
+}
+
+.vector-project-trust-dialog__mark {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--vx-line-strong);
+  border-radius: 9px;
+  background: var(--vx-purple-soft);
+  color: var(--vx-purple-bright);
+}
+
+.vector-project-trust-dialog__mark svg {
+  width: 17px;
+  height: 17px;
+}
+
+.vector-project-trust-dialog [data-slot="dialog-body"].vector-project-trust-dialog__body {
+  padding: 0 20px 0 64px;
+  color: var(--vx-text-subtle);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* An agent or parallel workspace's own folder, so the user can tell it from the repository it belongs to. */
+.vector-project-trust-dialog__folder {
+  margin: 0 0 6px;
+  color: var(--vx-text-muted);
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 [data-component="dialog-v2"][data-variant="settings"].settings-v2-dialog [data-slot="dialog-container"] {
   width: min(1080px, calc(100vw - 44px));
   height: min(760px, calc(100vh - 44px));

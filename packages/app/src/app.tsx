@@ -44,6 +44,7 @@ import { ModelsProvider } from "@/context/models"
 import { NotificationProvider } from "@/context/notification"
 import { PermissionProvider } from "@/context/permission"
 import { PlanModeProvider } from "@/context/plan-mode"
+import { ProjectTrustProvider } from "@/context/project-trust"
 import { usePlatform } from "@/context/platform"
 import { PromptProvider } from "@/context/prompt"
 import { resolveRouteServer, ServerConnection, ServerProvider, serverName, useServer } from "@/context/server"
@@ -487,10 +488,12 @@ function SharedProviders(props: ParentProps) {
     <>
       <BodyDesignClass />
       <PlanModeProvider>
-        <CommandProvider>
-          <DesktopCommands />
-          <HighlightsProvider>{props.children}</HighlightsProvider>
-        </CommandProvider>
+        <ProjectTrustProvider>
+          <CommandProvider>
+            <DesktopCommands />
+            <HighlightsProvider>{props.children}</HighlightsProvider>
+          </CommandProvider>
+        </ProjectTrustProvider>
       </PlanModeProvider>
     </>
   )

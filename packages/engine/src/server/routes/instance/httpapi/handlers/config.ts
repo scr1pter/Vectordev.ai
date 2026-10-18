@@ -3,8 +3,10 @@ import { Flag } from "@vectordevai/core/flag/flag"
 import { Provider } from "@/provider/provider"
 import * as InstanceState from "@/effect/instance-state"
 import { Redaction } from "@vectordevai/core/redaction"
+import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
+import { ServerAuth } from "@/server/auth"
 import { InstanceHttpApi } from "../api"
 import { markInstanceForDisposal } from "../lifecycle"
 
@@ -28,11 +30,14 @@ export const configHandlers = HttpApiBuilder.group(InstanceHttpApi, "config", (h
 
     const trust = Effect.fn("ConfigHttpApi.trust")(function* () {
       const status = yield* configSvc.trust()
+      const principal = yield* RequestPrincipal
       return {
         workspace: status.workspace,
         trusted: status.trusted,
         ignored: status.ignored,
         settings: status.settings,
+        // The same rule that refuses a guest's approval below, so the two cannot drift apart.
+        approvable: principal.kind === "owner" || !ServerAuth.isOwnerOnlyRoute("POST", "/config/trust"),
       }
     })
 

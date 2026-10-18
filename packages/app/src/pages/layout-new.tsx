@@ -1003,6 +1003,13 @@ export default function NewLayout(props: ParentProps) {
     sourcePath: activeTaskScope().projectPath,
     parentSessionId: activeTaskScope().taskId,
   })
+  // The folder the open session or draft runs in. For an agent or parallel workspace it is not the source repository,
+  // and the engine trusts it separately, so Settings, Repository trust checks it as well.
+  const activeSessionDirectory = () =>
+    routeSessionDirectory() ||
+    activeDraftDirectory() ||
+    parallelRecords().find((record) => record.id === parallelWorkspaceIDFromPath(location.pathname))?.isolatedPath ||
+    undefined
   const parallelWorkspaceIDFromRoute = () => {
     return parallelWorkspaceIDFromPath(location.pathname)
   }
@@ -3077,7 +3084,12 @@ export default function NewLayout(props: ParentProps) {
   const openTourSettings = () => {
     if (tourSettings.pending) return
     tourSettings.pending = import("@/components/settings-v2/dialog-settings-v2").then((x) => {
-      dialog.show(() => <x.DialogSettings repositoryPath={activeWorkspaceScope().sourcePath} />)
+      dialog.show(() => (
+        <x.DialogSettings
+          repositoryPath={activeWorkspaceScope().sourcePath}
+          sessionDirectory={activeSessionDirectory()}
+        />
+      ))
     })
   }
   const closeTourSettings = () => {
@@ -3160,14 +3172,38 @@ export default function NewLayout(props: ParentProps) {
   const openProviderSettings = () => {
     closeWorkspacePanel()
     void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
-      dialog.show(() => <x.DialogSettings section="providers" repositoryPath={activeWorkspaceScope().sourcePath} />)
+      dialog.show(() => (
+        <x.DialogSettings
+          section="providers"
+          repositoryPath={activeWorkspaceScope().sourcePath}
+          sessionDirectory={activeSessionDirectory()}
+        />
+      ))
     })
   }
 
   const openSettings = () => {
     closeWorkspacePanel()
     void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
-      dialog.show(() => <x.DialogSettings repositoryPath={activeWorkspaceScope().sourcePath} />)
+      dialog.show(() => (
+        <x.DialogSettings
+          repositoryPath={activeWorkspaceScope().sourcePath}
+          sessionDirectory={activeSessionDirectory()}
+        />
+      ))
+    })
+  }
+
+  const openProjectTrustSettings = () => {
+    closeWorkspacePanel()
+    void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
+      dialog.show(() => (
+        <x.DialogSettings
+          section="trust"
+          repositoryPath={activeWorkspaceScope().sourcePath}
+          sessionDirectory={activeSessionDirectory()}
+        />
+      ))
     })
   }
 
@@ -6917,6 +6953,10 @@ export default function NewLayout(props: ParentProps) {
                 <button type="button" class="vector-engineering-row" onClick={openProviderSettings}>
                   <span>Model provider</span>
                   <small>{parallelModelState.current()?.provider.name || "Configure BYOK"}</small>
+                </button>
+                <button type="button" class="vector-engineering-row" onClick={openProjectTrustSettings}>
+                  <span>Repository trust</span>
+                  <small>The repository's own Vector settings</small>
                 </button>
               </div>
             </section>

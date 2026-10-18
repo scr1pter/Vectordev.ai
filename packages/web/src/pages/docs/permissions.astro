@@ -7,42 +7,52 @@ export const prerender = true
 <DocsPage id="permissions">
 
           <p>
-            Every tool action is checked against a ruleset whose effect is <strong>allow</strong>, <strong>ask</strong> or <strong>deny</strong>. Rules from the agent, from the project and from your saved answers are merged: deny wins, then ask, then allow, and anything with no matching rule defaults to ask. An agent with no permissions at all is denied everything rather than trusted.
+            Every tool action is checked against a ruleset whose effect is <strong>allow</strong>, <strong>ask</strong> or <strong>deny</strong>. Rules from the agent, from the repository and from your saved answers are merged: deny wins, then ask, then allow, and anything with no matching rule defaults to ask. An agent with no permissions at all is denied everything rather than trusted.
           </p>
           <p>
-            When you answer <strong>always</strong>, that allow is saved for the project, so the same action is not asked again. Saved answers are per project, and you can clear them.
+            When you answer <strong>always</strong>, that allow is saved for the repository, so the same action is not asked again. Saved answers are per repository, and you can clear them.
           </p>
           <p class="note is-caution">
             For unattended runs the terminal agent takes <code>--auto</code> (also spelled <code>--yolo</code> or <code>--dangerously-skip-permissions</code>). It auto-approves anything not explicitly denied — deny rules still hold. It is off by default, and it is the flag to think twice about.
           </p>
 
-          <h2 id="project-trust">Project trust</h2>
+          <h2 id="project-trust">Repository trust</h2>
           <p>
-            From desktop 1.99.108, a project's own <code>vector.json</code> and <code>.vector</code> folder (its agents,
-            commands, modes, plugins, tools, skills, MCP servers, formatters and language servers) load only after you
-            trust the project, because they can run code on your computer. Until then Vector applies the project's
-            deny rules, and its run limits, loop pauses and sharing settings only where they are stricter than yours, so
-            a cloned repository cannot raise your spend cap or switch loop pauses off. Nothing carries over from
-            earlier versions, so after updating every project asks once. In the app, choose
-            <strong>Trust project</strong> beside <strong>Project settings ignored</strong> in the session header.
-            The TUI's <code>/trust</code> and the terminal's <code>vector trust status</code> and
-            <code>vector trust approve</code> arrive with the next CLI release, 1.99.108 or later; the CLI that npm and
-            <code>vectordev.ai/install</code> serve today has neither, and Windows WSL servers keep the 1.99.99 engine,
-            without project trust, until a later desktop release requires that CLI.
+            From desktop 1.99.108, a repository's own <code>vector.json</code> and <code>.vector</code> folder (its
+            agents, commands, modes, plugins, tools, skills, MCP servers, formatters and language servers) load only
+            after you trust the repository, because they can run code on your computer. Until then Vector applies the
+            repository's deny rules, and its run limits, loop pauses and sharing settings only where they are stricter
+            than yours, so a cloned repository cannot raise your spend cap or switch loop pauses off.
           </p>
           <p>
-            The language servers and formatters you turn on in your own settings also stay off in a project you have not
-            trusted, because they run its code, and your own local MCP servers start in an empty folder outside it, so
-            the project's <code>node_modules</code>, <code>.npmrc</code> or Python modules cannot take them over. This
-            holds in every new project, one with no settings of its own included; there the app shows
-            <strong>Project not trusted</strong> instead.
+            From desktop 1.99.109, the app asks once, the first time you open a repository that has settings of its
+            own: <strong>Trust this repository?</strong> Choose <strong>Trust this repository</strong> to load its
+            settings as they are now, or <strong>Not now</strong> to leave them off, and the app does not ask about it
+            again. Every such repository asks, including one you clone with <strong>Open from GitHub</strong>, because
+            a clone can come from anyone's link. To trust one later, choose <strong>Trust this repository…</strong> in
+            its menu on Home, or open Settings, <strong>Repository trust</strong>. Only you can trust a repository on
+            your computer, so a guest you invite is never asked; the app tells the guest that you decide. In desktop
+            1.99.108 the same approval is the button in the session header. The TUI's <code>/trust</code> and the
+            terminal's <code>vector trust status</code> and <code>vector trust approve</code> arrive with the next CLI
+            release; the CLI that npm and <code>vectordev.ai/install</code> serve today has neither, and Windows WSL
+            servers keep the 1.99.99 engine, without repository trust, until a later desktop release requires that CLI.
           </p>
           <p>
-            Trust covers the project as it was when you approved it. A later change to anything that can run, from a
-            pull or an edit, needs approval again; plans, memory and rules that Vector writes into <code>.vector</code>
-            do not. Integrations you add from the app are kept with your own settings rather than in the project, so
-            they stay after a restart. A trusted project can add allow rules, but it cannot lift a deny in your own
-            settings.
+            The language servers and formatters you turn on in your own settings also stay off in a repository you have
+            not trusted, because they run its code, and your own local MCP servers start in an empty folder outside it,
+            so the repository's <code>node_modules</code>, <code>.npmrc</code> or Python modules cannot take them over.
+            This holds in a repository with no settings of its own too. The app does not ask about such a repository;
+            while your tools are held back there it shows a <strong>Repository not trusted</strong> notice, and you
+            trust it in Settings, <strong>Repository trust</strong>. Agent and parallel workspaces are folders of their
+            own with their own trust: the question about one reads <strong>Trust this workspace?</strong>, and from one
+            of their sessions Settings shows that folder beside the repository it came from.
+          </p>
+          <p>
+            Trust covers the repository as it was when you approved it. A later change to anything that can run, from a
+            pull or an edit, needs approval again, and the app asks once more; plans, memory and rules that Vector
+            writes into <code>.vector</code> do not. Integrations you add from the app are kept with your own settings
+            rather than in the repository, so they stay after a restart. A trusted repository can add allow rules, but
+            it cannot lift a deny in your own settings.
           </p>
 
           <h2 id="read-only-specialists">Read-only specialists</h2>

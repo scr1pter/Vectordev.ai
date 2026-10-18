@@ -27380,9 +27380,12 @@
           },
           "settings": {
             "type": "boolean"
+          },
+          "approvable": {
+            "type": "boolean"
           }
         },
-        "required": ["workspace", "trusted", "ignored", "settings"],
+        "required": ["workspace", "trusted", "ignored", "settings", "approvable"],
         "additionalProperties": false
       },
       "Model": {

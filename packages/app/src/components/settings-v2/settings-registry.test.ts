@@ -3,7 +3,7 @@ import { filterSettingsGroups, isSettingsTab, settingsGroups, settingsItemCount 
 
 describe("settings registry", () => {
   test("keeps every settings page reachable", () => {
-    expect(settingsItemCount(settingsGroups)).toBe(17)
+    expect(settingsItemCount(settingsGroups)).toBe(18)
     expect(settingsGroups.flatMap((group) => group.items.map((item) => item.value))).toEqual([
       "account",
       "general",
@@ -17,6 +17,7 @@ describe("settings registry", () => {
       "models",
       "servers",
       "rules",
+      "trust",
       "editor",
       "chat",
       "notifications",
@@ -45,6 +46,15 @@ describe("settings registry", () => {
     for (const query of ["sign out", "billing", "Codium", "delete"])
       expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toContain("account")
     expect(isSettingsTab("account")).toBe(true)
+  })
+
+  test("finds repository trust by what people call it", () => {
+    expect(settingsGroups.flatMap((group) => group.items).find((item) => item.value === "trust")?.label).toBe(
+      "Repository trust",
+    )
+    for (const query of ["trust", "vector.json", "repository settings", "project settings"])
+      expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toEqual(["trust"])
+    expect(isSettingsTab("trust")).toBe(true)
   })
 
   test("returns the complete registry for whitespace", () => {

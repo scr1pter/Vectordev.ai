@@ -4,7 +4,7 @@ import { providerUsable } from "@vectordevai/schema/provider-policy"
 import { totalTokens } from "../economics/economics-types"
 import { measureUsage } from "../economics/token-usage"
 import { REVIEW_SESSION_TITLE_PREFIX } from "@/utils/internal-sessions"
-import { requestComposerPrompt } from "@/features/cloud/cloud-handoff"
+import { requestComposerPrompt } from "@/utils/composer-handoff"
 // Vector code review in the desktop Pull Requests panel (section 6, D1), of a pull request or of the uncommitted
 // changes in the user's own checkout. It runs the same core as the GitHub Action and `vector review`: the same
 // prompts, output schema, filters and summary. The engine instance always stays on the user's own project, so another

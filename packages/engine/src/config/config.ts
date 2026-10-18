@@ -1011,25 +1011,27 @@ const layer = Layer.effect(
           deps.push(yield* dependencies.prepare().pipe(Effect.forkDetach))
         }
 
-        if (!trusted && !Flag.VECTOR_PURE && (WorkspaceTrust.hasInputs(trustSnapshot) || startsInWorkspace(result))) {
-          // Without this the project's agents, commands and default model, or the user's language servers,
-          // formatters and MCP servers, would vanish or change with no explanation.
-          // A project with no settings of its own holds back only the user's tools, so the notice claims no settings.
-          const settings = WorkspaceTrust.hasInputs(trustSnapshot)
+        const settings = WorkspaceTrust.hasInputs(trustSnapshot)
+        const desktop = Flag.VECTOR_CLIENT === "desktop"
+        // Without this the repository's agents, commands and default model, or the user's language servers,
+        // formatters and MCP servers, would vanish or change with no explanation. The desktop app asks once about a
+        // repository's own settings and remembers "Not now", so repeating it on every load would undo that answer;
+        // it never asks about a repository without settings, where only the user's tools are held back.
+        if (!trusted && !Flag.VECTOR_PURE && (settings ? !desktop : startsInWorkspace(result))) {
           const held = settings
-            ? "Vector is not loading this project's vector.json or .vector settings until you trust it, and keeps your language servers, formatters and MCP servers out of it."
-            : "Vector keeps your language servers, formatters and MCP servers out of this project until you trust it."
+            ? "Vector is not loading this repository's vector.json or .vector settings until you trust it, and keeps your language servers, formatters and MCP servers out of it."
+            : "Vector keeps your language servers, formatters and MCP servers out of this repository until you trust it."
           GlobalBus.emit("event", {
             directory: "global",
             payload: {
               type: TuiEvent.ToastShow.type,
               properties: {
-                title: settings ? "Project settings ignored" : "Project not trusted",
+                title: settings ? "Repository settings ignored" : "Repository not trusted",
                 // The desktop ships no vector command, and the published CLI predates /trust and `vector trust`.
                 message: `${held} ${
-                  Flag.VECTOR_CLIENT === "desktop"
-                    ? "Choose Trust project in the session header."
-                    : "Use /trust in the TUI, Trust project in the app, or run `vector trust approve` in the project."
+                  desktop
+                    ? "Trust it in Settings, under Repository trust."
+                    : "Use /trust in the TUI, Repository trust in the app's Settings, or run `vector trust approve` in the repository."
                 }`,
                 variant: "warning",
                 duration: 15_000,
