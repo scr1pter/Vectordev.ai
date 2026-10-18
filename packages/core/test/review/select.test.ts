@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { parseUnifiedDiff } from "@vectordevai/core/review/diff"
-import { normalizeTitle } from "@vectordevai/core/review/fingerprint"
+import { anchorText, buildAnchorIndex, parseUnifiedDiff, resolveAnchor, type DiffFile } from "@vectordevai/core/review/diff"
+import { fingerprint, normalizeCode, normalizeTitle } from "@vectordevai/core/review/fingerprint"
+import { buildInlineBody } from "@vectordevai/core/review/format"
 import {
   categoryGroup,
   computeRisk,
@@ -9,6 +10,7 @@ import {
   teamPenalty,
   type SelectInput,
 } from "@vectordevai/core/review/select"
+import { nextState, priorFromComment, priorFromState } from "@vectordevai/core/review/state"
 import type { Finding, PriorFinding } from "@vectordevai/core/review/types"
 
 const HEAD = "e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4"
@@ -108,6 +110,14 @@ function finding(overrides: Partial<Finding> = {}): Finding {
     source: "review",
     ...overrides,
   }
+}
+
+// The id the engine and the desktop give a finding: its path, category, title words and anchored code, never its line.
+function withId(files: DiffFile[], entry: Finding): Finding {
+  const index = buildAnchorIndex(files)
+  const resolved = resolveAnchor(index, entry)
+  const code = resolved.ok ? anchorText(index, resolved.anchor) : ""
+  return { ...entry, id: fingerprint(entry.path, entry.category, normalizeTitle(entry.title), normalizeCode(code)) }
 }
 
 function prior(overrides: Partial<PriorFinding> = {}): PriorFinding {
@@ -583,6 +593,98 @@ describe("selectFindings: duplicates, continuations and caps", () => {
     expect(selection.inline.map((f) => [f.line, f.also, f.body])).toEqual([
       [12, ["src/big.ts:40", "src/big.ts:90"], "Explained.\n\nThe same problem is also at lines 40 and 90."],
     ])
+  })
+
+  test("the same defect reported with the same words far apart is one finding that names the other places", () => {
+    const write = "  store.write(next)"
+    const files = bigFile(120, { 12: write, 40: write, 90: write })
+    const found = [12, 40, 90].map((line) =>
+      withId(files, finding({ path: "src/big.ts", line, title: "Store write is not awaited", confidence: line === 12 ? 0.95 : 0.8 })),
+    )
+    expect(new Set(found.map((f) => f.id)).size).toBe(1)
+    const selection = run({ anchors: files, findings: found })
+    expect(selection.inline.map((f) => [f.line, f.also, f.body])).toEqual([
+      [12, ["src/big.ts:40", "src/big.ts:90"], "Explained.\n\nThe same problem is also at lines 40 and 90."],
+    ])
+    expect(selection.dropped).toEqual([{ reason: "duplicate", count: 2 }])
+    // Three lines apart is the same place, so it is dropped without being named.
+    const near = run({
+      anchors: files,
+      findings: [found[0]!, withId(files, finding({ path: "src/big.ts", line: 14, title: "Store write is not awaited" }))],
+    })
+    expect(near.inline.map((f) => [f.line, f.also])).toEqual([[12, undefined]])
+  })
+
+  test("a re-review does not post again a place the open comment already names", () => {
+    const write = "  store.write(next)"
+    const files = bigFile(120, { 12: write, 90: write })
+    const found = () => [
+      withId(files, finding({ path: "src/big.ts", line: 12, title: "Store write is not awaited", confidence: 0.95 })),
+      withId(files, finding({ path: "src/big.ts", line: 90, title: "Store write never awaited", confidence: 0.8 })),
+    ]
+    const first = run({ anchors: files, findings: found() })
+    expect(first.inline.map((f) => [f.line, f.also])).toEqual([[12, ["src/big.ts:90"]]])
+
+    // On GitHub: the comment Vector posted for it, read back on the next review.
+    const posted = first.inline[0]!
+    const comment = priorFromComment({
+      id: 1,
+      body: buildInlineBody(posted, { head: HEAD, trust: "trusted" }),
+      path: posted.path,
+      line: posted.line,
+      side: "RIGHT",
+    })!
+    expect(comment.also).toEqual([90])
+    const second = run({ anchors: files, findings: found(), prior: [comment] })
+    expect(second.inline).toEqual([])
+    expect(second.stillOpen.map((entry) => entry.id)).toEqual([posted.id])
+
+    // Locally: the listed finding is saved in the state, and its places follow the code.
+    const saved = nextState(undefined, { head: HEAD, base: HEAD, mode: "full", now: 0, selection: first, moved: first.inline })
+    const shifted = parseUnifiedDiff(
+      [
+        "diff --git a/src/big.ts b/src/big.ts",
+        "index 7777777..8888888 100644",
+        "--- a/src/big.ts",
+        "+++ b/src/big.ts",
+        "@@ -0,0 +1,2 @@",
+        "+// one",
+        "+// two",
+        "",
+      ].join("\n"),
+    )
+    const [listed] = priorFromState(saved, shifted)
+    expect([listed?.line, listed?.also]).toEqual([14, [92]])
+    const moved = bigFile(122, { 14: write, 92: write })
+    const again = run({
+      anchors: moved,
+      findings: [
+        withId(moved, finding({ path: "src/big.ts", line: 14, title: "Store write is not awaited", confidence: 0.95 })),
+        withId(moved, finding({ path: "src/big.ts", line: 92, title: "Store write never awaited", confidence: 0.8 })),
+      ],
+      prior: [listed!],
+    })
+    expect([again.inline, again.overflow, again.nits]).toEqual([[], [], []])
+    expect(again.stillOpen.map((entry) => entry.id)).toEqual([posted.id])
+  })
+
+  test("a place an open comment names is posted again when it is raised to blocking, or the comment was dismissed", () => {
+    const write = "  store.write(next)"
+    const files = bigFile(120, { 12: write, 90: write })
+    const named = prior({ id: "bbbbbbbbbbbb", path: "src/big.ts", line: 12, title: "Store write is not awaited", also: [90] })
+    const at90 = (overrides: Partial<Finding>) =>
+      withId(files, finding({ path: "src/big.ts", line: 90, title: "Store write never awaited", ...overrides }))
+    expect(run({ anchors: files, findings: [at90({})], prior: [named] }).inline).toEqual([])
+    expect(
+      run({ anchors: files, findings: [at90({ severity: "blocking" })], prior: [named] }).inline.map((f) => f.line),
+    ).toEqual([90])
+    expect(
+      run({ anchors: files, findings: [at90({})], prior: [{ ...named, status: "dismissed" }] }).inline.map((f) => f.line),
+    ).toEqual([90])
+    // A different defect near a named place is its own finding.
+    expect(
+      run({ anchors: files, findings: [at90({ title: "Unbounded retry loop" })], prior: [named] }).inline.map((f) => f.line),
+    ).toEqual([90])
   })
 
   test("an earlier finding on an outdated thread is still open when reported again, and stays dismissed", () => {

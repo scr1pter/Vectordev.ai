@@ -942,6 +942,34 @@ describe("vector github review against a fake GitHub", () => {
   )
 
   test(
+    "a re-review after the lines moved does not post again a place the open comment already names",
+    async () => {
+      await using w = await world()
+      const write = "export const saved = store.write(next)"
+      const twice = insert(insert(FEATURE_LIST, 30, [write]), 5, [write])
+      await push(w, { "src/list.ts": twice })
+      const repeated = (first: number, second: number): ModelFinding[] => [
+        { ...OFF_BY_ONE, line: first, title: "Store write is not awaited", suggestion: undefined, confidence: 0.95 },
+        { ...OFF_BY_ONE, line: second, title: "Store write never awaited", suggestion: undefined, confidence: 0.85 },
+      ]
+      await job(w, reviewer({ findings: () => repeated(6, 32) }))
+      const posted = w.fake.rootComment("src/list.ts")
+      expect([posted.line, posted.body]).toEqual([6, expect.stringContaining("The same problem is also at line 32.")])
+
+      // Five lines added at the top move both places; GitHub moves the thread with them.
+      await push(w, { "src/list.ts": insert(twice, 0, ["// a", "// b", "// c", "// d", "// e"]) })
+      w.fake.threadAt("src/list.ts").line = 11
+      const again = reviewer({ findings: () => repeated(11, 37) })
+      const { result } = await job(w, again)
+      expect(result.exitCode).toBe(0)
+      expect(again.calls[0]?.prior.find((entry) => entry.id === parseFindingMarker(posted.body)?.id)?.also).toEqual([37])
+      expect(posts(w, /\/pulls\/7\/reviews$/)).toHaveLength(1)
+      expect(w.fake.reviewComments).toHaveLength(1)
+    },
+    TIMEOUT,
+  )
+
+  test(
     "3. one bad anchor out of four: the halves are posted, the refused comment moves to the summary",
     async () => {
       await using w = await world()

@@ -175,7 +175,8 @@ export function selectFindings(input: SelectInput): Selection {
 
   // 4. Dedupe within the run, by id and then by location. The stronger finding is kept. Nearby findings are one only
   // when their titles are alike, they carry the same fix, or two reviewers flagged the same code, so a missing test
-  // three lines from a bug stays its own finding.
+  // three lines from a bug stays its own finding. An id leaves the line out, so the same id further down the file is
+  // the same defect at another place: the kept finding names it (6b).
   const codes = new Map<Finding, string>()
   const codeOf = (finding: Finding) => {
     let code = codes.get(finding)
@@ -186,14 +187,30 @@ export function selectFindings(input: SelectInput): Selection {
     }
     return code
   }
+  // Kept finding → the other places it stands for, as "path:line".
+  const places = new Map<Finding, string[]>()
+  const fold = (into: Finding, finding: Finding) =>
+    places.set(into, [
+      ...(places.get(into) ?? []),
+      ...(places.get(finding) ?? []),
+      ...(finding.also ?? []),
+      `${finding.path}:${finding.line}`,
+    ])
   const unique: Finding[] = []
   for (const finding of kept.sort(stronger)) {
-    const other = unique.find((entry) => entry.id === finding.id || sameFinding(entry, finding, codeOf))
+    const other =
+      unique.find(
+        (entry) => (entry.id === finding.id && !apart(entry, finding)) || sameFinding(entry, finding, codeOf),
+      ) ?? unique.find((entry) => entry.id === finding.id)
     if (!other) {
       unique.push(finding)
       continue
     }
     drop("duplicate")
+    if (apart(other, finding)) {
+      fold(other, finding)
+      continue
+    }
     // The security reviewer's copy of a defect the code reviewer found keeps the code reviewer's category.
     if (
       other.source === "security" &&
@@ -225,7 +242,11 @@ export function selectFindings(input: SelectInput): Selection {
   const claim = (entry: PriorFinding) => available.splice(available.indexOf(entry), 1)
   for (const finding of candidates.sort(order)) {
     const match = matchPrior(finding, available)
-    if (!match || match.status === "outdated") posting.push(finding)
+    if (!match) {
+      // An open comment that already names this place as the same defect covers it, unless it got worse since.
+      const named = namedBy(finding, available)
+      if (!named || (finding.severity === "blocking" && named.severity !== "blocking")) posting.push(finding)
+    } else if (match.status === "outdated") posting.push(finding)
     else if (match.status === "dismissed") drop("dismissed")
     else if (match.status === "fixed" || (finding.severity === "blocking" && match.severity !== "blocking")) {
       claim(match)
@@ -240,7 +261,6 @@ export function selectFindings(input: SelectInput): Selection {
   // findings are matched, so a place the team dismissed never takes a new place with it, and a finding that continues
   // an earlier one stays its own. A finding carried from an earlier review keeps the places it already names.
   const folded: Finding[] = []
-  const repeated = new Map<Finding, string[]>()
   for (const finding of posting) {
     const first = continues.has(finding.id) ? undefined : folded.find((entry) => repeats(entry, finding, codeOf))
     if (!first) {
@@ -248,14 +268,17 @@ export function selectFindings(input: SelectInput): Selection {
       continue
     }
     drop("duplicate")
-    repeated.set(first, [...(repeated.get(first) ?? []), ...(finding.also ?? []), `${finding.path}:${finding.line}`])
+    fold(first, finding)
   }
-  for (const [finding, also] of repeated) {
-    const places = [...new Set([...(finding.also ?? []), ...also])].filter(
-      (place) => place !== `${finding.path}:${finding.line}`,
-    )
-    finding.also = places.toSorted((a, b) => lineOf(a) - lineOf(b))
-    finding.body = withAlso(finding.body, places)
+  for (const finding of folded) {
+    const named = places.get(finding)
+    if (!named) continue
+    const also = [...new Set([...(finding.also ?? []), ...named])]
+      .filter((place) => place !== `${finding.path}:${finding.line}`)
+      .toSorted((a, b) => lineOf(a) - lineOf(b))
+    if (!also.length) continue
+    finding.also = also
+    finding.body = withAlso(finding.body, also)
   }
 
   // 7–9. Anchors, the incremental focus, and severity.
@@ -388,9 +411,36 @@ function repeats(a: Finding, b: Finding, code: (finding: Finding) => string): bo
   return (code(a) !== "" && code(a) === code(b)) || (fix(a) !== "" && fix(a) === fix(b))
 }
 
+// The same finding twice on one side of a file, further apart than one place: the same defect in two places.
+function apart(a: Finding, b: Finding): boolean {
+  return a.side === b.side && gap(a.line, a.endLine ?? a.line, b.line, b.endLine ?? b.line) > NEAR
+}
+
+// An open earlier finding whose comment names this finding's place as another place of the same defect.
+function namedBy(finding: Finding, prior: readonly PriorFinding[]): PriorFinding | undefined {
+  return prior.find(
+    (entry) =>
+      entry.status === "open" &&
+      entry.path === finding.path &&
+      entry.side === finding.side &&
+      categoryGroup(entry.category) === categoryGroup(finding.category) &&
+      titleSimilarity(finding.title, entry.title) >= REPEAT_TITLE &&
+      (entry.also ?? []).some((line) => gap(finding.line, finding.endLine ?? finding.line, line, line) <= NEAR),
+  )
+}
+
 function lineOf(place: string) {
   return Number(place.slice(place.lastIndexOf(":") + 1))
 }
+
+// The lines a finding's "also at" sentence names, read back from a comment Vector posted. The last sentence is
+// Vector's own: it ends the finding's text.
+export function namedLines(text: string): number[] {
+  const last = [...text.matchAll(ALSO_LINES)].at(-1)
+  return last ? [...(last[1] ?? "").matchAll(/\d+/g)].map((match) => Number(match[0])) : []
+}
+
+const ALSO_LINES = /The same problem is also at lines? ((?:\d+, )*\d+(?: and \d+)?)\./g
 
 // "path:line" entries of one file, as the sentence a reader sees under the finding. A sentence written by an earlier
 // fold is replaced, so a carried finding never lists a place twice.

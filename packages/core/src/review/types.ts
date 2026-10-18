@@ -101,6 +101,8 @@ export interface PriorFinding {
   threadId?: string
   fixedIn?: string
   dismissedBy?: string
+  // The other lines of this file its comment or listing names as the same defect, at the current head.
+  also?: number[]
 }
 
 export interface Selection {
@@ -130,6 +132,7 @@ export interface SummaryFinding {
   sha: string
   status: PriorFinding["status"]
   fixedIn?: string
+  also?: number[] // the other lines of this file it names as the same defect
 }
 
 export interface ReviewState {

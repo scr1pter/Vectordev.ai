@@ -9,6 +9,7 @@ import {
   escapeVectorMarkers,
   findingMarker,
   findSticky,
+  followAlso,
   inlineTitle,
   MAX_STATE_CHARS,
   mergePrior,
@@ -117,6 +118,23 @@ describe("encodeState and decodeState", () => {
     expect(decodeState(base64url("[1,2]"))).toBeUndefined()
     expect(decodeState(base64url('{"v":2,"r":1}'))).toBeUndefined()
     expect(decodeState("__4")).toBeUndefined() // not UTF-8
+  })
+
+  test("keep the other places a finding names, after fixedIn or in its place", () => {
+    const state: ReviewState = {
+      ...emptyState(),
+      findings: [
+        summaryFinding(1, { also: [40, 90] }),
+        summaryFinding(2, { status: "fixed", fixedIn: "e5f6a7b", also: [7] }),
+        summaryFinding(3),
+      ],
+    }
+    expect(decodeState(encodeState(state))).toEqual(state)
+    // A state written before places were kept, and a malformed list, read as no places.
+    const raw = rawJson(encodeState(state))
+    const entries = raw.s as unknown[][]
+    entries[0]![10] = ["40", -1, 2.5]
+    expect(decodeState(base64url(JSON.stringify(raw)))?.findings[0]?.also).toBeUndefined()
   })
 
   test("skip a malformed finding entry and keep the rest", () => {
@@ -348,6 +366,30 @@ describe("earlier findings", () => {
       threadId: "T_1",
     })
     expect(priorFromComment({ id: 1, body: "no marker", path: "a.ts", line: 1 })).toBeUndefined()
+  })
+
+  test("an earlier finding's other places are read from its comment and follow the code to this head", () => {
+    const body = `**Concern** · Store write is not awaited\n\nExplained.\n\nThe same problem is also at lines 40, 90 and 120.\n\n<sub>bug</sub>\n${marker("3f9a1c07be21")}`
+    const prior = priorFromComment({ id: 123, body, path: "src/a.ts", line: 12 })!
+    expect(prior.also).toEqual([40, 90, 120])
+    const changes = parseUnifiedDiff(
+      [
+        "diff --git a/src/a.ts b/src/a.ts",
+        "index 1111111..2222222 100644",
+        "--- a/src/a.ts",
+        "+++ b/src/a.ts",
+        "@@ -0,0 +1,2 @@",
+        "+// one",
+        "+// two",
+        "@@ -90 +92 @@",
+        "-  store.write(next)",
+        "+  await store.write(next)",
+        "",
+      ].join("\n"),
+    )
+    expect(followAlso(prior, changes).also).toEqual([42, 122])
+    expect(followAlso({ ...prior, side: "LEFT" }, changes).also).toEqual([40, 90, 120])
+    expect(priorFromComment({ id: 1, body: body.replace(/The same[^\n]*\n\n/, ""), path: "src/a.ts", line: 12 })?.also).toBeUndefined()
   })
 
   test("priorFromState moves lines to this head, and a deleted line becomes null", () => {
