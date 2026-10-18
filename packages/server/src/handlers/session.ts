@@ -1,7 +1,10 @@
 import { SessionV2 } from "@vectordevai/core/session"
 import { Catalog } from "@vectordevai/core/catalog"
 import { ProviderV2 } from "@vectordevai/core/provider"
-import { FREE_MODEL_TRAINING_OWNER_ONLY, freeModelMayTrain } from "@vectordevai/core/free-model-choice"
+import { ModelV2 } from "@vectordevai/core/model"
+import { FREE_MODEL_TRAINING_OWNER_ONLY } from "@vectordevai/core/free-model-choice"
+import { freeModelDataPolicy } from "@vectordevai/core/free-model-catalog"
+import { FreeModels } from "@vectordevai/core/free-models"
 import { Location } from "@vectordevai/core/location"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { DateTime, Effect, Option, Stream } from "effect"
@@ -239,12 +242,8 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         Effect.fn(function* (ctx) {
           // Resuming runs the turn on the owner's OpenRouter account and acceptance, so a guest may not resume one
           // whose model may train.
-          if ((yield* RequestPrincipal).kind !== "owner") {
-            const catalog = yield* Catalog.Service
-            const model = yield* catalog.model.get(ProviderV2.ID.openrouter, ctx.payload.modelID)
-            if (model && freeModelMayTrain(model))
-              return yield* new ForbiddenError({ message: FREE_MODEL_TRAINING_OWNER_ONLY })
-          }
+          if ((yield* RequestPrincipal).kind !== "owner")
+            yield* refuseTrainingFreeModel({ providerID: ProviderV2.ID.openrouter, id: ctx.payload.modelID })
           yield* session.resumeFreeModels({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
             Effect.catchTag("Session.NotFoundError", (error) =>
               Effect.fail(
@@ -274,14 +273,12 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
           // A guest never accepted the free-model training notice, so the owner's acceptance must not carry a guest's
           // prompt to a model that may train. The prompt runs on the session's model, or the default without one.
           if ((yield* RequestPrincipal).kind !== "owner") {
-            const catalog = yield* Catalog.Service
             const current = yield* session.get(ctx.params.sessionID).pipe(Effect.option)
-            const model =
+            yield* refuseTrainingFreeModel(
               Option.isSome(current) && current.value.model
-                ? yield* catalog.model.get(current.value.model.providerID, current.value.model.id)
-                : yield* catalog.model.default().pipe(Effect.orElseSucceed(() => undefined))
-            if (model && freeModelMayTrain(model))
-              return yield* new ForbiddenError({ message: FREE_MODEL_TRAINING_OWNER_ONLY })
+                ? current.value.model
+                : yield* (yield* Catalog.Service).model.default().pipe(Effect.orElseSucceed(() => undefined)),
+            )
           }
           // The budget is armed in memory before admission, so the drain that promotes this input runs under it. A guest's
           // budget can only tighten the limits the owner's run has.
@@ -553,3 +550,29 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       )
   }),
 )
+
+/**
+ * Refuses an invited guest's prompt or resume that would run on a free model whose provider may train on prompts: it
+ * would run under the owner's acceptance, which the guest never gave. A shared model's policy comes from the shared
+ * catalog itself, since plugins may still be filling the location's model catalog when a guest's first request
+ * arrives; a model on the owner's own OpenRouter account, where a shared model also runs when listed there, comes from
+ * the location's catalog. A free model whose policy is found nowhere is not treated as no-training.
+ */
+const refuseTrainingFreeModel = Effect.fn("SessionHandler.refuseTrainingFreeModel")(function* (
+  model: { readonly providerID: string; readonly id: string } | undefined,
+) {
+  if (!model || !["vector", "openrouter"].includes(model.providerID) || !model.id.toLowerCase().endsWith(":free"))
+    return
+  const freeModels = yield* FreeModels.Service
+  const catalog = yield* Catalog.Service
+  const shared = yield* freeModels.catalog()
+  const located = yield* Effect.forEach([ProviderV2.ID.vector, ProviderV2.ID.openrouter], (providerID) =>
+    catalog.model.get(providerID, ModelV2.ID.make(model.id)),
+  )
+  const policies = [
+    ...(shared.enabled ? shared.models : []).filter((item) => item.id === model.id).map(freeModelDataPolicy),
+    ...located.flatMap((item) => (item?.freeModel ? [item.freeModel.dataPolicy ?? "unreviewed"] : [])),
+  ]
+  if (!policies.length || policies.some((policy) => policy !== "no-training"))
+    return yield* new ForbiddenError({ message: FREE_MODEL_TRAINING_OWNER_ONLY })
+})
