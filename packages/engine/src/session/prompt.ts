@@ -2184,7 +2184,7 @@ const layer = Layer.effect(
       if (!message || SessionMemory.recalled(message) || recallsTried.has(message.info.id)) return input.msgs
       recallsTried.add(message.info.id)
       if (recallsTried.size > MAX_INSTRUCTION_SNAPSHOTS * 4) recallsTried.delete(recallsTried.values().next().value!)
-      const query = SessionMemory.typed(message)
+      const query = SessionMemory.asked(message)
       if (!query) return input.msgs
       const result = yield* brain.recall(yield* instruction.place(), {
         query,
@@ -2204,40 +2204,54 @@ const layer = Layer.effect(
         text: result.shared ?? "",
         synthetic: true,
         metadata: {
-          [SessionMemory.RECALL]: { ids: [...result.ids], tokens: result.tokens, personal: [...(result.personal ?? [])] },
+          [SessionMemory.RECALL]: {
+            ids: [...result.ids],
+            tokens: result.tokens,
+            personal: [...(result.personal ?? [])],
+            ...(result.newest ? { newest: true } : {}),
+          },
         },
       } satisfies SessionV1.TextPart)
       message.parts.push(part)
       return input.msgs
     })
 
-    // Recalled personal memory is never saved in the transcript, so a session that is shared, exported or opened by an
-    // invited guest later does not carry the owner's personal memory, and forgetting an entry takes it out of later
-    // requests too. Each request fills it in from the brain while personal memory is allowed for it; the lines are the
-    // same from step to step, so the provider's cache still holds.
+    // Personal memory is never saved in the transcript, whether recalled or returned by the memory tool, so a session
+    // that is shared, exported or opened by an invited guest later does not carry the owner's personal memory, and
+    // forgetting an entry takes it out of later requests too. Each request fills it in from the brain while personal
+    // memory is allowed for it; the lines are the same from step to step, so the provider's cache still holds.
     const personalRecall = Effect.fn("SessionPrompt.personalRecall")(function* (
       msgs: SessionV1.WithParts[],
       personal: boolean,
     ) {
       if (!personal) return msgs
-      const recalls = msgs.flatMap((message) =>
+      const ids = msgs.flatMap((message) =>
         message.parts.flatMap((part) => {
           const recall = SessionMemory.recall(part)
-          return recall?.personal.length ? [recall] : []
+          return recall?.personal.length ? recall.ids : SessionMemory.personal(part)
         }),
       )
-      if (recalls.length === 0) return msgs
-      const lines = yield* brain.lines(
-        yield* instruction.place(),
-        recalls.flatMap((recall) => recall.ids),
-        { personal: true },
-      )
+      if (ids.length === 0) return msgs
+      const lines = yield* brain.lines(yield* instruction.place(), [...new Set(ids)], { personal: true })
       return msgs.map((message) => ({
         ...message,
         parts: message.parts.map((part) => {
           const recall = SessionMemory.recall(part)
-          if (part.type !== "text" || !recall?.personal.length) return part
-          return { ...part, text: Brain.recallText(recall.ids.flatMap((id) => lines.get(id) ?? [])) }
+          if (part.type === "text" && recall?.personal.length)
+            return {
+              ...part,
+              text: Brain.recallText(
+                recall.ids.flatMap((id) => lines.get(id) ?? []),
+                { newest: recall.newest },
+              ),
+            }
+          const withheld = SessionMemory.personal(part)
+          if (part.type !== "tool" || part.state.status !== "completed" || withheld.length === 0) return part
+          const output = withheld.reduce(
+            (text, id) => text.replaceAll(SessionMemory.withheld(id), lines.get(id)?.replace(/^- /, "") ?? SessionMemory.withheld(id)),
+            part.state.output,
+          )
+          return { ...part, state: { ...part.state, output } }
         }),
       }))
     })
@@ -2424,7 +2438,26 @@ const layer = Layer.effect(
 
       yield* getModel(taskModel.providerID, taskModel.modelID, input.sessionID)
 
-      const templateParts = yield* resolvePromptParts(template)
+      // A slash command's text is not the user's words: a template someone wrote, an MCP server's prompt, a skill or
+      // what its snippets printed. Memory takes only the arguments as theirs, and memory written after outside content
+      // (an MCP prompt, a skill fetched from the web, a snippet that is not a local command) waits for review.
+      const outside =
+        (cmd.source === "skill" && cmd.remote) || prepared.shellCommands.some((item) => !SessionMemory.local(item))
+          ? ("web" as const)
+          : cmd.source === "mcp"
+            ? ("mcp" as const)
+            : undefined
+      const templateParts = (yield* resolvePromptParts(template)).map((part) =>
+        part.type === "text"
+          ? {
+              ...part,
+              metadata: {
+                ...part.metadata,
+                [SessionMemory.COMMAND]: { source: cmd.source ?? "command", arguments: input.arguments, ...(outside ? { outside } : {}) },
+              },
+            }
+          : part,
+      )
       const inputFiles = new Set(
         input.parts?.filter((part) => new URL(part.url).protocol === "file:").map((part) => fileURLToPath(part.url)),
       )

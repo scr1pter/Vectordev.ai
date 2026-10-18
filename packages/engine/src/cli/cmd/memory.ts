@@ -123,6 +123,9 @@ export const MemoryAddCommand = effectCmd({
     })
     if (result.type === "refused") return yield* fail(result.message)
     UI.println(UI.Style.TEXT_SUCCESS_BOLD + `Saved ${result.entry.id}` + UI.Style.TEXT_NORMAL)
+    // Memory never replaces an entry on its own, so a similar one stays in use beside this; say which, to edit or forget.
+    if ("related" in result && result.related)
+      UI.println(`  Similar: ${line(result.related)}\n  To replace it, run: vector memory edit ${result.related.id} <text>`)
   }),
 })
 
@@ -191,7 +194,7 @@ export const MemoryTidyCommand = effectCmd({
     const memory = yield* where
     const report = yield* memory.brain.consolidate(memory.place, { force: true })
     UI.println(
-      `Merged ${report.merged}, confirmed ${report.promoted}, archived ${report.archived}, dropped ${report.dropped}, marked ${report.stale} stale.`,
+      `Merged ${report.merged}, archived ${report.archived}, dropped ${report.dropped}, marked ${report.stale} stale.`,
     )
   }),
 })

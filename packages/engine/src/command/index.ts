@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Schema } from "effect"
 import { Config } from "@/config/config"
 import { MCP } from "../mcp"
 import { Skill } from "../skill"
+import { Global } from "@vectordevai/core/global"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
 import { LegacyEvent } from "@vectordevai/schema/legacy-event"
@@ -34,7 +35,11 @@ export const Info = Schema.Struct({
   hints: Schema.Array(Schema.String),
 }).annotate({ identifier: "Command" })
 
-export type Info = Omit<Schema.Schema.Type<typeof Info>, "template"> & { template: Promise<string> | string }
+export type Info = Omit<Schema.Schema.Type<typeof Info>, "template"> & {
+  template: Promise<string> | string
+  /** A skill pulled from a skills URL: its text came from the web. */
+  remote?: boolean
+}
 
 export function hints(template: string) {
   const result: string[] = []
@@ -64,6 +69,7 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const mcp = yield* MCP.Service
     const skill = yield* Skill.Service
+    const global = yield* Global.Service
 
     const init = Effect.fn("Command.state")(function* (ctx: InstanceContext) {
       const cfg = yield* config.get()
@@ -135,6 +141,8 @@ const layer = Layer.effect(
         }
       }
 
+      // Skills pulled from a skills URL are cached under Vector's cache folder.
+      const pulled = path.join(global.cache, "skills") + path.sep
       for (const item of yield* skill.all()) {
         if (commands[item.name]) continue
         const dir = item.location === "<built-in>" ? undefined : path.dirname(item.location)
@@ -142,6 +150,7 @@ const layer = Layer.effect(
           name: item.name,
           description: item.description,
           source: "skill",
+          ...(item.location.startsWith(pulled) ? { remote: true } : {}),
           get template() {
             if (!dir) return item.content
             return [
@@ -176,6 +185,6 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [Config.node, MCP.node, Skill.node] })
+export const node = LayerNode.make({ service: Service, layer: layer, deps: [Config.node, MCP.node, Skill.node, Global.node] })
 
 export * as Command from "."

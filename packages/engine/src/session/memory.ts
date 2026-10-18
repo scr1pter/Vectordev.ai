@@ -14,6 +14,20 @@ import { attachedMemory } from "./instruction"
 /** Metadata key of the synthetic part that carries a request message's recalled memory. */
 export const RECALL = "vector.memory.recall"
 
+/**
+ * Metadata key of a text part a slash command wrote: its template, an MCP server's prompt, a skill, or what its shell
+ * snippets printed. The value says which arguments the user typed and whether the text came from outside.
+ */
+export const COMMAND = "vector.command"
+
+/** Metadata key of a memory tool result's personal entries, which the transcript keeps as ids only. */
+export const PERSONAL = "vector.memory.personal"
+
+/** How a memory tool result stands in for a personal entry; each request fills the line in while that is allowed. */
+export function withheld(id: string) {
+  return `[${id}] (personal memory)`
+}
+
 // Tools whose output is written by Vector or by the user's own repository. Anything else (web fetch and search, the
 // browser, Vector Cloud logs, MCP servers, a subagent's report of its own work) brings in content from outside.
 const LOCAL_TOOLS = new Set([
@@ -35,12 +49,45 @@ const LOCAL_TOOLS = new Set([
   "StructuredOutput",
 ])
 
-/** What the user typed in a message, without Vector's synthetic notes or attached file contents. */
+/**
+ * What the user typed in a message, without Vector's synthetic notes or attached file contents. A slash command's text
+ * is someone else's words (a template, an MCP server's prompt, a skill, a snippet's output), so of it only the
+ * arguments the user typed count.
+ */
 export function typed(message: SessionV1.WithParts) {
+  return message.parts
+    .flatMap((part) => {
+      if (part.type !== "text" || part.synthetic || part.ignored) return []
+      return [command(part)?.arguments ?? part.text]
+    })
+    .join("\n")
+    .trim()
+}
+
+/** What a message asks for, a slash command's text included: what recall reads a request by. */
+export function asked(message: SessionV1.WithParts) {
   return message.parts
     .flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored ? [part.text] : []))
     .join("\n")
     .trim()
+}
+
+/** Where a slash command's text part came from, or nothing for a part the user typed. */
+export function command(part: SessionV1.Part) {
+  if (part.type !== "text") return undefined
+  const value = part.metadata?.[COMMAND]
+  if (!value || typeof value !== "object") return undefined
+  return {
+    arguments: "arguments" in value && typeof value.arguments === "string" ? value.arguments : "",
+    outside: "outside" in value && (value.outside === "web" || value.outside === "mcp") ? value.outside : undefined,
+  }
+}
+
+/** The personal entries a memory tool result stands in for. */
+export function personal(part: SessionV1.Part) {
+  if (part.type !== "tool" || part.tool !== "memory" || part.state.status !== "completed") return []
+  const ids = part.state.metadata?.[PERSONAL]
+  return Array.isArray(ids) ? ids.filter((id: unknown): id is string => typeof id === "string") : []
 }
 
 /** The files a message attached, as paths. */
@@ -65,7 +112,11 @@ export function recall(part: SessionV1.Part) {
   if (!value || typeof value !== "object" || !("ids" in value) || !Array.isArray(value.ids)) return undefined
   const strings = (list: unknown) =>
     Array.isArray(list) ? list.filter((id: unknown): id is string => typeof id === "string") : []
-  return { ids: strings(value.ids), personal: "personal" in value ? strings(value.personal) : [] }
+  return {
+    ids: strings(value.ids),
+    personal: "personal" in value ? strings(value.personal) : [],
+    newest: "newest" in value && value.newest === true,
+  }
 }
 
 /** The memory already in this conversation: recalled into a message, or attached to a read result. */
@@ -83,9 +134,9 @@ function normal(text: string) {
   return text.toLowerCase().replace(/[\s"'`]+/g, " ").trim()
 }
 
-/** The request message this step answers: what the user typed last. */
+/** The request message this step answers: what the user sent last. */
 export function request(messages: readonly SessionV1.WithParts[]) {
-  return messages.filter((message) => message.info.role === "user" && typed(message)).slice(-1)
+  return messages.filter((message) => message.info.role === "user" && asked(message)).slice(-1)
 }
 
 /** Whether the user said this, word for word, in a message of this conversation. */
@@ -160,35 +211,245 @@ export function touched(messages: readonly SessionV1.WithParts[], file: string, 
   )
 }
 
-// Shell commands whose output is someone else's text: a URL fetched, a hosted issue or pull request read, a remote's
-// history pulled, or a package run straight from a registry. Their output reaches the agent like a web page does.
-const REMOTE =
-  /(?:^|[\s;&|(`$])(?:curl|wget|xh|https?|aria2c|gh|glab|ssh|scp|sftp|ftp|uvx|git\s+(?:fetch|pull|clone|ls-remote|remote\s+update|submodule\s+update)|(?:pnpm|yarn)\s+dlx|pipx\s+run|(?:npx|bunx|pnpx|npm\s+exec)(?!\s+(?:--?\S+\s+)*(?:tsc|vitest|jest|eslint|biome|prettier|playwright|tsx|turbo|oxlint|mocha)(?=\s|$)))(?=\s|$)/
-
 /**
- * Why memory learned in this conversation has to wait for the user: it read the web (with a web tool or a shell
- * command that fetches), used the browser or Vector Cloud, ran an MCP tool, or took a subagent's report. Memory
- * poisoning works by planting text the agent later saves as its own, so once outside content is in the history, every
- * write is held for review.
+ * Why memory learned in this conversation has to wait for the user: it read the web (with a web tool, a shell command
+ * that is not a local one, or a slash command whose snippets reached outside or whose skill came from the web), used
+ * the browser or Vector Cloud, ran an MCP tool or an MCP server's prompt, or took a subagent's report. Memory poisoning
+ * works by planting text the agent later saves as its own, so once outside content is in the history, every write is
+ * held for review.
  */
 export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hold | undefined {
   const calls = messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part] : [])))
   const tools = calls.map((part) => part.tool)
+  const commands = messages.flatMap((message) => message.parts.flatMap((part) => command(part)?.outside ?? []))
   if (tools.some((tool) => tool === "webfetch" || tool === "websearch" || tool === "browser" || tool === "vector_cloud"))
     return "web"
   if (
+    commands.includes("web") ||
     calls.some(
-      (part) => part.tool === "bash" && typeof part.state.input.command === "string" && REMOTE.test(part.state.input.command),
+      (part) => part.tool === "bash" && typeof part.state.input.command === "string" && !local(part.state.input.command),
     )
   )
     return "web"
   if (tools.some((tool) => tool === "task" || tool === "task_manage" || tool === "send_teammate_message"))
     return "subagent"
-  if (tools.some((tool) => !LOCAL_TOOLS.has(tool))) return "mcp"
+  if (commands.includes("mcp") || tools.some((tool) => !LOCAL_TOOLS.has(tool))) return "mcp"
   return undefined
 }
 
 /** When the request message this step answers was sent: the per-message write cap counts from here. */
 export function since(messages: readonly SessionV1.WithParts[]) {
-  return messages.findLast((message) => message.info.role === "user" && typed(message))?.info.time.created ?? 0
+  return messages.findLast((message) => message.info.role === "user" && asked(message))?.info.time.created ?? 0
+}
+
+/**
+ * Whether a shell command's output comes from this computer: its files, the repository's own history, and the checks
+ * and scripts it runs. Anything else (a fetch, a hosted issue or pull request, a remote's history, a package run
+ * straight from a registry, code passed inline to an interpreter, or a program Vector does not know) may print someone
+ * else's text, so it is an allowlist: what is not known to be local counts as outside content.
+ */
+export function local(command: string) {
+  return simple(withoutHeredocs(command)).every(runsLocally)
+}
+
+// Text utilities, shell builtins and the repository's own build and check tools. Their output is this computer's.
+const LOCAL_PROGRAMS = new Set([
+  ...["ls", "cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg", "ag", "ack", "find", "fd", "sed", "awk"],
+  ...["gawk", "cut", "tr", "wc", "sort", "uniq", "diff", "cmp", "comm", "echo", "printf", "pwd", "cd", "pushd", "popd"],
+  ...["mkdir", "rmdir", "rm", "cp", "mv", "touch", "chmod", "chown", "ln", "stat", "file", "which", "whereis", "type"],
+  ...["test", "[", "[[", "]", "]]", "true", "false", ":", "export", "set", "unset", "source", ".", "tree", "jq", "yq"],
+  ...["xxd", "hexdump", "od", "basename", "dirname", "realpath", "readlink", "date", "sleep", "tee", "seq", "column"],
+  ...["paste", "join", "split", "tar", "gzip", "gunzip", "zip", "unzip", "shasum", "sha1sum", "sha256sum", "md5", "md5sum"],
+  ...["du", "df", "ps", "kill", "pkill", "pgrep", "uname", "whoami", "id", "clear", "exit", "read", "wait", "trap", "nl"],
+  ...["rev", "fold", "fmt", "iconv", "strings", "base64", "bc", "expr", "let", "local", "declare", "printenv", "patch"],
+  ...["if", "then", "else", "elif", "fi", "for", "in", "do", "done", "while", "until", "case", "esac", "function", "{"],
+  ...["}", "!", "return", "shift", "open", "lsof", "tsc", "tsgo", "vitest", "jest", "pytest", "mypy", "pyright", "ruff"],
+  ...["eslint", "biome", "oxlint", "prettier", "rspec", "phpunit", "xcodebuild", "xcrun", "swiftc", "clang", "gcc", "cc"],
+  ...["c++", "make", "cmake", "ninja", "mvn", "gradle", "gradlew", "dotnet", "swift", "mix", "turbo", "playwright", "tsx"],
+  ...["ts-node", "mocha", "knip", "vite", "drizzle-kit", "stylelint", "rustc", "rustfmt", "gofmt", "black", "isort"],
+])
+
+// What `npx` and its kin may run without counting as a registry download: tools a repository installs itself.
+const LOCAL_TOOLS_RUN = new Set([
+  ...["tsc", "tsgo", "vitest", "jest", "eslint", "biome", "prettier", "playwright", "tsx", "turbo", "oxlint", "mocha"],
+  ...["ts-node", "knip", "svelte-check", "vue-tsc", "astro", "next", "vite", "drizzle-kit", "stylelint", "c8", "nyc"],
+])
+
+const GIT_LOCAL = new Set([
+  ...["status", "diff", "log", "show", "add", "commit", "branch", "checkout", "switch", "restore", "reset", "stash"],
+  ...["rev-parse", "rev-list", "merge-base", "merge", "rebase", "cherry-pick", "revert", "blame", "grep", "ls-files"],
+  ...["ls-tree", "cat-file", "describe", "tag", "worktree", "mv", "rm", "clean", "apply", "am", "format-patch"],
+  ...["shortlog", "reflog", "notes", "bisect", "init", "config", "symbolic-ref", "for-each-ref", "show-ref", "name-rev"],
+  ...["check-ignore", "check-attr", "var", "help", "version", "gc", "fsck", "count-objects", "whatchanged", "range-diff"],
+  ...["sparse-checkout", "update-index", "write-tree", "read-tree", "hash-object", "cherry", "diff-tree", "diff-index"],
+  ...["diff-files", "update-ref", "stage", "annotate", "prune", "repack", "--version", "--help"],
+])
+
+// Package manager commands that reach a registry and print what it sends: a package's readme or metadata, a template,
+// advisories, or a package run straight from it.
+const REGISTRY = new Set([
+  ...["x", "dlx", "create", "init", "view", "info", "show", "v", "docs", "home", "repo", "bugs", "search", "s"],
+  ...["publish", "login", "logout", "adduser", "whoami", "owner", "access", "token", "deprecate", "dist-tag", "star"],
+  ...["stars", "unpublish", "team", "org", "hook", "profile", "ping", "audit", "outdated", "upgrade", "fund"],
+  ...["upgrade-interactive", "self-update", "feedback", "repl"],
+])
+
+const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish"])
+const WRAPPERS = new Set(["sudo", "time", "nice", "nohup", "command", "builtin", "exec", "env", "xargs", "timeout", "stdbuf"])
+const RUNTIMES = new Set(["node", "deno", "python", "python3", "ruby", "perl", "php", "lua"])
+const PACKAGES = new Set(["bun", "npm", "pnpm", "yarn"])
+const PYTHON_PACKAGES = new Set(["pip", "pip3", "uv", "poetry", "pipenv"])
+const INLINE = new Set(["-e", "--eval", "-p", "--print", "-c", "-r", "eval"])
+const URL_ARG = /^(?:[a-z][a-z0-9+.-]*:\/\/|git@|github:|gitlab:|bitbucket:|gist:)/i
+
+function runsLocally(words: readonly string[]): boolean {
+  const [first, ...rest] = words
+  if (first === undefined) return true
+  // `FOO=1 cmd`: the assignment, then the command.
+  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(first)) return runsLocally(rest)
+  const name = first.split("/").pop() ?? first
+  if (WRAPPERS.has(name)) return runsLocally(rest.slice(rest.findIndex((word) => !/^-|^\d+[smhd]?$|^[A-Za-z_]\w*=/.test(word)) >>> 0))
+  if (SHELLS.has(name) || name === "eval") {
+    const inline = name === "eval" ? 0 : rest.findIndex((word) => /^-[a-z]*c[a-z]*$/.test(word))
+    if (inline < 0) return true
+    return simple(rest.slice(name === "eval" ? 0 : inline + 1).join(" ")).every(runsLocally)
+  }
+  if (name === "find") {
+    const at = rest.findIndex((word) => word === "-exec" || word === "-execdir" || word === "-ok")
+    return at < 0 || runsLocally(rest.slice(at + 1))
+  }
+  if (name === "git") return gitLocally(rest)
+  if (LOCAL_PROGRAMS.has(name)) return true
+  if (rest.some((word) => URL_ARG.test(word))) return false
+  if (name === "npx" || name === "bunx" || name === "pnpx")
+    return LOCAL_TOOLS_RUN.has(rest.find((word) => !word.startsWith("-")) ?? "")
+  if (PACKAGES.has(name)) {
+    if (rest.some((word) => INLINE.has(word) && word !== "-c" && word !== "-r")) return false
+    const sub = rest.find((word) => !word.startsWith("-"))
+    if (sub === "exec") return LOCAL_TOOLS_RUN.has(rest.slice(rest.indexOf("exec") + 1).find((word) => !word.startsWith("-")) ?? "")
+    if (sub === "pm") return !["view", "whoami"].includes(rest[rest.indexOf("pm") + 1] ?? "")
+    return sub === undefined || !REGISTRY.has(sub)
+  }
+  if (RUNTIMES.has(name)) {
+    if (rest.some((word) => INLINE.has(word))) return false
+    // `python -m pip download` fetches like `pip download` does.
+    const module = rest.indexOf("-m")
+    return module < 0 || !(rest[module + 1] === "pip" && ["download", "index", "search"].includes(rest[module + 2] ?? ""))
+  }
+  if (PYTHON_PACKAGES.has(name)) return !["download", "index", "search", "publish", "upload"].includes(rest[0] ?? "")
+  if (name === "go") return rest[0] !== "get" && !rest.some((word) => /^[\w.-]+\.[a-z]{2,}\/\S*@/.test(word))
+  if (name === "cargo") return !["search", "install", "info", "publish", "login"].includes(rest[0] ?? "")
+  // A script or binary named by its path is the repository's own, unless it is one of the known fetchers.
+  return first.includes("/") && !/^(?:curl|wget|gh|glab|ssh|scp|sftp|ftp|rsync|nc|telnet|http|https|xh|aria2c)$/.test(name)
+}
+
+function gitLocally(words: readonly string[]): boolean {
+  const [first, ...rest] = words
+  if (first === undefined) return true
+  // A configuration override can turn any command into a fetch or a shell (`-c alias.x='!curl …'`).
+  if (first === "-c" || first.startsWith("--config-env")) return false
+  if (["-C", "--git-dir", "--work-tree", "--namespace"].includes(first)) return gitLocally(rest.slice(1))
+  if (first.startsWith("-")) return gitLocally(rest)
+  if (first === "remote") return ["-v", "--verbose", "get-url", "add", "remove", "rm", "rename", "set-url", undefined].includes(rest[0])
+  if (first === "submodule") return rest[0] === "status"
+  return GIT_LOCAL.has(first)
+}
+
+// A heredoc's body is data for the command that reads it, not commands of its own.
+function withoutHeredocs(command: string) {
+  return command.split("\n").reduce<{ lines: string[]; until?: string }>(
+    (state, line) => {
+      if (state.until !== undefined) return line.trim() === state.until ? { lines: state.lines } : state
+      const heredoc = /<<-?\s*["']?([A-Za-z_][\w-]*)["']?/.exec(line)?.[1]
+      return { lines: [...state.lines, line], ...(heredoc ? { until: heredoc } : {}) }
+    },
+    { lines: [] },
+  ).lines.join("\n")
+}
+
+/**
+ * The simple commands of a command line, each as its words: split at `;`, `&`, `|` and newlines outside quotes, with
+ * `$(…)` and backticks as commands of their own (they run inside double quotes too), and comments dropped.
+ */
+function simple(line: string) {
+  const out: string[][] = []
+  // The quoting each open `$(` or backtick interrupted, restored when it closes.
+  const open: { readonly quote: string | undefined; readonly tick: boolean }[] = []
+  let words: string[] = []
+  let word = ""
+  let quote: string | undefined
+  const end = () => {
+    if (word) words.push(word)
+    word = ""
+  }
+  const cut = () => {
+    end()
+    if (words.length) out.push(words)
+    words = []
+  }
+  for (let index = 0; index < line.length; index++) {
+    const char = line[index]!
+    const next = line[index + 1]
+    if (quote === "'") {
+      if (char === "'") quote = undefined
+      else word += char
+      continue
+    }
+    if (char === "\\") {
+      if (next !== "\n") word += next ?? ""
+      index++
+      continue
+    }
+    if (char === "$" && next === "(") {
+      cut()
+      open.push({ quote, tick: false })
+      quote = undefined
+      index++
+      continue
+    }
+    if (char === "`") {
+      cut()
+      if (open.at(-1)?.tick) quote = open.pop()!.quote
+      else {
+        open.push({ quote, tick: true })
+        quote = undefined
+      }
+      continue
+    }
+    if (quote === '"') {
+      if (char === '"') quote = undefined
+      else word += char
+      continue
+    }
+    if (char === ")" && open.length && !open.at(-1)!.tick) {
+      cut()
+      quote = open.pop()!.quote
+      continue
+    }
+    if (char === "'" || char === '"') {
+      quote = char
+      continue
+    }
+    if (char === "#" && word === "") {
+      const stop = line.indexOf("\n", index)
+      index = stop < 0 ? line.length : stop - 1
+      continue
+    }
+    // `2>&1` and `&>` are redirections; `&&`, `&` and `|` end a command.
+    if (char === "&" && (word.endsWith(">") || word.endsWith("<") || next === ">")) {
+      word += char
+      continue
+    }
+    if (char === ";" || char === "&" || char === "|" || char === "\n" || char === "(" || char === ")") {
+      cut()
+      continue
+    }
+    if (char === " " || char === "\t") {
+      end()
+      continue
+    }
+    word += char
+  }
+  cut()
+  return out
 }

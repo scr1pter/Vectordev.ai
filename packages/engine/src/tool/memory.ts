@@ -30,6 +30,8 @@ type Metadata = {
   result?: string
   id?: string
   hold?: BrainSchema.Hold
+  /** Personal entries this result stands in for; the transcript keeps their ids, never their words. */
+  [SessionMemory.PERSONAL]?: string[]
 }
 
 export const MemoryTool = Tool.define<
@@ -61,25 +63,35 @@ export const MemoryTool = Tool.define<
               personal,
               sessionID: ctx.sessionID,
             })
+            // Personal entries are saved as ids; each request fills their lines in while personal memory is allowed.
             return {
               title: params.text ? `Memory: ${params.text}` : "Memory",
               output: found.length
-                ? found.map(describe).join("\n")
+                ? found.map((entry) => (entry.scope === "personal" ? SessionMemory.withheld(entry.id) : describe(entry))).join("\n")
                 : "Nothing in memory matches. Search with other words, or carry on without it.",
-              metadata: { action: "search", result: `${found.length}` },
+              metadata: { action: "search", result: `${found.length}`, ...withheld(found) },
             }
           }
 
           if (params.action === "get") {
             const detail = params.id ? yield* brain.get(place, params.id, { personal }) : undefined
             if (!detail) return refused("get", `No memory ${params.id ?? ""} here.`)
+            // A personal entry's evidence is the user's own words, so it shows as its line alone.
+            if (detail.entry.scope === "personal")
+              return {
+                title: `Memory ${detail.entry.id}`,
+                output: SessionMemory.withheld(detail.entry.id),
+                metadata: { action: "get", id: detail.entry.id, ...withheld([detail.entry]) },
+              }
             return {
               title: `Memory ${detail.entry.id}`,
               output: [
                 describe(detail.entry),
                 ...detail.evidence.slice(-3).map((item) => `  evidence: ${evidenceLine(item)}`),
                 ...(detail.related.length
-                  ? [`Related: ${detail.related.map((item) => `[${item.id}] ${item.text.slice(0, 60)}`).join("; ")}`]
+                  ? [
+                      `Related: ${detail.related.map((item) => (item.scope === "personal" ? `[${item.id}] (personal)` : `[${item.id}] ${item.text.slice(0, 60)}`)).join("; ")}`,
+                    ]
                   : []),
               ].join("\n"),
               metadata: { action: "get", id: detail.entry.id },
@@ -134,7 +146,7 @@ export const MemoryTool = Tool.define<
           if (result.type === "refused") return refused(params.action, result.message)
           return {
             title: `Memory ${result.type}: ${result.entry.id}`,
-            output: written(result),
+            output: written(result, target?.entry),
             metadata: {
               action: params.action,
               result: result.type,
@@ -152,8 +164,8 @@ const SECRET_FILE =
   /(?:^|\/)(?:\.env(?:\.[\w.-]+)?|\.npmrc|\.pypirc|\.netrc|\.git-credentials|id_[a-z0-9]+|[\w.-]+\.(?:pem|key|p12|pfx)|credentials(?:\.json)?|secrets?\.(?:json|ya?ml|toml|txt|env))$/i
 
 // Evidence is checked here against the conversation and the files, never taken from the model's word: a quote must be
-// the user's own, a file line must be committed in a file the agent did not change in this session, and a command must
-// be a check that failed and then passed in it. The brain then checks that the evidence states the memory at all.
+// the user's own, a file line must be on the default branch in a file the agent did not change in this session, and a
+// command must be a check that failed and then passed in it. The brain then checks that the evidence states the memory.
 const verify = Effect.fnUntraced(function* (
   params: Schema.Schema.Type<typeof Parameters>,
   ctx: Tool.Context<Metadata>,
@@ -165,11 +177,10 @@ const verify = Effect.fnUntraced(function* (
   if (params.file && params.quote) {
     const target = path.resolve(root, params.file)
     const file = path.relative(root, target).split(path.sep).join("/")
-    // The committed file, so a line the agent wrote this session, or a file it created, cannot vouch for itself.
-    const committed =
-      FSUtil.contains(root, target) && !SessionMemory.touched(ctx.messages, target, root)
-        ? yield* git.show(root, "HEAD", file)
-        : ""
+    // The file as the default branch has it, so a line the agent wrote this session, a file it created, or a pull
+    // request checked out for review (whose commit is HEAD) cannot vouch for itself.
+    const base = FSUtil.contains(root, target) && !SessionMemory.touched(ctx.messages, target, root) ? yield* git.defaultBranch(root) : undefined
+    const committed = base ? yield* git.show(root, base.ref, file) : ""
     return {
       type: "file" as const,
       path: file,
@@ -207,24 +218,40 @@ function evidenceLine(item: BrainSchema.Evidence) {
   return "the user saved it"
 }
 
-function written(result: Exclude<Brain.WriteResult, { type: "refused" }>) {
+// The words memory keeps, quoted, so the agent knows what memory says rather than assuming its own wording was saved.
+// A personal entry's words stay out of the transcript.
+function words(entry: BrainSchema.Entry, length = 300) {
+  return entry.scope === "personal" ? "(personal memory)" : `"${entry.text.slice(0, length)}"`
+}
+
+function written(result: Exclude<Brain.WriteResult, { type: "refused" }>, replaced: BrainSchema.Entry | undefined) {
   const id = result.entry.id
-  if (result.type === "added") return `Saved as ${id}.`
-  // The words already kept, so the agent knows what memory says rather than assuming its own wording was saved.
+  // A different fact can share most of these words, so memory never replaces it on its own; the agent decides.
+  const related =
+    "related" in result && result.related
+      ? ` Related ${result.related.id}: ${words(result.related, 120)}. If this replaces it, use update(${result.related.id}) instead.`
+      : ""
+  if (result.type === "added") return `Saved as ${id}.${related}`
   if (result.type === "merged") {
-    if (result.entry.status === "active") return `Already known as ${id}: "${result.entry.text}"`
-    if (result.entry.status === "archived") return `Already in memory as ${id}, put away: "${result.entry.text}"`
-    return `Already in memory as ${id}, waiting for the user's review: "${result.entry.text}"`
+    if (result.entry.status === "active") return `Already known as ${id}: ${words(result.entry)}`
+    if (result.entry.status === "archived") return `Already in memory as ${id}, put away: ${words(result.entry)}`
+    return `Already in memory as ${id}, waiting for the user's review: ${words(result.entry)}`
   }
-  if (result.type === "promoted") return `Confirmed ${id}: "${result.entry.text}". It is in use now.`
-  if (result.type === "superseded") return `Saved as ${id}, replacing ${result.previous}.`
+  if (result.type === "promoted") return `Confirmed ${id}: ${words(result.entry)}. It is in use now.`
+  if (result.type === "superseded")
+    return `Saved as ${id}, replacing ${result.previous}${replaced ? `: ${words(replaced, 120)}` : ""}.`
   if (result.type === "proposed")
-    return `Saved ${id} as a proposal, not in use yet: its evidence did not check out (a quote or file line has to say what the memory says), or it changes what the user wrote. The user can approve it in Settings > Memory.`
-  return `Saved ${id} for the user's review (${holdReason(result.entry.hold)}). It is not used until they approve it.`
+    return `Saved ${id} as a proposal, not in use yet: its evidence did not check out (the user's own words, a line on the default branch, or a check that went from failing to passing has to say what the memory says). The user can approve it in Settings > Memory.${related}`
+  return `Saved ${id} for the user's review (${holdReason(result.entry.hold)}). It is not used until they approve it.${related}`
+}
+
+function withheld(entries: readonly BrainSchema.Entry[]) {
+  const ids = entries.filter((entry) => entry.scope === "personal").map((entry) => entry.id)
+  return ids.length ? { [SessionMemory.PERSONAL]: ids } : {}
 }
 
 function holdReason(hold: BrainSchema.Hold | undefined) {
-  if (hold === "web") return "this session read web content"
+  if (hold === "web") return "this session read web content or ran a command that reaches outside this computer"
   if (hold === "mcp") return "this session ran an MCP tool"
   if (hold === "subagent") return "this session took a subagent's report"
   if (hold === "guest") return "an invited guest is in this session"
