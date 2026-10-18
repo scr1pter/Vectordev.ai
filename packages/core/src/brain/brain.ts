@@ -395,7 +395,8 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
         origin: source.type === "failures" ? ("failure-memory" as const) : ("file" as const),
         status,
         pinned: previous?.pinned ?? false,
-        body: BrainScan.stripHidden(item.text),
+        // A key pasted into MEMORY.md or a rules file is not sent on to a provider either.
+        body: BrainScan.redact(BrainScan.stripHidden(item.text)).text,
         paths: [...item.paths],
         terms: encode(BrainLexical.terms([item.heading ?? "", item.text, ...item.paths].join(" "))),
         norm_hash: normHash(item.text),
@@ -417,7 +418,8 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
         signature: item.signature ?? null,
       } satisfies Row
     })
-    const digest = render(source, content, rows)
+    const rendered = render(source, content, rows)
+    const digest = rendered?.text ? { ...rendered, text: BrainScan.redact(rendered.text).text } : rendered
     const tier0 = new Set(digest?.ids ?? [])
     yield* db
       .transaction((tx) =>
@@ -809,14 +811,21 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
     if (redacted.redacted && BrainScan.remainder(redacted.text) < 16)
       return refuse("secret", "That is a secret. Memory never stores secrets, keys, tokens or passwords.")
     const text = redacted.text
-    // Personal memory follows the user into every repository, so only what the user said about themselves goes there.
     const evidence = proposal.evidence
     const verified = proposal.origin === "user" || (evidence !== undefined && evidence.type !== "user" && evidence.verified)
-    const scope: BrainSchema.Scope =
-      proposal.scope === "personal" &&
-      (proposal.origin === "user" || (evidence?.type === "message" && evidence.verified))
-        ? "personal"
-        : "repository"
+    const said = proposal.origin === "user" || (evidence?.type === "message" && evidence.verified)
+    const previous = proposal.supersedes ? yield* find(place, proposal.supersedes, true) : undefined
+    if (proposal.supersedes && !previous) return refuse("not-found", `No memory ${proposal.supersedes} here.`)
+    if (previous && !LEARNED.includes(previous.origin))
+      return refuse(
+        "file-entry",
+        `${previous.id} comes from ${previous.source_file ? path.basename(previous.source_file) : "a file"}; ask the user to edit that file.`,
+      )
+    // A replacement keeps the scope of what it replaces. Personal memory follows the user into every repository, so
+    // only what the user said about themselves goes there, and only their words change it.
+    if (previous?.scope === "personal" && !said)
+      return refuse("not-found", `${previous.id} is the user's own memory; quote what they said to change it.`)
+    const scope: BrainSchema.Scope = (previous?.scope ?? proposal.scope) === "personal" && said ? "personal" : "repository"
     const repository = scope === "personal" ? PERSONAL : place.repository
     const hash = normHash(text)
     if (proposal.origin === "agent" && (yield* tombstoned(repository, hash)))
@@ -825,13 +834,6 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       proposal.origin === "user"
         ? undefined
         : (proposal.hold ?? (hiddenText ? "hidden-unicode" : BrainScan.instructionLike(text) ? "instruction-like" : undefined))
-    const previous = proposal.supersedes ? yield* find(place, proposal.supersedes, true) : undefined
-    if (proposal.supersedes && !previous) return refuse("not-found", `No memory ${proposal.supersedes} here.`)
-    if (previous && !LEARNED.includes(previous.origin))
-      return refuse(
-        "file-entry",
-        `${previous.id} comes from ${previous.source_file ? path.basename(previous.source_file) : "a file"}; ask the user to edit that file.`,
-      )
 
     const peers = yield* db
       .select()

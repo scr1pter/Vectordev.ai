@@ -107,6 +107,15 @@ describe("Brain digest", () => {
     expect(result.review.map((entry) => entry.hold)).toEqual(["hidden-unicode"])
   })
 
+  test("a key pasted into MEMORY.md is not sent on", async () => {
+    const digest = await run(
+      { "config/MEMORY.md": "- My staging key is ghp_abcdefghijklmnopqrstuvwxyz0123456789AB, use it for deploys.\n" },
+      ({ brain, place }) => brain.digest(place, { personal: true, index: true }),
+    )
+    expect(digest.text).toContain("[redacted]")
+    expect(digest.text).not.toContain("ghp_")
+  })
+
   test("MEMORY.md past its budget keeps the start and recalls the rest when relevant", async () => {
     const filler = Array.from({ length: 120 }, (_, index) => `- Preference number ${index} about formatting tables neatly.`)
     const memory = [...filler, "- Deploys go through the staging Vercel project before production."].join("\n")
@@ -354,6 +363,39 @@ describe("Brain writes", () => {
     )
     expect(result?.next.type).toBe("superseded")
     expect(result?.archived[0]?.status).toBe("superseded")
+  })
+
+  test("only the user's own words change their personal memory, and a replacement keeps its scope", async () => {
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const mine = yield* brain.propose(place, {
+          kind: "preference",
+          text: "Prefers tabs over spaces.",
+          scope: "personal",
+          origin: "user",
+        })
+        if (mine.type === "refused") return undefined
+        const guessed = yield* brain.propose(place, {
+          kind: "preference",
+          text: "Prefers spaces over tabs.",
+          scope: "repository",
+          origin: "agent",
+          supersedes: mine.entry.id,
+          evidence: { type: "file", path: ".editorconfig", quote: "indent_style = space", verified: true },
+        })
+        const told = yield* brain.propose(place, {
+          kind: "preference",
+          text: "Prefers spaces over tabs now.",
+          scope: "repository",
+          origin: "agent",
+          supersedes: mine.entry.id,
+          evidence: { type: "message", quote: "I switched to spaces", verified: true },
+        })
+        return { guessed, told }
+      }),
+    )
+    expect(result?.guessed.type).toBe("refused")
+    expect(result?.told.type === "superseded" ? result.told.entry.scope : "").toBe("personal")
   })
 
   test("an agent may not edit an entry that comes from a person's file", async () => {
