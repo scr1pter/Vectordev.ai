@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.99.109",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Simple messages stay simple, free models on your Vector account, billing in the app and one spend limit",
+              "description": "A greeting or a thank-you now gets a direct answer in one small request, with no tools or extended thinking, and everything else runs with the normal tools at the model's usual effort. Subagents and high effort come in only when you ask for thoroughness, for example \"be thorough\" or \"use subagents\", or when the agent finds the work is large; the LLM-as-a-judge, when you switch it on in Settings, checks large tasks that changed files, or every task that changed files if you choose. Free models inside of Vector now cover every free OpenRouter model that can use tools, plus OpenRouter's Free Models Router, served from Vector's shared allowance to anyone signed in to Vector, with no OpenRouter account of your own. Free models whose providers may train on prompts are labelled May train on your prompts and are used only after you accept once, and invited guests never reach them. Settings, Account shows who is signed in, your Vector Codium plan, its renewal and the share of this month's credits left; buying credits, subscribing, changing or cancelling a plan, updating your card and invoices open Stripe's own pages in a Vector window, and deleting your account is confirmed in Vector after you sign in again in your browser. Codium sales are still closed, so those buttons say Coming soon. Clicking your name opens Account, and when an update is ready the Update button takes the Settings gear's place, on Home too, and asks before restarting while agents are running. Spend limits are now one overall set per run, per day and per month across all your repositories: the per-repository monthly limit from 1.99.108 is dropped on update, and a repository's own budget.run is ignored with a one-time notice. Settings no longer has the rules, Appearance, Editor, Chat, Voice or Personalization pages: Vector always uses its dark look and your computer's language, Vector Tab turns on and off from the editor's status bar, and repository rules live in .vector/RULES.md, where deleting or editing a line in Vector's section removes or changes that rule. Vector calls your folders repositories everywhere. A repository with its own Vector settings asks once whether to trust it and remembers the answer, repositories created in Vector are trusted automatically and clones always ask, and until you trust one your language servers, formatters and MCP servers stay off in it. Vector Cloud now opens from Home; its button, the database banner and Publish are gone from inside a task. Vectorscope's Apply fix works and refuses to write over lines that changed since the review, an optional triageModel in .vector/review.json runs a cheaper first pass that the review model double-checks, only confirmed findings are posted, a repeated finding names every place in one comment, and a GitHub review that cannot start says which secret or model is missing. The read-only agents (explore, review, judge and security) now refuse shell commands Vector cannot fully check, such as hidden command substitutions, and other agents ask before running them; allow rules, including Always allow answers, no longer approve them. Redirects through a link that points outside the repository ask first, and a linked rules file is never read into a prompt. GitHub reviews and the terminal get these Vectorscope, sizing and shell changes with the next CLI release, and Windows WSL servers keep running the 1.99.99 engine until a later desktop release requires the new CLI. This release is not yet code-signed, so a new install may show an operating-system warning on first launch."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.99.108",
       "highlights": [
         {
