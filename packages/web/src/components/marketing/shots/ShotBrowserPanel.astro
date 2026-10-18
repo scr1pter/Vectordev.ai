@@ -101,11 +101,8 @@ const rain = `url("data:image/svg+xml,${encodeURIComponent(
       <svg class="bp-wordmark" viewBox="0 0 40 7" fill="currentColor" aria-hidden="true">
         {wordmarkCells.map((cell) => <rect x={cell.x} y={cell.y} width="0.84" height="0.84" />)}
       </svg>
-      <p class="bp-headline">An engineering workspace that <span>has a 300B+ model planned.</span></p>
-      <p class="bp-deck">
-        Open a repository on your computer. Plan, edit, run, and ship with Vector's own agent beside your editor — on
-        your desktop, in your terminal, or from the cloud.
-      </p>
+      <p class="bp-headline">The same scripted work for <span>67–79% less</span> modelled spend than Claude Code.</p>
+      <p class="bp-deck">Vector is a free workspace for coding agents, built around a lean agent of its own.</p>
       <div class="bp-actions">
         <a class="bp-cta" href="https://vectordev.ai/login" data-browser-link="/login">Get Vector <ShotIcon name="arrow" size={16} /></a>
         <a
@@ -655,9 +652,9 @@ const rain = `url("data:image/svg+xml,${encodeURIComponent(
     letter-spacing: -0.025em;
   }
 
+  /* As on the real hero, the figure stays in ink and only keeps its words together. */
   .bp-headline span {
-    display: block;
-    color: #c9b0ff;
+    white-space: nowrap;
   }
 
   .bp-deck {

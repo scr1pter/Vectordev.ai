@@ -42,26 +42,29 @@ import { wordmarkCells } from "../lib/wordmark"
 // Vector, the numbers) in LanderStory, then the product tour: the workspace in one screen, more of the app, privacy,
 // and the card shelf of what Vector does, each card linked to the docs page that covers it in full.
 
-// The hero's rotating line completes "Vector …". Each phrase is true in desktop 1.99.108; the qualifiers (caps are
-// off until set, the terminal gets the Run Guard and background subagents with the next CLI release, Windows WSL
-// servers later) sit in LanderStory's notes. Eight is the batch size, not a limit on subagents running together.
-// The first phrase shows under reduced motion and before the script runs.
+// The hero leads with the measured edge and its qualifier, then says in one sentence what Vector is. The cost range
+// spans both sessions of the archived benchmark (LanderStory's note b); test/landing-copy.test.ts recomputes it.
+const heroCost = "67–79%"
+
+// The hero's rotating line completes "Vector …". Each phrase is true in desktop 1.99.109; the qualifiers (the
+// terminal gets the Run Guard and background subagents with the next CLI release, Windows WSL servers later) sit in
+// LanderStory's notes. Eight is the batch size, not a limit on subagents running together. The first phrase shows
+// under reduced motion and before the script runs.
 const heroPhrases = [
-  "has an agent of its own.",
-  "runs Claude Code, Codex and Cursor too.",
+  "runs Claude Code, Codex and Cursor Agent too.",
   "runs subagents in batches of up to eight.",
   "pauses an agent stuck in a loop.",
   "reviews your branch before you push.",
-  "ships from your own Vercel and Supabase.",
-  "runs in your terminal too.",
-  "has a 300B+ model planned.",
+  "deploys to your own Vercel and Supabase accounts.",
+  "runs in your terminal.",
+  "is building a coding model of its own.",
 ]
 
 // The work Vector does in one window. Six, so the grid fills two even rows.
 const workspaceFacts = [
   {
     title: "As many agents as you want",
-    text: "Start as many parallel agents as you like, each in its own copy of the repository, and merge the ones that landed.",
+    text: "Start as many parallel agents as you like, side by side, and merge the ones that landed.",
   },
   {
     title: "Subagents for the parts",
@@ -81,7 +84,7 @@ const workspaceFacts = [
   },
   {
     title: "A tokenomics engine",
-    text: "Each chat priced from the tokens your provider reported where the model has a price, and from desktop 1.99.108 a Run Guard that stops a run within one step of the cap you set.",
+    text: "Each chat priced from the tokens your provider reported where the model has a price, with the desktop app's Run Guard, described above, on top.",
   },
 ]
 
@@ -104,9 +107,9 @@ const pluginNames = [
 ]
 
 // Privacy in six claims, each checked against the code and /legal/privacy on 17 October 2026.
-// Keep the "coming soon" label until Codium sales open. Free models whose providers may train arrive with the next
-// release, labelled "May train on your prompts" and used only after a one-time consent. The promise that nothing
-// trains on your prompts covers Vector itself, not every model provider.
+// Keep the "coming soon" label until Codium sales open. Free models whose providers may train arrive with desktop
+// 1.99.109, which this page ships with, labelled "May train on your prompts" and used only after a one-time consent.
+// The promise that nothing trains on your prompts covers Vector itself, not every model provider.
 const privacyFacts = [
   {
     title: "Local first",
@@ -114,7 +117,7 @@ const privacyFacts = [
   },
   {
     title: "Straight to your provider",
-    text: "With your own key or ChatGPT sign-in, prompts go straight to that provider under its terms, never through Vector, and a model on your own computer keeps them there.",
+    text: "With your own key or ChatGPT sign-in, prompts go straight to that provider under its terms and on its bill, never through Vector, and a model on your own computer keeps them there.",
   },
   {
     title: "No copy on our servers",
@@ -122,11 +125,11 @@ const privacyFacts = [
   },
   {
     title: "Vector doesn't train on it",
-    text: "Vector collects nothing for training, and Velocity, the model we plan to build, won't be trained on customers' code. What a model's provider does with your prompts follows that provider's terms.",
+    text: "Vector collects nothing for training, and Velocity, the model we are building, won't be trained on customers' code. What a model's provider does with your prompts follows that provider's terms.",
   },
   {
     title: "Free models inside of Vector",
-    text: "Every free-model request without the “May train on your prompts” label asks providers not to train on your prompts, though they may keep them. Labelled models arrive with the next release, and Vector asks you once before you first use one. Codium, coming soon, uses only providers OpenRouter records as zero data retention.",
+    text: "For a free model without the “May train on your prompts” label, Vector asks its provider not to train on your prompts, though the provider may keep them, and Vector asks you once before you first use a labelled one. Codium, coming soon, uses only providers OpenRouter records as zero data retention.",
   },
   {
     title: "Counts, not content",
@@ -271,7 +274,7 @@ const trustCards = [
   {
     icon: Sparkles,
     lead: "Free models inside of Vector.",
-    text: "With the next release, connect a free OpenRouter account and Vector offers every free OpenRouter model it is allowed to offer, stopping at their limits instead of switching to a paid one, and labels any whose provider may train on your prompts.",
+    text: "From desktop 1.99.109, connect a free OpenRouter account and Vector offers every free OpenRouter model it is allowed to offer, stopping at their limits instead of switching to a paid one, and labels any whose provider may train on your prompts.",
     href: "/docs/models#free-models",
     more: "Read about free models inside of Vector",
   },
@@ -328,13 +331,16 @@ const trustCards = [
           </h1>
 
           <p class="headline">
-            The harness shapes the bill. <span class="headline-accent">Vector's own is built&nbsp;lean.</span>
+            The same scripted work for <span class="headline-figure">{heroCost}&nbsp;less</span> modelled spend than
+            Claude&nbsp;Code.
+          </p>
+          <p class="hero-receipt">
+            From Vector's offline benchmark of four scripted coding tasks, run 11 October 2026 against a fake model
+            server and priced at list rates. It measures what each agent sends, not answer quality.
+            <a class="hero-receipt-more" href="#proof">See the numbers</a>
           </p>
 
-          <p class="hero-deck simple-deck">
-            Vector is a free workspace for coding agents. Its own agent sends a smaller fixed prompt than Claude Code with
-            every request, and in the desktop app a Run Guard stops a run within one step of the cap you set.
-          </p>
+          <p class="hero-deck simple-deck">Vector is a free workspace for coding agents, built around a lean agent of its own.</p>
 
           <p class="hero-ticker">
             <span class="ticker-lead">Vector</span>{" "}
@@ -342,10 +348,9 @@ const trustCards = [
               >{heroPhrases[0]}</span
             >
             <span class="sr-only"
-              >Vector has an agent of its own, runs Claude Code, Codex and Cursor Agent beside it, runs subagents in
-              batches of up to eight, pauses an agent stuck in a loop, reviews your branch before you push, ships from
-              your own Vercel and Supabase accounts, runs in your terminal too, and has its own 300B+ model
-              planned.</span
+              >Vector runs Claude Code, Codex and Cursor Agent too, runs subagents in batches of up to eight, pauses an
+              agent stuck in a loop, reviews your branch before you push, deploys to your own Vercel and Supabase
+              accounts, runs in your terminal, and is building a coding model of its own.</span
             >
           </p>
 
@@ -356,16 +361,6 @@ const trustCards = [
             </a>
             <a class="simple-secondary" href="/docs/terminal-agent#install-the-cli">Install the CLI</a>
           </div>
-          <p class="hero-receipt">
-            <a href="#proof">
-              <span>modelled cost, five scripted subagent tasks</span>
-              <span aria-hidden="true">·</span>
-              <span>Vector 64–67% lower than Claude Code 2.1.215</span>
-              <span aria-hidden="true">·</span>
-              <span>offline, 16 Oct 2026</span>
-              <span class="hero-receipt-more">See the numbers</span>
-            </a>
-          </p>
           <p class="hero-note">Free with a Vector account. macOS, Windows, and Linux.</p>
         </div>
 
@@ -385,12 +380,12 @@ const trustCards = [
       <div class="story-copy" data-reveal-group>
         <p class="story-kicker" data-reveal>One workspace</p>
         <h2 id="everything-title" class="story-title" data-reveal>Everything shipping&nbsp;takes.</h2>
-        <p class="story-subtitle" data-reveal>Not a chat box bolted onto an editor.</p>
+        <p class="story-subtitle" data-reveal>From the first prompt to production.</p>
         <p class="story-body" data-reveal>
           Point a swarm of agents at separate branches and let each one spawn subagents for the parts. Set up the
           database, deploy to your own cloud account, and have the change reviewed before it reaches main. Vector does
-          all of it in one window, over the repository already on your disk — with a browser it can drive, a tokenomics
-          engine that prices each chat where the model has a price, {pluginCount} one-click plugins, and any MCP server you write yourself.
+          all of it in one window, over the repository already on your disk — with a browser it can drive, {pluginCount}
+          one-click plugins, and any MCP server you write yourself.
         </p>
         <ul class="story-facts" data-reveal>
           {
@@ -1171,11 +1166,11 @@ const trustCards = [
     text-wrap: balance;
   }
 
-  /* Each sentence of the thesis gets its own line. */
-  .headline-accent {
-    display: block;
-    color: var(--purple-soft);
-    text-shadow: 0 0 32px rgba(143, 82, 255, 0.24);
+  /* The figure stays in ink: the hero's one lavender line is the rotating phrase below. */
+  .headline-figure {
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   /* "Vector …" and a rotating phrase. Its box holds the longest phrase, one
@@ -1198,35 +1193,30 @@ const trustCards = [
     font-variant-ligatures: none;
   }
 
-  /* The measured edge, printed like a receipt under the buttons; it opens the
-     numbers and their footnotes further down. */
+  /* The headline's qualifier sits right under it, in plain sentences, and opens the numbers and their footnotes
+     further down. */
   .hero-receipt {
-    margin: 22px 0 0;
-    font-family: var(--font-landing-mono);
-    font-size: 12px;
-    line-height: 1.6;
-    letter-spacing: 0.01em;
-  }
-
-  .hero-receipt a {
-    display: inline-flex;
-    flex-wrap: wrap;
-    column-gap: 8px;
+    max-width: 60ch;
+    margin: 14px 0 0;
     color: var(--ink-55);
-    text-decoration: none;
+    font-size: 13.5px;
+    line-height: 1.6;
+    text-wrap: pretty;
   }
 
   .hero-receipt-more {
     color: var(--ink-70);
+    text-decoration: none;
+    white-space: nowrap;
     border-bottom: 1px solid rgba(224, 211, 255, 0.3);
   }
 
-  .hero-receipt a:hover .hero-receipt-more {
+  .hero-receipt-more:hover {
     color: var(--lavender);
     border-color: var(--purple-soft);
   }
 
-  .hero-receipt a:focus-visible {
+  .hero-receipt-more:focus-visible {
     outline: 2px solid var(--landing-accent);
     outline-offset: 3px;
     border-radius: 4px;
@@ -1325,7 +1315,7 @@ const trustCards = [
     padding-bottom: clamp(24px, 4vw, 48px) !important;
   }
   .simple-hero { max-width: 760px; }
-  .simple-deck { max-width: 560px; margin-top: 18px; font-size: 17px; line-height: 1.6; color: var(--ink-55); }
+  .simple-deck { max-width: 560px; margin-top: 22px; font-size: 17px; line-height: 1.6; color: var(--ink-70); }
   .simple-actions { margin-top: 26px; display: flex; flex-wrap: wrap; align-items: center; gap: 18px; }
   .simple-cta { width: auto; min-width: 0; margin: 0; padding-inline: 26px; }
   /* Simpler page: no floating chapter rail. */

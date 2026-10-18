@@ -59,13 +59,9 @@ test("the investor page describes Vectorscope's default verify pass", () => {
 })
 
 test("every page that gives Vector Velocity's planned size gives the same one", async () => {
-  const files = [
-    "README.md",
-    "packages/web/src/components/Lander.astro",
-    "packages/web/src/components/marketing/LanderStory.astro",
-    "packages/web/src/components/marketing/shots/ShotBrowserPanel.astro",
-    "packages/web/src/pages/investors.astro",
-  ]
+  // The landing page gives Velocity no total size, only its active parameters per token; packages/web's
+  // landing-copy test checks that.
+  const files = ["README.md", "packages/web/src/pages/investors.astro"]
   // A size reads "300B+", "a 300B model" or "300 billion parameters"; a model name such as Qwen3-Coder-480B is not one.
   const sizes = await Promise.all(
     files.map(async (file) =>
