@@ -1,6 +1,6 @@
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { BrowserWindow, safeStorage, shell } from "electron"
-import { isBillingWindow, openBillingWindow } from "./billing-window"
+import { focusBillingWindow, isBillingWindow, openBillingWindow } from "./billing-window"
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import { createVectorAccount, syncVectorAccount } from "./vector-account"
 import { createManagedAccountLifecycle } from "./vector-account-lifecycle"
@@ -52,6 +52,7 @@ export const vectorAccount = createVectorAccount({
     }),
   // The window that asked is the one focused when the person clicked; the billing window opens over it.
   billingWindow: (url) => openBillingWindow(url, ModelPlanStatus.SITE, BrowserWindow.getFocusedWindow()),
+  focusBilling: () => void focusBillingWindow(),
 })
 
 export function initializeVectorAccount(ready: NonNullable<typeof engine.ready>) {

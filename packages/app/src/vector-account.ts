@@ -24,10 +24,12 @@ export type VectorBillingRequest =
 
 /**
  * How the billing window ended: Stripe finished (completed), the person went back from checkout (cancelled) or closed
- * the window (closed). An older vectordev.ai makes Vector open the website instead (website).
+ * the window (closed). An older vectordev.ai, or a sign-in from before Vector 1.99.109 asking for the billing portal,
+ * makes Vector open the website instead (website). A request made while a billing window is already open brings that
+ * window forward and does nothing else (busy).
  */
 export type VectorBillingResult =
-  | { outcome: "completed" | "cancelled" | "closed" | "website" }
+  | { outcome: "completed" | "cancelled" | "closed" | "website" | "busy" }
   | { outcome: "failed"; message: string }
 
 export type VectorDeletionResult = { deleted: true } | { deleted: false; message: string }

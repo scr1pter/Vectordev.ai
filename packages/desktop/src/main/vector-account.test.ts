@@ -28,7 +28,9 @@ function fixture() {
       Response.json({ deleted: true, email: "fixture@example.test", cliTokens: "revoked" }) as Response,
     // What the exchange answers, when a test needs something other than a sign-in token.
     exchange: undefined as ((init: RequestInit) => Response) | undefined,
-    outcome: "completed" as "completed" | "cancelled" | "closed" | "failed",
+    outcome: "completed" as "completed" | "cancelled" | "closed" | "failed" | "busy",
+    // Holds the billing window open until a test resolves it.
+    billingDelay: undefined as Promise<void> | undefined,
   }
   const fetched: string[] = []
   const urls: string[] = []
@@ -36,6 +38,7 @@ function fixture() {
   const statuses: unknown[] = []
   const requests: RequestInit[] = []
   const windows: string[] = []
+  const focused: true[] = []
   const writes: unknown[] = []
   const secrets = new Map<string, string>()
   const token = `vct_${randomBytes(32).toString("base64url")}.synthetic`
@@ -93,13 +96,17 @@ function fixture() {
     changed: (status) => statuses.push(status),
     billingWindow: async (url) => {
       windows.push(url)
+      await state.billingDelay
       return state.outcome
+    },
+    focusBilling: () => {
+      focused.push(true)
     },
     now: () => state.now,
   })
   const callback = () =>
     `vector://auth/callback?${new URLSearchParams({ code: randomBytes(32).toString("base64url"), state: new URL(urls.at(-1)!).searchParams.get("state")! })}`
-  return { controller, state, urls, tokens, statuses, requests, fetched, token, callback, windows, writes }
+  return { controller, state, urls, tokens, statuses, requests, fetched, token, callback, windows, writes, focused }
 }
 
 async function signedIn() {
@@ -593,6 +600,31 @@ test("an older vectordev.ai sends billing to the website, while an expired sign-
     outcome: "failed",
     message: "Sign in to Vector to manage billing.",
   })
+})
+
+test("a request while a billing window is open brings it forward and never takes its result", async () => {
+  const app = await signedIn()
+  const open = Promise.withResolvers<void>()
+  app.state.billingDelay = open.promise
+  const checkout = app.controller.billing({ kind: "checkout", plan: "vector-10" })
+  // Say Usage, or the purchase dialog, asks to cancel the plan while checkout is open.
+  expect(await app.controller.billing({ kind: "portal", flow: "cancel" })).toEqual({ outcome: "busy" })
+  expect(await app.controller.billing({ kind: "topup", pack: "codium-topup-10" })).toEqual({ outcome: "busy" })
+  expect(app.focused).toHaveLength(2)
+  open.resolve()
+  expect(await checkout).toEqual({ outcome: "completed" })
+  // No Stripe session was made for them.
+  expect(app.fetched).toEqual(["https://vectordev.ai/api/model-plans/checkout"])
+  // Once it is done, the next request opens its own window.
+  app.state.billingDelay = undefined
+  app.state.billing = () => Response.json({ url: "https://billing.stripe.com/p/session/fixture" })
+  expect(await app.controller.billing({ kind: "portal", flow: "cancel" })).toEqual({ outcome: "completed" })
+  expect(app.windows).toEqual(["https://checkout.stripe.com/c/pay/cs_fixture", "https://billing.stripe.com/p/session/fixture"])
+  // A failed request frees the next one too.
+  app.state.billing = () => new Response("Bad gateway", { status: 502 })
+  expect(await app.controller.billing({ kind: "portal" })).toMatchObject({ outcome: "failed" })
+  app.state.billing = () => Response.json({ url: "https://billing.stripe.com/p/session/fixture" })
+  expect(await app.controller.billing({ kind: "portal" })).toEqual({ outcome: "completed" })
 })
 
 test("offers are read from the public configuration without the account token", async () => {

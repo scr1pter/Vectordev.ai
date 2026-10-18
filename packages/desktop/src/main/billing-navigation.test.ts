@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test"
-import { billingNavigation, billingReturn, billingTitle } from "./billing-navigation"
+import {
+  BILLING_PARTITION,
+  billingNavigation,
+  billingReturn,
+  billingStep,
+  billingTitle,
+  billingWindowOptions,
+} from "./billing-navigation"
 
 const site = "https://vectordev.ai"
 
@@ -60,4 +67,44 @@ test("the title names the page's host, since the window has no address bar", () 
     "Vector Codium billing: checkout.stripe.com",
   )
   expect(billingTitle("not a url")).toBe("Vector Codium billing")
+})
+
+test("only the page itself is held to Stripe: a frame's redirect to a bank's card check loads in its frame", () => {
+  // A 3D Secure challenge: Stripe's frame posts to the bank's server, which redirects to its own challenge page.
+  const bank = "https://acs.bank.example/challenge?transaction=fixture"
+  expect(billingStep(bank, site, false)).toEqual({ load: true })
+  expect(billingStep(`${site}/account?model_plan=success`, site, false)).toEqual({ load: true })
+  // The same address as the page's own redirect goes to the browser instead.
+  expect(billingStep(bank, site, true)).toEqual({ load: false, kept: "external", browser: true })
+  expect(billingStep("javascript:alert(1)", site)).toEqual({ load: false, kept: "block" })
+  expect(billingStep("https://checkout.stripe.com/c/pay/cs_fixture", site)).toEqual({ load: true })
+  expect(billingStep(`${site}/account?model_plan=success`, site)).toEqual({ load: false, finish: "completed" })
+  expect(billingStep(`${site}/account`, site)).toEqual({ load: false, finish: "closed" })
+  expect(billingStep(`${site}/legal/terms`, site)).toEqual({ load: false, browser: true })
+})
+
+test("the billing window is a titled child window with no access to Vector, never a macOS sheet", () => {
+  const options = billingWindowOptions("https://checkout.stripe.com/c/pay/cs_fixture", { width: 800, height: 600 })
+  // A modal child is a sheet on macOS: no title bar to name the Stripe host, and no close button.
+  expect(options.modal).toBe(false)
+  expect(options.title).toBe("Vector Codium billing: checkout.stripe.com")
+  expect([options.width, options.height]).toEqual([800, 600])
+  expect(options.webPreferences).toEqual({
+    partition: BILLING_PARTITION,
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+    webviewTag: false,
+    spellcheck: false,
+    navigateOnDragDrop: false,
+    devTools: false,
+  })
+  expect(options.webPreferences).not.toHaveProperty("preload")
+  // In memory only, so no Stripe or Link sign-in outlives the window.
+  expect(BILLING_PARTITION).not.toStartWith("persist:")
+  expect(billingWindowOptions("https://billing.stripe.com/p/session/fixture", undefined, false)).toMatchObject({
+    width: 960,
+    height: 760,
+    webPreferences: { devTools: true },
+  })
 })

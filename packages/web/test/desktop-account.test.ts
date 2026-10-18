@@ -243,6 +243,7 @@ test("desktop start, signed-in website and one-time API exchange complete the sa
       desktop.states.push(value)
     },
     billingWindow: async () => "closed",
+    focusBilling: () => undefined,
   })
   await account.start()
   const login = desktopSignInRequest(new URL(desktop.url).search)!
@@ -366,6 +367,7 @@ test("deleting from the desktop runs through the browser's fresh sign-in and end
       desktop.states.push(value)
     },
     billingWindow: async () => "closed",
+    focusBilling: () => undefined,
   })
   // Signed in to the app as the fixture account.
   await account.start()

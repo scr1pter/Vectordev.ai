@@ -31,6 +31,8 @@ type Dependencies = {
   changed(status: VectorAccountStatus): void
   /** Shows a Stripe page in Vector's billing window and resolves when that window is done. */
   billingWindow(url: string): Promise<BillingOutcome>
+  /** Brings the open billing window forward, for a request made while it is open. */
+  focusBilling(): void
   now?(): number
 }
 
@@ -50,6 +52,8 @@ export function createVectorAccount(deps: Dependencies) {
     grant?: Grant
     error?: string
     refreshing?: boolean
+    /** A billing request is under way, from asking vectordev.ai until its window is done. */
+    billing?: boolean
     work: Promise<void>
   } = {
     work: Promise.resolve(),
@@ -173,6 +177,62 @@ export function createVectorAccount(deps: Dependencies) {
     notify()
   }
 
+  // One billing request: ask vectordev.ai for the Stripe page, then show it in the billing window.
+  const openBilling = async (input: unknown): Promise<VectorBillingResult> => {
+    const request = billingRequest(input)
+    if (!request) return { outcome: "failed", message: "Vector could not open billing for that choice." }
+    const secret = await token().catch(() => undefined)
+    if (!secret) return { outcome: "failed", message: "Sign in to Vector to manage billing." }
+    const response = await deps
+      .fetch(`${ModelPlanStatus.API_URL}/${request.kind}`, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          authorization: `Bearer ${secret}`,
+        },
+        body: JSON.stringify(request.body),
+        redirect: "error",
+        signal: AbortSignal.timeout(15_000),
+      })
+      .catch(() => undefined)
+    if (!response)
+      return {
+        outcome: "failed",
+        message: "Vector could not reach vectordev.ai. Check your connection and try again.",
+      }
+    const payload: unknown = await response.json().catch(() => undefined)
+    const error = apiError(payload)
+    // A vectordev.ai from before 1.99.109 takes only a website session on these routes, and hands the account token
+    // to Supabase, which refuses it. That answer is not a sign-out: the website still does all of this.
+    if (
+      !response.ok &&
+      (error?.code === "SESSION_INVALID" ||
+        error?.code === "SIGN_IN_REQUIRED" ||
+        (!error && (response.status === 404 || response.status === 405)))
+    ) {
+      await deps
+        .openBrowser(request.kind === "portal" ? ModelPlanStatus.MANAGE_URL : ModelPlanStatus.PURCHASE_URL)
+        .catch(() => undefined)
+      return { outcome: "website" }
+    }
+    if (!response.ok)
+      return { outcome: "failed", message: error?.message ?? "Vector could not open billing. Try again shortly." }
+    const url = payload && typeof payload === "object" && "url" in payload ? payload.url : undefined
+    if (
+      typeof url !== "string" ||
+      !url.startsWith(request.kind === "portal" ? "https://billing.stripe.com/" : "https://checkout.stripe.com/")
+    )
+      return { outcome: "failed", message: "Vector could not open billing. Try again shortly." }
+    const outcome = await deps.billingWindow(url)
+    if (outcome === "failed")
+      return {
+        outcome: "failed",
+        message: "Vector could not open the Stripe page. Check your connection and try again.",
+      }
+    return { outcome }
+  }
+
   return {
     status,
     /** Main process only: the signed-in token for requests to vectordev.ai, never sent to a renderer. */
@@ -231,61 +291,19 @@ export function createVectorAccount(deps: Dependencies) {
     },
     /**
      * Opens Codium checkout, a top-up or Stripe's customer portal in Vector's billing window. The account token goes
-     * only to vectordev.ai, and the window loads only the Stripe address vectordev.ai answers with.
+     * only to vectordev.ai, and the window loads only the Stripe address vectordev.ai answers with. One request runs at
+     * a time: another, from a second page or dialog, gets "busy" and the open window comes forward, so no request
+     * reports how a different one ended and no second Stripe session is made.
      */
     async billing(input: unknown): Promise<VectorBillingResult> {
-      const request = billingRequest(input)
-      if (!request) return { outcome: "failed", message: "Vector could not open billing for that choice." }
-      const secret = await token().catch(() => undefined)
-      if (!secret) return { outcome: "failed", message: "Sign in to Vector to manage billing." }
-      const response = await deps
-        .fetch(`${ModelPlanStatus.API_URL}/${request.kind}`, {
-          method: "POST",
-          headers: {
-            accept: "application/json",
-            "content-type": "application/json",
-            authorization: `Bearer ${secret}`,
-          },
-          body: JSON.stringify(request.body),
-          redirect: "error",
-          signal: AbortSignal.timeout(15_000),
-        })
-        .catch(() => undefined)
-      if (!response)
-        return {
-          outcome: "failed",
-          message: "Vector could not reach vectordev.ai. Check your connection and try again.",
-        }
-      const payload: unknown = await response.json().catch(() => undefined)
-      const error = apiError(payload)
-      // A vectordev.ai from before 1.99.109 takes only a website session on these routes, and hands the account token
-      // to Supabase, which refuses it. That answer is not a sign-out: the website still does all of this.
-      if (
-        !response.ok &&
-        (error?.code === "SESSION_INVALID" ||
-          error?.code === "SIGN_IN_REQUIRED" ||
-          (!error && (response.status === 404 || response.status === 405)))
-      ) {
-        await deps
-          .openBrowser(request.kind === "portal" ? ModelPlanStatus.MANAGE_URL : ModelPlanStatus.PURCHASE_URL)
-          .catch(() => undefined)
-        return { outcome: "website" }
+      if (state.billing) {
+        deps.focusBilling()
+        return { outcome: "busy" }
       }
-      if (!response.ok)
-        return { outcome: "failed", message: error?.message ?? "Vector could not open billing. Try again shortly." }
-      const url = payload && typeof payload === "object" && "url" in payload ? payload.url : undefined
-      if (
-        typeof url !== "string" ||
-        !url.startsWith(request.kind === "portal" ? "https://billing.stripe.com/" : "https://checkout.stripe.com/")
-      )
-        return { outcome: "failed", message: "Vector could not open billing. Try again shortly." }
-      const outcome = await deps.billingWindow(url)
-      if (outcome === "failed")
-        return {
-          outcome: "failed",
-          message: "Vector could not open the Stripe page. Check your connection and try again.",
-        }
-      return { outcome }
+      state.billing = true
+      return openBilling(input).finally(() => {
+        state.billing = undefined
+      })
     },
     /**
      * Deleting the account needs a sign-in on vectordev.ai from the last few minutes, made in the browser because
