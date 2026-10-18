@@ -51,10 +51,47 @@ const DIFFICULTY = {
   thorough: "complex",
 } as const satisfies Record<TaskSize.Tier, TaskDifficulty>
 
-export function classifyTaskDifficulty(task: string): TaskDifficulty {
+// Only a social message is trivial, and only when no work is waiting on the user (`open`): then even a "thanks" answers
+// or follows up that work, so it goes to the engine with the history rather than to the quick lane.
+export function classifyTaskDifficulty(task: string, open = false): TaskDifficulty {
   if (!task.trim()) return "trivial"
-  return DIFFICULTY[TaskSize.classify({ text: task }).tier]
+  return DIFFICULTY[TaskSize.classify({ text: task, open }).tier]
 }
+
+type HistoryMessage = {
+  id: string
+  role: string
+  error?: unknown
+  finish?: string
+  time: { created: number; completed?: number }
+}
+type HistoryPart = { type: string; text?: string; synthetic?: boolean }
+
+/**
+ * Whether a session's work is waiting on the user, as the engine reads it: the agent's last reply asked or offered
+ * something, or its run did not finish (it failed, was stopped, or is still going).
+ */
+export function workOpen(
+  messages: readonly HistoryMessage[],
+  parts: (messageID: string) => readonly HistoryPart[] | undefined,
+) {
+  const last = messages.findLast((message) => message.role === "assistant")
+  if (!last) return false
+  if (last.error || !last.time.completed || UNFINISHED.has(last.finish ?? "")) return true
+  // The agent's closing words, not a later card without text such as the judge's.
+  const text = messages
+    .filter((message) => message.role === "assistant")
+    .map((message) =>
+      (parts(message.id) ?? [])
+        .flatMap((part) => (part.type === "text" && !part.synthetic && part.text?.trim() ? [part.text] : []))
+        .join("\n"),
+    )
+    .findLast((item) => item.length > 0)
+  return TaskSize.asks(text ?? "")
+}
+
+// Finish reasons of a run that stopped before its answer was done, as the engine reads them.
+const UNFINISHED = new Set(["length", "tool-calls", "unknown", "error", "content-filter"])
 
 function qualityScore(model: RoutableModel) {
   const label = `${model.id} ${model.name} ${model.family ?? ""}`.toLowerCase()

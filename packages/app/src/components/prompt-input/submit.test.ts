@@ -516,7 +516,7 @@ describe("prompt submit worktree selection", () => {
 describe("follow-up optimistic echo", () => {
   type SendInput = Parameters<typeof import("./submit").sendFollowupDraft>[0]
   type SentPart = { id: string; type: string; synthetic?: boolean; text?: string }
-  type Step = { kind: "echo" | "request"; parts: SentPart[]; budget?: unknown; judge?: unknown }
+  type Step = { kind: "echo" | "request"; parts: SentPart[]; budget?: unknown; judge?: unknown; agent?: string }
 
   // Real work, so the desktop's file map applies; a greeting gets none.
   const text = "add a caption under this picture that names its colors and what the square could represent"
@@ -541,8 +541,9 @@ describe("follow-up optimistic echo", () => {
 
   const send = async (
     draft: Partial<import("./submit").FollowupDraft> = {},
-    history: { role: string }[] = [],
+    history: object[] = [],
     config: object = {},
+    parts: Record<string, SentPart[]> = {},
   ) => {
     const { sendFollowupDraft } = await import("./submit")
     // One ordered log, so a test also sees when the echo happens relative to the request.
@@ -550,15 +551,21 @@ describe("follow-up optimistic echo", () => {
     await sendFollowupDraft({
       client: {
         session: {
-          promptAsync: async (input: { parts: SentPart[]; budget?: unknown; judge?: unknown }) => {
-            steps.push({ kind: "request", parts: input.parts, budget: input.budget, judge: input.judge })
+          promptAsync: async (input: { parts: SentPart[]; budget?: unknown; judge?: unknown; agent?: string }) => {
+            steps.push({
+              kind: "request",
+              parts: input.parts,
+              budget: input.budget,
+              judge: input.judge,
+              agent: input.agent,
+            })
             return { data: undefined }
           },
         },
       } as unknown as SendInput["client"],
       serverSync: { session: { set: () => undefined } } as unknown as SendInput["serverSync"],
       sync: {
-        data: { command: [], message: { "session-1": history }, config },
+        data: { command: [], message: { "session-1": history }, part: parts, config },
         session: {
           optimistic: {
             add: (value: { parts: SentPart[] }) => void steps.push({ kind: "echo", parts: value.parts }),
@@ -632,12 +639,35 @@ describe("follow-up optimistic echo", () => {
       expect(await map(content), content).toBe(1)
   })
 
+  test("sends a thanks to the quick lane only when no work waits on the user", async () => {
+    const thanks = (history: object[], parts: Record<string, SentPart[]> = {}) =>
+      send({ prompt: [{ type: "text", content: "thanks", start: 0, end: 6 }] }, history, {}, parts).then(
+        (steps) => steps.at(-1)?.agent,
+      )
+    const reply = (id: string, text: string, extra: object = {}) => ({
+      history: [{ id, role: "assistant", time: { created: 1, completed: 2 }, finish: "stop", ...extra }],
+      parts: { [id]: [{ id: `${id}-text`, type: "text", text }] },
+    })
+    const done = reply("done", "Fixed the typo in README.md.")
+    expect(await thanks(done.history, done.parts)).toBe("quick")
+    // The agent asked something: the thanks answers that work, which the engine sizes with the history.
+    const asked = reply("asked", "Deployed. Do you want me to keep the preview URL?")
+    expect(await thanks(asked.history, asked.parts)).toBe("build")
+    // The run did not finish.
+    const failed = reply("failed", "Migrating the routes", { error: { name: "MessageAbortedError" } })
+    expect(await thanks(failed.history, failed.parts)).toBe("build")
+  })
+
   test("sends exactly the echoed parts when nothing is added", async () => {
     expectOneEchoBeforeRequest(await send(), 0)
   })
 
   test("adds the desktop's file map only before the session's first reply", async () => {
-    expectOneEchoBeforeRequest(await withDesktopContext(() => send({}, [{ role: "user" }, { role: "assistant" }])), 0)
+    const history = [
+      { id: "u", role: "user", time: { created: 0 } },
+      { id: "a", role: "assistant", time: { created: 1, completed: 2 }, finish: "stop" },
+    ]
+    expectOneEchoBeforeRequest(await withDesktopContext(() => send({}, history)), 0)
   })
 
   test("sends the interactive per-run cap on top of the configured run budget", async () => {

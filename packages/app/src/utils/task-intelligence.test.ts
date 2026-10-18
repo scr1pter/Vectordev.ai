@@ -6,6 +6,7 @@ import {
   routeModelForTask,
   routeVariantForTask,
   supportsImageInput,
+  workOpen,
 } from "./task-intelligence"
 
 type TestModel = {
@@ -71,7 +72,7 @@ describe("task intelligence", () => {
       expect(routeModelForImages({ current, available: [current, paid] })).toEqual({ model: undefined, routed: false })
     })
 
-  test("keeps social messages in the quick lane", () => {
+  test("keeps social messages in the quick lane unless work waits on the user", () => {
     expect(classifyTaskDifficulty("hello!")).toBe("trivial")
     expect(classifyTaskDifficulty("fix login.ts")).toBe("standard")
     for (const text of [
@@ -83,8 +84,11 @@ describe("task intelligence", () => {
       "thanks for the help",
       "what is vector?",
       "hello again",
-    ])
+    ]) {
       expect(classifyTaskDifficulty(text), text).toBe("trivial")
+      // While the agent waits on an answer, even a thanks answers that work.
+      expect(classifyTaskDifficulty(text, true), text).toBe("standard")
+    }
   })
 
   test("a reply that continues the work, or anything that is not social, is never trivial and routes no variant", () => {
@@ -112,6 +116,22 @@ describe("task intelligence", () => {
     // Only the user's own ask makes work complex.
     expect(classifyTaskDifficulty("be thorough: migrate the app to the new router")).toBe("complex")
     expect(classifyTaskDifficulty("migrate the app to the new router across 40 files")).toBe("standard")
+  })
+
+  test("work is open when the agent's last reply asked something or its run did not finish", () => {
+    const reply = (text: string, extra: object = {}) => {
+      const message = { id: "m", role: "assistant", time: { created: 1, completed: 2 }, finish: "stop", ...extra }
+      return workOpen([{ id: "u", role: "user", time: { created: 0 } }, message], (id) =>
+        id === "m" ? [{ type: "text", text }] : [],
+      )
+    }
+    expect(reply("Fixed the typo.")).toBe(false)
+    expect(reply("Fixed the typo. Anything else?")).toBe(false)
+    expect(reply("Deployed. Do you want me to keep the preview URL?")).toBe(true)
+    expect(reply("Migrating the routes", { error: { name: "MessageAbortedError" } })).toBe(true)
+    expect(reply("Migrated 12 of", { finish: "length" })).toBe(true)
+    expect(reply("Still going", { time: { created: 1 } })).toBe(true)
+    expect(workOpen([], () => [])).toBe(false)
   })
 
   test("routes complex work to a meaningfully stronger model in the same provider", () => {

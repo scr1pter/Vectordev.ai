@@ -31,6 +31,7 @@ import {
   routeModelForTask,
   routeVariantForTask,
   type TaskDifficulty,
+  workOpen,
 } from "@/utils/task-intelligence"
 import { modelDisplayName } from "@/utils/provider-brand"
 import { FREE_MODEL_POLICY_NOTICE, firstFreeModelPolicyNotice } from "@/utils/free-model-policy-notice"
@@ -66,7 +67,8 @@ export function resolveExecutionAgent(input: {
   if (input.quickRequested) return "quick"
   // A greeting, thanks or a farewell takes the quick lane from here on every agent, with or without the judge, so an
   // engine that does not size requests itself (an older Vector, a remote server) also answers it with one small
-  // request. "ok", "yes" or "continue" are not trivial: they continue the work before them, which the engine sizes.
+  // request. "ok", "yes" or "continue", and anything sent while work waits on the user, are not trivial: they continue
+  // the work before them, which the engine sizes.
   if (input.difficulty === "trivial") return "quick"
   return input.current === "quick" ? "build" : input.current
 }
@@ -106,7 +108,12 @@ const SYNTHETIC_SLOTS = 2
 export async function sendFollowupDraft(input: FollowupSendInput) {
   const text = draftText(input.draft.prompt)
   const images = draftImages(input.draft.prompt)
-  const difficulty = input.draft.difficulty ?? classifyTaskDifficulty(text)
+  const difficulty =
+    input.draft.difficulty ??
+    classifyTaskDifficulty(
+      text,
+      workOpen(input.sync.data.message?.[input.draft.sessionID] ?? [], (id) => input.sync.data.part?.[id]),
+    )
   const agent = resolveExecutionAgent({
     planMode: input.draft.agent === "plan",
     quickRequested: input.draft.agent === "quick",
@@ -442,8 +449,10 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
+    // A social message takes the quick lane only when no work waits on the user; then it answers that work.
+    const open = params.id ? workOpen(sync().data.message?.[params.id] ?? [], (id) => sync().data.part?.[id]) : false
     const difficulty =
-      mode === "normal" && !text.trim().startsWith("/") ? classifyTaskDifficulty(text) : ("standard" as const)
+      mode === "normal" && !text.trim().startsWith("/") ? classifyTaskDifficulty(text, open) : ("standard" as const)
     // Hiding a model in Settings is how the first-run tour tells people to
     // control what Vector uses, so routing must not reach past that filter and
     // pick something they deliberately turned off.

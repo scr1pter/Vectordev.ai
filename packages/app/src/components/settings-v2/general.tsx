@@ -329,7 +329,7 @@ export const SettingsGeneralV2: Component<{
           <Show when={settings.general.llmJudge()}>
             <SelectRow
               title="Tasks the judge checks"
-              description="Large tasks are the ones Vector runs with subagents: rewrites, migrations, or when you ask it to be thorough. Every task that changes files also includes small fixes."
+              description="Large tasks are the ones Vector runs with subagents: when you ask it to be thorough, or when the agent finds the work is large. Every task that changes files also includes small fixes."
               options={[
                 { value: "thorough", label: "Large tasks" },
                 { value: "changes", label: "Every task that changes files" },
