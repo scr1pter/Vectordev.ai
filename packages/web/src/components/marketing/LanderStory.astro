@@ -67,10 +67,10 @@ const pillars = [
     label: "Harness",
     status: { kind: "today", text: "Today" },
     title: "An agent of its own, with less to carry.",
-    text: "Vector's own engine runs a fixed set of tools, compacts older turns while keeping a protected recent window, and ships nine built-in subagents, four of which can't edit a file. From desktop 1.99.108, subagents work in the background in batches of up to eight, while you message, steer or stop them.",
+    text: "Vector's engine runs a lean set of its own tools, compacts older turns while keeping a protected recent window, and ships nine built-in subagents, four of which can't edit a file. From desktop 1.99.108, subagents work in the background while you message, steer or stop them.",
     proof: "On every scripted task in the benchmark below, Vector made the same number of model requests as Claude Code, and each one carried less.",
     note: "a",
-    small: "Steering background subagents reaches the terminal with the next CLI release, and Windows WSL servers once a later desktop release requires that CLI.",
+    small: "Background subagents reach the terminal with the next CLI release, and Windows WSL servers after that.",
   },
   {
     id: "tokenomics",
@@ -80,15 +80,15 @@ const pillars = [
     text: "The Run Guard stops a run within one step of the cap you set, pauses an agent stuck repeating the same call or error three times, and ends a provider outage after 10 retries or 15 minutes. A step with no listed price shows as unpriced, not as $0.00.",
     proof: "One cap covers the whole run: its subagents and helper runs, Vectorscope reviews included, count against the run that launched them.",
     note: "c",
-    small: "Chats and parallel agents have no cap until you set one; automations start at $5 a run and $25 a day. Desktop from 1.99.108, not yet on Windows WSL servers; the terminal gets the Run Guard with the next CLI release.",
+    small: "Desktop only, and not yet on Windows WSL servers. Chats and parallel agents have no cap until you set one.",
   },
   {
     id: "velocity",
     label: "Vector Velocity",
     status: { kind: "dev", text: "In development" },
     title: "A model of its own, designed to cost less to run.",
-    text: "Vector Velocity is the coding model we are building for agentic computer use, agentic workflows and Vector's own harness, and for other coding and developer-tool work. It is designed to use under 20B parameters active per token.",
-    proof: "Three of the largest models coding agents run on today use more: 35B parameters per token for Qwen3-Coder-480B, and 32B for Kimi K2.5 and for Cursor's Composer 2, which is built on it. Compute per token grows with active parameters, so Velocity is designed to cost significantly less to run than all three. That is a design goal, not a measured result.",
+    text: "Vector Velocity is the coding model we are building for agentic computer use, agentic workflows and Vector's own harness, and for other coding and developer-tool work. The harness cuts what each request carries; Velocity is designed to cut what each token costs, with under 20B parameters active per token.",
+    proof: "Four of the largest coding models with a public size or base use more per token: 35B for Qwen3-Coder-480B, 32B for Kimi K2.7 Code, and, going by the open models they are built on, 32B for Cursor's Composer 2.5 and 104B for Cognition's SWE-2. Compute per token grows with active parameters, so Velocity is designed to cost significantly less to run than all four. That is a design goal, not a measured result.",
     note: "d",
     small: "No weights or benchmarks exist yet, so we make no performance claims. Vector doesn't use your prompts, code or model output to train any model, Velocity included.",
     href: "/legal/privacy#training",
@@ -107,7 +107,8 @@ const pillars = [
 ]
 
 // The proof strip carries measured results only: the first request's size as a bar, and the cost range of each
-// session. The values are the archive's medians for the four tasks where both agents made the same requests.
+// session. The values are the archive's medians for the four tasks where both agents made the same requests. The
+// simulated cache carries across tasks within a repetition, so neither label calls a session cold or warm.
 const firstRequest = { vector: 9183, claudeCode: 29857 }
 const figures = [
   {
@@ -115,7 +116,7 @@ const figures = [
     label: "lower modelled cost than Claude Code for the same four scripted tasks, first session",
     note: "b",
   },
-  { value: "69–75%", label: "lower in a second session of the same tasks, with a warmed simulated cache", note: "b" },
+  { value: "69–75%", label: "lower in a second session of the same tasks, run as a fresh process", note: "b" },
 ]
 
 // Each note is a list of parts; a part with an href renders as a link.
@@ -126,7 +127,7 @@ const notes = [
       { text: "Vector's offline footprint benchmark, run 11 October 2026 against Claude Code 2.1.215 and " },
       { text: "archived in Vector's repository", href: archive },
       {
-        text: ". In the first request of a new solo-fix session, Vector sent 9,183 estimated input tokens and Claude Code 29,857, most of it each agent's own instructions and tool definitions. Tokens are estimated as characters ÷ 4. Providers cache much of this prefix, so the figure measures what each agent sends, not your bill; note b prices it with caching.",
+        text: ". In the first request of a new solo-fix session, Vector sent 9,183 estimated input tokens and Claude Code 29,857, most of it each agent's own instructions and tool definitions. Tokens are estimated as characters ÷ 4. Providers cache much of this prefix, so the figure is not your bill; note b prices it with caching.",
       },
     ],
   },
@@ -134,7 +135,7 @@ const notes = [
     id: "b",
     parts: [
       {
-        text: "The same archive: four scripted tasks (a solo fix, two fixes that use each agent's own subagents, and a 12-turn investigation that stops before editing), each repeated three times, medians shown. Vector ran from source at a revision that desktop 1.99.108 includes, and both agents made the same number of model requests on every task. Vector's modelled cost was 67–79% lower in the first session and 69–75% lower in a second, a fresh process with a warmed simulated cache. Each agent's simulated cache is fresh at the start of a repetition and carries across its tasks and sessions within it. Requests go to a local fake model server and are priced at fixed list rates: $3 per million input tokens, $3.75 for cache writes, $0.30 for cache reads and $15 for output. The benchmark measures what each agent sends for identical scripted work, not a live bill or answer quality.",
+        text: "The same archive: four scripted tasks (a solo fix, two fixes that use each agent's own subagents, and a 12-turn investigation that stops before editing), each repeated three times, medians shown. Vector ran from source at a revision that desktop 1.99.108 includes, and both agents made the same number of model requests on every task. Vector's modelled cost was 67–79% lower in the first session and 69–75% lower in a second, a fresh process that is not a resumed chat. Each agent's simulated cache is fresh at the start of a repetition and carries across its tasks and sessions within it, so a first session can already read what an earlier task cached. The top of the first-session range is the 12-turn investigation, where Claude Code's first request found nothing cached and Vector's did. Requests go to a local fake model server and are priced at fixed list rates: $3 per million input tokens, $3.75 for cache writes, $0.30 for cache reads and $15 for output. The benchmark measures what each agent sends for identical scripted work, not a live bill or answer quality, and the archive itself says it is no proof that Vector costs less in general.",
       },
     ],
   },
@@ -149,15 +150,19 @@ const notes = [
   {
     id: "d",
     parts: [
-      { text: "Active parameters per token, from each model's own documentation, checked 17 October 2026: " },
+      { text: "Active parameters per token, from the makers' own pages, checked 17 October 2026: " },
       { text: "Qwen3-Coder-480B's model card", href: "https://huggingface.co/Qwen/Qwen3-Coder-480B-A35B-Instruct" },
-      { text: " (35B activated), " },
-      { text: "Kimi K2.5's model card", href: "https://huggingface.co/moonshotai/Kimi-K2.5" },
-      { text: " (32B activated) and " },
-      { text: "Cursor's Composer 2 technical report", href: "https://arxiv.org/abs/2603.24477" },
-      {
-        text: ", which names Kimi K2.5 as its base (32B active).",
-      },
+      { text: " (35B activated) and " },
+      { text: "Kimi K2.7 Code's", href: "https://huggingface.co/moonshotai/Kimi-K2.7-Code" },
+      { text: " (32B). Cursor and Cognition publish no sizes, so their figures are the open bases they name: " },
+      { text: "Composer 2.5", href: "https://cursor.com/blog/composer-2-5" },
+      { text: " is built on " },
+      { text: "Kimi K2.5", href: "https://huggingface.co/moonshotai/Kimi-K2.5" },
+      { text: " (32B activated), and " },
+      { text: "SWE-2", href: "https://cognition.com/blog/swe-2" },
+      { text: " on " },
+      { text: "Kimi K3", href: "https://huggingface.co/moonshotai/Kimi-K3" },
+      { text: " (104B activated)." },
     ],
   },
 ]
@@ -170,8 +175,8 @@ const thousands = (value: number) => `${(value / 1000).toFixed(1)}K`
     <p class="ls-kicker" data-reveal>What Vector is</p>
     <h2 id="what-title" class="ls-title" data-reveal>The work is moving from typing code to directing&nbsp;agents.</h2>
     <p class="ls-subtitle" data-reveal>
-      Vector is a free workspace for coding agents, on your desktop and in your terminal, working on the repository
-      already on your computer.
+      Vector gives that work one place, on your desktop and in your terminal, in the repository already on your
+      computer.
     </p>
     <p class="ls-body" data-reveal>
       Vector has an agent engine of its own, with its own tools and context handling. In the desktop app, Claude Code,
@@ -293,8 +298,8 @@ const thousands = (value: number) => `${(value / 1000).toFixed(1)}K`
     <p class="ls-kicker" data-reveal>The numbers</p>
     <h2 id="proof-title" class="ls-title" data-reveal>The numbers, with their fine&nbsp;print.</h2>
     <p class="ls-caveat" data-reveal>
-      One offline benchmark: identical scripted work against a fake model server, priced at list rates. It measures what
-      each agent sends, not a live bill or answer quality.
+      One offline benchmark of identical scripted work. The notes under the numbers say what it measures and what it
+      doesn't.
     </p>
   </div>
 

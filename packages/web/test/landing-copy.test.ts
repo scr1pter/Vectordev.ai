@@ -3,6 +3,7 @@ import path from "node:path"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { legacyName } from "@vectordevai/core/flag/legacy"
 import { DEFAULT_SPEND_POLICY } from "../../desktop/src/main/spend-limits"
+import { publishedDesktopVersion } from "../src/data/vector-releases"
 import summary from "../../../docs/benchmarks/vector-efficiency-2026-10/summary.json"
 import manifest from "../../../docs/benchmarks/vector-efficiency-2026-10/manifest.json"
 
@@ -50,15 +51,35 @@ test("the cost figures come from the archived efficiency benchmark, against Clau
   )
   expect(story).toContain(`value: "${range(gap(1))}"`)
   expect(story).toContain(`value: "${range(gap(2))}"`)
-  // The hero's figure spans both sessions, and the redrawn home page in the app's browser shows the same headline.
+  // The hero's figure spans both sessions. Its heading names whose agent did the work and its qualifier says both were
+  // priced alike, so the saving can't be read as Vector making Claude Code cheaper or as a cheaper model.
   const both = range([...gap(1), ...gap(2)])
   expect(lander).toContain(`const heroCost = "${both}"`)
   expect(lander).toContain(
-    'The same scripted work for <span class="headline-figure">{heroCost}&nbsp;less</span> modelled spend than Claude&nbsp;Code.',
+    `<h1 class="headline" id="hero-title"> Vector's own agent did the same scripted work as Claude&nbsp;Code for <span class="headline-figure">{heroCost}&nbsp;less</span> modelled spend. </h1>`,
   )
-  expect(browserPanel).toContain(
-    `The same scripted work for <span>${both} less</span> modelled spend than Claude Code.`,
+  expect(lander).toContain(
+    "Both were priced at the same list rates, so the difference is what each agent sends with every request.",
   )
+  // The claim is made once, beside its qualifier: the redrawn home page in the app's browser doesn't repeat it.
+  expect(page.match(/modelled spend/g)).toHaveLength(1)
+  expect(shots.filter((shot) => shot.text.includes(both) || shot.text.includes("modelled spend"))).toEqual([])
+})
+
+test("the top of the first-session range is the task where only Claude Code's first request missed the cache", () => {
+  // Note b says which task gives the top of the range, and why: in every repetition, Claude Code's first request in
+  // the first session's investigation read nothing from the simulated cache while Vector's read its prefix.
+  const top = matched[gap(1).indexOf(Math.max(...gap(1)))]
+  expect(top).toBe("long-loop")
+  expect(cell("claude-code", top, 1).firstPrimaryCacheRead).toBe(0)
+  expect(cell("vector", top, 1).firstPrimaryCacheRead).toBeGreaterThan(0)
+  expect(story).toContain(
+    "The top of the first-session range is the 12-turn investigation, where Claude Code's first request found nothing cached and Vector's did.",
+  )
+  // A first session can read what an earlier task cached, so no label calls it cold or the second one warm.
+  expect(cell("claude-code", "delegate-explore", 1).firstPrimaryCacheRead).toBeGreaterThan(0)
+  expect(story).toContain("so a first session can already read what an earlier task cached")
+  expect(story).not.toMatch(/warmed simulated cache|cold cache|cold start/)
 })
 
 test("the first-request bar and the per-request claim come from the same archive", async () => {
@@ -104,20 +125,27 @@ test("the first-request bar and the per-request claim come from the same archive
   )
 })
 
-test("every benchmark figure keeps its date and its caveats", () => {
+test("every benchmark figure keeps its date and its caveats", async () => {
   // The integrated HTTP runs all started on 11 October 2026 (UTC).
   const dates = manifest.reports
     .filter((report) => report.file.startsWith("raw/integrated-http-"))
     .map((report) => report.provenance.startedAt.slice(0, 10))
   expect(new Set(dates)).toEqual(new Set(["2026-10-11"]))
   expect(story).toContain("run 11 October 2026 against Claude Code 2.1.215")
-  expect(lander).toContain("run 11 October 2026 against a fake model server and priced at list rates")
-  expect(lander).toContain("It measures what each agent sends, not answer quality.")
-  expect(story).toContain("not your bill")
-  expect(story).toContain("It measures what each agent sends, not a live bill or answer quality.")
-  expect(story).toContain(
-    "The benchmark measures what each agent sends for identical scripted work, not a live bill or answer quality.",
+  expect(lander).toContain(
+    "From Vector's offline benchmark of four scripted coding tasks against a fake model server, run 11 October 2026; it doesn't measure answer quality.",
   )
+  expect(story).toContain("so the figure is not your bill")
+  // The caveat in full once, in note b, including the archive's own warning; the section head only points to it.
+  expect(story).toContain(
+    "The benchmark measures what each agent sends for identical scripted work, not a live bill or answer quality, and the archive itself says it is no proof that Vector costs less in general.",
+  )
+  expect(await Bun.file(path.join(archive, "README.md")).text()).toContain(
+    "not a live model quality evaluation or proof that Vector is generally cheaper",
+  )
+  expect(page.match(/answer quality/g)).toHaveLength(2)
+  expect(page.match(/fake model server/g)).toHaveLength(2)
+  expect(story).toContain("The notes under the numbers say what it measures and what it doesn't.")
   expect(story).toContain("Each agent's simulated cache is fresh at the start of a repetition")
   expect(story).toContain("archived in Vector's repository")
   // One archive for every figure: the earlier subagent run and its numbers are gone, and so is the 10 October one.
@@ -136,10 +164,17 @@ test("the hero leads with the edge, and Vector has one definition", () => {
   const definition = "a free workspace for coding agents"
   expect(index).toContain(`title="Vector — ${definition}"`)
   expect(index).toContain(`description="Vector is ${definition}`)
+  // Search results cut a description at about 160 characters.
+  expect(index.match(/description="([^"]+)"/)![1].length).toBeLessThanOrEqual(160)
+  // The heading is the edge; the wordmark above it is decoration.
+  expect(lander).toContain('<div class="wordmark" aria-hidden="true">')
+  expect(lander.match(/<h1\b/g)).toHaveLength(1)
+  // One plain sentence in the hero says what Vector is, and the story doesn't say it again.
   expect(lander).toContain(
     `<p class="hero-deck simple-deck">Vector is ${definition}, built around a lean agent of its own.</p>`,
   )
-  expect(story).toContain(`Vector is ${definition}, on your desktop and in your terminal`)
+  expect([lander, story].join(" ").match(new RegExp(`Vector is ${definition}`, "g"))).toHaveLength(1)
+  expect(story).toContain("Vector gives that work one place, on your desktop and in your terminal")
   // The closing call to action ends on the edge, not on bringing your own key.
   expect(footer).toContain(`<p class="footer-copy">Vector is ${definition}, built around a lean agent of its own.</p>`)
   expect(footer).not.toMatch(/own (model )?provider|own key/i)
@@ -151,6 +186,12 @@ test("the hero leads with the edge, and Vector has one definition", () => {
   expect(page.match(/each in its own copy of the repository/g)).toHaveLength(1)
   expect(story.match(/nine built-in subagents/g)).toHaveLength(1)
   expect(page.match(/within one step of the cap you set/g)).toHaveLength(1)
+  expect(page.match(/batches of up to eight/g)).toHaveLength(2) // the ticker and its screen-reader sentence
+  expect(page.match(/your branch before you push/g)).toHaveLength(2) // likewise
+  // The product tour doesn't list again what its own paragraph and the cards below it say.
+  expect(lander).not.toContain("workspaceFacts")
+  // Plugins and MCP servers add tools, so the engine's own tools are lean, not a fixed set.
+  expect(page).not.toContain("fixed set of tools")
 })
 
 test("the Run Guard, scheduled-agent and Vectorscope figures are the ones that ship", () => {
@@ -159,9 +200,9 @@ test("the Run Guard, scheduled-agent and Vectorscope figures are the ones that s
   const perDay = DEFAULT_SPEND_POLICY.unattended.perDay?.usd
   expect(story).toContain("run without a cap until you set one in Settings, Spend limits")
   expect(story).toContain(`automations start with limits of $${perRun} a run and $${perDay} a day`)
-  expect(story).toContain(
-    `Chats and parallel agents have no cap until you set one; automations start at $${perRun} a run and $${perDay} a day.`,
-  )
+  // The pillar keeps the qualifier beside the claim; note c gives the defaults once.
+  expect(story).toContain("Desktop only, and not yet on Windows WSL servers. Chats and parallel agents have no cap until you set one.")
+  expect(page.match(/\$5 a run and \$25 a day/g)).toHaveLength(1)
   expect(story).not.toContain("Caps are off until you set one.")
   expect(SpendGuard.LOOP_REPEATS).toBe(3)
   expect(SpendGuard.ERROR_STREAK).toBe(3)
@@ -177,14 +218,17 @@ test("the Run Guard, scheduled-agent and Vectorscope figures are the ones that s
   expect(shots.some((shot) => shot.text.includes("<b>ChatGPT plan</b>"))).toBe(true)
   // The terminal gets the Run Guard and subagent steering with the next CLI release, not with npm CLI 1.99.99, and
   // Windows WSL servers, which keep the 1.99.99 engine, get them later still.
-  expect(story).toContain("the terminal gets the Run Guard with the next CLI release")
-  expect(story).toContain("Steering background subagents reaches the terminal with the next CLI release")
+  expect(story).toContain("The terminal gets the Run Guard with the next CLI release")
+  expect(story).toContain("Background subagents reach the terminal with the next CLI release")
   expect(story.match(/Windows WSL servers/g)?.length).toBe(4)
+  expect(story.match(/once a later desktop release requires that CLI/g)).toHaveLength(1)
 })
 
 test("Vector Velocity is in development, sized by its active parameters only", () => {
   expect(story).toContain('label: "Vector Velocity", status: { kind: "dev", text: "In development" }')
-  expect(story).toContain("It is designed to use under 20B parameters active per token.")
+  expect(story).toContain(
+    "The harness cuts what each request carries; Velocity is designed to cut what each token costs, with under 20B parameters active per token.",
+  )
   // No total size, no base model, no compute provider.
   expect(
     [page, ...shots.map((shot) => shot.text)].filter((text) =>
@@ -195,17 +239,24 @@ test("Vector Velocity is in development, sized by its active parameters only", (
   expect(page).not.toMatch(/DeepSeek|GLM|Nebius/i)
   expect(page).not.toMatch(/plan to build|Velocity[^."]*\bplanned\b/i)
   expect(lander).toContain('"is building a coding model of its own."')
-  // Why it matters: the comparison models' active sizes, each from its maker's own documentation, and the saving
-  // stated as a design goal.
+  // Why it matters: four large coding models with a public size or base, the same four the investor page compares,
+  // each with its active size from its maker's own page (the open base for the two whose makers publish none), and
+  // the saving stated as a design goal. Closed models without a public size are not compared.
   expect(story).toContain(
-    "35B parameters per token for Qwen3-Coder-480B, and 32B for Kimi K2.5 and for Cursor's Composer 2, which is built on it.",
+    "Four of the largest coding models with a public size or base use more per token: 35B for Qwen3-Coder-480B, 32B for Kimi K2.7 Code, and, going by the open models they are built on, 32B for Cursor's Composer 2.5 and 104B for Cognition's SWE-2.",
   )
-  expect(story).toContain("https://huggingface.co/Qwen/Qwen3-Coder-480B-A35B-Instruct")
-  expect(story).toContain("https://huggingface.co/moonshotai/Kimi-K2.5")
-  expect(story).toContain("https://arxiv.org/abs/2603.24477")
+  ;[
+    "https://huggingface.co/Qwen/Qwen3-Coder-480B-A35B-Instruct",
+    "https://huggingface.co/moonshotai/Kimi-K2.7-Code",
+    "https://cursor.com/blog/composer-2-5",
+    "https://huggingface.co/moonshotai/Kimi-K2.5",
+    "https://cognition.com/blog/swe-2",
+    "https://huggingface.co/moonshotai/Kimi-K3",
+  ].forEach((source) => expect(story).toContain(`href: "${source}"`))
   expect(story).toContain(
-    "designed to cost significantly less to run than all three. That is a design goal, not a measured result.",
+    "designed to cost significantly less to run than all four. That is a design goal, not a measured result.",
   )
+  expect(page).not.toMatch(/largest models coding agents run on|than all three/)
   expect(story).toContain("No weights or benchmarks exist yet")
 })
 
@@ -227,6 +278,33 @@ test("what is not live when the page ships is labelled, and what ships with it i
   expect(lander).toContain('"runs subagents in batches of up to eight."')
   expect(page).not.toMatch(/eight subagents at once|subagents[^."]*no cap|no cap[^."]*subagents/i)
 })
+
+test("no picture of the session view shows a Publish button", () => {
+  // From desktop 1.99.109, publishing lives in Vector Cloud, reached from Home; the session's browser has no
+  // Publish button (session-side-panel.tsx), so the redrawn session and its browser don't either.
+  expect(shots.filter((shot) => /data-browser-publish|\bPublish\b/.test(shot.text)).map((shot) => shot.file)).toEqual([])
+})
+
+// The page ships with desktop 1.99.109 and describes or draws two things due in that release: free models labelled
+// "May train on your prompts" behind a one-time question, and the sidebar's "Repositories" and "Repository tools"
+// labels. Once the published desktop version reaches 1.99.109, the app in the same tree must have both; if either
+// slipped, put back the free models' status label or the old sidebar labels in the redraw.
+test.skipIf(Bun.semver.order(publishedDesktopVersion, "1.99.109") < 0)(
+  "once desktop 1.99.109 is published, the app has what the page says that release brings",
+  async () => {
+    const source = async (dir: string) =>
+      Promise.all(
+        (await Array.fromAsync(new Bun.Glob("**/*.{ts,tsx}").scan({ cwd: path.join(repo, dir) }))).map((file) =>
+          Bun.file(path.join(repo, dir, file)).text(),
+        ),
+      )
+    const app = [...(await source("packages/app/src")), ...(await source("packages/core/src"))]
+    expect(app.some((text) => text.includes("May train on your prompts"))).toBe(true)
+    expect(app.some((text) => text.includes("Repository tools"))).toBe(true)
+    const nav = await Bun.file(path.join(repo, "packages/app/src/components/workspace-navigation.tsx")).text()
+    expect(nav).not.toMatch(/>\s*Projects\s*<|Project tools/)
+  },
+)
 
 test("the landing page says repository, never project, for Vector's own idea", () => {
   expect([lander, story, index, footer].filter((text) => /\bprojects?\b/i.test(text))).toEqual([])

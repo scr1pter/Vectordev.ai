@@ -1,9 +1,13 @@
 ---
 // The browser in the session's side panel (BrowserPanel in
 // packages/app/src/pages/session/session-side-panel.tsx): back, forward,
-// reload, an address bar, the sidebar toggle, open-in-browser and Publish over
-// a page. The pages are small drawings of this site, so the address bar has
-// somewhere real to go and "open in your browser" opens the same page here.
+// reload, an address bar, the sidebar toggle and open-in-browser over a page.
+// It has no publish button: from desktop 1.99.109, which this page ships with,
+// publishing lives in Vector Cloud, reached from Home, not in the session.
+// The pages are small drawings of this site, so the address bar has somewhere
+// real to go and "open in your browser" opens the same page here. The drawn
+// home page carries the site's definition, not its benchmark headline, so that
+// claim is only made once, in the real hero, beside its qualifier.
 import { docsNav } from "../../../data/docs-nav"
 import { wordmarkCells } from "../../../lib/wordmark"
 import ShotIcon from "./ShotIcon.astro"
@@ -73,7 +77,6 @@ const rain = `url("data:image/svg+xml,${encodeURIComponent(
     <a class="bp-btn" data-browser-open href="https://vectordev.ai/" target="_blank" rel="noopener" aria-label="Open in system browser" title="Open in system browser">
       <ShotIcon name="external" size={14} />
     </a>
-    <button type="button" class="bp-publish" data-browser-publish>Publish</button>
   </div>
 
   <div class="bp-viewport" style={`--bp-rain: ${rain}`} data-browser-viewport>
@@ -101,8 +104,8 @@ const rain = `url("data:image/svg+xml,${encodeURIComponent(
       <svg class="bp-wordmark" viewBox="0 0 40 7" fill="currentColor" aria-hidden="true">
         {wordmarkCells.map((cell) => <rect x={cell.x} y={cell.y} width="0.84" height="0.84" />)}
       </svg>
-      <p class="bp-headline">The same scripted work for <span>67–79% less</span> modelled spend than Claude Code.</p>
-      <p class="bp-deck">Vector is a free workspace for coding agents, built around a lean agent of its own.</p>
+      <p class="bp-headline">A free workspace for coding agents.</p>
+      <p class="bp-deck">Built around a lean agent of its own, with Claude Code, Codex and Cursor Agent beside it.</p>
       <div class="bp-actions">
         <a class="bp-cta" href="https://vectordev.ai/login" data-browser-link="/login">Get Vector <ShotIcon name="arrow" size={16} /></a>
         <a
@@ -176,15 +179,6 @@ const rain = `url("data:image/svg+xml,${encodeURIComponent(
         Open <span data-browser-real-label></span> in your browser <ShotIcon name="external" size={13} />
       </a>
     </section>
-
-    <div class="bp-toast" data-browser-toast role="status" hidden>
-      <button type="button" class="bp-toast-close" data-browser-toast-close aria-label="Dismiss"><ShotIcon name="x" size={14} /></button>
-      <p class="bp-toast-title">Publish runs in the desktop app</p>
-      <p class="bp-toast-text">
-        It deploys the open repository with your own Vercel account and hands back the live link. This preview has no
-        repository to deploy.
-      </p>
-    </div>
   </div>
 </div>
 
@@ -213,13 +207,12 @@ const rain = `url("data:image/svg+xml,${encodeURIComponent(
     const back = root.querySelector<HTMLButtonElement>("[data-browser-back]")
     const forward = root.querySelector<HTMLButtonElement>("[data-browser-forward]")
     const open = root.querySelector<HTMLAnchorElement>("[data-browser-open]")
-    const toast = root.querySelector<HTMLElement>("[data-browser-toast]")
     const menu = root.querySelector<HTMLButtonElement>("[data-browser-menu]")
     const menuList = root.querySelector<HTMLElement>("[data-browser-menu-list]")
     const real = root.querySelector<HTMLAnchorElement>("[data-browser-real]")
     const realLabel = root.querySelector<HTMLElement>("[data-browser-real-label]")
-    if (!url || !back || !forward || !open || !toast || !menu || !menuList || !real || !realLabel) return
-    const state = { history: [{ path: "/", typed: "https://vectordev.ai/" }], at: 0, toast: 0 }
+    if (!url || !back || !forward || !open || !menu || !menuList || !real || !realLabel) return
+    const state = { history: [{ path: "/", typed: "https://vectordev.ai/" }], at: 0 }
 
     const setMenu = (on: boolean) => {
       menuList.hidden = !on
@@ -316,17 +309,6 @@ const rain = `url("data:image/svg+xml,${encodeURIComponent(
       if (!menuList.hidden && !menuList.contains(target) && !menu.contains(target)) setMenu(false)
     }
     document.addEventListener("pointerdown", outside)
-
-    const hideToast = () => {
-      clearTimeout(state.toast)
-      toast.hidden = true
-    }
-    root.querySelector("[data-browser-publish]")?.addEventListener("click", () => {
-      clearTimeout(state.toast)
-      toast.hidden = false
-      state.toast = window.setTimeout(hideToast, 7000)
-    })
-    root.querySelector("[data-browser-toast-close]")?.addEventListener("click", hideToast)
   }
 
   document.querySelectorAll<HTMLElement>("[data-browser]").forEach(boot)
@@ -464,23 +446,6 @@ const rain = `url("data:image/svg+xml,${encodeURIComponent(
     cursor: pointer;
   }
 
-  .bp-publish {
-    height: 24px;
-    margin-left: 7px;
-    padding: 0 12px;
-    border: 0;
-    border-radius: 999px;
-    background: linear-gradient(180deg, #a98af7, #8f6ff0);
-    color: #f6f2ff;
-    font: inherit;
-    font-size: 11.5px;
-    font-weight: 500;
-    cursor: pointer;
-  }
-
-  .bp-publish:hover {
-    filter: brightness(1.1);
-  }
 
   /* The site's nav stays at the top of every page; the page under it fills
      the rest. The glow sits under the nav and the wordmark, as on the site. */
@@ -650,11 +615,6 @@ const rain = `url("data:image/svg+xml,${encodeURIComponent(
     font-weight: 600;
     line-height: 32px;
     letter-spacing: -0.025em;
-  }
-
-  /* As on the real hero, the figure stays in ink and only keeps its words together. */
-  .bp-headline span {
-    white-space: nowrap;
   }
 
   .bp-deck {
@@ -1045,74 +1005,6 @@ const rain = `url("data:image/svg+xml,${encodeURIComponent(
 
     .bp-window-row .bp-model {
       display: none;
-    }
-  }
-
-  /* The app's publish sheet, slid over the bottom of the page. */
-  .bp-toast {
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 3;
-    padding: 16px 44px 18px 18px;
-    border-top: 1px solid rgba(226, 213, 237, 0.09);
-    background: color-mix(in srgb, #232228 92%, transparent);
-    -webkit-backdrop-filter: blur(18px);
-    backdrop-filter: blur(18px);
-    box-shadow: 0 -24px 70px rgba(0, 0, 0, 0.45);
-    animation: bp-sheet 180ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  .bp-toast[hidden] {
-    display: none;
-  }
-
-  @keyframes bp-sheet {
-    from {
-      opacity: 0;
-      transform: translateY(12px);
-    }
-  }
-
-  .bp-toast-title {
-    color: #fff;
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .bp-toast-text {
-    max-width: 92%;
-    margin-top: 4px;
-    color: rgba(255, 255, 255, 0.65);
-    font-size: 12.5px;
-    line-height: 1.55;
-  }
-
-  .bp-toast-close {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    display: grid;
-    width: 24px;
-    height: 24px;
-    place-items: center;
-    padding: 0;
-    border: 0;
-    border-radius: 7px;
-    background: transparent;
-    color: rgba(255, 255, 255, 0.45);
-    cursor: pointer;
-  }
-
-  .bp-toast-close:hover {
-    background: rgba(255, 255, 255, 0.07);
-    color: #fff;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .bp-toast {
-      animation: none;
     }
   }
 </style>
