@@ -34,6 +34,28 @@ test("first-run failure stays OFF, a network failure keeps the last catalog serv
   }
 })
 
+test("a newer catalog another process wrote to the shared cache file replaces this client's copy", async () => {
+  // The desktop engine, the terminal and "vector models" share the cache file; one refreshing it must not leave the
+  // others serving their own older copy until it expires.
+  const root = await mkdtemp(path.join(os.tmpdir(), "vector-free-models-"))
+  try {
+    const file = path.join(root, "catalog.json")
+    const first = { enabled: true, updatedAt: 1, models: [FREE_MODEL_FALLBACKS[0]!] }
+    let online = true
+    const client = FreeModels.createClient({ file, request: async () => Response.json(first), disabled: () => !online })
+    expect(await client.catalog(true)).toEqual(first)
+    expect(await client.catalog()).toEqual(first)
+    // Offline from here on; another process writes a newer catalog and the file's modification time moves on.
+    online = false
+    const second = { enabled: true, updatedAt: 2, models: [...FREE_MODEL_FALLBACKS.slice(0, 2)] }
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    await writeFile(file, JSON.stringify(second))
+    expect(await client.catalog()).toEqual(second)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test("a refusing answer, or a last catalog without models, never lists models whose prompts would fail", async () => {
   // Root cause 6 (17 Oct 2026): a client that last saw ON fell back to a built-in list on vectordev.ai's 503, so the
   // picker listed models while the shared chat refused every prompt. An empty ON answer (15 Oct) did the same.
