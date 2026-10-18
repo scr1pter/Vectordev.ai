@@ -4,6 +4,7 @@ import { providerUsable } from "@vectordevai/schema/provider-policy"
 import { totalTokens } from "../economics/economics-types"
 import { measureUsage } from "../economics/token-usage"
 import { REVIEW_SESSION_TITLE_PREFIX } from "@/utils/internal-sessions"
+import { requestComposerPrompt } from "@/features/cloud/cloud-handoff"
 // Vector code review in the desktop Pull Requests panel (section 6, D1), of a pull request or of the uncommitted
 // changes in the user's own checkout. It runs the same core as the GitHub Action and `vector review`: the same
 // prompts, output schema, filters and summary. The engine instance always stays on the user's own project, so another
@@ -1759,6 +1760,13 @@ export function askAgentPrompt(
     "",
     "Make the smallest change that fixes it and run the tests that cover it. Do not commit or push.",
   ].join("\n")
+}
+
+// Sends "Ask the agent"'s prompt to the task on screen, which takes it as its next message. With no composer on
+// screen, or one that holds an unsent draft or takes no input, `startTask` starts a new task with it instead.
+export function askAgent(text: string, startTask: (text: string) => void) {
+  if (requestComposerPrompt({ text, send: true })) return
+  startTask(text)
 }
 
 // The finding inside its <finding> tag. Its text was written by a model, so a tag in it is written as `&lt;` and can

@@ -32,6 +32,7 @@ import { WORKSPACE_FILE_SAVED_EVENT, workspaceFileSavedDetail } from "@/utils/wo
 import { WORKSPACE_MODE_CHANGED_EVENT, workspaceModeFromEvent, type WorkspaceMode } from "@/utils/workspace-mode"
 import {
   applyReviewFix,
+  askAgent,
   reviewCatalog,
   runReview,
   trackReviewSpend,
@@ -6606,13 +6607,12 @@ export default function NewLayout(props: ParentProps) {
           if (!directory) return Promise.reject(new Error("Open a repository before applying a fix."))
           return applyReviewFix(serverSDK().createClient({ directory, throwOnError: true }), directory, fix)
         }}
-        onAskAgent={(text) => {
-          // The task on screen takes it as its next message; with no composer on screen, a new task on the project
-          // starts with it.
-          if (requestComposerPrompt({ text, send: true })) return
-          const directory = activeWorkspaceScope().sourcePath
-          if (directory) tabs.newDraft({ server: server.key, directory }, text, { send: true })
-        }}
+        onAskAgent={(text) =>
+          askAgent(text, (prompt) => {
+            const directory = activeWorkspaceScope().sourcePath
+            if (directory) tabs.newDraft({ server: server.key, directory }, prompt, { send: true })
+          })
+        }
       />
 
       <AgentDashboard
