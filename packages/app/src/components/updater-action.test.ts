@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { installUpdate, updaterAction, updaterFailure, updateVectorToLatest } from "./updater-action"
+import {
+  installUpdate,
+  navigationUpdate,
+  navigationUpdateFailure,
+  updaterAction,
+  updaterFailure,
+  updateVectorToLatest,
+} from "./updater-action"
 import type { UpdaterPlatform, UpdaterState } from "@/updater"
 
 describe("updaterAction", () => {
@@ -170,5 +177,39 @@ describe("an install that fails", () => {
 
     expect(calls).toEqual(["install"])
     expect(errors).toEqual([])
+  })
+})
+
+describe("navigationUpdate", () => {
+  test("shows the Update button only for a downloaded update and while it installs", () => {
+    const hidden: (UpdaterState | undefined)[] = [
+      undefined,
+      { status: "disabled" },
+      { status: "idle" },
+      { status: "checking" },
+      { status: "downloading", version: "2.0.0" },
+      { status: "downloading", version: "2.0.0", percent: 40 },
+      { status: "up-to-date" },
+      { status: "error", message: "offline" },
+    ]
+    for (const state of hidden) expect(navigationUpdate(state)).toBeUndefined()
+    expect(navigationUpdate({ status: "ready", version: "2.0.0" })).toEqual({ version: "2.0.0", installing: false })
+    expect(navigationUpdate({ status: "installing", version: "2.0.0" })).toEqual({ version: "2.0.0", installing: true })
+  })
+})
+
+describe("navigationUpdateFailure", () => {
+  test("says the install failed, gives the updater's reason, and opens Updates & about", () => {
+    const opened: string[] = []
+    const toast = navigationUpdateFailure("The download is damaged.", () => opened.push("updates"))
+    expect(toast).toMatchObject({
+      variant: "error",
+      title: "Vector couldn't install the update",
+      description: "The download is damaged.",
+    })
+    expect(toast.actions.map((action) => action.label)).toEqual(["Open Updates", "Dismiss"])
+    const open = toast.actions[0].onClick
+    if (typeof open === "function") open()
+    expect(opened).toEqual(["updates"])
   })
 })

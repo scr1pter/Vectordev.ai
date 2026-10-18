@@ -27,6 +27,29 @@ export function updaterAction(state: UpdaterState | undefined) {
   }
 }
 
+// The sidebar's Update button, which takes the Settings gear's place: shown once an update has downloaded and while
+// it installs. Downloading has no progress to show, and an error also covers offline checks, so neither replaces the
+// gear; Settings > Updates & about shows both.
+export function navigationUpdate(state: UpdaterState | undefined) {
+  if (state?.status === "ready") return { version: state.version, installing: false }
+  if (state?.status === "installing") return { version: state.version, installing: true }
+  return undefined
+}
+
+// What the sidebar says when Update could not install. The button has already given its place back to the gear (the
+// updater is in its error state); Updates & about shows the error with Try again.
+export function navigationUpdateFailure(message: string, openUpdates: () => void) {
+  return {
+    variant: "error" as const,
+    title: "Vector couldn't install the update",
+    description: message,
+    actions: [
+      { label: "Open Updates", onClick: openUpdates },
+      { label: "Dismiss", onClick: "dismiss" as const },
+    ],
+  }
+}
+
 export async function updateVectorToLatest(updater: UpdaterPlatform | undefined) {
   if (!updater) return { status: "disabled" } as const
 

@@ -101,4 +101,29 @@ test("full-screen Settings is searchable and returns to the active task", async 
   await expect(page).toHaveURL(new RegExp(`${sessionID}$`))
   await expectSessionTitle(page, "Settings workspace regression")
   await expect(page.getByRole("button", { name: "Settings", exact: true })).toBeVisible()
+  // The web build has no updater, so the gear is never replaced by Update.
+  await expect(page.locator("[data-vector-update]")).toHaveCount(0)
+
+  // Cmd+, opens Settings on a task route, on Home, and on the task again after Home (Home's own copy of the command
+  // once outlived the page and swallowed the shortcut). The app picks Cmd or Ctrl from navigator.platform, which the
+  // Desktop Chrome fixture may emulate as Windows.
+  const shortcut = await page.evaluate(() =>
+    /(Mac|iPod|iPhone|iPad)/.test(navigator.platform) ? "Meta+Comma" : "Control+Comma",
+  )
+  // Shortcuts wait while a dialog is still closing, so press until Settings opens.
+  const openSettingsByKey = () =>
+    expect(async () => {
+      await page.keyboard.press(shortcut)
+      await expect(settings).toBeVisible({ timeout: 1_000 })
+    }).toPass()
+  await openSettingsByKey()
+  await settings.getByRole("button", { name: "Back", exact: true }).click()
+  await expect(settings).toHaveCount(0)
+  await page.locator("[data-vector-nav-home]").click()
+  await expect(page).toHaveURL(/\/$/)
+  await openSettingsByKey()
+  await settings.getByRole("button", { name: "Back", exact: true }).click()
+  await page.goBack()
+  await expectSessionTitle(page, "Settings workspace regression")
+  await openSettingsByKey()
 })

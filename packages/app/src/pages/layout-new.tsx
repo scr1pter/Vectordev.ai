@@ -13,12 +13,12 @@ import {
 } from "solid-js"
 import { useLocation, useNavigate } from "@solidjs/router"
 import { DebugBar } from "@/components/debug-bar"
-import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
+import { Titlebar } from "@/components/titlebar"
 import { useCommand } from "@/context/command"
 import { useLayout } from "@/context/layout"
 import { usePlanMode } from "@/context/plan-mode"
 import { usePlatform } from "@/context/platform"
-import { useUpdaterAction } from "@/components/updater-action"
+import { installUpdate, navigationUpdate, navigationUpdateFailure } from "@/components/updater-action"
 import { pathKey } from "@/utils/path-key"
 import { listSwarmWorkers } from "@/utils/swarm-workers"
 import { samePolledRecords, sameWorkspaceRevisions } from "@/utils/workspace-revisions"
@@ -798,6 +798,15 @@ export default function NewLayout(props: ParentProps) {
     void run({ contextId: "modal", command: "setVisible", visible: !modalOpen }).catch(() => undefined)
   })
   command.register("vector-navigation", () => [
+    // Settings from the palette and Cmd+, on every route, Home included. Registered once, here: a page's own copy
+    // outlives the page while the router finishes leaving it, and would answer Cmd+, after the page had gone.
+    {
+      id: "settings.open",
+      title: language.t("command.settings.open"),
+      category: language.t("command.category.settings"),
+      keybind: "mod+comma",
+      onSelect: () => openSettings(),
+    },
     {
       id: "vector.navigation.toggle",
       title: navigationVisible() ? "Hide Vector sidebar" : "Show Vector sidebar",
@@ -3207,12 +3216,13 @@ export default function NewLayout(props: ParentProps) {
     })
   }
 
-  const openAccountSettings = () => {
+  const openSettingsAt = (section: "account" | "about") => {
     closeWorkspacePanel()
     void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
-      dialog.show(() => <x.DialogSettings section="account" repositoryPath={activeWorkspaceScope().sourcePath} />)
+      dialog.show(() => <x.DialogSettings section={section} repositoryPath={activeWorkspaceScope().sourcePath} />)
     })
   }
+  const openAccountSettings = () => openSettingsAt("account")
 
   const activeParallelCount = createMemo(
     () => parallelRecords().filter((record) => isParallelWorkspaceRunning(record)).length,
@@ -3395,16 +3405,12 @@ export default function NewLayout(props: ParentProps) {
   globalThis.window?.addEventListener("keydown", handleGlobalKeyDown, { capture: true })
   onCleanup(() => globalThis.window?.removeEventListener("keydown", handleGlobalKeyDown, { capture: true }))
 
-  const updater = useUpdaterAction()
-  const update: TitlebarUpdate = {
-    version: () => {
-      const state = platform.updater?.state()
-      if (state?.status !== "ready") return
-      return state.version
-    },
-    installing: () => platform.updater?.state().status === "installing",
-    install: () => void updater.install(),
-  }
+  // The sidebar's Update button. A failed install already puts the gear back; the toast says why and opens Updates &
+  // about, which shows the error with Try again.
+  const installUpdateFromNavigation = () =>
+    void installUpdate(platform.updater, (message) =>
+      showToast(navigationUpdateFailure(message, () => openSettingsAt("about"))),
+    )
 
   const renderExternalAgentWorkspace = (recordAccessor: () => ParallelWorkspaceRecord) => {
     const record = () => recordAccessor()
@@ -3666,7 +3672,7 @@ export default function NewLayout(props: ParentProps) {
       }}
     >
       <div data-vector-pointer-glow aria-hidden="true" />
-      <Titlebar update={update} />
+      <Titlebar />
       <main
         data-vector-main-stage
         class="flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict"
@@ -6483,7 +6489,11 @@ export default function NewLayout(props: ParentProps) {
         onReportBug={() => setReportBugOpen(true)}
         onGettingStarted={() => setHelpPanelOpen(true)}
         onSettings={openSettings}
+        settingsKeybind={command.keybind("settings.open")}
         onAccount={openAccountSettings}
+        update={navigationUpdate(platform.updater?.state())}
+        onUpdate={installUpdateFromNavigation}
+        runningAgents={activeParallelCount() + activeBackgroundTasks().length}
       />
 
       <DialogReportBug open={reportBugOpen()} onClose={() => setReportBugOpen(false)} />

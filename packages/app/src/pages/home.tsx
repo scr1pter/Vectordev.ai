@@ -17,7 +17,6 @@ import {
   Switch,
 } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
-import { useSettingsCommand } from "@/components/settings-dialog"
 import { useNavigate } from "@solidjs/router"
 import { createStore } from "solid-js/store"
 import { useQuery } from "@tanstack/solid-query"
@@ -701,8 +700,6 @@ export function NewHome() {
     })
   }
 
-  useSettingsCommand(() => newSessionProject()?.worktree)
-
   function openSettings() {
     void import("@/components/settings-v2/dialog-settings-v2").then((module) => {
       dialog.show(() => <module.DialogSettings repositoryPath={newSessionProject()?.worktree} />)
@@ -928,7 +925,12 @@ export function NewHome() {
   )
 }
 
-function HomeAutomations(props: { supported: boolean; records: AutomationRecord[]; error?: string; onOpen: () => void }) {
+function HomeAutomations(props: {
+  supported: boolean
+  records: AutomationRecord[]
+  error?: string
+  onOpen: () => void
+}) {
   // Still on the schedule. A settled one-shot keeps its runAt in the past, so
   // counting it would pin the summary to "Due now" forever.
   const pending = createMemo(() =>
