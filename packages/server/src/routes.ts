@@ -12,6 +12,7 @@ import { LocationServiceMap } from "@vectordevai/core/location-service-map"
 import { SessionExecutionLocal } from "@vectordevai/core/session/execution/local"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { FreeModels } from "@vectordevai/core/free-models"
 import { ToolOutputStore } from "@vectordevai/core/tool-output-store"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -39,6 +40,8 @@ const applicationServices = LayerNode.group([
   LocationServiceMap.node,
   SpendGuard.node,
   FreeModelGuests.node,
+  // The session handler reads the shared free-model catalog to keep a guest off models that may train.
+  FreeModels.node,
 ])
 
 export function createRoutes(password?: string, options?: { readonly guardedHostname?: string }) {

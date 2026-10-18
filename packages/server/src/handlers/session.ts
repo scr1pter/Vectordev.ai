@@ -279,12 +279,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
           // The model is judged as the runner chooses it, so a session without one is judged by its automatic choice.
           if ((yield* RequestPrincipal).kind !== "owner") {
             const current = yield* session.get(ctx.params.sessionID).pipe(Effect.option)
-            const catalog = yield* Catalog.Service
+            const catalog = yield* Effect.serviceOption(Catalog.Service)
             if (Option.isSome(current))
               yield* refuseTrainingFreeModel(
-                yield* SessionRunnerModel.select(catalog, current.value).pipe(
-                  Effect.orElseSucceed(() => current.value.model),
-                ),
+                Option.isSome(catalog)
+                  ? yield* SessionRunnerModel.select(catalog.value, current.value).pipe(
+                      Effect.orElseSucceed(() => current.value.model),
+                    )
+                  : current.value.model,
               )
           }
           // The budget is armed in memory before admission, so the drain that promotes this input runs under it. A guest's
@@ -569,8 +571,14 @@ const refuseTrainingFreeModel = Effect.fn("SessionHandler.refuseTrainingFreeMode
   model: { readonly providerID: string; readonly id: string } | undefined,
 ) {
   if (!model || !isFreeModelRef({ providerID: model.providerID, modelID: model.id })) return
-  const freeModels = yield* FreeModels.Service
-  const catalog = yield* Catalog.Service
+  // Read optionally so the routes need no services of their own beyond the location's (embedded callers pass one
+  // argument to the web handler). Without them the policy cannot be read, so the guest is refused.
+  const freeModelsService = yield* Effect.serviceOption(FreeModels.Service)
+  const catalogService = yield* Effect.serviceOption(Catalog.Service)
+  if (Option.isNone(freeModelsService) || Option.isNone(catalogService))
+    return yield* new ForbiddenError({ message: FREE_MODEL_TRAINING_OWNER_ONLY })
+  const freeModels = freeModelsService.value
+  const catalog = catalogService.value
   const shared = yield* freeModels.catalog()
   const located = yield* Effect.forEach([ProviderV2.ID.vector, ProviderV2.ID.openrouter], (providerID) =>
     catalog.model.get(providerID, ModelV2.ID.make(model.id)),

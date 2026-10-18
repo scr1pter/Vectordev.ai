@@ -7,7 +7,7 @@ import { SessionV2 } from "@vectordevai/core/session"
 import { SessionTable } from "@vectordevai/core/session/sql"
 import { WorkspaceV2 } from "@vectordevai/core/workspace"
 import { eq } from "drizzle-orm"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Layer, Option, Schema } from "effect"
 import { HttpRouter, HttpServerRequest } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { ForbiddenError, InvalidRequestError, SessionNotFoundError } from "@vectordevai/protocol/errors"
@@ -64,9 +64,11 @@ export const sessionLocationLayer = Layer.effect(
           return yield* new ForbiddenError({ message: "Guest credential is not scoped to this session" })
         // Whatever a guest changes in a session, a prompt, a model switch, an answer, keeps that session's free-model
         // requests off models that may train (FreeModelGuests). It is recorded before the handler runs.
-        const request = yield* HttpServerRequest.HttpServerRequest
-        if (principal.kind === "guest" && request.method !== "GET" && request.method !== "HEAD")
-          yield* guests.mark(sessionID)
+        // Read optionally so the routes keep needing no request service of their own (embedded callers pass one
+        // argument). A request whose method cannot be read counts as a change.
+        const request = yield* Effect.serviceOption(HttpServerRequest.HttpServerRequest)
+        const method = Option.isSome(request) ? request.value.method : undefined
+        if (principal.kind === "guest" && method !== "GET" && method !== "HEAD") yield* guests.mark(sessionID)
 
         return yield* effect.pipe(
           Effect.provide(
