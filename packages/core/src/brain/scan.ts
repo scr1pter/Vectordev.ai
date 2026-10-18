@@ -17,6 +17,10 @@ export function stripHidden(text: string) {
   return text.replace(HIDDEN, "")
 }
 
+// `password = hunter2`, `API_KEY: abc…`: a value written next to a secret-sounding name.
+const NAMED =
+  /\b[\w.-]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\b["']?\s*[:=]\s*["']?(?=[^\s"',;]*[\d$#@!%^&*])[^\s"',;]{8,}/gi
+
 // Shapes that are a credential wherever they appear, beyond the provider token shapes review redaction knows.
 const SECRET_SHAPES = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
@@ -29,9 +33,58 @@ const SECRET_SHAPES = [
   /\bhf_[A-Za-z0-9]{30,}\b/g,
   /\bvct_[A-Za-z0-9._-]{16,}/g,
   /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{16,}/g,
-  // `password = hunter2`, `API_KEY: abc…`: a value written next to a secret-sounding name.
-  /\b[\w.-]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\b["']?\s*[:=]\s*["']?(?=[^\s"',;]*[\d$#@!%^&*])[^\s"',;]{8,}/gi,
+  NAMED,
+  // Incoming webhooks: the URL is the credential.
+  /\bhttps?:\/\/hooks\.slack\.com\/(?:services|workflows|triggers)\/[A-Za-z0-9_/-]+/gi,
+  /\bhttps?:\/\/(?:ptb\.|canary\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-Za-z0-9_-]+/gi,
+  /\bhttps?:\/\/[\w.-]+\.webhook\.office\.com\/[^\s"'<>]+/gi,
 ]
+
+// A secret written in plain words: "the admin password is Tr0ub4dor&3x", "the wifi passphrase is correct horse battery
+// staple". A phrase runs to the end of its clause; any other secret is the one word after "is".
+const SPOKEN =
+  /\b(password|passwd|passcode|passphrase|pin(?: code)?|secret|token|api key|access key|(?:unlock|recovery|seed|pass) (?:phrase|code|key|words))\s+(?:is|was|are|were)\s+["'“]?([^\s"'”,;]+(?:\s+[^\s"'”,;.]+)*)/gi
+
+// Words after "the password is" that say something about it rather than give it: "is stored in 1Password", "is
+// required", "is the same as staging".
+const NOT_A_VALUE =
+  /^(?:stored|kept|saved|managed|set|read|loaded|in|on|at|from|the|a|an|not|never|no|required|needed|optional|rotated|generated|available|provided|configured|defined|found|written|shared|sent|changed|hashed|encrypted|missing|empty|wrong|invalid|expired|only|always|usually|also|still|now|then|same|different|unknown|too|of|for|to|under|via|by|injected|passed|fetched|pulled|created|reset|entered|typed|asked|prompted|validated|checked|verified|used|mandatory|long|short|strong|weak|\[redacted\])$/i
+
+// One word passes for a password when it is not plain prose: it has a digit, a symbol or a capital inside it. A phrase
+// ("correct horse battery staple") is all words, so a passphrase or recovery phrase is taken whole.
+const PASSWORD_LIKE = /\d|[!@#$%^&*_+=~?<>|\\]|[a-z][A-Z]/
+
+// A username and password pair: "login: admin / hunter2hunter2", "credentials are deploy/s3cret!".
+const LOGIN =
+  /\b((?:login|logins|credentials?|creds)\s*(?::|=|\bis\b|\bare\b))\s*["']?[^\s"'/]+\s*\/\s*(?=[^\s"',;]*[\d!@#$%^&*_+=~?])[^\s"',;]+/gi
+
+// An AWS secret access key is 40 characters that read like a path once split at "/", so beside an access key id any
+// such run is the secret.
+const AWS_ID = /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/
+const AWS_SECRET = /(?<![A-Za-z0-9/+])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+=])/g
+
+function spoken(text: string) {
+  return text.replace(SPOKEN, (match, name: string, value: string) => {
+    const first = value.split(/\s+/)[0]!.replace(/[.!?]+$/, "")
+    if (NOT_A_VALUE.test(first) || /^\$|^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/.test(first)) return match
+    const phrase = /phrase|words/i.test(name)
+    // A PIN is digits; "the version pin is 5.6.2" is not one.
+    if (/^pin/i.test(name) ? !/^\d{4,8}$/.test(first) : !phrase && (first.length < 6 || !PASSWORD_LIKE.test(first)))
+      return match
+    const secret = phrase ? value.replace(/[.!?]+$/, "") : first
+    const at = match.length - value.length
+    return `${match.slice(0, at)}${REDACTED}${match.slice(at + secret.length)}`
+  })
+}
+
+/**
+ * Whether the text gives a password, passphrase, PIN or login together with its value. The agent never saves such a
+ * line, even redacted: a secret is not something to remember, and where it lives is what a memory should say.
+ */
+export function credential(text: string) {
+  const clean = stripHidden(text)
+  return spoken(clean) !== clean || clean.search(LOGIN) >= 0 || clean.search(NAMED) >= 0
+}
 
 // A long run of mixed letters and digits with no word in it is a key far more often than it is prose or a path. A path
 // or identifier ("migration/20261015_add_review_helpers") is made of words, so two word segments rule a match out.
@@ -45,8 +98,12 @@ function opaque(match: string) {
 
 /** The text with every credential replaced by [redacted], and whether anything was. */
 export function redact(text: string, env: Record<string, string | undefined> = process.env) {
-  const shaped = SECRET_SHAPES.reduce((out, shape) => out.replace(shape, REDACTED), text)
-  const known = redactSecrets(shaped, collectSecretValues(env))
+  const shaped = spoken(SECRET_SHAPES.reduce((out, shape) => out.replace(shape, REDACTED), text)).replace(
+    LOGIN,
+    `$1 ${REDACTED}`,
+  )
+  const aws = AWS_ID.test(shaped) ? shaped.replace(AWS_SECRET, REDACTED) : shaped
+  const known = redactSecrets(aws, collectSecretValues(env))
   const out = known.replace(OPAQUE, (match) => (opaque(match) ? REDACTED : match))
   return { text: out, redacted: out !== text }
 }

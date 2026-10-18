@@ -28,6 +28,38 @@ describe("BrainScan", () => {
     for (const text of safe) expect(BrainScan.redact(text, {}).text).toBe(text)
   })
 
+  test("redacts secrets written in plain words, webhooks and AWS secret keys, and leaves talk about secrets alone", () => {
+    const secrets = [
+      ["The staging admin password is Tr0ub4dor&3x for the seed script.", "Tr0ub4dor&3x"],
+      ["Staging DB login: admin / hunter2hunter2", "hunter2hunter2"],
+      ["Alerts post to https://hooks.slack.com/services/T0000/B0000/XXXXXXXXXXXXXXXXXXXXXXXX now.", "hooks.slack.com"],
+      ["Alerts post to https://discord.com/api/webhooks/123456789/abcDEF_ghi-jkl now.", "discord.com/api"],
+      ["Key AKIAIOSFODNN7EXAMPLE with wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY in staging.", "wJalrXUtnFEMI"],
+      ["The wifi passphrase is correct horse battery staple, ask first.", "horse battery"],
+      ["The vault unlock phrase is plum-orbit-cactus-17.", "plum-orbit"],
+      ["The office door pin is 4821.", "4821"],
+    ] as const
+    for (const [text, secret] of secrets) {
+      const out = BrainScan.redact(text, {})
+      expect(out.redacted).toBe(true)
+      expect(out.text).not.toContain(secret)
+    }
+    for (const text of [secrets[0][0], secrets[1][0], secrets[5][0], secrets[6][0], secrets[7][0]])
+      expect(BrainScan.credential(text)).toBe(true)
+    const talk = [
+      "The admin password is stored in 1Password under Staging.",
+      "The token is short-lived and refreshed by the client.",
+      "The TypeScript version pin is 5.6.2 in package.json.",
+      "The password is $STAGING_PASSWORD from the environment.",
+      "The login is at /login/sso for staff.",
+      "The session token is 64 hex characters long.",
+    ]
+    for (const text of talk) {
+      expect(BrainScan.redact(text, {}).text).toBe(text)
+      expect(BrainScan.credential(text)).toBe(false)
+    }
+  })
+
   test("redacts the value of a secret environment variable wherever it appears", () => {
     const out = BrainScan.redact("Staging uses abcd1234efgh5678 as its key.", { STAGING_TOKEN: "abcd1234efgh5678" })
     expect(out.text).toBe("Staging uses [redacted] as its key.")

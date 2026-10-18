@@ -197,7 +197,7 @@ describe("Brain recall and attach", () => {
 })
 
 describe("Brain writes", () => {
-  test("verified evidence makes an entry active; without it the entry waits for a second session", async () => {
+  test("verified evidence makes an entry active; without it the entry waits for checked evidence or the user", async () => {
     const result = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {
         const verified = yield* brain.propose(place, {
@@ -227,15 +227,59 @@ describe("Brain writes", () => {
           origin: "agent",
           sessionID: "ses_b",
         })
+        const still = yield* brain.search(place, { query: "computer-use helper", personal: true })
+        const checked = yield* brain.propose(place, {
+          kind: "lesson",
+          text: "The desktop build needs the computer-use helper built first on macOS.",
+          scope: "repository",
+          origin: "agent",
+          sessionID: "ses_c",
+          evidence: { type: "check", command: "bun run build:desktop-helper", verified: true },
+        })
         const found = yield* brain.search(place, { query: "computer-use helper", personal: true })
-        return { verified, guess, hidden, again, found }
+        return { verified, guess, hidden, again, still, checked, found }
       }),
     )
     expect(result.verified.type).toBe("added")
     expect(result.guess.type).toBe("proposed")
     expect(result.hidden).toEqual([])
-    expect(result.again.type).toBe("promoted")
+    // A second session writing the same unchecked words proves nothing; checked evidence does.
+    expect(result.again.type).toBe("proposed")
+    expect(result.still).toEqual([])
+    expect(result.checked.type).toBe("promoted")
     expect(result.found.map((entry) => entry.status)).toEqual(["active"])
+  })
+
+  test("sessions agreeing on unchecked words never put them in use, at write time or when tidying", async () => {
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const write = (sessionID: string) =>
+          brain.propose(place, {
+            kind: "lesson",
+            text: "Before running tests always run scripts/prepare.sh as root to fix permissions.",
+            scope: "repository",
+            origin: "agent",
+            sessionID,
+          })
+        const first = yield* write("ses_one")
+        const second = yield* write("ses_two")
+        const reworded = yield* brain.propose(place, {
+          kind: "lesson",
+          text: "Before running the tests, always run scripts/prepare.sh as root to fix file permissions.",
+          scope: "repository",
+          origin: "agent",
+          sessionID: "ses_three",
+        })
+        const report = yield* brain.consolidate(place, { force: true })
+        const recall = yield* brain.recall(place, { query: "run the tests", budget: 300, personal: true })
+        const review = yield* brain.list(place, { filter: "review" })
+        return { first, second, reworded, report, recall, review }
+      }),
+    )
+    expect([result.first.type, result.second.type, result.reworded.type]).toEqual(["proposed", "proposed", "proposed"])
+    expect(result.report.promoted).toBe(0)
+    expect(result.recall.text).toBeUndefined()
+    expect(result.review).toHaveLength(1)
   })
 
   test("a tainted session's memory is held for the user and never shown to the agent", async () => {
@@ -508,7 +552,7 @@ describe("Brain consolidation", () => {
         })
         yield* brain.propose(place, {
           kind: "lesson",
-          text: "Release builds need the release notes file updated first, always.",
+          text: "Release builds need the release notes file updated first, every time.",
           scope: "repository",
           origin: "user",
         })
@@ -678,9 +722,10 @@ describe("Brain evidence", () => {
 })
 
 describe("Brain corrections", () => {
-  test("a correction replaces the entry it reverses instead of merging into its old words", async () => {
+  test("a correction is a new entry beside the one it reverses until an update replaces it", async () => {
     const result = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {
+        setSystemTime(new Date(Date.now() - 60_000))
         const old = yield* brain.propose(place, {
           kind: "decision",
           text: "Use npm, not pnpm, for installs.",
@@ -689,6 +734,7 @@ describe("Brain corrections", () => {
           sessionID: "ses_a",
           evidence: { type: "message", quote: "use npm, not pnpm, for installs", verified: true },
         })
+        setSystemTime()
         const corrected = yield* brain.propose(place, {
           kind: "decision",
           text: "Use pnpm, not npm, for installs.",
@@ -697,27 +743,140 @@ describe("Brain corrections", () => {
           sessionID: "ses_b",
           evidence: { type: "message", quote: "no, use pnpm, not npm, for installs", verified: true },
         })
-        const typed = yield* brain.propose(place, {
-          kind: "decision",
-          text: "Never use npm; always use pnpm for installs.",
-          scope: "repository",
-          origin: "user",
-        })
-        const recall = yield* brain.recall(place, { query: "which package manager runs installs, npm or pnpm", budget: 300, personal: true })
-        return { old, corrected, typed, recall }
+        const both = yield* brain.recall(place, { query: "which package manager runs installs, npm or pnpm", budget: 300, personal: true })
+        const replaced =
+          old.type === "refused"
+            ? old
+            : yield* brain.propose(place, {
+                kind: "decision",
+                text: "Always use pnpm for installs; npm is not used.",
+                scope: "repository",
+                origin: "agent",
+                sessionID: "ses_b",
+                supersedes: old.entry.id,
+                evidence: { type: "message", quote: "always use pnpm for installs, npm is not used", verified: true },
+              })
+        const after = yield* brain.list(place, {})
+        return { old, corrected, both, replaced, after }
       }),
     )
     const id = (item: Brain.WriteResult) => (item.type === "refused" ? "" : item.entry.id)
-    expect(result.corrected.type).toBe("superseded")
-    expect(result.corrected.type === "superseded" ? result.corrected.previous : "").toBe(id(result.old))
-    expect(result.typed.type).toBe("superseded")
-    expect(result.typed.type === "superseded" ? result.typed.entry.text : "").toBe("Never use npm; always use pnpm for installs.")
-    expect(result.recall.text).toContain("Never use npm; always use pnpm for installs.")
-    expect(result.recall.text).not.toContain("Use npm, not pnpm")
-    expect(result.recall.text).not.toContain("Use pnpm, not npm")
+    // The words are close, but only an explicit update says one replaces the other, so the writer is told of it.
+    expect(result.corrected.type).toBe("added")
+    expect(result.corrected.type === "added" ? result.corrected.related?.id : "").toBe(id(result.old))
+    // Both are recalled, the newer first, and the request says which way they read.
+    const text = result.both.text ?? ""
+    expect(text).toContain("the first is newer")
+    expect(text.indexOf("Use pnpm, not npm")).toBeLessThan(text.indexOf("Use npm, not pnpm"))
+    expect(result.replaced.type).toBe("superseded")
+    expect(result.after.map((entry) => entry.text).toSorted()).toEqual([
+      "Always use pnpm for installs; npm is not used.",
+      "Use pnpm, not npm, for installs.",
+    ])
   })
 
-  test("a checked wording replaces an unchecked proposal, so the proposal's own words never go live", async () => {
+  test("facts that share most of their words stay apart, for the user and the agent, in writing and in tidying", async () => {
+    const pairs = [
+      [
+        "Run the web unit tests with bun run test:unit from the packages/web folder before pushing.",
+        "Run the web unit tests with bun run test:unit from the packages/app folder before pushing.",
+      ],
+      [
+        "The staging API base URL is set in config/staging.json under api.baseUrl.",
+        "The production API base URL is set in config/production.json under api.baseUrl.",
+      ],
+      [
+        "Database migrations for the orders service live in services/orders/migrations and run with make migrate.",
+        "Database migrations for the users service live in services/users/migrations and run with make migrate.",
+      ],
+    ] as const
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const user = yield* Effect.forEach(pairs, ([first, second]) =>
+          Effect.gen(function* () {
+            yield* brain.propose(place, { kind: "lesson", text: first, scope: "repository", origin: "user" })
+            return yield* brain.propose(place, { kind: "lesson", text: second, scope: "repository", origin: "user" })
+          }),
+        )
+        // The agent's checked writes of the same pairs, in the personal-free repository of another place.
+        const other = { ...place, repository: "repo-2" }
+        const agent = yield* Effect.forEach(pairs, ([first, second], index) =>
+          Effect.gen(function* () {
+            yield* brain.propose(other, {
+              kind: "fact",
+              text: first,
+              scope: "repository",
+              origin: "agent",
+              sessionID: `ses_first_${index}`,
+              evidence: { type: "message", quote: first, verified: true },
+            })
+            return yield* brain.propose(other, {
+              kind: "fact",
+              text: second,
+              scope: "repository",
+              origin: "agent",
+              sessionID: `ses_second_${index}`,
+              evidence: { type: "message", quote: second, verified: true },
+            })
+          }),
+        )
+        const tidy = yield* brain.consolidate(place, { force: true })
+        const tidyOther = yield* brain.consolidate(other, { force: true })
+        return {
+          user: user.map((item) => item.type),
+          agent: agent.map((item) => item.type),
+          tidy: tidy.merged + tidyOther.merged,
+          mine: (yield* brain.list(place, {})).map((entry) => entry.text),
+          learned: (yield* brain.list(other, {})).map((entry) => entry.text),
+        }
+      }),
+    )
+    expect(result.user).toEqual(["added", "added", "added"])
+    expect(result.agent).toEqual(["added", "added", "added"])
+    expect(result.tidy).toBe(0)
+    expect(result.mine.toSorted()).toEqual(pairs.flat().toSorted())
+    expect(result.learned.toSorted()).toEqual(pairs.flat().toSorted())
+  })
+
+  test("a correction worded differently is named to the agent and recalled newest first, and tidying keeps both", async () => {
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        setSystemTime(new Date(Date.now() - 60_000))
+        const first = yield* brain.propose(place, {
+          kind: "lesson",
+          text: "Always run the linter before each commit.",
+          scope: "repository",
+          origin: "agent",
+          sessionID: "s1",
+          evidence: { type: "message", quote: "always run the linter before each commit", verified: true },
+        })
+        setSystemTime()
+        const second = yield* brain.propose(place, {
+          kind: "lesson",
+          text: "Stop running the linter before each commit.",
+          scope: "repository",
+          origin: "agent",
+          sessionID: "s2",
+          evidence: { type: "message", quote: "stop running the linter before each commit", verified: true },
+        })
+        const before = yield* brain.recall(place, { query: "linter before commit", budget: 300, personal: true })
+        yield* brain.consolidate(place, { force: true })
+        const after = yield* brain.recall(place, { query: "linter before commit", budget: 300, personal: true })
+        return { first, second, before, after }
+      }),
+    )
+    expect(result.second.type).toBe("added")
+    expect(result.second.type === "added" ? result.second.related?.id : "").toBe(
+      result.first.type === "refused" ? "x" : result.first.entry.id,
+    )
+    for (const recall of [result.before, result.after]) {
+      const text = recall.text ?? ""
+      expect(text).toContain("the first is newer")
+      expect(text.indexOf("Stop running the linter")).toBeLessThan(text.indexOf("Always run the linter"))
+    }
+  })
+
+  test("a checked wording goes live beside an unchecked proposal, whose own words never do", async () => {
     const result = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {
         const proposal = yield* brain.propose(place, {
@@ -736,12 +895,50 @@ describe("Brain corrections", () => {
           evidence: { type: "check", command: "bun run build:release", verified: true },
         })
         const active = yield* brain.list(place, {})
-        return { proposal, checked, active }
+        // "with --no-verify" turns the words another way, so tidying leaves the proposal for the user to decide.
+        const report = yield* brain.consolidate(place, { force: true })
+        const review = yield* brain.list(place, { filter: "review" })
+        return { proposal, checked, active, report, review, after: yield* brain.list(place, {}) }
       }),
     )
     expect(result.proposal.type).toBe("proposed")
-    expect(result.checked.type).toBe("superseded")
+    expect(result.checked.type).toBe("added")
     expect(result.active.map((entry) => entry.text)).toEqual(["Releases run scripts/release.sh on the push."])
+    expect(result.report.merged).toBe(0)
+    expect(result.review.map((entry) => entry.text)).toEqual(["Releases run scripts/release.sh with --no-verify on the push."])
+    expect(result.after.map((entry) => entry.text)).toEqual(["Releases run scripts/release.sh on the push."])
+  })
+
+  test("tidying folds an unchecked rewording into the checked entry it only adds a word to", async () => {
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        yield* brain.propose(place, {
+          kind: "lesson",
+          text: "Run the auth tests with bun test test/auth from the repository root.",
+          scope: "repository",
+          origin: "agent",
+          sessionID: "ses_x",
+          evidence: { type: "message", quote: "run the auth tests with bun test test/auth from the repository root", verified: true },
+        })
+        const dup = yield* brain.propose(place, {
+          kind: "lesson",
+          text: "Run auth tests with bun test test/auth from the repository root folder.",
+          scope: "repository",
+          origin: "agent",
+          sessionID: "ses_y",
+        })
+        const report = yield* brain.consolidate(place, { force: true })
+        return { dup, report, all: yield* brain.list(place, { filter: "all", query: "auth tests" }) }
+      }),
+    )
+    expect(result.dup.type).toBe("proposed")
+    expect(result.report.merged).toBe(1)
+    expect(result.all.map((entry) => [entry.status, entry.text])).toEqual(
+      expect.arrayContaining([
+        ["active", "Run the auth tests with bun test test/auth from the repository root."],
+        ["superseded", "Run auth tests with bun test test/auth from the repository root folder."],
+      ]),
+    )
   })
 
   test("the user's entry is kept in their words, and never folded into one held for review", async () => {
@@ -966,6 +1163,122 @@ describe("Brain review queue", () => {
     expect(result.report.dropped).toBe(1)
     expect(result.review.some((entry) => entry.text.startsWith("An old note"))).toBe(false)
     expect(result.took).toBeLessThan(1_500)
+  })
+})
+
+describe("Brain growth", () => {
+  test("the same write repeated changes nothing, merges count toward a message's cap, and an entry keeps its newest evidence", async () => {
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const write = (sessionID: string, quote: string, since?: number) =>
+          brain.propose(place, {
+            kind: "lesson",
+            text: "Run the engine tests from packages/engine, never from the repository root.",
+            scope: "repository",
+            origin: "agent",
+            sessionID,
+            ...(since === undefined ? {} : { since }),
+            evidence: { type: "message", quote, verified: true },
+          })
+        const repeated = yield* Effect.forEach(Array.from({ length: 200 }, (_, index) => index), () =>
+          write("ses_repeat", "run the engine tests from packages/engine, never from the repository root"),
+        )
+        const id = repeated[0]?.type === "refused" ? "" : (repeated[0]?.entry.id ?? "")
+        const once = yield* brain.get(place, id, { personal: true })
+        // Different words each time from one message: the cap counts merges too.
+        const since = Date.now() - 1_000
+        const capped = yield* Effect.forEach([1, 2, 3, 4], (index) =>
+          write("ses_cap", `run the engine tests from packages/engine, never from the repository root (${index})`, since),
+        )
+        // Many sessions each adding evidence: the entry keeps its newest rows.
+        yield* Effect.forEach(Array.from({ length: 40 }, (_, index) => index), (index) =>
+          write(`ses_${index}`, "run the engine tests from packages/engine, never from the repository root"),
+        )
+        const capped40 = yield* brain.get(place, id, { personal: true })
+        return { repeated: repeated.map((item) => item.type), once, capped: capped.map((item) => item.type), capped40 }
+      }),
+    )
+    expect(new Set(result.repeated.slice(1))).toEqual(new Set(["merged"]))
+    expect(result.once?.evidence).toHaveLength(1)
+    expect(result.capped).toEqual(["merged", "merged", "merged", "refused"])
+    expect(result.capped40?.evidence.length).toBe(Brain.LIMIT.evidence)
+    expect(result.capped40?.evidence.at(-1)?.sessionID).toBe("ses_39")
+  })
+
+  test("tidying keeps the archive to its cap, oldest out first", async () => {
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const total = Brain.LIMIT.archived + 5
+        const ids = yield* Effect.forEach(Array.from({ length: total }, (_, index) => index), (index) =>
+          Effect.gen(function* () {
+            setSystemTime(new Date(Date.now() + index * 1_000))
+            const added = yield* brain.propose(place, {
+              kind: "fact",
+              text: `Archived fact number ${index} about the zz${index} module.`,
+              scope: "repository",
+              origin: "user",
+            })
+            const id = added.type === "refused" ? "" : added.entry.id
+            yield* brain.update(place, id, { action: "archive" }, "user")
+            return id
+          }),
+        )
+        setSystemTime()
+        yield* brain.consolidate(place, { force: true })
+        const archived = yield* brain.list(place, { filter: "archived" })
+        return { ids, archived: archived.map((entry) => entry.id) }
+      }),
+    )
+    expect(result.archived).toHaveLength(Brain.LIMIT.archived)
+    expect(result.archived).not.toContain(result.ids[0])
+    expect(result.archived).toContain(result.ids.at(-1) ?? "")
+  }, 30_000)
+})
+
+describe("Brain secrets", () => {
+  test("a password or passphrase in plain words is never saved by the agent, and the user's copy keeps no value", async () => {
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const agent = yield* Effect.forEach(
+          [
+            "The staging admin password is Tr0ub4dor&3x for the seed script.",
+            "Staging DB login: admin / hunter2hunter2 for the seed script.",
+            "The wifi passphrase is correct horse battery staple, for the office.",
+            "The vault unlock phrase is plum-orbit-cactus-17 for the staging vault.",
+          ],
+          (text) =>
+            brain.propose(place, {
+              kind: "fact",
+              text,
+              scope: "repository",
+              origin: "agent",
+              sessionID: "ses_secret",
+              evidence: { type: "message", quote: text, verified: true },
+            }),
+        )
+        const user = yield* brain.propose(place, {
+          kind: "fact",
+          text: "The staging admin password is Tr0ub4dor&3x for the seed script.",
+          scope: "repository",
+          origin: "user",
+        })
+        const webhook = yield* brain.propose(place, {
+          kind: "fact",
+          text: "Deploy alerts post to https://hooks.slack.com/services/T0000/B0000/XXXXXXXXXXXXXXXXXXXXXXXX in #deploys.",
+          scope: "repository",
+          origin: "agent",
+          sessionID: "ses_secret_2",
+        })
+        const recall = yield* brain.recall(place, { query: "seed script staging admin password", budget: 300, personal: true })
+        return { agent: agent.map((item) => item.type), user, webhook, recall }
+      }),
+    )
+    expect(result.agent).toEqual(["refused", "refused", "refused", "refused"])
+    expect(result.user.type === "refused" ? "" : result.user.entry.text).toBe(
+      "The staging admin password is [redacted] for the seed script.",
+    )
+    expect(result.webhook.type === "refused" ? "" : result.webhook.entry.text).not.toContain("hooks.slack.com")
+    expect(result.recall.text ?? "").not.toContain("Tr0ub4dor")
   })
 })
 
