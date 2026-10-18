@@ -1,14 +1,18 @@
 import {
   FREE_MODELS_TITLE,
+  FREE_MODEL_TRAINING_LABEL,
   freeModelMayTrain,
   freeModelName,
   freeModelSource,
   FREE_MODEL_TRAINING_SCOPE,
   freeModelTrainingDisclaimer,
   freeModelTrainingLabel,
+  freeModelTrainingRefusal,
   preferOwnFreeModels,
+  type FreeModelChoice,
 } from "@vectordevai/core/free-model-choice"
 import { useSDK } from "../context/sdk"
+import { useToast } from "../ui/toast"
 import { DialogConfirm } from "../ui/dialog-confirm"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { createMemo, createSignal, onMount } from "solid-js"
@@ -28,6 +32,7 @@ export function DialogModel(props: { providerID?: string }) {
   const sync = useSync()
   const dialog = useDialog()
   const sdk = useSDK()
+  const toast = useToast()
   const [query, setQuery] = createSignal("")
   // Account models can arrive after startup, as when vectordev.ai answers a first Codium catalog read slowly.
   onMount(() => void sync.refreshProviders().catch(() => undefined))
@@ -163,25 +168,17 @@ export function DialogModel(props: { providerID?: string }) {
   })
 
   async function onSelect(providerID: string, modelID: string) {
-    // A free model whose provider may train on prompts is chosen only after the one-time acceptance, which the engine
-    // also requires before it sends anything to one.
     const info = sync.data.provider.find((item) => item.id === providerID)?.models[modelID]
-    if (info && freeModelMayTrain(info)) {
-      const consent = await sdk.client.provider.freeModels.consent().catch(() => undefined)
-      if (consent?.data?.training !== true) {
-        const accepted = await DialogConfirm.show(
-          dialog,
-          freeModelTrainingLabel(info) ?? "May train on your prompts",
-          `${freeModelTrainingDisclaimer(info) ?? ""} ${FREE_MODEL_TRAINING_SCOPE}`,
-          "Accept",
-        )
-        if (accepted !== true) return
-        const recorded = await sdk.client.provider.freeModels
-          .setConsent({ freeModelConsent: { training: true } })
-          .catch(() => undefined)
-        if (recorded?.data?.training !== true) return
-      }
-    }
+    if (
+      info &&
+      !(await confirmFreeModelChoice({
+        model: info,
+        freeModels: sdk.client.provider.freeModels,
+        ask: (title, message) => DialogConfirm.show(dialog, title, message, "Accept").then((value) => value === true),
+        notify: (message) => toast.show({ variant: "error", message }),
+      }))
+    )
+      return
     local.model.set({ providerID, modelID }, { recent: true })
     const list = local.model.variant.list()
     const cur = local.model.variant.selected()
@@ -250,4 +247,26 @@ export function sortModelOptions<T extends { footer?: string; releaseDate: strin
   // sorting by date and title would put Claude Haiku 5.5, the model that uses credits fastest, first.
   if (providerID === ModelPlanStatus.PROVIDER_ID) return options
   return sortBy(options, [(option) => option.releaseDate, "desc"], (option) => option.title)
+}
+
+/**
+ * Whether a model may be chosen. A free model whose provider may train on prompts is chosen only after the one-time
+ * acceptance, which the engine also requires before it sends anything to one; the question says the acceptance covers
+ * every labelled model. A refused acceptance, as for an invited guest, keeps the current model and says why.
+ */
+export async function confirmFreeModelChoice(input: {
+  model: Pick<FreeModelChoice, "freeModel">
+  freeModels: Pick<ReturnType<typeof useSDK>["client"]["provider"]["freeModels"], "consent" | "setConsent">
+  ask: (title: string, message: string) => Promise<boolean>
+  notify: (message: string) => void
+}) {
+  if (!freeModelMayTrain(input.model)) return true
+  const consent = await input.freeModels.consent().catch(() => undefined)
+  if (consent?.data?.training === true) return true
+  const message = `${freeModelTrainingDisclaimer(input.model) ?? ""} ${FREE_MODEL_TRAINING_SCOPE}`
+  if (!(await input.ask(freeModelTrainingLabel(input.model) ?? FREE_MODEL_TRAINING_LABEL, message))) return false
+  const recorded = await input.freeModels.setConsent({ freeModelConsent: { training: true } }).catch(() => undefined)
+  if (recorded?.data?.training === true) return true
+  input.notify(freeModelTrainingRefusal(recorded?.response?.status))
+  return false
 }

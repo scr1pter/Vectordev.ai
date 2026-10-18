@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
+  FREE_MODEL_TRAINING_OWNER_ONLY,
+  freeModelTrainingRefusal,
   FREE_MODEL_TRAINING_DISCLAIMER,
   FREE_MODEL_TRAINING_LABEL,
   FREE_MODELS_DATA_POLICY,
@@ -70,4 +72,12 @@ test('may-train and unreviewed free models carry "May train on your prompts"; no
   expect(FREE_MODEL_TRAINING_DISCLAIMER).toContain("Vector itself never trains on your prompts.")
   expect(freeModelTrainingDisclaimer(free("unreviewed"))).toContain("has not reviewed")
   expect(freeModelTrainingDisclaimer(free("no-training"))).toBeUndefined()
+})
+
+test("an invited guest whose acceptance the engine refuses is told only the owner can use these models", () => {
+  // The engine answers 403 to a guest's acceptance, so "try again" could never work for a guest.
+  expect(freeModelTrainingRefusal(403)).toBe(FREE_MODEL_TRAINING_OWNER_ONLY)
+  expect(FREE_MODEL_TRAINING_OWNER_ONLY).toContain('"May train on your prompts"')
+  expect(FREE_MODEL_TRAINING_OWNER_ONLY).toContain("workspace owner")
+  for (const status of [500, 503, undefined]) expect(freeModelTrainingRefusal(status)).toContain("Try again")
 })

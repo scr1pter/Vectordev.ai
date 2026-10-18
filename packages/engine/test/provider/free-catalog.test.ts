@@ -92,6 +92,20 @@ it.instance("with the shared catalog off, the user's own OpenRouter free models 
   }),
 )
 
+it.instance("an invited guest is offered no free model that may train, on either route", () =>
+  Effect.sync(() => {
+    // A guest's prompts run under the owner's acceptance, which the guest never gave, so the guest's lists leave
+    // those models out and the default for the guest is a no-training one.
+    const providers = Provider.withoutTrainingFreeModels({
+      openrouter: Provider.fromFreeModels([laguna, FREE_MODEL_FALLBACKS[0]], "openrouter"),
+      vector: Provider.fromFreeModels([laguna, FREE_MODEL_FALLBACKS[1]]),
+    })
+    expect(Object.keys(providers.openrouter.models)).toEqual([FREE_MODEL_FALLBACKS[0].id])
+    expect(Object.keys(providers.vector.models)).toEqual([FREE_MODEL_FALLBACKS[1].id])
+    expect(Provider.defaultModelIDs(providers).openrouter).toBe(ModelV2.ID.make(FREE_MODEL_FALLBACKS[0].id))
+  }),
+)
+
 it.instance(
   "a prompt to a may-train free model without the user's acceptance is refused before anything is sent",
   () =>

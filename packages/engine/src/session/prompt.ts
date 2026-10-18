@@ -1,7 +1,11 @@
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { freeModelDataPolicy } from "@vectordevai/core/free-model-catalog"
-import { FREE_MODEL_TRAINING_BLOCKED } from "@vectordevai/core/free-model-choice"
+import {
+  FREE_MODEL_TRAINING_BLOCKED,
+  FREE_MODEL_TRAINING_OWNER_ONLY,
+  freeModelMayTrain,
+} from "@vectordevai/core/free-model-choice"
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
@@ -134,6 +138,7 @@ export interface Interface {
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
   readonly resumeFreeModels: (
     input: ResumeFreeModelsInput,
+    options?: Pick<PromptOptions, "refuseTrainingFreeModels">,
   ) => Effect.Effect<SessionV1.WithParts, Session.BusyError | FreeModelsResumeError>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
@@ -787,6 +792,18 @@ const layer = Layer.effect(
       }
 
       const model = input.model ?? (yield* currentModel(input.sessionID, ag.model))
+      // Before anything is saved: a sender who cannot accept the training notice, such as an invited guest, must not
+      // reach a may-train free model through the owner's acceptance, whether chosen or kept from the session.
+      if (options?.refuseTrainingFreeModels) {
+        const chosen = yield* provider
+          .getModel(model.providerID, model.modelID)
+          .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
+        if (chosen && freeModelMayTrain(chosen)) {
+          const error = new NamedError.Unknown({ message: FREE_MODEL_TRAINING_OWNER_ONLY })
+          yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+          throw error
+        }
+      }
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const full =
         !input.variant && ag.variant && same
@@ -1749,7 +1766,10 @@ const layer = Layer.effect(
       return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
     })
 
-    const resumeFreeModels = Effect.fn("SessionPrompt.resumeFreeModels")(function* (input: ResumeFreeModelsInput) {
+    const resumeFreeModels = Effect.fn("SessionPrompt.resumeFreeModels")(function* (
+      input: ResumeFreeModelsInput,
+      options?: Pick<PromptOptions, "refuseTrainingFreeModels">,
+    ) {
       const validate = Effect.gen(function* () {
         const history = yield* sessions.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)
         const latest = history.at(-1)
@@ -1799,6 +1819,13 @@ const layer = Layer.effect(
               ? FREE_MODEL_TRAINING_BLOCKED
               : "Connect OpenRouter and choose the same available free model to continue.",
         })
+      }
+      if (options?.refuseTrainingFreeModels) {
+        const chosen = yield* provider
+          .getModel(ProviderV2.ID.openrouter, input.modelID)
+          .pipe(Effect.orElseSucceed(() => undefined))
+        if (chosen && freeModelMayTrain(chosen))
+          return yield* new FreeModelsResumeError({ message: FREE_MODEL_TRAINING_OWNER_ONLY })
       }
       yield* validate
       const work = Effect.gen(function* () {
@@ -2034,6 +2061,11 @@ export type PromptOptions = {
    * an invited guest. Otherwise it replaces them, as the owner's own budget does.
    */
   readonly tightenBudget?: boolean
+  /**
+   * For a sender who cannot accept the free-model training notice, such as an invited guest: a prompt that would run
+   * on a free model labelled "May train on your prompts" is refused before it is saved, although the owner accepted.
+   */
+  readonly refuseTrainingFreeModels?: boolean
 }
 
 export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput")({

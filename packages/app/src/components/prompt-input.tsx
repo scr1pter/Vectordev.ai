@@ -80,7 +80,7 @@ import { ImagePreview } from "@vectordevai/ui/image-preview"
 import type { ReferenceInfo } from "@vectordevai/sdk/v2/client"
 import { modelVariantDescription, modelVariantLabel, visibleModelVariants } from "@/context/model-variant"
 import { modelDisplayName } from "@/utils/provider-brand"
-import { freeModelTrainingLabel } from "@vectordevai/core/free-model-choice"
+import { freeModelTrainingLabel, freeModelTrainingRefusal } from "@vectordevai/core/free-model-choice"
 import { detectParallelIntent } from "@/features/delegation/delegation"
 import { holdsHandoff } from "@/features/cloud/cloud-handoff"
 import { createOutcomes } from "@/features/economics/economics-repository"
@@ -1582,9 +1582,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           accept: () =>
             client.provider.freeModels.setConsent({ freeModelConsent: { training: true } }).then((result) => {
               if (result.data?.training === true) return true
+              // An invited guest is refused (403): only the owner can accept, so retrying would never help.
               showToast({
                 title: "Nothing was sent",
-                description: "Vector couldn't record your choice. Send again to retry.",
+                description: freeModelTrainingRefusal(result.response?.status),
                 variant: "error",
               })
               return false

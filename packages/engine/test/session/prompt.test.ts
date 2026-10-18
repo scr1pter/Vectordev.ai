@@ -8,6 +8,7 @@ import { FreeModels } from "@vectordevai/core/free-models"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
+import { FREE_MODEL_TRAINING_OWNER_ONLY } from "@vectordevai/core/free-model-choice"
 import { LLMEvent } from "@vectordevai/llm"
 import { SessionProjector } from "@vectordevai/core/session/projector"
 import { eq } from "drizzle-orm"
@@ -333,6 +334,39 @@ const freePrompts = testEffect(
             LLMEvent.stepFinish({ index: 0, reason: "stop" }),
             LLMEvent.finish({ reason: "stop" }),
           ),
+      }),
+    ],
+  ]),
+)
+// The user's own OpenRouter account lists a no-training model and one whose provider may train, and the owner has
+// accepted the training notice.
+const lagunaFree = {
+  id: "poolside/laguna-s-2.1:free",
+  name: "Poolside: Laguna S 2.1",
+  contextLength: 262144,
+  maxOutputTokens: 32768,
+  providers: [{ id: "poolside/fp4", name: "Poolside", retention: "", dataPolicy: "may-train" as const }],
+}
+const trainingPrompts = testEffect(
+  LayerNode.compile(promptRoot, [
+    [SessionSummary.node, summary],
+    [LSP.node, lsp],
+    [MCP.node, makeMcp()],
+    [RuntimeFlags.node, runtimeFlags],
+    [
+      FreeModels.node,
+      Layer.succeed(FreeModels.Service, {
+        catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
+        forKey: () => Effect.succeed([FREE_MODEL_FALLBACKS[0], lagunaFree]),
+        trainingConsent: () => Effect.succeed(true),
+        setTrainingConsent: (accepted) => Effect.succeed(accepted),
+        changes: Stream.empty,
+      }),
+    ],
+    [
+      FreeModels.credentialsNode,
+      Layer.succeed(FreeModels.CredentialsService, {
+        get: (provider) => Effect.succeed(provider === "openrouter" ? "synthetic-key" : undefined),
       }),
     ],
   ]),
@@ -3845,6 +3879,52 @@ if (process.platform !== "win32")
       }),
     { trusted: true, config: paidCommandConfig },
   )
+
+trainingPrompts.instance(
+  "an invited guest's prompt to a free model that may train is refused before it is saved, despite the owner's acceptance",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const laguna = { providerID: ProviderV2.ID.openrouter, modelID: ModelV2.ID.make(lagunaFree.id) }
+      const chat = yield* sessions.create({ title: "Shared" })
+      const parts = [{ type: "text" as const, text: "hello" }]
+      // What the session handlers pass for an invited guest.
+      const guest = { tightenBudget: true, refuseTrainingFreeModels: true }
+      const refused = (exit: Exit.Exit<unknown, unknown>) => {
+        const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+        return NamedError.Unknown.isInstance(error) && error.data.message === FREE_MODEL_TRAINING_OWNER_ONLY
+      }
+      // Chosen explicitly.
+      expect(
+        refused(
+          yield* prompt.prompt({ sessionID: chat.id, model: laguna, noReply: true, parts }, guest).pipe(Effect.exit),
+        ),
+      ).toBe(true)
+      expect(yield* sessions.messages({ sessionID: chat.id })).toEqual([])
+      // The owner chose it for the session; a guest's prompt without a model would run on it.
+      expect((yield* prompt.prompt({ sessionID: chat.id, model: laguna, noReply: true, parts })).info).toMatchObject({
+        model: laguna,
+      })
+      expect(refused(yield* prompt.prompt({ sessionID: chat.id, noReply: true, parts }, guest).pipe(Effect.exit))).toBe(
+        true,
+      )
+      expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(1)
+      // Resuming an interrupted turn runs it on the owner's account too.
+      const resumed = yield* prompt
+        .resumeFreeModels(
+          { sessionID: chat.id, messageID: MessageID.ascending(), modelID: laguna.modelID },
+          { refuseTrainingFreeModels: true },
+        )
+        .pipe(Effect.flip)
+      expect(resumed).toMatchObject({ message: FREE_MODEL_TRAINING_OWNER_ONLY })
+      // A no-training free model stays open to the guest.
+      expect(
+        (yield* prompt.prompt({ sessionID: chat.id, model: freeRef, noReply: true, parts }, guest)).info,
+      ).toMatchObject({ model: freeRef })
+    }),
+  { trusted: true },
+)
 
 // Agent / command resolution errors
 

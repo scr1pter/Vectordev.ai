@@ -1387,6 +1387,16 @@ export function applyFreeCatalog(providers: Record<string, Info>, catalog: FreeM
   return providers
 }
 
+/**
+ * What an invited guest is offered: no free model labelled "May train on your prompts". A guest's prompts run under
+ * the owner's acceptance, which the guest never gave, so the engine also refuses a guest's prompt to one.
+ */
+export function withoutTrainingFreeModels(providers: Record<string, Info>) {
+  for (const provider of Object.values(providers))
+    for (const [id, model] of Object.entries(provider.models)) if (freeModelMayTrain(model)) delete provider.models[id]
+  return providers
+}
+
 export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "vector" | "openrouter" = "vector"): Info {
   return {
     id: ProviderV2.ID.make(providerID),

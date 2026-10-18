@@ -24,6 +24,11 @@ export const FREE_MODEL_UNREVIEWED_DISCLAIMER =
 export const FREE_MODEL_TRAINING_SCOPE = `Accepting covers every free model labelled "${FREE_MODEL_TRAINING_LABEL}", including ones Vector has not reviewed yet, now and later. Withdraw it any time with "vector models --decline-training", or with Withdraw in the desktop app's Help panel.`
 /** Shown, and sent as the error, when a prompt to such a model is stopped because it was never accepted. */
 export const FREE_MODEL_TRAINING_CONSENT_REQUIRED = `${FREE_MODEL_TRAINING_DISCLAIMER} Nothing was sent. Accept it once when Vector asks, or run "vector models --accept-training", then send again.`
+/**
+ * An invited guest's prompts run on the owner's engine, under the owner's acceptance, which the guest never gave. Such
+ * models are left out of a guest's lists, and a guest's prompt to one is refused before it is saved.
+ */
+export const FREE_MODEL_TRAINING_OWNER_ONLY = `Only the workspace owner can use free models labelled "${FREE_MODEL_TRAINING_LABEL}" here, since only they can accept that notice. Choose another model.`
 /** OpenRouter has separate privacy settings for free and paid models; the free one decides whether these route at all. */
 export const FREE_MODEL_TRAINING_BLOCKED =
   'Your OpenRouter privacy settings block free models whose providers may train on prompts. To use this one, open openrouter.ai/settings/privacy, allow free models from providers that may train on your data, then send again. Or choose a model without the "May train on your prompts" label.'
@@ -56,6 +61,14 @@ export function freeModelMayTrain(model: Pick<FreeModelChoice, "freeModel">) {
 /** "May train on your prompts" for such a model; nothing for a no-training or non-free one. */
 export function freeModelTrainingLabel(model: Pick<FreeModelChoice, "freeModel">) {
   return freeModelMayTrain(model) ? FREE_MODEL_TRAINING_LABEL : undefined
+}
+
+/**
+ * Why an acceptance was not recorded. The engine refuses it from an invited guest (403), for whom retrying can never
+ * work, so a guest is told that only the owner can use these models.
+ */
+export function freeModelTrainingRefusal(status: number | undefined) {
+  return status === 403 ? FREE_MODEL_TRAINING_OWNER_ONLY : "Vector couldn't record your choice. Try again."
 }
 
 /** The longer disclaimer that goes with the label. */

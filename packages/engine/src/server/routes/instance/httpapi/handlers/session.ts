@@ -373,9 +373,13 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     // The owner's files are theirs to attach from anywhere. A guest's go through the workspace boundary and read
-    // permission, which only the owner can approve, and a guest's budget can only tighten the owner's run limits.
+    // permission, which only the owner can approve, and a guest's budget can only tighten the owner's run limits. A
+    // guest never accepted the free-model training notice, so the owner's acceptance does not carry a guest's prompt to
+    // a model that may train.
     const promptOptions = Effect.gen(function* () {
-      return (yield* RequestPrincipal).kind === "owner" ? { userFile: () => true } : { tightenBudget: true }
+      return (yield* RequestPrincipal).kind === "owner"
+        ? { userFile: () => true }
+        : { tightenBudget: true, refuseTrainingFreeModels: true }
     })
 
     const prompt = Effect.fn("SessionHttpApi.prompt")(function* (ctx: {
@@ -418,12 +422,15 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: { messageID: MessageID; modelID: ModelV2.ID }
     }) {
       yield* requireSession(ctx.params.sessionID)
-      yield* promptSvc.resumeFreeModels({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
-        Effect.catchTag("SessionBusyError", (error) => SessionError.mapBusy(Effect.fail(error))),
-        Effect.catchTag("FreeModelsResumeError", (error) =>
-          Effect.fail(new InvalidRequestError({ message: error.message })),
-        ),
-      )
+      const owner = (yield* RequestPrincipal).kind === "owner"
+      yield* promptSvc
+        .resumeFreeModels({ ...ctx.payload, sessionID: ctx.params.sessionID }, { refuseTrainingFreeModels: !owner })
+        .pipe(
+          Effect.catchTag("SessionBusyError", (error) => SessionError.mapBusy(Effect.fail(error))),
+          Effect.catchTag("FreeModelsResumeError", (error) =>
+            Effect.fail(new InvalidRequestError({ message: error.message })),
+          ),
+        )
       return true
     })
 

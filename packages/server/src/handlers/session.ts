@@ -1,7 +1,10 @@
 import { SessionV2 } from "@vectordevai/core/session"
+import { Catalog } from "@vectordevai/core/catalog"
+import { ProviderV2 } from "@vectordevai/core/provider"
+import { FREE_MODEL_TRAINING_OWNER_ONLY, freeModelMayTrain } from "@vectordevai/core/free-model-choice"
 import { Location } from "@vectordevai/core/location"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
-import { DateTime, Effect, Stream } from "effect"
+import { DateTime, Effect, Option, Stream } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { Api } from "../api"
 import { SessionsCursor } from "@vectordevai/protocol/groups/session"
@@ -234,6 +237,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.resumeFreeModels",
         Effect.fn(function* (ctx) {
+          // Resuming runs the turn on the owner's OpenRouter account and acceptance, so a guest may not resume one
+          // whose model may train.
+          if ((yield* RequestPrincipal).kind !== "owner") {
+            const catalog = yield* Catalog.Service
+            const model = yield* catalog.model.get(ProviderV2.ID.openrouter, ctx.payload.modelID)
+            if (model && freeModelMayTrain(model))
+              return yield* new ForbiddenError({ message: FREE_MODEL_TRAINING_OWNER_ONLY })
+          }
           yield* session.resumeFreeModels({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
             Effect.catchTag("Session.NotFoundError", (error) =>
               Effect.fail(
@@ -260,6 +271,18 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.prompt",
         Effect.fn(function* (ctx) {
+          // A guest never accepted the free-model training notice, so the owner's acceptance must not carry a guest's
+          // prompt to a model that may train. The prompt runs on the session's model, or the default without one.
+          if ((yield* RequestPrincipal).kind !== "owner") {
+            const catalog = yield* Catalog.Service
+            const current = yield* session.get(ctx.params.sessionID).pipe(Effect.option)
+            const model =
+              Option.isSome(current) && current.value.model
+                ? yield* catalog.model.get(current.value.model.providerID, current.value.model.id)
+                : yield* catalog.model.default().pipe(Effect.orElseSucceed(() => undefined))
+            if (model && freeModelMayTrain(model))
+              return yield* new ForbiddenError({ message: FREE_MODEL_TRAINING_OWNER_ONLY })
+          }
           // The budget is armed in memory before admission, so the drain that promotes this input runs under it. A guest's
           // budget can only tighten the limits the owner's run has.
           if (ctx.payload.budget)
