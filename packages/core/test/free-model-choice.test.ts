@@ -12,6 +12,7 @@ import {
   freeModelName,
   freeModelSource,
   freeModelChoices,
+  freeModelTrainingNotice,
   FREE_MODEL_RESUME_UNAVAILABLE,
   FREE_ROUTER_DISCLAIMER,
   FREE_MODELS_OWN_KEYS,
@@ -122,4 +123,25 @@ test("OpenRouter's free router carries its own notice, which says the model is p
   expect(freeModelTrainingDisclaimer({ ...router, id: "poolside/laguna-s-2.1:free" })).toBe(
     FREE_MODEL_TRAINING_DISCLAIMER,
   )
+})
+
+test("the in-use notice names the source and label of a model that may train, and nothing for one that does not", () => {
+  const laguna = {
+    id: "poolside/laguna-s-2.1:free",
+    freeModel: { source: "shared" as const, dataPolicy: "may-train" as const },
+  }
+  expect(freeModelTrainingNotice(laguna)).toEqual({
+    summary: "Shared Vector allowance · May train on your prompts",
+    disclaimer: FREE_MODEL_TRAINING_DISCLAIMER,
+  })
+  expect(
+    freeModelTrainingNotice({ ...laguna, freeModel: { source: "openrouter", dataPolicy: "unreviewed" } })?.summary,
+  ).toBe("Your OpenRouter account · May train on your prompts")
+  expect(freeModelTrainingNotice({ id: "openrouter/free", freeModel: laguna.freeModel })?.disclaimer).toBe(
+    FREE_ROUTER_DISCLAIMER,
+  )
+  expect(freeModelTrainingNotice({ ...laguna, freeModel: { source: "shared", dataPolicy: "no-training" } })).toBe(
+    undefined,
+  )
+  expect(freeModelTrainingNotice({ id: "maker/paid" })).toBeUndefined()
 })

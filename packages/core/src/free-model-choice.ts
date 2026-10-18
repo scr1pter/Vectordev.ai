@@ -88,7 +88,7 @@ export function freeModelName(model: Pick<FreeModelChoice, "name">) {
     .trim()
 }
 
-export function freeModelSource(model: FreeModelChoice) {
+export function freeModelSource(model: Pick<FreeModelChoice, "id" | "freeModel">) {
   if (model.freeModel?.source === "openrouter") return "Your OpenRouter account"
   if (model.freeModel?.source === "shared") return "Shared Vector allowance"
   return undefined
@@ -118,6 +118,16 @@ export function freeModelTrainingDisclaimer(model: Pick<FreeModelChoice, "freeMo
   if (model.freeModel?.dataPolicy === "unreviewed") return FREE_MODEL_UNREVIEWED_DISCLAIMER
   if (model.freeModel?.dataPolicy === "may-train") return FREE_MODEL_TRAINING_DISCLAIMER
   return undefined
+}
+
+/**
+ * What stays in view while a free model labelled "May train on your prompts" is in use (the desktop composer, the TUI
+ * prompt and `vector run`): its source and label, then its disclaimer. Nothing for a no-training or non-free model.
+ */
+export function freeModelTrainingNotice(model: Pick<FreeModelChoice, "id" | "freeModel">) {
+  const disclaimer = freeModelTrainingDisclaimer(model)
+  if (!disclaimer) return
+  return { summary: [freeModelSource(model), FREE_MODEL_TRAINING_LABEL].filter(Boolean).join(" · "), disclaimer }
 }
 
 /**

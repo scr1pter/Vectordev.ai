@@ -137,6 +137,80 @@ afterEach(() => {
 })
 
 describe("run interactive runtime", () => {
+  for (const dataPolicy of ["may-train", "no-training"] as const) {
+    test(`a free model ${dataPolicy === "may-train" ? "that may train shows its notice once, before" : "that does not train shows no notice before"} the first request`, async () => {
+      const sdk = new VectorClient()
+      const shared = {
+        ...provider,
+        id: "vector",
+        models: {
+          "maker/free:free": {
+            ...provider.models["gpt-5"],
+            id: "maker/free:free",
+            providerID: "vector",
+            name: "Maker Free",
+            freeModel: { source: "shared" as const, dataPolicy },
+          },
+        },
+      }
+      spyOn(sdk.config, "providers").mockImplementation(() => ok({ providers: [shared], default: {} }))
+      spyOn(sdk.session, "messages").mockImplementation(() => ok([]))
+      spyOn(sdk.app, "agents").mockImplementation(() => ok([]))
+      spyOn(sdk.experimental.resource, "list").mockImplementation(() => ok({}))
+      spyOn(sdk.command, "list").mockImplementation(() => ok([]))
+      const output = footer()
+      const order: string[] = []
+      spyOn(output, "append").mockImplementation((commit) => {
+        if (commit.kind === "system") order.push(commit.text)
+      })
+      await runInteractiveMode(
+        {
+          sdk,
+          directory: "/tmp",
+          sessionID: "ses-free-notice",
+          agent: "build",
+          model: { providerID: "vector", modelID: "maker/free:free" },
+          variant: undefined,
+          files: [],
+          initialInput: "hello",
+          thinking: false,
+          backgroundSubagents: false,
+        },
+        {
+          createRuntimeLifecycle: async () => ({
+            footer: output,
+            onResize: () => () => {},
+            refreshTheme: () => {},
+            resetForReplay: () => Promise.resolve(),
+            close: () => Promise.resolve(),
+          }),
+          streamTransport: Promise.resolve({
+            createSessionTransport: async () => ({
+              runPromptTurn: async () => {
+                order.push("request")
+                output.close()
+              },
+              selectSubagent: () => {},
+              replayOnResize: async () => false,
+              close: async () => {},
+            }),
+            formatUnknownError: (error: unknown) => String(error),
+          }),
+        },
+      )
+      const notices = order.filter((text) => text.includes("May train on your prompts"))
+      expect(order).toContain("request")
+      if (dataPolicy === "no-training") {
+        expect(notices).toEqual([])
+        return
+      }
+      expect(notices).toHaveLength(1)
+      expect(notices[0]).toContain("Maker Free · Shared Vector allowance · May train on your prompts")
+      expect(notices[0]).toContain("Vector itself never trains on your prompts.")
+      expect(order.indexOf(notices[0])).toBeLessThan(order.indexOf("request"))
+    })
+  }
+
   test("waits for provider metadata before eager replay transport bootstrap", async () => {
     const providersStarted = defer<void>()
     const providers = defer<void>()

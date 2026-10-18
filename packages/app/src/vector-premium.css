@@ -2654,6 +2654,27 @@ html[data-vector-navigation-resizing] * {
 :is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-training"] {
   color: var(--vx-amber);
 }
+/* Such a row grows a second line, under the name, for its disclaimer. */
+:is(.vector-model-popover, .vector-select-model-dialog) [data-component="menu-v2-item"][data-training-notice] {
+  height: auto;
+  min-height: 32px;
+  padding-block: 6px;
+}
+:is(.vector-model-popover, .vector-select-model-dialog)
+  [data-component="menu-v2-item"][data-training-notice]
+  [data-slot="menu-v2-item-content"] {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-training-detail"] {
+  flex: 1 0 100%;
+  padding-left: 24px;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: normal;
+  text-align: left;
+  color: var(--vx-text-muted);
+}
 .vector-select-model-dialog [data-slot="model-row-check"] {
   display: inline-flex;
   flex: none;

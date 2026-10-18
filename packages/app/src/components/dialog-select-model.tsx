@@ -1,4 +1,8 @@
-import { freeModelSource, freeModelTrainingLabel } from "@vectordevai/core/free-model-choice"
+import {
+  freeModelSource,
+  freeModelTrainingDisclaimer,
+  freeModelTrainingLabel,
+} from "@vectordevai/core/free-model-choice"
 import { Popover as Kobalte } from "@kobalte/core/popover"
 import { Component, ComponentProps, createMemo, createSignal, For, JSX, onMount, Show, ValidComponent } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -115,7 +119,8 @@ function SectionHeading(props: { section: ModelSection }) {
 }
 
 /** One model row, shared by both views: mark gutter, name, "New", and a quiet spec line
-    with the context size.
+    with the context size. A free model labelled "May train on your prompts" also shows its
+    disclaimer on a line of its own, so it is read before the model is chosen.
     Everything else is in the row's tooltip (modelTitle), which the caller sets. */
 function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }) {
   // The top section mixes providers, so its rows carry their own mark; provider sections
@@ -157,6 +162,9 @@ function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }
             )}
           </For>
         </span>
+      </Show>
+      <Show when={freeModelTrainingDisclaimer(props.item)}>
+        {(disclaimer) => <span data-slot="model-row-training-detail">{disclaimer()}</span>}
       </Show>
     </>
   )
@@ -385,6 +393,7 @@ export function ModelSelectorPopoverV2(props: {
                               <MenuV2.RadioItem
                                 value={key}
                                 data-option-key={key}
+                                data-training-notice={freeModelTrainingDisclaimer(item) ? "" : undefined}
                                 data-active={active() === key ? "" : undefined}
                                 data-selected-model={picker.current() === key ? true : undefined}
                                 aria-label={modelAriaLabel(item, store.now)}
@@ -561,6 +570,7 @@ export const DialogSelectModelV2: Component<{ provider?: string; model?: ModelSt
                             type="button"
                             data-component="menu-v2-item"
                             data-option-key={key}
+                            data-training-notice={freeModelTrainingDisclaimer(item) ? "" : undefined}
                             data-active={active() === key ? "" : undefined}
                             data-checked={checked() ? "" : undefined}
                             aria-current={checked() ? "true" : undefined}

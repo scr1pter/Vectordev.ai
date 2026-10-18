@@ -18,6 +18,7 @@ import { MessageID } from "@/session/schema"
 import { createRunDemo } from "./demo"
 import { resolveModelInfo, resolveRunTuiConfig, resolveSessionInfo } from "./runtime.boot"
 import { createRuntimeLifecycle } from "./runtime.lifecycle"
+import { freeModelRunNotice } from "./free-model-notice"
 import { trace } from "./trace"
 import { cycleVariant, formatModelLabel, resolveSavedVariant, resolveVariant, saveVariant } from "./variant.shared"
 import type { LocalReplayAnchor, LocalReplayRow, RunInput, RunPrompt, RunProvider, StreamCommit } from "./types"
@@ -539,6 +540,8 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
 
   const runQueue = async () => {
     let includeFiles = true
+    // Models labelled "May train on your prompts" whose notice this run has shown.
+    const trainingNoticed = new Set<string>()
     if (state.demo) {
       await state.demo.start()
     }
@@ -650,6 +653,14 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
         let outputAnchor: LocalReplayAnchor | undefined
         try {
           const next = await ensureStream()
+          // A model labelled "May train on your prompts" says so the first time this run sends to it.
+          const key = state.model ? `${state.model.providerID}/${state.model.modelID}` : undefined
+          const notice =
+            key && !trainingNoticed.has(key) ? freeModelRunNotice((await modelTask).providers, state.model) : undefined
+          if (key && notice) {
+            trainingNoticed.add(key)
+            footer.append({ kind: "system", text: notice, phase: "final", source: "system" })
+          }
           await next.handle.runPromptTurn({
             agent: state.agent,
             model: state.model,
