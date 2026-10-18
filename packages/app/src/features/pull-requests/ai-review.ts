@@ -605,13 +605,15 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
       .join("\0"),
   )
   // Files whose diff is the same as at the last review of this subject, under the same settings. When every file is,
-  // that review stands. A review that stopped early or lost a reviewer did not see everything, so it is not reused.
+  // that review stands. A review that stopped early or lost a reviewer did not see everything, and one whose
+  // double-check did not finish left its findings unchecked (or, after a triage pass, out), so neither is reused.
   const previous =
     input.previous &&
     input.previous.pr === pr?.number &&
     input.previous.settingsKey === settingsKey &&
     input.previous.specialists.length > 0 &&
-    input.previous.specialists.every((specialist) => specialist.status === "ok")
+    input.previous.specialists.every((specialist) => specialist.status === "ok") &&
+    (input.previous.verification?.status ?? "ok") === "ok"
       ? input.previous
       : undefined
   const unchanged = new Set(

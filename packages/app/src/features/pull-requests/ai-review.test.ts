@@ -1346,6 +1346,25 @@ describe("cheaper first pass", () => {
     )
   })
 
+  test("Review again runs the double-check again when it did not finish, instead of reusing the review", async () => {
+    const files = { "src/list.ts": HEAD, ".vector/review.json": '{"triageModel":"openrouter/cheap-coder"}' }
+    const failed = fakeClient({
+      files,
+      reply: (call) => (isVerify(call) ? undefined : fromModel(call, report(), 0.001)),
+    })
+    const previous = (await run(failed.client, { catalog: [sonnet, cheap] }))!
+    expect(previous.verification?.status).toBe("failed")
+    expect(previous.selection.inline).toEqual([])
+    const again = fakeClient({
+      files,
+      reply: (call) => (isVerify(call) ? fromModel(call, verdicts(call), 0.02) : fromModel(call, report(), 0.001)),
+    })
+    const outcome = (await run(again.client, { catalog: [sonnet, cheap], previous }))!
+    expect(outcome.unchanged).toBeUndefined()
+    expect(again.calls.prompt.filter(isVerify)).toHaveLength(1)
+    expect(outcome.selection.inline.map((finding) => [finding.title, finding.verified])).toEqual([[offByOne.title, true]])
+  })
+
   test("says so when the triage model is not connected, and runs everything on the review model", async () => {
     const { client, calls } = fakeClient({
       files: { "src/list.ts": HEAD, ".vector/review.json": '{"triageModel":"openrouter/missing"}' },
@@ -1397,6 +1416,20 @@ describe("reviewing again", () => {
     const partial = fakeClient({ files: { "src/list.ts": HEAD } })
     expect((await run(partial.client, { previous: stopped }))!.unchanged).toBeUndefined()
     expect(partial.calls.prompt.length).toBeGreaterThan(0)
+  })
+
+  test("reviews again when the last review's double-check did not finish", async () => {
+    const failed = fakeClient({
+      files: { "src/list.ts": HEAD },
+      reply: (call) => (isVerify(call) ? undefined : answer(report())),
+    })
+    const previous = (await run(failed.client))!
+    expect(previous.verification?.status).toBe("failed")
+    const again = fakeClient({ files: { "src/list.ts": HEAD } })
+    const outcome = (await run(again.client, { previous }))!
+    expect(outcome.unchanged).toBeUndefined()
+    expect(again.calls.prompt.filter(isVerify)).toHaveLength(1)
+    expect(outcome.verification?.status).toBe("ok")
   })
 
   test("looks only at the files that changed, and carries the last review's findings in the others", async () => {
