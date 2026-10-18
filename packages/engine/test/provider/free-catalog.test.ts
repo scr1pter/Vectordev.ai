@@ -1,4 +1,5 @@
 import { afterEach, expect } from "bun:test"
+import { streamText } from "ai"
 import { Effect, Layer } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FreeModels } from "@vectordevai/core/free-models"
@@ -89,4 +90,34 @@ it.instance("with the shared catalog off, the user's own OpenRouter free models 
     expect(Provider.applyFreeCatalog({}, on, true).vector?.models[FREE_MODEL_FALLBACKS[1].id]).toBeDefined()
     expect(Provider.applyFreeCatalog({}, on, false).vector).toBeUndefined()
   }),
+)
+
+it.instance(
+  "a prompt to a may-train free model without the user's acceptance is refused before anything is sent",
+  () =>
+    Effect.gen(function* () {
+      const provider = yield* Provider.Service
+      served.catalog = { enabled: true, updatedAt: 1, models: [...FREE_MODEL_FALLBACKS, laguna] }
+      yield* Effect.promise(() => client.catalog(true))
+      const model = yield* pollWithTimeout(
+        provider.getModel(ProviderV2.ID.vector, ModelV2.ID.make(laguna.id)).pipe(Effect.orElseSucceed(() => undefined)),
+        "the may-train model was never listed",
+        "3 seconds",
+      )
+      // This client has no consent file, so the engine has no acceptance on record. The request is refused while it
+      // is built, before the fetch to vectordev.ai, so this test makes no network request.
+      const result = streamText({
+        model: yield* provider.getLanguage(model),
+        messages: [{ role: "user", content: "hello" }],
+        maxRetries: 0,
+      })
+      const errors: unknown[] = []
+      yield* Effect.promise(async () => {
+        for await (const part of result.fullStream) if (part.type === "error") errors.push(part.error)
+      }).pipe(Effect.orElseSucceed(() => undefined))
+      expect(String(errors[0])).toContain("Nothing was sent")
+      expect(String(errors[0])).toContain("vector models --accept-training")
+      served.catalog = off
+    }),
+  { trusted: true },
 )
