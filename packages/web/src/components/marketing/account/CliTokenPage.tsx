@@ -142,8 +142,8 @@ export function CliTokenPage() {
               <code>vector</code> — start the agent in any repository
             </li>
             <li>
-              Connect your own provider with <code>vector auth login</code>. From 1.99.99, connecting your own
-              OpenRouter account adds its zero-price models under Free models inside of Vector
+              Signed in, <code>vector models</code> lists the Free models inside of Vector, on Vector's shared
+              allowance. Connect your own provider with <code>vector auth login</code>
             </li>
           </ol>
         )}

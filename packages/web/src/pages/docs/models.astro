@@ -7,8 +7,8 @@ export const prerender = true
 <DocsPage id="models">
 
           <p>
-            Connect a provider account or API key to start. From 1.99.99, Vector also offers guarded free-model
-            access through your own free OpenRouter account, with setup and limits described below.
+            Sign in to Vector to use free models, or connect a provider account or API key. The free models, their
+            data policies and their limits are described below.
           </p>
 
           <h2 id="byok">Bring your own key</h2>
@@ -29,31 +29,35 @@ export const prerender = true
 
           <h2 id="free-models">Free models inside of Vector</h2>
           <p>
-            From 1.99.99, Vector offers guarded access through your own free OpenRouter account.
-            In Settings → Providers, choose Connect OpenRouter, then choose a model under
-            Free models inside of Vector, marked Your OpenRouter account. This personal section works whether or
-            not Vector's shared allowance is on. Every model is an explicit free variant with online, tool-capable,
-            zero-price endpoints, and the guarded route never switches to a paid model or provider.
+            Sign in to Vector and the Free models inside of Vector are there at no cost to you: Vector's shared
+            allowance runs them on Vector's own OpenRouter account, through Vector's server, which checks your account
+            and its limits. You don't need an OpenRouter account of your own. Every model is listed at a zero price
+            with tool-capable endpoints, and a request never switches to a paid model or provider. The section appears
+            while Vector's service has the shared allowance switched on and has models to serve.
           </p>
           <p>
-            From desktop 1.99.109 and the next CLI release, Vector offers every such free model OpenRouter lists,
-            except NVIDIA's trial endpoints, whose terms allow evaluation only. Each one carries the data policy
-            Vector recorded for the provider serving it, reviewed on 17 October 2026:
+            From desktop 1.99.109 and the next CLI release, Vector offers every free model OpenRouter lists, except
+            those whose terms bar this use: NVIDIA's trial endpoints, whose terms allow evaluation only, and Google
+            Lyria, which charges per song or clip. Each one carries the data policy Vector recorded for the provider
+            serving it, reviewed on 17 October 2026:
           </p>
           <ul>
             <li>
               <strong>No training:</strong> Cohere's North Mini Code (Cohere, kept up to 30 days), Dots3-Note
-              Preview (AtlasCloud, which does not publish how long it keeps prompts), Google's Gemma 4 26B and 31B
-              (Google AI Studio, kept up to 55 days) and XingChen's Xing4.0 (Phala). Each request asks OpenRouter to
-              deny data collection. Gemma and Xing4.0 are offered only through your own OpenRouter account, not
-              Vector's shared allowance.
+              Preview (AtlasCloud, which does not publish how long it keeps prompts) and XingChen's Xing4.0 (Phala).
+              Each request asks OpenRouter to deny data collection. Google's Gemma 4 26B and 31B (Google AI Studio,
+              kept up to 55 days) are listed only for an OpenRouter account of your own, because Google's terms limit
+              users in the EEA, Switzerland and the UK to paid use, and the shared allowance does not check where you
+              are.
             </li>
             <li>
               <strong>May train on your prompts:</strong> Poolside's Laguna S 2.1 and XS 2.1 (free until 31 October
-              2026), Liquid's LFM2.5-2.6B and Thinking Machines' Inkling and Inkling Small. Their providers may log
-              your prompts, code and outputs and use them to train their models. A free model Vector has not yet
-              reviewed carries the same label, is offered only through your own OpenRouter account, and its
-              requests still ask OpenRouter to deny data collection.
+              2026), Liquid's LFM2.5-2.6B, Thinking Machines' Inkling and Inkling Small, and OpenRouter's Free Models
+              Router. Their providers may log your prompts, code and outputs and use them to train their models. The
+              Free Models Router sends each request to a free model OpenRouter picks at random; Vector asks OpenRouter
+              to skip NVIDIA's trial endpoints, but OpenRouter doesn't say whether the router honours that. A free model
+              Vector has not yet reviewed carries the same label, and its requests still ask OpenRouter to deny data
+              collection.
             </li>
           </ul>
           <p>
@@ -72,33 +76,26 @@ export const prerender = true
             CLI 1.99.99 are offered no-training models only.
           </p>
           <p>
-            Keep that account free: do not buy credits, add a payment method, enable automatic top-ups,
-            attach paid provider keys through OpenRouter's BYOK settings, or enable default or enforced paid plugins.
-            OpenRouter currently lists up to 50 requests a day and 20 a minute without a credit purchase;
-            availability can be lower, and a coding task can consume many requests. At a limit, wait for the reset.
-            The guarded route stops when no eligible zero-price endpoint is available and does not switch to
-            a paid model or provider. <a href="https://openrouter.ai/docs/api_reference/limits">Check OpenRouter's current limits.</a>
+            The shared allowance has a per-minute and a daily limit for each account, and everyone on it shares
+            OpenRouter's limits for Vector's account. A coding task can use many requests, since each tool step is
+            one. At a limit, Vector says when the allowance is expected to reset; to keep working before then, choose
+            a model from another provider you've connected, or add your own provider key in Settings → Providers.
           </p>
           <p>
             Prompts are processed by OpenRouter and the selected model provider. Vector does not request zero data
             retention for these models: most of their providers keep prompts and outputs under their own policies,
-            and OpenRouter records Phala, which serves Xing4.0, as keeping none. Your OpenRouter account's
-            privacy settings decide whether models that may train are listed for you at all; if they are hidden,
-            allow free models from providers that may train on your data in OpenRouter's privacy settings, or choose
-            a no-training model. The policies rely on the providers' published terms and OpenRouter's records, not an
-            independent audit. They do not cover Vector's local history, OpenRouter account logging or other
-            connected services. Review those settings before sending confidential code.
-            Other provider connections have their own terms. Releases before 1.99.99, such as desktop 1.99.8, do not
-            include this route. Vector's shared allowance serves the reviewed models except Gemma and Xing4.0, under
-            the same labels and consent, to any signed-in Vector account without an OpenRouter account, through
-            Vector's server, which checks the account and its limits. It serves them only while Vector's service has it
-            switched on, and the picker shows it, as Shared Vector allowance, only while it has models to serve.
+            and OpenRouter records Phala, which serves Xing4.0, as keeping none. The policies rely on the providers'
+            published terms and OpenRouter's records, not an independent audit. They do not cover Vector's local
+            history, OpenRouter's account logging or other connected services. Review them before sending
+            confidential code. Other provider connections have their own terms.
           </p>
           <p>
-            For guarded free models, save an API key through Settings → Providers or set
-            <code>OPENROUTER_API_KEY</code> in the engine environment. A key stored only in a project's
-            <code>provider.openrouter.options.apiKey</code> does not enable this route; migrate it to a provider
-            connection or environment variable without committing it to the project.
+            OpenRouter is also an ordinary provider in Settings → Providers. If you connect an OpenRouter account of
+            your own there, its free models are listed under Free models inside of Vector, marked Your OpenRouter
+            account, and run on that account's own limits and privacy settings instead of the shared allowance. A key
+            stored only in a repository's <code>provider.openrouter.options.apiKey</code> does not list them. From
+            1.99.99 to 1.99.108, connecting OpenRouter was the way to start free; from desktop 1.99.109 it is signing
+            in to Vector.
             <a href="https://openrouter.ai/docs/guides/routing/provider-selection">OpenRouter routing documentation</a>
             describes the data-collection and provider controls.
           </p>
@@ -110,18 +107,10 @@ export const prerender = true
           <p class="doc-cmd"><code>vector models
 vector models anthropic --verbose</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
           <p>
-            From 1.99.99, your personal account adds eligible models under
-            <strong>Free models inside of Vector</strong>, marked Your OpenRouter account, independently of
-            Vector's shared allowance. Display names omit <code>:free</code>; selectors retain it. Human guidance,
-            including the “May train on your prompts” label from the next CLI release, goes to stderr, while stdout
-            keeps plain model selectors. Connect your own account with
-            <code>vector providers login --provider openrouter --method "Connect OpenRouter"</code>.
-          </p>
-          <p>
-            Browser authorization returns to the engine's localhost. If you use a remote engine without access
-            to that callback port, connect through the API-key method or set <code>OPENROUTER_API_KEY</code> on
-            that engine. A project-only provider key does not enable guarded free models. Releases before 1.99.99,
-            such as CLI 1.99.7 and desktop 1.99.8, do not include this setup.
+            Signed in with <code>vector login</code>, the shared allowance's models are listed under
+            <strong>Free models inside of Vector</strong>, marked Shared Vector allowance. Display names omit
+            <code>:free</code>; selectors retain it. Human guidance, including the “May train on your prompts” label
+            from the next CLI release, goes to stderr, while stdout keeps plain model selectors.
           </p>
           <p>
             Models that expose reasoning effort take <code>--variant</code>. The level resolves from the flag, then your saved preference, then what the session last used, and your choice is kept per provider and model.
