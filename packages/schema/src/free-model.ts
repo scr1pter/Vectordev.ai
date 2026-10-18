@@ -3,7 +3,7 @@ import { Option, Schema } from "effect"
 /**
  * What a free endpoint's provider may do with request content, from Vector's reviewed record in
  * packages/core/src/free-model-catalog.ts. "unreviewed" is a free endpoint Vector has not reviewed yet; it is
- * disclosed exactly like "may-train" and never treated as no-training.
+ * disclosed the same way as "may-train" and never treated as no-training.
  */
 export const FreeDataPolicy = Schema.Literals(["no-training", "may-train", "unreviewed"])
 export type FreeDataPolicy = typeof FreeDataPolicy.Type

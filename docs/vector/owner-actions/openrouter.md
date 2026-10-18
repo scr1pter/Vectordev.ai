@@ -6,7 +6,40 @@ No account was created, terms accepted, purchase made, key read, privacy setting
 
 On 2 October 2026, OpenRouter's [pricing page](https://openrouter.ai/pricing) listed Data Policy-Based Routing as unavailable on Free, while its [per-request ZDR documentation](https://openrouter.ai/docs/guides/features/zdr#per-request-zdr-enforcement) described `provider.zdr` without an account-tier qualification. These sources do not establish whether an unfunded account can use Vector's `data_collection: "deny"` and provider-list constraints. (Since 15 October 2026 included models no longer request `zdr: true`; see below.) Public endpoint metadata and passing fixture tests do not resolve that entitlement question. Keep the guards intact and treat rejected requests as unavailable; purchasing credits or upgrading is not an acceptable workaround.
 
-## No-training policy: owner steps (15 October 2026)
+## Free models of 17 October 2026: owner steps
+
+The owner decided on 17 October 2026 to offer every free OpenRouter model, including models whose providers may train on prompts, behind the label "May train on your prompts" and a one-time consent; see [FREE-MODELS.md](../FREE-MODELS.md#every-free-model-with-its-data-policy-owner-decision-17-october-2026). Code cannot do the steps below. Nothing here was done by the implementation agent: no account settings were changed, no key was read and no authenticated or paid call was made.
+
+**Why production shows no free models today.** On 17 October 2026 at about 23:40 UTC, `GET https://vectordev.ai/api/free-models/models` answered 503 because the catalog was never written under the storage key in use. The import fix (4f03b239b) landed after that day's 03:17 UTC cron had already failed. After this branch deploys, the key is `vector:free-models:catalog:v4:policy`, which is empty until the refresh runs, and `/models` then names the case (`FREE_MODELS_CATALOG_MISSING`).
+
+In the OpenRouter account behind `OPENROUTER_FREE_API_KEY`, at [openrouter.ai/settings/privacy](https://openrouter.ai/settings/privacy). OpenRouter's documentation says the account settings page sets "whether you would like to allow routing to providers that may train on your data", with separate settings for paid and free models. The exact toggle labels below come from third-party descriptions, because the settings page needs sign-in; match them to what the page shows.
+
+1. **Free models: allow providers that may train on your data — turn ON.** Without it OpenRouter never routes to Poolside, Liquid or Thinking Machines, so the shared catalog keeps only no-training models (the account's `/models/user` list leaves them out). Every request still narrows routing: no-training models, and every user who has not accepted, keep `data_collection: "deny"`.
+2. **Paid models: allow providers that may train — keep OFF.** Codium is paid and must not change.
+3. **Providers that may publish prompts — keep OFF.** No free endpoint publishes prompts today, and the consent covers training, not publication.
+4. **"ZDR endpoints only" — keep OFF.** With it on, every free model is refused (`{"enabled":false,"count":0}`). Codium already sends `zdr: true` on each request, so it does not need the account-wide setting.
+5. **Ignored and allowed providers.** Do not ignore `cohere`, `atlas-cloud`, `google-ai-studio`, `phala`, `poolside`, `liquid` or `thinkingmachines`. If the account has an allowed-providers list, it must include all of them; OpenRouter answers 404 when the account list and a request's `only` list do not overlap.
+6. **Prompt logging and OpenRouter's own use of inputs — keep OFF.**
+7. Keep the account free of paid upstream BYOK keys and paid plugins. Whether to buy $10 of credits (1,000 free requests a day instead of 50) is your decision; Vector's guards still send `max_price: 0` either way.
+
+Then, after this branch deploys:
+
+8. **Run the refresh.** In Vercel open the project → Settings → Cron Jobs → **Run** on `/api/free-models/refresh`, or send `GET https://vectordev.ai/api/free-models/refresh` with `Authorization: Bearer <CRON_SECRET>`. The answer says which case you are in:
+   - `{"enabled":true,"count":10}` (or fewer as models come and go): working. With step 1 off, expect `count: 5`, the no-training models only.
+   - `{"enabled":false,"count":0}`: OpenRouter's account list allows nothing; recheck steps 1, 4 and 5.
+   - 503 `FREE_MODELS_CATALOG_UNAVAILABLE`: an OpenRouter read failed, probably a bad or revoked `OPENROUTER_FREE_API_KEY`.
+   - 503 `PERSISTENT_STORE_UNAVAILABLE`: the key-value store is unavailable.
+   - 503 `FREE_MODELS_UNAVAILABLE`: no key environment variable is set.
+   - 401: `CRON_SECRET` is missing or wrong.
+9. **Check both catalogs.** `GET https://vectordev.ai/api/free-models/models` (what 1.99.108 and CLI 1.99.99 see) should list no-training models only; `GET https://vectordev.ai/api/free-models/models?disclosure=may-train-v1` adds the may-train ones, each provider with `"dataPolicy"`.
+10. **Set the limits** (Vercel environment): `FREE_MODELS_MINUTE_PER_USER` now defaults to 10 (at most 20) and `FREE_MODELS_DAILY_PER_USER` to the smaller of 20 and a tenth of the account's daily free limit (at most 1,000). With 50 requests a day for the whole account, each user gets about 5, and one agent prompt can use that up. Choose values for the account's tier.
+11. **Try one harmless prompt** from a signed-in 1.99.109 build to one no-training model and one may-train model (accepting the notice), and confirm both answer and the balance is unchanged. A refusal shows "temporarily unavailable" and never falls back to a paid endpoint.
+
+Still unverified, because it needs a logged-in call: whether an account that never bought credits can use `data_collection`, `only` and `max_price` routing at all (OpenRouter's pricing table lists Data Policy-Based Routing as not on the Free plan). If shared requests are refused while the catalog lists models, that is the likely cause.
+
+## No-training policy: owner steps (15 October 2026, superseded on 17 October)
+
+Steps 1, 3 and 4 below still apply. Step 2 changed: free endpoints that may train must now be allowed on the account (see above).
 
 The included-models policy changed from zero data retention to no training: providers may retain prompts under their own policies but must not train on them. Included and personal requests send `data_collection: "deny"`, the allowlisted provider `only` list, `require_parameters: true` and a zero `max_price`, and no longer send `zdr: true`. The allowlist names each model with the provider that may serve it: Cohere for North Mini Code and AtlasCloud for Dots3-Note Preview (see [No-training evidence per model](#no-training-evidence-per-model)). NovitaAI and ModelRun serve no free model today and were dropped until they are re-reviewed. Poolside is excluded because OpenRouter's free Laguna pages say free use may train on inputs. Codium is unchanged and still requests `zdr: true` on every request, so an account-wide ZDR setting is not needed for it.
 
@@ -21,6 +54,8 @@ In the OpenRouter account behind `OPENROUTER_FREE_API_KEY` (its privacy and prov
 Before deploying, complete the per-model confirmations in [No-training evidence per model](#no-training-evidence-per-model). After deploying, force a refresh instead of waiting for the 03:17 UTC cron: in Vercel open the project → Settings → Cron Jobs and choose **Run** on `/api/free-models/refresh`, or send `GET https://vectordev.ai/api/free-models/refresh` with the header `Authorization: Bearer <CRON_SECRET>`. A good answer is `{"enabled":true,"updatedAt":…,"count":2}`. Then `https://vectordev.ai/api/free-models/models` should list `cohere/north-mini-code:free` and `dots-studio/dots-3-note-preview:free`. If nothing qualifies, the refresh publishes `{"enabled":false}` and the app hides the section. Finally send one harmless prompt to each model from a signed-in desktop and confirm it answers and the account balance is unchanged. A refusal shows "temporarily unavailable" and never falls back to a paid endpoint; if that happens, recheck steps 1 to 4. One unreadable endpoint list drops only that model from a refresh; a failed `/models` or `/models/user` read keeps the stored catalog and answers 503.
 
 ## No-training evidence per model
+
+The 17 October 2026 review, covering every free model with its per-endpoint data policy, is in [free-models-legal.md](free-models-legal.md#evidence-per-model-17-october-2026). The table below is the earlier 15 October record for the first two pairs.
 
 OpenRouter's public endpoint and provider data has no training field, and provider-level records do not describe free endpoints reliably: the 25 September records listed Poolside as not training, while its free Laguna pages say free use may train on inputs. The allowlist (`NO_TRAINING_ENDPOINTS` in `packages/core/src/free-model-catalog.ts`) therefore names each model with the provider that may serve it, and a new free model is never offered until it is added. `data_collection: "deny"` remains a second guard, but it rests on OpenRouter's own data-policy records.
 
