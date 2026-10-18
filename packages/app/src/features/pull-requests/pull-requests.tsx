@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, Show
 import { createStore } from "solid-js/store"
 import { githubApi, GithubDeviceSignIn } from "@/components/github-connect"
 import {
+  afterFixes,
   askAgentPrompt,
   buildDesktopReview,
   checksForReview,
@@ -1329,17 +1330,30 @@ export function PullRequests(props: {
   }
 
   // Writes the finding's suggested change into the user's checkout, once the lines still read as they were reviewed.
+  // Fixes apply one at a time, so each reads the file the one before it wrote, and each allows for the lines the
+  // review's earlier fixes moved or rewrote next to it.
+  let applying = Promise.resolve()
   const applyFix = async (finding: ReviewFindingView) => {
     const fix = finding.apply
     const apply = props.onApplyFix
     const state = applied()[finding.id]
     if (!fix || !apply || state === "applying" || state === "applied") return
     setApplied((current) => ({ ...current, [finding.id]: "applying" }))
-    const result = await apply(fix).catch((cause: unknown) => {
-      setError(`Vector could not apply the fix: ${pullRequestErrorMessage(cause)}`)
-      return "failed" as const
+    const turn = applying.then(async () => {
+      const earlier = groups()
+        .flatMap((group) => group.findings)
+        .flatMap((other) => (other.apply && applied()[other.id] === "applied" ? [other.apply] : []))
+      const edit = afterFixes(fix, earlier)
+      const result = edit
+        ? await apply(edit).catch((cause: unknown) => {
+            setError(`Vector could not apply the fix: ${pullRequestErrorMessage(cause)}`)
+            return "failed" as const
+          })
+        : ("changed" as const)
+      setApplied((current) => ({ ...current, [finding.id]: result }))
     })
-    setApplied((current) => ({ ...current, [finding.id]: result }))
+    applying = turn
+    await turn
   }
 
   // Hands the finding to the agent in the task on screen, which works in the checkout that was reviewed.

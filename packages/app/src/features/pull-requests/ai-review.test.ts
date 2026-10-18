@@ -6,6 +6,7 @@ import { reviewPermissionRules } from "@vectordevai/core/review/permission"
 import { buildFinalizePrompt } from "@vectordevai/core/review/prompt"
 import { REVIEW_REPORT_JSON_SCHEMA, VERIFY_JSON_SCHEMA } from "@vectordevai/core/review/schema"
 import {
+  afterFixes,
   applyFix,
   applyReviewFix,
   askAgentPrompt,
@@ -1560,6 +1561,33 @@ describe("applying a fix", () => {
     const bare = { ...nullFix, above: [], below: [] }
     expect(applyFix(edited, bare)).toBeUndefined()
     expect(applyFix("// moved\n" + twoFunctions, bare)).toBeUndefined()
+  })
+
+  test("a fix next to one already applied still applies, and one whose lines that fix rewrote does not", () => {
+    const text = Array.from({ length: 20 }, (_, index) => `const v${index + 1} = ${index + 1}`).join("\n") + "\n"
+    const code = (line: number) => `const v${line} = ${line}`
+    // As fixOf builds them: up to three of the diff's lines on each side.
+    const at = (line: number, after: string[]): ReviewFix => ({
+      path: "src/twenty.ts",
+      line,
+      endLine: line,
+      above: [line - 3, line - 2, line - 1].map(code),
+      before: [code(line)],
+      below: [line + 1, line + 2, line + 3].map(code),
+      after,
+    })
+    const ten = at(10, ["const v10 = ten()", "check(v10)"])
+    const twelve = at(12, ["const v12 = twelve()"])
+    const both = text
+      .replace("const v10 = 10\n", "const v10 = ten()\ncheck(v10)\n")
+      .replace("const v12 = 12\n", "const v12 = twelve()\n")
+    expect(applyFix(applyFix(text, ten)!, afterFixes(twelve, [ten])!)).toBe(both)
+    expect(applyFix(applyFix(text, twelve)!, afterFixes(ten, [twelve])!)).toBe(both)
+    // Nothing applied yet: the fix is unchanged.
+    expect(afterFixes(twelve, [])).toEqual(twelve)
+    // The lines a fix replaces must still be the reviewed ones: another fix that rewrote them stops it.
+    expect(afterFixes(at(10, ["const v10 = 0"]), [ten])).toBeUndefined()
+    expect(afterFixes(at(11, ["const v11 = 0"]), [{ ...ten, endLine: 11, before: [code(10), code(11)] }])).toBeUndefined()
   })
 
   test("refuses a moved fix when the reviewed lines now appear more than once nearby", () => {

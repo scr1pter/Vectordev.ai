@@ -1801,6 +1801,30 @@ export function applyFix(text: string, fix: ReviewFix): string | undefined {
   return next.join(eol) + (ending ? eol : "")
 }
 
+// A fix as it reads once other fixes from the same review were applied to its file: lines below each of them moved by
+// the lines it added or removed, and the diff lines next to this fix that one of them rewrote are no longer checked.
+// undefined when one of them rewrote a line this fix replaces, since those are no longer the reviewed lines.
+export function afterFixes(fix: ReviewFix, applied: readonly ReviewFix[]): ReviewFix | undefined {
+  const earlier = applied.filter((other) => other !== fix && other.path === fix.path)
+  if (earlier.some((other) => other.line <= fix.endLine && other.endLine >= fix.line)) return undefined
+  const rewritten = (line: number) => earlier.some((other) => line >= other.line && line <= other.endLine)
+  // Nearest first, up to the first line another fix rewrote.
+  const until = (lines: readonly string[], at: (offset: number) => number) => {
+    const stop = lines.findIndex((_, offset) => rewritten(at(offset)))
+    return stop === -1 ? [...lines] : lines.slice(0, stop)
+  }
+  const shift = earlier
+    .filter((other) => other.endLine < fix.line)
+    .reduce((total, other) => total + other.after.length - other.before.length, 0)
+  return {
+    ...fix,
+    line: fix.line + shift,
+    endLine: fix.endLine + shift,
+    above: until(fix.above.toReversed(), (offset) => fix.line - 1 - offset).toReversed(),
+    below: until(fix.below, (offset) => fix.endLine + 1 + offset),
+  }
+}
+
 // Reads the file, applies the fix and writes it back through the engine. "changed" when the lines it replaces are
 // not in the file any more, so nothing was written.
 export async function applyReviewFix(
