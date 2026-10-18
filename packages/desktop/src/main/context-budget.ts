@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { readFile, readdir, stat } from "node:fs/promises"
 import { extname, join, normalize, relative, resolve } from "node:path"
+import { TaskSize } from "@vectordevai/core/task-size"
 
 import { rankFiles, refreshIndex } from "./repo-index"
 import { getStore } from "./store"
@@ -147,34 +148,17 @@ type FileCandidate = {
 
 type PersistedIndexes = Record<string, ContextProjectIndex>
 
-const TRIVIAL_TASK =
-  /^(?:hi|hey|hello|yo|sup|thanks|thank you|ok|okay|cool|nice|good morning|good afternoon|good evening)[!.?\s]*$/i
-const COMPLEX_TERMS = [
-  /\barchitecture\b/i,
-  /\bmigrat(?:e|ion)\b/i,
-  /\brefactor\b/i,
-  /\bmulti[- ]?file\b/i,
-  /\bcodebase\b/i,
-  /\bend[- ]?to[- ]?end\b/i,
-  /\bproduction[- ]?ready\b/i,
-  /\bparallel\b/i,
-  /\bperformance\b/i,
-  /\bsecurity\b/i,
-  /\b(?:build|implement|fix|test) (?:everything|all|the entire|the whole)\b/i,
-]
-const ACTION_TERMS =
-  /\b(?:add|build|change|debug|delete|edit|fix|implement|improve|investigate|refactor|remove|rename|repair|test|update)\b/i
+// The engine, the app and desktop share one classifier (TaskSize); these are the desktop's older names for its sizes.
+const DIFFICULTY = {
+  chat: "trivial",
+  light: "simple",
+  standard: "standard",
+  thorough: "complex",
+} as const satisfies Record<TaskSize.Tier, TaskDifficulty>
 
 export function classifyTaskDifficulty(task: string): TaskDifficulty {
-  const text = task.trim()
-  if (!text || TRIVIAL_TASK.test(text)) return "trivial"
-
-  const paths = explicitPaths(text)
-  const complexSignals = COMPLEX_TERMS.filter((pattern) => pattern.test(text)).length
-  if (text.length >= 900 || paths.size >= 4 || complexSignals >= 2) return "complex"
-  if (complexSignals === 1 && (text.length >= 260 || ACTION_TERMS.test(text))) return "complex"
-  if (ACTION_TERMS.test(text) || text.length >= 180 || paths.size >= 2) return "standard"
-  return "simple"
+  if (!task.trim()) return "trivial"
+  return DIFFICULTY[TaskSize.classify({ text: task }).tier]
 }
 
 export function contextBudgetForDifficulty(difficulty: TaskDifficulty) {
