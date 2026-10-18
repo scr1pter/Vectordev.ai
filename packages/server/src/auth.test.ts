@@ -27,6 +27,19 @@ describe("server authentication", () => {
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/experimental/console/switch")).toBe(true)
   })
 
+  test("memory is the owner's own, so a guest can neither read nor change it", () => {
+    for (const [method, route] of [
+      ["GET", "/memory"],
+      ["GET", "/memory/:memoryID"],
+      ["GET", "/memory/settings"],
+      ["POST", "/memory"],
+      ["PATCH", "/memory/:memoryID"],
+      ["DELETE", "/memory/:memoryID"],
+      ["POST", "/memory/erase"],
+    ])
+      expect(ServerAuth.isOwnerOnlyRoute(method!, route!)).toBe(true)
+  })
+
   test("host commands and permission answers require the server owner", () => {
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/pty")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("GET", "/pty/:ptyID/connect-token")).toBe(true)

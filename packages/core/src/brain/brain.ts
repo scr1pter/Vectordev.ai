@@ -202,6 +202,8 @@ export interface Interface {
   readonly setLearning: (enabled: boolean) => Effect.Effect<void>
   /** How many active entries this session made since `since`, for the per-message write cap. */
   readonly written: (sessionID: string, since: number) => Effect.Effect<number>
+  /** The user's own memory and rules files, which the brain reads and never writes. */
+  readonly files: () => { readonly memory: string; readonly rules: string }
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/Brain") {}
@@ -930,7 +932,8 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
         Effect.gen(function* () {
           yield* tx.insert(BrainEntryTable).values(row).run()
           yield* tx.insert(BrainEvidenceTable).values(evidenceRow(id, evidence, proposal.sessionID)).run()
-          if (previous)
+          // A replacement held for review leaves the entry it replaces in use until the user approves it.
+          if (previous && status !== "quarantined")
             yield* tx
               .update(BrainEntryTable)
               .set({ status: "superseded", superseded_by: id, updated_at: now })
@@ -944,7 +947,12 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
         }),
       )
       .pipe(Effect.orDie)
-    yield* event(row, previous ? "superseded" : "added", proposal.origin, previous ? { previous: previous.id } : undefined)
+    yield* event(
+      row,
+      previous && status !== "quarantined" ? "superseded" : "added",
+      proposal.origin,
+      previous ? (status === "quarantined" ? { pending: previous.id } : { previous: previous.id }) : undefined,
+    )
     if (status === "active") yield* capacity(repository)
     yield* bump(repository)
     const entry = toEntry(row)
@@ -1044,6 +1052,20 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
         .where(eq(BrainEntryTable.id, id))
         .run()
         .pipe(Effect.orDie)
+      // A replacement that waited for review replaces its entry now.
+      const pending = (yield* db
+        .select()
+        .from(BrainEventTable)
+        .where(and(eq(BrainEventTable.entry_id, id), eq(BrainEventTable.action, "added")))
+        .all()
+        .pipe(Effect.orDie)).flatMap((item) => (typeof item.detail?.pending === "string" ? [item.detail.pending] : []))
+      if (pending.length)
+        yield* db
+          .update(BrainEntryTable)
+          .set({ status: "superseded", superseded_by: id, updated_at: now })
+          .where(and(inArray(BrainEntryTable.id, pending), eq(BrainEntryTable.status, "active")))
+          .run()
+          .pipe(Effect.orDie)
       yield* event(row, "approved", actor)
     }
     if (change.action === "reject" && (row.status === "proposed" || row.status === "quarantined")) {
@@ -1051,11 +1073,13 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       yield* forgetRow(row)
       return { type: "merged" as const, entry: toEntry({ ...row, status: "archived" }) }
     }
-    if (change.action === "archive" && learned && row.status === "active") {
+    if ((change.action === "archive" || change.action === "restore") && !learned)
+      return refuse("file-entry", `${row.id} comes from ${row.source_file ? path.basename(row.source_file) : "a file"}; edit that file.`)
+    if (change.action === "archive" && row.status === "active") {
       yield* db.update(BrainEntryTable).set({ status: "archived", updated_at: now }).where(eq(BrainEntryTable.id, id)).run().pipe(Effect.orDie)
       yield* event(row, "archived", actor)
     }
-    if (change.action === "restore" && learned && (row.status === "archived" || row.status === "superseded")) {
+    if (change.action === "restore" && (row.status === "archived" || row.status === "superseded")) {
       yield* db
         .update(BrainEntryTable)
         .set({ status: "active", superseded_by: null, updated_at: now })
@@ -1339,6 +1363,7 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
     learning,
     setLearning,
     written,
+    files: () => personalFiles,
   }
 }
 

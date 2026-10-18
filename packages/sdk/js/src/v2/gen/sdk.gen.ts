@@ -159,6 +159,25 @@ import type {
   McpRemoveResponses,
   McpStatusErrors,
   McpStatusResponses,
+  MemoryCreateErrors,
+  MemoryCreateResponses,
+  MemoryEraseErrors,
+  MemoryEraseResponses,
+  MemoryGetErrors,
+  MemoryGetResponses,
+  MemoryListErrors,
+  MemoryListResponses,
+  MemoryRemoveErrors,
+  MemoryRemoveResponses,
+  MemorySettings,
+  MemorySettingsGetErrors,
+  MemorySettingsGetResponses,
+  MemorySettingsUpdateErrors,
+  MemorySettingsUpdateResponses,
+  MemoryTidyErrors,
+  MemoryTidyResponses,
+  MemoryUpdateErrors,
+  MemoryUpdateResponses,
   ModelRef,
   MoveSessionDestination,
   OutputFormat,
@@ -3541,6 +3560,337 @@ export class Mcp extends HeyApiClient {
   private _auth?: Auth2
   get auth(): Auth2 {
     return (this._auth ??= new Auth2({ client: this.client }))
+  }
+}
+
+export class Settings extends HeyApiClient {
+  /**
+   * Get memory settings
+   *
+   * Whether Vector may add to its memory as it works.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<MemorySettingsGetResponses, MemorySettingsGetErrors, ThrowOnError>({
+      url: "/memory/settings",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Change memory settings
+   *
+   * Turn Vector's learning on or off. Memory already saved stays until you erase it.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      memorySettings?: MemorySettings
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "memorySettings", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<
+      MemorySettingsUpdateResponses,
+      MemorySettingsUpdateErrors,
+      ThrowOnError
+    >({
+      url: "/memory/settings",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Memory extends HeyApiClient {
+  /**
+   * List memory
+   *
+   * Rules, saved preferences and what Vector learned for the repository at `directory` and for the user, with counts.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      scope?: "repository" | "personal"
+      filter?: "active" | "review" | "archived" | "all"
+      query?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "scope" },
+            { in: "query", key: "filter" },
+            { in: "query", key: "query" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<MemoryListResponses, MemoryListErrors, ThrowOnError>({
+      url: "/memory",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Add a memory
+   *
+   * Save something for Vector to remember, as the user. Secrets are refused.
+   */
+  public create<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      kind?: "preference" | "decision" | "lesson" | "fact"
+      text?: string
+      scope?: "repository" | "personal"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "kind" },
+            { in: "body", key: "text" },
+            { in: "body", key: "scope" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<MemoryCreateResponses, MemoryCreateErrors, ThrowOnError>({
+      url: "/memory",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Forget a memory entry
+   *
+   * Delete an entry for good. Vector keeps only a hash of its text so it does not learn it again. Entries from a file are changed in the file.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      memoryID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "memoryID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<MemoryRemoveResponses, MemoryRemoveErrors, ThrowOnError>({
+      url: "/memory/{memoryID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get a memory entry
+   *
+   * One entry, the evidence it was saved with, and related entries.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      memoryID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "memoryID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<MemoryGetResponses, MemoryGetErrors, ThrowOnError>({
+      url: "/memory/{memoryID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Change a memory entry
+   *
+   * Edit, pin or unpin, approve or reject a held entry, archive or restore.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      memoryID: string
+      directory?: string
+      workspace?: string
+      text?: string
+      pinned?: boolean
+      action?: "approve" | "reject" | "archive" | "restore"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "memoryID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "text" },
+            { in: "body", key: "pinned" },
+            { in: "body", key: "action" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<MemoryUpdateResponses, MemoryUpdateErrors, ThrowOnError>({
+      url: "/memory/{memoryID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Erase learned memory
+   *
+   * Erase what Vector learned for this repository, for the user, or everywhere. Files people wrote are left alone.
+   */
+  public erase<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      scope?: "repository" | "personal" | "all"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "scope" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<MemoryEraseResponses, MemoryEraseErrors, ThrowOnError>({
+      url: "/memory/erase",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Tidy memory now
+   *
+   * Merge duplicates, confirm or drop proposals, archive what goes unused and mark stale entries.
+   */
+  public tidy<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<MemoryTidyResponses, MemoryTidyErrors, ThrowOnError>({
+      url: "/memory/tidy",
+      ...options,
+      ...params,
+    })
+  }
+
+  private _settings?: Settings
+  get settings(): Settings {
+    return (this._settings ??= new Settings({ client: this.client }))
   }
 }
 
@@ -8612,6 +8962,11 @@ export class VectorClient extends HeyApiClient {
   private _mcp?: Mcp
   get mcp(): Mcp {
     return (this._mcp ??= new Mcp({ client: this.client }))
+  }
+
+  private _memory?: Memory
+  get memory(): Memory {
+    return (this._memory ??= new Memory({ client: this.client }))
   }
 
   private _project?: Project

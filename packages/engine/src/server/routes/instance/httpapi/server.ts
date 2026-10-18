@@ -60,6 +60,7 @@ import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { EventV2 } from "@vectordevai/core/event"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { Brain } from "@vectordevai/core/brain/brain"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { Npm } from "@vectordevai/core/npm"
 import { PermissionSaved } from "@vectordevai/core/permission/saved"
@@ -98,6 +99,7 @@ import { fileHandlers } from "./handlers/file"
 import { globalHandlers } from "./handlers/global"
 import { instanceHandlers } from "./handlers/instance"
 import { mcpHandlers } from "./handlers/mcp"
+import { memoryHandlers } from "./handlers/memory"
 import { permissionHandlers } from "./handlers/permission"
 import { projectHandlers } from "./handlers/project"
 import { projectCopyHandlers } from "./handlers/project-copy"
@@ -169,6 +171,7 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
     fileHandlers,
     instanceHandlers,
     mcpHandlers,
+    memoryHandlers,
     projectHandlers,
     projectCopyHandlers,
     ptyHandlers,
@@ -236,6 +239,7 @@ const app = LayerNode.group([
   ModelCatalog.node,
   FreeModels.node,
   FreeModelGuests.node,
+  Brain.node,
   Provider.node,
   ProviderAuth.node,
   Agent.node,

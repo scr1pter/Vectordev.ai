@@ -2862,6 +2862,86 @@ export type McpServerNotFoundError = {
   message: string
 }
 
+export type MemoryEntry = {
+  id: string
+  scope: "repository" | "personal"
+  kind: "rule" | "preference" | "decision" | "lesson" | "fact" | "failure" | "review"
+  origin: "file" | "user" | "agent" | "failure-memory"
+  status: "active" | "proposed" | "quarantined" | "archived" | "superseded"
+  pinned: boolean
+  text: string
+  paths: Array<string>
+  confidence: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  uses: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  stale: boolean
+  hold?: "web" | "mcp" | "subagent" | "untrusted-repository" | "guest" | "instruction-like" | "hidden-unicode"
+  source?: {
+    file: string
+    line?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
+  supersededBy?: string
+  related: Array<string>
+  lastUsedAt?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  createdAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  updatedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+}
+
+export type MemoryStats = {
+  active: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  review: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  archived: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  rules: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  learned: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  digestTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  learning: boolean
+}
+
+export type MemoryList = {
+  entries: Array<MemoryEntry>
+  stats: MemoryStats
+  files: {
+    memory: string
+    rules: string
+    repository: Array<string>
+  }
+  held: boolean
+}
+
+export type MemoryEvidence = {
+  type: "message" | "file" | "check" | "user" | "file-item"
+  path?: string
+  quote?: string
+  command?: string
+  sessionID?: string
+  createdAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+}
+
+export type MemoryDetail = {
+  entry: MemoryEntry
+  evidence: Array<MemoryEvidence>
+  related: Array<MemoryEntry>
+}
+
+export type MemoryError = {
+  name: "MemoryError"
+  data: {
+    code: "refused" | "not-found"
+    message: string
+  }
+}
+
+export type MemoryTidy = {
+  merged: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  promoted: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  archived: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  dropped: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  stale: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+}
+
+export type MemorySettings = {
+  learning: boolean
+}
+
 export type Project = {
   id: string
   worktree: string
@@ -11425,6 +11505,322 @@ export type McpRemoveResponses = {
 }
 
 export type McpRemoveResponse = McpRemoveResponses[keyof McpRemoveResponses]
+
+export type MemoryListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    scope?: "repository" | "personal"
+    filter?: "active" | "review" | "archived" | "all"
+    query?: string
+  }
+  url: "/memory"
+}
+
+export type MemoryListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryListError = MemoryListErrors[keyof MemoryListErrors]
+
+export type MemoryListResponses = {
+  /**
+   * Memory entries for this repository and the user
+   */
+  200: MemoryList
+}
+
+export type MemoryListResponse = MemoryListResponses[keyof MemoryListResponses]
+
+export type MemoryCreateData = {
+  body?: {
+    kind: "preference" | "decision" | "lesson" | "fact"
+    text: string
+    scope: "repository" | "personal"
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory"
+}
+
+export type MemoryCreateErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryCreateError = MemoryCreateErrors[keyof MemoryCreateErrors]
+
+export type MemoryCreateResponses = {
+  /**
+   * The saved entry
+   */
+  200: MemoryEntry
+}
+
+export type MemoryCreateResponse = MemoryCreateResponses[keyof MemoryCreateResponses]
+
+export type MemoryRemoveData = {
+  body?: never
+  path: {
+    /**
+     * A memory entry's short id, such as m4k2q
+     */
+    memoryID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/{memoryID}"
+}
+
+export type MemoryRemoveErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryRemoveError = MemoryRemoveErrors[keyof MemoryRemoveErrors]
+
+export type MemoryRemoveResponses = {
+  /**
+   * The entry was forgotten
+   */
+  200: boolean
+}
+
+export type MemoryRemoveResponse = MemoryRemoveResponses[keyof MemoryRemoveResponses]
+
+export type MemoryGetData = {
+  body?: never
+  path: {
+    /**
+     * A memory entry's short id, such as m4k2q
+     */
+    memoryID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/{memoryID}"
+}
+
+export type MemoryGetErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryGetError = MemoryGetErrors[keyof MemoryGetErrors]
+
+export type MemoryGetResponses = {
+  /**
+   * One memory entry with its evidence
+   */
+  200: MemoryDetail
+}
+
+export type MemoryGetResponse = MemoryGetResponses[keyof MemoryGetResponses]
+
+export type MemoryUpdateData = {
+  body?: {
+    text?: string
+    pinned?: boolean
+    action?: "approve" | "reject" | "archive" | "restore"
+  }
+  path: {
+    /**
+     * A memory entry's short id, such as m4k2q
+     */
+    memoryID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/{memoryID}"
+}
+
+export type MemoryUpdateErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryUpdateError = MemoryUpdateErrors[keyof MemoryUpdateErrors]
+
+export type MemoryUpdateResponses = {
+  /**
+   * The entry after the change
+   */
+  200: MemoryEntry
+}
+
+export type MemoryUpdateResponse = MemoryUpdateResponses[keyof MemoryUpdateResponses]
+
+export type MemoryEraseData = {
+  body?: {
+    scope: "repository" | "personal" | "all"
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/erase"
+}
+
+export type MemoryEraseErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryEraseError = MemoryEraseErrors[keyof MemoryEraseErrors]
+
+export type MemoryEraseResponses = {
+  /**
+   * How many entries were erased
+   */
+  200: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+}
+
+export type MemoryEraseResponse = MemoryEraseResponses[keyof MemoryEraseResponses]
+
+export type MemoryTidyData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/tidy"
+}
+
+export type MemoryTidyErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryTidyError = MemoryTidyErrors[keyof MemoryTidyErrors]
+
+export type MemoryTidyResponses = {
+  /**
+   * What tidying changed
+   */
+  200: MemoryTidy
+}
+
+export type MemoryTidyResponse = MemoryTidyResponses[keyof MemoryTidyResponses]
+
+export type MemorySettingsGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/settings"
+}
+
+export type MemorySettingsGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemorySettingsGetError = MemorySettingsGetErrors[keyof MemorySettingsGetErrors]
+
+export type MemorySettingsGetResponses = {
+  /**
+   * Memory settings
+   */
+  200: MemorySettings
+}
+
+export type MemorySettingsGetResponse = MemorySettingsGetResponses[keyof MemorySettingsGetResponses]
+
+export type MemorySettingsUpdateData = {
+  body?: MemorySettings
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/settings"
+}
+
+export type MemorySettingsUpdateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemorySettingsUpdateError = MemorySettingsUpdateErrors[keyof MemorySettingsUpdateErrors]
+
+export type MemorySettingsUpdateResponses = {
+  /**
+   * Memory settings after the change
+   */
+  200: MemorySettings
+}
+
+export type MemorySettingsUpdateResponse = MemorySettingsUpdateResponses[keyof MemorySettingsUpdateResponses]
 
 export type ProjectListData = {
   body?: never

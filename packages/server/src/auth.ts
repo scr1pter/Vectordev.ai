@@ -180,6 +180,8 @@ export function isOwnerOnlyRoute(method: string, route: string) {
   // session-scoped routes instead.
   if (route.startsWith("/api/permission/request") || route.startsWith("/api/question/request")) return true
   if (route.startsWith("/api/credential") || route.startsWith("/api/permission/saved")) return true
+  // Memory is the owner's own: their rules, what they told Vector about themselves and what it learned in their work.
+  if (route === "/memory" || route.startsWith("/memory/")) return true
   if (route.startsWith("/experimental/project/") && route.includes("/copy")) return true
   // Creating a worktree runs the project's start command and an extra startup command from the request, and removing
   // or resetting one discards the owner's work in a directory outside the guest's workspace.

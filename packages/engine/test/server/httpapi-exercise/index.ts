@@ -618,6 +618,73 @@ const scenarios: Scenario[] = [
       body: { accountID: "httpapi-account", orgID: "httpapi-org" },
     }))
     .status(400, undefined, "none"),
+  http.protected.get("/memory", "memory.list").json(200, (body) => {
+    object(body)
+    check(Array.isArray(body.entries), "memory list should return entries")
+    check(typeof body.stats === "object", "memory list should return counts")
+  }),
+  http.protected
+    .post("/memory", "memory.create")
+    .mutating()
+    .at((ctx) => ({
+      path: "/memory",
+      headers: ctx.headers(),
+      body: { kind: "decision", text: "HTTP API memory: releases go out on Thursdays.", scope: "repository" },
+    }))
+    .json(
+      200,
+      (body) => {
+        object(body)
+        check(body.text === "HTTP API memory: releases go out on Thursdays.", "memory create should return the saved text")
+        check(body.status === "active", "a memory the user adds is active")
+      },
+      "status",
+    ),
+  http.protected
+    .post("/memory", "memory.create.secret")
+    .mutating()
+    .at((ctx) => ({
+      path: "/memory",
+      headers: ctx.headers(),
+      body: { kind: "fact", text: "ghp_abcdefghijklmnopqrstuvwxyz0123456789AB", scope: "repository" },
+    }))
+    .json(400, object, "status"),
+  http.protected
+    .get("/memory/{memoryID}", "memory.get")
+    .at((ctx) => ({ path: route("/memory/{memoryID}", { memoryID: "m0none" }), headers: ctx.headers() }))
+    .json(400, object, "status"),
+  http.protected
+    .patch("/memory/{memoryID}", "memory.update")
+    .mutating()
+    .at((ctx) => ({
+      path: route("/memory/{memoryID}", { memoryID: "m0none" }),
+      headers: ctx.headers(),
+      body: { pinned: true },
+    }))
+    .json(400, object, "status"),
+  http.protected
+    .delete("/memory/{memoryID}", "memory.remove")
+    .mutating()
+    .at((ctx) => ({ path: route("/memory/{memoryID}", { memoryID: "m0none" }), headers: ctx.headers() }))
+    .json(400, object, "status"),
+  http.protected
+    .post("/memory/tidy", "memory.tidy")
+    .mutating()
+    .json(200, object, "status"),
+  http.protected
+    .post("/memory/erase", "memory.erase")
+    .mutating()
+    .at((ctx) => ({ path: "/memory/erase", headers: ctx.headers(), body: { scope: "repository" } }))
+    .json(200, (body) => check(typeof body === "number", "memory erase should return a count"), "status"),
+  http.protected.get("/memory/settings", "memory.settings.get").json(200, object),
+  http.protected
+    .patch("/memory/settings", "memory.settings.update")
+    .mutating()
+    .at((ctx) => ({ path: "/memory/settings", headers: ctx.headers(), body: { learning: true } }))
+    .json(200, (body) => {
+      object(body)
+      check(body.learning === true, "memory settings should keep learning on")
+    }),
   http.protected.get("/experimental/workspace/adapter", "experimental.workspace.adapter.list").json(200, array),
   http.protected.get("/experimental/workspace", "experimental.workspace.list").json(200, array),
   http.protected.get("/experimental/workspace/status", "experimental.workspace.status").json(200, array),

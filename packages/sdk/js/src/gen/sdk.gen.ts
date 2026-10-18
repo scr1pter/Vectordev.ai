@@ -213,6 +213,33 @@ import type {
   McpStatusData,
   McpStatusErrors,
   McpStatusResponses,
+  MemoryCreateData,
+  MemoryCreateErrors,
+  MemoryCreateResponses,
+  MemoryEraseData,
+  MemoryEraseErrors,
+  MemoryEraseResponses,
+  MemoryGetData,
+  MemoryGetErrors,
+  MemoryGetResponses,
+  MemoryListData,
+  MemoryListErrors,
+  MemoryListResponses,
+  MemoryRemoveData,
+  MemoryRemoveErrors,
+  MemoryRemoveResponses,
+  MemorySettingsGetData,
+  MemorySettingsGetErrors,
+  MemorySettingsGetResponses,
+  MemorySettingsUpdateData,
+  MemorySettingsUpdateErrors,
+  MemorySettingsUpdateResponses,
+  MemoryTidyData,
+  MemoryTidyErrors,
+  MemoryTidyResponses,
+  MemoryUpdateData,
+  MemoryUpdateErrors,
+  MemoryUpdateResponses,
   PartDeleteData,
   PartDeleteErrors,
   PartDeleteResponses,
@@ -2071,6 +2098,143 @@ export class Mcp extends HeyApiClient {
   private _auth?: Auth2
   get auth(): Auth2 {
     return (this._auth ??= new Auth2({ client: this.client }))
+  }
+}
+
+export class Settings extends HeyApiClient {
+  /**
+   * Get memory settings
+   *
+   * Whether Vector may add to its memory as it works.
+   */
+  public get<ThrowOnError extends boolean = false>(options?: Options<MemorySettingsGetData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<MemorySettingsGetResponses, MemorySettingsGetErrors, ThrowOnError>({
+      url: "/memory/settings",
+      ...options,
+    })
+  }
+
+  /**
+   * Change memory settings
+   *
+   * Turn Vector's learning on or off. Memory already saved stays until you erase it.
+   */
+  public update<ThrowOnError extends boolean = false>(options?: Options<MemorySettingsUpdateData, ThrowOnError>) {
+    return (options?.client ?? this.client).patch<
+      MemorySettingsUpdateResponses,
+      MemorySettingsUpdateErrors,
+      ThrowOnError
+    >({
+      url: "/memory/settings",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+}
+
+export class Memory extends HeyApiClient {
+  /**
+   * List memory
+   *
+   * Rules, saved preferences and what Vector learned for the repository at `directory` and for the user, with counts.
+   */
+  public list<ThrowOnError extends boolean = false>(options?: Options<MemoryListData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<MemoryListResponses, MemoryListErrors, ThrowOnError>({
+      url: "/memory",
+      ...options,
+    })
+  }
+
+  /**
+   * Add a memory
+   *
+   * Save something for Vector to remember, as the user. Secrets are refused.
+   */
+  public create<ThrowOnError extends boolean = false>(options?: Options<MemoryCreateData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<MemoryCreateResponses, MemoryCreateErrors, ThrowOnError>({
+      url: "/memory",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
+   * Forget a memory entry
+   *
+   * Delete an entry for good. Vector keeps only a hash of its text so it does not learn it again. Entries from a file are changed in the file.
+   */
+  public remove<ThrowOnError extends boolean = false>(options: Options<MemoryRemoveData, ThrowOnError>) {
+    return (options.client ?? this.client).delete<MemoryRemoveResponses, MemoryRemoveErrors, ThrowOnError>({
+      url: "/memory/{memoryID}",
+      ...options,
+    })
+  }
+
+  /**
+   * Get a memory entry
+   *
+   * One entry, the evidence it was saved with, and related entries.
+   */
+  public get<ThrowOnError extends boolean = false>(options: Options<MemoryGetData, ThrowOnError>) {
+    return (options.client ?? this.client).get<MemoryGetResponses, MemoryGetErrors, ThrowOnError>({
+      url: "/memory/{memoryID}",
+      ...options,
+    })
+  }
+
+  /**
+   * Change a memory entry
+   *
+   * Edit, pin or unpin, approve or reject a held entry, archive or restore.
+   */
+  public update<ThrowOnError extends boolean = false>(options: Options<MemoryUpdateData, ThrowOnError>) {
+    return (options.client ?? this.client).patch<MemoryUpdateResponses, MemoryUpdateErrors, ThrowOnError>({
+      url: "/memory/{memoryID}",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  /**
+   * Erase learned memory
+   *
+   * Erase what Vector learned for this repository, for the user, or everywhere. Files people wrote are left alone.
+   */
+  public erase<ThrowOnError extends boolean = false>(options?: Options<MemoryEraseData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<MemoryEraseResponses, MemoryEraseErrors, ThrowOnError>({
+      url: "/memory/erase",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+
+  /**
+   * Tidy memory now
+   *
+   * Merge duplicates, confirm or drop proposals, archive what goes unused and mark stale entries.
+   */
+  public tidy<ThrowOnError extends boolean = false>(options?: Options<MemoryTidyData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<MemoryTidyResponses, MemoryTidyErrors, ThrowOnError>({
+      url: "/memory/tidy",
+      ...options,
+    })
+  }
+
+  private _settings?: Settings
+  get settings(): Settings {
+    return (this._settings ??= new Settings({ client: this.client }))
   }
 }
 
@@ -4330,6 +4494,11 @@ export class VectorClient extends HeyApiClient {
   private _mcp?: Mcp
   get mcp(): Mcp {
     return (this._mcp ??= new Mcp({ client: this.client }))
+  }
+
+  private _memory?: Memory
+  get memory(): Memory {
+    return (this._memory ??= new Memory({ client: this.client }))
   }
 
   private _project?: Project
