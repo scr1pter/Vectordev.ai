@@ -102,6 +102,17 @@ const draftText = (prompt: Prompt) => prompt.map((part) => ("content" in part ? 
 
 const draftImages = (prompt: Prompt) => prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
 
+// What a message carries besides its text, as the engine counts it when it sizes the message: a greeting with a
+// screenshot, a file or a named subagent is never a bare reply.
+const attachments = (prompt: Prompt, context: readonly unknown[]) => {
+  const images = draftImages(prompt).filter((part) => part.mime.startsWith("image/")).length
+  return {
+    images,
+    files: prompt.filter((part) => part.type === "file" || part.type === "image").length - images + context.length,
+    agents: prompt.flatMap((part) => (part.type === "agent" ? [part.name] : [])),
+  }
+}
+
 // Task preparation and the judge policy for older engines can each add one hidden instruction after the typed text.
 const SYNTHETIC_SLOTS = 2
 
@@ -110,10 +121,10 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   const images = draftImages(input.draft.prompt)
   const difficulty =
     input.draft.difficulty ??
-    classifyTaskDifficulty(
-      text,
-      workOpen(input.sync.data.message?.[input.draft.sessionID] ?? [], (id) => input.sync.data.part?.[id]),
-    )
+    classifyTaskDifficulty(text, {
+      open: workOpen(input.sync.data.message?.[input.draft.sessionID] ?? [], (id) => input.sync.data.part?.[id]),
+      ...attachments(input.draft.prompt, input.draft.context),
+    })
   const agent = resolveExecutionAgent({
     planMode: input.draft.agent === "plan",
     quickRequested: input.draft.agent === "quick",
@@ -452,7 +463,12 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     // A social message takes the quick lane only when no work waits on the user; then it answers that work.
     const open = params.id ? workOpen(sync().data.message?.[params.id] ?? [], (id) => sync().data.part?.[id]) : false
     const difficulty =
-      mode === "normal" && !text.trim().startsWith("/") ? classifyTaskDifficulty(text, open) : ("standard" as const)
+      mode === "normal" && !text.trim().startsWith("/")
+        ? classifyTaskDifficulty(text, {
+            open,
+            ...attachments([...currentPrompt.filter((part) => part.type !== "image"), ...images], context),
+          })
+        : ("standard" as const)
     // Hiding a model in Settings is how the first-run tour tells people to
     // control what Vector uses, so routing must not reach past that filter and
     // pick something they deliberately turned off.

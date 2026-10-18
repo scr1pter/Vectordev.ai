@@ -87,7 +87,13 @@ describe("task intelligence", () => {
     ]) {
       expect(classifyTaskDifficulty(text), text).toBe("trivial")
       // While the agent waits on an answer, even a thanks answers that work.
-      expect(classifyTaskDifficulty(text, true), text).toBe("standard")
+      expect(classifyTaskDifficulty(text, { open: true }), text).toBe("standard")
+    }
+    // An image, a file or a named subagent makes it work, as the engine sizes it: "help" with a screenshot of an error.
+    for (const text of ["hi", "thanks", "help", ""]) {
+      expect(classifyTaskDifficulty(text, { images: 1 }), text).toBe("standard")
+      expect(classifyTaskDifficulty(text, { files: 1 }), text).toBe("standard")
+      expect(classifyTaskDifficulty(text, { agents: ["explore"] }), text).toBe("standard")
     }
   })
 
@@ -132,6 +138,17 @@ describe("task intelligence", () => {
     expect(reply("Migrated 12 of", { finish: "length" })).toBe(true)
     expect(reply("Still going", { time: { created: 1 } })).toBe(true)
     expect(workOpen([], () => [])).toBe(false)
+    // A greeting's reply waits on nothing, even when its small talk asks back.
+    expect(reply("I'm doing great, thanks for asking! How about you?", { agent: "quick" })).toBe(false)
+    expect(reply("Hey! How's your day going?", { agent: "build", size: "chat" })).toBe(false)
+    // The agent asked through the question tool and the user dismissed it.
+    const asked = (status: string) =>
+      workOpen([{ id: "m", role: "assistant", time: { created: 1, completed: 2 }, finish: "stop" }], () => [
+        { type: "text", text: "I need one decision before I go on." },
+        { type: "tool", tool: "question", state: { status } },
+      ])
+    expect(asked("error")).toBe(true)
+    expect(asked("completed")).toBe(false)
   })
 
   test("routes complex work to a meaningfully stronger model in the same provider", () => {

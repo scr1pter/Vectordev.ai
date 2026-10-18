@@ -52,24 +52,32 @@ const DIFFICULTY = {
 } as const satisfies Record<TaskSize.Tier, TaskDifficulty>
 
 // Only a social message is trivial, and only when no work is waiting on the user (`open`): then even a "thanks" answers
-// or follows up that work, so it goes to the engine with the history rather than to the quick lane.
-export function classifyTaskDifficulty(task: string, open = false): TaskDifficulty {
-  if (!task.trim()) return "trivial"
-  return DIFFICULTY[TaskSize.classify({ text: task, open }).tier]
+// or follows up that work, so it goes to the engine with the history rather than to the quick lane. A message with
+// files, images or a named subagent is never trivial, as the engine sizes it: "help" with a screenshot of an error
+// needs the tools.
+export function classifyTaskDifficulty(
+  task: string,
+  input: { open?: boolean; files?: number; images?: number; agents?: readonly string[] } = {},
+): TaskDifficulty {
+  if (!task.trim() && !input.files && !input.images && !input.agents?.length) return "trivial"
+  return DIFFICULTY[TaskSize.classify({ text: task, ...input }).tier]
 }
 
 type HistoryMessage = {
   id: string
   role: string
+  agent?: string
+  size?: string
   error?: unknown
   finish?: string
   time: { created: number; completed?: number }
 }
-type HistoryPart = { type: string; text?: string; synthetic?: boolean }
+type HistoryPart = { type: string; text?: string; synthetic?: boolean; tool?: string; state?: { status?: string } }
 
 /**
  * Whether a session's work is waiting on the user, as the engine reads it: the agent's last reply asked or offered
- * something, or its run did not finish (it failed, was stopped, or is still going).
+ * something, it asked through the question tool and the user dismissed it, or its run did not finish (it failed, was
+ * stopped, or is still going). A greeting's reply is never open: its "How about you?" waits on nothing.
  */
 export function workOpen(
   messages: readonly HistoryMessage[],
@@ -77,7 +85,14 @@ export function workOpen(
 ) {
   const last = messages.findLast((message) => message.role === "assistant")
   if (!last) return false
+  if (last.size === "chat" || last.agent === "quick") return false
   if (last.error || !last.time.completed || UNFINISHED.has(last.finish ?? "")) return true
+  if (
+    (parts(last.id) ?? []).some(
+      (part) => part.type === "tool" && part.tool === "question" && part.state?.status !== "completed",
+    )
+  )
+    return true
   // The agent's closing words, not a later card without text such as the judge's.
   const text = messages
     .filter((message) => message.role === "assistant")

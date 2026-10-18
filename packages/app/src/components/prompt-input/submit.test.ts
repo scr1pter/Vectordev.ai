@@ -656,6 +656,30 @@ describe("follow-up optimistic echo", () => {
     // The run did not finish.
     const failed = reply("failed", "Migrating the routes", { error: { name: "MessageAbortedError" } })
     expect(await thanks(failed.history, failed.parts)).toBe("build")
+    // The user dismissed the agent's question: the work still waits on them.
+    const dismissed = {
+      history: done.history,
+      parts: {
+        done: [...done.parts.done, { id: "done-question", type: "tool", tool: "question", state: { status: "error" } }],
+      },
+    }
+    expect(await thanks(dismissed.history, dismissed.parts as unknown as Record<string, SentPart[]>)).toBe("build")
+    // A greeting's reply asks back, but waits on nothing.
+    const smallTalk = reply("chat", "I'm doing great, thanks for asking! How about you?", { agent: "quick" })
+    expect(await thanks(smallTalk.history, smallTalk.parts)).toBe("quick")
+  })
+
+  test("sends a greeting or a help with an image, a file or a named subagent to the agent the user picked", async () => {
+    const mention = { type: "file" as const, path: "src/app.ts", content: "@src/app.ts", start: 3, end: 14 }
+    for (const word of ["hi", "thanks", "help"]) {
+      const typed = { type: "text" as const, content: word, start: 0, end: word.length }
+      const withImage = await send({ prompt: [typed, pasted] })
+      expect(withImage.at(-1)?.agent, word).toBe("build")
+      expect(files(withImage.at(-1)?.parts ?? []), word).toHaveLength(1)
+      expect((await send({ prompt: [typed, mention] })).at(-1)?.agent, word).toBe("build")
+    }
+    // The same words alone are a greeting for the quick lane.
+    expect((await send({ prompt: [{ type: "text", content: "hi", start: 0, end: 2 }] })).at(-1)?.agent).toBe("quick")
   })
 
   test("sends exactly the echoed parts when nothing is added", async () => {
