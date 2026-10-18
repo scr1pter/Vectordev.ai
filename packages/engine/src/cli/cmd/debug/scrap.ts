@@ -3,7 +3,7 @@ import { cmd } from "../cmd"
 
 export const ScrapCommand = cmd({
   command: "scrap",
-  describe: "list all known projects",
+  describe: "list all known repositories",
   builder: (yargs) => yargs,
   async handler() {
     const { Project } = await import("@/project/project")

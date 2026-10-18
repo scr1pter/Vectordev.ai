@@ -125,7 +125,7 @@ Commands:
   vector debug lsp           LSP debugging utilities
   vector debug rg            ripgrep debugging utilities
   vector debug file          file system debugging utilities
-  vector debug scrap         list all known projects
+  vector debug scrap         list all known repositories
   vector debug skill         list all available skills
   vector debug snapshot      snapshot debugging utilities
   vector debug startup       print startup timing
@@ -320,7 +320,8 @@ Options:
       --tools       number of tools to show (default: all)                                  [number]
       --models      show model statistics (default: hidden). Pass a number to show top N, otherwise
                     shows all
-      --project     filter by project (default: all projects, empty string: current project)[string]"
+      --project     filter by repository (default: all repositories, empty string: current
+                    repository)                                                             [string]"
 `;
 
 exports[`vector CLI help-text snapshots every documented command emits stable help text: vector export --help 1`] = `

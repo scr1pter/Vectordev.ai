@@ -95,7 +95,7 @@ const AgentCreateCommand = effectCmd({
             message: "Location",
             options: [
               {
-                label: "Current project",
+                label: "Current repository",
                 value: "project" as const,
                 hint: ctx.worktree,
               },

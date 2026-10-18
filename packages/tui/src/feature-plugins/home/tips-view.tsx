@@ -170,7 +170,7 @@ const TIPS: Tip[] = [
   "Drag and drop images or PDFs into the terminal to add them as context",
   (shortcuts) => press(shortcuts.inputPaste(), "to paste images from your clipboard into the prompt"),
   (shortcuts) => `Use ${commandText("/editor", shortcuts.editorOpen())} to compose messages in your external editor`,
-  "Run {highlight}/init{/highlight} to auto-generate project rules based on your codebase",
+  "Run {highlight}/init{/highlight} to auto-generate repository rules based on your codebase",
   (shortcuts) => `Use ${commandText("/models", shortcuts.modelList())} to see and switch between available AI models`,
   (shortcuts) => `Use ${commandText("/themes", shortcuts.themeList())} to switch between ${themeCount} built-in themes`,
   (shortcuts) => `Use ${commandText("/new", shortcuts.sessionNew())} to start a fresh conversation session`,
@@ -259,7 +259,7 @@ const TIPS: Tip[] = [
   'Set {highlight}"mcp_*": false{/highlight} to disable all tools from an MCP server',
   "Override global tool settings per agent configuration",
   "Permission {highlight}doom_loop{/highlight} prevents infinite tool call loops",
-  "Permission {highlight}external_directory{/highlight} protects files outside project",
+  "Permission {highlight}external_directory{/highlight} protects files outside the repository",
   "Run {highlight}vector debug config{/highlight} to troubleshoot configuration",
   "Use {highlight}--print-logs{/highlight} flag to see detailed logs in stderr",
   (shortcuts) => `Use ${commandText("/timeline", shortcuts.sessionTimeline())} to jump to specific messages`,
@@ -270,7 +270,7 @@ const TIPS: Tip[] = [
     shortcuts.commandList()
       ? `Toggle username display in chat via the command palette (${shortcutText(shortcuts.commandList())})`
       : "Toggle username display in chat via the command palette",
-  "Commit your project's {highlight}AGENTS.md{/highlight} file to Git for team sharing",
+  "Commit your repository's {highlight}AGENTS.md{/highlight} file to Git for team sharing",
   "Use {highlight}/review{/highlight} to review uncommitted changes, branches, or PRs",
   (shortcuts) => `Use ${commandText("/help", shortcuts.helpShow())} to show the help dialog`,
   "Use {highlight}/rename{/highlight} to rename the current session",

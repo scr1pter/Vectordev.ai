@@ -514,7 +514,7 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = 
         const ctx = yield* InstanceState.context
         if (ctx.project.vcs !== "git") {
           return yield* new PatchApplyError({
-            message: "Patch can't be applied because the project is not git-based",
+            message: "Patch can't be applied because the folder is not a Git repository",
             reason: "non-git",
           })
         }
@@ -531,7 +531,7 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = 
         const ctx = yield* InstanceState.context
         if (ctx.project.vcs !== "git") {
           return yield* new CommitError({
-            message: "Changes can't be committed because the project is not git-based",
+            message: "Changes can't be committed because the folder is not a Git repository",
             reason: "non-git",
           })
         }
@@ -606,7 +606,7 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = 
         const ctx = yield* InstanceState.context
         if (ctx.project.vcs !== "git") {
           return yield* new SwitchError({
-            message: "Branches can't be switched because the project is not git-based",
+            message: "Branches can't be switched because the folder is not a Git repository",
             reason: "non-git",
           })
         }

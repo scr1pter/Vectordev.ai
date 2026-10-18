@@ -26,14 +26,14 @@ describe("vector trust", () => {
         "Workspace: /canonical/workspace",
         "Fingerprint: abc123",
         "Status: trusted",
-        "Trust approved. Rerun the command or restart Vector to load trusted executable project config.",
+        "Trust approved. Rerun the command or restart Vector to load trusted executable repository config.",
       ].join("\n"),
     )
   })
 
-  test("shows when pure mode disables executable project config", () => {
+  test("shows when pure mode disables executable repository config", () => {
     expect(
       formatTrustStatus({ workspace: "/workspace", fingerprint: "def456", trusted: false }, false, true),
-    ).toContain("Executable project config: disabled by --pure")
+    ).toContain("Executable repository config: disabled by --pure")
   })
 })

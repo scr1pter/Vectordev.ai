@@ -11,7 +11,10 @@ export function cloudPermissionDetails(request: { permission: string; metadata: 
   }
   const rows = [
     { label: "Provider", value: text("provider") },
-    { label: "Project", value: text("project") },
+    {
+      label: text("provider") === "Vector" ? "Repository" : `${text("provider") ?? "Cloud"} project`,
+      value: text("project"),
+    },
     { label: "Environment", value: text("environment") },
   ].flatMap((row) => (row.value ? [{ label: row.label, value: row.value }] : []))
   const statements = Array.isArray(request.metadata.statements)
