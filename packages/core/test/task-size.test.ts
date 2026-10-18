@@ -49,11 +49,37 @@ describe("TaskSize.classify", () => {
       "open a PR",
       "build the app",
       "rename foo to bar in utils.ts",
-      "why does this crash?\n```\nTypeError: x is undefined\n    at main (src/index.ts:10:3)\n```",
+      "fix the comment in utils.ts",
+      "replace the logo",
+      "switch the default port to 3000",
+      "switch to the dev branch",
+      "convert this string to a number in utils.ts",
+      "deploy the entire app to vercel",
+      "make the app's icon bigger",
     ])
       expect(tier(text), text).toBe("light")
     // A pasted trace full of paths says what broke, not how big the job is: it stays a single fix.
     expect(tier("fix this:\n```\n" + "    at a (src/a.ts:1:1)\n".repeat(40) + "```")).toBe("standard")
+  })
+
+  test("a hard failure takes real investigation, even asked as a question", () => {
+    for (const text of [
+      "why does this crash?\n```\nTypeError: x is undefined\n    at main (src/index.ts:10:3)\n```",
+      "why does this deadlock?",
+      "why does the session runner deadlock when two prompts arrive at once?",
+      "is there a race in the title fiber?",
+      "the app crashes on startup",
+      "the dev server hangs after a reload",
+      "why does the build fail on Linux?",
+      "why is the build slow?",
+      "why doesn't the login work?",
+    ]) {
+      const result = TaskSize.classify({ text })
+      expect(result.tier, text).toBe("standard")
+      // Standard runs at the provider's own effort, never with reasoning off.
+      expect(TaskSize.effort(result.tier)).toBe("default")
+    }
+    expect(tier("hang on")).not.toBe("standard")
   })
 
   test("standard work: features, real bugs, a few files", () => {
@@ -76,6 +102,19 @@ describe("TaskSize.classify", () => {
       "be thorough",
       "use subagents to review this",
       "update all 25 components to the new theme",
+      // Rewrites, ports and conversions of a whole system, or of every part of one.
+      "rewrite the entire backend in Rust",
+      "redesign the entire UI",
+      "port the app to Svelte",
+      "port the TUI to the new renderer",
+      "switch the whole app from solid to react",
+      "convert the whole codebase to TypeScript",
+      "convert all class components to hooks",
+      "replace moment with date-fns everywhere",
+      "go through the codebase and remove dead code",
+      "make the desktop app work offline",
+      "upgrade to Next 15 and fix the breaking changes",
+      "overhaul vectorscope so it reviews every PR and posts inline comments",
       [
         "Please do the following:",
         "- add a settings page",
@@ -86,6 +125,22 @@ describe("TaskSize.classify", () => {
       ].join("\n"),
     ])
       expect(tier(text), text).toBe("thorough")
+  })
+
+  test("a rework of one part is Standard, not Thorough", () => {
+    for (const text of [
+      "rewrite the whole function",
+      "refactor the whole file",
+      "refactor the login handler in the app",
+      "rebuild the settings page from scratch",
+      "update every import of foo to bar",
+      "make the api faster",
+    ])
+      expect(tier(text), text).toBe("standard")
+    // "comments" that are not an edit to a comment are not a small edit.
+    expect(TaskSize.classify({ text: "overhaul vectorscope so it posts inline comments" }).reasons).not.toContain(
+      "small-edit",
+    )
   })
 
   test("negations and caps", () => {
@@ -99,6 +154,11 @@ describe("TaskSize.classify", () => {
     expect(tier("keep it simple")).toBe("light")
     // A mention of the judge as a subject is not a request for it.
     expect(tier("the judge module is broken, fix it")).toBe("standard")
+    // "Don't be thorough" asks for the opposite of thorough.
+    expect(tier("dont be thorough, just fix it")).toBe("light")
+    expect(tier("don’t be too thorough, fix the login bug")).toBe("light")
+    expect(tier("don't overthink it, rename foo to bar")).toBe("light")
+    expect(tier("no need to go deep, rewrite the entire backend")).toBe("standard")
   })
 
   test("acknowledgements continue the request they answer", () => {
@@ -109,8 +169,14 @@ describe("TaskSize.classify", () => {
     expect(tier("go ahead", { previous: "standard" })).toBe("standard")
     expect(tier("continue", { previous: "thorough" })).toBe("thorough")
     expect(tier("try again", { previous: "light" })).toBe("light")
-    // Without a question, a plain acknowledgement or reaction is just a reply.
+    // An acceptance needs something it accepts, so it continues the work before it even without a question mark.
+    expect(tier("sure", { previous: "thorough" })).toBe("thorough")
+    expect(tier("yes please", { previous: "thorough" })).toBe("thorough")
+    expect(tier("sounds good, go ahead", { previous: "standard" })).toBe("standard")
+    expect(tier("yes, thanks", { previous: "light" })).toBe("light")
+    // Without a question or an offer, a plain acknowledgement or reaction is just a reply.
     expect(tier("ok", { previous: "light" })).toBe("chat")
+    expect(tier("sounds good", { previous: "thorough" })).toBe("chat")
     expect(tier("great", { previous: "standard" })).toBe("chat")
     // Thanks is thanks even after a question.
     expect(tier("thanks", { previous: "light", asked: true })).toBe("chat")
@@ -177,6 +243,18 @@ describe("TaskSize helpers", () => {
     expect(TaskSize.asks("I can publish a preview. Shall I deploy?")).toBe(true)
     expect(TaskSize.asks("Here is the plan. Let me know if it looks right.")).toBe(true)
     expect(TaskSize.asks("Done. I fixed the typo in README.md.")).toBe(false)
+    // An offer without a question mark waits on the user too.
+    expect(TaskSize.asks("I can also add tests for this if you want.")).toBe(true)
+    expect(TaskSize.asks("Next I would update the remaining 12 routes the same way.")).toBe(true)
+    expect(TaskSize.asks("I recommend we also migrate the auth routes.")).toBe(true)
+  })
+
+  test("social tells a greeting from a reply to the work", () => {
+    for (const text of ["hi", "thanks!", "bye", "👍", "what can you do?"])
+      expect(TaskSize.social(TaskSize.classify({ text })), text).toBe(true)
+    for (const text of ["ok", "yes", "continue", "go ahead", "try again", "great", "sure"])
+      expect(TaskSize.social(TaskSize.classify({ text })), text).toBe(false)
+    expect(TaskSize.social(TaskSize.classify({ text: "fix the typo" }))).toBe(false)
   })
 
   test("notes stay short", () => {

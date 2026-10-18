@@ -63,7 +63,7 @@ export function min(a: Tier, b: Tier): Tier {
   return ORDER[a] <= ORDER[b] ? a : b
 }
 
-/** One step up, as the escalate tool raises a request. Thorough stays Thorough. */
+/** One step up, as the escalate tool raises a request without a target. Thorough stays Thorough. */
 export function raise(tier: Tier): Tier {
   return TIERS[Math.min(ORDER[tier] + 1, TIERS.length - 1)]
 }
@@ -105,7 +105,7 @@ export function withheld(
  * the same on every later request and the provider's prompt cache keeps it.
  */
 export function note(tier: Tier, options: { readonly escalate: boolean; readonly judge: boolean }) {
-  const escalate = options.escalate ? " If it turns out bigger, call escalate once with your reason." : ""
+  const escalate = options.escalate ? " If it turns out bigger, call escalate with your reason." : ""
   if (tier === "light")
     return `<task_size>Light request: do it directly in as few steps as possible, without a to-do list or subagents. If you changed code, run one focused check.${escalate}</task_size>`
   if (tier === "standard")
@@ -118,7 +118,7 @@ export function note(tier: Tier, options: { readonly escalate: boolean; readonly
 
 export function classify(input: Input): Result {
   const text = prose(input.text)
-  const lower = text.toLowerCase()
+  const lower = text.toLowerCase().replace(/[’‘]/g, "'")
   const cues = {
     cloud: CLOUD.test(lower),
     browser: BROWSER.test(lower) || (input.images ?? 0) > 0,
@@ -133,12 +133,14 @@ export function classify(input: Input): Result {
   if (input.choice && input.choice !== "auto") return result(input.choice, "user", ["user"])
   if (input.auto === false) return result("thorough", "auto", ["auto-off"])
 
-  // Negated asks ("no subagents", "skip the judge") come out first, so they cannot read as the ask itself.
+  // Negated asks ("no subagents", "skip the judge", "don't be thorough") come out first, so they cannot read as the ask
+  // itself. "Don't be thorough" asks for the opposite: it caps the request like "keep it simple".
   const noSubagents = NO_SUBAGENTS.test(lower)
   const noJudge = NO_JUDGE.test(lower)
-  const asked = strip(strip(lower, NO_SUBAGENTS), NO_JUDGE)
+  const notThorough = NOT_THOROUGH.test(lower)
+  const asked = strip(strip(strip(lower, NO_SUBAGENTS), NO_JUDGE), NOT_THOROUGH)
   const forced = FORCE.flatMap(([code, pattern]) => (pattern.test(asked) ? [code] : []))
-  const capped = CAP_LIGHT.test(lower)
+  const capped = CAP_LIGHT.test(lower) || notThorough
   const plain = !input.files && !input.images && cues.agents.length === 0
   const raw = input.text
 
@@ -150,11 +152,14 @@ export function classify(input: Input): Result {
   const phrase = chatPhrase(lower)
   const bare = plain && !PATH.test(raw) && !URL_PATTERN.test(raw) && !raw.includes("`") && text.length <= 60
   if (bare && phrase) {
-    // "great" or "yes" after a question answers it, so it continues that request with its history and tools.
-    if ((phrase === "reaction" || phrase === "affirm") && input.asked && input.previous)
+    // A "continue" or a "yes" (an acceptance needs something it accepts) continues the request before it with its
+    // history and tools. An "ok" or a "great" does only when the reply before it asked or offered something; otherwise
+    // it is just a reply.
+    if ((phrase === "directive" || phrase === "accept") && input.previous)
+      return result(input.previous, "inherited", [phrase === "directive" ? "continue" : "answer"], !noJudge)
+    if ((phrase === "reaction" || phrase === "ack") && input.asked && input.previous)
       return result(input.previous, "inherited", ["answer"], !noJudge)
-    if (phrase === "directive" && input.previous) return result(input.previous, "inherited", ["continue"], !noJudge)
-    return result("chat", "auto", [phrase === "vector" ? "about-vector" : phrase === "directive" ? "ack" : phrase])
+    return result("chat", "auto", [phrase === "vector" ? "about-vector" : phrase])
   }
 
   // A message that is only a cue ("keep it simple", "no subagents") applies to the request it follows.
@@ -177,11 +182,31 @@ export function classify(input: Input): Result {
   return result(tier, "auto", reasons.length > 0 ? reasons : ["default"], !noJudge)
 }
 
-/** Whether an assistant's closing text asks the user for a decision, so a short "yes" or "ok" answers it. */
+/** Whether an assistant's closing text asks the user for a decision or offers more work, so a short "ok" answers it. */
 export function asks(text: string) {
   const tail = text.trim().slice(-400).toLowerCase()
   if (tail.endsWith("?")) return true
   return ASKS.test(tail)
+}
+
+/**
+ * Whether a reply ends on a question the work waits on, such as "Should I also migrate the tests?". A closing
+ * pleasantry ("Anything else?") is not one. Vector does not judge work that stopped to ask the user something.
+ */
+export function waits(text: string) {
+  const tail = text.trim().replace(/[\s*_`)\]]+$/, "")
+  if (!tail.endsWith("?")) return false
+  const start = Math.max(...[".", "!", "?", "\n"].map((mark) => tail.lastIndexOf(mark, tail.length - 2))) + 1
+  return !PLEASANTRY.test(tail.slice(start).toLowerCase())
+}
+
+/**
+ * Whether a Chat result is social: a greeting, thanks, a farewell, emoji or a question about Vector. The rest of Chat
+ * ("ok", "yes", "continue", "great") is a reply to the work before it, which only the engine can read against that
+ * work, so a client must not treat it as a bare greeting.
+ */
+export function social(result: Pick<Result, "tier" | "reasons">) {
+  return result.tier === "chat" && SOCIAL.has(result.reasons[0] ?? "")
 }
 
 function measure(text: string, lower: string, input: Input) {
@@ -189,7 +214,9 @@ function measure(text: string, lower: string, input: Input) {
   const items = text.split("\n").filter((line) => LIST_ITEM.test(line))
   const actionItems = items.filter((line) => ACTION.test(line.toLowerCase())).length
   const scale = SCALE.filter((pattern) => pattern.test(lower)).length
-  const scope = SCOPE.test(lower)
+  const wide = WIDE.test(lower)
+  const system = SYSTEM_SCOPE.test(lower)
+  const target = SYSTEM_OBJECT.exec(lower)
   const counted = Math.max(
     0,
     ...[...lower.matchAll(COUNTED)].map((match) => Number(match[1])),
@@ -199,15 +226,27 @@ function measure(text: string, lower: string, input: Input) {
   const building = BUILD.test(lower)
   const fixing = FIX.test(lower)
   const editing = EDIT.test(lower)
-  const action = building || fixing || editing || ACTION.test(lower)
+  // Reworking what exists (rewrite, port, switch, convert, replace ...) is an action, and over a whole system or every
+  // part of one it is large work.
+  const rework = REWORK.test(lower)
+  const action = building || fixing || editing || rework || ACTION.test(lower)
   const small = SMALL_EDIT.test(lower)
   const operation = OPERATION.test(lower)
   const question = INFO_QUESTION.test(lower.trim()) && !REQUEST.test(lower.trim())
+  // A deadlock, a race, a leak or a crash takes real investigation, even asked as a question.
+  const hard = [
+    ...(HARD_FAILURE.test(lower) ? ["hard-failure"] : []),
+    ...(WHY_FAIL.test(lower.trim()) ? ["why-fail"] : []),
+  ]
   const length = text.replace(/\s+/g, " ").trim().length
 
   const thorough = [
     ...(scale >= 2 ? [`scale:${scale}`] : []),
-    ...(scale >= 1 && scope && action ? ["scale+scope"] : []),
+    ...(scale >= 1 && wide && action && !small ? ["scale+scope"] : []),
+    ...(rework && (system || wide) && !small ? ["rework+scope"] : []),
+    // A rework of a whole system, or "make the app ..." with a scale term ("make the desktop app work offline").
+    ...(target && (target[1] !== undefined || scale >= 1) ? ["whole-system"] : []),
+    ...(system && (building || fixing || editing) && !small ? ["system-wide"] : []),
     ...(counted >= 10 ? [`files:${counted}`] : []),
     ...(paths >= 6 ? [`paths:${paths}`] : []),
     ...(actionItems >= 5 ? [`items:${actionItems}`] : []),
@@ -220,7 +259,10 @@ function measure(text: string, lower: string, input: Input) {
     ...(/\b(?:with|add|write|and) (?:unit |integration |e2e )?tests\b/.test(lower) ? ["tests"] : []),
     ...(paths >= 2 ? [`paths:${paths}`] : []),
     ...(actionItems >= 2 ? [`items:${actionItems}`] : []),
-    ...(scale >= 1 && action ? ["scale"] : []),
+    ...(scale >= 1 && action && !small ? ["scale"] : []),
+    ...(target ? ["system"] : []),
+    ...(wide && (building || editing || rework) && !small && !operation ? ["wide"] : []),
+    ...hard,
     ...(length >= 300 && action ? ["long"] : []),
     ...(length >= 600 ? ["long"] : []),
     ...((input.images ?? 0) > 0 && action ? ["image+action"] : []),
@@ -230,13 +272,13 @@ function measure(text: string, lower: string, input: Input) {
     ...(small ? ["small-edit"] : []),
     ...(operation ? ["operation"] : []),
   ]
-  // A question about code stays Light, how-to questions included, unless it is plainly about a large area; then it is
-  // at most Standard.
-  if (question && !fixing) return { thorough: [], standard: thorough.length > 0 ? thorough : [], light }
+  // A question about code stays Light, how-to questions included, unless it is plainly about a large area or a hard
+  // failure; then it is Standard, at the provider's own effort.
+  if (question && !fixing) return { thorough: [], standard: [...thorough, ...hard], light }
   return { thorough, standard, light }
 }
 
-type Phrase = "greeting" | "thanks" | "farewell" | "reaction" | "affirm" | "directive" | "vector" | "emoji"
+type Phrase = "greeting" | "thanks" | "farewell" | "reaction" | "ack" | "accept" | "directive" | "vector" | "emoji"
 
 function chatPhrase(lower: string): Phrase | undefined {
   if (EMOJI_ONLY.test(lower)) return "emoji"
@@ -257,11 +299,24 @@ function chatPhrase(lower: string): Phrase | undefined {
   if (SMALL_TALK.has(phrase)) return "greeting"
   if (THANKS.has(phrase)) return "thanks"
   if (FAREWELLS.has(phrase)) return "farewell"
-  if (REACTIONS.has(phrase)) return "reaction"
-  if (AFFIRM.has(phrase)) return "affirm"
-  if (DIRECTIVES.has(phrase)) return "directive"
   if (THANKS.has(dropTrailing(phrase))) return "thanks"
-  return undefined
+  // "sounds good, go ahead" or "yes please do": replies built only from short replies take the strongest of them.
+  const kinds = replyKinds(phrase.split(" "))
+  if (!kinds) return undefined
+  return (["directive", "accept", "thanks", "ack", "reaction"] as const).find((kind) => kinds.has(kind))
+}
+
+// Splits a short message into known short replies, longest first, or gives up when any word is left over.
+function replyKinds(words: readonly string[]): Set<Phrase> | undefined {
+  if (words.length === 0) return new Set()
+  return [4, 3, 2, 1]
+    .filter((size) => size <= words.length)
+    .map((size) => {
+      const kind = REPLIES.find(([, items]) => items.has(words.slice(0, size).join(" ")))?.[0]
+      const rest = kind ? replyKinds(words.slice(size)) : undefined
+      return kind && rest ? new Set<Phrase>([kind, ...rest]) : undefined
+    })
+    .find((kinds) => kinds !== undefined)
 }
 
 function strip(text: string, pattern: RegExp) {
@@ -390,16 +445,12 @@ const REACTIONS = set([
   "good work",
   "excellent",
 ])
-const AFFIRM = set([
+// Acknowledgements: they answer the reply before them only when it asked or offered something.
+const ACK = set([
   "ok",
   "okay",
   "k",
   "kk",
-  "yes",
-  "yep",
-  "yeah",
-  "yup",
-  "sure",
   "alright",
   "got it",
   "understood",
@@ -410,8 +461,37 @@ const AFFIRM = set([
   "lgtm",
   "sounds good",
   "looks good",
-  "yes please",
+  "noted",
+  "sounds great",
+  "looks great",
+])
+// Acceptances: on their own they make no sense without something to accept, so they always continue the request
+// before them.
+const ACCEPT = set([
+  "yes",
+  "yep",
+  "yeah",
+  "yup",
+  "ya",
+  "yea",
+  "sure",
   "sure thing",
+  "yes please",
+  "yes pls",
+  "please",
+  "ok sure",
+  "okay sure",
+  "absolutely",
+  "definitely",
+  "of course",
+  "do that",
+  "lets do it",
+  "lets do that",
+  "lets go",
+  "that works",
+  "works for me",
+  "both",
+  "all of them",
 ])
 const DIRECTIVES = set([
   "go",
@@ -458,6 +538,14 @@ const VECTOR_QUESTIONS = set([
   "are you an ai",
   "are you a bot",
 ])
+const REPLIES = [
+  ["directive", DIRECTIVES],
+  ["accept", ACCEPT],
+  ["ack", ACK],
+  ["reaction", REACTIONS],
+  ["thanks", THANKS],
+] as const
+const SOCIAL = new Set(["greeting", "thanks", "farewell", "emoji", "about-vector"])
 const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\u200d|\ufe0f|[\u{1F3FB}-\u{1F3FF}]|\s)+$/u
 
 const LOG_LINE =
@@ -473,7 +561,7 @@ const NO_SUBAGENTS =
 const NO_JUDGE =
   /\b(?:no|don'?t|do not|without|never|skip(?: the)?)\s+(?:use\s+|using\s+|run(?:ning)?\s+|the\s+|any\s+|an?\s+)*(?:llm[- ]as[- ]a[- ])?judge\b/
 const FORCE: ReadonlyArray<readonly [code: string, pattern: RegExp]> = [
-  ["explicit:thorough", /\bbe (?:very |extra |really |super )?thorough\b|\bthoroughly\b|\bexhaustive(?:ly)?\b/],
+  ["explicit:thorough", /\bbe (?:very |extra |really |super |more )?thorough\b|\bthoroughly\b|\bexhaustive(?:ly)?\b/],
   ["explicit:thorough", /\bdeep[- ]dive\b|\bgo deep\b|\btake your time\b/],
   ["explicit:think", /\bultrathink\b|\bthink (?:hard|harder|deeply|very carefully)\b/],
   [
@@ -487,6 +575,9 @@ const FORCE: ReadonlyArray<readonly [code: string, pattern: RegExp]> = [
 ]
 const CAP_LIGHT =
   /\b(?:quick question|briefly|just (?:answer|tell me|show me|run it)|tl;?dr|keep it (?:simple|short|light|quick)|in one line|one[- ]liner)\b/
+// "Don't be thorough", "no need to go deep", "don't overthink it": the opposite of a force word.
+const NOT_THOROUGH =
+  /\b(?:no|don'?t|do not|no need to|needn'?t|without|stop)\s+(?:be(?:ing)?\s+|get(?:ting)?\s+|too\s+|so\s+|very\s+|overly\s+|super\s+|extra\s+|that\s+|a\s+)*(?:thorough(?:ly)?|exhaustive(?:ly)?|deep[- ]dive|go(?:ing)? (?:too )?deep|overthink(?:ing)?(?: it| this)?|over-?engineer(?:ing)?(?: it| this)?|think (?:too )?hard(?:er)?|take your time)\b/
 const FILLER = /\b(?:please|pls|and|but|ok|okay|also|now|this|it|that|the|time|for|again|thanks|just|so)\b/
 
 const SCALE = [
@@ -494,9 +585,15 @@ const SCALE = [
   /\bmigrat(?:e|es|ing|ion)\b/,
   /\brefactor(?:s|ing)?\b/,
   /\brewrit(?:e|es|ing)\b/,
-  /\bredesign\b/,
-  /\boverhaul\b/,
-  /\bport(?:ing)? (?:it |this |the [\w-]+ )?(?:to|from|over)\b/,
+  /\bredesign(?:s|ing)?\b/,
+  /\boverhaul(?:s|ing)?\b/,
+  /\bport(?:ing)? (?:it|this|that|everything|(?:the|our|my) [\w-]+) (?:to|from|over)\b/,
+  /\bre-?implement(?:s|ing|ation)?\b/,
+  /\brestructur(?:e|es|ing)\b/,
+  /\bmoderni[sz](?:e|es|ing|ation)\b/,
+  /\bbreaking changes\b/,
+  /\bupgrad(?:e|es|ing)\s+(?:\S+\s+){0,3}?to\s+(?:the\s+)?(?:[\w.@/-]+\s+)?(?:v(?:ersion)?\s*)?(?:\d|latest\b)/,
+  /\b(?:works?|run|runs|usable|available) offline\b|\boffline[- ](?:first|support|mode)\b|\bmultiplayer\b|\breal[- ]?time (?:sync|collaboration)\b/,
   /\bmonorepo\b/,
   /\bmulti[- ]?file\b/,
   /\bend[- ]to[- ]end\b/,
@@ -506,8 +603,23 @@ const SCALE = [
   /\bperformance (?:audit|overhaul)\b/,
   /\bcodebase[- ]wide\b/,
 ]
-const SCOPE =
-  /\b(?:across|entire|whole|every (?:file|route|page|package|component|endpoint|test|module|screen)|all (?:the |of the )?(?:files|routes|pages|packages|components|endpoints|tests|modules|screens|services|apis|models|tables))\b/
+// Every part of something: across it, all of a kind, every one of a kind, everywhere.
+const WIDE =
+  /\b(?:everywhere|across|throughout|(?:entire|whole)(?!\s+(?:function|method|file|class|component|line|paragraph|sentence|section|page|test|block|thing|message|string|word|comment|readme|doc|docstring|script|query|loop)\b)|every (?!(?:time|day|week|month|year|now|so|other|once|single time)\b)[\w-]+|all (?:the |of the |our |my )?(?:[\w-]+ )?(?:files|routes|pages|packages|components|endpoints|tests|modules|screens|services|apis|models|tables|views|controllers|handlers|hooks|classes|functions|imports|usages|calls|callers|queries|dependencies|deps|templates|commands|tools|plugins|providers|schemas|scripts|workflows|places|occurrences|instances|references|crates|libraries|apps|repos|repositories))\b/
+// A whole system: the codebase, the repository or the entire app, as the place the work happens.
+const SYSTEM =
+  "app|apps|application|backend|back[- ]end|frontend|front[- ]end|codebase|code base|repo|repository|monorepo|project|site|website|ui|tui|cli|server|api|stack|system|product|platform|engine|extension"
+const SYSTEM_SCOPE = new RegExp(
+  `\\b(?:entire|whole|full|complete)\\s+(?:[\\w.-]+\\s+){0,2}?(?:${SYSTEM})\\b|\\b(?:across|throughout|all over|through|go through|sweep(?: through)?)\\s+(?:the |this |our |my )?(?:entire |whole )?(?:codebase|code base|repo|repository|monorepo|project|app|application)\\b|\\b(?:codebase|repo(?:sitory)?|project)[- ]wide\\b`,
+)
+// A rework verb, or "make" and "turn", aimed at a whole system: "port the TUI to ...", "rewrite the backend", "make the
+// desktop app work offline". Not a part of one ("the app's icon", "the api key").
+const SYSTEM_OBJECT = new RegExp(
+  `\\b(?:(rewrit(?:e|ing)|redesign(?:ing)?|overhaul(?:ing)?|port(?:ing)?|switch(?:ing)?|convert(?:ing)?|rebuild(?:ing)?|re-?implement(?:ing)?|re-?architect(?:ing)?|restructur(?:e|ing)|moderni[sz](?:e|ing)|migrat(?:e|ing)|refactor(?:ing)?|upgrad(?:e|ing)|translat(?:e|ing))|make|turn)\\s+(?:the |this |our |my |your )?(?:entire |whole |full |complete )?(?:[\\w.-]+ ){0,2}?(?:${SYSTEM})\\b(?!['’]s\\b|\\s+(?:icon|logo|name|title|version|port|readme|config|description|badge|tagline|url|link|key|keys|token|client|call|calls|docs|route|endpoint|button|label|color|colour|font)\\b)`,
+)
+// Verbs that rework something that exists. "Port" and "switch" only as verbs: "port the app to ...", "switch the app".
+const REWORK =
+  /\b(?:rewrit(?:e|es|ing)|redesign(?:s|ing)?|overhaul(?:s|ing)?|convert(?:s|ing)?|rebuild(?:s|ing)?|re-?implement(?:s|ing)?|re-?architect(?:s|ing)?|restructur(?:e|es|ing)|moderni[sz](?:e|es|ing)|migrat(?:e|es|ing)|refactor(?:s|ing)?|upgrad(?:e|es|ing)|replac(?:e|es|ing)|translat(?:e|es|ing))\b|\bport(?:s|ing)? (?:it|this|that|the|our|my|all|everything)\b[^.?!\n]*\b(?:to|from|over|onto|into)\b|\bswitch(?:es|ing)? (?:the|our|my|this|that|all|every|everything|it|over)\b/
 const COUNTED =
   /\b(\d{2,})\s+(?:\w+\s+)?(?:files|modules|routes|pages|components|tests|endpoints|packages|screens|services|tables|apis)\b/g
 const ACROSS_COUNT = /\bacross\s+(\d{2,})\b/g
@@ -531,14 +643,21 @@ const EDIT =
 const ACTION =
   /\b(?:add|implement|build|create|write|integrate|fix|debug|refactor|update|change|remove|rename|replace|migrate|test|deploy|ship|make|move|convert|support|wire|set up|improve|optimi[sz]e)\b/
 const SMALL_EDIT =
-  /\b(?:typos?|spelling|misspell\w*|comments?|wording|copy text|readme|docstrings?|console\.log|log line|whitespace|indentation|version (?:number|bump)|bump (?:the )?version|lint (?:errors?|warnings?)|formatting|a label|the label|the title|the colou?r|padding|margin|font size)\b/
+  /\b(?:typos?|spelling|misspell\w*|(?:fix|update|add|remove|delete|edit|change|reword|rewrite|tweak|clean up|correct|improve)\s+(?:the |a |an |this |that |these |those |my |some |its |their )?(?:[\w-]+ )?(?:comments?|docstrings?)|a comment|the comment|wording|copy text|readme|console\.log|log line|whitespace|indentation|version (?:number|bump)|bump (?:the )?version|lint (?:errors?|warnings?)|formatting|a label|the label|the title|the colou?r|padding|margin|font size)\b/
 const OPERATION =
   /\b(?:deploy|ship|publish|preview|release|roll ?back|commit|push|pull|merge|rebase|stash|install|uninstall)\b|\b(?:run|start|restart|stop|kick off|rerun|re-run) (?:the |all |my )?(?:tests?|test suite|build|dev server|server|app|linter|lint|typecheck|type check|migrations?|script|command)\b|\bbuild (?:it|this|the (?:app|project|repo|repository|site|package))\b|\b(?:open|create|make|raise) (?:a |the )?(?:pr|pull request)\b/
 const INFO_QUESTION =
   /^(?:what|where|why|how|when|which|who|is|are|does|do|did|was|were|explain|describe|tell me|show me|list|find|summari[sz]e|walk me through)\b/
 const REQUEST = /^(?:can you|could you|would you|will you|please|pls)\b/
+// A deadlock, a race, a leak, a hang or a crash, and "why does ... fail": problems that take real investigation.
+const HARD_FAILURE =
+  /\b(?:dead-?lock(?:s|ed|ing)?|live-?lock(?:s|ed|ing)?|race conditions?|racy|races?|memory leaks?|leak(?:s|ing|ed)?|hang(?:s|ing)?(?! on\b| tight\b)|hung|freez(?:e|es|ing)|frozen|crash(?:es|ing|ed)?|segfaults?|segmentation fault|flak(?:y|iness)|intermittent(?:ly)?|non-?deterministic|stall(?:s|ing|ed)?|stuck|corrupt(?:s|ed|ion)?|out of memory|oom|infinite loop)\b/
+const WHY_FAIL =
+  /^why (?:does|do|did|is|are|was|were|would|might)\b.*\b(?:fail\w*|break\w*|broken|errors?|erroring|throw\w*|time[sd]? ?out|timing out|slow\w*|wrong|stop\w*|exit\w*|not work\w*)\b|^why (?:doesn'?t|won'?t|isn'?t|aren'?t|can'?t|don'?t|didn'?t|wasn'?t)\b/
 const ASKS =
-  /\b(?:shall i|should i|want me to|would you like|do you want|let me know|if you(?:'d| would) like|ready to (?:proceed|go|publish|deploy)|confirm|approve|okay to|ok to|go ahead\?)\b/
+  /\b(?:shall i|should i|shall we|should we|want me to|want me|would you like|would you prefer|do you want|let me know|if you(?:'d| would)? (?:like|want|prefer|wish)|if you want|ready to (?:proceed|go|publish|deploy)|confirm|approve|okay to|ok to|go ahead\?|i (?:can|could) also|we (?:can|could) also|next,? i(?:'d| would|'ll| will| can| could| plan to)|i(?:'d)? (?:recommend|suggest)|happy to|the next steps? (?:would|is|are|could)|i can (?:go ahead|take care of|do that|handle))\b/
+const PLEASANTRY =
+  /\b(?:anything else|something else|anything more|any other (?:changes|questions|tasks)|any questions|further (?:help|questions|changes)|help with anything)\b/
 const CLOUD =
   /\b(?:vercel|supabase|deploy\w*|ship (?:it|this|to)|publish\w*|preview|production|prod|rollback|roll back|env vars?|environment variables?|database|db|auth|login|log in|sign[- ]?in|sign[- ]?up|domain|hosting|hosted)\b/
 const BROWSER =
