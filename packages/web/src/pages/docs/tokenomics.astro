@@ -38,7 +38,8 @@ export const prerender = true
             (1.99.99) and the CLI that <code>vectordev.ai/install</code> serves predate it, so the terminal UI and
             <code>vector run</code> with <code>--max-cost</code> and <code>--max-steps</code> get the Run Guard with the
             next CLI release, and Windows WSL servers, which run the 1.99.99 engine desktop 1.99.108 requires, get it
-            once a later desktop release requires that CLI.
+            once a later desktop release requires that CLI. From desktop 1.99.109, the limits are one overall set: they
+            cover all your repositories together, and a repository cannot set its own.
           </p>
           <dl class="doc-rows">
             {runGuardRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}

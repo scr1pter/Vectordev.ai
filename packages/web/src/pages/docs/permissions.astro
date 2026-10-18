@@ -22,7 +22,9 @@ export const prerender = true
             agents, commands, modes, plugins, tools, skills, MCP servers, formatters and language servers) load only
             after you trust the repository, because they can run code on your computer. Until then Vector applies the
             repository's deny rules, and its run limits, loop pauses and sharing settings only where they are stricter
-            than yours, so a cloned repository cannot raise your spend cap or switch loop pauses off.
+            than yours, so a cloned repository cannot raise your spend cap or switch loop pauses off. From desktop
+            1.99.109, a repository's run limits are ignored even once you trust it, because spend limits are one
+            overall set of yours, and Vector says so once for each file that still sets <code>budget.run</code>.
           </p>
           <p>
             From desktop 1.99.109, the app asks once, the first time you open a repository that has settings of its
