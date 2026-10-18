@@ -104,7 +104,7 @@ The shell and PowerShell installers at `https://vectordev.ai/install` and `https
 
 ## Coming soon
 
-**Vector Velocity** (Planned): Vector's own coding model, planned at over 300 billion parameters and designed for the loop Vector actually runs — planning, tool calls, edits, checks, and verification — rather than for open-ended chat. No work on it has started: there are no weights and no benchmarks.
+**Vector Velocity** (In development): Vector's own model, designed for under 20B parameters active per token and specialised for agentic computer use, agentic workflows and the loop Vector's harness runs — planning, tool calls, edits, checks and subagents — plus other coding and developer-tool tasks. Work on it has started, but there are no weights or benchmarks yet, so Vector makes no performance claims for it.
 
 An **API platform** that drives the same workspace programmatically is not available yet. What exists today is `vector serve`, which runs Vector's HTTP API on your own machine, and a JavaScript SDK for it that is prepared in source and awaiting publication (see the [SDK guide](https://vectordev.ai/docs/sdk)).
 
