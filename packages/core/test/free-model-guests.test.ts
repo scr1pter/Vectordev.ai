@@ -71,7 +71,7 @@ describe("FreeModelGuests", () => {
       yield* sessions
       const directory = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "free-model-guests-")))
       yield* Effect.addFinalizer(() => Effect.promise(() => rm(directory, { recursive: true, force: true })))
-      const file = path.join(directory, "free-model-guest-sessions.json")
+      const file = path.join(directory, "free-model-guest-sessions.txt")
       const first = yield* registry(file)
       yield* first.mark(child)
       // A new engine on the same database, as after a restart, reads the mark back for any session of the tree.
@@ -81,6 +81,25 @@ describe("FreeModelGuests", () => {
       yield* Effect.promise(() => writeFile(file, "not json"))
       const unreadable = yield* registry(file)
       expect(yield* unreadable.marked(root)).toBe(false)
+    }),
+  )
+
+  it.effect("two engines marking different sessions at once both keep their marks", () =>
+    Effect.gen(function* () {
+      yield* sessions
+      const directory = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "free-model-guests-")))
+      yield* Effect.addFinalizer(() => Effect.promise(() => rm(directory, { recursive: true, force: true })))
+      // Each round uses a new file. Two registries stand for two engines on one database, such as the terminal's
+      // beside the desktop app's: neither waits for the other.
+      for (const round of Array.from({ length: 10 }, (_, index) => index)) {
+        const file = path.join(directory, `free-model-guest-sessions-${round}.txt`)
+        const terminal = yield* registry(file)
+        const desktop = yield* registry(file)
+        yield* Effect.all([terminal.mark(root), desktop.mark(other)], { concurrency: "unbounded" })
+        // A third engine reads only the file.
+        const later = yield* registry(file)
+        expect([yield* later.marked(root), yield* later.marked(other)]).toEqual([true, true])
+      }
     }),
   )
 })

@@ -1,10 +1,9 @@
 export * as FreeModelGuests from "./free-model-guests"
 
-import { randomUUID } from "node:crypto"
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
+import { appendFile, mkdir, readFile } from "node:fs/promises"
 import path from "node:path"
 import { eq } from "drizzle-orm"
-import { Context, Effect, Layer, Option, Schema, Semaphore } from "effect"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import { SessionID } from "@vectordevai/schema/session-id"
 import { Database } from "./database/database"
 import { makeGlobalNode } from "./effect/app-node"
@@ -32,25 +31,26 @@ export class Service extends Context.Service<Service, Interface>()("@vector/Free
  */
 export const GUEST_REQUEST_HEADER = "x-vector-guest-request"
 
-const Marks = Schema.fromJsonString(Schema.Struct({ version: Schema.Literal(1), sessions: Schema.Array(SessionID) }))
-
 // Deeper than any subagent chain the engine starts; a longer one is treated as ending there.
 const MAX_DEPTH = 64
 
-/** Marks are kept in memory and, beside an on-disk database, in `file`, so a restart does not forget a guest. */
+/**
+ * Marks are kept in memory and, beside an on-disk database, in `file`, so a restart does not forget a guest. The file
+ * holds one root session ID per line, and a mark is appended, never rewritten: two engines on one database, such as
+ * the terminal's beside the desktop app's, may mark sessions at the same moment, and rewriting the whole file would
+ * keep only the last writer's.
+ */
 export const layerFor = (file: string | undefined) =>
   Layer.effect(
     Service,
     Effect.gen(function* () {
       const { db } = yield* Database.Service
       const memory = new Set<SessionID>()
-      const lock = Semaphore.makeUnsafe(1)
-      // Read on every check, never cached: another engine on the same database, such as the terminal's beside the
-      // desktop app's, may have marked a session since. A missing or unreadable file marks nothing.
+      // Read on every check, never cached: another engine on the same database may have marked a session since. A
+      // missing or unreadable file, or a line that is not a session ID, marks nothing.
       const saved = Effect.promise(async () => {
-        const text = file ? await readFile(file, "utf8").catch(() => undefined) : undefined
-        const marks = text === undefined ? Option.none() : Schema.decodeUnknownOption(Marks)(text)
-        return new Set(Option.isSome(marks) ? marks.value.sessions : [])
+        const text = file ? await readFile(file, "utf8").catch(() => "") : ""
+        return new Set(text.split("\n").flatMap((line) => Option.toArray(Schema.decodeUnknownOption(SessionID)(line))))
       })
       // The session and its ancestors, nearest first. A session not saved yet is its own root.
       const lineage = Effect.fnUntraced(function* (sessionID: SessionID) {
@@ -72,22 +72,12 @@ export const layerFor = (file: string | undefined) =>
           const chain = yield* lineage(sessionID)
           const root = chain[chain.length - 1]
           memory.add(root)
-          if (!file) return
-          yield* lock.withPermit(
-            Effect.gen(function* () {
-              const current = yield* saved
-              if (current.has(root)) return
-              const temporary = `${file}.${randomUUID()}.tmp`
-              // A file that cannot be written leaves the mark in memory, which still holds until a restart.
-              yield* Effect.promise(() =>
-                mkdir(path.dirname(file), { recursive: true })
-                  .then(() =>
-                    writeFile(temporary, JSON.stringify({ version: 1, sessions: [...current, root] }), { mode: 0o600 }),
-                  )
-                  .then(() => rename(temporary, file))
-                  .catch(() => undefined),
-              )
-            }),
+          if (!file || (yield* saved).has(root)) return
+          // A file that cannot be written leaves the mark in memory, which still holds until a restart.
+          yield* Effect.promise(() =>
+            mkdir(path.dirname(file), { recursive: true })
+              .then(() => appendFile(file, `${root}\n`, { mode: 0o600 }))
+              .catch(() => undefined),
           )
         }),
         marked: Effect.fn("FreeModelGuests.marked")(function* (sessionID) {
@@ -104,7 +94,7 @@ export const layerFor = (file: string | undefined) =>
 // Beside the database that holds the sessions the marks name, so engines that share sessions share the marks too.
 function marksFile() {
   const database = Database.path()
-  return database === ":memory:" ? undefined : path.join(path.dirname(database), "free-model-guest-sessions.json")
+  return database === ":memory:" ? undefined : path.join(path.dirname(database), "free-model-guest-sessions.txt")
 }
 
 export const node = makeGlobalNode({
