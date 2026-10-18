@@ -28,7 +28,7 @@ Then, after this branch deploys:
 
 8. **Run the refresh.** In Vercel open the project → Settings → Cron Jobs → **Run** on `/api/free-models/refresh`, or send `GET https://vectordev.ai/api/free-models/refresh` with `Authorization: Bearer <CRON_SECRET>`. The answer says which case you are in:
    - `{"enabled":true,"count":9}` (or fewer as models come and go): working. On the 17 October 2026 snapshot those are North Mini Code, Dots3-Note Preview and Xing4.0 (no training), Laguna S 2.1, Laguna XS 2.1, LFM2.5-2.6B, Inkling and Inkling Small (may train), and the Free Models Router (labelled as one that may train). Gemma 4 is never counted: it is offered only through users' own OpenRouter accounts (`PERSONAL_ONLY_FREE_MODELS`). With step 1 off, expect `count: 3`, the three no-training models only, or 4 if OpenRouter still lists the Free Models Router to the account.
-   - `{"enabled":false,"count":0}`: OpenRouter's account list allows nothing; recheck steps 1, 4 and 5.
+   - `{"enabled":false,"count":0}`: OpenRouter's account list allows nothing, or only the Free Models Router, which on its own never turns the section on; recheck steps 1, 4 and 5.
    - 503 `FREE_MODELS_CATALOG_UNAVAILABLE`: an OpenRouter read failed, probably a bad or revoked `OPENROUTER_FREE_API_KEY`.
    - 503 `PERSISTENT_STORE_UNAVAILABLE`: the key-value store is unavailable.
    - 503 `FREE_MODELS_UNAVAILABLE`: no key environment variable is set.
