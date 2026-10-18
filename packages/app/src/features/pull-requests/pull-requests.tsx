@@ -17,6 +17,7 @@ import {
   keptDismissals,
   passLines,
   REBUILT_HINT,
+  rememberedRules,
   repoOf,
   reviewEvents,
   reviewFooter,
@@ -34,6 +35,7 @@ import {
   type ReviewOutcomeLite,
   type ReviewRequest,
   type ReviewTarget,
+  type RepoRulesApi,
   type WorkingTreeChanges,
 } from "./ai-review"
 import {
@@ -147,10 +149,6 @@ const AUTOMATIC_STATE: Record<AutoReviewStatus["state"], string> = {
 
 function api(): PullRequestsApi | undefined {
   return (globalThis.window as unknown as { api?: { pullRequests?: PullRequestsApi } } | undefined)?.api?.pullRequests
-}
-
-type RepoRulesApi = {
-  save: (input: { description: string; repositoryPath: string; filePatterns: string[] }) => Promise<unknown>
 }
 
 function rulesApi(): RepoRulesApi | undefined {
@@ -738,6 +736,8 @@ export function PullRequests(props: {
   const [postedNote, setPostedNote] = createSignal<string>()
   // Finding id → why it was dismissed. Dismissed findings stay visible, struck through, and are never posted.
   const [dismissed, setDismissed] = createSignal<Record<string, string>>({})
+  // The repository rules "Don't flag this again" saved, so Undo can delete them.
+  const remembered = rememberedRules()
   const [menuFor, setMenuFor] = createSignal<string>()
   // Finding id → where applying its fix stands.
   const [applied, setApplied] = createSignal<Record<string, "applying" | "applied" | "changed" | "failed">>({})
@@ -1300,8 +1300,12 @@ export function PullRequests(props: {
     const rules = rulesApi()
     if (!rules || !projectPath) return
     // The rule lands in .vector/RULES.md, which every later review reads as the repository's instructions.
-    await rules
-      .save({ description: dismissalRule(finding), repositoryPath: projectPath, filePatterns: [finding.path] })
+    await remembered
+      .save(finding.id, rules, {
+        description: dismissalRule(finding),
+        repositoryPath: projectPath,
+        filePatterns: [finding.path],
+      })
       .then(
         () =>
           setDismissed((current) =>
@@ -1316,8 +1320,14 @@ export function PullRequests(props: {
       )
   }
 
-  const restore = (finding: ReviewFindingView) =>
+  const restore = (finding: ReviewFindingView) => {
+    const reason = dismissed()[finding.id]
     setDismissed((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== finding.id)))
+    if (reason !== REMEMBER && reason !== REMEMBERED) return
+    void remembered
+      .undo(finding.id)
+      .catch((cause: unknown) => setError(`${REMEMBER_COPY.undoFailed}: ${pullRequestErrorMessage(cause)}`))
+  }
 
   // Hands the finding to an isolated agent workspace. The launcher opens with the task filled in; nothing runs until
   // the user starts it there.

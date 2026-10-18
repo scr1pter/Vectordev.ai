@@ -1894,8 +1894,34 @@ export const REMEMBER_COPY = {
   saving: "Saving to .vector/RULES.md…",
   saved: "Won't be flagged again · saved to .vector/RULES.md",
   failed: "Vector could not save the repository rule",
+  undoFailed: "Vector could not remove the repository rule from .vector/RULES.md",
   applied: "Repository rules applied",
 } as const
+
+export type RepoRulesApi = {
+  save: (input: { description: string; repositoryPath: string; filePatterns: string[] }) => Promise<{ id: string }>
+  remove: (id: string) => Promise<unknown>
+}
+
+// Undo after "Don't flag this again" has to delete the rule it saved, or the finding stays hidden from every later
+// review. Undo can come before the save finishes, so it waits for the saved rule's id before removing it.
+export function rememberedRules() {
+  const saved = new Map<string, { rules: RepoRulesApi; id: Promise<string | undefined> }>()
+  return {
+    save(key: string, rules: RepoRulesApi, input: Parameters<RepoRulesApi["save"]>[0]) {
+      const id = rules.save(input).then((rule) => rule.id)
+      saved.set(key, { rules, id: id.catch(() => undefined) })
+      return id
+    },
+    async undo(key: string) {
+      const entry = saved.get(key)
+      if (!entry) return
+      saved.delete(key)
+      const id = await entry.id
+      if (id) await entry.rules.remove(id)
+    },
+  }
+}
 
 // The repository rule "Don't flag this again" saves.
 export function dismissalRule(finding: Pick<ReviewFindingView, "title" | "path">) {
