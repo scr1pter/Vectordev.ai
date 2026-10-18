@@ -23,6 +23,7 @@ import {
   navigationUpdate,
   navigationUpdateFailure,
   runningAgentCount,
+  UpdateActionContext,
 } from "@/components/updater-action"
 import { pathKey } from "@/utils/path-key"
 import { listSwarmWorkers } from "@/utils/swarm-workers"
@@ -3437,6 +3438,12 @@ export default function NewLayout(props: ParentProps) {
     void installUpdate(platform.updater, (message) =>
       showToast(navigationUpdateFailure(message, () => openSettingsAt("about"))),
     )
+  // The same Update for Home, which shows no sidebar.
+  const updateAction = {
+    update: () => navigationUpdate(platform.updater?.state()),
+    install: installUpdateFromNavigation,
+    runningAgents: countRunningAgents,
+  }
 
   const renderExternalAgentWorkspace = (recordAccessor: () => ParallelWorkspaceRecord) => {
     const record = () => recordAccessor()
@@ -3709,7 +3716,14 @@ export default function NewLayout(props: ParentProps) {
         }}
       >
         <div class="min-h-0 w-full flex-1">
-          <Show when={parallelWorkspaceIDFromRoute()} fallback={<Suspense>{props.children}</Suspense>}>
+          <Show
+            when={parallelWorkspaceIDFromRoute()}
+            fallback={
+              <UpdateActionContext.Provider value={updateAction}>
+                <Suspense>{props.children}</Suspense>
+              </UpdateActionContext.Provider>
+            }
+          >
             {(workspaceID) => (
               <Show
                 when={routedParallelWorkspace()}
@@ -6143,7 +6157,9 @@ export default function NewLayout(props: ParentProps) {
                           }
                         >
                           <div class="min-h-0 flex-1 overflow-hidden">
-                            <Suspense>{props.children}</Suspense>
+                            <UpdateActionContext.Provider value={updateAction}>
+                              <Suspense>{props.children}</Suspense>
+                            </UpdateActionContext.Provider>
                           </div>
                         </Show>
                       }
@@ -6519,9 +6535,9 @@ export default function NewLayout(props: ParentProps) {
         onSettings={openSettings}
         settingsKeybind={command.keybind("settings.open")}
         onAccount={openAccountSettings}
-        update={navigationUpdate(platform.updater?.state())}
-        onUpdate={installUpdateFromNavigation}
-        runningAgents={countRunningAgents}
+        update={updateAction.update()}
+        onUpdate={updateAction.install}
+        runningAgents={updateAction.runningAgents}
       />
 
       <DialogReportBug open={reportBugOpen()} onClose={() => setReportBugOpen(false)} />

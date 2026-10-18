@@ -700,6 +700,43 @@ html[data-vector-navigation-resizing] * {
   opacity: 0.45;
 }
 
+/* Home's Update button (home-update.tsx): the sidebar's lavender pill at Home's button height, before Settings, while
+   an update is ready or installing. Its confirmation is the sidebar's [data-vector-update-confirm] card, drawn at a
+   fixed place under the button because the header clips what overflows it. */
+.vector-home-heading__actions button[data-variant="update"] {
+  border: 1px solid color-mix(in srgb, var(--vx-purple) 40%, transparent);
+  background: color-mix(in srgb, var(--vx-purple) 18%, transparent);
+  color: var(--vx-purple-bright);
+  white-space: nowrap;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.vector-home-heading__actions button[data-variant="update"]:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--vx-purple) 56%, transparent);
+  background: color-mix(in srgb, var(--vx-purple) 26%, transparent);
+  color: var(--vx-text);
+}
+
+.vector-home-heading__actions button[data-variant="update"]:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--vx-purple) 76%, white 6%);
+  outline-offset: 2px;
+}
+
+.vector-home-heading__actions button[data-variant="update"]:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+
+.vector-home-update__confirm {
+  position: fixed;
+  z-index: 60;
+  width: 280px;
+  max-width: calc(100vw - 32px);
+}
+
 .vector-home-heading__status {
   display: flex;
   align-items: center;

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { createRoot, createSignal } from "solid-js"
 import {
+  createUpdateRestart,
   installUpdate,
   navigationUpdate,
   navigationUpdateFailure,
@@ -230,5 +232,53 @@ describe("runningAgentCount", () => {
     expect(runningAgentCount(sessions, 0)).toBe(3)
     expect(runningAgentCount(sessions, 2)).toBe(5)
     expect(runningAgentCount({ ses_done: { type: "idle" } }, 0)).toBe(0)
+  })
+})
+
+describe("a click on Update", () => {
+  const setup = (agents: number) =>
+    createRoot((dispose) => {
+      const [update, setUpdate] = createSignal<{ version: string; installing: boolean } | undefined>({
+        version: "1.99.110",
+        installing: false,
+      })
+      const calls: string[] = []
+      const running = { agents }
+      const restart = createUpdateRestart({
+        update,
+        install: () => calls.push("install"),
+        runningAgents: async () => running.agents,
+      })
+      return { restart, setUpdate, calls, running, dispose }
+    })
+
+  test("restarts at once when no agent is running", async () => {
+    const { restart, calls, dispose } = setup(0)
+    expect(await restart.start()).toBe(false)
+    expect(calls).toEqual(["install"])
+    expect(restart.confirming()).toBe(false)
+    dispose()
+  })
+
+  test("asks first while agents run, and keeps the count from the click", async () => {
+    const { restart, calls, running, dispose } = setup(2)
+    expect(await restart.start()).toBe(true)
+    expect(restart.confirming()).toBe(true)
+    running.agents = 0
+    expect(restart.stopping()).toBe(2)
+    expect(calls).toEqual([])
+    dispose()
+  })
+
+  // Closing the question and the ready announcement run as effects, which the browser specs cover.
+  test("does nothing once the update is installing or gone", async () => {
+    const { restart, setUpdate, calls, dispose } = setup(1)
+    setUpdate({ version: "1.99.110", installing: true })
+    expect(await restart.start()).toBe(false)
+    setUpdate(undefined)
+    expect(await restart.start()).toBe(false)
+    expect(restart.confirming()).toBe(false)
+    expect(calls).toEqual([])
+    dispose()
   })
 })
