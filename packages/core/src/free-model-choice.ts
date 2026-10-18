@@ -1,4 +1,6 @@
-import { FREE_ROUTER_ID, type FreeDataPolicy } from "@vectordevai/schema/free-model"
+// A relative path, not the package name: vectordev.ai's API functions load this file on Vercel's Node runtime, where the
+// package name resolves to Schema's TypeScript source inside node_modules, which Node will not load.
+import { FREE_ROUTER_ID, type FreeDataPolicy } from "../../schema/src/free-model.js"
 
 /** Presentation uses server-approved metadata, never price or an ID suffix as enablement. */
 export type FreeModelChoice = {
