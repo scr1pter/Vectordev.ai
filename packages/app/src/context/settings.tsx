@@ -244,6 +244,14 @@ const defaultSettings: Settings = {
   },
 }
 
+// What Restore default settings leaves: the defaults, except that Vector Tab stays off for someone who switched it off.
+// Its suggestions spend the selected model's tokens, and the reset button gives no warning that it would turn them on.
+export function restoredSettings(current: Pick<Settings, "editor">): Settings {
+  const next = structuredClone(defaultSettings)
+  if (current.editor?.aiAutocomplete === false) next.editor.aiAutocomplete = false
+  return next
+}
+
 function withFallback<T>(read: () => T | undefined, fallback: T) {
   return createMemo(() => read() ?? fallback)
 }
@@ -637,7 +645,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         },
       },
       resetAll() {
-        setStore(reconcile(structuredClone(defaultSettings)))
+        setStore(reconcile(restoredSettings(store)))
       },
     }
   },
