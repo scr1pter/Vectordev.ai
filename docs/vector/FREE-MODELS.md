@@ -2,10 +2,10 @@
 
 This describes the free-model section from desktop **1.99.109** and the next CLI release, and what earlier versions do. The current downloads are desktop 1.99.108 and npm CLI 1.99.99. Whether Vector's shared allowance serves models is set on Vector's service with `FREE_MODELS_ENABLED`, not by the release; see [Shared allowance for Vector accounts](#shared-allowance-for-vector-accounts).
 
-Two routes reach the same section:
+**The shared allowance is the free path (owner decision, 17 October 2026).** In the owner's words: "i want it so that the vector app is connected to my openrouter account no matter who uses the free models". Every signed-in Vector account uses Free models inside of Vector on Vector's shared allowance, which runs on Vector's own OpenRouter account. Nothing in the free-model flow (the composer's first-run card, Getting Started, the Free models inside of Vector card, limit and unavailable messages, the TUI and the CLI) asks anyone to connect an OpenRouter account of their own; signed out, it says "Sign in to Vector to use free models." Two routes still reach the same section:
 
-- **Your OpenRouter account.** Connect your own free OpenRouter account. Requests go directly to OpenRouter with your stored key and do not use Vector's shared allowance.
-- **Shared Vector allowance.** Any signed-in Vector account, with no OpenRouter account, while Vector's service has it on. Requests pass through vectordev.ai, which checks the account and its limits.
+- **Shared Vector allowance.** Any signed-in Vector account, with no OpenRouter account, while Vector's service has it on. Requests pass through vectordev.ai, which checks the account and its limits. A free model chosen while an OpenRouter account was connected runs here too once that account is gone, if the shared catalog lists it.
+- **Your OpenRouter account.** OpenRouter stays an ordinary provider in Settings → Providers, not promoted anywhere else. An account connected there lists its own free models, marked Your OpenRouter account, and its requests go directly to OpenRouter with the stored key instead of the shared allowance.
 
 Names omit the `:free` suffix; routing IDs keep it. A failed catalog check never authorizes an unlisted endpoint or a paid fallback, and `max_price` stays zero on every request.
 
@@ -53,41 +53,43 @@ The user's own OpenRouter key is held to the same list. Every model in OpenRoute
 
 Desktop 1.99.108 and CLI 1.99.99 never show the label, so vectordev.ai serves may-train models only to clients that declare they show it: `GET /api/free-models/models?disclosure=may-train-v1`, and the header `x-vector-free-model-disclosure: may-train-v1` on shared chats. Any other client receives the no-training models only, and its shared chats fall back only among them. The shared chat refuses a may-train model with 403 `FREE_MODELS_DISCLOSURE_REQUIRED` when the disclosure is missing and 403 `FREE_MODELS_CONSENT_REQUIRED` without `x-vector-free-model-training-consent: accepted`, before any allowance is spent.
 
-## Keep model access at no charge
+## Limits, and what Vector says at one
 
-Use a free OpenRouter account without purchasing credits, adding a payment method, enabling automatic top-ups, or connecting paid upstream provider keys through OpenRouter's BYOK settings. Remove account defaults or enforced settings that enable paid plugins. These account settings are outside Vector's control.
+The shared allowance runs on Vector's OpenRouter account, which has bought $10 of credits (owner, 17 October 2026). OpenRouter sets the free tier by credits purchased over the account's life, so the account gets **1,000 free-model requests a day** instead of 50, and keeps it as the balance is spent; OpenRouter states no expiry. The limit is still **20 requests a minute**, counted across all the account's keys, so every user of the shared allowance shares both. Failed attempts count, and one coding task can use many requests, since each tool step is one. See [OpenRouter's current limits](https://openrouter.ai/docs/api_reference/limits).
 
-OpenRouter currently lists up to **50 free-model requests per day** and **20 per minute** for an account without a credit purchase, and 1,000 a day once an account has bought $10 of credits. Failed attempts count. Model and provider availability can impose tighter limits, and one coding task can use many requests, since each tool step is one request. At a limit, wait for it to reset; Vector never switches to a paid model or provider. See [OpenRouter's current limits](https://openrouter.ai/docs/api_reference/limits).
+At a limit, Vector says what happened, when the shared allowance is expected to reset, and what else to do, never connecting OpenRouter: "To keep working now, choose a model from another provider you've connected, or add your own provider key in Settings → Providers." The TUI and CLI say `/connect` or `vector providers login` instead of Settings. A user who already connected OpenRouter can still continue the same turn on it. Vector never switches to a paid model or provider. Desktop 1.99.108 and CLI 1.99.99 write their own limit text from the typed limit, which still mentions OpenRouter; only a new release changes that.
+
+**Never let the shared account's balance go negative.** OpenRouter refuses free models with HTTP 402 on an account with a negative balance, which takes the whole shared allowance down (Vector shows it as "Shared free models are temporarily unavailable"). Every shared request sends a zero `max_price`, disables paid plugins and names only zero-price endpoints, so free use does not spend the credits; keep automatic top-ups, paid upstream BYOK keys and default or enforced paid plugins off on that account, and use it for nothing else.
+
+A personal OpenRouter account connected in Settings → Providers has its own limits: 50 free-model requests a day without a credit purchase. Keep it free of purchased credits, payment methods, automatic top-ups, paid BYOK keys and paid plugins if it should cost nothing; those settings are outside Vector's control.
 
 ## Your OpenRouter account's privacy settings
 
 OpenRouter has separate privacy settings for free and paid models. If a user's account does not allow free models from providers that may train on their data, OpenRouter does not list those models for that account, so they do not appear under **Your OpenRouter account**. When such a model was chosen from the shared allowance, or OpenRouter answers that no endpoint matches the data policy for a may-train model, Vector says: "Your OpenRouter privacy settings block free models whose providers may train on prompts. To use this one, open openrouter.ai/settings/privacy, allow free models from providers that may train on your data, then send again. Or choose a model without the "May train on your prompts" label." A model Vector has not reviewed is sent `data_collection: "deny"` by Vector itself, so no account setting can help; for it Vector says that it has not reviewed the model's data policy, asked OpenRouter for providers that don't train on prompts, found none, and suggests another free model.
 
-## Connect your account
+## Start free
 
-In the desktop app, choose **Start free with OpenRouter** above the composer (shown while no connected provider offers a model) or **Start free** in Getting Started. You can also open Settings → Providers and choose **Connect OpenRouter**. The browser authorization flow stores the resulting key in Vector's provider credential store, and the composer then selects the largest-context free model on the account, preferring a no-training one, and keeps your draft prompt ready to send. If no free model is available, Vector says so and selects nothing; it never substitutes a paid model. In the terminal, use `/connect` (the TUI home screen shows it whenever no provider is connected), or run:
+In the desktop app, the composer's card (shown while no connected provider offers a model) and **Start free** in Getting Started say "Sign in to Vector to use free models." and offer **Sign in to Vector** and **Use my own API key**. Once signed in, the shared models load, the card goes away and the composer selects a free model, a no-training one first; the draft prompt stays ready to send. If the shared allowance serves nothing while you are signed in, the card says Free models inside of Vector are unavailable right now and offers your own API key. The web build, which cannot sign in itself, offers the key only. In the terminal, the TUI home screen says "Sign in to Vector to use free models: run vector login." while the shared catalog is on, or that the free models are unavailable right now, and offers `/connect` for your own key:
 
 ```sh
-vector providers login --provider openrouter --method "Connect OpenRouter"
+vector login
 vector models
 vector models --accept-training   # only if you want models labelled "May train on your prompts"
 ```
 
-For an API-key connection, save the key through Settings → Providers or set `OPENROUTER_API_KEY` in the engine's environment. A key only in a repository's `provider.openrouter.options.apiKey` does not enable guarded free models.
-
-Browser authorization receives its callback on the engine's localhost. With a remote engine, use an OpenRouter API key.
-
 `vector models` keeps canonical `provider/model` selectors on stdout. Its free-model heading, display names, source captions, labels and the disclaimer go to stderr.
+
+**Your own OpenRouter account.** Settings → Providers → OpenRouter connects one through browser authorization (its callback is on the engine's localhost, so a remote engine needs an API key) or an API key; `OPENROUTER_API_KEY` in the engine's environment works too. A key only in a repository's `provider.openrouter.options.apiKey` does not list its free models.
 
 ## Shared allowance for Vector accounts
 
-`FREE_MODELS_ENABLED=false` keeps the shared allowance off without disabling personal OpenRouter access. A model available through your own connected OpenRouter account uses your account's copy.
+`FREE_MODELS_ENABLED=false` keeps the shared allowance off without disabling a personal OpenRouter connection. A model available through an OpenRouter account the user connected uses that account's copy.
 
 The daily refresh (03:17 UTC, `/api/free-models/refresh`) reads OpenRouter's public `/api/v1/models`, Vector's account list `/api/v1/models/user` (which applies that account's privacy settings), and, for each reviewed candidate, `/api/v1/models/{author}/{slug}/endpoints`. It keeps zero-price, tool-capable, reviewed endpoints that are online and more than 7 days from expiry, plus the Free Models Router, which lists no endpoints and is judged by its own listing, and leaves out personal-only models (`PERSONAL_ONLY_FREE_MODELS`, Gemma today), which a stored catalog also never serves. One unreadable endpoint list drops only that model; a failed model or account list keeps the stored catalog. When nothing qualifies, it publishes `enabled: false`. The catalog is stored under `vector:free-models:catalog:v4:policy` for 54 hours, so one failed nightly run does not take the section down, and every stored endpoint must carry the policy the reviewed record gives it.
 
 `/api/free-models/models` returns a 503 whose code says why: `FREE_MODELS_CATALOG_MISSING` (never refreshed under the current key), `FREE_MODELS_CATALOG_STALE`, `FREE_MODELS_CATALOG_INVALID` or `PERSISTENT_STORE_UNAVAILABLE`.
 
-For hosted activation, set the Vector account/token and persistent Redis configuration, `OPENROUTER_FREE_API_KEY`, `CRON_SECRET` and `FREE_MODELS_ENABLED=true` on the server, then run the refresh; see [owner actions](owner-actions/openrouter.md#free-models-of-17-october-2026-owner-steps). `FREE_MODELS_MINUTE_PER_USER` defaults to 10 (at most 20) and `FREE_MODELS_DAILY_PER_USER` to the smaller of 20 and a tenth of the account's daily free limit (at most 1,000). These do not raise OpenRouter's account-wide quota, which every user of the shared allowance shares.
+For hosted activation, set the Vector account/token and persistent Redis configuration, `OPENROUTER_FREE_API_KEY`, `CRON_SECRET` and `FREE_MODELS_ENABLED=true` on the server, then run the refresh; see [owner actions](owner-actions/openrouter.md#free-models-of-17-october-2026-owner-steps). `FREE_MODELS_MINUTE_PER_USER` defaults to 10 (at most 20) and `FREE_MODELS_DAILY_PER_USER` to the smaller of 20 and a tenth of the account's daily free limit (at most 1,000). With the account's 1,000 a day, set `FREE_MODELS_DAILY_PER_USER=50`: enough for a few agent tasks a day, while 20 users at that rate reach the account's limit, after which everyone sees "Today's shared free model allowance is used up" until the next UTC day. These settings do not raise OpenRouter's account-wide quota, which every user of the shared allowance shares.
 
 ## Clients after an outage
 
