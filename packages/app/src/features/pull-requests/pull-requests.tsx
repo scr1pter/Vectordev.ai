@@ -7,6 +7,7 @@ import {
   buildDesktopReview,
   checksForReview,
   dismissalRule,
+  REMEMBER_COPY,
   fixMission,
   withoutDismissed,
   countBySeverity,
@@ -157,8 +158,8 @@ function rulesApi(): RepoRulesApi | undefined {
 }
 
 const DISMISS_REASONS = ["Not a bug", "Intended behaviour", "Fixed elsewhere"]
-const REMEMBER = "Don't flag this again"
-const REMEMBERED = "Won't be flagged again · saved to Project rules"
+const REMEMBER = REMEMBER_COPY.action
+const REMEMBERED = REMEMBER_COPY.saved
 
 type CiRun = {
   id: number
@@ -413,7 +414,7 @@ function Grounding(props: { outcome: ReviewOutcomeLite }) {
             title="AGENTS.md and .vector/RULES.md from your checkout, including findings you chose not to see again."
           >
             <Icon name="rule" class="size-3" />
-            Project rules applied
+            {REMEMBER_COPY.applied}
           </span>
         </Show>
       </div>
@@ -456,7 +457,7 @@ function FindingCard(props: {
             <Show when={props.dismissed === REMEMBER || props.dismissed === REMEMBERED}>
               <Icon name="rule" class="size-3" />
             </Show>
-            {props.dismissed === REMEMBER ? "Saving as a project rule…" : props.dismissed}
+            {props.dismissed === REMEMBER ? REMEMBER_COPY.saving : props.dismissed}
           </span>
           <button
             type="button"
@@ -627,7 +628,7 @@ function FindingCard(props: {
                           {REMEMBER}
                         </span>
                         <span class="mt-0.5 block text-[10.5px] text-[color:var(--vx-text-muted)]">
-                          Saves a project rule that every review reads
+                          {REMEMBER_COPY.hint}
                         </span>
                       </button>
                     </Show>
@@ -1310,7 +1311,7 @@ export function PullRequests(props: {
           setDismissed((current) =>
             current[finding.id] === REMEMBER ? { ...current, [finding.id]: "Dismissed" } : current,
           )
-          setError(`Vector could not save the project rule: ${pullRequestErrorMessage(cause)}`)
+          setError(`${REMEMBER_COPY.failed}: ${pullRequestErrorMessage(cause)}`)
         },
       )
   }

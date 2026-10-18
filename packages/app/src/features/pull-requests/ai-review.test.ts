@@ -14,6 +14,7 @@ import {
   buildDesktopSummary,
   checksForReview,
   dismissalRule,
+  REMEMBER_COPY,
   fixMission,
   checkoutLabel,
   chooseCheckout,
@@ -1335,6 +1336,14 @@ describe("fixMission", () => {
     expect(dismissalRule({ title: 'Uses `any`\nfor "speed"', path: "src/a.ts" })).toBe(
       "Code review: do not flag \"Uses 'any' for 'speed'\" in src/a.ts; it was reviewed and is not a problem.",
     )
+  })
+
+  test("Don't flag this again says the rule goes to .vector/RULES.md, not to a Project rules page", () => {
+    expect(REMEMBER_COPY.action).toBe("Don't flag this again")
+    expect(REMEMBER_COPY.hint).toBe("Saves a repository rule in .vector/RULES.md that every review reads")
+    expect(REMEMBER_COPY.saved).toBe("Won't be flagged again · saved to .vector/RULES.md")
+    // Vector has repositories, not projects, and no rules page to point at.
+    for (const copy of Object.values(REMEMBER_COPY)) expect(copy).not.toMatch(/project/i)
   })
 })
 
