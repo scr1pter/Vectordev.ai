@@ -1,4 +1,4 @@
-import { afterEach, expect } from "bun:test"
+import { afterEach, expect, test } from "bun:test"
 import { Effect, Layer, Stream } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FreeModels } from "@vectordevai/core/free-models"
@@ -134,3 +134,18 @@ for (const id of ["acme/missing:free", "acme/unreviewed:FREE"])
       }),
     { trusted: true, config: { ...config, model: `openrouter/${id}` } },
   )
+
+test("OpenRouter's free router is never anyone's default, whatever its context", () => {
+  const free = (id: string, context: number, dataPolicy: "no-training" | "may-train") => ({
+    id,
+    limit: { context },
+    freeModel: { source: "shared" as const, dataPolicy },
+  })
+  const router = free("openrouter/free", 2_000_000, "may-train")
+  expect(Provider.sort([router, free("poolside/laguna-s-2.1:free", 262_144, "may-train")])[0].id).toBe(
+    "poolside/laguna-s-2.1:free",
+  )
+  expect(Provider.sort([router, free("cohere/north-mini-code:free", 256_000, "no-training")])[0].id).toBe(
+    "cohere/north-mini-code:free",
+  )
+})

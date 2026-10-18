@@ -10,6 +10,7 @@ import { SessionID } from "@vectordevai/schema/session-id"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
 import {
+  FREE_ROUTER_ID,
   FreeDataPolicy,
   isFreeModel,
   isFreeModelRef,
@@ -2575,6 +2576,8 @@ export function sort<
 >(models: T[]) {
   return sortBy(
     models,
+    // OpenRouter's free router picks a model at random, so it is never anyone's default.
+    [(model) => (model.id === FREE_ROUTER_ID ? 1 : 0), "asc"],
     [(model) => (model.freeModel?.source === "openrouter" ? 0 : 1), "asc"],
     // A model whose provider may train on prompts is never chosen automatically ahead of a no-training one.
     [(model) => (model.freeModel?.dataPolicy && model.freeModel.dataPolicy !== "no-training" ? 1 : 0), "asc"],

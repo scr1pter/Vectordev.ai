@@ -1,4 +1,5 @@
 import { freeModelMayTrain, type FreeModelChoice } from "@vectordevai/core/free-model-choice"
+import { FREE_ROUTER_ID } from "@vectordevai/schema/free-model"
 
 type FreeCandidate = { id: string; limit: { context: number }; freeModel?: FreeModelChoice["freeModel"] }
 
@@ -9,9 +10,12 @@ type FreeCandidate = { id: string; limit: { context: number }; freeModel?: FreeM
  * model can never be chosen here.
  */
 export function bestOwnFreeModel<T extends FreeCandidate>(models: readonly T[]) {
-  return models
-    .filter((model) => model.freeModel?.source === "openrouter")
-    .toSorted(
-      (a, b) => Number(freeModelMayTrain(a)) - Number(freeModelMayTrain(b)) || b.limit.context - a.limit.context,
-    )[0]
+  return (
+    models
+      // OpenRouter's free router picks a model at random, so it is never chosen for the user.
+      .filter((model) => model.freeModel?.source === "openrouter" && model.id !== FREE_ROUTER_ID)
+      .toSorted(
+        (a, b) => Number(freeModelMayTrain(a)) - Number(freeModelMayTrain(b)) || b.limit.context - a.limit.context,
+      )[0]
+  )
 }

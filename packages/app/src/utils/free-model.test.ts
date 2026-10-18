@@ -50,6 +50,21 @@ describe("bestOwnFreeModel", () => {
     )
   })
 
+  test("never chooses OpenRouter's free router, which picks a model at random", () => {
+    const ownModel = (id: string, context: number, dataPolicy: "may-train") => ({
+      id,
+      limit: { context },
+      freeModel: { source: "openrouter" as const, dataPolicy },
+    })
+    expect(
+      bestOwnFreeModel([
+        ownModel("openrouter/free", 2_000_000, "may-train"),
+        ownModel("thinkingmachines/inkling:free", 1_048_576, "may-train"),
+      ])?.id,
+    ).toBe("thinkingmachines/inkling:free")
+    expect(bestOwnFreeModel([ownModel("openrouter/free", 200_000, "may-train")])).toBeUndefined()
+  })
+
   test("returns nothing when the account offers no eligible free model", () => {
     expect(bestOwnFreeModel([model("maker/paid", 1_000_000), model("maker/huge:free", 900_000)])).toBeUndefined()
     expect(bestOwnFreeModel([])).toBeUndefined()

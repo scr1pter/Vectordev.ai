@@ -417,3 +417,23 @@ it.effect("a connected OpenRouter account without verified free models requires 
     expect(yield* catalog.model.default()).toMatchObject({ id: paid })
   }),
 )
+
+it.effect("OpenRouter's free router is never chosen automatically, though its context is the largest", () =>
+  Effect.gen(function* () {
+    const catalog = yield* Catalog.Service
+    const router = ModelV2.ID.make("openrouter/free")
+    const laguna = ModelV2.ID.make("poolside/laguna-s-2.1:free")
+    yield* catalog.transform((draft) => {
+      draft.provider.update(ProviderV2.ID.openrouter, () => {})
+      draft.model.update(ProviderV2.ID.openrouter, router, (model) => {
+        model.freeModel = { source: "openrouter", dataPolicy: "may-train" }
+        model.limit = { context: 2_000_000, output: 8192 }
+      })
+      draft.model.update(ProviderV2.ID.openrouter, laguna, (model) => {
+        model.freeModel = { source: "openrouter", dataPolicy: "may-train" }
+        model.limit = { context: 262_144, output: 32_768 }
+      })
+    })
+    expect(yield* catalog.model.default()).toMatchObject({ id: laguna })
+  }),
+)

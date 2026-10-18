@@ -11,7 +11,7 @@ import { EventV2 } from "./event"
 import { Policy } from "./policy"
 import { State } from "./state"
 import { Integration } from "./integration"
-import { isFreeModelRef } from "@vectordevai/schema/free-model"
+import { FREE_ROUTER_ID, isFreeModelRef } from "@vectordevai/schema/free-model"
 
 export type ProviderRecord = {
   provider: ProviderV2.MutableInfo
@@ -272,15 +272,18 @@ const layer = Layer.effect(
           // A model whose provider may train on prompts is never picked ahead of a no-training one.
           const mayTrain = (model: ModelV2.Info) =>
             Number(!!model.freeModel?.dataPolicy && model.freeModel.dataPolicy !== "no-training")
+          // OpenRouter's free router picks a model at random, so it is never chosen for anyone.
           const free = models
-            .filter((model) => model.freeModel?.source === "openrouter")
+            .filter((model) => model.freeModel?.source === "openrouter" && model.id !== FREE_ROUTER_ID)
             .toSorted((a, b) => mayTrain(a) - mayTrain(b) || b.limit.context - a.limit.context)[0]
           if (free) return free
           if ((yield* result.provider.available()).some((provider) => provider.id === "openrouter"))
             return yield* new FreeModelsUnavailableError()
           // Connected providers first, then Vector's shared free models. Codium spends the account's credits, so it
           // is never chosen automatically.
-          const runnable = models.filter((model) => model.providerID !== ModelPlanStatus.PROVIDER_ID)
+          const runnable = models.filter(
+            (model) => model.providerID !== ModelPlanStatus.PROVIDER_ID && model.id !== FREE_ROUTER_ID,
+          )
           const connected = runnable.filter((model) => model.providerID !== "vector")
           return Option.getOrUndefined(
             pipe(
