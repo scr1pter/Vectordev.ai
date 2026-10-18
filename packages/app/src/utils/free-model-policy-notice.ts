@@ -6,8 +6,10 @@ import {
   FREE_MODELS_TITLE,
   freeModelMayTrain,
   freeModelTrainingDisclaimer,
+  freeModelTrainingRefusal,
   type FreeModelChoice,
 } from "@vectordevai/core/free-model-choice"
+import type { VectorClient } from "@vectordevai/sdk/v2/client"
 
 const STORAGE_KEY = "vector.notice.free-model-policy.v2"
 
@@ -55,4 +57,21 @@ export async function freeModelTrainingGate(input: {
   if (await input.consent().catch(() => false)) return true
   if (!(await input.ask())) return false
   return input.accept().catch(() => false)
+}
+
+/**
+ * Records the acceptance through the engine, and says why when it is not recorded: an invited guest (403) is told that
+ * only the workspace owner can accept, since trying again never helps; any other refusal, or no answer, asks to try
+ * again. The app's client throws on an error status, which would lose the status, so this asks for the response.
+ */
+export async function acceptFreeModelTraining(
+  freeModels: Pick<VectorClient["provider"]["freeModels"], "setConsent">,
+  refused: (description: string) => void,
+) {
+  const result = await freeModels
+    .setConsent({ freeModelConsent: { training: true } }, { throwOnError: false })
+    .catch(() => undefined)
+  if (result?.data?.training === true) return true
+  refused(freeModelTrainingRefusal(result?.response?.status))
+  return false
 }

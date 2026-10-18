@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
+import { FREE_MODEL_TRAINING_OWNER_ONLY } from "@vectordevai/core/free-model-choice"
+import { createVectorClient } from "@vectordevai/sdk/v2/client"
 import {
   FREE_MODEL_POLICY_NOTICE,
+  acceptFreeModelTraining,
   firstFreeModelPolicyNotice,
   freeModelTrainingGate,
   freeModelTrainingNotice,
@@ -108,5 +111,39 @@ describe("may-train consent gate", () => {
       expect(description).toContain("including ones Vector has not reviewed yet")
       expect(description).toContain("vector models --decline-training")
     }
+  })
+})
+
+describe("recording the acceptance", () => {
+  // The app's directory client throws on an error status (context/server-sdk.tsx), so the refusal must still say why.
+  const engine = (answer: () => Promise<Response>) =>
+    createVectorClient({ baseUrl: "http://engine.test", throwOnError: true, fetch: answer }).provider.freeModels
+  const record = async (answer: () => Promise<Response>) => {
+    const shown: string[] = []
+    const accepted = await acceptFreeModelTraining(engine(answer), (description) => shown.push(description))
+    return { accepted, shown }
+  }
+
+  test("an invited guest's refusal says only the owner can accept, and nothing is sent", async () => {
+    expect(
+      await record(async () =>
+        Response.json({ _tag: "ForbiddenError", message: "This operation requires the server owner" }, { status: 403 }),
+      ),
+    ).toEqual({ accepted: false, shown: [FREE_MODEL_TRAINING_OWNER_ONLY] })
+  })
+
+  test("any other failure, or no answer, asks to try again", async () => {
+    const again = { accepted: false, shown: ["Vector couldn't record your choice. Try again."] }
+    expect(await record(async () => Response.json({ message: "boom" }, { status: 500 }))).toEqual(again)
+    expect(
+      await record(async () => {
+        throw new TypeError("fetch failed")
+      }),
+    ).toEqual(again)
+    expect(await record(async () => Response.json({ training: false }))).toEqual(again)
+  })
+
+  test("a recorded acceptance lets the prompt go without a notice", async () => {
+    expect(await record(async () => Response.json({ training: true }))).toEqual({ accepted: true, shown: [] })
   })
 })

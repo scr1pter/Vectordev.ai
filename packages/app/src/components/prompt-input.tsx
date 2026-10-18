@@ -65,7 +65,7 @@ import {
 } from "./prompt-input/history"
 import { createPromptSubmit, type FollowupDraft } from "./prompt-input/submit"
 import { DialogFreeModelTraining } from "./dialog-free-model-training"
-import { freeModelTrainingGate } from "@/utils/free-model-policy-notice"
+import { acceptFreeModelTraining, freeModelTrainingGate } from "@/utils/free-model-policy-notice"
 import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/slash-popover"
 import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
@@ -80,7 +80,7 @@ import { ImagePreview } from "@vectordevai/ui/image-preview"
 import type { ReferenceInfo } from "@vectordevai/sdk/v2/client"
 import { modelVariantDescription, modelVariantLabel, visibleModelVariants } from "@/context/model-variant"
 import { modelDisplayName } from "@/utils/provider-brand"
-import { freeModelTrainingLabel, freeModelTrainingRefusal } from "@vectordevai/core/free-model-choice"
+import { freeModelTrainingLabel } from "@vectordevai/core/free-model-choice"
 import { detectParallelIntent } from "@/features/delegation/delegation"
 import { holdsHandoff } from "@/features/cloud/cloud-handoff"
 import { createOutcomes } from "@/features/economics/economics-repository"
@@ -1580,16 +1580,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               ),
             ),
           accept: () =>
-            client.provider.freeModels.setConsent({ freeModelConsent: { training: true } }).then((result) => {
-              if (result.data?.training === true) return true
-              // An invited guest is refused (403): only the owner can accept, so retrying would never help.
-              showToast({
-                title: "Nothing was sent",
-                description: freeModelTrainingRefusal(result.response?.status),
-                variant: "error",
-              })
-              return false
-            }),
+            acceptFreeModelTraining(client.provider.freeModels, (description) =>
+              showToast({ title: "Nothing was sent", description, variant: "error" }),
+            ),
         })
       },
     })
