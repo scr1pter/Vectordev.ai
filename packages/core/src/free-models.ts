@@ -29,7 +29,12 @@ import {
   isFreeRouter,
   offeredFreeModel,
 } from "./free-model-catalog"
-import { FREE_MODEL_TRAINING_BLOCKED, FREE_MODEL_UNLISTED, FREE_MODEL_UNREVIEWED_BLOCKED } from "./free-model-choice"
+import {
+  FREE_MODEL_TRAINING_BLOCKED,
+  FREE_MODEL_UNLISTED,
+  FREE_MODEL_UNREVIEWED_BLOCKED,
+  FREE_MODELS_SIGN_IN,
+} from "./free-model-choice"
 
 // The disclosure parameter tells vectordev.ai this client labels free models that may train and asks first.
 export const CATALOG_URL = `https://vectordev.ai/api/free-models/models?disclosure=${FREE_MODELS_DISCLOSURE}`
@@ -352,12 +357,13 @@ export async function resolveRoute(input: {
       headers: {},
     }
   }
-  if (input.provider === "openrouter") throw new Error("Connect OpenRouter to use your own free allowance.")
+  // Without an OpenRouter key of the user's own, every free model runs on Vector's shared allowance, including one
+  // chosen while an OpenRouter account was connected, when the shared catalog lists it.
   const catalog = await input.catalog()
   if (!catalog.enabled || !catalog.models.some((model) => model.id === input.modelID))
     throw new Error("That free model is unavailable. Choose another model in Vector.")
   const token = await input.credential("vector")
-  if (!token) throw new Error("Sign in to Vector to use the shared free allowance, or connect OpenRouter.")
+  if (!token) throw new Error(FREE_MODELS_SIGN_IN)
   return {
     url: SHARED_CHAT_URL,
     key: token,

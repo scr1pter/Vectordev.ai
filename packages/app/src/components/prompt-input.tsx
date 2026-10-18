@@ -1855,12 +1855,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         t={(key) => language.t(key as Parameters<typeof language.t>[0])}
       />
       <Show when={needsModel()}>
-        <FreeModelStart
-          directory={sdk().directory}
-          model={props.controls.model.selection}
-          nudge={modelStartNudge()}
-          onReady={restoreFocus}
-        />
+        <FreeModelStart directory={sdk().directory} nudge={modelStartNudge()} />
       </Show>
       <Show when={showDelegationChip()}>
         <div class="mx-1 mb-2 flex items-center gap-2 rounded-full border border-[#9374ec]/30 bg-[#9374ec]/10 px-3 py-1.5 text-[12px] text-[#d8cdfb] animate-in fade-in">

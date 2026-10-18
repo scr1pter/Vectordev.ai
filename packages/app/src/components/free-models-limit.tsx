@@ -8,15 +8,18 @@ import { useDialog } from "@vectordevai/ui/context/dialog"
 import {
   freeModelsLimitTitle,
   freeModelsResetLabel,
-  OPENROUTER_ACCOUNT_COPY,
   type FreeModelsLimitNotice,
 } from "@vectordevai/core/free-model-choice"
 import { useSDK } from "@/context/sdk"
 import { useLocal } from "@/context/local"
 import { useLanguage } from "@/context/language"
 import { formatServerError } from "@/utils/server-errors"
-import { DialogConnectProvider } from "./dialog-connect-provider"
 
+/**
+ * Shown when the shared allowance stops a turn: when it is expected to reset, and the user's own provider keys in
+ * general. It never asks the user to connect an OpenRouter account (owner decision, 17 October 2026); one already
+ * connected can still continue the same turn.
+ */
 export function FreeModelsLimit(props: {
   sessionID: string
   limit: FreeModelsLimitNotice & { messageID: string; modelID: string }
@@ -28,20 +31,13 @@ export function FreeModelsLimit(props: {
   const language = useLanguage()
   const dialog = useDialog()
   const [state, setState] = createStore({ busy: false, error: "", resumed: false })
-  const target = () => ({
-    client: sdk().client,
-    directory: sdk().directory,
-    sessionID: props.sessionID,
-    messageID: props.limit.messageID,
-    modelID: props.limit.modelID,
-  })
-  const resume = async (input = target()) => {
+  const resume = async () => {
     if (state.busy || state.resumed) return
     setState({ busy: true, error: "" })
-    const sessionID = input.sessionID
-    const modelID = input.modelID
-    const result = await input.client.session
-      .resumeFreeModels({ sessionID, messageID: input.messageID, modelID })
+    const sessionID = props.sessionID
+    const modelID = props.limit.modelID
+    const result = await sdk()
+      .client.session.resumeFreeModels({ sessionID, messageID: props.limit.messageID, modelID })
       .then((result) => {
         if (result.error) throw result.error
         return true
@@ -56,32 +52,24 @@ export function FreeModelsLimit(props: {
     }
     setState("busy", false)
   }
+  const ownKey = async () => {
+    const directory = sdk().directory
+    const { DialogSelectProvider } = await import("./dialog-select-provider")
+    dialog.show(() => <DialogSelectProvider directory={() => directory} />)
+  }
   return (
     <Card class="error-card" data-free-models-limit="">
       <div class="flex flex-col gap-3">
         <strong>{freeModelsLimitTitle(props.limit)}</strong>
         <p>{language.t("freeModels.limit.reset", { time: freeModelsResetLabel(props.limit, language.intl()) })}</p>
-        <p>{OPENROUTER_ACCOUNT_COPY}</p>
+        <p>{language.t("freeModels.limit.ownKeys")}</p>
         <Show when={state.error}>
           <p role="alert">{state.error}</p>
         </Show>
         <Show when={!state.resumed} fallback={<p>{language.t("freeModels.limit.resumed")}</p>}>
           <div class="flex flex-wrap gap-2">
-            <Button
-              disabled={state.busy}
-              onClick={() => {
-                const input = target()
-                dialog.show(() => (
-                  <DialogConnectProvider
-                    provider="openrouter"
-                    preferredMethod="oauth"
-                    directory={() => input.directory}
-                    onConnected={() => resume(input)}
-                  />
-                ))
-              }}
-            >
-              {language.t("freeModels.connect")}
+            <Button disabled={state.busy} onClick={() => void ownKey()}>
+              {language.t("freeModels.limit.addKey")}
             </Button>
             <Show when={providers.connected().some((provider) => provider.id === "openrouter")}>
               <Button variant="ghost" disabled={state.busy} onClick={() => void resume()}>

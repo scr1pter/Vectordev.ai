@@ -195,12 +195,16 @@ describe("isSessionNotFoundError", () => {
   })
 })
 
-test("free-model quota notifications hide upstream text and offer an account switch", () => {
+test("free-model quota notifications hide upstream text, say when the allowance resets and offer the user's own keys", () => {
   const text = formatServerError({
     name: "FreeModelsLimitError",
     data: { reason: "shared_daily", resetAt: 1893542400000, message: "raw proxy debug" },
   })
   expect(text).toContain("Today's shared free model allowance is used up")
-  expect(text).toContain("connect OpenRouter")
+  expect(text).toContain("expected to reset at")
+  expect(text).toContain("2030")
+  // The owner's decision of 17 October 2026: never point to an OpenRouter account of the user's own.
+  expect(text).toContain("add your own provider key in Settings → Providers")
+  expect(text).not.toMatch(/openrouter/i)
   expect(text).not.toContain("raw proxy debug")
 })

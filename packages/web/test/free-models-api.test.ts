@@ -675,7 +675,7 @@ describe("shared free inference", () => {
       const text = await refused.text()
       expect(JSON.parse(text).error).toEqual({
         code: "FREE_MODELS_UPSTREAM_UNAVAILABLE",
-        message: "This free model is temporarily unavailable. Try another free model or connect OpenRouter.",
+        message: "This free model is temporarily unavailable. Try another free model.",
       })
       expect(text).not.toContain("fixture-openrouter-key")
       expect(chats).toHaveLength(1)
@@ -741,6 +741,29 @@ describe("free models that may train on prompts", () => {
     expect((await chat(prompt(catalogModels[0].id), account(), consented)).status).toBe(200)
     expect(chats[1].body.provider).toMatchObject({ data_collection: "deny" })
     expect(chats[1].body.models).not.toContain(laguna.id)
+  })
+
+  test("OpenRouter's free router goes out only after acceptance, naming no providers and asking to skip NVIDIA", async () => {
+    const router: FreeModelInfo = {
+      id: "openrouter/free",
+      name: "Free Models Router",
+      contextLength: 200000,
+      maxOutputTokens: 8192,
+      providers: [{ id: "openrouter", name: "OpenRouter", retention: "", dataPolicy: "may-train" }],
+    }
+    await store([...catalogModels, router])
+    // 1.99.108 never sees it, and is refused it; a current client is refused it until the user accepts.
+    expect((await chat(prompt(router.id))).status).toBe(403)
+    expect((await chat(prompt(router.id), account(), disclosure)).status).toBe(403)
+    expect(chats).toHaveLength(0)
+    expect((await chat(prompt(router.id), account(), consented)).status).toBe(200)
+    expect(chats[0].body.models).toEqual([router.id])
+    expect(chats[0].body.provider).toEqual({
+      data_collection: "allow",
+      require_parameters: true,
+      ignore: ["nvidia"],
+      max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
+    })
   })
 
   test("the default per-minute cap lets one agent prompt make several tool steps", async () => {

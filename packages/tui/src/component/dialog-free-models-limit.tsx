@@ -1,9 +1,9 @@
 import { createMemo, createSignal } from "solid-js"
 import {
+  FREE_MODELS_OWN_KEYS_TERMINAL,
   freeModelsLimitNotice,
   freeModelsLimitTitle,
   freeModelsResetLabel,
-  OPENROUTER_ACCOUNT_COPY,
   type FreeModelsLimitNotice,
 } from "@vectordevai/core/free-model-choice"
 import { useSDK } from "../context/sdk"
@@ -14,8 +14,13 @@ import { useDialog } from "../ui/dialog"
 import { DialogSelect } from "../ui/dialog-select"
 import { useToast } from "../ui/toast"
 import { useTheme } from "../context/theme"
-import { createDialogProviderOptions } from "./dialog-provider"
+import { DialogProvider } from "./dialog-provider"
 
+/**
+ * Shown when the shared allowance stops a turn: when it is expected to reset, and the user's own provider keys in
+ * general. It never asks the user to connect an OpenRouter account (owner decision, 17 October 2026); one already
+ * connected can still continue the same turn.
+ */
 export function DialogFreeModelsLimit(props: { sessionID: string; limit: FreeModelsLimitNotice }) {
   const sdk = useSDK()
   const sync = useSync()
@@ -30,6 +35,7 @@ export function DialogFreeModelsLimit(props: { sessionID: string; limit: FreeMod
       (message) => message.role === "assistant" && freeModelsLimitNotice(message.error),
     ),
   )
+  const openRouter = createMemo(() => sync.data.provider.some((provider) => provider.id === "openrouter"))
   const resume = async () => {
     const message = failed()
     if (busy() || !message || message.role !== "assistant") return
@@ -41,7 +47,7 @@ export function DialogFreeModelsLimit(props: { sessionID: string; limit: FreeMod
     if (result.error) {
       toast.show({
         variant: "error",
-        message: "Could not continue this turn. Check that OpenRouter is connected and this is the latest paused turn.",
+        message: "Could not continue this turn on your OpenRouter account. Check that this is the latest paused turn.",
       })
       return
     }
@@ -49,7 +55,6 @@ export function DialogFreeModelsLimit(props: { sessionID: string; limit: FreeMod
     route.navigate({ type: "session", sessionID: props.sessionID })
     dialog.clear()
   }
-  const providers = createDialogProviderOptions({ preferredMethod: "oauth", onConnected: resume })
   return (
     <DialogSelect
       title={freeModelsLimitTitle(props.limit)}
@@ -58,29 +63,29 @@ export function DialogFreeModelsLimit(props: { sessionID: string; limit: FreeMod
       footer={
         <box paddingLeft={2} paddingRight={2} paddingBottom={1} gap={1}>
           <text fg={theme.textMuted}>
-            Shared allowance is expected to reset at {freeModelsResetLabel(props.limit)}.
+            The shared allowance is expected to reset at {freeModelsResetLabel(props.limit)}.
           </text>
-          <text fg={theme.textMuted}>{OPENROUTER_ACCOUNT_COPY}</text>
+          <text fg={theme.textMuted}>{FREE_MODELS_OWN_KEYS_TERMINAL}</text>
         </box>
       }
       options={[
         {
-          title: "Connect OpenRouter",
+          title: "Connect a provider with your own key",
           value: "connect",
-          onSelect: () => {
-            void providers()
-              .find((provider) => provider.value === "openrouter")
-              ?.onSelect()
-          },
+          onSelect: () => dialog.replace(() => <DialogProvider />),
         },
-        {
-          title: "Continue with connected OpenRouter",
-          value: "resume",
-          disabled: !failed(),
-          onSelect: () => {
-            void resume()
-          },
-        },
+        ...(openRouter()
+          ? [
+              {
+                title: "Continue with connected OpenRouter",
+                value: "resume",
+                disabled: !failed(),
+                onSelect: () => {
+                  void resume()
+                },
+              },
+            ]
+          : []),
         { title: "Wait for the shared allowance to reset", value: "wait", onSelect: () => dialog.clear() },
       ]}
     />

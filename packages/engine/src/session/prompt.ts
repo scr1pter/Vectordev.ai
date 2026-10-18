@@ -2,6 +2,7 @@ import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { freeModelDataPolicy } from "@vectordevai/core/free-model-catalog"
 import {
+  FREE_MODEL_RESUME_UNAVAILABLE,
   FREE_MODEL_TRAINING_BLOCKED,
   FREE_MODEL_TRAINING_OWNER_ONLY,
   freeModelMayTrain,
@@ -1804,7 +1805,7 @@ const layer = Layer.effect(
           Effect.mapError(
             () =>
               new FreeModelsResumeError({
-                message: "Connect OpenRouter and choose the same available free model to continue.",
+                message: FREE_MODEL_RESUME_UNAVAILABLE,
               }),
           ),
         )
@@ -1824,7 +1825,7 @@ const layer = Layer.effect(
           message:
             listed && freeModelDataPolicy(listed) !== "no-training"
               ? FREE_MODEL_TRAINING_BLOCKED
-              : "Connect OpenRouter and choose the same available free model to continue.",
+              : FREE_MODEL_RESUME_UNAVAILABLE,
         })
       }
       if (options?.refuseTrainingFreeModels) {

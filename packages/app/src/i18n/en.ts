@@ -1,17 +1,21 @@
 export const dict = {
-  "freeModels.connect": "Connect OpenRouter",
-  "freeModels.limit.reset":
-    "Shared allowance is expected to reset at {{time}}. You can continue this conversation with your own OpenRouter account.",
+  "freeModels.limit.reset": "The shared allowance is expected to reset at {{time}}.",
+  "freeModels.limit.ownKeys":
+    "To keep working now, choose a model from another provider you've connected, or add your own provider key in Settings → Providers.",
+  "freeModels.limit.addKey": "Use my own API key",
   "freeModels.limit.resume": "Continue with connected OpenRouter",
   "freeModels.limit.resumed": "Continuing this conversation with your OpenRouter account.",
-  "freeModels.start.label": "Connect a model",
-  "freeModels.start.title": "Connect a model to start",
-  "freeModels.start.description":
-    "Use your own free OpenRouter account. No payment or credits needed, and Vector picks a free model for you.",
-  "freeModels.start.fallback": "Connect a provider with your API key or sign-in to send prompts.",
+  "freeModels.start.label": "Free models",
+  "freeModels.start.title": "Choose a model to start",
+  "freeModels.start.signIn": "Sign in to Vector to use free models.",
+  "freeModels.start.signInAction": "Sign in to Vector",
+  "freeModels.start.signingIn": "Finish signing in in your browser, then return to Vector.",
+  "freeModels.start.signInFailed": "Vector couldn't start signing in. Try again in Settings → Providers.",
+  "freeModels.start.unavailableShared":
+    "Free models inside of Vector are unavailable right now. Try again later, or use an API key you already have.",
   "freeModels.start.note":
-    "OpenRouter and its model providers process your prompts. Free accounts allow up to 50 requests a day, subject to availability.",
-  "freeModels.start.free": "Start free with OpenRouter",
+    "Free models run on Vector's shared allowance at no cost to you, within a daily limit for each account. OpenRouter and the model's provider process your prompts.",
+  "freeModels.start.fallback": "Connect a provider with your API key or sign-in to send prompts.",
   "freeModels.start.ownKey": "Use my own API key",
   "freeModels.start.ready": "{{model}} is selected. Your prompt is ready to send.",
   "freeModels.start.readyForProject": "{{model}} is ready. Open a repository to send your first prompt.",
@@ -136,7 +140,7 @@ export const dict = {
     "{{provider}} sign-in is currently paused in Vector. Choose another provider to continue.",
   "dialog.provider.openai.note": "GPT models with your ChatGPT Plus/Pro plan or an API key",
   "dialog.provider.google.note": "Gemini models for fast, structured responses",
-  "dialog.provider.openrouter.note": "Free models with your own account. No payment needed.",
+  "dialog.provider.openrouter.note": "Access all supported models from one provider",
   "dialog.provider.vercel.note": "Unified access to AI models with smart routing",
 
   "dialog.model.select.title": "Select model",
@@ -314,7 +318,7 @@ export const dict = {
   "prompt.toast.modelAgentRequired.description": "Choose an agent and model before sending a prompt.",
   "prompt.toast.providerRequired.title": "Connect a model to send this prompt",
   "prompt.toast.providerRequired.description":
-    "Your prompt is kept. Start free with your own OpenRouter account, or use an API key you already have.",
+    "Your prompt is kept. Sign in to Vector to use free models, or use an API key you already have.",
   "prompt.toast.worktreeCreateFailed.title": "Failed to create worktree",
   "prompt.toast.sessionCreateFailed.title": "Failed to create session",
   "prompt.toast.shellSendFailed.title": "Failed to send shell command",

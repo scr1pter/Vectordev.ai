@@ -14,6 +14,8 @@ import {
   FREE_MODEL_TRAINING_CONSENT_REQUIRED,
   FREE_MODEL_TRAINING_LABEL,
   FREE_MODELS_TITLE,
+  FREE_MODELS_UNAVAILABLE,
+  freeModelsLimitTitle,
 } from "../../packages/core/src/free-model-choice.js"
 import { freeModelRequest } from "../../packages/core/src/free-model-request.js"
 import { enforceRateLimit, requireTrustedJsonRequest } from "./abuse.js"
@@ -33,6 +35,7 @@ const KeyLimits = Schema.Struct({
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value)
 const nextDay = (now: number) => (Math.floor(now / 86400000) + 1) * 86400000
+const RESET = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "long", timeZone: "UTC" })
 
 class Limit extends Error {
   constructor(readonly detail: FreeModelLimit) {
@@ -46,7 +49,8 @@ export function freeModelLimit(reason: FreeModelLimitReason, resetAt: number): F
     code: "VECTOR_FREE_MODELS_LIMIT",
     reason,
     resetAt,
-    message: `You've used today's shared allowance for ${FREE_MODELS_TITLE}. Continue free with your own OpenRouter account.`,
+    // Clients from 1.99.109 write their own notice from reason and resetAt; this is for any other reader.
+    message: `${freeModelsLimitTitle({ reason, resetAt })}. The shared allowance is expected to reset at ${RESET.format(resetAt)}. Until then, use a model from a provider you've connected with your own key.`,
   }
 }
 
@@ -80,7 +84,7 @@ export async function streamFreeModelResponse(upstream: Response, response: ApiR
     throw new ApiError(
       503,
       "FREE_MODELS_UPSTREAM_UNAVAILABLE",
-      "This free model is temporarily unavailable. Try another free model or connect OpenRouter.",
+      "This free model is temporarily unavailable. Try another free model.",
     )
   if (!upstream.headers.get("content-type")?.includes("text/event-stream"))
     throw new ApiError(503, "FREE_MODELS_UPSTREAM_INVALID", "The free model did not return a response stream.")
@@ -129,7 +133,7 @@ export async function streamFreeModelResponse(upstream: Response, response: ApiR
             throw new ApiError(
               503,
               "FREE_MODELS_UPSTREAM_UNAVAILABLE",
-              "This free model is temporarily unavailable. Try another free model or connect OpenRouter.",
+              "This free model is temporarily unavailable. Try another free model.",
             )
           }
           if (!response.write(`data: ${JSON.stringify(value)}\n\n`))
@@ -174,12 +178,7 @@ export async function handleFreeModelsChat(
   try {
     requireMethod(request, "POST")
     requireTrustedJsonRequest(request, MAX_BYTES)
-    if (!freeModelsEnabled())
-      throw new ApiError(
-        503,
-        "FREE_MODELS_DISABLED",
-        `${FREE_MODELS_TITLE} are not enabled. Connect OpenRouter to use your own account.`,
-      )
+    if (!freeModelsEnabled()) throw new ApiError(503, "FREE_MODELS_DISABLED", FREE_MODELS_UNAVAILABLE)
     const token = /^Bearer (vct_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+)$/.exec(String(request.headers.authorization ?? ""))?.[1]
     const account = verifyCliToken(token ?? "", now)
     await requireUnrevokedAccount(account.id, fetcher)
@@ -189,12 +188,7 @@ export async function handleFreeModelsChat(
     // A client that does not disclose may-train models, such as 1.99.108, routes among no-training models only.
     const noTraining = all.models.filter((model) => freeModelDataPolicy(model) === "no-training")
     const catalog = disclosure ? all : { ...all, enabled: all.enabled && noTraining.length > 0, models: noTraining }
-    if (!catalog.enabled)
-      throw new ApiError(
-        503,
-        "FREE_MODELS_UNAVAILABLE",
-        `${FREE_MODELS_TITLE} are temporarily unavailable. Connect OpenRouter to use your own account.`,
-      )
+    if (!catalog.enabled) throw new ApiError(503, "FREE_MODELS_UNAVAILABLE", FREE_MODELS_UNAVAILABLE)
     const body = await readJson(request, MAX_BYTES)
     // Refuse a may-train model before any allowance is spent: an older client never showed its label, and a newer
     // one must carry the user's acceptance.
@@ -252,7 +246,7 @@ export async function handleFreeModelsChat(
       throw new ApiError(
         503,
         "FREE_MODELS_LIMITS_UNAVAILABLE",
-        "The shared free allowance could not be verified. Connect OpenRouter to use your own account.",
+        "The shared free allowance could not be verified. Try again later.",
       )
     const quota = decoded.value.data.free_model_daily_requests
     if (
@@ -293,7 +287,7 @@ export async function handleFreeModelsChat(
                 ? error.statusCode === 413
                   ? "This conversation exceeds the 4.5 MB shared-request limit. Compact it or connect your own provider."
                   : error.message
-                : `${FREE_MODELS_TITLE} are temporarily unavailable. Connect OpenRouter to use your own account.`,
+                : FREE_MODELS_UNAVAILABLE,
           }
     if (response.headersSent) {
       response.end(`data: ${JSON.stringify({ error: detail })}\n\ndata: [DONE]\n\n`)

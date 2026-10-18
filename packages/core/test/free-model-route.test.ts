@@ -175,7 +175,7 @@ test("native shared requests reject oversized UTF-8 context before contacting th
       reason: {
         _tag: "InvalidRequest",
         message:
-          "Context too large for the shared free allowance. Compact this conversation or connect OpenRouter to continue with your own account.",
+          "Context too large for the shared free allowance. Compact this conversation, or use a model from a provider you've connected with your own key.",
       },
     },
   })

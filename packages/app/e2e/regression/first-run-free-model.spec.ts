@@ -40,8 +40,8 @@ function catalog(connected: boolean) {
 }
 
 /**
- * A fresh profile with no provider, optionally with one project draft open. OpenRouter's PKCE
- * callback completes only when `authorize()` is called.
+ * A fresh profile with no provider, optionally with one repository draft open. OpenRouter's PKCE routes are mocked
+ * only so a test can show the first run never starts them.
  */
 async function setup(page: Page, input: { draft: boolean }) {
   const state = { connected: false, methods: [] as number[], prompts: [] as string[] }
@@ -114,35 +114,26 @@ async function setup(page: Page, input: { draft: boolean }) {
   return { state, authorize: () => callback.resolve() }
 }
 
-async function signInOnOpenRouter(page: Page, start: () => Promise<void>, authorize: () => void) {
-  const popup = page.waitForEvent("popup")
-  await start()
-  const signIn = await popup
-  await expect(signIn.getByText("Synthetic OpenRouter sign-in")).toBeVisible()
-  await signIn.close()
-  await page.bringToFront()
-  const dialog = page.getByRole("dialog")
-  await expect(dialog).toContainText("Finish in your browser: sign in to OpenRouter and approve Vector.")
-  await expect(dialog).toContainText("No payment or credits needed.")
-  await expect(dialog.getByRole("textbox")).toHaveCount(0)
-  await page.screenshot({ path: test.info().outputPath("03-openrouter-waiting.png"), animations: "disabled" })
-  authorize()
-  await expect(dialog).toHaveCount(0)
-}
-
-test("fresh profile starts free from the composer and keeps the draft ready to send", async ({ page }) => {
-  const { state, authorize } = await setup(page, { draft: true })
+// The owner's decision of 17 October 2026: free models run on Vector's shared allowance for every signed-in Vector
+// account, so the first-run card and checklist offer signing in to Vector, never connecting an OpenRouter account. This
+// web build has no desktop account bridge, so signing in itself is not offered here; a key the user has is.
+test("fresh profile is told to sign in to Vector for free models and keeps the draft ready to send", async ({
+  page,
+}) => {
+  const { state } = await setup(page, { draft: true })
   await page.goto(`/new-session?draftId=${draftID}`)
 
   const card = page.locator('[data-component="free-model-start"]')
   await expect(card).toBeVisible()
-  await expect(card).toContainText("Connect a model to start")
-  await expect(card).toContainText("No payment or credits needed")
-  await expect(card).toContainText("OpenRouter and its model providers process your prompts.")
-  const start = card.getByRole("button", { name: "Start free with OpenRouter" })
+  await expect(card).toContainText("Choose a model to start")
+  await expect(card).toContainText("Sign in to Vector to use free models.")
+  await expect(card).toContainText("Vector's shared allowance")
+  await expect(card).not.toContainText("OpenRouter")
+  await expect(card.getByRole("button", { name: "Start free with OpenRouter" })).toHaveCount(0)
+  const ownKey = card.getByRole("button", { name: "Use my own API key" })
   await page.screenshot({ path: test.info().outputPath("01-composer-no-model.png"), animations: "disabled" })
 
-  await card.getByRole("button", { name: "Use my own API key" }).click()
+  await ownKey.click()
   await expect(page.getByPlaceholder("Search providers")).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(page.getByPlaceholder("Search providers")).toHaveCount(0)
@@ -152,42 +143,26 @@ test("fresh profile starts free from the composer and keeps the draft ready to s
   await page.keyboard.type(draft)
   await page.keyboard.press("Enter")
   await expect(page.getByText("Connect a model to send this prompt", { exact: true })).toBeVisible()
-  await expect(start).toBeFocused()
-  await expect(editor).toHaveText(draft)
-  await page.screenshot({ path: test.info().outputPath("02-send-without-model.png"), animations: "disabled" })
-
-  await signInOnOpenRouter(page, () => start.click(), authorize)
-  expect(state.methods).toEqual([0])
-
-  await expect(card).toHaveCount(0)
-  const picker = page.locator('[data-action="prompt-model"]').filter({ visible: true }).first()
-  await expect(picker).toContainText("Maker Big")
-  await expect(picker).not.toContainText("Paid Giant")
-  await expect(page.getByText("Maker Big is selected. Your prompt is ready to send.", { exact: true })).toBeVisible()
-  await expect(editor).toBeFocused()
+  await expect(
+    page.getByText("Sign in to Vector to use free models, or use an API key you already have."),
+  ).toBeVisible()
+  await expect(ownKey).toBeFocused()
   await expect(editor).toHaveText(draft)
   expect(state.prompts).toEqual([])
-  await page.screenshot({ path: test.info().outputPath("04-composer-ready.png"), animations: "disabled" })
+  expect(state.methods).toEqual([])
+  await page.screenshot({ path: test.info().outputPath("02-send-without-model.png"), animations: "disabled" })
 })
 
-test("the first-run checklist starts free and returns to the next step", async ({ page }) => {
-  const { state, authorize } = await setup(page, { draft: false })
+test("the first-run checklist offers signing in to Vector for free models, never OpenRouter", async ({ page }) => {
+  const { state } = await setup(page, { draft: false })
   await page.goto("/")
   const checklist = page.getByRole("heading", { name: /first steps/i })
   await expect(checklist).toBeVisible()
   await expect(checklist).toContainText("0 of 3")
-  await expect(page.getByText("Start free with your own OpenRouter account", { exact: false })).toBeVisible()
+  await expect(page.getByText("Sign in to Vector to use free models", { exact: false })).toBeVisible()
+  await expect(page.getByText("Start free with your own OpenRouter account", { exact: false })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Start free →" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Use my own API key" })).toBeVisible()
+  expect(state.methods).toEqual([])
   await page.screenshot({ path: test.info().outputPath("05-checklist-start-free.png"), animations: "disabled" })
-
-  await signInOnOpenRouter(page, () => page.getByRole("button", { name: "Start free →" }).click(), authorize)
-  expect(state.methods).toEqual([0])
-
-  await expect(checklist).toContainText("1 of 3")
-  await expect(page.getByText("Connected. Run the safe first task below", { exact: false })).toBeVisible()
-  await expect(
-    page.getByText("Maker Big is ready. Open a project to send your first prompt.", { exact: true }),
-  ).toBeVisible()
-  await expect(page.getByRole("button", { name: "Start free →" })).toHaveCount(0)
-  await page.screenshot({ path: test.info().outputPath("06-checklist-connected.png"), animations: "disabled" })
 })

@@ -6,6 +6,7 @@ import { Database } from "../database/database"
 import { makeLocationNode } from "../effect/app-node"
 import { EventV2 } from "../event"
 import { FreeModels } from "../free-models"
+import { FREE_MODEL_RESUME_UNAVAILABLE } from "../free-model-choice"
 import { ModelV2 } from "../model"
 import { ProviderV2 } from "../provider"
 import { SessionEvent } from "./event"
@@ -71,8 +72,7 @@ export const node = makeLocationNode({
           })
           yield* validate
           const key = yield* credentials.get("openrouter")
-          if (!key)
-            return yield* new Rejected({ message: "Connect OpenRouter to continue with your own free allowance." })
+          if (!key) return yield* new Rejected({ message: FREE_MODEL_RESUME_UNAVAILABLE })
           const models = yield* freeModels.forKey(key, true)
           if (
             !models.some((model) => model.id === input.modelID) ||

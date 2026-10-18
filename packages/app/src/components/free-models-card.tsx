@@ -2,17 +2,18 @@ import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
 import type { VectorAccountStatus } from "@/vector-account"
 import { Show, createSignal, onMount, onCleanup } from "solid-js"
-import { useDialog } from "@vectordevai/ui/context/dialog"
 import {
   FREE_MODEL_TRAINING_LABEL,
+  FREE_MODELS_SHARED_COPY,
+  FREE_MODELS_SIGN_IN,
   FREE_MODELS_TITLE,
-  OPENROUTER_ACCOUNT_COPY,
 } from "@vectordevai/core/free-model-choice"
-import { useProviders } from "@/hooks/use-providers"
 import { useServerSDK } from "@/context/server-sdk"
-import { DialogConnectProvider } from "./dialog-connect-provider"
 
-/** Shared sign-in is offered only while the server advertises its allowance. */
+/**
+ * Free models run on Vector's shared allowance for every signed-in Vector account, so this card offers signing in to
+ * Vector and never an OpenRouter account of the user's own (owner decision, 17 October 2026).
+ */
 export function FreeModelsCard() {
   const platform = usePlatform()
   const [status, setStatus] = createStore<VectorAccountStatus>({ authenticated: false, pending: false })
@@ -31,8 +32,6 @@ export function FreeModelsCard() {
       .then(setStatus)
       .catch(() => setStatus("error", "Could not start sign-in. Try again in Settings → Providers."))
   }
-  const providers = useProviders()
-  const dialog = useDialog()
   const serverSDK = useServerSDK()
   // The one-time acceptance for models that may train on prompts, which the person can withdraw here.
   const [training, setTraining] = createSignal(false)
@@ -48,20 +47,13 @@ export function FreeModelsCard() {
       .then((result) => setTraining(result.data?.training === true))
       .catch(() => {})
   }
-  const shared = () =>
-    [...providers.all().values()].some((provider) =>
-      Object.values(provider.models).some((model) => model.freeModel?.source === "shared"),
-    )
   return (
     <section data-component="free-models-card" class="mb-3 rounded-lg border border-border-base p-3 text-text-base">
       <h3 class="text-14-medium">{FREE_MODELS_TITLE}</h3>
-      <p class="mt-2 text-12-regular">
-        Connect your own free OpenRouter account. OpenRouter and its model providers process your prompts.
-      </p>
-      <Show when={shared()}>
-        <p class="mt-2 text-12-regular">A shared allowance is also available by signing in to Vector.</p>
+      <p class="mt-2 text-12-regular">{FREE_MODELS_SHARED_COPY}</p>
+      <Show when={platform.vectorAccount && !status.authenticated}>
+        <p class="mt-2 text-12-regular">{FREE_MODELS_SIGN_IN}</p>
       </Show>
-      <p class="mt-2 text-12-regular">{OPENROUTER_ACCOUNT_COPY}</p>
       <Show when={training()}>
         <p class="mt-2 text-12-regular" data-slot="free-models-training-consent">
           You accepted that free models labelled "{FREE_MODEL_TRAINING_LABEL}" may receive your prompts. Vector asks
@@ -77,19 +69,13 @@ export function FreeModelsCard() {
       <Show when={status.pending}>
         <p role="status">Finish signing in in your browser, then return to Vector.</p>
       </Show>
-      <div class="mt-3 flex flex-wrap gap-3 text-12-medium">
-        <Show when={shared() && platform.vectorAccount && !status.authenticated}>
+      <Show when={platform.vectorAccount && !status.authenticated}>
+        <div class="mt-3 flex flex-wrap gap-3 text-12-medium">
           <button type="button" disabled={status.pending} onClick={signIn}>
             Sign in to Vector
           </button>
-        </Show>
-        <button
-          type="button"
-          onClick={() => dialog.show(() => <DialogConnectProvider provider="openrouter" preferredMethod="oauth" />)}
-        >
-          Connect OpenRouter
-        </button>
-      </div>
+        </div>
+      </Show>
     </section>
   )
 }

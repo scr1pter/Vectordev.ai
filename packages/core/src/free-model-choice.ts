@@ -49,6 +49,29 @@ export const FREE_MODEL_UNLISTED = `This model runs on OpenRouter's free endpoin
 /** Vector itself asks for no-training routing for a model it has not reviewed, so no account setting can lift it. */
 export const FREE_MODEL_UNREVIEWED_BLOCKED =
   "Vector has not reviewed this free model's data policy yet, so it asks OpenRouter to route it only to providers that don't train on prompts, and none of this model's providers qualifies. Choose another free model."
+/**
+ * Free models run on Vector's shared allowance, on Vector's own OpenRouter account, for every signed-in Vector user
+ * (owner decision, 17 October 2026). The free-model flow never asks anyone to connect an OpenRouter account of their
+ * own; connecting one stays an ordinary provider choice in Settings → Providers, described by OPENROUTER_ACCOUNT_COPY
+ * there only.
+ */
+export const FREE_MODELS_SIGN_IN = "Sign in to Vector to use free models."
+export const FREE_MODELS_SHARED_COPY =
+  "Free models run on Vector's shared allowance at no cost to you, within a daily limit for each account. Requests pass through vectordev.ai to OpenRouter, and OpenRouter and the model's provider process your prompts."
+/** What to do when the shared allowance is used up or unavailable: the user's own provider keys, not one provider. */
+export const FREE_MODELS_OWN_KEYS =
+  "To keep working now, choose a model from another provider you've connected, or add your own provider key in Settings → Providers."
+export const FREE_MODELS_OWN_KEYS_TERMINAL =
+  "To keep working now, choose a model from another provider you've connected, or connect your own provider key with /connect or vector providers login."
+/** Sent by the engine and vectordev.ai, so it names no client's settings. */
+export const FREE_MODELS_UNAVAILABLE = `${FREE_MODELS_TITLE} are temporarily unavailable. Try again later, or use a model from a provider you've connected with your own key.`
+/**
+ * Resuming a paused free-model turn runs it on an OpenRouter account the user already connected. Without one, the
+ * notice says what else to do instead of asking them to connect one.
+ */
+export const FREE_MODEL_RESUME_UNAVAILABLE =
+  "This turn can continue only on an OpenRouter account already connected to Vector that lists the same free model. Wait for the shared allowance to reset, or choose another model."
+/** Describes connecting OpenRouter in its own connect flow, which the free-model flow never offers. */
 export const OPENROUTER_ACCOUNT_COPY =
   "Use your own free OpenRouter account: up to 50 requests a day, subject to availability. No payment or credits needed. Keep automatic top-ups, default or enforced account plugins, and external provider keys disabled."
 export const OPENROUTER_REMOTE_COPY =
@@ -145,4 +168,12 @@ export function freeModelsLimitTitle(limit: FreeModelsLimitNotice) {
 
 export function freeModelsResetLabel(limit: FreeModelsLimitNotice, locale?: string) {
   return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(limit.resetAt)
+}
+
+/** The whole notice: what happened, when the shared allowance is expected to reset, and the user's own keys. */
+export function freeModelsLimitMessage(
+  limit: FreeModelsLimitNotice,
+  options: { locale?: string; terminal?: boolean } = {},
+) {
+  return `${freeModelsLimitTitle(limit)}. The shared allowance is expected to reset at ${freeModelsResetLabel(limit, options.locale)}. ${options.terminal ? FREE_MODELS_OWN_KEYS_TERMINAL : FREE_MODELS_OWN_KEYS}`
 }

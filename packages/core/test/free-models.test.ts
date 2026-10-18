@@ -5,7 +5,12 @@ import path from "node:path"
 import { FreeModels } from "../src/free-models"
 import { VectorAccount } from "../src/vector-account"
 import { FREE_MODEL_FALLBACKS, FREE_MODELS_DISCLOSURE } from "@vectordevai/schema/free-model"
-import { FREE_MODEL_TRAINING_BLOCKED, FREE_MODEL_UNREVIEWED_BLOCKED } from "../src/free-model-choice"
+import {
+  FREE_MODEL_TRAINING_BLOCKED,
+  FREE_MODEL_UNLISTED,
+  FREE_MODEL_UNREVIEWED_BLOCKED,
+  FREE_MODELS_SIGN_IN,
+} from "../src/free-model-choice"
 import { freeModelRequest } from "../src/free-model-request"
 
 const enabled = { enabled: true, updatedAt: 123, models: [...FREE_MODEL_FALLBACKS.slice(0, 2)] }
@@ -325,6 +330,30 @@ test("saved shared selection prefers own key and never silently consumes shared 
       credential: async (provider) => (provider === "vector" ? "vct_shared" : undefined),
     }),
   ).rejects.toThrow("unavailable")
+})
+
+test("without an OpenRouter key of the user's own, every free model runs on the shared allowance, or asks to sign in to Vector", async () => {
+  // The owner's decision of 17 October 2026: the shared allowance is the free path for every signed-in account.
+  const route = {
+    provider: "openrouter" as const,
+    modelID: enabled.models[0].id,
+    catalog: async () => enabled,
+    forKey: async () => [],
+    credential: async (provider: string) => (provider === "vector" ? "vct_shared" : undefined),
+    trainingConsent: async () => false,
+    guest: async () => false,
+  }
+  // A model chosen while an OpenRouter account was connected now runs on the shared allowance.
+  expect(await FreeModels.resolveRoute(route)).toMatchObject({ url: FreeModels.SHARED_CHAT_URL, key: "vct_shared" })
+  // Signed out, Vector asks for a Vector sign-in, never an OpenRouter account.
+  for (const provider of ["vector", "openrouter"] as const)
+    await expect(FreeModels.resolveRoute({ ...route, provider, credential: async () => undefined })).rejects.toThrow(
+      new Error(FREE_MODELS_SIGN_IN),
+    )
+  // A name that is not a free model ID, such as one configured under another name, is never sent.
+  await expect(FreeModels.resolveRoute({ ...route, modelID: "alias-laguna" })).rejects.toThrow(
+    new Error(FREE_MODEL_UNLISTED),
+  )
 })
 
 test("shared requests carry the disclosure always and the acceptance only once given; personal ones carry neither", async () => {

@@ -1,8 +1,4 @@
-import {
-  freeModelsLimitNotice,
-  freeModelsLimitTitle,
-  freeModelsResetLabel,
-} from "@vectordevai/core/free-model-choice"
+import { freeModelsLimitMessage, freeModelsLimitNotice } from "@vectordevai/core/free-model-choice"
 import {
   AssistantMessage,
   type SnapshotFileDiff,
@@ -321,8 +317,7 @@ export function SessionTurn(
   })
   const errorText = createMemo(() => {
     const limit = freeModelsLimitNotice(error())
-    if (limit)
-      return `${freeModelsLimitTitle(limit)}. Shared allowance is expected to reset at ${freeModelsResetLabel(limit)}. Connect OpenRouter to continue with your own account.`
+    if (limit) return freeModelsLimitMessage(limit)
     const msg = error()?.data?.message
     if (typeof msg === "string") return unwrap(msg)
     if (msg === undefined || msg === null) return ""

@@ -12,7 +12,7 @@ import {
   personalOnlyFreeModel,
   reviewedFreeModel,
 } from "../../packages/core/src/free-model-catalog.js"
-import { FREE_MODELS_TITLE } from "../../packages/core/src/free-model-choice.js"
+import { FREE_MODELS_UNAVAILABLE } from "../../packages/core/src/free-model-choice.js"
 import { ApiError } from "./http.js"
 import { persistentStore } from "./persistent-store.js"
 
@@ -28,12 +28,7 @@ export const freeModelsEnabled = () => process.env.FREE_MODELS_ENABLED === "true
 
 export function openRouterHeaders() {
   const key = process.env.OPENROUTER_FREE_API_KEY?.trim() || process.env.OPENROUTER_API_KEY?.trim()
-  if (!key)
-    throw new ApiError(
-      503,
-      "FREE_MODELS_UNAVAILABLE",
-      `${FREE_MODELS_TITLE} are temporarily unavailable. Connect OpenRouter to use your own account.`,
-    )
+  if (!key) throw new ApiError(503, "FREE_MODELS_UNAVAILABLE", FREE_MODELS_UNAVAILABLE)
   return {
     authorization: `Bearer ${key}`,
     "HTTP-Referer": "https://vectordev.ai/",
@@ -157,9 +152,5 @@ export async function currentFreeModelCatalog(
 }
 
 function unavailable(code: string) {
-  return new ApiError(
-    503,
-    code,
-    `${FREE_MODELS_TITLE} are temporarily unavailable. Connect OpenRouter to use your own account.`,
-  )
+  return new ApiError(503, code, FREE_MODELS_UNAVAILABLE)
 }
