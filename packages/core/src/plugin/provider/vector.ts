@@ -2,7 +2,8 @@ import { Effect, Stream } from "effect"
 import { EventV2 } from "../../event"
 import { Integration } from "../../integration"
 import { FreeModels } from "../../free-models"
-import { freeModelDataPolicy, isOpenRouterFreeModel } from "../../free-model-catalog"
+import { freeModelDataPolicy, sendsToOpenRouterFree } from "../../free-model-catalog"
+import type { CatalogDraft } from "@vectordevai/plugin/v2/promise"
 import { define } from "../internal"
 
 export const VectorPlugin = define({
@@ -20,13 +21,7 @@ export const VectorPlugin = define({
         if (openrouter) catalog.provider.update("openrouter", () => {})
         // OpenRouter models that run on free endpoints, zero-price ones and its free router included, return below
         // only as reviewed free models.
-        for (const item of catalog.provider.list()) {
-          if (item.provider.id !== "openrouter") continue
-          for (const model of item.models.values()) {
-            if (isOpenRouterFreeModel(model.id, model.cost.find((cost) => !cost.tier)))
-              catalog.model.remove("openrouter", model.id)
-          }
-        }
+        removeOpenRouterFree(catalog)
         if (current.enabled)
           catalog.provider.update("vector", (provider) => {
             provider.name = "Vector"
@@ -85,3 +80,46 @@ export const VectorPlugin = define({
     )
   }),
 })
+
+/**
+ * Repository configuration loads after the provider plugins, so it can add a free OpenRouter model back, under its own
+ * name or another, or under a provider of another name pointed at openrouter.ai. This runs after it. The runner sends
+ * any such model only through the free-model route, which refuses it; this keeps it out of the lists too.
+ */
+export const FreeModelGuardPlugin = define({
+  id: "free-model-guard",
+  effect: Effect.fn(function* (ctx) {
+    yield* ctx.catalog.transform(
+      Effect.fn(function* (catalog) {
+        removeOpenRouterFree(catalog)
+      }),
+    )
+  }),
+})
+
+// Free models listed by Vector itself carry `freeModel` and stay; the shared allowance's provider is Vector's own.
+function removeOpenRouterFree(catalog: CatalogDraft) {
+  for (const item of catalog.provider.list()) {
+    if (item.provider.id === "vector") continue
+    for (const model of item.models.values()) {
+      if (
+        !model.freeModel &&
+        sendsToOpenRouterFree({
+          providerID: item.provider.id,
+          id: model.id,
+          apiID: model.api.id,
+          destinations: [
+            model.api.url,
+            model.request.body.baseURL,
+            model.api.type === "aisdk" ? model.api.package : undefined,
+            item.provider.api.url,
+            item.provider.request.body.baseURL,
+            item.provider.api.type === "aisdk" ? item.provider.api.package : undefined,
+          ],
+          price: model.cost.find((cost) => !cost.tier),
+        })
+      )
+        catalog.model.remove(item.provider.id, model.id)
+    }
+  }
+}

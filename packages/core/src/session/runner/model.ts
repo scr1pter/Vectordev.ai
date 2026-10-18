@@ -11,7 +11,7 @@ import { produce } from "immer"
 import { FreeModels } from "../../free-models"
 import { FreeModelGuests } from "../../free-model-guests"
 import { freeModelMayTrain } from "../../free-model-choice"
-import { isOpenRouterFreeModel } from "../../free-model-catalog"
+import { sendsToOpenRouterFree } from "../../free-model-catalog"
 import { ModelPlans } from "../../model-plans"
 import { freeModelRoute } from "./free-model-route"
 import { modelPlanRoute } from "./model-plan-route"
@@ -336,11 +336,23 @@ export const supported = (model: ModelV2.Info) =>
       model.api.package === "@ai-sdk/anthropic" ||
       (model.api.package === "@ai-sdk/openai-compatible" && model.api.url !== undefined)))
 
+// A free OpenRouter model configured under another name, or under a provider of another name pointed at openrouter.ai,
+// is judged by the API ID it sends, so it takes the free route too, which refuses a model it has not reviewed.
 function requiresFreeRoute(model: ModelV2.Info) {
   return (
     model.providerID === "vector" ||
     !!model.freeModel ||
-    (model.providerID === "openrouter" && isOpenRouterFreeModel(model.id, model.cost.find((cost) => !cost.tier)))
+    sendsToOpenRouterFree({
+      providerID: model.providerID,
+      id: model.id,
+      apiID: model.api.id,
+      destinations: [
+        model.api.url,
+        model.request.body.baseURL,
+        model.api.type === "aisdk" ? model.api.package : undefined,
+      ],
+      price: model.cost.find((cost) => !cost.tier),
+    })
   )
 }
 
@@ -434,6 +446,4 @@ export const select = Effect.fn("SessionRunnerModel.select")(function* (
 // Codium spends the account's credits, so it is never chosen automatically. Nor is a free model that may train on
 // prompts: its notice is accepted for a model someone chose, not for one picked for them.
 const automaticModel = (models: readonly ModelV2.Info[]) =>
-  models.find(
-    (model) => supported(model) && model.providerID !== ModelPlans.PROVIDER_ID && !freeModelMayTrain(model),
-  )
+  models.find((model) => supported(model) && model.providerID !== ModelPlans.PROVIDER_ID && !freeModelMayTrain(model))

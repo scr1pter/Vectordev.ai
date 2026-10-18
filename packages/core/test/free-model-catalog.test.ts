@@ -8,8 +8,10 @@ import {
   freeEndpointPolicy,
   freeModelDataPolicy,
   freeModelInfo,
+  isOpenRouterURL,
   offeredFreeModel,
   personalOnlyFreeModel,
+  sendsToOpenRouterFree,
 } from "../src/free-model-catalog"
 
 // Every free OpenRouter model and endpoint, captured from the public API on 17 October 2026.
@@ -188,4 +190,27 @@ test("offered models are free, zero-priced, tool-capable and more than a week fr
   const laguna = metadata("poolside/laguna-s-2.1:free")
   expect(offeredFreeModel(laguna, Date.parse("2026-10-23T23:00:00Z"))).toBe(true)
   expect(offeredFreeModel(laguna, Date.parse("2026-10-24T00:00:00Z"))).toBe(false)
+})
+
+test("a model reaches OpenRouter's free endpoints by its name or the ID it sends, under any provider pointed there", () => {
+  const free = (model: Partial<Parameters<typeof sendsToOpenRouterFree>[0]>) =>
+    sendsToOpenRouterFree({ providerID: "openrouter", id: "maker/paid", destinations: [], price: undefined, ...model })
+  expect(free({})).toBe(false)
+  // Configured under another name: the ID sent decides.
+  for (const apiID of ["poolside/laguna-s-2.1:free", "openrouter/free", "stealth/owl", " Poolside/Laguna:FREE "])
+    expect(free({ apiID })).toBe(true)
+  // A variant stacked after `:free` still names the free endpoints.
+  expect(free({ id: "poolside/laguna-s-2.1:free:nitro" })).toBe(true)
+  expect(free({ id: "maker/paid", price: { input: 0, output: 0 } })).toBe(true)
+  // Any provider whose requests go to OpenRouter, by base URL or SDK package.
+  for (const destinations of [
+    ["https://openrouter.ai/api/v1"],
+    [undefined, "https://eu.openrouter.ai/api/v1"],
+    ["@openrouter/ai-sdk-provider"],
+  ])
+    expect(free({ providerID: "or-proxy", apiID: "poolside/laguna-s-2.1:free", destinations })).toBe(true)
+  // Another provider elsewhere may name a free ID of its own.
+  for (const destinations of [[], ["https://openrouter.ai.example.com/v1"], ["https://example.com/openrouter.ai"]])
+    expect(free({ providerID: "acme", apiID: "maker/coder:free", destinations })).toBe(false)
+  expect(isOpenRouterURL("not a url")).toBe(false)
 })

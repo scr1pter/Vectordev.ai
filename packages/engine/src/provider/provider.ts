@@ -10,8 +10,8 @@ import { SessionID } from "@vectordevai/schema/session-id"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
 import { FreeDataPolicy, isFreeModel, type FreeModelCatalog, type FreeModelInfo } from "@vectordevai/schema/free-model"
-import { freeModelDataPolicy, isOpenRouterFreeModel } from "@vectordevai/core/free-model-catalog"
-import { freeModelMayTrain } from "@vectordevai/core/free-model-choice"
+import { freeModelDataPolicy, sendsToOpenRouterFree } from "@vectordevai/core/free-model-catalog"
+import { FREE_MODEL_UNLISTED, freeModelMayTrain } from "@vectordevai/core/free-model-choice"
 import { ProviderUnavailable, providerRetired, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
 import {
@@ -1374,6 +1374,22 @@ export function fromModelCatalogProvider(provider: ModelCatalog.Provider): Info 
   }
 }
 
+/** What decides whether a model's requests reach OpenRouter's free endpoints: its names, destinations and price. */
+function openRouterDestination(
+  providerID: string,
+  modelID: string,
+  model: Pick<Model, "api" | "cost">,
+  provider: Pick<Info, "options"> | undefined,
+) {
+  return {
+    providerID,
+    id: modelID,
+    apiID: model.api.id,
+    destinations: [model.api.url, model.api.npm, provider?.options?.baseURL],
+    price: model.cost.unpriced ? undefined : model.cost,
+  }
+}
+
 /**
  * What clients see of free models. With the shared catalog on, its models are listed under Vector. With it off, only
  * the shared allowance's own models lose their free tag: free models on the user's own OpenRouter account keep it,
@@ -1875,14 +1891,15 @@ const layer = Layer.effect(
         const openRouterKey = yield* freeCredentials.get("openrouter")
         const ownedFree = openRouterKey ? yield* freeModels.forKey(openRouterKey) : []
         // OpenRouter models that run on free endpoints, zero-price ones and its free router included, return below
-        // only as reviewed free models.
-        const router = providers[ProviderV2.ID.openrouter]
-        if (router) {
-          for (const [modelID, item] of Object.entries(router.models)) {
-            if (isOpenRouterFreeModel(modelID, item.cost.unpriced ? undefined : item.cost)) delete router.models[modelID]
+        // only as reviewed free models. That holds under any provider pointed at openrouter.ai, and for a model
+        // configured under another name, whose API ID is what is sent.
+        delete providers[ProviderV2.ID.vector]
+        for (const [providerID, item] of Object.entries(providers)) {
+          for (const [modelID, model] of Object.entries(item.models)) {
+            if (sendsToOpenRouterFree(openRouterDestination(providerID, modelID, model, item)))
+              delete item.models[modelID]
           }
         }
-        delete providers[ProviderV2.ID.vector]
         if (freeCatalog.enabled && isProviderAllowed(ProviderV2.ID.vector) && (vectorToken || openRouterKey)) {
           const models = openRouterKey ? ownedFree : freeCatalog.models
           if (models.length) providers[ProviderV2.ID.vector] = fromFreeModels(models)
@@ -2048,8 +2065,7 @@ const layer = Layer.effect(
         if (
           model.providerID === "vector" ||
           model.freeModel ||
-          (model.providerID === "openrouter" &&
-            isOpenRouterFreeModel(model.id, model.cost.unpriced ? undefined : model.cost))
+          sendsToOpenRouterFree(openRouterDestination(model.providerID, model.id, model, provider))
         ) {
           const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible")
           return createOpenAICompatible({
@@ -2142,6 +2158,14 @@ const layer = Layer.effect(
         }
 
         const baseURL = resolveBaseURL(model, options, s.varsLoaders[model.providerID], envs)
+        // A base URL filled in from the environment can point any provider at openrouter.ai after the lists were built.
+        if (
+          sendsToOpenRouterFree({
+            ...openRouterDestination(model.providerID, model.id, model, provider),
+            destinations: [baseURL],
+          })
+        )
+          throw new Error(FREE_MODEL_UNLISTED)
 
         if (baseURL !== undefined) options["baseURL"] = baseURL
         if (consent) requirePluginDestination(consent, baseURL)

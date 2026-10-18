@@ -37,6 +37,12 @@ export const FREE_MODEL_TRAINING_GUEST_SESSION = `An invited guest has worked in
 /** OpenRouter has separate privacy settings for free and paid models; the free one decides whether these route at all. */
 export const FREE_MODEL_TRAINING_BLOCKED =
   'Your OpenRouter privacy settings block free models whose providers may train on prompts. To use this one, open openrouter.ai/settings/privacy, allow free models from providers that may train on your data, then send again. Or choose a model without the "May train on your prompts" label.'
+/**
+ * Sent as the error when a model would reach OpenRouter's free endpoints without being one of the reviewed free models,
+ * such as a free model configured under another name: it would skip the guest rule, the training notice and
+ * data_collection.
+ */
+export const FREE_MODEL_UNLISTED = `This model runs on OpenRouter's free endpoints but isn't one of the ${FREE_MODELS_TITLE}, so Vector doesn't send it. Nothing was sent. Choose a model from ${FREE_MODELS_TITLE}.`
 /** Vector itself asks for no-training routing for a model it has not reviewed, so no account setting can lift it. */
 export const FREE_MODEL_UNREVIEWED_BLOCKED =
   "Vector has not reviewed this free model's data policy yet, so it asks OpenRouter to route it only to providers that don't train on prompts, and none of this model's providers qualifies. Choose another free model."

@@ -28,7 +28,7 @@ import {
   isFreeModelID,
   offeredFreeModel,
 } from "./free-model-catalog"
-import { FREE_MODEL_TRAINING_BLOCKED, FREE_MODEL_UNREVIEWED_BLOCKED } from "./free-model-choice"
+import { FREE_MODEL_TRAINING_BLOCKED, FREE_MODEL_UNLISTED, FREE_MODEL_UNREVIEWED_BLOCKED } from "./free-model-choice"
 
 // The disclosure parameter tells vectordev.ai this client labels free models that may train and asks first.
 export const CATALOG_URL = `https://vectordev.ai/api/free-models/models?disclosure=${FREE_MODELS_DISCLOSURE}`
@@ -319,6 +319,9 @@ export async function resolveRoute(input: {
   /** Whether an invited guest has worked in the requesting session (FreeModelGuests), whoever sends this request. */
   guest: () => Promise<boolean>
 }) {
+  // A model configured under another name, or one OpenRouter serves on free endpoints that is not itself a free model
+  // ID, is never sent: the free-model checks below judge the model by this ID.
+  if (!isFreeModelID(input.modelID)) throw new Error(FREE_MODEL_UNLISTED)
   // The owner's acceptance never carries a guest's input: such a session gets no-training models only.
   const guest = await input.guest()
   const trainingConsent = !guest && (await input.trainingConsent())

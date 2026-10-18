@@ -3,7 +3,7 @@ import { streamText } from "ai"
 import { Effect, Layer } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FreeModels } from "@vectordevai/core/free-models"
-import { FREE_MODEL_TRAINING_GUEST_SESSION } from "@vectordevai/core/free-model-choice"
+import { FREE_MODEL_TRAINING_GUEST_SESSION, FREE_MODEL_UNLISTED } from "@vectordevai/core/free-model-choice"
 import { ModelV2 } from "@vectordevai/core/model"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { FREE_MODEL_FALLBACKS, type FreeModelCatalog, type FreeModelInfo } from "@vectordevai/schema/free-model"
@@ -242,7 +242,7 @@ it.instance(
         "prompt on a stealth model",
       )
       expect(reached.some((text) => text.includes("prompt on a stealth model"))).toBe(false)
-      expect(String(errors[0])).toContain("Connect OpenRouter")
+      expect(String(errors[0])).toContain(FREE_MODEL_UNLISTED)
     }),
   {
     trusted: true,

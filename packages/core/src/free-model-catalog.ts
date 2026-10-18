@@ -128,13 +128,44 @@ export function isOpenRouterFreeModel(
   id: string,
   price: { readonly input: number; readonly output: number } | undefined,
 ) {
-  const lower = id.toLowerCase()
+  const lower = id.trim().toLowerCase()
+  // A variant stacked after `:free` (`:free:nitro`) or a version after `@` still names the free endpoints.
   return (
-    lower.endsWith(":free") ||
-    lower === "openrouter/free" ||
+    /:free(?:$|[:@])/.test(lower) ||
+    /^openrouter\/free(?:$|[:@])/.test(lower) ||
     lower.startsWith("stealth/") ||
     (price?.input === 0 && price.output === 0)
   )
+}
+
+/** Whether a request to this URL goes to OpenRouter. */
+export function isOpenRouterURL(url: unknown) {
+  if (typeof url !== "string" || !URL.canParse(url.trim())) return false
+  const host = new URL(url.trim()).hostname.toLowerCase()
+  return host === "openrouter.ai" || host.endsWith(".openrouter.ai")
+}
+
+/**
+ * Whether a configured model would reach OpenRouter's free endpoints outside the free-model checks. Configuration can
+ * name a model one thing and send another (`id` on the legacy engine, `api.id` on V2), and can point a provider of any
+ * name at openrouter.ai, so both the catalog name and the ID sent are tested, on the openrouter provider and on any
+ * provider whose requests go to OpenRouter. Such a model is removed from the regular lists and, if it reaches the
+ * engine anyway, sent only through the free-model route, which refuses a model it has not reviewed.
+ */
+export function sendsToOpenRouterFree(model: {
+  readonly providerID: string
+  readonly id: string
+  readonly apiID?: string
+  /** The model's and its provider's base URLs, and its SDK package: whatever decides where requests go. */
+  readonly destinations: readonly unknown[]
+  readonly price: { readonly input: number; readonly output: number } | undefined
+}) {
+  if (
+    model.providerID !== "openrouter" &&
+    !model.destinations.some((item) => item === "@openrouter/ai-sdk-provider" || isOpenRouterURL(item))
+  )
+    return false
+  return [model.id, model.apiID].some((id) => typeof id === "string" && isOpenRouterFreeModel(id, model.price))
 }
 
 /** Why a free model is never offered, when its terms bar Vector's use. */

@@ -527,6 +527,70 @@ test("no one is offered or sent OpenRouter's free router or a zero-price stealth
   )
 }, 90_000)
 
+test("a free OpenRouter model configured under another name, or under a provider pointed at OpenRouter, is never offered or sent", async () => {
+  // The verifier's medium of 17 October 2026: every check judged the catalog name, never the ID sent, so a repository
+  // alias reached the owner's OpenRouter key with a guest's text, the owner's acceptance and no provider block.
+  const reached: string[] = []
+  const aliases = {
+    openrouter: ["alias-laguna", "alias-router"],
+    "or-proxy": ["poolside/laguna-xs-2.1:free", "renamed"],
+  }
+  await serve(
+    async (h) => {
+      for (const headers of [h.owner, h.guest]) {
+        const body = (await (await h.get("/provider", headers)).json()) as {
+          all: { id: string; models: Record<string, unknown> }[]
+        }
+        for (const [providerID, modelIDs] of Object.entries(aliases)) {
+          const listed = Object.keys(body.all.find((provider) => provider.id === providerID)?.models ?? {})
+          for (const modelID of modelIDs) expect(listed).not.toContain(modelID)
+        }
+      }
+      for (const [who, headers] of [
+        ["guest", h.guest],
+        ["owner", h.owner],
+      ] as const) {
+        const session = await newSession(h, headers)
+        for (const [providerID, modelIDs] of Object.entries(aliases))
+          for (const modelID of modelIDs)
+            await h.send(`/session/${session}/message`, headers, {
+              model: { providerID, modelID },
+              parts: [{ type: "text", text: `${who} secret via ${providerID}/${modelID}` }],
+            })
+      }
+      expect(reached.filter((text) => text.includes("secret via"))).toEqual([])
+      expect(h.outbound.filter((item) => item.text.includes("secret via"))).toEqual([])
+    },
+    {
+      answer: async (request) => {
+        reached.push(await request.text())
+        return undefined
+      },
+      config: (base) => ({
+        provider: {
+          ...testProviderConfig(base).provider,
+          openrouter: {
+            options: { apiKey: "sk-or-synthetic-not-a-key", baseURL: base },
+            models: {
+              "alias-laguna": { id: "poolside/laguna-s-2.1:free", name: "Alias" },
+              "alias-router": { id: "openrouter/free", name: "Alias router" },
+            },
+          },
+          // A provider of another name sending to openrouter.ai, which this test refuses and records.
+          "or-proxy": {
+            npm: "@ai-sdk/openai-compatible",
+            options: { apiKey: "sk-or-synthetic-not-a-key", baseURL: "https://openrouter.ai/api/v1" },
+            models: {
+              "poolside/laguna-xs-2.1:free": { name: "Laguna XS" },
+              renamed: { id: "thinkingmachines/inkling:free", name: "Renamed" },
+            },
+          },
+        },
+      }),
+    },
+  )
+}, 90_000)
+
 test("a session warped here from an engine where a guest worked in it stays off may-train models", async () => {
   await serve(async (h) => {
     // This engine is the remote workspace. The engine warping the session in replays its history, then steals it

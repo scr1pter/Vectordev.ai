@@ -33,6 +33,7 @@ import { AgentPlugin } from "./agent"
 import { CommandPlugin } from "./command"
 import { ModelCatalogPlugin } from "./model-catalog"
 import { VectorPlanPlugin } from "./provider/vector-plan"
+import { FreeModelGuardPlugin } from "./provider/vector"
 import { SkillPlugin } from "./skill"
 import { VariantPlugin } from "./variant"
 
@@ -135,6 +136,8 @@ const layer = Layer.effectDiscard(
           for (const item of ProviderPlugins) yield* add(item)
           yield* add(ConfigExternalPlugin.Plugin)
           yield* add(ConfigProviderPlugin.Plugin)
+          // Configuration may not add back a free OpenRouter model that only the free-model checks may send.
+          yield* add(FreeModelGuardPlugin)
           // Account entitlements, prices and transport metadata cannot be replaced by repository configuration.
           yield* add(VectorPlanPlugin)
           yield* add(VariantPlugin.Plugin)

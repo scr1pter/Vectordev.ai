@@ -10,12 +10,13 @@ import { ModelPlans } from "@vectordevai/core/model-plans"
 import { ModelV2 } from "@vectordevai/core/model"
 import { PluginV2 } from "@vectordevai/core/plugin"
 import { PluginHost } from "@vectordevai/core/plugin/host"
-import { VectorPlugin } from "@vectordevai/core/plugin/provider/vector"
+import { FreeModelGuardPlugin, VectorPlugin } from "@vectordevai/core/plugin/provider/vector"
 import { ProjectV2 } from "@vectordevai/core/project"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { AbsolutePath } from "@vectordevai/core/schema"
 import { SessionV2 } from "@vectordevai/core/session"
 import { SessionRunnerModel } from "@vectordevai/core/session/runner/model"
+import { FREE_MODEL_UNLISTED } from "@vectordevai/core/free-model-choice"
 import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
 import { testEffect } from "./lib/effect"
 import { PluginTestLayer } from "./plugin/fixture"
@@ -245,3 +246,120 @@ for (const shared of [[laguna], [laguna, approved]])
         expect(chosen).toMatchObject({ _tag: "Success", success: { id: approved.id } })
       }),
   )
+
+// The verifier's medium of 17 October 2026: the runner judged a model by its catalog name only, so a free model
+// configured under a name that looks paid went out on the generic route, with no guest rule, notice or data_collection.
+for (const scenario of [
+  {
+    name: "a free OpenRouter model configured under a paid-looking name never goes out on the generic route",
+    providerID: "openrouter",
+    modelID: "alias-laguna",
+    api: { id: "poolside/laguna-s-2.1:free", url: "https://openrouter.ai/api/v1" },
+  },
+  {
+    name: "OpenRouter's free router configured under another name never goes out on the generic route",
+    providerID: "openrouter",
+    modelID: "alias-router",
+    api: { id: "openrouter/free", url: "https://openrouter.ai/api/v1" },
+  },
+  {
+    name: "a free model under a provider of another name pointed at openrouter.ai never goes out on the generic route",
+    providerID: "or-proxy",
+    modelID: "poolside/laguna-xs-2.1:free",
+    api: { id: "poolside/laguna-xs-2.1:free", url: "https://openrouter.ai/api/v1" },
+  },
+  {
+    name: "a renamed free model under a provider of another name pointed at openrouter.ai never goes out either",
+    providerID: "or-proxy",
+    modelID: "renamed",
+    api: { id: "thinkingmachines/inkling:free", url: "https://eu.openrouter.ai/api/v1" },
+  },
+]) {
+  it.effect(scenario.name, () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const host = yield* PluginHost.make(yield* PluginV2.Service)
+      yield* VectorPlugin.effect(host).pipe(
+        Effect.provideService(FreeModels.Service, freeModels),
+        Effect.provideService(FreeModels.CredentialsService, credentials),
+      )
+      yield* ConfigProviderPlugin.Plugin.effect(host).pipe(
+        Effect.provideService(Config.Service, {
+          entries: () =>
+            Effect.succeed([
+              new Config.Document({
+                type: "document",
+                info: Schema.decodeUnknownSync(Config.Info)({
+                  providers: {
+                    [scenario.providerID]: {
+                      models: {
+                        [scenario.modelID]: {
+                          api: { ...scenario.api, type: "aisdk", package: "@ai-sdk/openai-compatible" },
+                          request: { body: { apiKey: "sk-or-synthetic-not-a-key" } },
+                        },
+                      },
+                    },
+                  },
+                }),
+              }),
+            ]),
+        }),
+      )
+      const providerID = ProviderV2.ID.make(scenario.providerID)
+      const modelID = ModelV2.ID.make(scenario.modelID)
+      expect(yield* catalog.model.get(providerID, modelID)).toBeDefined()
+      const session = SessionV2.Info.make({
+        id: SessionV2.ID.make("ses_free_alias"),
+        projectID: ProjectV2.ID.global,
+        title: "free alias",
+        model: { id: modelID, providerID },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: DateTime.makeUnsafe(0), updated: DateTime.makeUnsafe(0) },
+        location: { directory: AbsolutePath.make("/synthetic-project") },
+      })
+      // An invited guest has worked in this session, and the owner has accepted the notice: the generic route would
+      // send the guest's text to a may-train model under the owner's acceptance.
+      const resolved = yield* Effect.gen(function* () {
+        const resolver = yield* SessionRunnerModel.Service
+        return yield* resolver.resolve(session)
+      }).pipe(
+        Effect.provide(SessionRunnerModel.locationLayer),
+        Effect.provideService(
+          FreeModelGuests.Service,
+          FreeModelGuests.Service.of({ mark: () => Effect.void, marked: () => Effect.succeed(true) }),
+        ),
+        Effect.provideService(
+          ModelPlans.Service,
+          ModelPlans.Service.of({
+            catalog: () => Effect.succeed({ enabled: false, models: [] }),
+            request: () => Promise.reject(new Error("Codium is off in this test")),
+          }),
+        ),
+        Effect.provideService(FreeModels.Service, { ...freeModels, trainingConsent: () => Effect.succeed(true) }),
+        Effect.provideService(FreeModels.CredentialsService, credentials),
+      )
+      const prepared = yield* resolved.route
+        .prepareTransport(
+          { model: resolved.id, messages: [{ role: "user", content: "guest secret" }] },
+          LLM.request({ model: resolved, prompt: "guest secret" }),
+        )
+        .pipe(Effect.result)
+      // A name that is not a free model ID is refused as unlisted; a free ID the account does not list is refused too.
+      expect(prepared).toMatchObject({
+        _tag: "Failure",
+        failure: {
+          reason: {
+            _tag: "InvalidRequest",
+            ...(scenario.modelID.includes(":free") ? {} : { message: FREE_MODEL_UNLISTED }),
+          },
+        },
+      })
+      // Configuration loads after the provider plugins; the guard after it keeps the model out of the lists too.
+      yield* FreeModelGuardPlugin.effect(host)
+      expect(yield* catalog.model.get(providerID, modelID)).toBeUndefined()
+      // Vector's own free models stay.
+      expect(yield* catalog.model.get(ProviderV2.ID.openrouter, ModelV2.ID.make(approved.id))).toBeDefined()
+    }),
+  )
+}
