@@ -107,16 +107,16 @@ const pillars = [
 ]
 
 // The proof strip carries measured results only: the first request's size as a bar, and the cost range of each
-// session. The values are the archive's medians for the four tasks where both agents made the same requests. The
+// session. The values are the archive's medians for the three valid fix tasks, where both agents made the same requests. The
 // simulated cache carries across tasks within a repetition, so neither label calls a session cold or warm.
 const firstRequest = { vector: 9183, claudeCode: 29857 }
 const figures = [
   {
-    value: "67–79%",
-    label: "lower modelled cost than Claude Code for the same four scripted tasks, first session",
+    value: "67–75%",
+    label: "lower modelled cost than Claude Code for the same three scripted fix tasks, first session",
     note: "b",
   },
-  { value: "69–75%", label: "lower in a second session of the same tasks, run as a fresh process", note: "b" },
+  { value: "75%", label: "lower in a second session of the same tasks, run as a fresh process", note: "b" },
 ]
 
 // Each note is a list of parts; a part with an href renders as a link.
@@ -135,7 +135,7 @@ const notes = [
     id: "b",
     parts: [
       {
-        text: "The same archive: four scripted tasks (a solo fix, two fixes that use each agent's own subagents, and a 12-turn investigation that stops before editing), each repeated three times, medians shown. Vector ran from source at a revision that desktop 1.99.108 includes, and both agents made the same number of model requests on every task. Vector's modelled cost was 67–79% lower in the first session and 69–75% lower in a second, a fresh process that is not a resumed chat. Each agent's simulated cache is fresh at the start of a repetition and carries across its tasks and sessions within it, so a first session can already read what an earlier task cached. The top of the first-session range is the 12-turn investigation, where Claude Code's first request found nothing cached and Vector's did. Requests go to a local fake model server and are priced at fixed list rates: $3 per million input tokens, $3.75 for cache writes, $0.30 for cache reads and $15 for output. The benchmark measures what each agent sends for identical scripted work, not a live bill or answer quality, and the archive itself says it is no proof that Vector costs less in general.",
+        text: "The same archive: three scripted fix tasks (a solo fix and two fixes that use each agent's own subagents), each repeated three times, medians shown. The archive's fourth task, a 12-turn investigation, is left out because its script reads a file that does not exist. Vector ran from source at a revision that desktop 1.99.108 includes, and both agents made the same number of model requests on every task. Vector's modelled cost was 67–75% lower in the first session and 75% lower in a second, a fresh process that is not a resumed chat. Each agent's simulated cache is fresh at the start of a repetition and carries across its tasks and sessions within it, so a first session can already read what an earlier task cached. Requests go to a local fake model server and are priced at fixed list rates: $3 per million input tokens, $3.75 for cache writes, $0.30 for cache reads and $15 for output. The benchmark measures what each agent sends for identical scripted work, not a live bill or answer quality, and the archive itself says it is no proof that Vector costs less in general.",
       },
     ],
   },

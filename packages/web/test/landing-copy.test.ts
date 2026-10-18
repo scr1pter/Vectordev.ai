@@ -31,21 +31,27 @@ const page = [lander, story, index, footer].join("\n")
 const cells = summary.cells.filter((cell) => cell.state === "integrated" && cell.transport === "http")
 const cell = (runtime: string, scenario: string, session: number) =>
   cells.find((item) => item.runtime === runtime && item.scenario === scenario && item.session === session)!
-// Only tasks where both agents made the same number of requests count as the same scripted work.
-const matched = Array.from(new Set(cells.map((item) => item.scenario))).filter((scenario) =>
-  [1, 2].every(
-    (session) => cell("vector", scenario, session).requests === cell("claude-code", scenario, session).requests,
-  ),
+// Only tasks where both agents made the same number of requests count as the same scripted work. long-loop is left
+// out: its script reads a file the fixture does not have, so it is not a valid task.
+const matched = Array.from(new Set(cells.map((item) => item.scenario))).filter(
+  (scenario) =>
+    scenario !== "long-loop" &&
+    [1, 2].every(
+      (session) => cell("vector", scenario, session).requests === cell("claude-code", scenario, session).requests,
+    ),
 )
 const gap = (session: number) =>
   matched.map(
     (scenario) =>
       100 * (1 - cell("vector", scenario, session).costUsd / cell("claude-code", scenario, session).costUsd),
   )
-const range = (values: number[]) => `${Math.round(Math.min(...values))}–${Math.round(Math.max(...values))}%`
+const range = (values: number[]) => {
+  const [low, high] = [Math.round(Math.min(...values)), Math.round(Math.max(...values))]
+  return low === high ? `${low}%` : `${low}–${high}%`
+}
 
 test("the cost figures come from the archived efficiency benchmark, against Claude Code only", () => {
-  expect(matched).toEqual(["solo-fix", "delegate-explore", "delegate-general", "long-loop"])
+  expect(matched).toEqual(["solo-fix", "delegate-explore", "delegate-general"])
   expect(story).toContain(
     `Vector's modelled cost was ${range(gap(1))} lower in the first session and ${range(gap(2))} lower in a second`,
   )
@@ -66,16 +72,8 @@ test("the cost figures come from the archived efficiency benchmark, against Clau
   expect(shots.filter((shot) => shot.text.includes(both) || shot.text.includes("modelled spend"))).toEqual([])
 })
 
-test("the top of the first-session range is the task where only Claude Code's first request missed the cache", () => {
-  // Note b says which task gives the top of the range, and why: in every repetition, Claude Code's first request in
-  // the first session's investigation read nothing from the simulated cache while Vector's read its prefix.
-  const top = matched[gap(1).indexOf(Math.max(...gap(1)))]
-  expect(top).toBe("long-loop")
-  expect(cell("claude-code", top, 1).firstPrimaryCacheRead).toBe(0)
-  expect(cell("vector", top, 1).firstPrimaryCacheRead).toBeGreaterThan(0)
-  expect(story).toContain(
-    "The top of the first-session range is the 12-turn investigation, where Claude Code's first request found nothing cached and Vector's did.",
-  )
+test("no label calls a session cold or warm, because the simulated cache carries across tasks", () => {
+  expect(story).toContain("The archive's fourth task, a 12-turn investigation, is left out because its script reads a file that does not exist.")
   // A first session can read what an earlier task cached, so no label calls it cold or the second one warm.
   expect(cell("claude-code", "delegate-explore", 1).firstPrimaryCacheRead).toBeGreaterThan(0)
   expect(story).toContain("so a first session can already read what an earlier task cached")
@@ -133,7 +131,7 @@ test("every benchmark figure keeps its date and its caveats", async () => {
   expect(new Set(dates)).toEqual(new Set(["2026-10-11"]))
   expect(story).toContain("run 11 October 2026 against Claude Code 2.1.215")
   expect(lander).toContain(
-    "From Vector's offline benchmark of four scripted coding tasks against a fake model server, run 11 October 2026; it doesn't measure answer quality.",
+    "From Vector's offline benchmark of three scripted coding tasks against a fake model server, run 11 October 2026; it doesn't measure answer quality.",
   )
   expect(story).toContain("so the figure is not your bill")
   // The caveat in full once, in note b, including the archive's own warning; the section head only points to it.
@@ -235,8 +233,8 @@ test("Vector Velocity is in development, sized by its active parameters only", (
       /(?<![-\w.])\d+(?:B\+|B model| billion parameter)/.test(text),
     ),
   ).toEqual([])
-  expect(page).not.toMatch(/\b(300|320|552)B\b|over 300/)
-  expect(page).not.toMatch(/DeepSeek|GLM|Nebius/i)
+  expect(page).not.toMatch(/\b\d{3,}B (?:total|parameters)\b|\bover \d{3}B?\b/i)
+  expect(page).not.toMatch(/Velocity[^.]*\b(?:built on|based on|fine-tun\w*|base model)\b|compute credits/i)
   expect(page).not.toMatch(/plan to build|Velocity[^."]*\bplanned\b/i)
   expect(lander).toContain('"is building a coding model of its own."')
   // Why it matters: four large coding models with a public size or base, the same four the investor page compares,
