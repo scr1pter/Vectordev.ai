@@ -3,6 +3,7 @@ import path from "node:path"
 import { dict } from "../i18n/en"
 import {
   projectTrustAnswer,
+  projectTrustHostDecides,
   projectTrustParent,
   projectTrustPrompt,
   projectTrustRecord,
@@ -16,6 +17,12 @@ describe("trust wording", () => {
     expect(strings.length).toBeGreaterThan(0)
     expect(strings.filter(([, text]) => /project/i.test(text)).map(([key]) => key)).toEqual([])
     expect(dict["project.trust.dialog.title"]).toBe("Trust this repository?")
+  })
+
+  // A guest's approval is refused, so the guest is told who decides instead of being asked or told to try again.
+  test("an invited guest is told that the person who invited them decides", () => {
+    expect(dict["project.trust.host.title"]).toBe("Only the host can trust this repository")
+    expect(dict["project.trust.host.description"]).toContain("until the person who invited you trusts it")
   })
 
   // "Not now" leaves the repository untrusted, and the engine keeps the user's own language servers and formatters
@@ -91,6 +98,12 @@ describe("projectTrustPrompt", () => {
   test("never asks while the status is unknown", () => {
     expect(projectTrustPrompt(undefined, undefined)).toBeUndefined()
   })
+
+  test("never asks an invited guest, whose approval the server always refuses", () => {
+    expect(projectTrustPrompt({ ...ignored, approvable: false }, undefined)).toBeUndefined()
+    expect(projectTrustPrompt({ ...ignored, approvable: false }, "trusted")).toBeUndefined()
+    expect(projectTrustPrompt({ ...ignored, approvable: true }, undefined)).toBe("ask")
+  })
 })
 
 describe("projectTrustRecord", () => {
@@ -123,9 +136,16 @@ describe("projectTrustAnswer", () => {
 
 describe("projectTrustStatus", () => {
   test("reads the engine's status", () => {
-    const status = { workspace: "/work/app", trusted: false, ignored: true, settings: true }
+    const status = { workspace: "/work/app", trusted: false, ignored: true, settings: true, approvable: true }
     expect(projectTrustStatus(status)).toEqual(status)
     expect(projectTrustStatus({ ...status, extra: 1 })).toEqual(status)
+    expect(projectTrustStatus({ ...status, approvable: false })).toEqual({ ...status, approvable: false })
+  })
+
+  test("an engine that does not say who may approve is the owner's, as before the field existed", () => {
+    const status = { workspace: "/work/app", trusted: false, ignored: true, settings: true }
+    expect(projectTrustStatus(status)).toEqual({ ...status, approvable: true })
+    expect(projectTrustStatus({ ...status, approvable: "no" })).toBeUndefined()
   })
 
   test("drops a reply that is not a status, so the app neither crashes nor asks", () => {
@@ -137,6 +157,19 @@ describe("projectTrustStatus", () => {
     expect(projectTrustStatus("<!doctype html>")).toBeUndefined()
     expect(projectTrustStatus(null)).toBeUndefined()
     expect(projectTrustStatus(undefined)).toBeUndefined()
+  })
+})
+
+describe("projectTrustHostDecides", () => {
+  test("tells an invited guest that the host decides about a repository's ignored settings", () => {
+    expect(projectTrustHostDecides({ ...ignored, approvable: false })).toBe(true)
+  })
+
+  test("says nothing to the owner, about a trusted repository, or about one with no settings of its own", () => {
+    expect(projectTrustHostDecides({ ...ignored, approvable: true })).toBe(false)
+    expect(projectTrustHostDecides({ ignored: false, settings: true, approvable: false })).toBe(false)
+    expect(projectTrustHostDecides({ ignored: true, settings: false, approvable: false })).toBe(false)
+    expect(projectTrustHostDecides(undefined)).toBe(false)
   })
 })
 

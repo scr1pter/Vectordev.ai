@@ -9,6 +9,7 @@ import { useGlobal } from "@/context/global"
 import { useLanguage } from "@/context/language"
 import { useProjectTrust } from "@/context/project-trust"
 import {
+  projectTrustHostDecides,
   projectTrustParent,
   projectTrustPrompt,
   projectTrustRecord,
@@ -32,6 +33,7 @@ export function ProjectTrustPrompt() {
   const serverSync = useServerSync()
   const trust = useProjectTrust()
   const dialog = useDialog()
+  const language = useLanguage()
   const ask = useProjectTrustDialog()
   const [status] = createResource(
     () => ({ directory: sdk(), version: trust.version() }),
@@ -51,6 +53,16 @@ export function ProjectTrustPrompt() {
     const directory = sdk()
     const record = projectTrustRecord(current, trust.answer(directory.scope, current.workspace))
     if (record) trust.remember(directory.scope, current.workspace, record)
+    // An invited guest's approval is refused, so the guest is told who decides instead of being asked.
+    if (projectTrustHostDecides(current) && trust.tell(directory.scope, current.workspace))
+      untrack(() =>
+        showToast({
+          title: language.t("project.trust.host.title"),
+          description: language.t("project.trust.host.description", {
+            name: getFilename(current.workspace) || current.workspace,
+          }),
+        }),
+      )
     const prompt = projectTrustPrompt(current, record)
     // Another dialog keeps the screen; this one waits until it closes.
     if (!prompt || dialog.active) return
@@ -71,8 +83,9 @@ export function ProjectTrustPrompt() {
 }
 
 /**
- * "Trust this project…" in a project's menu, shown only while the engine ignores that project's own settings. The
- * status is read when the menu opens, so a closed menu costs nothing.
+ * "Trust this project…" in a project's menu, shown only while the engine ignores that project's own settings and this
+ * client may approve (never for an invited guest). The status is read when the menu opens, so a closed menu costs
+ * nothing.
  */
 export function ProjectTrustMenuItem(props: { server: ServerConnection.Any; directory: string; open: boolean }) {
   const global = useGlobal()
@@ -93,7 +106,7 @@ export function ProjectTrustMenuItem(props: { server: ServerConnection.Any; dire
   )
 
   return (
-    <Show when={status()?.ignored && status()?.settings ? status() : undefined}>
+    <Show when={projectTrustPrompt(status(), undefined) ? status() : undefined}>
       {(current) => (
         <MenuV2.Item
           onSelect={() =>

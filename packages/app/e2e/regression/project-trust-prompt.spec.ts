@@ -7,7 +7,7 @@ import {
   stressDraftHref,
 } from "../performance/timeline/timeline-test-helpers"
 
-type TrustStatus = { trusted: boolean; ignored: boolean; settings: boolean }
+type TrustStatus = { trusted: boolean; ignored: boolean; settings: boolean; approvable?: boolean }
 
 const ignoredSettings = { trusted: false, ignored: true, settings: true }
 
@@ -95,6 +95,16 @@ test("never asks about a repository with no Vector settings of its own", async (
   const trust = await openDraft(page, { trusted: false, ignored: true, settings: false })
   await expectNoTrustDialog(page, trust, 0)
   expect(trust.approvals).toBe(0)
+})
+
+test("tells an invited guest that the host decides instead of asking a question it cannot answer", async ({ page }) => {
+  // The server refuses a guest's approval, so asking would end in "try again", which never works for a guest.
+  const trust = await openDraft(page, { ...ignoredSettings, approvable: false })
+  await expect(page.getByText("Only the host can trust this repository")).toBeVisible()
+  await expect(page.getByText("until the person who invited you trusts it")).toBeVisible()
+  await expectNoTrustDialog(page, trust, 0)
+  expect(trust.approvals).toBe(0)
+  expect(await storedAnswers(page)).not.toContain("dismissed")
 })
 
 test("asks again when another dialog replaced the question before it was answered", async ({ page }) => {

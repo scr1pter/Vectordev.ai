@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { projectTrustFolders, projectTrustSummary, uniqueTrustWorkspaces } from "./project-trust-model"
 
-const status = (input: { trusted: boolean; ignored: boolean; settings: boolean }) => ({
+const status = (input: { trusted: boolean; ignored: boolean; settings: boolean; approvable?: boolean }) => ({
   workspace: "/work/app",
+  approvable: true,
   ...input,
 })
 
@@ -27,6 +28,23 @@ describe("projectTrustSummary", () => {
     expect(summary.state).toBe("untrusted")
     expect(summary.canTrust).toBe(true)
     expect(summary.description).toContain("has no Vector settings of its own")
+  })
+
+  test("an invited guest cannot trust the host's repository and is told the host decides", () => {
+    const withSettings = projectTrustSummary(
+      status({ trusted: false, ignored: true, settings: true, approvable: false }),
+      "app",
+    )
+    expect(withSettings.state).toBe("untrusted")
+    expect(withSettings.canTrust).toBe(false)
+    expect(withSettings.description).toContain("until the person who invited you trusts it")
+    const toolsOnly = projectTrustSummary(
+      status({ trusted: false, ignored: true, settings: false, approvable: false }),
+      "app",
+    )
+    expect(toolsOnly.canTrust).toBe(false)
+    expect(toolsOnly.description).toContain("until the person who invited you trusts it")
+    expect(toolsOnly.description).not.toContain("your language servers")
   })
 
   test("a trusted repository has nothing to approve and says a change asks again", () => {

@@ -767,6 +767,9 @@ export const dict = {
   "project.trust.dialog.workspace.trust": "Trust this workspace",
   "project.trust.dialog.notNow": "Not now",
   "project.trust.menu": "Trust this repository…",
+  "project.trust.host.title": "Only the host can trust this repository",
+  "project.trust.host.description":
+    "{{name}} has its own Vector settings, which Vector ignores until the person who invited you trusts it.",
   "project.trust.approve.failed": "Could not trust this repository",
   "project.trust.approve.failed.description": "Vector could not save the approval. Try again in a moment.",
   "session.header.open.finder": "Finder",

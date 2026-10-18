@@ -11,6 +11,7 @@ export type ProjectTrustPrompt = "ask" | "changed"
 /**
  * Reads the engine's trust status, dropping a reply that is not one, such as an older or proxied engine's answer to a
  * route it does not have. Acting on a reply without a workspace would ask about, and remember, no repository at all.
+ * An engine from before `approvable` existed let whoever asked approve, so a status without it reads as approvable.
  */
 export function projectTrustStatus(value: unknown): ProjectTrustStatus | undefined {
   if (typeof value !== "object" || value === null) return
@@ -18,7 +19,14 @@ export function projectTrustStatus(value: unknown): ProjectTrustStatus | undefin
   if (typeof status.workspace !== "string" || !status.workspace) return
   if (typeof status.trusted !== "boolean" || typeof status.ignored !== "boolean") return
   if (typeof status.settings !== "boolean") return
-  return { workspace: status.workspace, trusted: status.trusted, ignored: status.ignored, settings: status.settings }
+  if (status.approvable !== undefined && typeof status.approvable !== "boolean") return
+  return {
+    workspace: status.workspace,
+    trusted: status.trusted,
+    ignored: status.ignored,
+    settings: status.settings,
+    approvable: status.approvable ?? true,
+  }
 }
 
 /** Reads a stored answer, dropping anything the app never writes. */
@@ -29,16 +37,27 @@ export function projectTrustAnswer(value: unknown): ProjectTrustAnswer | undefin
 /**
  * Whether opening a project asks the user to trust it. Only a project whose own Vector settings are being ignored
  * asks: never one without settings, one the engine trusts, or one the user answered "Not now" for. A project the user
- * trusted whose settings changed since then is no longer trusted by the engine, so it asks again as `changed`.
+ * trusted whose settings changed since then is no longer trusted by the engine, so it asks again as `changed`. An
+ * invited guest is never asked, because only the server's owner may approve; see projectTrustHostDecides.
  */
 export function projectTrustPrompt(
-  status: Pick<ProjectTrustStatus, "ignored" | "settings"> | undefined,
+  status: (Pick<ProjectTrustStatus, "ignored" | "settings"> & { approvable?: boolean }) | undefined,
   answer: ProjectTrustAnswer | undefined,
 ): ProjectTrustPrompt | undefined {
-  if (!status?.ignored || !status.settings) return
+  if (!status?.ignored || !status.settings || status.approvable === false) return
   if (answer === "dismissed") return
   if (answer === "trusted") return "changed"
   return "ask"
+}
+
+/**
+ * Whether to tell an invited guest, instead of asking, that the host decides about a repository whose own settings
+ * Vector ignores. The server refuses a guest's approval, so asking would only lead to an error.
+ */
+export function projectTrustHostDecides(
+  status: Pick<ProjectTrustStatus, "ignored" | "settings" | "approvable"> | undefined,
+) {
+  return Boolean(status?.ignored && status.settings && !status.approvable)
 }
 
 /**

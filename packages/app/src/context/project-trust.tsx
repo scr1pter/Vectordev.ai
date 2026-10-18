@@ -23,6 +23,9 @@ export const { use: useProjectTrust, provider: ProjectTrustProvider } = createSi
     const [version, setVersion] = createSignal(0)
     // Workspaces with a trust dialog open, so two views of one project never ask at once.
     const asking = new Set<string>()
+    // Workspaces whose invited guest was told that the host decides, so it is said once while the app runs. It is
+    // not stored as an answer: the same browser may later open the server as its owner, who must still be asked.
+    const told = new Set<string>()
 
     const answer = (scope: ServerScope, workspace: string) =>
       projectTrustAnswer(store.answers[ScopedKey.from(scope, workspace)])
@@ -44,6 +47,12 @@ export const { use: useProjectTrust, provider: ProjectTrustProvider } = createSi
       },
       release(scope: ServerScope, workspace: string) {
         asking.delete(ScopedKey.from(scope, workspace))
+      },
+      tell(scope: ServerScope, workspace: string) {
+        const key = ScopedKey.from(scope, workspace)
+        if (told.has(key)) return false
+        told.add(key)
+        return true
       },
       // Approves the project's settings as they are now through the engine, which is the only thing that grants
       // trust. Resolves to the new status, or undefined when the engine could not save the approval.

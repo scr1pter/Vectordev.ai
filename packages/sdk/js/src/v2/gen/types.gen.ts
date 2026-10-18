@@ -2265,6 +2265,7 @@ export type ProjectTrustStatus = {
   trusted: boolean
   ignored: boolean
   settings: boolean
+  approvable: boolean
 }
 
 export type Model = {

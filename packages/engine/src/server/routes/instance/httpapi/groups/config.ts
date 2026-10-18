@@ -17,6 +17,9 @@ export const TrustStatus = Schema.Struct({
   // Whether the project has settings of its own (config, .vector or skills content) that trust decides on. Without
   // them `ignored` means only the user's language servers, formatters and MCP servers are held back.
   settings: Schema.Boolean,
+  // Whether the client asking may approve trust. Only the server's owner may; an invited guest reads the status, but
+  // its approval is refused, so the app tells the guest that the host decides instead of asking.
+  approvable: Schema.Boolean,
 }).annotate({ identifier: "ProjectTrustStatus" })
 
 export const ConfigApi = HttpApi.make("config")

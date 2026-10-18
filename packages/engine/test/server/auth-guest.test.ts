@@ -1283,6 +1283,59 @@ test("guests load the app's bootstrap routes, narrowed to their workspace", asyn
   }
 }, 30_000)
 
+test("a guest reads its repository's trust but is told only the owner can approve it", async () => {
+  // Approving trust is owner-only, so the app must not ask an invited guest a question whose answer is refused.
+  await using tmp = await tmpdir({
+    trusted: false,
+    git: true,
+    config: { model: "test/project-model", formatter: false, lsp: false },
+  })
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
+  const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
+  const call = (route: string, init: RequestInit = {}) =>
+    fetch(new URL(route, listener.url), { ...init, keepalive: false })
+  try {
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+    const guestStatus = await call("/config/trust", { headers: guest })
+    expect(guestStatus.status).toBe(200)
+    expect(await guestStatus.json()).toMatchObject({ trusted: false, ignored: true, settings: true, approvable: false })
+    expect((await call("/config/trust", { method: "POST", headers: guest })).status).toBe(403)
+
+    const ownerStatus = await call(`/config/trust?directory=${encodeURIComponent(tmp.path)}`, { headers: owner })
+    expect(ownerStatus.status).toBe(200)
+    expect(await ownerStatus.json()).toMatchObject({ trusted: false, ignored: true, settings: true, approvable: true })
+  } finally {
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 30_000)
+
 // Presence on the directory event stream. This test server has no password,
 // so every connection has the default owner principal regardless of headers.
 const EventData = Schema.Struct({

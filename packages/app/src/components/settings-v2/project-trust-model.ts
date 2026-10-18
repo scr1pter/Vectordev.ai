@@ -25,6 +25,16 @@ export function projectTrustSummary(status: ProjectTrustStatus | undefined, name
         : `${name} has no Vector settings of its own, and your language servers, formatters and MCP servers run in it.`,
       canTrust: false,
     }
+  // An invited guest reads the host's status, but the server refuses a guest's approval.
+  if (status.ignored && !status.approvable)
+    return {
+      state: "untrusted",
+      title: "Not trusted",
+      description: status.settings
+        ? `${name} has its own Vector settings, like agents, commands, plugins or MCP servers, which can run code on the host's computer. Vector ignores them until the person who invited you trusts it, which only they can do.`
+        : `${name} has no Vector settings of its own. Language servers and formatters stay off in it until the person who invited you trusts it, which only they can do.`,
+      canTrust: false,
+    }
   if (status.ignored)
     return {
       state: "untrusted",
