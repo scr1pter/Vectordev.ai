@@ -82,7 +82,7 @@ Do all of this in **test mode** first, for the preview test run in [section 4](#
 1. **Which account.** Use an OpenRouter account other than the one behind `OPENROUTER_FREE_API_KEY`. The free-models account must stay unfunded, with no automatic top-up (see [openrouter.md](openrouter.md)), and Codium's account needs both.
 2. **Management key.** Create one under Settings → Management Keys (some OpenRouter pages call these provisioning keys). It goes in `OPENROUTER_MANAGEMENT_KEY`. It creates, caps and switches off each buyer's key, and reads the balance and key list for the funding check.
    - Do not rename or delete Codium's keys in the OpenRouter dashboard. The check counts keys named `Vector <account id> …` or `Codium <account id> …`.
-3. **Starting balance.** Add enough credits to cover your first customers. Before the first sale, the funding check needs the balance to cover the credits of your largest plan or top-up, multiplied by 1.1, plus $20.
+3. **Starting balance.** Add enough credits to cover your first customers. Before the first sale, the funding check needs the balance to cover the credits of your largest plan or top-up, multiplied by 1.1, plus $20. The test run in [section 4](#4-test-mode-run-before-selling) needs $50 more.
 4. **Auto top-up** (Settings → Credits). Turn it on and set:
    - **Threshold:** at least what the funding check needs at your busiest point: the credits customers will hold, plus the credits they buy in about 90 minutes, plus the credits of your largest purchase, all multiplied by 1.1, plus $20 (see the margin variables below). If the threshold is lower, the balance can sit between the two: auto top-up does not fire, and sales stay paused until you add credits or raise the threshold.
    - **Amount:** at least a week of expected model spend, so the card is charged in a few large purchases rather than many small ones.
@@ -132,6 +132,7 @@ Run the test on one **preview** branch with its own settings, so test payments n
    Then redeploy the branch.
 
 5. **Sign in on the preview's account page** (`https://<preview address>/account`) with your email and password. Google and GitHub sign-in return there only if the address is in Supabase's Redirect URLs (Authentication → URL Configuration).
+6. **Enough balance for the test.** Fund Codium's OpenRouter account to the minimum in [section 2](#2-openrouter), step 3, plus $50. The test's two $10 purchases count among what customers hold until they are refunded, and each stays reserved for up to 90 minutes after its checkout opens. At the bare minimum, a check during the test, such as the funding check in the fifth step below, can answer `"status":"paused"`.
 
 Then:
 
@@ -146,7 +147,7 @@ Then:
      "https://<preview address>/api/model-plans/funding?x-vercel-protection-bypass=<secret>"
    ```
 
-   It should answer `{"enabled":true,"status":"open","ran":true,"notified":false}`. Then set the branch's `CODIUM_FUNDING_MARGIN_USD` above the OpenRouter balance (for example `100000`), redeploy and call it again: it answers `"status":"paused"`, checkout refuses with "temporarily unavailable", and the pause email arrives. Set the margin back, redeploy and call it again: sales reopen and the reopen email arrives.
+   With the extra $50 from preparation step 6, it should answer `{"enabled":true,"status":"open","ran":true,"notified":false}`. Then set the branch's `CODIUM_FUNDING_MARGIN_USD` above the OpenRouter balance (for example `100000`), redeploy and call it again: it answers `"status":"paused"`, checkout refuses with "temporarily unavailable", and the pause email arrives. Set the margin back, redeploy and call it again: sales reopen and the reopen email arrives.
 
 6. Cancel the plan in the preview's portal. Its key stays switched off, as the refund left it, and expires at the end of the period.
 

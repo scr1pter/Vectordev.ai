@@ -752,6 +752,31 @@ describe("sales follow Vector's OpenRouter balance", () => {
     expect(await checkCodiumFunding(fetcher, Date.now() + 2 * 60 * 60_000)).toMatchObject({ reserved: 0 })
   })
 
+  test("the owner doc's test run needs $50 above the first-sale minimum for its funding check to answer open", async () => {
+    // The first-sale minimum: the largest purchase's credits ($100 of fixture credits) × 1.1 + $20 = $130.
+    funded(130)
+    // The run buys the $10 plan and a $10 top-up, then refunds both.
+    await modelPlanCheckout(user, "vector-10", fetcher)
+    const plan = subscribe(10)
+    await reconcileModelPlanEvent(event("invoice.paid", plan.invoice), fetcher)
+    const bought = await topUp(10)
+    await reconcileModelPlanEvent(event("checkout.session.completed", bought.session), fetcher)
+    expect(activeKeys()).toHaveLength(2)
+    Object.assign(bought.charge, { amount_refunded: 1000, refunded: true })
+    await reconcileModelPlanEvent(event("charge.refunded", { ...bought.charge }), fetcher)
+    Object.assign(plan.charge, { amount_refunded: 1000, refunded: true })
+    await reconcileModelPlanEvent(event("charge.refunded", { ...plan.charge }), fetcher)
+    // Nothing is owed any more, but both checkouts are still reserved, so the bare minimum falls short.
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({
+      status: "paused",
+      owed: 0,
+      reserved: 1000,
+      required: 14100,
+    })
+    funded(180)
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", owed: 0, reserved: 1000 })
+  })
+
   test("a sale without a recent check runs one, and sales stay closed while OpenRouter cannot be read", async () => {
     funded(300)
     openRouter.unavailable = true
