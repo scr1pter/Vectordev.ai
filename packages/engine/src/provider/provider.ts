@@ -1025,7 +1025,13 @@ export const Model = Schema.Struct({
   providerID: ProviderV2.ID,
   api: ProviderApiInfo,
   name: Schema.String,
-  freeModel: optional(Schema.Struct({ source: Schema.Literals(["shared", "openrouter"]) })),
+  freeModel: optional(
+    Schema.Struct({
+      source: Schema.Literals(["shared", "openrouter"]),
+      // "optional" when Vector may switch the model's reasoning off for a greeting or a light job.
+      reasoning: optional(Schema.Literals(["optional", "mandatory"])),
+    }),
+  ),
   family: optional(Schema.String),
   capabilities: ProviderCapabilities,
   cost: ProviderCost,
@@ -1377,7 +1383,10 @@ export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "ve
           id: ModelV2.ID.make(model.id),
           providerID: ProviderV2.ID.make(providerID),
           name: model.name,
-          freeModel: { source: providerID === "vector" ? "shared" : "openrouter" },
+          freeModel: {
+            source: providerID === "vector" ? "shared" : "openrouter",
+            ...(model.reasoning ? { reasoning: model.reasoning } : {}),
+          },
           api: {
             id: model.id,
             npm: "@ai-sdk/openai-compatible",

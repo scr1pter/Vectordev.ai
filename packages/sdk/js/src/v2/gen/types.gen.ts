@@ -278,6 +278,10 @@ export type OutputFormatJsonSchema = {
 
 export type OutputFormat = OutputFormatText | OutputFormatJsonSchema
 
+export type TaskSizeChoice = "auto" | "chat" | "light" | "standard" | "thorough"
+
+export type TaskJudgeMode = "off" | "thorough" | "changes"
+
 export type UserMessage = {
   id: string
   sessionID: string
@@ -302,6 +306,8 @@ export type UserMessage = {
     [key: string]: boolean
   }
   executionMode?: "normal" | "fast"
+  size?: TaskSizeChoice
+  judge?: TaskJudgeMode
 }
 
 export type ProviderAuthError = {
@@ -400,6 +406,8 @@ export type FreeModelsLimitError = {
   }
 }
 
+export type TaskSizeTier = "chat" | "light" | "standard" | "thorough"
+
 export type AssistantMessage = {
   id: string
   sessionID: string
@@ -443,6 +451,7 @@ export type AssistantMessage = {
   }
   structured?: unknown
   variant?: string
+  size?: TaskSizeTier
   finish?: string
   forked?: boolean
 }
@@ -2104,6 +2113,7 @@ export type Config = {
       model?: string
       variant?: string
       subtask?: boolean
+      size?: TaskSizeTier
     }
   }
   skills?: {
@@ -2235,6 +2245,10 @@ export type Config = {
       enabled?: boolean
     }
   }
+  sizing?: {
+    auto?: boolean
+    judge?: TaskJudgeMode
+  }
   experimental?: {
     disable_paste_summary?: boolean
     batch_tool?: boolean
@@ -2279,6 +2293,7 @@ export type Model = {
   name: string
   freeModel?: {
     source: "shared" | "openrouter"
+    reasoning?: "optional" | "mandatory"
   }
   family?: string
   capabilities: {
@@ -2699,6 +2714,7 @@ export type Command = {
   source?: "command" | "mcp" | "skill"
   template: string
   subtask?: boolean
+  size?: TaskSizeTier
   hints: Array<string>
 }
 
@@ -12652,6 +12668,8 @@ export type SessionPromptData = {
     variant?: string
     executionMode?: "normal" | "fast"
     budget?: RunBudget
+    size?: TaskSizeChoice
+    judge?: TaskJudgeMode
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -13162,6 +13180,8 @@ export type SessionPromptAsyncData = {
     variant?: string
     executionMode?: "normal" | "fast"
     budget?: RunBudget
+    size?: TaskSizeChoice
+    judge?: TaskJudgeMode
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -13210,6 +13230,8 @@ export type SessionCommandData = {
     variant?: string
     executionMode?: "normal" | "fast"
     budget?: RunBudget
+    size?: TaskSizeChoice
+    judge?: TaskJudgeMode
     parts?: Array<{
       id?: string
       type: "file"

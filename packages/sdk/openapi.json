@@ -9361,6 +9361,12 @@
                   "budget": {
                     "$ref": "#/components/schemas/RunBudget"
                   },
+                  "size": {
+                    "$ref": "#/components/schemas/TaskSizeChoice"
+                  },
+                  "judge": {
+                    "$ref": "#/components/schemas/TaskJudgeMode"
+                  },
                   "parts": {
                     "type": "array",
                     "items": {
@@ -10674,6 +10680,12 @@
                   "budget": {
                     "$ref": "#/components/schemas/RunBudget"
                   },
+                  "size": {
+                    "$ref": "#/components/schemas/TaskSizeChoice"
+                  },
+                  "judge": {
+                    "$ref": "#/components/schemas/TaskJudgeMode"
+                  },
                   "parts": {
                     "type": "array",
                     "items": {
@@ -10833,6 +10845,12 @@
                   },
                   "budget": {
                     "$ref": "#/components/schemas/RunBudget"
+                  },
+                  "size": {
+                    "$ref": "#/components/schemas/TaskSizeChoice"
+                  },
+                  "judge": {
+                    "$ref": "#/components/schemas/TaskJudgeMode"
                   },
                   "parts": {
                     "type": "array",
@@ -21139,6 +21157,14 @@
           }
         ]
       },
+      "TaskSizeChoice": {
+        "type": "string",
+        "enum": ["auto", "chat", "light", "standard", "thorough"]
+      },
+      "TaskJudgeMode": {
+        "type": "string",
+        "enum": ["off", "thorough", "changes"]
+      },
       "UserMessage": {
         "type": "object",
         "properties": {
@@ -21218,6 +21244,12 @@
           "executionMode": {
             "type": "string",
             "enum": ["normal", "fast"]
+          },
+          "size": {
+            "$ref": "#/components/schemas/TaskSizeChoice"
+          },
+          "judge": {
+            "$ref": "#/components/schemas/TaskJudgeMode"
           }
         },
         "required": ["id", "sessionID", "role", "time", "agent", "model"],
@@ -21503,6 +21535,10 @@
         "required": ["name", "data"],
         "additionalProperties": false
       },
+      "TaskSizeTier": {
+        "type": "string",
+        "enum": ["chat", "light", "standard", "thorough"]
+      },
       "AssistantMessage": {
         "type": "object",
         "properties": {
@@ -21640,6 +21676,9 @@
           "structured": {},
           "variant": {
             "type": "string"
+          },
+          "size": {
+            "$ref": "#/components/schemas/TaskSizeTier"
           },
           "finish": {
             "type": "string"
@@ -26881,6 +26920,9 @@
                 },
                 "subtask": {
                   "type": "boolean"
+                },
+                "size": {
+                  "$ref": "#/components/schemas/TaskSizeTier"
                 }
               },
               "required": ["template"],
@@ -27284,6 +27326,18 @@
             },
             "additionalProperties": false
           },
+          "sizing": {
+            "type": "object",
+            "properties": {
+              "auto": {
+                "type": "boolean"
+              },
+              "judge": {
+                "$ref": "#/components/schemas/TaskJudgeMode"
+              }
+            },
+            "additionalProperties": false
+          },
           "experimental": {
             "type": "object",
             "properties": {
@@ -27422,6 +27476,10 @@
               "source": {
                 "type": "string",
                 "enum": ["shared", "openrouter"]
+              },
+              "reasoning": {
+                "type": "string",
+                "enum": ["optional", "mandatory"]
               }
             },
             "required": ["source"],
@@ -28702,6 +28760,9 @@
           },
           "subtask": {
             "type": "boolean"
+          },
+          "size": {
+            "$ref": "#/components/schemas/TaskSizeTier"
           },
           "hints": {
             "type": "array",

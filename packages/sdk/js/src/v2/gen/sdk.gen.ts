@@ -301,6 +301,8 @@ import type {
   TaskBridgePollInput,
   TaskBridgeReceiptInput,
   TaskBridgeRegisterInput,
+  TaskJudgeMode,
+  TaskSizeChoice,
   TeamsId,
   TextPartInput,
   ToolIdsErrors,
@@ -4775,6 +4777,8 @@ export class Session2 extends HeyApiClient {
       variant?: string
       executionMode?: "normal" | "fast"
       budget?: RunBudget
+      size?: TaskSizeChoice
+      judge?: TaskJudgeMode
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
     options?: Options<never, ThrowOnError>,
@@ -4797,6 +4801,8 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "variant" },
             { in: "body", key: "executionMode" },
             { in: "body", key: "budget" },
+            { in: "body", key: "size" },
+            { in: "body", key: "judge" },
             { in: "body", key: "parts" },
           ],
         },
@@ -5244,6 +5250,8 @@ export class Session2 extends HeyApiClient {
       variant?: string
       executionMode?: "normal" | "fast"
       budget?: RunBudget
+      size?: TaskSizeChoice
+      judge?: TaskJudgeMode
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
     options?: Options<never, ThrowOnError>,
@@ -5266,6 +5274,8 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "variant" },
             { in: "body", key: "executionMode" },
             { in: "body", key: "budget" },
+            { in: "body", key: "size" },
+            { in: "body", key: "judge" },
             { in: "body", key: "parts" },
           ],
         },
@@ -5301,6 +5311,8 @@ export class Session2 extends HeyApiClient {
       variant?: string
       executionMode?: "normal" | "fast"
       budget?: RunBudget
+      size?: TaskSizeChoice
+      judge?: TaskJudgeMode
       parts?: Array<{
         id?: string
         type: "file"
@@ -5328,6 +5340,8 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "variant" },
             { in: "body", key: "executionMode" },
             { in: "body", key: "budget" },
+            { in: "body", key: "size" },
+            { in: "body", key: "judge" },
             { in: "body", key: "parts" },
           ],
         },

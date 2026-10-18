@@ -10,6 +10,7 @@ import { Skill } from "../skill"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
 import { LegacyEvent } from "@vectordevai/schema/legacy-event"
+import { TaskSize } from "@vectordevai/schema/task-size"
 
 type State = {
   commands: Record<string, Info>
@@ -28,6 +29,8 @@ export const Info = Schema.Struct({
   // Some command templates are lazy promises from MCP prompt resolution.
   template: Schema.Unknown,
   subtask: Schema.optional(Schema.Boolean),
+  // How much harness the command's run gets; Standard when unset.
+  size: Schema.optional(TaskSize.Tier),
   hints: Schema.Array(Schema.String),
 }).annotate({ identifier: "Command" })
 
@@ -98,6 +101,7 @@ const layer = Layer.effect(
             return command.template
           },
           subtask: command.subtask,
+          ...(command.size ? { size: command.size } : {}),
           hints: hints(command.template),
         }
       }

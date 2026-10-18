@@ -116,6 +116,13 @@ function projectExecutableConfig(config: Info, trusted: boolean, base: Info): In
       if (Object.keys(budget).length) next.budget = budget
       else delete next.budget
     }
+    // Task sizing may only get cheaper too: a cloned repository can switch the judge off, but cannot turn automatic
+    // sizing off (the full harness on every request) or have the judge run on the user's account.
+    if (next.sizing) {
+      const sizing = next.sizing.judge === "off" ? { judge: "off" as const } : undefined
+      if (sizing) next.sizing = sizing
+      else delete next.sizing
+    }
     if (next.experimental?.continue_loop_on_deny === true && base.experimental?.continue_loop_on_deny !== true) {
       const experimental = { ...next.experimental }
       delete experimental.continue_loop_on_deny

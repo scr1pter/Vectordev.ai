@@ -81,7 +81,8 @@ describe("vector run (non-interactive subprocess)", () => {
         const result = yield* vector.run('fix the "auth" bug')
         vector.expectExit(result, 0)
         const hits = yield* llm.hits
-        expect(lastUserText(hits[0].body)).toBe('fix the "auth" bug')
+        // As typed, ahead of the request's size note.
+        expect(lastUserText(hits[0].body).split("\n")[0]).toBe('fix the "auth" bug')
       }),
     60_000,
   )
@@ -326,7 +327,7 @@ describe("vector run (non-interactive subprocess)", () => {
 
         const result = yield* vector.run("delegate a look", {
           format: "json",
-          extraArgs: ["--dangerously-skip-permissions"],
+          extraArgs: ["--dangerously-skip-permissions", "--size", "thorough"],
         })
 
         expect(result.exitCode, result.stdout).toBe(0)
@@ -366,7 +367,7 @@ describe("vector run (non-interactive subprocess)", () => {
 
         const result = yield* vector.run("launch the spend survey", {
           format: "json",
-          extraArgs: ["--dangerously-skip-permissions"],
+          extraArgs: ["--dangerously-skip-permissions", "--size", "thorough"],
           timeoutMs: 50_000,
         })
         vector.expectExit(result, 0)
@@ -511,7 +512,7 @@ describe("vector run (non-interactive subprocess)", () => {
         yield* llm.pushMatch(asking("task-notification"), reply().text("the survey found two handlers"))
 
         const result = yield* vector.run("launch the survey", {
-          extraArgs: ["--dangerously-skip-permissions"],
+          extraArgs: ["--dangerously-skip-permissions", "--size", "thorough"],
           timeoutMs: 50_000,
         })
 
@@ -555,7 +556,11 @@ describe("vector run (non-interactive subprocess)", () => {
         yield* llm.pushMatch(asking("task-notification"), reply().text("the survey found two handlers"))
 
         // The run rejects every permission it is asked for, so the command ends the parent's turn.
-        const result = yield* vector.run("launch the survey", { permission: { bash: "ask" }, timeoutMs: 50_000 })
+        const result = yield* vector.run("launch the survey", {
+          permission: { bash: "ask" },
+          extraArgs: ["--size", "thorough"],
+          timeoutMs: 50_000,
+        })
 
         expect(result.timedOut).toBe(false)
         expect(result.stdout).toContain("the survey found two handlers")
@@ -583,7 +588,7 @@ describe("vector run (non-interactive subprocess)", () => {
         yield* llm.pushMatch(asking("SURVEY_BRIEF"), reply().hang())
 
         const result = yield* vector.run("launch the survey", {
-          extraArgs: ["--dangerously-skip-permissions"],
+          extraArgs: ["--dangerously-skip-permissions", "--size", "thorough"],
           env: { VECTOR_RUN_BACKGROUND_WAIT_MS: "1000" },
           timeoutMs: 50_000,
         })

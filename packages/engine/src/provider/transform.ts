@@ -3,6 +3,7 @@ import { mergeDeep, unique } from "remeda"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import type * as Provider from "./provider"
 import type { ModelCatalog } from "@vectordevai/core/model-catalog"
+import type { TaskSize } from "@vectordevai/core/task-size"
 import { Option, Schema } from "effect"
 import type { RuntimeFlags } from "@/effect/runtime-flags"
 import { iife } from "@/util/iife"
@@ -1298,6 +1299,9 @@ export function reasoningContextBody(
 }
 
 export function smallOptions(model: Provider.Model) {
+  // A free model that may reason or not runs a title, a summary or a greeting without reasoning. The free proxy passes
+  // OpenRouter's `reasoning` object through and drops `reasoning_effort`, so this is the shape that reaches the model.
+  if (model.freeModel?.reasoning === "optional") return { reasoning: { effort: "none" } }
   // Effort-style variants list their weakest effort first. Budget-style ones start at "high", a 16K thinking
   // budget that a title or summary does not need, so small calls run those models at their default instead.
   const [name, weakest] = Object.entries(model.variants ?? {})[0] ?? []
@@ -1329,6 +1333,22 @@ export function smallOptions(model: Provider.Model) {
   }
 
   return small
+}
+
+/**
+ * Provider options for a request's reasoning effort, by its task size, when the user left effort on its default. "off"
+ * is the weakest setting the model has, since a greeting needs no thinking; "low" suits a light job; "default" keeps
+ * the provider's own default; "high" is for a thorough job. Never xhigh or max: only the user picks those.
+ */
+export function effortOptions(model: Provider.Model, effort: TaskSize.Effort): Record<string, any> {
+  if (effort === "default") return {}
+  if (effort === "off") return smallOptions(model)
+  const variants = model.variants ?? {}
+  if (effort === "high") return variants.high ?? {}
+  if (model.freeModel?.reasoning === "optional") return { reasoning: { effort: "none" } }
+  const name = ["low", "minimal", "none"].find((item) => item in variants)
+  // Budget-style variants start at "high"; below that the model runs without extended thinking, as small calls do.
+  return name ? variants[name] : smallOptions(model)
 }
 
 // Maps model ID prefix to provider slug used in providerOptions.

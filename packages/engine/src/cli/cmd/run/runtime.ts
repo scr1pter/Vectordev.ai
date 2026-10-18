@@ -50,6 +50,7 @@ type RunRuntimeInput = {
   createSession?: (ctx: BootContext, input: CreateSessionInput) => Promise<ResolvedSession>
   files: RunInput["files"]
   budget?: RunInput["budget"]
+  sizing?: RunInput["sizing"]
   initialInput?: string
   thinking: boolean
   backgroundSubagents: boolean
@@ -68,6 +69,7 @@ type RunLocalInput = {
   model: RunInput["model"]
   variant: RunInput["variant"]
   budget?: RunInput["budget"]
+  sizing?: RunInput["sizing"]
   files: RunInput["files"]
   initialInput?: string
   thinking: boolean
@@ -653,6 +655,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
             model: state.model,
             variant: state.activeVariant,
             budget: input.budget,
+            sizing: input.sizing,
             prompt,
             files: input.files,
             includeFiles,
@@ -745,6 +748,7 @@ export async function runInteractiveLocalMode(input: RunLocalInput): Promise<voi
   return runInteractiveRuntime({
     files: input.files,
     budget: input.budget,
+    sizing: input.sizing,
     initialInput: input.initialInput,
     thinking: input.thinking,
     backgroundSubagents: input.backgroundSubagents,
@@ -794,6 +798,7 @@ export async function runInteractiveMode(
     {
       files: input.files,
       budget: input.budget,
+      sizing: input.sizing,
       initialInput: input.initialInput,
       thinking: input.thinking,
       backgroundSubagents: input.backgroundSubagents,

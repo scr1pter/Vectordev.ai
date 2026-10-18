@@ -20,6 +20,7 @@ import { TEAM_MARKER_RELATIVE_PATH, TeammateMessageTool } from "./teammate"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
+import { EscalateTool } from "./escalate"
 import { SkillTool } from "./skill"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
@@ -120,6 +121,7 @@ const layer = Layer.effect(
     const fsutil = yield* FSUtil.Service
 
     const invalid = yield* InvalidTool
+    const escalate = yield* EscalateTool
     const task = yield* TaskTool
     const taskManage = yield* TaskManageTool
     const read = yield* ReadTool
@@ -247,6 +249,7 @@ const layer = Layer.effect(
 
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),
+          escalate: Tool.init(escalate),
           shell: Tool.init(shell),
           read: Tool.init(read),
           glob: Tool.init(globtool),
@@ -287,6 +290,8 @@ const layer = Layer.effect(
             tool.search,
             tool.skill,
             tool.patch,
+            // Offered only to a sized Light or Standard request; the session runtime removes it everywhere else.
+            tool.escalate,
             ...(process.env.VECTOR_BROWSER_BRIDGE_URL && process.env.VECTOR_BROWSER_BRIDGE_TOKEN ? [tool.browser] : []),
             ...(process.env.VECTOR_CLOUD_BRIDGE_URL && process.env.VECTOR_CLOUD_BRIDGE_TOKEN ? [tool.vectorcloud] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),

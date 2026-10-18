@@ -67,6 +67,10 @@ import { TitleUsage } from "./title-usage"
 import { LLMEvent } from "@vectordevai/llm"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { RunBudget } from "@vectordevai/schema/run-budget"
+import { TaskSize } from "@vectordevai/core/task-size"
+import { SessionTaskSize } from "./task-size"
+import { parseJudgeVerdict } from "./judge-verdict"
+import { isRecord } from "@/util/record"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -93,6 +97,10 @@ IMPORTANT:
 - This tool provides your final answer - no further actions are taken after calling it`
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
+
+// The judge Vector runs after a finished run gets at most this many rounds per request: a FAIL sends its findings back
+// for repair and the judge looks again, and the third verdict stands.
+const MAX_JUDGE_ROUNDS = 3
 
 const FAST_EXECUTION_SYSTEM_PROMPT = [
   "FAST EXECUTION MODE is enabled for this task.",
@@ -277,41 +285,66 @@ const layer = Layer.effect(
       modelID: ModelV2.ID
       // Whether the provider answered the first main request before the run ended.
       answering: Effect.Effect<boolean>
+      // Completes when the run ends.
+      ended: Effect.Effect<void>
+      // For a sized session: the request this run answers, whether it is only a greeting, and whether it is the
+      // session's first request that is more than one.
+      sized?: { users: readonly SessionV1.WithParts[]; chat: boolean; first: boolean }
     }) {
       if (input.session.parentID || input.session.internal) return
-      if (!Session.isDefaultTitle(input.session.title)) return
 
       const real = (m: SessionV1.WithParts) =>
         m.info.role === "user" && !m.parts.every((p) => "synthetic" in p && p.synthetic)
-      const idx = input.history.findIndex(real)
-      if (idx === -1) return
-      if (input.history.filter(real).length !== 1) return
-
-      const firstUser = input.history[idx]
-      if (!firstUser || firstUser.info.role !== "user") return
-      const firstInfo = firstUser.info
+      const reals = input.history.filter(real)
+      if (reals.length === 0) return
       // A title needs what the user typed, not attached file contents or earlier synthetic context.
-      const request = firstUser.parts
-        .flatMap((p) => {
-          if (p.type === "text" && !p.synthetic) return [p.text]
-          if (p.type === "subtask") return [p.prompt]
-          if (p.type === "file" && p.filename) return [p.filename]
-          return []
-        })
-        .join("\n")
-        .trim()
-        .slice(0, 1500)
-      if (!request) return
-
+      const words = (message: SessionV1.WithParts) =>
+        message.parts
+          .flatMap((p) => {
+            if (p.type === "text" && !p.synthetic) return [p.text]
+            if (p.type === "subtask") return [p.prompt]
+            if (p.type === "file" && p.filename) return [p.filename]
+            return []
+          })
+          .join("\n")
+          .trim()
+          .slice(0, 1500)
       // The first line of what the user typed is the title at once. The model's title replaces it, but its request
       // waits until the main request is being answered, so it never delays or competes with that request.
-      const first =
-        request
-          .split("\n")
-          .map((item) => item.trim())
-          .find((item) => item.length > 0)
-          ?.replace(/\s+/g, " ") ?? request
-      const provisional = first.length > 50 ? `${first.slice(0, 50)}...` : first
+      const provisionalOf = (text: string) => {
+        const first =
+          text
+            .split("\n")
+            .map((item) => item.trim())
+            .find((item) => item.length > 0)
+            ?.replace(/\s+/g, " ") ?? text
+        return first.length > 50 ? `${first.slice(0, 50)}...` : first
+      }
+      const opening = words(reals[0])
+      // The first line of a greeting that opened the session is still Vector's own title, so the session's first real
+      // task may replace it. A title someone set stays, as does one a client named after the session's first message.
+      const greeted = !!input.sized && !input.sized.users.some((user) => user.info.id === reals[0].info.id)
+      if (
+        !Session.isDefaultTitle(input.session.title) &&
+        !(greeted && opening && input.session.title === provisionalOf(opening))
+      )
+        return
+      // A greeting is titled with what the user typed and makes no model request; the model's title waits for the
+      // session's first real task.
+      if (input.sized?.chat) {
+        if (opening && Session.isDefaultTitle(input.session.title))
+          yield* sessions.setTitle({ sessionID: input.session.id, title: provisionalOf(opening) })
+        return
+      }
+      if (input.sized ? !input.sized.first : reals.length !== 1) return
+
+      const firstUser = input.sized?.users[0] ?? reals[0]
+      if (!firstUser || firstUser.info.role !== "user") return
+      const firstInfo = firstUser.info
+      const request = (input.sized ? input.sized.users.map(words).join("\n") : opening).trim().slice(0, 1500)
+      if (!request) return
+
+      const provisional = provisionalOf(request)
       yield* sessions.setTitle({ sessionID: input.session.id, title: provisional })
       if (!(yield* input.answering)) return
       // A title someone set meanwhile stays.
@@ -329,6 +362,10 @@ const layer = Layer.effect(
         : ag.model
           ? yield* provider.getModel(ag.model.providerID, ag.model.modelID)
           : ((yield* provider.getSmallModel(input.providerID, input.modelID)) ?? primary)
+      // A shared free model allows a few requests a minute, so its title waits until the run is done rather than
+      // compete with the run's own requests.
+      if (isFreeModel(mdl)) yield* input.ended
+      if (!(yield* kept)) return
       const usage = TitleUsage.create({ sessionID: input.session.id, model: mdl, publish: events.publish })
       // A title sent to the session's provider needs a connection of its own beside the one opened for the first step.
       yield* provider.preconnect(mdl)
@@ -573,6 +610,179 @@ const layer = Layer.effect(
       } satisfies SessionV1.TextPart)
     })
 
+    // LLM-as-a-judge, run by Vector itself once a run that changed files has finished, when the request's size and the
+    // user's setting call for it: after a Thorough run, or after every run that changed files. No model is asked to
+    // launch the judge, so a greeting can never bring it in, and its cost is bounded at MAX_JUDGE_ROUNDS per request.
+    // The judge is an ordinary subagent of the session, so its card and its cost show in the conversation that ran it.
+    const judgeGate = Effect.fn("SessionPrompt.judgeGate")(function* (input: {
+      session: Session.Info
+      msgs: SessionV1.WithParts[]
+      lastUser: SessionV1.User
+      lastAssistant: SessionV1.Assistant
+    }) {
+      if (!sizable(input.session, input.lastUser) || input.lastUser.agent !== "build") return "done" as const
+      if (input.lastAssistant.error || (yield* guard.stopped(input.session.id))) return "done" as const
+      const sizing = (yield* config.get()).sizing
+      const request = SessionTaskSize.size({
+        messages: input.msgs,
+        caching: false,
+        lifetime: 0,
+        auto: sizing?.auto,
+        judge: sizing?.judge,
+      }).at(-1)
+      if (!request || request.judge === "off") return "done" as const
+      if (request.judge === "thorough" ? request.tier !== "thorough" : request.tier === "chat") return "done" as const
+      const runs = SessionTaskSize.judgeRuns(request)
+      if (runs.length >= MAX_JUDGE_ROUNDS) return "done" as const
+      // Only work that changed files since the last verdict is judged.
+      const changed = SessionTaskSize.changedFiles(request, runs.at(-1)?.messageID)
+      if (changed.length === 0) return "done" as const
+      const judge = yield* agents.get("judge")
+      const parent = yield* agents.get("build")
+      if (!judge || judge.mode === "primary" || !parent) return "done" as const
+      if (Permission.evaluate("task", "judge", parent.permission, input.session.permission ?? []).action === "deny")
+        return "done" as const
+
+      const round = runs.length + 1
+      const sessionID = input.session.id
+      const ctx = yield* InstanceState.context
+      const promptOps = yield* ops()
+      const { task: taskTool } = yield* registry.named()
+      const message: SessionV1.Assistant = yield* sessions.updateMessage({
+        id: MessageID.ascending(),
+        role: "assistant",
+        parentID: input.lastUser.id,
+        sessionID,
+        mode: parent.name,
+        agent: parent.name,
+        variant: input.lastUser.model.variant,
+        size: request.tier,
+        path: { cwd: ctx.directory, root: ctx.worktree },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        // The task tool runs the judge on this message's model, as a subagent the agent launched would run.
+        modelID: input.lastUser.model.modelID,
+        providerID: input.lastUser.model.providerID,
+        time: { created: Date.now() },
+      })
+      const args = {
+        prompt: judgeBrief(request, changed),
+        description: round === 1 ? "Check the finished work" : `Check the repairs (round ${round})`,
+        subagent_type: "judge",
+        background: false,
+      }
+      let part: SessionV1.ToolPart = yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: message.id,
+        sessionID,
+        type: "tool",
+        callID: ulid(),
+        tool: TaskTool.id,
+        metadata: { judge: { round } },
+        state: { status: "running", input: args, time: { start: Date.now() } },
+      })
+      const abort = new AbortController()
+      const result = yield* taskTool
+        .execute(args, {
+          agent: parent.name,
+          messageID: message.id,
+          sessionID,
+          abort: abort.signal,
+          callID: part.callID,
+          // The user turned the judge on, so it starts without a task permission prompt, as a subagent they named does.
+          extra: { invokedAgents: ["judge"], promptOps },
+          messages: input.msgs,
+          metadata: (val: { title?: string; metadata?: Record<string, any> }) =>
+            Effect.gen(function* () {
+              part = yield* sessions.updatePart({
+                ...part,
+                type: "tool",
+                state: { ...part.state, ...val },
+              } satisfies SessionV1.ToolPart)
+            }),
+          ask: (req: any) =>
+            permission
+              .ask({ ...req, sessionID, ruleset: Permission.merge(judge.permission, input.session.permission ?? []) })
+              .pipe(Effect.orDie),
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError("judge failed", { error: Cause.squash(cause) }).pipe(Effect.as(undefined)),
+          ),
+          Effect.onInterrupt(() =>
+            Effect.gen(function* () {
+              abort.abort()
+              message.finish = "stop"
+              message.time.completed = Date.now()
+              yield* sessions.updateMessage(message)
+              if (part.state.status !== "running") return
+              yield* sessions.updatePart({
+                ...part,
+                state: {
+                  status: "error",
+                  error: "Cancelled",
+                  time: { start: part.state.time.start, end: Date.now() },
+                  metadata: { ...part.state.metadata, interrupted: true },
+                  input: part.state.input,
+                },
+              } satisfies SessionV1.ToolPart)
+            }),
+          ),
+        )
+      const verdict = parseJudgeVerdict(result?.output)
+      const repair = verdict === "FAIL" && round < MAX_JUDGE_ROUNDS
+      // A verdict that stands ends the run; a FAIL with rounds left goes back to the agent with its findings.
+      message.finish = repair ? "tool-calls" : "stop"
+      message.time.completed = Date.now()
+      yield* sessions.updateMessage(message)
+      const start = part.state.status === "pending" ? Date.now() : part.state.time.start
+      yield* sessions.updatePart(
+        result
+          ? ({
+              ...part,
+              metadata: { judge: { round, ...(verdict ? { verdict } : {}) } },
+              state: {
+                status: "completed",
+                input: args,
+                title: result.title,
+                metadata: result.metadata,
+                output: result.output,
+                time: { start, end: Date.now() },
+              },
+            } satisfies SessionV1.ToolPart)
+          : ({
+              ...part,
+              metadata: { judge: { round } },
+              state: {
+                status: "error",
+                error: "The judge could not run",
+                input: args,
+                time: { start, end: Date.now() },
+              },
+            } satisfies SessionV1.ToolPart),
+      )
+      if (!repair) return "done" as const
+      const followup: SessionV1.User = {
+        id: MessageID.ascending(),
+        sessionID,
+        role: "user",
+        time: { created: Date.now() },
+        agent: input.lastUser.agent,
+        model: input.lastUser.model,
+        executionMode: input.lastUser.executionMode,
+      }
+      yield* sessions.updateMessage(followup)
+      yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: followup.id,
+        sessionID,
+        type: "text",
+        synthetic: true,
+        text: `<vector_judge_verdict round="${round}">Automated message from Vector, not from the user: the judge returned FAIL. Its findings are in the task result above. Repair each blocking finding, run the focused checks again, then finish with a short summary of what changed. Vector runs the judge again afterwards.</vector_judge_verdict>`,
+      } satisfies SessionV1.TextPart)
+      return "repair" as const
+    })
+
     const shellImpl = Effect.fn("SessionPrompt.shellImpl")(function* (input: ShellInput, ready?: Latch.Latch) {
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
@@ -809,6 +1019,8 @@ const layer = Layer.effect(
         system: input.system,
         format: input.format,
         executionMode: input.executionMode,
+        ...(input.size ? { size: input.size } : {}),
+        ...(input.judge ? { judge: input.judge } : {}),
       }
 
       const current = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
@@ -1307,10 +1519,12 @@ const layer = Layer.effect(
       const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
       // A run that ends before the provider answers keeps its provisional title without starting another request.
       const answering = yield* Deferred.make<boolean>()
-      const steps = runSteps(session, answering, resumed).pipe(
+      const ended = yield* Deferred.make<void>()
+      const steps = runSteps(session, answering, Deferred.await(ended), resumed).pipe(
         Effect.ensuring(Deferred.succeed(answering, false)),
         // Stop waits for queued snapshots so immediate undo sees all changes from completed steps.
         Effect.ensuring(processor.settle(sessionID)),
+        Effect.ensuring(Deferred.succeed(ended, undefined)),
       )
       // A helper decides each time it runs, since one helper session can serve many runs, such as autocomplete or the
       // Browser Agent's planner. Inside its session's run it counts there. Outside one, such as a review the user
@@ -1396,6 +1610,7 @@ const layer = Layer.effect(
     const runSteps = Effect.fn("SessionPrompt.runSteps")(function* (
       session: Session.Info,
       answering: Deferred.Deferred<boolean>,
+      ended: Effect.Effect<void>,
       resumed?: ResumeFreeModelsInput & { parentID: MessageID },
     ) {
       const ctx = yield* InstanceState.context
@@ -1449,6 +1664,9 @@ const layer = Layer.effect(
             })
           }
           yield* Effect.logInfo("exiting loop", { "session.id": sessionID })
+          // LLM-as-a-judge runs here, once the agent has finished, when the request's size and the user's setting
+          // call for it. A FAIL sends its findings back and the run goes on to repair them.
+          if ((yield* judgeGate({ session, msgs, lastUser, lastAssistant })) === "repair") continue
           break
         }
 
@@ -1461,19 +1679,6 @@ const layer = Layer.effect(
         }
 
         step++
-        if (step === 1 && !resumed) {
-          const background = yield* InstanceState.get(backgroundTasks)
-          const fiber = yield* title({
-            session,
-            modelID: lastUser.model.modelID,
-            providerID: lastUser.model.providerID,
-            history: msgs,
-            answering: Deferred.await(answering),
-          }).pipe(Effect.ignore, Effect.forkIn(background.scope))
-          background.titles.add(fiber)
-          fiber.addObserver(() => background.titles.delete(fiber))
-        }
-
         const selectedModel = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
         const model =
           lastUser.executionMode === "fast" && !selectedModel.id.endsWith("-fast")
@@ -1483,6 +1688,46 @@ const layer = Layer.effect(
             : selectedModel
         // The provider connection opens while the first request is prepared, rather than after it is sent.
         if (step === 1) yield* provider.preconnect(model)
+
+        // Every step sizes the request again from the projected history, so a raise or a message that joined the run
+        // applies from the next step. Subagents, Vector's hidden helpers and custom agents keep their own setup.
+        const sizing = (yield* config.get()).sizing
+        const requests = sizable(session, lastUser)
+          ? SessionTaskSize.size({
+              messages: msgs,
+              caching: caches(model),
+              lifetime: ProviderTransform.cacheLifetime(model),
+              auto: sizing?.auto,
+              judge: sizing?.judge,
+            })
+          : []
+        const sized = requests.at(-1)
+
+        if (step === 1 && !resumed) {
+          const background = yield* InstanceState.get(backgroundTasks)
+          const fiber = yield* title({
+            session,
+            modelID: lastUser.model.modelID,
+            providerID: lastUser.model.providerID,
+            history: msgs,
+            answering: Deferred.await(answering),
+            ended,
+            // The composer's Quick mode is a greeting lane of its own, titled the same way.
+            ...(lastUser.agent === "quick"
+              ? { sized: { users: [], chat: true, first: false } }
+              : sized
+                ? {
+                    sized: {
+                      users: sized.users,
+                      chat: sized.tier === "chat",
+                      first: !requests.slice(0, -1).some((request) => request.tier !== "chat"),
+                    },
+                  }
+                : {}),
+          }).pipe(Effect.ignore, Effect.forkIn(background.scope))
+          background.titles.add(fiber)
+          fiber.addObserver(() => background.titles.delete(fiber))
+        }
         const task = tasks.pop()
 
         if (task?.type === "subtask") {
@@ -1529,9 +1774,14 @@ const layer = Layer.effect(
           yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
           throw error
         }
+        // A greeting, thanks or a question about Vector goes out on the quick lane: no tools, no repository context,
+        // only the newest message, and no extended reasoning. Plan mode keeps its own setup for everything else.
+        const chat = sized?.tier === "chat"
+        const stepAgent = chat ? ((yield* agents.get("quick")) ?? agent) : agent
+        const build = sized && !chat && agent.name === "build" ? sized : undefined
         const maxSteps = agent.steps ?? Infinity
         const isLastStep = step >= maxSteps
-        const quick = agent.name === "quick" || agent.name === "autocomplete"
+        const quick = stepAgent.name === "quick" || stepAgent.name === "autocomplete"
         msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
           Effect.provideService(RuntimeFlags.Service, flags),
           Effect.provideService(FSUtil.Service, fsys),
@@ -1539,14 +1789,16 @@ const layer = Layer.effect(
         )
         // A quick agent is given no environment, so it is given no date either.
         if (!quick) msgs = SessionReminders.dates(msgs)
+        if (requests.length > 0) msgs = sizeNotes(msgs, quick ? [] : requests)
 
         const msg: SessionV1.Assistant = {
           id: MessageID.ascending(),
           parentID: lastUser.id,
           role: "assistant",
-          mode: agent.name,
-          agent: agent.name,
+          mode: stepAgent.name,
+          agent: stepAgent.name,
           variant: lastUser.model.variant,
+          ...(build ? { size: build.tier } : chat ? { size: "chat" as const } : {}),
           path: { cwd: ctx.directory, root: ctx.worktree },
           cost: 0,
           tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -1581,13 +1833,14 @@ const layer = Layer.effect(
           const promptOps = yield* ops()
 
           const tools = yield* SessionTools.resolve({
-            agent,
+            agent: stepAgent,
             session,
             model,
             processor: handle,
             invokedAgents,
             messages: msgs,
             promptOps,
+            ...(build ? { taskSize: { tier: build.tier, escalated: build.escalated } } : {}),
           }).pipe(
             Effect.provideService(Session.Service, sessions),
             Effect.provideService(Plugin.Service, plugin),
@@ -1596,6 +1849,24 @@ const layer = Layer.effect(
             Effect.provideService(MCP.Service, mcp),
             Effect.provideService(Truncate.Service, truncate),
           )
+
+          // A request is offered what its size needs. On a caching provider the size here is the session's highest
+          // while the cache is warm, so the task tool may stay defined on a Light request; it still runs only the
+          // subagents the user named, and escalate is how the agent asks for more.
+          if (build) {
+            for (const id of TaskSize.withheld(build.offered.tier, {
+              cloud: build.offered.cloud,
+              browser: build.offered.browser,
+              agents: build.result.agents.length,
+            }))
+              delete tools[id]
+            // A thorough request has nothing to raise to, but on a caching provider the tool keeps its place so a
+            // smaller follow-up sends the same definitions and reads the cached prefix.
+            if (build.tier === "thorough" && !caches(model)) delete tools.escalate
+            const delegate = tools.task?.execute
+            if (delegate && build.tier !== "thorough")
+              tools.task = { ...tools.task, execute: namedOnly(delegate, build.result.agents) }
+          } else delete tools.escalate
 
           if (lastUser.format?.type === "json_schema") {
             tools["StructuredOutput"] = createStructuredOutputTool({
@@ -1618,7 +1889,7 @@ const layer = Layer.effect(
           // Policies for a tool go only with a request that offers it, after this agent's permissions remove what it
           // may not use, as the request itself is built.
           const offered = Object.keys(
-            LLMRequestPrep.resolveTools({ tools, agent, permission: session.permission, user: lastUser }),
+            LLMRequestPrep.resolveTools({ tools, agent: stepAgent, permission: session.permission, user: lastUser }),
           )
           const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
             quick ? Effect.succeed(undefined) : sys.skills(agent),
@@ -1631,19 +1902,23 @@ const layer = Layer.effect(
                   Effect.flatMap((list) =>
                     sys.environment(model, {
                       subagents: {
-                        ...SystemPrompt.subagentAvailability({
-                          agents: list,
-                          permission: agent.permission,
-                          session: session.permission,
-                          agent: agent.name,
-                          nested: session.parentID !== undefined,
-                        }),
+                        ...delegation(
+                          SystemPrompt.subagentAvailability({
+                            agents: list,
+                            permission: agent.permission,
+                            session: session.permission,
+                            agent: agent.name,
+                            nested: session.parentID !== undefined,
+                          }),
+                          build && { offered: offered.includes("task"), named: build.result.agents, tier: build.tier },
+                        ),
                         teammates: offered.includes("send_teammate_message"),
                       },
                       tools: offered,
                       nested: session.parentID !== undefined,
                       // The day the history starts on; a later day is noted on the user message that starts it.
                       date: msgs.find((message) => message.info.role === "user")?.info.time.created,
+                      completion: build?.offered.tier !== "light",
                     }),
                   ),
                 ),
@@ -1659,6 +1934,10 @@ const layer = Layer.effect(
             MessageV2.toModelMessagesEffect(msgs, model),
           ])
           const system = [
+            // The quick lane carries no environment, so this is how it can say which model answers.
+            ...(stepAgent.name === "quick"
+              ? [`You are Vector, powered by the model named ${model.api.id} (${model.providerID}/${model.api.id}).`]
+              : []),
             ...env.session,
             ...instructions,
             ...(mcpInstructions ? [mcpInstructions] : []),
@@ -1669,7 +1948,14 @@ const layer = Layer.effect(
           if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
           const result = yield* handle.process({
             user: lastUser,
-            agent,
+            agent: stepAgent,
+            // A greeting never reasons; otherwise the size sets effort where the user left it on its default. Changing
+            // thinking settings rewrites Anthropic's cached messages, so there effort follows the size the tools do.
+            effort: quick
+              ? "off"
+              : build
+                ? TaskSize.effort(ProviderTransform.usesCacheBreakpoints(model) ? build.offered.tier : build.tier)
+                : undefined,
             permission: session.permission,
             sessionID,
             parentSessionID: session.parentID,
@@ -1952,6 +2238,9 @@ const layer = Layer.effect(
           variant: input.variant,
           executionMode: input.executionMode,
           budget: input.budget,
+          // A command's template is a workflow someone wrote, not a measure of the job, so it is sized by declaration.
+          size: input.size && input.size !== "auto" ? input.size : (cmd.size ?? "standard"),
+          ...(input.judge ? { judge: input.judge } : {}),
         },
         // @file references in an MCP prompt or a skill are not the user's choice; the user's own attachments are.
         { userFile: (url) => attached.has(url) || cmd.source === "command" },
@@ -1982,6 +2271,115 @@ function isFreeSelection(model: { providerID: string; modelID: string }) {
   return ["vector", "openrouter"].includes(model.providerID) && model.modelID.toLowerCase().endsWith(":free")
 }
 
+// Sizing applies to the user's own requests to the build agent, and Plan mode's greetings. Subagents, Vector's hidden
+// helpers and custom agents keep their own setup.
+function sizable(session: Session.Info, user: SessionV1.User) {
+  return !session.parentID && !session.internal && (user.agent === "build" || user.agent === "plan")
+}
+
+// Whether the provider caches the prompt prefix, so a smaller tool set on the next request would write it again.
+function caches(model: Provider.Model) {
+  return ProviderTransform.usesCacheBreakpoints(model) || (model.cost?.cache?.read ?? 0) > 0
+}
+
+// Each sized request's guidance rides on its last user message, worked out from that request alone, so every earlier
+// message renders the same on every request and stays in the provider's cache. The judge policy older clients sent
+// with each prompt is dropped: Vector runs the judge itself, and the policy would have the model launch it too.
+function sizeNotes(messages: SessionV1.WithParts[], requests: readonly SessionTaskSize.Request[]) {
+  const notes = new Map(
+    requests.flatMap((request) => {
+      const user = request.users.at(-1)
+      if (!user || user.info.role !== "user" || user.info.agent !== "build") return []
+      const text = TaskSize.note(request.result.tier, { escalate: true, judge: request.judge !== "off" })
+      return text ? [[user.info.id, text] as const] : []
+    }),
+  )
+  return messages.map((message) => {
+    if (message.info.role !== "user") return message
+    const note = notes.get(message.info.id)
+    const parts = message.parts.filter(
+      (part) => !(part.type === "text" && part.synthetic && part.text.startsWith(SessionTaskSize.LEGACY_JUDGE_POLICY)),
+    )
+    if (!note && parts.length === message.parts.length) return message
+    return {
+      ...message,
+      parts: [
+        ...parts,
+        ...(note
+          ? [
+              {
+                id: PartID.ascending(),
+                messageID: message.info.id,
+                sessionID: message.info.sessionID,
+                type: "text" as const,
+                text: note,
+                synthetic: true,
+              },
+            ]
+          : []),
+      ],
+    }
+  })
+}
+
+// Below Thorough the task tool may stay in a cached request's definitions; only a subagent the user named runs.
+function namedOnly(execute: NonNullable<AITool["execute"]>, named: readonly string[]): NonNullable<AITool["execute"]> {
+  return (args, options) => {
+    const input: Record<string, unknown> = isRecord(args) ? args : {}
+    const briefs: unknown[] = Array.isArray(input.tasks) ? input.tasks : [input]
+    const types = briefs.map((brief) =>
+      isRecord(brief) && typeof brief.subagent_type === "string" && brief.subagent_type.trim()
+        ? brief.subagent_type.trim()
+        : "general",
+    )
+    if (types.every((type) => named.includes(type))) return execute(args, options)
+    throw new Error(
+      "Subagents are not offered for this request. Do the work yourself, or call escalate if it truly needs subagents.",
+    )
+  }
+}
+
+// What the subagent policy describes for a sized request: nothing when the task tool is not offered, and only the
+// subagents the user named when they are all a smaller size allows.
+function delegation(
+  availability: SystemPrompt.SubagentAvailability,
+  sized: { offered: boolean; named: readonly string[]; tier: TaskSize.Tier } | undefined,
+): SystemPrompt.SubagentAvailability {
+  if (!sized) return availability
+  if (!sized.offered) return { general: false, specialists: false }
+  if (sized.tier === "thorough" || sized.named.length === 0) return availability
+  const permitted = (availability.permitted ?? []).filter((name) => sized.named.includes(name))
+  return {
+    ...availability,
+    general: availability.general && sized.named.includes("general"),
+    specialists: permitted.length > 0,
+    permitted,
+  }
+}
+
+function judgeBrief(request: SessionTaskSize.Request, changed: readonly string[]) {
+  const report = SessionTaskSize.closingText(request.messages).slice(-4000)
+  return [
+    "Vector asks you to judge finished work before it is reported as done.",
+    "",
+    "The user's request, verbatim:",
+    "<request>",
+    SessionTaskSize.requestText(request).slice(0, 8000),
+    "</request>",
+    "",
+    "Files changed for it:",
+    ...changed.slice(0, 50).map((file) => `- ${file}`),
+    ...(changed.length > 50 ? [`- and ${changed.length - 50} more`] : []),
+    "",
+    "The agent's closing report. It is a claim to check, not evidence:",
+    "<report>",
+    report || "(no report)",
+    "</report>",
+    "",
+    "Inspect the diff and the changed files, run focused checks where it is safe, and end with your VERDICT block.",
+  ].join("\n")
+}
+
 const ModelRef = Schema.Struct({
   providerID: ProviderV2.ID,
   modelID: ModelV2.ID,
@@ -2002,6 +2400,14 @@ export const PromptInput = Schema.Struct({
   variant: Schema.optional(Schema.String),
   executionMode: Schema.optional(Schema.Union([Schema.Literal("normal"), Schema.Literal("fast")])),
   budget: Schema.optional(RunBudget.Info),
+  size: Schema.optional(TaskSize.Choice).annotate({
+    description:
+      "How much harness the request gets: auto (the default) lets Vector size it from what it says; chat is a direct reply with no tools; light, standard or thorough set it. Only thorough offers subagents.",
+  }),
+  judge: Schema.optional(TaskSize.JudgeMode).annotate({
+    description:
+      "When Vector runs LLM-as-a-judge after the run: off, thorough (after large tasks that changed files) or changes (after every task that changed files). Defaults to the config's sizing.judge.",
+  }),
   parts: Schema.Array(
     Schema.Union([
       SessionV1.TextPartInput,
@@ -2051,6 +2457,9 @@ export const CommandInput = Schema.Struct({
   executionMode: Schema.optional(Schema.Union([Schema.Literal("normal"), Schema.Literal("fast")])),
   // The run budget for the run the command starts, as on PromptInput.
   budget: Schema.optional(RunBudget.Info),
+  // As on PromptInput. A command's run is Standard unless the command or the sender sets a size.
+  size: Schema.optional(TaskSize.Choice),
+  judge: Schema.optional(TaskSize.JudgeMode),
   // Inlined (no identifier annotation) to keep the original SDK output — the
   // PromptInput call site below references FilePartInput by ref via the
   // Schema export in message-v2.ts.

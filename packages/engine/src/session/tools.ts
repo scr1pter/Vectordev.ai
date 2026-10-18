@@ -12,6 +12,7 @@ import { Truncate } from "@/tool/truncate"
 
 import { Plugin } from "@/plugin"
 import type { TaskPromptOps } from "@/tool/task"
+import type { TaskSizeContext } from "@/tool/escalate"
 import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
 import { Effect, Result, Schema } from "effect"
 import { MessageV2 } from "./message-v2"
@@ -47,6 +48,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   invokedAgents: readonly string[]
   messages: SessionV1.WithParts[]
   promptOps: TaskPromptOps
+  // The request's size this step, for the escalate tool; absent where sizing does not apply.
+  taskSize?: TaskSizeContext
 }) {
   const tools: Record<string, AITool> = {}
   const run = yield* EffectBridge.make()
@@ -62,12 +65,20 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     abort: options.abortSignal!,
     messageID: input.processor.message.id,
     callID: options.toolCallId,
-    extra: { model: input.model, invokedAgents: input.invokedAgents, promptOps: input.promptOps },
+    extra: {
+      model: input.model,
+      invokedAgents: input.invokedAgents,
+      promptOps: input.promptOps,
+      ...(input.taskSize ? { taskSize: input.taskSize } : {}),
+    },
     ownedPaths: SubagentLifecycle.read(input.session)?.ownedPaths,
-    getOwnedPaths: () => sessions.get(input.session.id).pipe(
-      Effect.map((session) => SubagentLifecycle.read(session)?.ownedPaths ?? SubagentLifecycle.read(input.session)?.ownedPaths),
-      Effect.orDie,
-    ),
+    getOwnedPaths: () =>
+      sessions.get(input.session.id).pipe(
+        Effect.map(
+          (session) => SubagentLifecycle.read(session)?.ownedPaths ?? SubagentLifecycle.read(input.session)?.ownedPaths,
+        ),
+        Effect.orDie,
+      ),
     agent: input.agent.name,
     messages: input.messages,
     metadata: (val) =>

@@ -11,6 +11,7 @@
 //     → stream.ts bridges to footer API
 //       → footer.ts queues commits and patches the footer view
 //         → OpenTUI split-footer renderer writes to terminal
+import type { TaskSize } from "@vectordevai/schema/task-size"
 import type { VectorClient, PermissionRequest, QuestionRequest, RunBudget, ToolPart } from "@vectordevai/sdk/v2"
 import type { TuiConfig } from "@vectordevai/tui/config"
 
@@ -67,6 +68,8 @@ export type RunInput = {
   variant: string | undefined
   // Arms the spend guard on every prompt turn sent from this session, from --max-cost and --max-steps.
   budget?: RunBudget
+  // The task size and judge setting sent with every prompt turn, from --size and --judge.
+  sizing?: { size?: TaskSize.Choice; judge?: TaskSize.JudgeMode }
   files: RunFilePart[]
   initialInput?: string
   thinking: boolean
