@@ -14,7 +14,7 @@ export const dict = {
   "freeModels.start.free": "Start free with OpenRouter",
   "freeModels.start.ownKey": "Use my own API key",
   "freeModels.start.ready": "{{model}} is selected. Your prompt is ready to send.",
-  "freeModels.start.readyForProject": "{{model}} is ready. Open a project to send your first prompt.",
+  "freeModels.start.readyForProject": "{{model}} is ready. Open a repository to send your first prompt.",
   "freeModels.start.unavailable":
     "No free model is available on your account right now. Vector won't pick a paid model for you. Try again later or choose a model yourself.",
   "command.category.suggested": "Suggested",
