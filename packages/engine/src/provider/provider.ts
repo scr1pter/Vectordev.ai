@@ -8,7 +8,7 @@ import { FreeModels } from "@vectordevai/core/free-models"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
 import type { FreeModelInfo } from "@vectordevai/schema/free-model"
-import { isFreeModel } from "@vectordevai/schema/free-model"
+import { FREE_MODEL_FALLBACKS, isFreeModel } from "@vectordevai/schema/free-model"
 import { ProviderUnavailable, providerRetired, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
 import {
@@ -1370,6 +1370,12 @@ export function fromModelCatalogProvider(provider: ModelCatalog.Provider): Info 
 }
 
 export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "vector" | "openrouter" = "vector"): Info {
+  // A catalog published before it said whether a model may reason without it says nothing; the reviewed fallback for
+  // the same model fills that in, so switching reasoning off does not wait on a catalog deploy.
+  const reasoning = (model: FreeModelInfo) => {
+    const value = model.reasoning ?? FREE_MODEL_FALLBACKS.find((item) => item.id === model.id)?.reasoning
+    return value === "optional" || value === "mandatory" ? { reasoning: value } : {}
+  }
   return {
     id: ProviderV2.ID.make(providerID),
     name: providerID === "vector" ? "Vector" : "OpenRouter",
@@ -1385,7 +1391,7 @@ export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "ve
           name: model.name,
           freeModel: {
             source: providerID === "vector" ? "shared" : "openrouter",
-            ...(model.reasoning ? { reasoning: model.reasoning } : {}),
+            ...reasoning(model),
           },
           api: {
             id: model.id,

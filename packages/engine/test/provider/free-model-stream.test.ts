@@ -124,3 +124,28 @@ test("a greeting on a free model whose reasoning is optional reaches the free pr
   expect(forwarded[2]?.reasoning).toBeUndefined()
   expect(forwarded.some((body) => "reasoning_effort" in body)).toBe(false)
 })
+
+test("a free model the live catalog says nothing about takes its reviewed reasoning, and an unsupported one never does", async () => {
+  const { Provider } = await import("@/provider/provider")
+  const north = FREE_MODEL_FALLBACKS.find((model) => model.id === "cohere/north-mini-code:free")!
+  // A catalog published before it carried the field: reasoning still switches off without waiting on a deploy.
+  const unstated = {
+    id: north.id,
+    name: north.name,
+    contextLength: north.contextLength,
+    maxOutputTokens: north.maxOutputTokens,
+    providers: north.providers,
+  }
+  expect(Provider.fromFreeModels([unstated]).models[north.id]?.freeModel?.reasoning).toBe("optional")
+  // The catalog's own word wins, and an endpoint that does not take the parameter is never sent it.
+  expect(Provider.fromFreeModels([{ ...north, reasoning: "unsupported" }]).models[north.id]?.freeModel?.reasoning).toBe(
+    undefined,
+  )
+  expect(Provider.fromFreeModels([{ ...north, reasoning: "mandatory" }]).models[north.id]?.freeModel?.reasoning).toBe(
+    "mandatory",
+  )
+  // A model with no reviewed fallback keeps its own default.
+  expect(
+    Provider.fromFreeModels([{ ...unstated, id: "other/model:free" }]).models["other/model:free"]?.freeModel?.reasoning,
+  ).toBeUndefined()
+})

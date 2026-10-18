@@ -7,9 +7,10 @@ export const FreeModelInfo = Schema.Struct({
   maxOutputTokens: Schema.Number,
   providers: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, retention: Schema.String })),
   // Whether the model reasons, from OpenRouter's supported parameters: "optional" means Vector may switch reasoning off
-  // for a greeting or a light job. Absent when the model takes no reasoning parameter, or on a catalog published
-  // before this field existed; such a model keeps its own default.
-  reasoning: Schema.optional(Schema.Literals(["optional", "mandatory"])),
+  // for a greeting or a light job; "unsupported" means an endpoint does not take the parameter. Absent when OpenRouter
+  // did not say, or on a catalog published before this field existed; Vector then uses the reviewed fallback for that
+  // model, if it has one, and otherwise the model keeps its own default.
+  reasoning: Schema.optional(Schema.Literals(["optional", "mandatory", "unsupported"])),
 })
 export type FreeModelInfo = typeof FreeModelInfo.Type
 

@@ -31,7 +31,8 @@ test("reasoning is optional only when OpenRouter says it is not mandatory and ev
     ...endpoint,
     supported_parameters: endpoint.supported_parameters.filter((item: string) => item !== "reasoning"),
   }
-  expect(info({ reasoning: { mandatory: false } }, [noReasoning])).toBeUndefined()
+  // An endpoint without the parameter is said outright, so no client falls back to a value that would send it.
+  expect(info({ reasoning: { mandatory: false } }, [noReasoning])).toBe("unsupported")
 })
 
 test("no-training mode applies the same model ID and endpoint checks as ZDR mode", () => {

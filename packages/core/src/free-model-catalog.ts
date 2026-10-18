@@ -142,9 +142,10 @@ export function freeModelInfo(
     return
   // Reasoning is switched off for a greeting only on OpenRouter's word that it may be: the model says reasoning is not
   // mandatory, and every endpoint takes the parameter, since the request asks OpenRouter to route only to endpoints
-  // that support every parameter it sends.
+  // that support every parameter it sends. An endpoint without the parameter is stated, so a client never falls back
+  // to a reviewed value that would send it.
   const reasoning = !eligible.every((item) => item.endpoint.supported_parameters.includes("reasoning"))
-    ? undefined
+    ? ("unsupported" as const)
     : model.reasoning?.mandatory === true
       ? ("mandatory" as const)
       : model.reasoning?.mandatory === false
