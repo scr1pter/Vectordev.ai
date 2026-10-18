@@ -247,7 +247,7 @@ describe("cloud CLI commands in the shell", () => {
       [['v"ercel"', "--prod"], "production"],
       [["v\\ercel", "--prod"], "production"],
       [["vercel", "--pr''od"], "production"],
-      [["supa''base", "db", "push"], "linked project"],
+      [["supa''base", "db", "push"], "linked Supabase project"],
       [["C:\\tools\\vercel.cmd", "--prod"], "production"],
     ]
     for (const [tokens, environment] of cases) {
@@ -259,7 +259,7 @@ describe("cloud CLI commands in the shell", () => {
     const cases: Array<[string, string]> = [
       ["node node_modules/vercel/dist/index.js deploy --prod", "production"],
       ["node --require ./hook.js node_modules/.bin/vercel --prod", "production"],
-      ["node node_modules/supabase/bin/supabase db push", "linked project"],
+      ["node node_modules/supabase/bin/supabase db push", "linked Supabase project"],
       ["deno run -A npm:vercel --prod", "production"],
       ["deno run -A npm:vercel@59 deploy", "preview"],
       ["corepack pnpm dlx vercel --prod", "production"],

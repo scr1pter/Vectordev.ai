@@ -336,7 +336,7 @@ function vercel(args: string[]): Request | undefined {
       environment: "development",
       action: "dev",
       summary:
-        "run the project on this machine with its Development environment variables, secrets included, downloaded from Vercel",
+        "run the app on this machine with the Vercel project's Development environment variables, secrets included, downloaded from Vercel",
     }
   }
   if (sub === "build") {
@@ -349,7 +349,7 @@ function vercel(args: string[]): Request | undefined {
       provider: "Vercel",
       environment,
       action: "build",
-      summary: `build the project, first writing its ${environment} environment variables, secrets included, into .vercel when its settings are not on this machine`,
+      summary: `build the Vercel project, first writing its ${environment} environment variables, secrets included, into .vercel when its settings are not on this machine`,
     }
   }
   // `vercel`, `vercel --prod` and `vercel <dir>` deploy, as `vercel deploy` does.
@@ -372,7 +372,7 @@ function vercel(args: string[]): Request | undefined {
       provider: "Vercel",
       environment: "production",
       action: sub,
-      summary: "change which deployment serves the project, or remove deployments",
+      summary: "change which deployment serves the Vercel project, or remove deployments",
     }
   }
   if (VERCEL_ENVIRONMENT.has(sub)) {
@@ -383,8 +383,8 @@ function vercel(args: string[]): Request | undefined {
       action: [sub, second].filter(Boolean).join(" "),
       summary:
         sub === "pull" || second === "pull"
-          ? "write the project's environment variables, secrets included, into local files"
-          : "change the project's environment variables",
+          ? "write the Vercel project's environment variables, secrets included, into local files"
+          : "change the Vercel project's environment variables",
     }
   }
   return {
@@ -525,7 +525,7 @@ function supabase(args: string[]): Request | undefined {
   return {
     permission: "vector_cloud_database",
     provider: "Supabase",
-    environment: "linked project",
+    environment: "linked Supabase project",
     action,
     summary: "change the Supabase project or account, or read its data or keys",
   }
