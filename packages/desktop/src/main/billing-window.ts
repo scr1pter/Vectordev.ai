@@ -57,6 +57,8 @@ export function openBillingWindow(url: string, origin: string, parent?: BrowserW
   const finish = (outcome: BillingOutcome) => {
     if (settle.done) return
     settle.done = true
+    // The window closes a moment later; a new request in the meantime gets a new window, not this finished one.
+    if (state.current?.window === window) state.current = undefined
     finished.resolve(outcome)
     if (!window.isDestroyed()) window.close()
   }
@@ -103,6 +105,10 @@ export function openBillingWindow(url: string, origin: string, parent?: BrowserW
     event.preventDefault()
     if (billingNavigation(item.getURL()) !== "block") void shell.openExternal(item.getURL())
   })
+  // A page that could not load at all; -3 is a navigation this window stopped itself.
+  contents.on("did-fail-load", (_event, code, _description, _url, mainFrame) => {
+    if (mainFrame && code !== -3) finish("failed")
+  })
   contents.on("page-title-updated", (event) => event.preventDefault())
   contents.on("did-navigate", (_event, target) => {
     if (!window.isDestroyed()) window.setTitle(billingTitle(target))
@@ -119,9 +125,7 @@ export function openBillingWindow(url: string, origin: string, parent?: BrowserW
   })
 
   state.current = { window, done: finished.promise }
-  void window.loadURL(url).catch(() => {
-    // A navigation this window stopped itself also rejects; only a page that never loaded is a failure.
-    if (!settle.done && !window.isDestroyed() && !contents.getURL()) finish("failed")
-  })
+  // Failures arrive through did-fail-load; a navigation this window stopped itself also rejects here.
+  void window.loadURL(url).catch(() => undefined)
   return finished.promise
 }
