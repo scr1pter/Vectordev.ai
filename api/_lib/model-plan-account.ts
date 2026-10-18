@@ -8,15 +8,19 @@ import { modelPlanStripe, stripeRecord } from "./model-plan-stripe.js"
 import { ApiError } from "./http.js"
 import { persistentStore } from "./persistent-store.js"
 
+// `reservation` names the checkout's hold on Vector's OpenRouter balance (see reserveCodiumSale).
+const Checkout = Schema.Struct({
+  id: Schema.String,
+  plan: Schema.String,
+  url: Schema.String,
+  expires: Schema.Number,
+  reservation: Schema.optional(Schema.String),
+})
 const Account = Schema.Struct({
   customer: Schema.String,
   closing: Schema.optional(Schema.Boolean),
-  checkout: Schema.optional(
-    Schema.Struct({ id: Schema.String, plan: Schema.String, url: Schema.String, expires: Schema.Number }),
-  ),
-  topupCheckout: Schema.optional(
-    Schema.Struct({ id: Schema.String, plan: Schema.String, url: Schema.String, expires: Schema.Number }),
-  ),
+  checkout: Schema.optional(Checkout),
+  topupCheckout: Schema.optional(Checkout),
   purchases: Schema.optional(
     Schema.Array(
       Schema.Struct({
@@ -921,35 +925,34 @@ export async function modelPlanCheckout(
         )
       )
         throw new ApiError(409, "MODEL_PLAN_EXISTS", "You already have a subscription. Manage it from your account.")
-      if (account.checkout && account.checkout.expires > now) {
-        const pending = await modelPlanStripe(
-          `checkout/sessions/${encodeURIComponent(account.checkout.id)}`,
-          {},
-          fetcher,
+      const earlier = account.checkout && account.checkout.expires > now ? account.checkout : undefined
+      const pending = earlier
+        ? await modelPlanStripe(`checkout/sessions/${encodeURIComponent(earlier.id)}`, {}, fetcher)
+        : undefined
+      if (pending?.status === "complete")
+        throw new ApiError(
+          409,
+          "MODEL_PLAN_EXISTS",
+          "Checkout has already completed. Refresh your account or manage your subscription.",
         )
-        if (pending.status === "complete")
-          throw new ApiError(
-            409,
-            "MODEL_PLAN_EXISTS",
-            "Checkout has already completed. Refresh your account or manage your subscription.",
-          )
-        if (
-          pending.status === "open" &&
-          account.checkout.plan === plan.id &&
-          stripeRecord(pending.metadata) &&
-          pending.metadata.vector_model_credits_usd === String(plan.credits) &&
-          pending.metadata.vector_price_id === priceID
-        )
-          return { url: account.checkout.url }
-        if (pending.status === "open") {
-          await verify()
-          await modelPlanStripe(
-            `checkout/sessions/${encodeURIComponent(account.checkout.id)}/expire`,
-            { method: "POST" },
-            fetcher,
-          )
-        }
-      }
+      if (
+        earlier &&
+        pending?.status === "open" &&
+        earlier.plan === plan.id &&
+        stripeRecord(pending.metadata) &&
+        pending.metadata.vector_model_credits_usd === String(plan.credits) &&
+        pending.metadata.vector_price_id === priceID
+      )
+        return { url: earlier.url }
+      if (pending?.status === "open") await verify()
+      const closed =
+        earlier && pending?.status === "open"
+          ? await modelPlanStripe(
+              `checkout/sessions/${encodeURIComponent(earlier.id)}/expire`,
+              { method: "POST" },
+              fetcher,
+            )
+          : pending
       const price = await modelPlanStripe(`prices/${priceID}`, {}, fetcher)
       const recurring = stripeRecord(price.recurring) ? price.recurring : undefined
       if (
@@ -961,9 +964,17 @@ export async function modelPlanCheckout(
       )
         throw new ApiError(503, "MODEL_PLAN_PRICE_MISMATCH", "This subscription price is not configured correctly.")
       const closes = (Math.floor(now / 1_800_000) + 2) * 1_800_000
+      const idempotency = `vector-model-checkout-${user.id}-${plan.id}-${createHash("sha256").update(`${priceID}:${plan.credits}`).digest("hex").slice(0, 12)}-${account.checkout?.id ?? "new"}-${Math.floor(now / 1_800_000)}`
+      // Only a checkout that can no longer be paid gives its reservation back. A paid one keeps counting until it
+      // lapses, because the reading this sale is measured against may not count its credits as owed yet.
       await reserveCodiumSale(
         funding,
-        { account: user.id, kind: "subscription", credits: plan.credits, closes },
+        {
+          id: idempotency,
+          credits: plan.credits,
+          closes,
+          released: closed?.status === "expired" ? earlier?.reservation : undefined,
+        },
         fetcher,
         now,
       )
@@ -972,7 +983,7 @@ export async function modelPlanCheckout(
         "checkout/sessions",
         {
           method: "POST",
-          idempotency: `vector-model-checkout-${user.id}-${plan.id}-${createHash("sha256").update(`${priceID}:${plan.credits}`).digest("hex").slice(0, 12)}-${account.checkout?.id ?? "new"}-${Math.floor(now / 1_800_000)}`,
+          idempotency,
           body: new URLSearchParams({
             mode: "subscription",
             "payment_method_types[0]": "card",
@@ -1003,7 +1014,13 @@ export async function modelPlanCheckout(
         user.id,
         {
           ...account,
-          checkout: { id: checkout.id, plan: plan.id, url: checkout.url, expires: checkout.expires_at * 1000 },
+          checkout: {
+            id: checkout.id,
+            plan: plan.id,
+            url: checkout.url,
+            expires: checkout.expires_at * 1000,
+            reservation: idempotency,
+          },
         },
         fetcher,
       )
@@ -1071,38 +1088,38 @@ export async function modelTopupCheckout(
         throw new ApiError(502, "BILLING_CUSTOMER", "Your billing account could not be created.")
       const account = previous ?? { customer }
       if (!previous) await saveAccount(user.id, account, fetcher)
-      if (account.topupCheckout && account.topupCheckout.expires > now) {
-        const pending = await modelPlanStripe(
-          `checkout/sessions/${encodeURIComponent(account.topupCheckout.id)}`,
-          {},
-          fetcher,
+      const earlier = account.topupCheckout && account.topupCheckout.expires > now ? account.topupCheckout : undefined
+      const pending = earlier
+        ? await modelPlanStripe(`checkout/sessions/${encodeURIComponent(earlier.id)}`, {}, fetcher)
+        : undefined
+      if (
+        earlier &&
+        pending?.status === "complete" &&
+        !account.purchases?.some((value) => value.checkout === earlier.id)
+      )
+        throw new ApiError(
+          409,
+          "MODEL_TOPUP_PROCESSING",
+          "Your last credit purchase is processing. Refresh your account and retry.",
         )
-        if (
-          pending.status === "complete" &&
-          !account.purchases?.some((value) => value.checkout === account.topupCheckout?.id)
-        )
-          throw new ApiError(
-            409,
-            "MODEL_TOPUP_PROCESSING",
-            "Your last credit purchase is processing. Refresh your account and retry.",
-          )
-        if (
-          pending.status === "open" &&
-          account.topupCheckout.plan === pack.id &&
-          stripeRecord(pending.metadata) &&
-          pending.metadata.vector_credits_usd === String(pack.credits) &&
-          pending.metadata.vector_price_id === priceID
-        )
-          return { url: account.topupCheckout.url }
-        if (pending.status === "open") {
-          await verify()
-          await modelPlanStripe(
-            `checkout/sessions/${encodeURIComponent(account.topupCheckout.id)}/expire`,
-            { method: "POST" },
-            fetcher,
-          )
-        }
-      }
+      if (
+        earlier &&
+        pending?.status === "open" &&
+        earlier.plan === pack.id &&
+        stripeRecord(pending.metadata) &&
+        pending.metadata.vector_credits_usd === String(pack.credits) &&
+        pending.metadata.vector_price_id === priceID
+      )
+        return { url: earlier.url }
+      if (pending?.status === "open") await verify()
+      const closed =
+        earlier && pending?.status === "open"
+          ? await modelPlanStripe(
+              `checkout/sessions/${encodeURIComponent(earlier.id)}/expire`,
+              { method: "POST" },
+              fetcher,
+            )
+          : pending
       const price = await modelPlanStripe(`prices/${priceID}`, {}, fetcher)
       if (
         price.active !== true ||
@@ -1133,13 +1150,26 @@ export async function modelTopupCheckout(
         body.set(`metadata[${key}]`, value)
         body.set(`payment_intent_data[metadata][${key}]`, value)
       })
-      await reserveCodiumSale(funding, { account: user.id, kind: "topup", credits: pack.credits, closes }, fetcher, now)
+      const idempotency = `vector-topup-checkout-${user.id}-${pack.id}-${createHash("sha256").update(`${priceID}:${pack.credits}`).digest("hex").slice(0, 12)}-${account.topupCheckout?.id ?? "new"}-${Math.floor(now / 1_800_000)}`
+      // A paid top-up keeps its reservation when the buyer opens the next one: the reading this sale is measured
+      // against may not count its credits as owed yet. Only a checkout that can no longer be paid gives it back.
+      await reserveCodiumSale(
+        funding,
+        {
+          id: idempotency,
+          credits: pack.credits,
+          closes,
+          released: closed?.status === "expired" ? earlier?.reservation : undefined,
+        },
+        fetcher,
+        now,
+      )
       await verify()
       const checkout = await modelPlanStripe(
         "checkout/sessions",
         {
           method: "POST",
-          idempotency: `vector-topup-checkout-${user.id}-${pack.id}-${createHash("sha256").update(`${priceID}:${pack.credits}`).digest("hex").slice(0, 12)}-${account.topupCheckout?.id ?? "new"}-${Math.floor(now / 1_800_000)}`,
+          idempotency,
           body,
         },
         fetcher,
@@ -1155,7 +1185,13 @@ export async function modelTopupCheckout(
         user.id,
         {
           ...account,
-          topupCheckout: { id: checkout.id, plan: pack.id, url: checkout.url, expires: checkout.expires_at * 1000 },
+          topupCheckout: {
+            id: checkout.id,
+            plan: pack.id,
+            url: checkout.url,
+            expires: checkout.expires_at * 1000,
+            reservation: idempotency,
+          },
         },
         fetcher,
       )

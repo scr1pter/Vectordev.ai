@@ -32,16 +32,18 @@ export type CodiumFunding = typeof Funding.Type
 
 const FUNDING_KEY = "vector:codium:funding"
 const LOCK_KEY = "vector:codium:funding:lock"
-// One reservation per account and kind of purchase, "<account>:<kind>" -> "<lapses at>:<cents>": a new checkout
-// replaces the account's last one, so one buyer cannot hold back sales by opening many.
+// One reservation per checkout, "<checkout's idempotency key>" -> "<lapses at>:<cents>". A buyer's new checkout gives
+// back only the reservation of the earlier checkout it closes, so one buyer holds one unpaid checkout of each kind
+// while every purchase they paid for keeps counting.
 const RESERVED_KEY = "vector:codium:funding:reserved"
-// Drops lapsed reservations and adds up the others, leaving out ARGV[2]'s own, which the caller is replacing.
+// Drops lapsed reservations and the one given back (ARGV[3]) and adds up the others, leaving out ARGV[2]'s own, which a
+// retry of the same checkout is reserving again.
 const RESERVATIONS =
-  "local reserved = 0 local entries = redis.call('HGETALL', KEYS[1]) for i = 1, #entries, 2 do local lapses, cents = string.match(entries[i + 1], '^(%d+):(%d+)$') if not lapses or tonumber(lapses) <= tonumber(ARGV[1]) then redis.call('HDEL', KEYS[1], entries[i]) elseif entries[i] ~= ARGV[2] then reserved = reserved + tonumber(cents) end end "
-// Reserves ARGV[3] cents until ARGV[4] only while the reading's balance (ARGV[5]) covers what is owed (ARGV[6]), every
-// other reservation and this one, with the margin (ARGV[7] percent plus ARGV[8] cents), all in one step so purchases
+  "local reserved = 0 local entries = redis.call('HGETALL', KEYS[1]) for i = 1, #entries, 2 do local lapses, cents = string.match(entries[i + 1], '^(%d+):(%d+)$') if not lapses or tonumber(lapses) <= tonumber(ARGV[1]) or entries[i] == ARGV[3] then redis.call('HDEL', KEYS[1], entries[i]) elseif entries[i] ~= ARGV[2] then reserved = reserved + tonumber(cents) end end "
+// Reserves ARGV[4] cents until ARGV[5] only while the reading's balance (ARGV[6]) covers what is owed (ARGV[7]), every
+// other reservation and this one, with the margin (ARGV[8] percent plus ARGV[9] cents), all in one step so purchases
 // made at the same moment cannot each pass against the same balance.
-const RESERVE = `${RESERVATIONS}if tonumber(ARGV[5]) < math.ceil((tonumber(ARGV[6]) + reserved + tonumber(ARGV[3])) * (100 + tonumber(ARGV[7])) / 100) + tonumber(ARGV[8]) then return 0 end redis.call('HSET', KEYS[1], ARGV[2], ARGV[4] .. ':' .. ARGV[3]) return 1`
+const RESERVE = `${RESERVATIONS}if tonumber(ARGV[6]) < math.ceil((tonumber(ARGV[7]) + reserved + tonumber(ARGV[4])) * (100 + tonumber(ARGV[8])) / 100) + tonumber(ARGV[9]) then return 0 end redis.call('HSET', KEYS[1], ARGV[2], ARGV[5] .. ':' .. ARGV[4]) return 1`
 // The cron checks every ten minutes. A sale needs a reading from about one interval ago; an older one is stale, so the
 // sale runs a check of its own first.
 export const CODIUM_FUNDING_MAX_AGE_MS = 15 * 60_000
@@ -138,7 +140,7 @@ async function fundingReading(fetcher: typeof fetch, now: number) {
   const balance = await openRouterBalance(fetcher)
   const owed = await creditsOwed(fetcher, now)
   const reserved = Number(
-    await persistentStore(["EVAL", `${RESERVATIONS}return reserved`, 1, RESERVED_KEY, now, ""], fetcher),
+    await persistentStore(["EVAL", `${RESERVATIONS}return reserved`, 1, RESERVED_KEY, now, "", ""], fetcher),
   )
   if (!Number.isSafeInteger(reserved)) throw unavailable()
   return {
@@ -176,12 +178,14 @@ export async function requireCodiumSales(fetcher: typeof fetch = fetch, now = Da
 /**
  * Holds a purchase's credits against the balance from when its checkout opens until it can no longer be paid, plus
  * long enough for a check to count a paid purchase among what is owed. Purchases since the last check would otherwise
- * each pass against the same reading and together sell more than the balance covers. A paid purchase counts twice
- * until its reservation lapses, which errs towards pausing.
+ * each pass against the same reading and together sell more than the balance covers. `sale.id` is the checkout's own
+ * idempotency key, and `sale.released` names the reservation of an earlier checkout this one closed: only a checkout
+ * that can no longer be paid gives its reservation back. A paid purchase counts twice until its reservation lapses,
+ * which errs towards pausing.
  */
 export async function reserveCodiumSale(
   reading: { balance: number; owed: number },
-  sale: { account: string; kind: "subscription" | "topup"; credits: number; closes: number },
+  sale: { id: string; credits: number; closes: number; released?: string },
   fetcher: typeof fetch = fetch,
   now = Date.now(),
 ) {
@@ -193,7 +197,8 @@ export async function reserveCodiumSale(
       1,
       RESERVED_KEY,
       now,
-      `${sale.account}:${sale.kind}`,
+      sale.id,
+      sale.released ?? "",
       Math.round(sale.credits * 100),
       sale.closes + 2 * CODIUM_FUNDING_MAX_AGE_MS,
       reading.balance,

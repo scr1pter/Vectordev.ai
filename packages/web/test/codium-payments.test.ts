@@ -705,14 +705,48 @@ describe("sales follow Vector's OpenRouter balance", () => {
     expect(emails).toHaveLength(1)
   })
 
-  test("a buyer's new checkout replaces their reservation, and a reservation lapses after its checkout closes", async () => {
+  test("one buyer's paid top-ups keep their reservations, so buying again and again cannot oversell", async () => {
+    funded(300)
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", required: 13000 })
+    // The same buyer pays for $200 top-ups ($100 of credits each) one after another, before the next check counts any
+    // of them as owed. The $300 balance covers two: a third would need ($100 × 3) × 1.1 + $20 = $350.
+    const outcomes = await [1, 2, 3].reduce(
+      async (previous) => [
+        ...(await previous),
+        await topUp(200).then(
+          async (bought) => {
+            await reconcileModelPlanEvent(event("checkout.session.completed", bought.session), fetcher)
+            return "sold"
+          },
+          (error: { code: string }) => error.code,
+        ),
+      ],
+      Promise.resolve<string[]>([]),
+    )
+    expect(outcomes).toEqual(["sold", "sold", "CODIUM_SALES_PAUSED"])
+    expect(stripe.sessions.size).toBe(2)
+    expect(activeKeys()).toEqual([expect.objectContaining({ limit: 200 })])
+    // The next check counts both paid purchases as owed and, until their reservations lapse, as reserved too.
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({
+      status: "paused",
+      owed: 20000,
+      reserved: 20000,
+      required: 57000,
+    })
+  })
+
+  test("a buyer's new checkout gives back the reservation of the one it closes, and a reservation lapses after its checkout closes", async () => {
     funded(300)
     await checkCodiumFunding(fetcher)
-    // Switching packs again and again holds only the latest one.
+    // Switching packs again and again closes each earlier checkout and holds only the latest one.
     await modelTopupCheckout(user, "codium-topup-200", fetcher)
     await modelTopupCheckout(user, "codium-topup-100", fetcher)
     await modelTopupCheckout(user, "codium-topup-200", fetcher)
     expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", reserved: 10000, required: 24000 })
+    // A checkout Stripe has already closed gives its reservation back too.
+    stripe.sessions.get("cs_buyer3")!.status = "expired"
+    await modelTopupCheckout(user, "codium-topup-100", fetcher)
+    expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", reserved: 5000, required: 18500 })
     // Two hours on, every checkout opened now has closed and its reservation has lapsed.
     expect(await checkCodiumFunding(fetcher, Date.now() + 2 * 60 * 60_000)).toMatchObject({ reserved: 0 })
   })
