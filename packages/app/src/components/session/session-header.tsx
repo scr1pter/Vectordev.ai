@@ -313,7 +313,7 @@ export function SessionHeader() {
               </svg>
             </span>
             <span data-vector-session-title>
-              {session()?.title || (params.id ? "Untitled project" : "New project")}
+              {session()?.title || (params.id ? "Untitled session" : "New session")}
             </span>
             <span data-vector-session-path>{name()}</span>
           </div>

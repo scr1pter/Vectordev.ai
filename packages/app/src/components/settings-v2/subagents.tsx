@@ -196,8 +196,8 @@ export function SettingsSubagentsV2() {
               <div class="settings-v2-row-description">
                 The terminal reads its own config file. To turn subagents off there, set agent.general.disable to true
                 in ~/.config/vector/vector.json {"(%USERPROFILE%\\.config\\vector\\vector.json on Windows)"}. It takes
-                effect the next time you start Vector in the terminal. The same setting in a project's vector.json turns
-                them off for that project everywhere, whatever this switch says.
+                effect the next time you start Vector in the terminal. The same setting in a repository's vector.json
+                turns them off for that repository everywhere, whatever this switch says.
               </div>
             </div>
           </div>
@@ -271,9 +271,9 @@ export function SettingsSubagentsV2() {
             </For>
           </div>
           <p class="settings-v2-row-description">
-            Explore, Review, Security and Judge can read your project and run checks, but cannot edit it. In Plan mode,
-            Vector uses only Explore, Review and Security. Agents you define yourself count as subagent specialists too.
-            All of them keep working when General subagents is off.
+            Explore, Review, Security and Judge can read your repository and run checks, but cannot edit it. In Plan
+            mode, Vector uses only Explore, Review and Security. Agents you define yourself count as subagent
+            specialists too. All of them keep working when General subagents is off.
           </p>
         </div>
       </div>

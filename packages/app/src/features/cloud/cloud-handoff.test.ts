@@ -110,7 +110,7 @@ describe("publish plan", () => {
     expect(publishPlan(linked, vercel)).toEqual({ ready: true, project: "shop", account: "ana" })
     expect(publishPlan({ provider: "Vercel", connected: true })).toEqual({
       ready: false,
-      reason: "Link a Vercel project to this project in Vector Cloud > Connections.",
+      reason: "Link a Vercel project to this repository in Vector Cloud > Connections.",
       connect: true,
     })
     expect(publishPlan(overview().hosting)).toEqual({

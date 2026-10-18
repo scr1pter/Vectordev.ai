@@ -39,7 +39,7 @@ describe("cloudProviderTokenGuide", () => {
     expect(cloudProviderTokenGuide("vercel")).toEqual({
       url: "https://vercel.com/account/settings/tokens",
       location: "Vercel → Personal Account → Settings → Tokens",
-      instruction: "Create a token that can access the team and projects you want Vector to manage.",
+      instruction: "Create a token that can access the team and Vercel projects you want Vector to manage.",
       placeholder: "Paste your Vercel access token",
     })
   })
@@ -48,7 +48,8 @@ describe("cloudProviderTokenGuide", () => {
     expect(cloudProviderTokenGuide("supabase")).toEqual({
       url: "https://supabase.com/dashboard/account/tokens",
       location: "Supabase → Account → Access Tokens",
-      instruction: "Create a personal access token for the organizations and projects you want Vector to manage.",
+      instruction:
+        "Create a personal access token for the organizations and Supabase projects you want Vector to manage.",
       placeholder: "Paste your Supabase personal access token",
     })
   })

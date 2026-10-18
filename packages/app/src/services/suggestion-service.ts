@@ -113,7 +113,7 @@ export function generateSuggestions(signals: SuggestionSignals) {
     add({
       id: `${signals.projectId}:browser-not-tested:${changed.slice(0, 6).join("|")}`,
       title: "The changed flow has not been browser-tested yet",
-      reason: "Frontend files changed, but there is no recent controlled-browser success event for this project.",
+      reason: "Frontend files changed, but there is no recent controlled-browser success event for this repository.",
       confidence: 0.74,
       risk: "medium",
       action: "Open Browser",
@@ -124,7 +124,7 @@ export function generateSuggestions(signals: SuggestionSignals) {
   if (staleCheckpoint(signals.latestCheckpointAt)) {
     add({
       id: `${signals.projectId}:checkpoint-stale`,
-      title: "This project has no recent checkpoint",
+      title: "This repository has no recent checkpoint",
       reason: "Create a restorable point before more edits so risky work can be backed out cleanly.",
       confidence: 0.7,
       risk: "low",

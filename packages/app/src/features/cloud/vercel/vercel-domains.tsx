@@ -32,7 +32,7 @@ export function VercelDomains(props: { projectPath: string; notice: VercelNotice
       const listed = await api.domains(props.projectPath)
       setState({ project: listed.project, domains: listed.domains })
     } catch (caught) {
-      props.notice({ tone: "error", text: vercelErrorText(caught, "Could not read the project's domains.") })
+      props.notice({ tone: "error", text: vercelErrorText(caught, "Could not read the Vercel project's domains.") })
     } finally {
       setState("loading", false)
     }
@@ -153,7 +153,7 @@ export function VercelDomains(props: { projectPath: string; notice: VercelNotice
           each={state.domains}
           fallback={
             <p class="cloud-muted text-[12px]">
-              {state.loading ? "Loading…" : "No custom domains on this project yet."}
+              {state.loading ? "Loading…" : "No custom domains on this Vercel project yet."}
             </p>
           }
         >

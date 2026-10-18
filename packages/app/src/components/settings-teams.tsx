@@ -86,7 +86,7 @@ export function TeamsPicker(props: {
         </h3>
         <p class="text-12-regular text-text-weak mt-1">
           Choose the team settings for this server. Team settings can include providers, permissions, and integrations;
-          personal and project settings still take precedence.
+          personal and repository settings still take precedence.
         </p>
       </div>
       <label class="text-12-regular" for="vector-team-selection">

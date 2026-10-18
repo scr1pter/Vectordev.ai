@@ -112,13 +112,13 @@ describe("formatServerError", () => {
     )
   })
 
-  test("explains stale project folders", () => {
+  test("explains stale repository folders", () => {
     expect(
       formatWorkspaceFailure(
         "NotFound: FileSystem.realPath (/Users/Krishna/Missing Project) at packages/engine/src/file.ts",
       ),
     ).toBe(
-      "The project folder is unavailable: /Users/Krishna/Missing Project. Reopen the project from its existing folder.",
+      "The repository folder is unavailable: /Users/Krishna/Missing Project. Reopen the repository from its existing folder.",
     )
   })
 

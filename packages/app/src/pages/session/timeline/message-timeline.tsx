@@ -1002,7 +1002,7 @@ export function MessageTimeline(props: {
     return (
       <DialogV2 fit>
         <DialogHeader>
-          <DialogTitleGroup title={language.t("common.rename")} description="Give this project session a clear name." />
+          <DialogTitleGroup title={language.t("common.rename")} description="Give this session a clear name." />
         </DialogHeader>
         <form class="flex min-w-[360px] flex-col gap-4 self-stretch px-5 pb-2" onSubmit={submit}>
           <input

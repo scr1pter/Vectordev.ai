@@ -439,9 +439,9 @@ function classifyArchitectureFile(path: string, content: string) {
   const name = reportFileBasename(path).toLowerCase()
   const language = reportLanguage(path)
   if (name === "package.json")
-    return { role: "Manifest", summary: "Defines dependencies, scripts, and project runtime expectations." }
+    return { role: "Manifest", summary: "Defines dependencies, scripts, and the repository's runtime expectations." }
   if (/vite\.config|next\.config|tailwind\.config|tsconfig|postcss\.config/i.test(path)) {
-    return { role: "Build configuration", summary: "Controls how the project builds, transforms, or styles code." }
+    return { role: "Build configuration", summary: "Controls how the repository builds, transforms, or styles code." }
   }
   if (/app|page|route|router|routes/i.test(path))
     return { role: "Route or app shell", summary: "Likely controls navigation, pages, or the main app surface." }
@@ -455,8 +455,9 @@ function classifyArchitectureFile(path: string, content: string) {
     return { role: "HTML entry", summary: "Previewable document entry point for browser rendering." }
   if (language === "Python" || language === "Shell")
     return { role: "Runtime script", summary: "Script or command-oriented file that may run outside the browser." }
-  if (language === "Markdown") return { role: "Documentation", summary: "Explains behavior, setup, or project notes." }
-  return { role: language, summary: "Project source file included in Vector's local analysis." }
+  if (language === "Markdown")
+    return { role: "Documentation", summary: "Explains behavior, setup, or repository notes." }
+  return { role: language, summary: "Repository source file included in Vector's local analysis." }
 }
 
 function modelStrengthFromLabel(label: string): VectorLocalReport["modelFit"]["strength"] {
@@ -585,7 +586,7 @@ function buildVectorLocalReport(
     risk === "High"
       ? "Use a frontier model and ask Vector to focus on specific files before broad refactors."
       : risk === "Medium"
-        ? "This project is moderate size. File selection and clear task scope will keep BYOK cost sane."
+        ? "This repository is moderate size. File selection and clear task scope will keep BYOK cost sane."
         : "This is a small context pack. Most capable coding models should handle focused tasks cheaply.",
     `Current model: ${modelLabel || "not selected"}.`,
     diffs.length
@@ -672,7 +673,7 @@ function buildVectorLocalReport(
       reason: changedFiles.includes(path)
         ? "The current AI task modified this file, so it appears in Review changes."
         : importantFiles.includes(path)
-          ? "This file looks central to running or understanding the project."
+          ? "This file looks central to running or understanding the repository."
           : "This file is part of the detected architecture map.",
     }))
 
@@ -694,7 +695,7 @@ function buildVectorLocalReport(
   )
   const learning = {
     appOverview: [
-      `This project currently looks like ${frameworks.join(" + ") || "a plain web/code"} workspace with ${files.length} scanned source file${files.length === 1 ? "" : "s"}.`,
+      `This repository currently looks like ${frameworks.join(" + ") || "a plain web/code"} workspace with ${files.length} scanned source file${files.length === 1 ? "" : "s"}.`,
       importantFiles.length
         ? `Start by reading: ${importantFiles.slice(0, 5).join(", ")}.`
         : "Vector did not find a clear entry point yet.",
@@ -750,7 +751,7 @@ function buildVectorLocalReport(
   const promptReplayBench = [
     {
       model: "Cheap / fast model",
-      quality: risk === "High" ? "Low for this project size" : "Useful for small questions",
+      quality: risk === "High" ? "Low for this repository size" : "Useful for small questions",
       cost: "Lowest",
       recommendation: "Use for explanations, quick searches, and narrow one-file fixes.",
     },
@@ -812,7 +813,7 @@ function buildVectorLocalReport(
       ],
     },
     demoChecklist: [
-      "Open the project in Vector Agent.",
+      "Open the repository in Vector Agent.",
       "Run one focused edit and wait for reviewable changes.",
       "Open Review changes to inspect changed files before accepting them.",
       preview.status === "ready" ? "Open Browser and show the rendered app." : "Fix preview blockers before demoing.",
@@ -4276,7 +4277,7 @@ export function SessionSidePanel(props: {
       title: `${problem.severity === "error" ? "Error" : problem.severity === "warning" ? "Warning" : "Info"} · ${fileBasename(problem.path)}`,
       summary: problem.message,
       files: [problem.path],
-      source: "Project Doctor",
+      source: "Repository Doctor",
     }))
   })
   const engineeringTimeline = createMemo<EngineeringTimelineEvent[]>(() => {
@@ -4323,12 +4324,12 @@ export function SessionSidePanel(props: {
         id: `decision:memory:${report.scannedAt}`,
         timestamp: report.scannedAt,
         type: "decision",
-        title: "Project memory summary",
+        title: "Repository memory summary",
         summary: report.memory.summary,
         status: "success",
         details: report.memory.nextSteps,
         files: report.memory.importantFiles,
-        source: "Project Doctor",
+        source: "Repository Doctor",
       },
       ...explicit,
     ]
@@ -4557,7 +4558,7 @@ export function SessionSidePanel(props: {
         timestamp: report.scannedAt,
         type: "review",
         status: report.problems.some((problem) => problem.severity === "error") ? "warning" : "success",
-        title: "Scanned project health",
+        title: "Scanned repository health",
         summary: `Scanned ${files.length} workspace file${files.length === 1 ? "" : "s"} locally. Preview status: ${report.preview.status}.`,
         details: [
           `Files: ${report.fileCount}`,
@@ -4566,23 +4567,23 @@ export function SessionSidePanel(props: {
           `Problems: ${report.problems.length}`,
         ],
         files: report.memory.importantFiles,
-        source: "Project Doctor",
+        source: "Repository Doctor",
       })
       showToast({
-        title: "Project Doctor finished",
+        title: "Repository Doctor finished",
         description: `Scanned ${files.length} workspace file${files.length === 1 ? "" : "s"} locally.`,
       })
     } catch (error) {
       logEngineeringEvent(sessionKey(), {
         type: "error",
         status: "failed",
-        title: "Project Doctor failed",
+        title: "Repository Doctor failed",
         summary: error instanceof Error && error.message ? error.message : "Vector could not scan this workspace.",
-        source: "Project Doctor",
+        source: "Repository Doctor",
       })
       showToast({
         variant: "error",
-        title: "Project Doctor failed",
+        title: "Repository Doctor failed",
         description: error instanceof Error && error.message ? error.message : "Vector could not scan this workspace.",
       })
     } finally {

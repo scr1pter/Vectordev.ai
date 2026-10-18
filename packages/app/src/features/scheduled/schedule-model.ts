@@ -148,7 +148,7 @@ export const SUGGESTIONS: Suggestion[] = [
     description: "Look for outdated or vulnerable dependencies and report what is worth upgrading",
     recurrence: { kind: "weekly", weekday: 1, time: "09:00" },
     prompt:
-      "Check this project's dependencies for outdated or vulnerable packages. Report only upgrades worth making and why.",
+      "Check this repository's dependencies for outdated or vulnerable packages. Report only upgrades worth making and why.",
   },
   {
     title: "Weekly review",

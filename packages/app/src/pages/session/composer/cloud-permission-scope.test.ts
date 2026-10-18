@@ -11,15 +11,15 @@ describe("cloud permission scope", () => {
           provider: "Vercel",
           project: "shop-web",
           environment: "production",
-          summary: "Publish this project to the Vercel project shop-web as a production release.",
+          summary: "Publish this repository to the Vercel project shop-web as a production release.",
           production: true,
         },
       }),
     ).toEqual({
-      summary: "Publish this project to the Vercel project shop-web as a production release.",
+      summary: "Publish this repository to the Vercel project shop-web as a production release.",
       rows: [
         { label: "Provider", value: "Vercel" },
-        { label: "Project", value: "shop-web" },
+        { label: "Vercel project", value: "shop-web" },
         { label: "Environment", value: "production" },
       ],
     })
@@ -35,8 +35,19 @@ describe("cloud permission scope", () => {
     ).toBeUndefined()
     expect(cloudPermissionScope({ permission: "vector_cloud_database", metadata: { project: "shop-db" } })).toEqual({
       summary: undefined,
-      rows: [{ label: "Project", value: "shop-db" }],
+      rows: [{ label: "Cloud project", value: "shop-db" }],
     })
+    // Vector's own actions name the repository, never a bare project.
+    expect(
+      cloudPermissionScope({
+        permission: "vector_cloud_environment",
+        metadata: { provider: "Vector", project: "shop", environment: "local .env" },
+      })?.rows,
+    ).toEqual([
+      { label: "Provider", value: "Vector" },
+      { label: "Repository", value: "shop" },
+      { label: "Environment", value: "local .env" },
+    ])
   })
 
   test("shows the SQL a prompt is about, saying when it was cut", () => {

@@ -31,14 +31,14 @@ export function SessionGithubPush(props: { placement?: ComponentProps<typeof Too
   const sdk = useSDK()
 
   return (
-    <TooltipV2 value="Commit and push this project to GitHub" placement={props.placement ?? "bottom"} shift={-8}>
+    <TooltipV2 value="Commit and push this repository to GitHub" placement={props.placement ?? "bottom"} shift={-8}>
       <IconButtonV2
         type="button"
         variant="ghost-muted"
         size="large"
         icon={<Icon name="github" size="small" />}
         onClick={() => dialog.show(() => <DialogGithubPush projectPath={sdk().directory} />)}
-        aria-label="Push project to GitHub"
+        aria-label="Push repository to GitHub"
       />
     </TooltipV2>
   )
@@ -121,11 +121,11 @@ export function DialogGithubPush(props: { projectPath: string }) {
   const dialogDescription = createMemo(() => {
     switch (mode()) {
       case "legacy":
-        return "Commit the current project, then push to its existing origin or create a new repository with your local GitHub login."
+        return "Commit your changes, then push to the existing origin or create a new repository with your local GitHub login."
       case "signed-out":
-        return "Connect your GitHub account to commit and push this project."
+        return "Connect your GitHub account to commit and push this repository."
       case "picker":
-        return "Commit the current project and push it to a repository on your GitHub account."
+        return "Commit your changes and push them to a repository on your GitHub account."
       default:
         return "Checking your GitHub connection."
     }
@@ -198,7 +198,7 @@ export function DialogGithubPush(props: { projectPath: string }) {
     showToast({
       variant: "success",
       title: "Pushed to GitHub",
-      description: "Your current project files are committed and available on GitHub.",
+      description: "Your repository's files are committed and available on GitHub.",
     })
   }
 
@@ -207,7 +207,7 @@ export function DialogGithubPush(props: { projectPath: string }) {
     showToast({
       variant: "success",
       title: login ? `Connected as ${login}` : "GitHub connected",
-      description: "Pick a repository to push this project to.",
+      description: "Pick a GitHub repository to push to.",
     })
     setMode("picker")
     void loadRepos()
@@ -276,7 +276,7 @@ export function DialogGithubPush(props: { projectPath: string }) {
     showToast({
       variant: "success",
       title: "Pushed to GitHub",
-      description: "Your current project files are committed and available on GitHub.",
+      description: "Your repository's files are committed and available on GitHub.",
     })
   }
 
@@ -298,7 +298,7 @@ export function DialogGithubPush(props: { projectPath: string }) {
 
         <Match when={mode() === "signed-out"}>
           <GithubDeviceSignIn
-            intro="Authorize Vector with your GitHub account to create repositories and push this project. No command-line tools required."
+            intro="Authorize Vector with your GitHub account to create repositories and push your changes. No command-line tools required."
             onConnected={connected}
             onClose={() => dialog.close()}
           />
@@ -428,7 +428,7 @@ export function DialogGithubPush(props: { projectPath: string }) {
                       "Vector can create repositories with the GitHub CLI signed in on this computer."
                     : api
                       ? "Existing remotes push with your normal Git credentials or SSH. GitHub CLI is only required when Vector creates a new repository."
-                      : "Open this project in the Vector desktop app to use native GitHub publishing."}
+                      : "Open this repository in the Vector desktop app to use native GitHub publishing."}
                 </div>
               </div>
               <Show when={api && !checking() && !status()?.authenticated}>

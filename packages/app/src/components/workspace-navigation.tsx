@@ -288,7 +288,7 @@ export function WorkspaceNavigation(props: {
 
         <section data-vector-project-group>
           <div class="flex h-9 items-center gap-2 px-3.5 text-[12px] font-medium text-[color:var(--vx-workspace-text-tertiary)]">
-            <span class="min-w-0 flex-1">Projects</span>
+            <span class="min-w-0 flex-1">Repositories</span>
             <button
               type="button"
               data-tour="nav-new-workspace"
@@ -501,7 +501,7 @@ export function WorkspaceNavigation(props: {
         </section>
 
         <section data-vector-nav-group class="border-t border-[color:var(--vx-line)] px-2 py-3">
-          <div data-vector-nav-label>Project tools</div>
+          <div data-vector-nav-label>Repository tools</div>
           <button type="button" data-vector-nav-item data-tour="nav-agent-dashboard" onClick={props.onAgentDashboard}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
               <rect

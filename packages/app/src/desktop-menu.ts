@@ -98,7 +98,7 @@ export const DESKTOP_MENU: DesktopMenu[] = [
         command: "session.new",
         accelerator: { macos: "Shift+Cmd+S" },
       },
-      { type: "item", label: "Open Project...", command: "project.open", accelerator: { macos: "Cmd+O" } },
+      { type: "item", label: "Open Repository...", command: "project.open", accelerator: { macos: "Cmd+O" } },
       {
         type: "item",
         label: "Open from GitHub...",
@@ -171,13 +171,13 @@ export const DESKTOP_MENU: DesktopMenu[] = [
       { type: "separator" },
       {
         type: "item",
-        label: "Previous Project",
+        label: "Previous Repository",
         command: "project.previous",
         accelerator: { macos: "Cmd+Option+Up" },
       },
       {
         type: "item",
-        label: "Next Project",
+        label: "Next Repository",
         command: "project.next",
         accelerator: { macos: "Cmd+Option+Down" },
       },

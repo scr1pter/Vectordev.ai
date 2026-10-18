@@ -338,7 +338,7 @@ export function SupabaseAuth(props: SupabasePanelProps & { icon: JSX.Element }) 
         </div>
 
         <div class="cloud-panel">
-          <PanelHead title="Users" detail="Accounts in this project's Supabase Auth.">
+          <PanelHead title="Users" detail="Accounts in the Supabase Auth of the Supabase project this repository uses.">
             <button class="cloud-button" type="button" disabled={Boolean(busy())} onClick={() => void loadUsers()}>
               Refresh
             </button>

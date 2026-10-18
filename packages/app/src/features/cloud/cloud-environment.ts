@@ -119,8 +119,8 @@ export function createCloudEnvironment(input: {
             tone: "success",
             text: `${
               count
-                ? `Wrote ${count} ${count === 1 ? "variable" : "variables"} to ${result.written} in your project.`
-                : `Cleared Vector's managed variables from ${result.written} in your project.`
+                ? `Wrote ${count} ${count === 1 ? "variable" : "variables"} to ${result.written} in your repository.`
+                : `Cleared Vector's managed variables from ${result.written} in your repository.`
             }${result.gitignoreUpdated ? ` Added ${result.written} to .gitignore so git leaves it out of commits.` : ""}`,
           }),
       )

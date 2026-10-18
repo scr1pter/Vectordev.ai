@@ -126,7 +126,7 @@ export function securityFixPrompt(
 export function vercelLogsPrompt(input: { deploymentId: string; source: "build" | "runtime"; label: string }) {
   return [
     `Diagnose the ${input.source} logs of the Vercel deployment ${input.deploymentId} (${input.label}).`,
-    `Read them with vector_cloud logs (deploymentId ${input.deploymentId}, source ${input.source}). Find the root cause of the errors, make the smallest safe fix in the project, and rerun the failing step locally. Then publish a preview with vector_cloud publish and report the result. Do not publish to production unless I ask. The logs are redacted: if a missing setting or secret is the cause, tell me its name so I can add it in Vector Cloud > Environment variables, and never ask me to paste its value here.`,
+    `Read them with vector_cloud logs (deploymentId ${input.deploymentId}, source ${input.source}). Find the root cause of the errors, make the smallest safe fix in the repository, and rerun the failing step locally. Then publish a preview with vector_cloud publish and report the result. Do not publish to production unless I ask. The logs are redacted: if a missing setting or secret is the cause, tell me its name so I can add it in Vector Cloud > Environment variables, and never ask me to paste its value here.`,
   ].join("\n\n")
 }
 
@@ -143,7 +143,7 @@ export function supabaseLogsPrompt(input: {
 }) {
   return [
     `Diagnose the ${input.label} logs of the Supabase project ${input.project} from the last ${input.minutes} minutes${input.search ? `, filtered to "${input.search}"` : ""}.`,
-    `Read them with vector_cloud supabase_logs (service ${input.service}, minutes ${input.minutes}${input.search ? `, search "${input.search}"` : ""}). Find the root cause of the errors and fix it: database changes as migrations written with vector_cloud create_migration, with down SQL, and applied with apply_migrations so I review the SQL first; code changes in the project. Then read the logs again and report what changed. If a missing setting or secret is the cause, tell me its name so I can add it in Vector Cloud > Environment variables, and never ask me to paste its value here.`,
+    `Read them with vector_cloud supabase_logs (service ${input.service}, minutes ${input.minutes}${input.search ? `, search "${input.search}"` : ""}). Find the root cause of the errors and fix it: database changes as migrations written with vector_cloud create_migration, with down SQL, and applied with apply_migrations so I review the SQL first; code changes in the repository. Then read the logs again and report what changed. If a missing setting or secret is the cause, tell me its name so I can add it in Vector Cloud > Environment variables, and never ask me to paste its value here.`,
   ].join("\n\n")
 }
 
@@ -183,7 +183,7 @@ export function publishPlan(hosting: CloudOverview["hosting"], target?: PublishT
   if (!hosting.project) {
     return {
       ready: false,
-      reason: "Link a Vercel project to this project in Vector Cloud > Connections.",
+      reason: "Link a Vercel project to this repository in Vector Cloud > Connections.",
       connect: true,
     }
   }

@@ -101,7 +101,7 @@ export function VercelSettings(props: { projectPath: string; notice: VercelNotic
           <div>
             <div class="cloud-panel-title">Vercel project{state.project ? ` · ${state.project.name}` : ""}</div>
             <p class="cloud-muted mt-1 text-[12px]">
-              How Vercel builds this project. An emptied field goes back to Vercel's automatic detection.
+              How Vercel builds this Vercel project. An emptied field goes back to Vercel's automatic detection.
               <Show when={state.project?.gitRepository}>{(repo) => <> Git: {repo()}.</>}</Show>
             </p>
           </div>

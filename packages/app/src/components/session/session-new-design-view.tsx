@@ -105,7 +105,7 @@ export function NewSessionDesignView(props: { children: JSX.Element }) {
         <section class="vector-new-task__welcome" aria-labelledby="vector-new-task-title">
           <div class="vector-new-task__eyebrow">Vector Agent</div>
           <h1 id="vector-new-task-title">What should we build?</h1>
-          <p>Plan a feature, repair a bug, or ask Vector to work across the project.</p>
+          <p>Plan a feature, repair a bug, or ask Vector to work across the repository.</p>
         </section>
         <div class="vector-new-task__composer">
           <div class={`${NEW_SESSION_CONTENT_WIDTH}`}>{props.children}</div>

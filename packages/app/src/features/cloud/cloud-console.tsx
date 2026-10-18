@@ -50,7 +50,7 @@ type Notice = { tone: "info" | "success" | "error"; text: string }
 type BuildDraft = Omit<CloudBuildSettings, "source" | "updatedAt">
 
 const SECTION_GROUPS: { label?: string; items: { id: CloudSection; label: string }[] }[] = [
-  { items: [{ id: "overview", label: "Project overview" }] },
+  { items: [{ id: "overview", label: "Repository overview" }] },
   {
     label: "Deploy & observe",
     items: [
@@ -76,7 +76,7 @@ const SECTION_GROUPS: { label?: string; items: { id: CloudSection; label: string
     label: "Setup",
     items: [
       { id: "connections", label: "Connections" },
-      { id: "settings", label: "Project settings" },
+      { id: "settings", label: "Hosting settings" },
     ],
   },
 ]
@@ -452,7 +452,7 @@ export function CloudConsole(props: {
     if (api) void refreshAll()
   })
 
-  const projectName = createMemo(() => props.projectPath.split("/").filter(Boolean).at(-1) ?? "No project")
+  const projectName = createMemo(() => props.projectPath.split("/").filter(Boolean).at(-1) ?? "No repository")
 
   // --- Deployments ---------------------------------------------------------
   const runPublish = async (override?: { environment?: "preview" | "production"; workspace?: CloudAgentWorkspace }) => {
@@ -530,7 +530,7 @@ export function CloudConsole(props: {
         updated.probe === "protected"
           ? {
               tone: "info",
-              text: `${updated.name} is protected by Vercel Deployment Protection, so Vector could not open it. Turn on Protection Bypass for Automation in Project settings to check it.`,
+              text: `${updated.name} is protected by Vercel Deployment Protection, so Vector could not open it. Turn on Protection Bypass for Automation in Hosting settings to check it.`,
             }
           : updated.probe === "ok"
             ? {
@@ -613,7 +613,7 @@ export function CloudConsole(props: {
     try {
       const saved = await api.build.set(props.projectPath, props.taskId, buildDraft())
       setBuildSettings(saved)
-      setNotice({ tone: "success", text: "Build and runtime settings saved for this project session." })
+      setNotice({ tone: "success", text: "Build and runtime settings saved for this repository." })
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not save build settings." })
     } finally {
@@ -628,7 +628,7 @@ export function CloudConsole(props: {
   // --- Provider connections ------------------------------------------------
   const providerConnection = (provider: CloudProviderId) => connections().find((item) => item.provider === provider)
   const providerLink = (provider: "vercel") => providerLinks().find((item) => item.provider === provider)
-  const vercelProjectName = () => providerLink("vercel")?.projectName ?? "this project"
+  const vercelProjectName = () => providerLink("vercel")?.projectName ?? "this Vercel project"
 
   // Whether this project can publish now, decided the way the preview's
   // Publish decides it: a connected Vercel account, a linked project, and a
@@ -791,7 +791,7 @@ export function CloudConsole(props: {
         <div class="min-w-0">
           <div class="text-[13px] font-semibold text-white">Vector Cloud</div>
           <div class="max-w-[440px] truncate text-[11px] text-white/45">
-            {props.projectPath || "Open a project to manage its cloud"}
+            {props.projectPath || "Open a repository to manage its cloud"}
           </div>
         </div>
         <div class="ml-auto flex items-center gap-2">
@@ -853,10 +853,10 @@ export function CloudConsole(props: {
               <div class="cloud-heading">
                 <div>
                   <div class="cloud-kicker">{projectName()}</div>
-                  <h1>Project overview</h1>
+                  <h1>Repository overview</h1>
                   <p>
                     One repository-scoped view of releases, provider connections, data services, and runtime health.
-                    Vector's agent uses the same project context when it deploys or prepares cloud-backed features.
+                    Vector's agent uses the same repository context when it deploys or prepares cloud-backed features.
                   </p>
                 </div>
               </div>
@@ -883,7 +883,7 @@ export function CloudConsole(props: {
                 <button class="cloud-metric" type="button" onClick={() => setSection("environment")}>
                   <span class="cloud-metric-value">{envVars().length}</span>
                   <strong>Environment variables</strong>
-                  <small>Stored for this repository and project scope</small>
+                  <small>Stored for this repository</small>
                 </button>
               </div>
               <section class="cloud-service-list mt-4">
@@ -923,8 +923,8 @@ export function CloudConsole(props: {
                   <div class="cloud-kicker">Your accounts</div>
                   <h1>Cloud connections</h1>
                   <p>
-                    Connect your Vercel and Supabase accounts once, then publish, link projects, and configure your
-                    database here or by asking Vector. Access tokens stay encrypted on this device.
+                    Connect your Vercel and Supabase accounts once, then publish, link Vercel and Supabase projects, and
+                    configure your database here or by asking Vector. Access tokens stay encrypted on this device.
                   </p>
                 </div>
               </div>
@@ -1162,7 +1162,7 @@ export function CloudConsole(props: {
                   <div class="cloud-kicker">Live on the internet</div>
                   <h1>Deployments</h1>
                   <p>
-                    Vector ships this project itself — it runs the build, drives the deploy, and hands you the live
+                    Vector ships this repository itself — it runs the build, drives the deploy, and hands you the live
                     link. You authorize your account once; Vector does the rest.
                   </p>
                 </div>
@@ -1174,13 +1174,13 @@ export function CloudConsole(props: {
                     <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
                       {sectionIcon("deployments")}
                     </svg>
-                    <strong>No project open</strong>
-                    <p>Open a project to publish it to a public link.</p>
+                    <strong>No repository open</strong>
+                    <p>Open a repository to publish it to a public link.</p>
                   </div>
                 }
               >
                 <div class="cloud-panel mb-3">
-                  <div class="cloud-panel-title">Publish this project</div>
+                  <div class="cloud-panel-title">Publish this repository</div>
                   <p class="cloud-muted mt-1 text-[12px]">
                     Vector runs the whole deploy on your own Vercel account — authorize once, then it's a single click.
                     Your code is never proxied through Vector. A preview never changes production; a production build is
@@ -1235,14 +1235,14 @@ export function CloudConsole(props: {
                   <Show when={deploymentEnvironment() === "production" && !firstRelease() && productionBlocked()}>
                     <p class="cloud-muted mt-2 text-[11px]">
                       Vercel Deployment Protection covers {vercelProjectName()}'s production builds, so Vector cannot
-                      check them and production will not move. Turn on Protection Bypass for Automation in Project
+                      check them and production will not move. Turn on Protection Bypass for Automation in Hosting
                       settings first.
                     </p>
                   </Show>
                   <Show when={firstRelease()}>
                     <p class="cloud-muted mt-2 text-[11px]">
-                      {vercelProjectName()} has never been deployed, and Vercel makes a project's first deployment
-                      production, whichever you choose. Release checks run after it is live.
+                      {vercelProjectName()} has never been deployed, and Vercel makes the first deployment production,
+                      whichever you choose. Release checks run after it is live.
                     </p>
                   </Show>
                   <Show when={publish && hostingState().ready && providerLink("vercel")}>
@@ -1323,7 +1323,7 @@ export function CloudConsole(props: {
                       <div>
                         <div class="cloud-panel-title">Agent workspace previews</div>
                         <p class="cloud-muted mt-1 text-[12px]">
-                          Deploy an isolated agent worktree before merging it. The main project stays untouched.
+                          Deploy an isolated agent worktree before merging it. Your repository stays untouched.
                         </p>
                       </div>
                       <span class="cloud-status">{agentWorkspaces().length} workspaces</span>
@@ -1418,11 +1418,11 @@ export function CloudConsole(props: {
                     <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
                       {sectionIcon("logs")}
                     </svg>
-                    <strong>{props.projectPath ? "Connect Vercel to read logs" : "No project open"}</strong>
+                    <strong>{props.projectPath ? "Connect Vercel to read logs" : "No repository open"}</strong>
                     <p>
                       {props.projectPath
-                        ? "Connect Vercel and link this repository's project in Connections."
-                        : "Open a project to read its deployment logs."}
+                        ? "Connect Vercel and link this repository's Vercel project in Connections."
+                        : "Open a repository to read its deployment logs."}
                     </p>
                     <Show when={props.projectPath}>
                       <button
@@ -1454,7 +1454,7 @@ export function CloudConsole(props: {
                   <h1>Observability</h1>
                   <p>
                     Probe every live URL from Vector and keep the latest HTTP status, response time, and failure reason
-                    with this project.
+                    with this repository.
                   </p>
                 </div>
               </div>
@@ -1592,11 +1592,11 @@ export function CloudConsole(props: {
                     <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
                       {sectionIcon("domains")}
                     </svg>
-                    <strong>{props.projectPath ? "Connect Vercel to add a domain" : "No project open"}</strong>
+                    <strong>{props.projectPath ? "Connect Vercel to add a domain" : "No repository open"}</strong>
                     <p>
                       {props.projectPath
-                        ? "Connect Vercel and link this repository's project in Connections."
-                        : "Open a project to connect a custom domain to it."}
+                        ? "Connect Vercel and link this repository's Vercel project in Connections."
+                        : "Open a repository to connect a custom domain to it."}
                     </p>
                     <Show when={props.projectPath}>
                       <button
@@ -1638,8 +1638,8 @@ export function CloudConsole(props: {
                     <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
                       {sectionIcon("environment")}
                     </svg>
-                    <strong>No project open</strong>
-                    <p>Open a project to manage its environment variables.</p>
+                    <strong>No repository open</strong>
+                    <p>Open a repository to manage its environment variables.</p>
                   </div>
                 }
               >
@@ -1796,8 +1796,8 @@ export function CloudConsole(props: {
                     <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
                       {sectionIcon("database")}
                     </svg>
-                    <strong>No project open</strong>
-                    <p>Open a project to connect a database to it.</p>
+                    <strong>No repository open</strong>
+                    <p>Open a repository to connect a database to it.</p>
                   </div>
                 }
               >
@@ -1876,8 +1876,8 @@ export function CloudConsole(props: {
                   <div class="cloud-kicker">Build pipeline</div>
                   <h1>Build & runtime</h1>
                   <p>
-                    Detect the project framework and keep its install, build, output, and Node settings attached to this
-                    repository. Vector Cloud uses these settings for its build before publishing.
+                    Detect the repository's framework and keep its install, build, output, and Node settings attached to
+                    this repository. Vector Cloud uses these settings for its build before publishing.
                   </p>
                 </div>
               </div>
@@ -1888,15 +1888,15 @@ export function CloudConsole(props: {
                     <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
                       {sectionIcon("settings")}
                     </svg>
-                    <strong>No project open</strong>
-                    <p>Open a project to configure its build pipeline.</p>
+                    <strong>No repository open</strong>
+                    <p>Open a repository to configure its build pipeline.</p>
                   </div>
                 }
               >
                 <div class="cloud-panel">
                   <div class="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <div class="cloud-panel-title">Project configuration</div>
+                      <div class="cloud-panel-title">Build configuration</div>
                       <p class="cloud-muted mt-1 text-[12px]">
                         {buildSettings()
                           ? `${buildSettings()?.source === "detected" ? "Detected" : "Saved"} ${formatDate(buildSettings()?.updatedAt)}`
@@ -1909,7 +1909,7 @@ export function CloudConsole(props: {
                       disabled={!api || detectingBuild()}
                       onClick={() => void detectBuild()}
                     >
-                      {detectingBuild() ? "Detecting…" : "Detect from project"}
+                      {detectingBuild() ? "Detecting…" : "Detect from repository"}
                     </button>
                   </div>
                   <div class="cloud-form-grid mt-5">

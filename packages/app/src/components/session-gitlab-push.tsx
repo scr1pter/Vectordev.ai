@@ -98,14 +98,14 @@ export function SessionGitlabPush(props: { placement?: ComponentProps<typeof Too
   const sdk = useSDK()
 
   return (
-    <TooltipV2 value="Commit and push this project to GitLab" placement={props.placement ?? "bottom"} shift={-8}>
+    <TooltipV2 value="Commit and push this repository to GitLab" placement={props.placement ?? "bottom"} shift={-8}>
       <IconButtonV2
         type="button"
         variant="ghost-muted"
         size="large"
         icon={<Icon name="gitlab" size="small" />}
         onClick={() => dialog.show(() => <DialogGitlabPush projectPath={sdk().directory} />)}
-        aria-label="Push project to GitLab"
+        aria-label="Push repository to GitLab"
       />
     </TooltipV2>
   )
@@ -123,7 +123,7 @@ function ResultPanel(props: { result?: GitlabPublishResult }) {
           }}
         >
           <div class="text-13-medium text-text-strong">
-            {current.ok ? "Project is up to date" : current.error || "Push failed"}
+            {current.ok ? "Repository is up to date" : current.error || "Push failed"}
           </div>
           <Show when={current.log}>
             <details class="mt-2">
@@ -193,9 +193,9 @@ export function DialogGitlabPush(props: { projectPath: string }) {
     switch (mode()) {
       case "signed-out":
       case "device-code":
-        return "Connect your GitLab account to commit and push this project."
+        return "Connect your GitLab account to commit and push this repository."
       case "picker":
-        return "Commit the current project and push it to a project on your GitLab account."
+        return "Commit your changes and push them to a GitLab project on your account."
       case "unavailable":
         return "GitLab publishing isn't available here."
       default:
@@ -205,7 +205,7 @@ export function DialogGitlabPush(props: { projectPath: string }) {
 
   async function initialize() {
     if (!api?.auth || !api.pushOauth) {
-      setUnavailableReason("Open this project in the Vector desktop app to push to GitLab.")
+      setUnavailableReason("Open this repository in the Vector desktop app to push to GitLab.")
       setMode("unavailable")
       return
     }
@@ -258,7 +258,7 @@ export function DialogGitlabPush(props: { projectPath: string }) {
         showToast({
           variant: "success",
           title: outcome.login ? `Connected as ${outcome.login}` : "GitLab connected",
-          description: "Pick a project to push this to.",
+          description: "Pick a GitLab project to push to.",
         })
         setMode("picker")
         void loadRepos()
@@ -360,7 +360,7 @@ export function DialogGitlabPush(props: { projectPath: string }) {
     showToast({
       variant: "success",
       title: "Pushed to GitLab",
-      description: "Your current project files are committed and available on GitLab.",
+      description: "Your repository's files are committed and available on GitLab.",
     })
   }
 
@@ -398,7 +398,7 @@ export function DialogGitlabPush(props: { projectPath: string }) {
             <Icon name="gitlab" size="large" />
             <div class="text-16-medium text-text-strong">Connect GitLab</div>
             <p class="max-w-[380px] text-13-regular text-text-weak">
-              Authorize Vector with your GitLab account to create projects and push this project. No command-line tools
+              Authorize Vector with your GitLab account to create GitLab projects and push this repository. No command-line tools
               required.
             </p>
             <Show when={authError()}>
@@ -476,14 +476,14 @@ export function DialogGitlabPush(props: { projectPath: string }) {
               </Button>
             </div>
 
-            <div role="radiogroup" aria-label="Destination project" class="flex flex-col gap-2">
+            <div role="radiogroup" aria-label="Destination GitLab project" class="flex flex-col gap-2">
               <TextField
-                label="Search projects"
+                label="Search GitLab projects"
                 hideLabel
                 value={search()}
                 onChange={setSearch}
                 disabled={pushing()}
-                placeholder="Search projects…"
+                placeholder="Search GitLab projects…"
               />
 
               <div class="max-h-[200px] overflow-y-auto rounded-lg border border-border-weak-base">
@@ -492,7 +492,7 @@ export function DialogGitlabPush(props: { projectPath: string }) {
                   fallback={
                     <div class="flex items-center gap-2 px-4 py-3 text-12-regular text-text-weak">
                       <Spinner class="size-3.5" />
-                      Loading projects…
+                      Loading GitLab projects…
                     </div>
                   }
                 >
@@ -510,8 +510,8 @@ export function DialogGitlabPush(props: { projectPath: string }) {
                       <Show when={!repoError()}>
                         <div class="px-4 py-3 text-12-regular text-text-weak">
                           {search().trim()
-                            ? "No projects match your search."
-                            : "No projects yet — create one below."}
+                            ? "No GitLab projects match your search."
+                            : "No GitLab projects yet — create one below."}
                         </div>
                       </Show>
                     }
@@ -571,19 +571,19 @@ export function DialogGitlabPush(props: { projectPath: string }) {
                       <span class="size-2 rounded-full bg-[rgb(139,92,246)]" />
                     </Show>
                   </span>
-                  <span class="text-13-medium text-text-strong">Create new project</span>
+                  <span class="text-13-medium text-text-strong">Create a new GitLab project</span>
                 </button>
                 <Show when={selection()?.kind === "create"}>
                   <div class="flex flex-col gap-3 border-t border-border-weak-base px-4 py-3">
                     <TextField
-                      label="Project name"
+                      label="GitLab project name"
                       value={name()}
                       onChange={setName}
                       disabled={pushing()}
                       required
                     />
                     <label class="flex cursor-pointer items-center justify-between gap-4">
-                      <span class="text-13-medium text-text-strong">Private project</span>
+                      <span class="text-13-medium text-text-strong">Private GitLab project</span>
                       <input
                         type="checkbox"
                         class="size-4 accent-[rgb(139,92,246)]"
@@ -597,7 +597,7 @@ export function DialogGitlabPush(props: { projectPath: string }) {
                       value={description()}
                       onChange={setDescription}
                       disabled={pushing()}
-                      placeholder="Optional project description"
+                      placeholder="Optional description"
                     />
                   </div>
                 </Show>
@@ -620,7 +620,7 @@ export function DialogGitlabPush(props: { projectPath: string }) {
               </Button>
               <Show when={result()?.ok && result()?.url}>
                 <Button type="button" onClick={() => platform.openLink(result()!.url!)}>
-                  Open project
+                  Open on GitLab
                 </Button>
               </Show>
               <Button type="submit" variant="primary" disabled={!oauthReady()}>

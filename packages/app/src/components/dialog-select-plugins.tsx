@@ -324,8 +324,8 @@ export const DialogSelectPlugins: Component = () => {
         </For>
 
         <p class="px-1 text-11-regular text-text-weaker">
-          Plugins run as MCP servers scoped to this project. Tokens stay in Vector's encrypted credential vault and are
-          only revealed to the service process or request that needs them.
+          Plugins run as MCP servers scoped to this repository. Tokens stay in Vector's encrypted credential vault and
+          are only revealed to the service process or request that needs them.
         </p>
       </div>
     </Dialog>

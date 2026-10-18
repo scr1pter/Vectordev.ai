@@ -26,9 +26,9 @@ export function LocalMemoryPanel() {
         <div class="settings-v2-card-copy">
           <h3 class="settings-v2-card-title">Local memory</h3>
           <p class="settings-v2-card-description">
-            Save durable facts about how you work and Vector will carry them across every project and repository. Memory
-            is a plain Markdown file stored only on this computer. When the file exists, Vector automatically includes
-            its contents in built-in agent context sent to the model provider you selected.
+            Save durable facts about how you work and Vector will carry them across every repository. Memory is a plain
+            Markdown file stored only on this computer. When the file exists, Vector automatically includes its contents
+            in built-in agent context sent to the model provider you selected.
           </p>
         </div>
       </div>
@@ -68,7 +68,7 @@ export function LocalMemoryPanel() {
               <textarea
                 id="vector-local-memory"
                 class="mt-2 min-h-[180px] w-full resize-y rounded-[7px] border border-[color:var(--vx-line)] bg-black/15 px-3 py-2 font-mono text-[11.5px] leading-relaxed text-white/80 outline-none transition focus:border-[color:var(--vx-purple)]"
-                placeholder={"- I use Bun for JavaScript projects.\n- Keep explanations concise."}
+                placeholder={"- I use Bun for JavaScript.\n- Keep explanations concise."}
                 value={editor.draft()}
                 onInput={(event) => editor.setDraft(event.currentTarget.value)}
                 autofocus
