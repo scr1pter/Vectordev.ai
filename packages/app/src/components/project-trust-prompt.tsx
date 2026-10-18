@@ -9,12 +9,14 @@ import { useGlobal } from "@/context/global"
 import { useLanguage } from "@/context/language"
 import { useProjectTrust } from "@/context/project-trust"
 import {
+  projectTrustParent,
   projectTrustPrompt,
   projectTrustRecord,
   projectTrustStatus,
   type ProjectTrustPrompt,
 } from "@/context/project-trust-policy"
 import { useSDK } from "@/context/sdk"
+import { useServerSync } from "@/context/server-sync"
 import type { ServerConnection } from "@/context/server"
 import { showToast } from "@/utils/toast"
 import type { ServerScope } from "@/utils/server-scope"
@@ -27,6 +29,7 @@ import type { ServerScope } from "@/utils/server-scope"
  */
 export function ProjectTrustPrompt() {
   const sdk = useSDK()
+  const serverSync = useServerSync()
   const trust = useProjectTrust()
   const dialog = useDialog()
   const ask = useProjectTrustDialog()
@@ -51,15 +54,17 @@ export function ProjectTrustPrompt() {
     const prompt = projectTrustPrompt(current, record)
     // Another dialog keeps the screen; this one waits until it closes.
     if (!prompt || dialog.active) return
-    untrack(() =>
+    untrack(() => {
+      const parent = projectTrustParent(serverSync().data.project, current.workspace, directory.directory)
       ask({
         client: directory.client,
         scope: directory.scope,
         workspace: current.workspace,
+        repository: parent && (parent.name || getFilename(parent.worktree) || parent.worktree),
         prompt,
         rememberDismissal: true,
-      }),
-    )
+      })
+    })
   })
 
   return null
@@ -108,7 +113,8 @@ export function ProjectTrustMenuItem(props: { server: ServerConnection.Any; dire
 }
 
 /**
- * Opens the trust dialog for one repository. When `rememberDismissal` is set, closing it without trusting (Not now,
+ * Opens the trust dialog for one repository, or for an agent or parallel workspace when `repository` names the
+ * repository it belongs to. When `rememberDismissal` is set, closing it without trusting (Not now,
  * Escape or a click outside) is remembered so the repository never asks again; a dialog the user opened from a menu
  * leaves the answer as it was. Another dialog that replaces this one (release notes after an update, a spend stop)
  * is not an answer: nothing is remembered and the claim is released, so the question comes back once it closes.
@@ -122,6 +128,8 @@ export function useProjectTrustDialog() {
     client: VectorClient
     scope: ServerScope
     workspace: string
+    /** The repository this workspace folder belongs to, when it is not that repository's own folder. */
+    repository?: string
     prompt: ProjectTrustPrompt
     rememberDismissal?: boolean
   }) => {
@@ -150,7 +158,8 @@ export function useProjectTrustDialog() {
     void dialog.show(
       () => (
         <DialogProjectTrust
-          name={getFilename(input.workspace) || input.workspace}
+          name={input.repository ?? (getFilename(input.workspace) || input.workspace)}
+          folder={input.repository === undefined ? undefined : input.workspace}
           changed={input.prompt === "changed"}
           onTrust={approve}
           onDispose={release}
@@ -164,8 +173,26 @@ export function useProjectTrustDialog() {
   }
 }
 
+// The question's title and description: for a repository or for a workspace folder of one, asked the first time or
+// after its settings changed.
+const DIALOG_COPY = {
+  repository: {
+    ask: { title: "project.trust.dialog.title", description: "project.trust.dialog.description" },
+    changed: { title: "project.trust.dialog.changed.title", description: "project.trust.dialog.changed.description" },
+  },
+  workspace: {
+    ask: { title: "project.trust.dialog.workspace.title", description: "project.trust.dialog.workspace.description" },
+    changed: {
+      title: "project.trust.dialog.workspace.changed.title",
+      description: "project.trust.dialog.workspace.changed.description",
+    },
+  },
+} as const
+
 function DialogProjectTrust(props: {
   name: string
+  /** Set for an agent or parallel workspace, which is trusted apart from the repository `name` it belongs to. */
+  folder?: string
   changed: boolean
   onTrust: () => Promise<boolean>
   onDispose: () => void
@@ -173,6 +200,7 @@ function DialogProjectTrust(props: {
   const dialog = useDialog()
   const language = useLanguage()
   const [pending, setPending] = createSignal(false)
+  const copy = () => DIALOG_COPY[props.folder ? "workspace" : "repository"][props.changed ? "changed" : "ask"]
   // Escape can close the dialog while the approval is still saving; closing again then would close whatever is on top.
   const state = { open: true }
   onCleanup(() => {
@@ -206,22 +234,20 @@ function DialogProjectTrust(props: {
           </svg>
         </span>
         <DialogTitleGroup
-          title={language.t(props.changed ? "project.trust.dialog.changed.title" : "project.trust.dialog.title")}
-          description={language.t(
-            props.changed ? "project.trust.dialog.changed.description" : "project.trust.dialog.description",
-            { name: props.name },
-          )}
+          title={language.t(copy().title)}
+          description={language.t(copy().description, { name: props.name })}
         />
       </DialogHeader>
       <DialogBody class="vector-project-trust-dialog__body">
-        <p>{language.t("project.trust.dialog.later")}</p>
+        <Show when={props.folder}>{(folder) => <p class="vector-project-trust-dialog__folder">{folder()}</p>}</Show>
+        <p>{language.t(props.folder ? "project.trust.dialog.workspace.later" : "project.trust.dialog.later")}</p>
       </DialogBody>
       <DialogFooter>
         <ButtonV2 variant="ghost" onClick={() => dialog.close()}>
           {language.t("project.trust.dialog.notNow")}
         </ButtonV2>
         <ButtonV2 variant="contrast" disabled={pending()} onClick={trust}>
-          {language.t("project.trust.dialog.trust")}
+          {language.t(props.folder ? "project.trust.dialog.workspace.trust" : "project.trust.dialog.trust")}
         </ButtonV2>
       </DialogFooter>
     </DialogV2>

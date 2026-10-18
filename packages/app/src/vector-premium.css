@@ -1943,6 +1943,15 @@ html[data-vector-navigation-resizing] * {
   line-height: 18px;
 }
 
+/* An agent or parallel workspace's own folder, so the user can tell it from the repository it belongs to. */
+.vector-project-trust-dialog__folder {
+  margin: 0 0 6px;
+  color: var(--vx-text-muted);
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 [data-component="dialog-v2"][data-variant="settings"].settings-v2-dialog [data-slot="dialog-container"] {
   width: min(1080px, calc(100vw - 44px));
   height: min(760px, calc(100vh - 44px));

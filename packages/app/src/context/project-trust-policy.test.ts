@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import path from "node:path"
 import { dict } from "../i18n/en"
-import { projectTrustAnswer, projectTrustPrompt, projectTrustRecord, projectTrustStatus } from "./project-trust-policy"
+import {
+  projectTrustAnswer,
+  projectTrustParent,
+  projectTrustPrompt,
+  projectTrustRecord,
+  projectTrustStatus,
+} from "./project-trust-policy"
 
 describe("trust wording", () => {
   // Vector has repositories, not projects (owner rule), so the question reads "Trust this repository?".
@@ -20,6 +26,14 @@ describe("trust wording", () => {
     expect(later).toContain("Vector ignores these settings")
     expect(later).toContain("your language servers and formatters stay off in it")
     expect(later).toContain("your MCP servers start outside it")
+  })
+
+  // An agent or parallel workspace has its own trust, and the repository's menu on Home approves only the repository.
+  test("the question about a workspace folder points only to Settings, never to the repository's menu on Home", () => {
+    const later = dict["project.trust.dialog.workspace.later"]
+    expect(later).toContain("your language servers and formatters stay off in it")
+    expect(later).toContain("in Settings, under Repository trust")
+    expect(later).not.toContain("Home")
   })
 })
 
@@ -123,5 +137,25 @@ describe("projectTrustStatus", () => {
     expect(projectTrustStatus("<!doctype html>")).toBeUndefined()
     expect(projectTrustStatus(null)).toBeUndefined()
     expect(projectTrustStatus(undefined)).toBeUndefined()
+  })
+})
+
+describe("projectTrustParent", () => {
+  const repository = { worktree: "/work/app", name: "App", sandboxes: ["/work/app/.vector/workspaces/agent-1/app"] }
+  const other = { worktree: "/work/site", sandboxes: [] }
+
+  test("finds the repository an agent or parallel workspace folder belongs to", () => {
+    const folder = "/work/app/.vector/workspaces/agent-1/app"
+    expect(projectTrustParent([other, repository], folder, folder)).toBe(repository)
+  })
+
+  test("a repository's own folder has no parent, so its question may point to its menu on Home", () => {
+    expect(projectTrustParent([other, repository], "/work/app", "/work/app")).toBeUndefined()
+    expect(projectTrustParent([other, repository], "/work/app", "/work/app/packages/web")).toBeUndefined()
+  })
+
+  test("a folder that no repository lists reads as a repository", () => {
+    expect(projectTrustParent([other, repository], "/work/new", "/work/new")).toBeUndefined()
+    expect(projectTrustParent([], "/work/app", "/work/app")).toBeUndefined()
   })
 })

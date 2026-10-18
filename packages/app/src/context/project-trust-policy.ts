@@ -53,3 +53,20 @@ export function projectTrustRecord(
   if (status.trusted) return "trusted"
   return answer
 }
+
+/**
+ * The repository a trust workspace belongs to when it is a folder of its own, such as an agent or parallel
+ * workspace: the engine lists those among the repository's sandboxes and trusts each one apart from it. The
+ * repository's menu on Home approves only the repository's own folder, so the question about such a folder names
+ * the repository and points to Settings instead. A folder that is not positively one reads as a repository.
+ */
+export function projectTrustParent<T extends { worktree: string; sandboxes?: readonly string[] }>(
+  projects: readonly T[],
+  workspace: string,
+  directory: string,
+) {
+  return projects.find(
+    (project) =>
+      project.worktree !== workspace && [workspace, directory].some((folder) => project.sandboxes?.includes(folder)),
+  )
+}

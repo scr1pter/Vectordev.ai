@@ -756,6 +756,15 @@ export const dict = {
   "project.trust.dialog.later":
     "Until you trust it, Vector ignores these settings, your language servers and formatters stay off in it and your MCP servers start outside it. You can trust it later from the repository's menu on Home or in Settings, under Repository trust.",
   "project.trust.dialog.trust": "Trust this repository",
+  "project.trust.dialog.workspace.title": "Trust this workspace?",
+  "project.trust.dialog.workspace.changed.title": "Trust this workspace's new settings?",
+  "project.trust.dialog.workspace.description":
+    "This workspace of {{name}} is a folder of its own, which Vector trusts apart from the repository. Trusting it lets Vector load the settings it comes with, like its own agents, commands, plugins and MCP servers, which can run code on this computer.",
+  "project.trust.dialog.workspace.changed.description":
+    "The Vector settings in this workspace of {{name}} changed after you trusted it, so trusting it again lets Vector load the new settings, which can run code on this computer.",
+  "project.trust.dialog.workspace.later":
+    "Until you trust it, Vector ignores these settings, your language servers and formatters stay off in it and your MCP servers start outside it. You can trust it later in Settings, under Repository trust, while one of its sessions is open.",
+  "project.trust.dialog.workspace.trust": "Trust this workspace",
   "project.trust.dialog.notNow": "Not now",
   "project.trust.menu": "Trust this repository…",
   "project.trust.approve.failed": "Could not trust this repository",
