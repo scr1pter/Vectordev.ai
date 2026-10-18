@@ -34,9 +34,9 @@ const MAX_OUTPUT_TOKENS = 1_024
 export const PRODUCT_DOCUMENTATION = [
   {
     section: "Start here",
-    title: "New project session",
+    title: "New session",
     where: "The gradient button at the top of the sidebar — or ⌘N (Ctrl+N on Windows/Linux).",
-    body: "Start a fresh project session, describe one result in plain language, and press Enter. The Vector agent can plan, edit files, run commands, and narrate its work. The model chip in the composer shows the active model.",
+    body: "Start a fresh session, describe one result in plain language, and press Enter. The Vector agent can plan, edit files, run commands, and narrate its work. The model chip in the composer shows the active model.",
   },
   {
     section: "Start here",
@@ -48,25 +48,25 @@ export const PRODUCT_DOCUMENTATION = [
     section: "Start here",
     title: "Overview",
     where: "The house icon at the top of the sidebar — Vector's home.",
-    body: "Open a project, start a focused session, resume a searchable recent session, and view local activity such as token use, completed chats, and favorite model.",
+    body: "Open a repository, start a focused session, resume a searchable recent session, and view local activity such as token use, completed chats, and favorite model.",
   },
   {
     section: "Start here",
     title: "Code it yourself",
-    where: "Project tools → Code editor.",
-    body: "Search for a file and edit it directly. Manual edits and agent edits share the active project, so users can handle precise changes themselves and delegate broader work.",
+    where: "The tools group in the sidebar → Code editor.",
+    body: "Search for a file and edit it directly. Manual edits and agent edits share the active repository, so users can handle precise changes themselves and delegate broader work.",
   },
   {
     section: "Start here",
     title: "Work with one agent",
-    where: "Start a project session and describe the outcome in the message box.",
-    body: "The main agent can inspect the project, plan, edit, run Terminal commands, operate the visible Browser, and repair failures. Users can steer it, change model or effort, and inspect the result.",
+    where: "Start a session and describe the outcome in the message box.",
+    body: "The main agent can inspect the repository, plan, edit, run Terminal commands, operate the visible Browser, and repair failures. Users can steer it, change model or effort, and inspect the result.",
   },
   {
     section: "Start here",
     title: "Work with multiple agents",
-    where: "Use New workspace under the active project in the sidebar.",
-    body: "Launch isolated agents for separate parts of a project. Each receives its own worktree, conversation, files, and command history. Review its diff and checks before merging trusted work.",
+    where: "Use New workspace under the active repository in the sidebar.",
+    body: "Launch isolated agents for separate parts of a repository. Each receives its own worktree, conversation, files, and command history. Review its diff and checks before merging trusted work.",
   },
   {
     section: "Cloud Services",
@@ -78,19 +78,19 @@ export const PRODUCT_DOCUMENTATION = [
     section: "Cloud Services",
     title: "Observability",
     where: "Cloud Services → Observability.",
-    body: "Check deployed URLs and view HTTP status, response time, last-check time, and network failures. Results remain scoped to the current project session.",
+    body: "Check deployed URLs and view HTTP status, response time, last-check time, and network failures. Results remain scoped to the current repository.",
   },
   {
     section: "Cloud Services",
     title: "Domains",
     where: "Cloud Services → Domains.",
-    body: "Add a domain, see the CNAME record to create, and use Verify to check DNS. Domain lists are scoped per project.",
+    body: "Add a domain, see the CNAME record to create, and use Verify to check DNS. Domain lists are scoped per repository.",
   },
   {
     section: "Cloud Services",
     title: "Environment variables",
     where: "Cloud Services → Environment.",
-    body: "Manage project key-value configuration and apply it to the project's .env file. Put secrets here instead of pasting them into chat.",
+    body: "Manage the repository's key-value configuration and apply it to its .env file. Put secrets here instead of pasting them into chat.",
   },
   {
     section: "Cloud Services",
@@ -108,12 +108,12 @@ export const PRODUCT_DOCUMENTATION = [
     section: "Agents",
     title: "Scheduled runs",
     where: "Agents group in the sidebar.",
-    body: "Write a prompt, choose a date and time, and run it later. Desktop can launch it at the scheduled time; other environments save it and prompt the user to load and run it. Open a project first.",
+    body: "Write a prompt, choose a date and time, and run it later. Desktop can launch it at the scheduled time; other environments save it and prompt the user to load and run it. Open a repository first.",
   },
   {
     section: "Agents",
     title: "Agent tabs",
-    where: "Inside every active project.",
+    where: "Inside every open repository.",
     body: "Launch specialists in isolated git worktrees or managed copies. Each has its own model, conversation, tools, terminal activity, and changes. Review guardrails and diffs before merging.",
   },
   {
@@ -123,40 +123,40 @@ export const PRODUCT_DOCUMENTATION = [
     body: "Connect Model Context Protocol servers to give agents their exposed tools, such as database, API, or internal-service capabilities.",
   },
   {
-    section: "Project tools",
+    section: "Repository tools",
     title: "Canvas",
-    where: "Project group in the sidebar.",
-    body: "Arrange project tools in floating windows and use the editor, terminal, review, browser, scheduled work, MCP connections, and coding agents together. Canvas accepts voice or typed commands.",
+    where: "The tools group in the sidebar.",
+    body: "Arrange repository tools in floating windows and use the editor, terminal, review, browser, scheduled work, MCP connections, and coding agents together. Canvas accepts voice or typed commands.",
   },
   {
-    section: "Project tools",
+    section: "Repository tools",
     title: "Code editor",
-    where: "Project group in the sidebar — also called Codespace — inside an active task.",
-    body: "Edit project files, inspect Problems, use Find in project, and send the current file and its problems to AI Architect for a focused agent pass.",
+    where: "The tools group in the sidebar — also called Codespace — inside an active task.",
+    body: "Edit repository files, inspect Problems, search for files, and send the current file and its problems to AI Architect for a focused agent pass.",
   },
   {
-    section: "Project tools",
+    section: "Repository tools",
     title: "Browser",
-    where: "Project group in the sidebar, inside an active task.",
+    where: "The tools group in the sidebar, inside an active task.",
     body: "Use a real controlled browser beside chat. Vector can inspect and operate that visible page while reading DOM state, console output, runtime failures, and network errors.",
   },
   {
-    section: "Project tools",
+    section: "Repository tools",
     title: "Review changes",
-    where: "Project group in the sidebar, inside an active task.",
+    where: "The tools group in the sidebar, inside an active task.",
     body: "Inspect task changes as diffs before accepting them. Files show additions, deletions, and a Low, Medium, or High risk indication.",
   },
   {
-    section: "Project tools",
+    section: "Repository tools",
     title: "Rewind code + chat",
     where: "Command palette (⌘⇧P, or Ctrl+Shift+P on Windows/Linux) inside a session, or type /undo or /redo in the message box.",
     body: "Undo an agent's work one request at a time. Rewind code + chat restores the files and the conversation to before the last request, stopping the agent first if it is still working, and puts that request's text back in the message box. Run it again to go back further. Move rewind forward (or /redo) restores the next request.",
   },
   {
-    section: "Project tools",
+    section: "Repository tools",
     title: "Terminal",
-    where: "Project group in the sidebar, inside an active task.",
-    body: "Open a real shell in the project directory to run development servers, git commands, package installs, and other commands. It requires an active task.",
+    where: "The tools group in the sidebar, inside an active task.",
+    body: "Open a real shell in the repository's folder to run development servers, git commands, package installs, and other commands. It requires an active task.",
   },
   {
     section: "Everyday flow",
@@ -200,10 +200,17 @@ function documentationKey(title: string, section: string) {
   return `${title}\u0000${section}`
 }
 
+// Desktop builds up to 1.99.108 still send the names these entries had before they were renamed.
+const LEGACY_HINT_NAMES: Record<string, string> = {
+  "New project session": "New session",
+  "Project tools": "Repository tools",
+}
+
 function documentationFor(selectionHint: string, question: string) {
+  const current = (name: string) => LEGACY_HINT_NAMES[name] ?? name
   const requested = new Set(
     [...selectionHint.matchAll(/^## ([^\r\n]{1,120}) \(([^\r\n]{1,80})\)$/gm)].map((match) =>
-      documentationKey(match[1] ?? "", match[2] ?? ""),
+      documentationKey(current(match[1] ?? ""), current(match[2] ?? "")),
     ),
   )
   const selected = PRODUCT_DOCUMENTATION.filter((doc) => requested.has(documentationKey(doc.title, doc.section))).slice(
