@@ -17,6 +17,7 @@ import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { ShellID } from "./shell/id"
 import { Sandbox } from "./shell/sandbox"
 import { CloudCli } from "./shell/cloud-cli"
+import { UNREAD } from "./shell/unread"
 
 import * as Truncate from "./truncate"
 import { Plugin } from "@/plugin"
@@ -201,6 +202,62 @@ const ASSIGNMENTS = new Set(["variable_assignment", "variable_assignments"])
 // An assignment inside one of these (`A=1 git diff`, `export A=1`) is already
 // part of that statement's pattern.
 const OWNERS = new Set(["command", "declaration_command", "variable_assignments"])
+
+// A statement the scan cannot fully read is approved only as written, behind a prefix no allow rule matches (see
+// shell/unread.ts), so the read-only agents refuse it and anyone else is asked.
+function unread(scan: Scan, text: string) {
+  scan.patterns.add(UNREAD + text.trim())
+  scan.always.add(UNREAD + text.trim())
+}
+
+// Whether bash or zsh would run a command substitution the grammar keeps as plain text: a backtick or `$(` in an
+// unquoted heredoc body, in a `${VAR#...}` operand or on the right of `[[ x =~ ... ]]`. Single quotes, `$'...'` and a
+// heredoc whose delimiter is quoted keep them literal, and so does a backslash, except that inside backticks an escaped
+// backtick opens a nested substitution. A position the parse cannot place counts as hidden.
+function hiddenSubstitution(root: Node) {
+  const text = root.text
+  const at = (node: Node) => {
+    const start = node.startIndex - root.startIndex
+    return text.slice(start, start + node.text.length) === node.text ? start : undefined
+  }
+  const literal: [number, number][] = []
+  for (const node of root.descendantsOfType(["raw_string", "ansi_c_string", "heredoc_redirect"])) {
+    if (!node) continue
+    const bodies =
+      node.type !== "heredoc_redirect"
+        ? [node]
+        : node.descendantsOfType("heredoc_start").some((start) => start && /['"\\]/.test(start.text))
+          ? node.descendantsOfType("heredoc_body")
+          : []
+    for (const body of bodies) {
+      if (!body) continue
+      const start = at(body)
+      if (start === undefined) return true
+      literal.push([start, start + body.text.length])
+    }
+  }
+  const opened = new Set<number>()
+  const backticks: [number, number][] = []
+  for (const node of root.descendantsOfType(["command_substitution", "process_substitution", "arithmetic_expansion"])) {
+    if (!node) continue
+    const start = at(node)
+    if (start === undefined) return true
+    opened.add(start)
+    if (!node.text.startsWith("`")) continue
+    opened.add(start + node.text.length - 1)
+    backticks.push([start, start + node.text.length])
+  }
+  const within = (ranges: [number, number][], index: number) => ranges.some(([start, end]) => index >= start && index < end)
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] !== "`" && !(text[index] === "$" && text[index + 1] === "(")) continue
+    if (opened.has(index) || within(literal, index)) continue
+    let slashes = 0
+    while (text[index - 1 - slashes] === "\\") slashes++
+    if (slashes % 2 === 1 && !(text[index] === "`" && within(backticks, index))) continue
+    return true
+  }
+  return false
+}
 
 function statements(node: Node) {
   return node
@@ -885,7 +942,10 @@ export const ShellTool = Tool.define(
         // A wildcard (`.en?`, `.e*`) or an expansion inside the name (`.e%X:~0,0%nv`, `.e"$X"nv`) asks for each
         // environment file it would open in its folder or, when the scan cannot list that folder, for one it could
         // open. A name that is only an expansion (`$file`) may be anything, as `cat $file` may be in bash.
-        const glob = file.name.replace(expansion, "*")
+        // bash's brace expansion (`.e{n,}v`) and zsh's glob syntax (`.e(n|x)v`, `.env(N)`) open names a plain wildcard
+        // would, so each group counts as one.
+        const named = win ? file.name : file.name.replace(/\{[^{}]*(?:,|\.\.)[^{}]*\}/g, "*").replace(/\([^()]*\)/g, "*")
+        const glob = named.replace(expansion, "*")
         if (!file.name.replace(expansion, "") || !/[*?[]/.test(glob)) return yield* linkedEnv(file.dir + file.name)
         const folder = /[*?[]/.test(file.dir) ? undefined : yield* wordPath(file.dir || ".", cwd, ps, shell)
         const names = folder ? yield* entries(folder) : ENV_NAMES
@@ -906,10 +966,18 @@ export const ShellTool = Tool.define(
         yield* envRead(text)
         const word = shellWord(text, cwd, ps, shell)
         if (DEVICES.has(word.toLowerCase()) || INPUTS.has(word)) return
+        // A target the scan cannot place (`< "$IN"`, `< ~other/x`, `< ~+/x`) may be any file, so it is approved only as
+        // written.
+        if (!win && (new RegExp(BASH_EXPANSION.source).test(word) || /^~[^/]/.test(word))) unread(scan, `< ${text}`)
         const file = fileName(word, win, expansion)
-        const folder = yield* wordPath(file.dir || ".", cwd, ps, shell)
+        // Inside or outside is decided on the file's real path, as the read tool decides it, so a link in the
+        // repository to a file outside it asks for that folder.
+        const folder = yield* real(yield* wordPath(file.dir || ".", cwd, ps, shell))
         if (folder && !containsPath(folder, instance)) scan.dirs.add(folder)
-        const resolved = /[*?[]/.test(file.name) ? undefined : yield* wordPath(file.dir + file.name, cwd, ps, shell)
+        const resolved = yield* real(
+          /[*?[]/.test(file.name) ? undefined : yield* wordPath(file.dir + file.name, cwd, ps, shell),
+        )
+        if (resolved && !containsPath(resolved, instance)) scan.dirs.add(path.dirname(resolved))
         const match = wildcard(file.name, win)
         const opened = resolved
           ? [resolved]
@@ -920,6 +988,10 @@ export const ShellTool = Tool.define(
         if (opened.length === 0) scan.reads.add(file.dir + file.name)
         for (const item of opened) scan.reads.add(path.relative(instance.worktree, item))
       })
+      const real = (item: string | undefined) =>
+        Effect.try({ try: () => (item ? FSUtil.realpath(item) : undefined), catch: (cause) => cause }).pipe(
+          Effect.orElseSucceed(() => item),
+        )
       // A link to an environment file, or on Windows its 8.3 short name (`ENV~1`), opens it under another name, so the
       // name it really has is tested too, as the read tool tests both.
       const linkedEnv = Effect.fnUntraced(function* (word: string) {
@@ -1023,7 +1095,7 @@ export const ShellTool = Tool.define(
             .filter((node): node is Node => Boolean(node)),
         ]
         // A command the grammar cannot parse (`Get-Content $dir/.en?`) may do anything the scan did not see.
-        if (root.hasError) exact.push(root)
+        if (root.hasError) unread(scan, root.text)
         const ids = new Set(exact.map((node) => node.id))
         for (const node of exact) {
           let outer = node.parent
@@ -1080,6 +1152,17 @@ export const ShellTool = Tool.define(
         }
       }
 
+      // bash and zsh: a command the grammar cannot parse, or one that hides a command substitution from it, may run
+      // anything the scan did not see. A statement made only of redirects runs a program too (zsh's READNULLCMD).
+      if (!ps && shellKind !== "cmd") {
+        if (root.hasError || hiddenSubstitution(root)) unread(scan, root.text)
+        for (const node of root.descendantsOfType("redirected_statement")) {
+          if (!node) continue
+          if (node.namedChildren.every((child) => child?.type === "file_redirect" || child?.type === "heredoc_redirect"))
+            unread(scan, node.text)
+        }
+      }
+
       // cmd is read with the bash grammar, which does not know cmd's syntax: in `for /f %a in (.env) do echo %a`, which
       // reads .env line by line, bash sees `.env` as a command in a subshell. So any cmd word may name an environment
       // file, and a command the grammar cannot parse is approved only as written.
@@ -1087,10 +1170,7 @@ export const ShellTool = Tool.define(
         for (const node of root.descendantsOfType(["word", "string", "raw_string", "concatenation"])) {
           if (node) yield* envRead(node.text)
         }
-        if (root.hasError) {
-          scan.patterns.add(root.text.trim())
-          scan.always.add(root.text.trim())
-        }
+        if (root.hasError) unread(scan, root.text)
       }
 
       return scan

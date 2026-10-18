@@ -10,6 +10,7 @@ import path from "path"
 import { Config } from "@/config/config"
 import { Shell } from "@vectordevai/core/shell"
 import { ShellTool } from "../../src/tool/shell"
+import { UNREAD } from "../../src/tool/shell/unread"
 import { Filesystem } from "@/util/filesystem"
 import { provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
 import { Permission } from "../../src/permission"
@@ -1015,14 +1016,14 @@ describe("tool.shell permissions", () => {
                     })
                   }
                   // The PowerShell grammar cannot parse an unquoted `$dir/.en?`, so the scan does not know what it reads:
-                  // the whole command is approved only as written.
+                  // the whole command is approved only as written, behind the prefix no allow rule matches.
                   if (name === "pwsh") {
                     requests.length = 0
                     const command = "Get-Content $dir/.en?"
                     yield* run({ command }, rejectRead)
                     const bash = requests.find((r) => r.permission === "bash")
-                    expect(bash?.patterns).toContain(command)
-                    expect(bash?.always).toContain(command)
+                    expect(bash?.patterns).toContain(UNREAD + command)
+                    expect(bash?.always).toContain(UNREAD + command)
                   }
                   for (const command of cases[name].quiet) {
                     requests.length = 0
@@ -2089,7 +2090,7 @@ describe("tool.shell read-only allowlist", () => {
                 requests.length = 0
                 const loop = 'for /f "delims=" %a in (notes.txt) do @echo %a'
                 yield* fail({ command: loop }, stopAt("bash"))
-                expect(requests.find((r) => r.permission === "bash")?.always).toContain(loop)
+                expect(requests.find((r) => r.permission === "bash")?.always).toContain(UNREAD + loop)
                 // A caret no longer hides a path, or the command that takes it, from the outside-folder check.
                 requests.length = 0
                 const command = `ty^pe ..^/${path.basename(outside)}/notes.txt`
@@ -2276,6 +2277,161 @@ describe("tool.shell read-only allowlist", () => {
       ),
     )
   }
+})
+
+describe("tool.shell statements the scan cannot read", () => {
+  type Request = Omit<PermissionV1.Request, "id" | "sessionID" | "tool">
+  // A stand-in of each name that only exits non-zero: the scan reads each command as that shell, and nothing runs.
+  const standIns = Effect.fn("ShellToolTest.standIns")(function* () {
+    const dir = yield* tmpdirScoped()
+    return yield* Effect.forEach(["bash", "zsh"], (name) =>
+      Effect.promise(async () => {
+        const shell = path.join(dir, name)
+        await Bun.write(shell, "#!/bin/sh\nexit 3\n")
+        await fs.chmod(shell, 0o755)
+        return { label: name, shell }
+      }),
+    )
+  })
+  // Approves every prompt but the shell's, which it decides by the agent's rules, so a denied or asked shell pattern
+  // stops the command.
+  const decide = (requests: Request[], ruleset: PermissionV1.Ruleset, agent: string) => ({
+    ...ctx,
+    agent,
+    ask: (req: Request) =>
+      Effect.sync(() => {
+        requests.push(req)
+        if (req.permission !== "bash") return
+        const rules = req.patterns.map((pattern) => Permission.evaluate(req.permission, pattern, ruleset))
+        if (rules.some((rule) => rule.action === "deny")) throw new PermissionV1.DeniedError({ ruleset })
+        if (rules.some((rule) => rule.action === "ask")) throw new Error("asked")
+      }),
+  })
+  const record = (requests: Request[]) => ({
+    ...ctx,
+    ask: (req: Request) => Effect.sync(() => void requests.push(req)),
+  })
+
+  // Command substitutions bash and zsh run although the grammar keeps them as text, a command it cannot parse, and
+  // redirects from a file the scan cannot place.
+  const hidden = [
+    "git log --stdin <<EOF\n`echo hi`\nEOF",
+    "git log -1 ${HOME#`echo hi`}",
+    "git log -1 ${HOME/a/`echo hi`}",
+    "git log -1; [[ x =~ `echo hi` ]]",
+    "git log -1 `#c` `echo hi`",
+    'git log --stdin < "$HOME/x"',
+    "git log --stdin < ~root/x",
+    '< "$HOME/x"',
+  ]
+
+  it.live("the read-only agents refuse what the scan cannot read, and build asks for it", () =>
+    Effect.gen(function* () {
+      for (const item of yield* standIns()) {
+        yield* withShell(
+          item,
+          Effect.gen(function* () {
+            const tmp = yield* tmpdirScoped({ git: true })
+            yield* runIn(
+              tmp,
+              Effect.gen(function* () {
+                const explore = (yield* Agent.Service.use((svc) => svc.get("explore")))!
+                const build = (yield* Agent.Service.use((svc) => svc.get("build")))!
+                for (const command of hidden) {
+                  const requests: Request[] = []
+                  const denied = yield* fail({ command }, decide(requests, explore.permission, "explore"))
+                  if (!(denied instanceof PermissionV1.DeniedError))
+                    throw new Error(`[${item.label}] explore ran ${JSON.stringify(command)}: ${denied.message}`)
+                  requests.length = 0
+                  expect((yield* fail({ command }, decide(requests, build.permission, "build"))).message).toBe("asked")
+                  expect(
+                    requests.some((r) => r.permission === "bash" && r.patterns.some((p) => p.startsWith(UNREAD))),
+                  ).toBe(true)
+                }
+              }),
+            )
+          }),
+        )
+      }
+    }),
+  )
+
+  it.live("leaves commands the scan reads in full as they were", () =>
+    Effect.gen(function* () {
+      for (const item of yield* standIns()) {
+        yield* withShell(
+          item,
+          Effect.gen(function* () {
+            const tmp = yield* tmpdirScoped({ git: true })
+            yield* runIn(
+              tmp,
+              Effect.gen(function* () {
+                for (const command of [
+                  "git log -1 --oneline",
+                  "git status",
+                  "git diff",
+                  "git show --stat HEAD",
+                  'git log --format="%h $(echo x)"',
+                  "echo `echo hi`",
+                  "ls -la",
+                  "grep -rn 'a`b' .",
+                  "cat README.md",
+                  "find . -name '*.ts'",
+                  "git log --stdin <<'EOF'\n`echo hi`\nEOF",
+                  "echo \\`echo hi\\`",
+                ]) {
+                  const requests: Request[] = []
+                  yield* run({ command }, record(requests))
+                  expect([command, requests.flatMap((r) => r.patterns).filter((p) => p.startsWith(UNREAD))]).toEqual([
+                    command,
+                    [],
+                  ])
+                }
+              }),
+            )
+          }),
+        )
+      }
+    }),
+  )
+
+  it.live("asks under read for an environment file a brace or zsh glob names, and for a linked file's real folder", () =>
+    Effect.gen(function* () {
+      for (const item of yield* standIns()) {
+        yield* withShell(
+          item,
+          Effect.gen(function* () {
+            const tmp = yield* tmpdirScoped({ git: true })
+            const outside = yield* tmpdirScoped()
+            yield* Effect.promise(async () => {
+              await Bun.write(path.join(tmp, ".env"), "PLACEHOLDER=1")
+              await Bun.write(path.join(outside, "secret.txt"), "placeholder")
+              await fs.symlink(path.join(outside, "secret.txt"), path.join(tmp, "keylink"))
+            })
+            yield* runIn(
+              tmp,
+              Effect.gen(function* () {
+                for (const command of ["cat .e{n,}v", "cat {.env,}", "cat .e{a..z}v"]) {
+                  const requests: Request[] = []
+                  yield* run({ command }, record(requests))
+                  expect([command, requests.filter((r) => r.permission === "read").flatMap((r) => r.patterns)]).toEqual(
+                    [command, expect.arrayContaining([".env"])],
+                  )
+                }
+                const requests: Request[] = []
+                yield* run({ command: "git log --stdin < keylink" }, record(requests))
+                expect(
+                  requests.find((r) => r.permission === "external_directory")?.patterns.some((p) =>
+                    p.startsWith(glob(FSUtil.realpath(outside))),
+                  ),
+                ).toBe(true)
+              }),
+            )
+          }),
+        )
+      }
+    }),
+  )
 })
 
 describe("tool.shell abort", () => {
