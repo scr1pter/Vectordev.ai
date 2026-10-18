@@ -1,6 +1,7 @@
 import {
   FREE_MODEL_TRAINING_DISCLAIMER,
   FREE_MODEL_TRAINING_LABEL,
+  FREE_MODEL_TRAINING_SCOPE,
   FREE_MODELS_DATA_POLICY,
   FREE_MODELS_TITLE,
   freeModelMayTrain,
@@ -34,7 +35,7 @@ export function firstFreeModelPolicyNotice(
 export function freeModelTrainingNotice(model: Pick<FreeModelChoice, "freeModel">) {
   return {
     title: FREE_MODEL_TRAINING_LABEL,
-    description: freeModelTrainingDisclaimer(model) ?? FREE_MODEL_TRAINING_DISCLAIMER,
+    description: `${freeModelTrainingDisclaimer(model) ?? FREE_MODEL_TRAINING_DISCLAIMER} ${FREE_MODEL_TRAINING_SCOPE}`,
     accept: "Accept and send",
     cancel: "Don't send",
   }

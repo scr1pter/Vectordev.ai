@@ -3,6 +3,7 @@ import {
   freeModelMayTrain,
   freeModelName,
   freeModelSource,
+  FREE_MODEL_TRAINING_SCOPE,
   freeModelTrainingDisclaimer,
   freeModelTrainingLabel,
   preferOwnFreeModels,
@@ -171,7 +172,7 @@ export function DialogModel(props: { providerID?: string }) {
         const accepted = await DialogConfirm.show(
           dialog,
           freeModelTrainingLabel(info) ?? "May train on your prompts",
-          freeModelTrainingDisclaimer(info) ?? "",
+          `${freeModelTrainingDisclaimer(info) ?? ""} ${FREE_MODEL_TRAINING_SCOPE}`,
           "Accept",
         )
         if (accepted !== true) return

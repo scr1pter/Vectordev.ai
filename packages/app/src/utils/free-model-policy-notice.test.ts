@@ -98,4 +98,15 @@ describe("may-train consent gate", () => {
       freeModelTrainingNotice({ freeModel: { source: "openrouter", dataPolicy: "unreviewed" } }).description,
     ).toContain("has not reviewed")
   })
+
+  test("the question names one model but says the acceptance covers every labelled model, reviewed or not", () => {
+    // The dialog shows the selected model's name, while one acceptance lets every labelled model, including unreviewed
+    // ones whose disclaimer the user never saw, receive prompts until it is withdrawn.
+    for (const dataPolicy of ["may-train", "unreviewed"] as const) {
+      const description = freeModelTrainingNotice({ freeModel: { source: "openrouter", dataPolicy } }).description
+      expect(description).toContain('Accepting covers every free model labelled "May train on your prompts"')
+      expect(description).toContain("including ones Vector has not reviewed yet")
+      expect(description).toContain("vector models --decline-training")
+    }
+  })
 })

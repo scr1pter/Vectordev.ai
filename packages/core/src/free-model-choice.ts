@@ -17,9 +17,13 @@ export const FREE_MODEL_TRAINING_DISCLAIMER =
   "This free model's provider may log your prompts, code and outputs and use them to train its models. Vector itself never trains on your prompts. Don't use it with private repositories, secrets or personal data."
 export const FREE_MODEL_UNREVIEWED_DISCLAIMER =
   "Vector has not reviewed this free model's data policy yet, so treat it as one whose provider may train on your prompts and code. Vector itself never trains on your prompts."
+/**
+ * Said wherever Vector asks: the question names one model, but one acceptance covers every labelled model, including
+ * unreviewed ones, until it is withdrawn.
+ */
+export const FREE_MODEL_TRAINING_SCOPE = `Accepting covers every free model labelled "${FREE_MODEL_TRAINING_LABEL}", including ones Vector has not reviewed yet, now and later. Withdraw it any time with "vector models --decline-training", or with Withdraw in the desktop app's Help panel.`
 /** Shown, and sent as the error, when a prompt to such a model is stopped because it was never accepted. */
 export const FREE_MODEL_TRAINING_CONSENT_REQUIRED = `${FREE_MODEL_TRAINING_DISCLAIMER} Nothing was sent. Accept it once when Vector asks, or run "vector models --accept-training", then send again.`
-/** OpenRouter has separate privacy settings for free and paid models; the free one decides whether these route at all. */
 /** OpenRouter has separate privacy settings for free and paid models; the free one decides whether these route at all. */
 export const FREE_MODEL_TRAINING_BLOCKED =
   'Your OpenRouter privacy settings block free models whose providers may train on prompts. To use this one, open openrouter.ai/settings/privacy, allow free models from providers that may train on your data, then send again. Or choose a model without the "May train on your prompts" label.'
