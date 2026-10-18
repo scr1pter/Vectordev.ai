@@ -1263,7 +1263,7 @@ async function runSpecialist(input: {
     await client.session.abort({ sessionID, directory }).catch(() => undefined)
     message = await within(first, ABORT_GRACE_MS)
   }
-  // The run guard ended the reviewer early (a repeating loop, a project budget.run cap). Its findings still come
+  // The run guard ended the reviewer early (a repeating loop, a budget.run cap). Its findings still come
   // back through the finalize prompt, but the files it never reached were not reviewed, so the review is partial.
   const guarded = guardStop(message)
   if (guarded && status === "ok") status = "stopped"

@@ -184,7 +184,8 @@ export const Info = Schema.Struct({
       ),
     }),
   ).annotate({
-    description: "Spend and runaway limits applied to every run in this project. A prompt's own budget overrides run.",
+    description:
+      "Spend and runaway limits. run applies to every run in every repository: set it in your user config, because a repository's own budget.run is ignored. A prompt's own budget overrides run.",
   }),
   experimental: Schema.optional(
     Schema.Struct({

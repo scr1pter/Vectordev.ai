@@ -43,7 +43,6 @@ import { ConfigDependencies } from "./dependencies"
 import { ConfigVariable } from "./variable"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
-import { SpendGuard } from "@vectordevai/core/spend-guard"
 
 // Custom merge function that concatenates array fields instead of replacing them
 // Keep remeda's deep conditional merge type out of hot config-loading paths; TS profiling showed it dominates here.
@@ -72,6 +71,14 @@ function normalizeLoadedConfig(data: unknown) {
 
 function projectExecutableConfig(config: Info, trusted: boolean, base: Info): Info {
   const next = { ...config }
+  // Spend limits are one overall set across every repository, so a repository's own budget.run is ignored, trusted
+  // or not. Its loop switch still follows the trust rules below.
+  if (next.budget?.run) {
+    const budget = { ...next.budget }
+    delete budget.run
+    if (Object.keys(budget).length) next.budget = budget
+    else delete next.budget
+  }
   if (!trusted) {
     const permission = authorityNarrowingPermission(next.permission)
     if (permission) next.permission = permission
@@ -106,14 +113,10 @@ function projectExecutableConfig(config: Info, trusted: boolean, base: Info): In
     if (next.share && (base.share === "disabled" || next.share === "auto")) delete next.share
     if (next.autoshare) delete next.autoshare
     if (next.snapshot === false) delete next.snapshot
-    // Run limits may only get stricter too: a cloned repository cannot raise or lift the user's cap, step limits or
-    // warning share, switch loop pauses off, or keep the agent going after a denied tool call.
+    // Loop limits may only get stricter too: a cloned repository cannot switch loop pauses off, or keep the agent
+    // going after a denied tool call.
     if (next.budget) {
-      const budget = {
-        ...(next.budget.run && { run: SpendGuard.tighter(base.budget?.run, next.budget.run) }),
-        ...(next.budget.loop?.enabled === true && { loop: { enabled: true } }),
-      }
-      if (Object.keys(budget).length) next.budget = budget
+      if (next.budget.loop?.enabled === true) next.budget = { loop: { enabled: true } }
       else delete next.budget
     }
     if (next.experimental?.continue_loop_on_deny === true && base.experimental?.continue_loop_on_deny !== true) {
@@ -599,6 +602,44 @@ const layer = Layer.effect(
       return yield* Effect.uninterruptible(cachedGlobal)
     })
 
+    // A repository's budget.run stopped applying when spend limits became one overall set. Say so once per file, so a
+    // cap someone relied on does not disappear silently, without repeating it on every load.
+    const noticeIgnoredRunBudgets = Effect.fn("Config.noticeIgnoredRunBudgets")(function* (
+      workspace: string,
+      sources: string[],
+    ) {
+      yield* Effect.logWarning("ignoring budget.run in repository config; spend limits cover every repository", {
+        sources,
+      })
+      const file = path.join(Global.Path.state, "ignored-repository-budgets.json")
+      const noticed = yield* fs.readJson(file).pipe(
+        Effect.map((value) =>
+          Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [],
+        ),
+        Effect.orElseSucceed((): string[] => []),
+      )
+      const fresh = sources.filter((source) => !noticed.includes(source))
+      if (!fresh.length) return
+      yield* fs.writeWithDirs(file, JSON.stringify([...noticed, ...fresh])).pipe(Effect.ignore)
+      const files = fresh.map((source) => path.relative(workspace, source) || source).join(" and ")
+      GlobalBus.emit("event", {
+        directory: "global",
+        payload: {
+          type: TuiEvent.ToastShow.type,
+          properties: {
+            title: "Repository spend cap ignored",
+            message: `This repository's ${files} ${fresh.length === 1 ? "sets" : "set"} budget.run, which no longer applies: spend limits now cover all your repositories together. ${
+              Flag.VECTOR_CLIENT === "desktop"
+                ? "Set your limits in Settings, under Spend limits."
+                : `Set budget.run in ${path.join(Global.Path.config, "vector.json")} instead, or pass --max-cost to vector run.`
+            }`,
+            variant: "warning",
+            duration: 15_000,
+          },
+        },
+      })
+    })
+
     const ensureGitignore = Effect.fn("Config.ensureGitignore")(function* (dir: string) {
       const gitignore = path.join(dir, ".gitignore")
       const hasIgnore = yield* fs.existsSafe(gitignore)
@@ -771,10 +812,13 @@ const layer = Layer.effect(
         // The user's own sources merged alone, and whether a trusted project granted any permission over them.
         let userPermissions: Pick<Info, "permission" | "tools" | "agent"> = {}
         let projectGrants = false
+        // Repository files whose budget.run was dropped, for the notice once loading ends.
+        const ignoredRunBudgets: string[] = []
 
         const merge = (source: string, next: Info, kind?: ConfigPlugin.Scope) => {
           const scope = kind ?? (projectContains(source) ? "local" : "global")
           const projectSource = scope === "local" && source !== "VECTOR_CONFIG_CONTENT"
+          if (projectSource && next.budget?.run) ignoredRunBudgets.push(source)
           const safe = projectSource ? projectExecutableConfig(next, trusted, result) : next
           if (projectSource) projectGrants ||= grantsPermission(safe)
           // Only the keys a source sets: merging an undefined key would erase what an earlier user source declared,
@@ -1010,6 +1054,8 @@ const layer = Layer.effect(
         if (!InstallationLocal && result.plugin?.length) {
           deps.push(yield* dependencies.prepare().pipe(Effect.forkDetach))
         }
+
+        if (ignoredRunBudgets.length) yield* noticeIgnoredRunBudgets(workspace, ignoredRunBudgets)
 
         const settings = WorkspaceTrust.hasInputs(trustSnapshot)
         const desktop = Flag.VECTOR_CLIENT === "desktop"

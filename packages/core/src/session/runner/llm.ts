@@ -56,7 +56,7 @@ import { llmClient } from "../../effect/app-node-platform"
  *   - [x] Honor optional agent step limits.
  *   - [x] Stop a guarded run at its spend, step, or unpriced-step limit before the next provider turn.
  *   - [ ] Record compaction model calls with the spend guard; a compaction's cost is not counted against the cap.
- *   - [ ] Apply the project's budget.run config to runs; only a prompt's own budget arms a V2 run today.
+ *   - [ ] Apply the user's budget.run config to runs; only a prompt's own budget arms a V2 run today.
  *   - [ ] Bound provider retries and repeated identical tool calls.
  *
  * - Runtime context assembly

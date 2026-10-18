@@ -848,10 +848,7 @@ test("guests cannot allow tools in their own sessions", async () => {
 
 test("a guest's prompt budget can only tighten the owner's run limits", async () => {
   // The provider never answers, so each run begins under its budget and then ends on a connection error.
-  await using tmp = await tmpdir({
-    trusted: true,
-    config: { ...testProviderConfig("http://127.0.0.1:9/v1"), budget: { run: { usd: 2, steps: 50 } } },
-  })
+  await using tmp = await tmpdir({ trusted: true, config: testProviderConfig("http://127.0.0.1:9/v1") })
   const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
   const keys = [
     "VECTOR_SERVER_USERNAME",
@@ -861,9 +858,12 @@ test("a guest's prompt budget can only tighten the owner's run limits", async ()
     "VECTOR_SERVER_GUEST_WORKSPACES",
     "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
     "VECTOR_DISABLE_DEFAULT_PLUGINS",
+    "VECTOR_CONFIG_CONTENT",
   ] as const
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
   Object.assign(process.env, {
+    // The owner's run limits, from their own config: a repository's budget.run is ignored.
+    VECTOR_CONFIG_CONTENT: JSON.stringify({ budget: { run: { usd: 2, steps: 50 } } }),
     VECTOR_SERVER_USERNAME: "vector",
     VECTOR_SERVER_PASSWORD: "owner-secret",
     VECTOR_SERVER_GUEST_USERNAME: "guest",

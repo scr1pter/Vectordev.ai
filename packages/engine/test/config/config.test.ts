@@ -40,6 +40,7 @@ import { ConfigPluginV1 } from "@vectordevai/core/v1/config/plugin"
 import { AuthTest } from "../fake/auth"
 import { NpmTest } from "../fake/npm"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
+import { GlobalBus, type GlobalEvent } from "@/bus/global"
 
 const unexpectedHttp = HttpClient.make((request) =>
   Effect.die(`unexpected http request: ${request.method} ${request.url}`),
@@ -1191,7 +1192,7 @@ it.instance("lets an untrusted project make sharing and snapshots only safer", (
   ),
 )
 
-it.instance("lets an untrusted project make run limits and loop pauses only stricter", () =>
+it.instance("ignores an untrusted repository's run limits and keeps it from switching loop pauses off", () =>
   withGlobalConfig(
     {
       config: {
@@ -1207,25 +1208,72 @@ it.instance("lets an untrusted project make run limits and loop pauses only stri
           experimental: { continue_loop_on_deny: true },
         })
         const config = yield* Config.use.get()
-        expect(config.budget).toEqual({
-          run: { usd: 2, steps: 50, warnAt: 0.8, unpricedSteps: 40 },
-          loop: { enabled: true },
-        })
+        expect(config.budget).toEqual({ run: { usd: 2, steps: 50 }, loop: { enabled: true } })
         expect(config.experimental?.continue_loop_on_deny).toBe(false)
       }),
   ),
 )
 
-it.instance("lets an untrusted project lower the run limits and switch loop pauses on", () =>
+it.instance("ignores an untrusted repository's lower run limits and still lets it switch loop pauses on", () =>
   withGlobalConfig({ config: { budget: { run: { usd: 2 }, loop: { enabled: false } } } }, () =>
     Effect.gen(function* () {
       const test = yield* TestInstance
       yield* writeConfigEffect(test.directory, {
         budget: { run: { usd: 1, steps: 20 }, loop: { enabled: true } },
       })
-      expect((yield* Config.use.get()).budget).toEqual({ run: { usd: 1, steps: 20 }, loop: { enabled: true } })
+      expect((yield* Config.use.get()).budget).toEqual({ run: { usd: 2 }, loop: { enabled: true } })
     }),
   ),
+)
+
+// Spend limits are one overall set: a repository's budget.run is ignored even once the repository is trusted.
+it.instance("ignores a trusted repository's run limits and keeps its loop switch", () =>
+  withGlobalConfig({ config: { budget: { run: { usd: 2 } } } }, () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* writeTrustedConfigEffect(test.directory, {
+        budget: { run: { usd: 1_000, steps: 1_000 }, loop: { enabled: false } },
+      })
+      expect((yield* Config.Service.use((service) => service.trust!())).trusted).toBe(true)
+      expect((yield* Config.use.get()).budget).toEqual({ run: { usd: 2 }, loop: { enabled: false } })
+    }),
+  ),
+)
+
+it.instance("a trusted repository's run limits alone leave no budget", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    yield* writeTrustedConfigEffect(path.join(test.directory, ".vector"), { budget: { run: { usd: 0.5 } } })
+    expect((yield* Config.use.get()).budget).toBeUndefined()
+  }),
+)
+
+it.effect("says once per file that a repository's run limits are ignored", () =>
+  Effect.gen(function* () {
+    const global = yield* tmpdirScoped()
+    const directory = yield* tmpdirScoped()
+    yield* writeConfigEffect(path.join(directory, ".vector"), { budget: { run: { usd: 1 } } })
+    yield* writeConfigEffect(directory, { model: "test/model" })
+    const notices: { title?: string; message: string; variant: string }[] = []
+    const listener = (event: GlobalEvent) => {
+      if (event.payload.type === "tui.toast.show" && event.payload.properties.title === "Repository spend cap ignored")
+        notices.push(event.payload.properties)
+    }
+    GlobalBus.on("event", listener)
+    yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", listener)))
+    const load = withGlobalConfigDir(global, withInstanceDir(directory, Config.use.get()))
+
+    expect((yield* load).budget).toBeUndefined()
+    expect(notices).toHaveLength(1)
+    expect(notices[0]?.variant).toBe("warning")
+    expect(notices[0]?.message).toContain(`This repository's ${path.join(".vector", "vector.json")} sets budget.run`)
+    expect(notices[0]?.message).toContain("spend limits now cover all your repositories together")
+    expect(`${notices[0]?.title} ${notices[0]?.message}`).not.toMatch(/project/i)
+
+    yield* Effect.promise(() => InstanceRuntime.disposeAllInstances())
+    expect((yield* load).budget).toBeUndefined()
+    expect(notices).toHaveLength(1)
+  }),
 )
 
 it.instance("lets an untrusted project turn sharing off", () =>
