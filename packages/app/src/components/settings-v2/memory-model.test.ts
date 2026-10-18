@@ -82,6 +82,10 @@ describe("memory page model", () => {
       undefined,
     ] as const)
       expect(holdLabel(hold).length).toBeGreaterThan(20)
+    // Sessions agreeing no longer confirm a proposal, and a fetching command holds memory like the web does.
+    expect(holdLabel(undefined)).toContain("once you approve it")
+    expect(holdLabel(undefined)).not.toContain("another session confirms")
+    expect(holdLabel("web")).toContain("reaches outside this computer")
     expect(kindLabel("failure")).toBe("Past failure")
   })
 
