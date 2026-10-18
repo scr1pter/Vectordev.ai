@@ -1625,8 +1625,6 @@ const PASS_LABEL: Record<ReviewPass["name"], string> = {
   verify: "Double-check",
 }
 
-// What each pass of a finished review spent, one line each. Dollars show only when the review as a whole has a price;
-// otherwise, as for a subscription or Vector Codium, only tokens.
 // The double-check chip, and its tooltip, which says why findings were dropped: a finding the review model did not
 // confirm after a triage pass was left out, not found to be false.
 export function verificationChip(verification: NonNullable<ReviewOutcomeLite["verification"]>) {
@@ -1652,6 +1650,8 @@ export function verificationChip(verification: NonNullable<ReviewOutcomeLite["ve
   }
 }
 
+// What each pass of a finished review spent, one line each. Dollars show only when the review as a whole has a price;
+// otherwise, as for a subscription or Vector Codium, only tokens.
 export function passLines(outcome: Pick<ReviewOutcomeLite, "passes" | "cost">) {
   const priced = outcome.cost?.kind === "priced"
   return (outcome.passes ?? []).map((pass) =>
