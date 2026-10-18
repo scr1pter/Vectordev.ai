@@ -46,6 +46,7 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { Provider } from "@/provider/provider"
 import type { Command } from "@/command"
+import { FREE_ROUTER_ID, isFreeModelRef } from "@vectordevai/schema/free-model"
 
 export const AuthMethodID = "vector-login"
 
@@ -791,12 +792,7 @@ function defaultModelFromConfig(
     if (own?.freeModel?.source === "openrouter") return { providerID: ProviderV2.ID.openrouter, modelID: own.id }
   }
   if (configured && providers[configured.providerID]?.models[configured.modelID]) return configured
-  if (
-    configured &&
-    ["vector", "openrouter"].includes(configured.providerID) &&
-    configured.modelID.toLowerCase().endsWith(":free")
-  )
-    return configured
+  if (configured && isFreeModelRef(configured)) return configured
 
   // First-session startup resolves configured or sorted available models without reading historical sessions.
   // Vector Codium spends the account's credits, so it is never chosen automatically.
@@ -804,19 +800,22 @@ function defaultModelFromConfig(
   const preferred = connected.some((provider) => provider.id !== "vector")
     ? connected.filter((provider) => provider.id !== "vector")
     : connected
-  const best = Provider.sort(preferred.flatMap((provider) => Object.values(provider.models)))[0]
+  const best = Provider.automaticModels(preferred.flatMap((provider) => Object.values(provider.models)))[0]
   if (providers[ProviderV2.ID.openrouter] && best?.freeModel?.source !== "openrouter") return
   if (best) return { providerID: best.providerID, modelID: best.id }
 }
 
 const selectDefaultModel = Effect.fn("ACP.selectDefaultModel")(function* (snapshot: Directory.Snapshot) {
   if (snapshot.defaultModel) return snapshot.defaultModel
-  const free = Provider.sort(
+  const free = Provider.automaticModels(
     Object.values(snapshot.providers).flatMap((provider) => Object.values(provider.models)),
   ).find((model) => model.freeModel?.source === "openrouter")
   if (free) return { providerID: free.providerID, modelID: free.id }
   if (snapshot.providers[ProviderV2.ID.openrouter]) return yield* new ACPError.AuthRequiredError({})
-  const model = snapshot.modelOptions.find((option) => option.providerID !== ModelPlanStatus.PROVIDER_ID)
+  // Nor is OpenRouter's free router, which picks a model at random, chosen for anyone.
+  const model = snapshot.modelOptions.find(
+    (option) => option.providerID !== ModelPlanStatus.PROVIDER_ID && option.modelID !== FREE_ROUTER_ID,
+  )
   if (model) return { providerID: model.providerID, modelID: model.modelID }
   // Codium alone is listed: it runs only on a model the person names, never as the automatic choice.
   if (snapshot.providers[ProviderV2.ID.make(ModelPlanStatus.PROVIDER_ID)])

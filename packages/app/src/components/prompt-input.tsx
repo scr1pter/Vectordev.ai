@@ -64,6 +64,8 @@ import {
   promptLength,
 } from "./prompt-input/history"
 import { createPromptSubmit, type FollowupDraft } from "./prompt-input/submit"
+import { DialogFreeModelTraining } from "./dialog-free-model-training"
+import { acceptFreeModelTraining, freeModelTrainingGate } from "@/utils/free-model-policy-notice"
 import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/slash-popover"
 import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
@@ -78,6 +80,7 @@ import { ImagePreview } from "@vectordevai/ui/image-preview"
 import type { ReferenceInfo } from "@vectordevai/sdk/v2/client"
 import { modelVariantDescription, modelVariantLabel, visibleModelVariants } from "@/context/model-variant"
 import { modelDisplayName } from "@/utils/provider-brand"
+import { freeModelTrainingLabel } from "@vectordevai/core/free-model-choice"
 import { detectParallelIntent } from "@/features/delegation/delegation"
 import { holdsHandoff } from "@/utils/composer-handoff"
 import { createOutcomes } from "@/features/economics/economics-repository"
@@ -1555,6 +1558,33 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       llmJudge: settings.general.llmJudge,
       autoModelRouting: settings.general.autoModelRouting,
       connectProvider: () => setModelStartNudge((count) => count + 1),
+      confirmFreeModelTraining: (model) => {
+        const client = sdk().client
+        return freeModelTrainingGate({
+          model,
+          consent: () => client.provider.freeModels.consent().then((result) => result.data?.training === true),
+          ask: () =>
+            new Promise<boolean>((resolve) =>
+              dialog.show(
+                () => (
+                  <DialogFreeModelTraining
+                    model={model}
+                    onAccept={() => {
+                      resolve(true)
+                      dialog.close()
+                    }}
+                    onCancel={() => dialog.close()}
+                  />
+                ),
+                () => resolve(false),
+              ),
+            ),
+          accept: () =>
+            acceptFreeModelTraining(client.provider.freeModels, (description) =>
+              showToast({ title: "Nothing was sent", description, variant: "error" }),
+            ),
+        })
+      },
     })
 
   // A prompt another surface handed over to send (Fix this deploy, for example)
@@ -1762,11 +1792,18 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return current ? modelDisplayName(current) : language.t("dialog.model.select.title")
   }
 
+  // The chip's tooltip repeats the picker's "May train on your prompts" label for the selected model.
+  const modelChipTitle = () => {
+    const current = props.controls.model.selection.current()
+    const training = current ? freeModelTrainingLabel(current) : undefined
+    return training ? `${language.t("command.model.choose")} · ${training}` : language.t("command.model.choose")
+  }
+
   const modelControlState = createMemo<ComposerModelControlState>(() => ({
     loading: providersLoading(),
     shouldAnimate: providersShouldFadeIn(),
     paid: props.controls.model.paid,
-    title: language.t("command.model.choose"),
+    title: modelChipTitle(),
     keybind: command.keybindParts("model.choose"),
     model: props.controls.model.selection,
     providerID: props.controls.model.selection.current()?.provider?.id,
@@ -1818,12 +1855,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         t={(key) => language.t(key as Parameters<typeof language.t>[0])}
       />
       <Show when={needsModel()}>
-        <FreeModelStart
-          directory={sdk().directory}
-          model={props.controls.model.selection}
-          nudge={modelStartNudge()}
-          onReady={restoreFocus}
-        />
+        <FreeModelStart directory={sdk().directory} nudge={modelStartNudge()} />
       </Show>
       <Show when={showDelegationChip()}>
         <div class="mx-1 mb-2 flex items-center gap-2 rounded-full border border-[#9374ec]/30 bg-[#9374ec]/10 px-3 py-1.5 text-[12px] text-[#d8cdfb] animate-in fade-in">
@@ -2503,7 +2535,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                           <TooltipKeybind
                             placement="top"
                             gutter={4}
-                            title={language.t("command.model.choose")}
+                            title={modelChipTitle()}
                             keybind={command.keybind("model.choose")}
                           >
                             <Button

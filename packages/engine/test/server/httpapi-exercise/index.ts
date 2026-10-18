@@ -336,6 +336,19 @@ const scenarios: Scenario[] = [
     .status(204, undefined, "status"),
   http.protected.get("/provider", "provider.list").json(),
   http.protected.get("/provider/auth", "provider.auth").json(),
+  http.protected.get("/provider/free-models/consent", "provider.freeModels.consent").json(200, (body) => {
+    object(body)
+    check(typeof body.training === "boolean", "free-model consent should say whether training was accepted")
+  }),
+  // Withdrawing is the non-destructive direction: it never records an acceptance the test user did not give.
+  http.protected
+    .post("/provider/free-models/consent", "provider.freeModels.setConsent")
+    .mutating()
+    .at((ctx) => ({ path: "/provider/free-models/consent", headers: ctx.headers(), body: { training: false } }))
+    .json(200, (body) => {
+      object(body)
+      check(body.training === false, "withdrawing free-model consent should report it withdrawn")
+    }),
   http.protected
     .post("/provider/{providerID}/oauth/authorize", "provider.oauth.authorize")
     .at((ctx) => ({

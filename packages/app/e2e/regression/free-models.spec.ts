@@ -168,7 +168,7 @@ test("groups free models once, prefers own account, and hides the group when OFF
   await setup(page, { enabled: true })
   await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
   await expect(
-    page.locator('[data-slot="model-section-name"]').filter({ hasText: "Models included with Vector" }),
+    page.locator('[data-slot="model-section-name"]').filter({ hasText: "Free models inside of Vector" }),
   ).toBeVisible()
   const free = page.locator('[data-option-key="openrouter:maker/coder:free"]')
   await expect(free).toHaveCount(1)
@@ -181,7 +181,7 @@ test("groups free models once, prefers own account, and hides the group when OFF
   await setup(page, { enabled: false })
   await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
   await expect(
-    page.locator('[data-slot="model-section-name"]').filter({ hasText: "Models included with Vector" }),
+    page.locator('[data-slot="model-section-name"]').filter({ hasText: "Free models inside of Vector" }),
   ).toHaveCount(0)
   await expect(page.locator('[data-option-key="openrouter:maker/coder:free"]')).toBeVisible()
 })
@@ -217,11 +217,14 @@ test("quota recovery resumes the same failed turn without submitting a new promp
   })
   const card = page.locator("[data-free-models-limit]")
   await expect(card).toBeVisible()
-  await expect(card).toContainText("You've used today's shared allowance for Models included with Vector")
+  await expect(card).toContainText("You've used today's shared allowance for Free models inside of Vector")
   await expect(card).toContainText("2030")
   await expect(page.getByText("RAW_UPSTREAM_QUOTA_DETAILS_MUST_NOT_RENDER")).toHaveCount(0)
   await expect(page.getByText("Build · Maker Coder:free")).toHaveCount(0)
   await expect(page.getByText("Build · Maker Coder", { exact: true })).toBeVisible()
+  // It says when the shared allowance resets and offers the user's own keys, never connecting OpenRouter.
+  await expect(card).toContainText("add your own provider key in Settings → Providers")
+  await expect(card.getByRole("button", { name: "Connect OpenRouter", exact: true })).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath("free-model-quota.png") })
   await card.getByRole("button", { name: "Continue with connected OpenRouter" }).click()
   await expect(card).toContainText("Continuing this conversation with your OpenRouter account.")
@@ -234,17 +237,12 @@ test("quota recovery resumes the same failed turn without submitting a new promp
   )
 })
 
-test("Connect OpenRouter starts PKCE and resumes the same conversation after authorization", async ({ page }) => {
-  let accepted = false
-  await setup(page, { enabled: true, limited: true, own: false, resumed: () => accepted })
-  let connected = false
-  const providerReads: string[] = []
-  await page.route(/\/provider(?:\?|$)/, (route) => {
-    if (connected) providerReads.push(new URL(route.request().url()).searchParams.get("directory") ?? "global")
-    return route.fulfill({ json: catalog({ enabled: true, own: connected }) })
-  })
-  const methods: number[] = []
-  const resumed: unknown[] = []
+test("without an OpenRouter account, the limit card offers the user's own keys and never OpenRouter", async ({
+  page,
+}) => {
+  // The owner's decision of 17 October 2026: free models run on Vector's shared allowance, and its limit notice never
+  // asks anyone to connect an OpenRouter account of their own.
+  await setup(page, { enabled: true, limited: true, own: false })
   const prompts: string[] = []
   page.on("request", (request) => {
     if (
@@ -253,52 +251,16 @@ test("Connect OpenRouter starts PKCE and resumes the same conversation after aut
     )
       prompts.push(request.url())
   })
-  await page.context().route("**/oauth-test", (route) => route.fulfill({ body: "Synthetic authorization callback" }))
-  await page.route("**/provider/auth*", (route) =>
-    route.fulfill({
-      json: {
-        openrouter: [
-          { type: "oauth", label: "Connect OpenRouter" },
-          { type: "api", label: "API key" },
-        ],
-      },
-    }),
-  )
-  await page.route("**/provider/openrouter/oauth/authorize*", (route) => {
-    methods.push(route.request().postDataJSON().method)
-    return route.fulfill({
-      json: {
-        method: "auto",
-        url: `${new URL(page.url()).origin}/oauth-test`,
-        instructions: "Complete authorization in your browser.",
-      },
-    })
-  })
-  await page.route("**/provider/openrouter/oauth/callback*", (route) => {
-    connected = true
-    return route.fulfill({ json: true })
-  })
-  await page.route("**/global/dispose*", (route) => route.fulfill({ json: true }))
-  await page.route(`**/session/${sessionID}/free-models/resume*`, (route) => {
-    resumed.push(route.request().postDataJSON())
-    accepted = true
-    return route.fulfill({ json: true })
-  })
   const card = page.locator("[data-free-models-limit]")
-  const popup = page.waitForEvent("popup")
-  await card.getByRole("button", { name: "Connect OpenRouter", exact: true }).click()
-  const authorizationPage = await popup
-  await expect(authorizationPage.getByText("Synthetic authorization callback")).toBeVisible()
-  await authorizationPage.close()
-  await page.bringToFront()
-  await expect
-    .poll(() => ({ methods, resumed, connected }))
-    .toEqual({ methods: [0], resumed: [{ messageID: assistantID, modelID }], connected: true })
-  expect(providerReads).toEqual(expect.arrayContaining(["global", directory]))
-  expect(prompts).toEqual([])
-  await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
-  await expect(page.locator('[data-option-key="openrouter:maker/coder:free"]')).toBeVisible()
+  await expect(card).toBeVisible()
+  await expect(card).toContainText("The shared allowance is expected to reset at")
+  await expect(card).toContainText("2030")
+  await expect(card).toContainText("add your own provider key in Settings → Providers")
+  await expect(card).not.toContainText("OpenRouter")
+  await expect(card.getByRole("button", { name: "Continue with connected OpenRouter" })).toHaveCount(0)
+  await card.getByRole("button", { name: "Use my own API key" }).click()
+  await expect(page.getByPlaceholder("Search providers")).toBeVisible()
   await page.keyboard.press("Escape")
-  await expect(card).toHaveCount(0)
+  expect(prompts).toEqual([])
   await expect(page.getByText("Please continue this exact task", { exact: true })).toHaveCount(1)
 })

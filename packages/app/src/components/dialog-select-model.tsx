@@ -1,4 +1,4 @@
-import { freeModelSource } from "@vectordevai/core/free-model-choice"
+import { freeModelSource, freeModelTrainingLabel } from "@vectordevai/core/free-model-choice"
 import { Popover as Kobalte } from "@kobalte/core/popover"
 import { Component, ComponentProps, createMemo, createSignal, For, JSX, onMount, Show, ValidComponent } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -125,6 +125,8 @@ function ModelRow(props: { item: ModelItem; section: ModelSection; now: number }
     const parts: { slot: string; text: string }[] = []
     const source = freeModelSource(props.item)
     if (source) parts.push({ slot: "model-row-source", text: source })
+    const training = freeModelTrainingLabel(props.item)
+    if (training) parts.push({ slot: "model-row-training", text: training })
     const context = contextLabel(props.item.limit?.context)
     if (context) parts.push({ slot: "model-row-context", text: context })
     return parts

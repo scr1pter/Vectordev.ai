@@ -1,28 +1,33 @@
-import { createEffect, on, Show } from "solid-js"
+import { createEffect, on, onCleanup, onMount, Show } from "solid-js"
+import { createStore } from "solid-js/store"
 import { useDialog } from "@vectordevai/ui/context/dialog"
-import { ProviderIcon } from "@vectordevai/ui/provider-icon"
-import type { useLocal } from "@/context/local"
 import { useLanguage } from "@/context/language"
-import { useProviders } from "@/hooks/use-providers"
-import { bestOwnFreeModel } from "@/utils/free-model"
-import { modelDisplayName } from "@/utils/provider-brand"
+import { usePlatform } from "@/context/platform"
+import type { VectorAccountStatus } from "@/vector-account"
 
 /**
- * The composer's first-run state while no connected provider offers a model: one free path through
- * the user's own OpenRouter account, and one for a key they already have. The draft stays in the
- * editor throughout, and `nudge` moves focus here when a send is attempted.
+ * The composer's first-run state while no connected provider offers a model. Free models run on Vector's shared
+ * allowance for every signed-in Vector account, so the free path is signing in to Vector, never connecting an
+ * OpenRouter account (owner decision, 17 October 2026); the other path is a key the user already has. Once signed in,
+ * the shared models load and this card unmounts; it stays only when the shared allowance serves nothing. The draft
+ * stays in the editor throughout, and `nudge` moves focus here when a send is attempted.
  */
-export function FreeModelStart(props: {
-  directory: string
-  model: ReturnType<typeof useLocal>["model"]
-  nudge: number
-  onReady: () => void
-}) {
+export function FreeModelStart(props: { directory: string; nudge: number }) {
   const dialog = useDialog()
   const language = useLanguage()
-  const providers = useProviders(() => props.directory)
-  const free = () => providers.all().has("openrouter")
+  const platform = usePlatform()
+  const [account, setAccount] = createStore<VectorAccountStatus>({ authenticated: false, pending: false })
   let action: HTMLButtonElement | undefined
+
+  onMount(() => {
+    const vectorAccount = platform.vectorAccount
+    if (!vectorAccount) return
+    onCleanup(vectorAccount.onChange(setAccount))
+    void vectorAccount
+      .status()
+      .then(setAccount)
+      .catch(() => {})
+  })
 
   createEffect(
     on(
@@ -32,26 +37,14 @@ export function FreeModelStart(props: {
     ),
   )
 
-  const startFree = async () => {
-    // This card unmounts as soon as a model exists, so the callback keeps what it needs.
-    const directory = props.directory
-    const model = props.model
-    const ready = props.onReady
-    const { DialogConnectProvider } = await import("../dialog-connect-provider")
-    dialog.show(() => (
-      <DialogConnectProvider
-        provider="openrouter"
-        preferredMethod="oauth"
-        directory={() => directory}
-        onConnected={() => {
-          const best = bestOwnFreeModel(model.list())
-          if (!best) return language.t("freeModels.start.unavailable")
-          model.set({ providerID: "openrouter", modelID: best.id }, { recent: true })
-          ready()
-          return language.t("freeModels.start.ready", { model: modelDisplayName(best) })
-        }}
-      />
-    ))
+  // Signing in from here needs the desktop app. Elsewhere, such as the web build, the engine is signed in with
+  // `vector login`, so the card says that instead of offering a sign-in it cannot start.
+  const canSignIn = () => !!platform.vectorAccount && !account.authenticated
+  const signIn = () => {
+    void platform.vectorAccount
+      ?.start()
+      .then(setAccount)
+      .catch(() => setAccount("error", language.t("freeModels.start.signInFailed")))
   }
 
   const ownKey = async () => {
@@ -69,13 +62,31 @@ export function FreeModelStart(props: {
     >
       <div class="vector-model-start__copy">
         <h2>{language.t("freeModels.start.title")}</h2>
-        <p>{free() ? language.t("freeModels.start.description") : language.t("freeModels.start.fallback")}</p>
+        <p>
+          {account.authenticated
+            ? language.t("freeModels.start.unavailableShared")
+            : platform.vectorAccount
+              ? language.t("freeModels.start.signIn")
+              : language.t("freeModels.start.signInEngine")}
+        </p>
+        <Show when={account.pending}>
+          <p role="status">{language.t("freeModels.start.signingIn")}</p>
+        </Show>
+        <Show when={account.error}>
+          <p role="alert">{account.error}</p>
+        </Show>
       </div>
       <div class="vector-model-start__actions">
         <Show
-          when={free()}
+          when={canSignIn()}
           fallback={
-            <button type="button" data-variant="primary" ref={(el) => (action = el)} onClick={ownKey}>
+            <button
+              type="button"
+              data-variant="primary"
+              data-action="own-api-key"
+              ref={(el) => (action = el)}
+              onClick={ownKey}
+            >
               {language.t("freeModels.start.ownKey")}
             </button>
           }
@@ -83,19 +94,19 @@ export function FreeModelStart(props: {
           <button
             type="button"
             data-variant="primary"
-            data-action="free-model-start"
+            data-action="free-model-sign-in"
+            disabled={account.pending}
             ref={(el) => (action = el)}
-            onClick={startFree}
+            onClick={signIn}
           >
-            <ProviderIcon id="openrouter" class="size-4 shrink-0" />
-            {language.t("freeModels.start.free")}
+            {language.t("freeModels.start.signInAction")}
           </button>
           <button type="button" data-variant="secondary" data-action="own-api-key" onClick={ownKey}>
             {language.t("freeModels.start.ownKey")}
           </button>
         </Show>
       </div>
-      <Show when={free()}>
+      <Show when={!account.authenticated}>
         <p class="vector-model-start__note">{language.t("freeModels.start.note")}</p>
       </Show>
     </section>

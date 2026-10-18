@@ -28,8 +28,6 @@ import { pathKey } from "@/utils/path-key"
 import { listSwarmWorkers } from "@/utils/swarm-workers"
 import { samePolledRecords, sameWorkspaceRevisions } from "@/utils/workspace-revisions"
 import { modelDisplayName } from "@/utils/provider-brand"
-import { bestOwnFreeModel } from "@/utils/free-model"
-import { freeModelName } from "@vectordevai/core/free-model-choice"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { decodeRouteSegment, projectPathFromWorkspaceRoute, sessionIDFromRouteValue } from "@/utils/project-route"
 import { taskScopeId, taskScopeSearch, type TaskScope } from "@/utils/task-scope"
@@ -3022,35 +3020,47 @@ export default function NewLayout(props: ParentProps) {
         ? "Vector completed a real model response with your selected provider."
         : onboardingProviderConnected()
           ? "Connected. Run the safe first task below to see the model answer end to end."
-          : "Start free with your own OpenRouter account, with no payment or credits needed. Or use an API key you already have.",
+          : platform.vectorAccount
+            ? "Sign in to Vector to use free models, with no payment or credits needed. Or use an API key you already have."
+            : language.t("freeModels.start.signInEngine"),
       done: onboardingProviderDone(),
-      cta: "Start free",
-      onGo: async () => {
-        const { DialogConnectProvider } = await import("@/components/dialog-connect-provider")
-        setOnboardingOpen(false)
-        // Come back to the checklist so the next step is one click away.
-        dialog.show(() => (
-          <DialogConnectProvider
-            provider="openrouter"
-            preferredMethod="oauth"
-            onConnected={() => {
-              setOnboardingOpen(true)
-              const best = bestOwnFreeModel(byokProviders.connected().flatMap((item) => Object.values(item.models)))
-              if (!best) return language.t("freeModels.start.unavailable")
-              // The composer picks the most recent model first, so a model used before this sign-in never wins.
-              byokModels.recent.push({ providerID: "openrouter", modelID: best.id })
-              return language.t("freeModels.start.readyForProject", { model: freeModelName(best) })
-            }}
-          />
-        ))
-      },
-      secondary: {
-        label: "Use my own API key",
-        onGo: () => {
-          setOnboardingOpen(false)
-          openProviderSettings()
-        },
-      },
+      // Free models run on Vector's shared allowance for every signed-in account, so starting free is signing in to
+      // Vector. Signed in with no free model listed, the shared allowance serves nothing right now: offer a key. Only
+      // the desktop app can sign in from here; elsewhere, such as the web build, the detail says how, and the step
+      // offers the key alone.
+      ...(platform.vectorAccount
+        ? {
+            cta: "Start free",
+            onGo: async () => {
+              const account = platform.vectorAccount
+              const status = await account?.status().catch(() => undefined)
+              if (!account || status?.authenticated) {
+                setOnboardingOpen(false)
+                openProviderSettings()
+                return
+              }
+              await account.start().catch(() =>
+                showToast({
+                  title: "Couldn't start signing in",
+                  description: "Try again in Settings → Providers.",
+                }),
+              )
+            },
+            secondary: {
+              label: "Use my own API key",
+              onGo: () => {
+                setOnboardingOpen(false)
+                openProviderSettings()
+              },
+            },
+          }
+        : {
+            cta: "Use my own API key",
+            onGo: () => {
+              setOnboardingOpen(false)
+              openProviderSettings()
+            },
+          }),
     },
     {
       id: "project",

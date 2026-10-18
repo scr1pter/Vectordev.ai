@@ -11,9 +11,14 @@ import { ProviderV2 } from "../src/provider"
 import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
 
 const catalog = { enabled: true, updatedAt: 1, models: [...FREE_MODEL_FALLBACKS.slice(0, 2)] }
+// No invited guest has worked in the sessions these routes serve.
+const ownerSession = Effect.succeed(false)
 const client = FreeModels.Service.of({
   catalog: () => Effect.succeed(catalog),
   forKey: () => Effect.succeed(catalog.models),
+  trainingConsent: () => Effect.succeed(false),
+  setTrainingConsent: (accepted) => Effect.succeed(accepted),
+  changes: Stream.empty,
 })
 const info = ModelV2.Info.make({
   ...ModelV2.Info.empty(ProviderV2.ID.vector, ModelV2.ID.make(catalog.models[0].id)),
@@ -33,7 +38,7 @@ test("native free route fixes destination and body after all caller overlays, re
   const credentials = FreeModels.CredentialsService.of({
     get: (provider) => Effect.succeed(provider === "openrouter" ? keys.shift() : "vct_shared"),
   })
-  const model = freeModelRoute(info, client, credentials)
+  const model = freeModelRoute(info, client, credentials, ownerSession)
   for (const key of ["first-owned-key", "second-owned-key"]) {
     const request = LLM.request({
       model,
@@ -70,6 +75,7 @@ test("native shared route uses Vector token only on fixed Vector endpoint and re
     FreeModels.CredentialsService.of({
       get: (provider) => Effect.succeed(provider === "vector" ? "vct_shared" : undefined),
     }),
+    ownerSession,
   )
   const request = LLM.request({ model, prompt: "hello" })
   const body = { model: model.id, messages: [{ role: "user", content: "hello" }] }
@@ -108,6 +114,7 @@ test("native free-model requests reject redirects before forwarding conversation
       FreeModels.CredentialsService.of({
         get: (provider) => Effect.succeed(provider === "vector" ? "vct_synthetic" : undefined),
       }),
+      ownerSession,
     )
     const result = await Effect.runPromise(
       LLMClient.stream(LLM.request({ model, prompt: "private conversation fixture" })).pipe(
@@ -142,6 +149,7 @@ test("native shared requests reject oversized UTF-8 context before contacting th
     FreeModels.CredentialsService.of({
       get: (provider) => Effect.succeed(provider === "vector" ? "vct_synthetic" : undefined),
     }),
+    ownerSession,
   )
   const result = await Effect.runPromise(
     LLMClient.stream(LLM.request({ model, prompt: "é".repeat(2_250_000) })).pipe(
@@ -167,7 +175,7 @@ test("native shared requests reject oversized UTF-8 context before contacting th
       reason: {
         _tag: "InvalidRequest",
         message:
-          "Context too large for the shared free allowance. Compact this conversation or connect OpenRouter to continue with your own account.",
+          "Context too large for the shared free allowance. Compact this conversation, or use a model from a provider you've connected with your own key.",
       },
     },
   })
@@ -181,6 +189,7 @@ test("a saved shared selection routed to the own key is not subject to the Vecto
     FreeModels.CredentialsService.of({
       get: (provider) => Effect.succeed(provider === "openrouter" ? "own-synthetic" : "vct_synthetic"),
     }),
+    ownerSession,
   )
   const result = await Effect.runPromise(
     LLMClient.stream(LLM.request({ model, prompt: "é".repeat(2_250_000) })).pipe(
@@ -214,6 +223,7 @@ test("the run guard counts a free-route step as free, whatever the model's ID sa
       ModelV2.Info.make({ ...info, id: ModelV2.ID.make("example/coder"), freeModel: { source: "openrouter" } }),
       client,
       credentials,
+      ownerSession,
     ),
   )
   const tokens = { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } }
@@ -222,4 +232,43 @@ test("the run guard counts a free-route step as free, whatever the model's ID sa
     costUsd: 0,
     costKind: "free",
   })
+})
+
+test("native route sends nothing to a may-train model before acceptance, then allows data collection and says so", async () => {
+  const laguna = {
+    id: "poolside/laguna-s-2.1:free",
+    name: "Poolside: Laguna S 2.1",
+    contextLength: 262144,
+    maxOutputTokens: 32768,
+    providers: [{ id: "poolside/fp4", name: "Poolside", retention: "", dataPolicy: "may-train" as const }],
+  }
+  const consent = { value: false }
+  const shared = FreeModels.Service.of({
+    ...client,
+    catalog: () => Effect.succeed({ enabled: true, updatedAt: 1, models: [laguna, ...catalog.models] }),
+    trainingConsent: () => Effect.sync(() => consent.value),
+  })
+  const model = freeModelRoute(
+    ModelV2.Info.make({
+      ...info,
+      id: ModelV2.ID.make(laguna.id),
+      api: { ...info.api, id: ModelV2.ID.make(laguna.id) },
+    }),
+    shared,
+    FreeModels.CredentialsService.of({
+      get: (provider) => Effect.succeed(provider === "vector" ? "vct_shared" : undefined),
+    }),
+    ownerSession,
+  )
+  const body = { model: model.id, messages: [{ role: "user", content: "hello" }] }
+  const request = LLM.request({ model, prompt: "hello" })
+  await expect(Effect.runPromise(model.route.prepareTransport(body, request))).rejects.toThrow(
+    "Vector itself never trains on your prompts",
+  )
+  consent.value = true
+  const prepared = await Effect.runPromise(model.route.prepareTransport(body, request))
+  expect(prepared.request.headers["x-vector-free-model-disclosure"]).toBe("may-train-v1")
+  expect(prepared.request.headers["x-vector-free-model-training-consent"]).toBe("accepted")
+  if (prepared.request.body._tag !== "Uint8Array") throw new Error("Expected JSON bytes")
+  expect(JSON.parse(new TextDecoder().decode(prepared.request.body.body)).provider.data_collection).toBe("allow")
 })

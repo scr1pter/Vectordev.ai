@@ -57,6 +57,8 @@ interface Setup {
   defaultModel?: string
   agent?: { model?: string; variant?: string }
   free?: boolean
+  /** Free models listed ahead of the curated ones under Vector. */
+  before?: Provider.Model[]
   oauth?: string[]
 }
 
@@ -74,7 +76,10 @@ const services = (setup: Setup) =>
                   source: "api" as const,
                   options: {},
                   models: Object.fromEntries(
-                    MODELS.filter((item) => item.providerID === "vector").map((item) => [item.id, item]),
+                    [...(setup.before ?? []), ...MODELS.filter((item) => item.providerID === "vector")].map((item) => [
+                      item.id,
+                      item,
+                    ]),
                   ),
                 },
               }
@@ -314,6 +319,19 @@ describe("free review defaults", () => {
       expect(unlisted.message).toBe(
         "Vector does not list the provider of retired/model. Set model in .vector/review.json to a current model.",
       )
+    }),
+  )
+  it.effect("an unattended review never picks a free model whose provider may train on prompts", () =>
+    Effect.gen(function* () {
+      const trainer = {
+        ...model("vector/acme/trainer:free"),
+        freeModel: { source: "shared" as const, dataPolicy: "may-train" as const },
+      }
+      const result = yield* resolve(
+        { trigger: "auto", env: { VECTOR_CLI_TOKEN: "test-only" } },
+        { free: true, before: [trainer] },
+      )
+      expect(result.modelID).toBe(ModelV2.ID.make("acme/coder:free"))
     }),
   )
   it.effect("marks direct OpenRouter free variants free and explains obsolete workflow models", () =>

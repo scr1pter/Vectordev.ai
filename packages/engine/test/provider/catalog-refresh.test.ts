@@ -1,7 +1,7 @@
 import { afterEach, expect } from "bun:test"
 import { mkdir, rm, stat, utimes, writeFile } from "fs/promises"
 import path from "path"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -89,6 +89,9 @@ function harness(served: string[]) {
                 Layer.succeed(FreeModels.Service, {
                   catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
                   forKey: () => Effect.succeed([]),
+                  trainingConsent: () => Effect.succeed(false),
+                  setTrainingConsent: (accepted) => Effect.succeed(accepted),
+                  changes: Stream.empty,
                 }),
               ],
               [

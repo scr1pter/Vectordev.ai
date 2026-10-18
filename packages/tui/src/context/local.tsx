@@ -1,6 +1,7 @@
 import { providerNoticeTracker, unavailableModel } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
-import { retainFreeModelSelection } from "@vectordevai/schema/free-model"
+import { FREE_ROUTER_ID, isFreeModelRef, retainFreeModelSelection } from "@vectordevai/schema/free-model"
+import { bestOwnFreeModel } from "@vectordevai/core/free-model-choice"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { createStore } from "solid-js/store"
 import { createSimpleContext } from "./helper"
@@ -81,8 +82,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         : model
     }
 
-    const freeSelection = (model: { providerID: string; modelID: string }) =>
-      ["vector", "openrouter"].includes(model.providerID) && model.modelID.toLowerCase().endsWith(":free")
+    const freeSelection = (model: { providerID: string; modelID: string }) => isFreeModelRef(model)
 
     // Saved choices follow a provider rename, so they keep working with their carried-over credential.
     function getFirstValidModel(...modelFns: (() => { providerID: string; modelID: string } | undefined)[]) {
@@ -234,17 +234,16 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (isModelValid(model) || freeSelection(model)) return model
         }
 
-        const free = sync.data.provider
-          .flatMap((provider) => Object.values(provider.models))
-          .filter((model) => model.freeModel?.source === "openrouter")
-          .toSorted((a, b) => b.limit.context - a.limit.context)[0]
+        // Never a may-train model ahead of a no-training one, and never OpenRouter's free router.
+        const free = bestOwnFreeModel(sync.data.provider.flatMap((provider) => Object.values(provider.models)))
         if (free) return { providerID: "openrouter", modelID: free.id }
         if (sync.data.provider.some((provider) => provider.id === "openrouter")) return
         // Codium spends the account's credits, so it is never chosen automatically, even as the only provider.
         const provider = ModelPlanStatus.automaticProviders(sync.data.provider)[0]
         if (!provider) return undefined
         const defaultModel = sync.data.provider_default[provider.id]
-        const firstModel = Object.values(provider.models)[0]
+        // OpenRouter's free router picks a model at random, so it is never chosen for anyone, even as the only model.
+        const firstModel = Object.values(provider.models).find((model) => model.id !== FREE_ROUTER_ID)
         const model = defaultModel ?? firstModel?.id
         if (!model) return undefined
         return {

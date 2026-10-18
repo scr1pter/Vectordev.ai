@@ -1501,7 +1501,7 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
                     dialog.replace(() => <DialogFreeModelsLimit sessionID={props.message.sessionID} limit={limit()} />)
                   }
                 >
-                  Connect OpenRouter to continue this conversation
+                  See when it resets and what to do now
                 </text>
               </box>
             )}

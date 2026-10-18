@@ -88,7 +88,19 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       payload: typeof TaskMessageInput.Type
     }) {
       yield* access(ctx.params.sessionID, true)
-      return yield* taskError(tasks.message({ ...ctx.params, ...ctx.payload }, taskPrompts))
+      // A guest's message to a worker must not reach a free model that may train through the owner's acceptance.
+      const guest = (yield* RequestPrincipal).kind !== "owner"
+      return yield* taskError(
+        tasks.message(
+          { ...ctx.params, ...ctx.payload },
+          guest
+            ? {
+                ...taskPrompts,
+                prompt: (input) => prompts.prompt(input, { refuseTrainingFreeModels: true }).pipe(Effect.orDie),
+              }
+            : taskPrompts,
+        ),
+      )
     })
 
     const taskStop = Effect.fn("ExperimentalHttpApi.taskStop")(function* (ctx: {

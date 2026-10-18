@@ -7864,6 +7864,141 @@
         ]
       }
     },
+    "/provider/free-models/consent": {
+      "get": {
+        "tags": ["provider"],
+        "operationId": "provider.freeModels.consent",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether may-train free models were accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeModelConsent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Whether the user accepted, once, that free models whose providers may train on prompts may receive them.",
+        "summary": "Get free-model training consent",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.provider.freeModels.consent({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "tags": ["provider"],
+        "operationId": "provider.freeModels.setConsent",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The recorded choice",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeModelConsent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Record the one-time acceptance needed before a prompt is sent to a free model whose provider may train on prompts, or withdraw it.",
+        "summary": "Accept or withdraw free-model training consent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeModelConsent"
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.provider.freeModels.setConsent({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/provider/auth": {
       "get": {
         "tags": ["provider"],
@@ -27422,6 +27557,10 @@
               "source": {
                 "type": "string",
                 "enum": ["shared", "openrouter"]
+              },
+              "dataPolicy": {
+                "type": "string",
+                "enum": ["no-training", "may-train", "unreviewed"]
               }
             },
             "required": ["source"],
@@ -29308,6 +29447,16 @@
           }
         },
         "required": ["_tag", "requestID", "message"],
+        "additionalProperties": false
+      },
+      "FreeModelConsent": {
+        "type": "object",
+        "properties": {
+          "training": {
+            "type": "boolean"
+          }
+        },
+        "required": ["training"],
         "additionalProperties": false
       },
       "ProviderAuthMethod": {
@@ -39641,6 +39790,10 @@
               "source": {
                 "type": "string",
                 "enum": ["shared", "openrouter"]
+              },
+              "dataPolicy": {
+                "type": "string",
+                "enum": ["no-training", "may-train", "unreviewed"]
               }
             },
             "required": ["source"],

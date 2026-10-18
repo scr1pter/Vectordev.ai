@@ -1,4 +1,5 @@
 import { isFreeModel } from "@vectordevai/schema/free-model"
+import { freeModelMayTrain } from "@vectordevai/core/free-model-choice"
 // Which model a review runs on (section 2.9), what it costs (section 5.5), and the 32k context floor.
 
 import { providerCredentialAllowed } from "@vectordevai/core/provider-policy"
@@ -72,9 +73,10 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
   const free =
     chosen || !ci
       ? undefined
-      : Object.values(yield* provider.list())
+      : // An unattended review never sends code to a free model whose provider may train on it.
+        Object.values(yield* provider.list())
           .flatMap((item) => Object.values(item.models))
-          .find(isFreeModel)
+          .find((model) => isFreeModel(model) && !freeModelMayTrain(model))
   const configured = chosen || ci ? undefined : yield* provider.defaultModel().pipe(Effect.option)
   const name =
     chosen ??

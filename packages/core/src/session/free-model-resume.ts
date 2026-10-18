@@ -6,6 +6,7 @@ import { Database } from "../database/database"
 import { makeLocationNode } from "../effect/app-node"
 import { EventV2 } from "../event"
 import { FreeModels } from "../free-models"
+import { FREE_MODEL_RESUME_UNAVAILABLE } from "../free-model-choice"
 import { ModelV2 } from "../model"
 import { ProviderV2 } from "../provider"
 import { SessionEvent } from "./event"
@@ -13,6 +14,7 @@ import { SessionInput } from "./input"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
 import { SessionStore } from "./store"
+import { isFreeModelRef } from "@vectordevai/schema/free-model"
 
 export const Input = Schema.Struct({ sessionID: SessionSchema.ID, messageID: SessionMessage.ID, modelID: ModelV2.ID })
 export type Input = typeof Input.Type
@@ -50,8 +52,7 @@ export const node = makeLocationNode({
               latest.id !== input.messageID ||
               latest.error?.type !== "free_models_limit" ||
               latest.model.id !== input.modelID ||
-              !["vector", "openrouter"].includes(latest.model.providerID) ||
-              !input.modelID.endsWith(":free") ||
+              !isFreeModelRef({ providerID: latest.model.providerID, modelID: input.modelID }) ||
               (session.model &&
                 (session.model.id !== input.modelID || !["vector", "openrouter"].includes(session.model.providerID))) ||
               history.some(
@@ -71,8 +72,7 @@ export const node = makeLocationNode({
           })
           yield* validate
           const key = yield* credentials.get("openrouter")
-          if (!key)
-            return yield* new Rejected({ message: "Connect OpenRouter to continue with your own free allowance." })
+          if (!key) return yield* new Rejected({ message: FREE_MODEL_RESUME_UNAVAILABLE })
           const models = yield* freeModels.forKey(key, true)
           if (
             !models.some((model) => model.id === input.modelID) ||

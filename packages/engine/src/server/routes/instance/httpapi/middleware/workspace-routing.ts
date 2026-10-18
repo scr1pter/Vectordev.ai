@@ -14,6 +14,8 @@ import {
 } from "@/server/shared/workspace-routing"
 import { NotFoundError } from "@/storage/storage"
 import { Flag } from "@vectordevai/core/flag/flag"
+import { FreeModelGuests, GUEST_REQUEST_HEADER } from "@vectordevai/core/free-model-guests"
+import { SessionID } from "@vectordevai/schema/session-id"
 import { Context, Data, Effect, Layer, Option, Schema } from "effect"
 import { HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
@@ -266,6 +268,7 @@ function routeWorkspace<E>(
   client: HttpClient.HttpClient,
   effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, WorkspaceRouteContext>,
   plan: RequestPlan,
+  guestInput: Effect.Effect<void>,
 ): Effect.Effect<
   HttpServerResponse.HttpServerResponse,
   E,
@@ -307,18 +310,38 @@ function routeWorkspace<E>(
           ),
         ),
       MissingWorkspace: ({ workspaceID }) => Effect.succeed(missingWorkspaceResponse(workspaceID)),
-      Remote: ({ request, workspace, target, url, path }) => proxyRemote(client, request, workspace, target, url, path),
+      // The remote engine sees the owner's credentials, so a guest's request says it is a guest's. The session is
+      // marked here too, so it keeps the mark if it is warped back to this engine.
+      Remote: ({ request, workspace, target, url, path }) =>
+        guestInput.pipe(
+          Effect.andThen(
+            proxyRemote(
+              client,
+              request,
+              workspace,
+              principal.kind === "guest"
+                ? { ...target, headers: [...new Headers(target.headers).entries(), [GUEST_REQUEST_HEADER, "1"]] }
+                : target,
+              url,
+              path,
+            ),
+          ),
+        ),
       Local: ({ directory, workspaceID, sessionID }) =>
-        effect.pipe(
-          Effect.provideService(
-            WorkspaceRouteContext,
-            WorkspaceRouteContext.of({
-              directory:
-                principal.kind === "guest" && (sessionID === undefined || !allowsSession(principal, sessionID))
-                  ? guestWorkspaceDirectory(principal, workspaceID)!
-                  : directory,
-              workspaceID,
-            }),
+        guestInput.pipe(
+          Effect.andThen(
+            effect.pipe(
+              Effect.provideService(
+                WorkspaceRouteContext,
+                WorkspaceRouteContext.of({
+                  directory:
+                    principal.kind === "guest" && (sessionID === undefined || !allowsSession(principal, sessionID))
+                      ? guestWorkspaceDirectory(principal, workspaceID)!
+                      : directory,
+                  workspaceID,
+                }),
+              ),
+            ),
           ),
         ),
     })
@@ -327,6 +350,7 @@ function routeWorkspace<E>(
 
 function routeHttpApiWorkspace<E>(
   client: HttpClient.HttpClient,
+  guests: FreeModelGuests.Interface,
   effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, WorkspaceRouteContext>,
 ): Effect.Effect<
   HttpServerResponse.HttpServerResponse,
@@ -382,7 +406,18 @@ function routeHttpApiWorkspace<E>(
       { template: route.route.path, path: matchedRoutePath(route.route.path, route.params) },
       session,
     )
-    return yield* routeWorkspace(client, effect, plan)
+    // Whatever a guest changes in a session, a prompt, a compaction, a message to a subagent, keeps that session's
+    // free-model requests off models that may train (FreeModelGuests). It is recorded before the handler runs, and
+    // only once the guest is allowed in the session.
+    const guestSession = Schema.decodeUnknownOption(SessionID)(sessionID)
+    const guestInput =
+      (principal.kind === "guest" || request.headers[GUEST_REQUEST_HEADER] === "1") &&
+      request.method !== "GET" &&
+      request.method !== "HEAD" &&
+      Option.isSome(guestSession)
+        ? guests.mark(guestSession.value)
+        : Effect.void
+    return yield* routeWorkspace(client, effect, plan, guestInput)
   })
 }
 
@@ -393,8 +428,9 @@ export const workspaceRoutingLayer = Layer.effect(
     const workspace = yield* Workspace.Service
     const client = yield* HttpClient.HttpClient
     const tickets = yield* PtyTicket.Service
+    const guests = yield* FreeModelGuests.Service
     return WorkspaceRoutingMiddleware.of((effect) =>
-      routeHttpApiWorkspace(client, effect).pipe(
+      routeHttpApiWorkspace(client, guests, effect).pipe(
         Effect.provideService(Socket.WebSocketConstructor, makeWebSocket),
         Effect.provideService(Workspace.Service, workspace),
         Effect.provideService(PtyTicket.Service, tickets),

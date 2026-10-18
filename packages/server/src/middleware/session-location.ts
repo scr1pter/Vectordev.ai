@@ -1,4 +1,5 @@
 import { Database } from "@vectordevai/core/database/database"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { LocationServiceMap } from "@vectordevai/core/location-services"
 import { Location } from "@vectordevai/core/location"
 import { AbsolutePath } from "@vectordevai/core/schema"
@@ -7,7 +8,7 @@ import { SessionTable } from "@vectordevai/core/session/sql"
 import { WorkspaceV2 } from "@vectordevai/core/workspace"
 import { eq } from "drizzle-orm"
 import { Effect, Layer, Schema } from "effect"
-import { HttpRouter } from "effect/unstable/http"
+import { HttpRouter, HttpServerRequest } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { ForbiddenError, InvalidRequestError, SessionNotFoundError } from "@vectordevai/protocol/errors"
 import {
@@ -31,6 +32,7 @@ export const sessionLocationLayer = Layer.effect(
   Effect.gen(function* () {
     const { db } = yield* Database.Service
     const locations = yield* LocationServiceMap.Service
+    const guests = yield* FreeModelGuests.Service
 
     return SessionLocationMiddleware.of((effect) =>
       Effect.gen(function* () {
@@ -60,6 +62,11 @@ export const sessionLocationLayer = Layer.effect(
         const guestDirectory = guestWorkspaceDirectory(principal, row.workspaceID ?? undefined)
         if (!sessionAllowed && guestDirectory !== row.directory)
           return yield* new ForbiddenError({ message: "Guest credential is not scoped to this session" })
+        // Whatever a guest changes in a session, a prompt, a model switch, an answer, keeps that session's free-model
+        // requests off models that may train (FreeModelGuests). It is recorded before the handler runs.
+        const request = yield* HttpServerRequest.HttpServerRequest
+        if (principal.kind === "guest" && request.method !== "GET" && request.method !== "HEAD")
+          yield* guests.mark(sessionID)
 
         return yield* effect.pipe(
           Effect.provide(

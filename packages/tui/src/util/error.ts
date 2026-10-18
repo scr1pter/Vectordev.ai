@@ -1,16 +1,11 @@
-import {
-  freeModelsLimitNotice,
-  freeModelsLimitTitle,
-  freeModelsResetLabel,
-} from "@vectordevai/core/free-model-choice"
+import { freeModelsLimitMessage, freeModelsLimitNotice } from "@vectordevai/core/free-model-choice"
 import { isRecord } from "./record"
 
 type ConfigIssue = { message: string; path: string[] }
 
 export function cliErrorMessage(input: unknown): string | undefined {
   const limit = freeModelsLimitNotice(input)
-  if (limit)
-    return `${freeModelsLimitTitle(limit)}. Shared allowance is expected to reset at ${freeModelsResetLabel(limit)}. Run vector providers login --provider openrouter to connect your own account.`
+  if (limit) return freeModelsLimitMessage(limit, { terminal: true })
   if (input instanceof Error && isRecord(input.cause) && "body" in input.cause) {
     const formatted = cliErrorMessage(input.cause.body)
     if (formatted) return formatted

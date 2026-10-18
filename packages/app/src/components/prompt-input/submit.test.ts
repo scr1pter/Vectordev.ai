@@ -39,6 +39,8 @@ let currentModel: { id: string; provider: { id: string } } | undefined
 let availableModels: Array<{ id: string; provider: { id: string } }> = []
 let providerReady = true
 let providerLoaded = true
+// The desktop app's Vector account bridge; the web build has none.
+let vectorAccount: object | undefined = {}
 const toasts: Array<{ title?: string; description?: string }> = []
 
 const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
@@ -256,6 +258,7 @@ beforeAll(async () => {
   mock.module("@/context/platform", () => ({
     usePlatform: () => ({
       fetch: fetch,
+      vectorAccount,
     }),
   }))
 
@@ -293,6 +296,7 @@ beforeEach(() => {
   availableModels = [currentModel]
   providerReady = true
   providerLoaded = true
+  vectorAccount = {}
   toasts.length = 0
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
@@ -865,6 +869,24 @@ describe("missing model", () => {
     expect(createdSessions).toHaveLength(0)
   })
 
+  test("in a build that cannot sign in to Vector itself, says to sign in on the engine's computer", async () => {
+    currentModel = undefined
+    availableModels = []
+    vectorAccount = undefined
+    const opened: boolean[] = []
+
+    await submitWith(() => opened.push(true)).handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(opened).toEqual([true])
+    expect(toasts).toEqual([
+      {
+        title: "prompt.toast.providerRequired.title",
+        description: "prompt.toast.providerRequired.descriptionEngine",
+      },
+    ])
+    expect(promptResetCount).toBe(0)
+  })
+
   test("keeps the select-model toast while the provider catalog is still loading", async () => {
     currentModel = undefined
     availableModels = []
@@ -934,7 +956,13 @@ describe("image attachments", () => {
       prompt,
       info: () => undefined,
       imageAttachments: () => [
-        { type: "image", id: "image", filename: "image.png", mime: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgo=" },
+        {
+          type: "image",
+          id: "image",
+          filename: "image.png",
+          mime: "image/png",
+          dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+        },
       ],
       commentCount: () => 0,
       autoAccept: () => false,
@@ -967,8 +995,12 @@ describe("image attachments", () => {
 
 describe("included model data notice", () => {
   test("tells the person once how included models handle their data", async () => {
-    globalThis.localStorage?.removeItem("vector.notice.free-model-policy.v1")
-    currentModel = { id: "maker/coder:free", provider: { id: "vector" }, freeModel: { source: "shared" } } as typeof currentModel
+    globalThis.localStorage?.removeItem("vector.notice.free-model-policy.v2")
+    currentModel = {
+      id: "maker/coder:free",
+      provider: { id: "vector" },
+      freeModel: { source: "shared" },
+    } as typeof currentModel
     availableModels = [currentModel!]
     const submit = createPromptSubmit({
       prompt,
@@ -989,12 +1021,72 @@ describe("included model data notice", () => {
       onNewSessionWorktreeReset: () => undefined,
       onSubmit: () => undefined,
     })
-    const notices = () => toasts.filter((toast) => toast.title === "How Models included with Vector handle your data")
+    const notices = () => toasts.filter((toast) => toast.title === "How Free models inside of Vector handle your data")
 
     await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
     expect(notices()).toHaveLength(1)
-    expect(notices()[0]?.description).toContain("Not zero data retention")
+    expect(notices()[0]?.description).toContain("Vector doesn't request zero data retention")
     await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
     expect(notices()).toHaveLength(1)
+  })
+})
+
+describe("may-train free model consent", () => {
+  const submitWith = (confirm: (model: unknown) => Promise<boolean>) =>
+    createPromptSubmit({
+      prompt,
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      newSessionWorktree: () => selected,
+      onNewSessionWorktreeReset: () => undefined,
+      onSubmit: () => undefined,
+      confirmFreeModelTraining: confirm,
+    })
+
+  test("asks before the first prompt to a model that may train, and sends nothing when declined", async () => {
+    currentModel = {
+      id: "poolside/laguna-s-2.1:free",
+      provider: { id: "vector" },
+      freeModel: { source: "shared", dataPolicy: "may-train" },
+    } as typeof currentModel
+    availableModels = [currentModel!]
+    const asked: unknown[] = []
+    const sessions = createdSessions.length
+    await submitWith(async (model) => {
+      asked.push(model)
+      return false
+    }).handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    expect(asked).toEqual([currentModel])
+    expect(createdSessions).toHaveLength(sessions)
+    expect(sentPrompts).toHaveLength(0)
+
+    await submitWith(async () => true).handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    expect(createdSessions).toHaveLength(sessions + 1)
+  })
+
+  test("never asks for a no-training free model", async () => {
+    currentModel = {
+      id: "cohere/north-mini-code:free",
+      provider: { id: "vector" },
+      freeModel: { source: "shared", dataPolicy: "no-training" },
+    } as typeof currentModel
+    availableModels = [currentModel!]
+    const asked: unknown[] = []
+    await submitWith(async (model) => {
+      asked.push(model)
+      return false
+    }).handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    expect(asked).toEqual([])
   })
 })

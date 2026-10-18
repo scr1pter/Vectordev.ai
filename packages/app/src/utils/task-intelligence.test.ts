@@ -14,7 +14,7 @@ type TestModel = {
   family: string
   status: string
   provider: { id: string }
-  freeModel?: { source: "shared" | "openrouter" }
+  freeModel?: { source: "shared" | "openrouter"; dataPolicy?: "no-training" | "may-train" | "unreviewed" }
   capabilities: {
     reasoning: boolean
     toolcall: boolean
@@ -52,6 +52,23 @@ describe("task intelligence", () => {
     expect(
       routeModelForImages({ current: { ...current, freeModel: { source: "shared" } }, available: [paid] }),
     ).toEqual({ model: undefined, routed: false })
+  })
+
+  test("automatic routing never moves a prompt onto a free model whose provider may train on it", () => {
+    const current = model("cohere/mini:free", {
+      provider: { id: "openrouter" },
+      freeModel: { source: "openrouter", dataPolicy: "no-training" },
+    })
+    // A much stronger free model that may train is not a routing target; the person has to pick it.
+    const trainer = model("acme/opus-max:free", {
+      provider: { id: "openrouter" },
+      limit: { context: 1_000_000, output: 64_000 },
+      freeModel: { source: "openrouter", dataPolicy: "may-train" },
+    })
+    expect(routeModelForTask({ difficulty: "complex", current, available: [current, trainer] })).toEqual({
+      model: current,
+      routed: false,
+    })
   })
 
   for (const id of ["maker/mini:free", "maker/mini:FREE"])

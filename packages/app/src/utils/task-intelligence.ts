@@ -1,4 +1,6 @@
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
+import { freeModelMayTrain, type FreeModelChoice } from "@vectordevai/core/free-model-choice"
+import { isFreeModelRef } from "@vectordevai/schema/free-model"
 
 export type TaskDifficulty = "trivial" | "simple" | "standard" | "complex"
 
@@ -16,7 +18,7 @@ type RoutableModel = {
   family?: string
   status?: string
   provider: { id: string }
-  freeModel?: { source: "shared" | "openrouter" }
+  freeModel?: FreeModelChoice["freeModel"]
   capabilities?: {
     reasoning?: boolean
     toolcall?: boolean
@@ -36,7 +38,7 @@ export function isFreeModelSelection(model: RoutableModel) {
   return (
     model.provider.id === "vector" ||
     !!model.freeModel ||
-    (model.provider.id === "openrouter" && model.id.toLowerCase().endsWith(":free"))
+    isFreeModelRef({ providerID: model.provider.id, modelID: model.id })
   )
 }
 
@@ -97,6 +99,8 @@ export function routeModelForTask<T extends RoutableModel>(input: {
   const candidates = input.available
     .filter((model) => model.provider.id === input.current.provider.id)
     .filter((model) => !isFreeModelSelection(input.current) || model.freeModel)
+    // Routing never moves a prompt onto a free model whose provider may train on it; the person picks one themselves.
+    .filter((model) => model.id === input.current.id || !freeModelMayTrain(model))
     .filter((model) => model.status !== "deprecated" && model.capabilities?.toolcall !== false)
     .toSorted((left, right) => qualityScore(right) - qualityScore(left))
   const strongest = candidates[0]

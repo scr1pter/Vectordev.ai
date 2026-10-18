@@ -232,6 +232,24 @@ describe("system prompt layout across sessions", () => {
     expect(value.agent.permission).toEqual([])
   })
 
+  test("the session header keeps the session's own ID whatever configuration or plugins add", async () => {
+    // The free-model fetch applies the guest rule to the session this header names, so another value, or a second one
+    // joined to it, would let a request for a session a guest worked in pass as the owner's.
+    const value = input({
+      model: { ...gpt, headers: { "x-session-id": "ses_from_config" } } as Input["model"],
+      directory: "/work/guest",
+    })
+    const prepared = await prepare({
+      ...value,
+      plugin: {
+        ...value.plugin,
+        trigger: (name, _input, output) =>
+          Effect.succeed(name === "chat.headers" ? { ...output, headers: { "X-SESSION-ID": "ses_from_plugin" } } : output),
+      } as Input["plugin"],
+    })
+    expect(new Headers(prepared.headers).get("x-session-id")).toBe(value.sessionID)
+  })
+
   test("tools go out in name order whatever order they were offered in", async () => {
     const value = input({ model: gpt, directory: "/work/a" })
     const schema = jsonSchema({ type: "object", properties: {} })

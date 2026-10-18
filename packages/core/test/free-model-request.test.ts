@@ -1,6 +1,12 @@
 import { expect, test } from "bun:test"
-import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
-import { freeModelRequest, serializeFreeModelRequest } from "../src/free-model-request"
+import { FREE_MODEL_FALLBACKS, FREE_ROUTER_ID } from "@vectordevai/schema/free-model"
+import {
+  FreeModelGuestSessionError,
+  FreeModelTrainingConsentError,
+  freeModelRequest,
+  serializeFreeModelRequest,
+} from "../src/free-model-request"
+import { FREE_MODEL_TRAINING_CONSENT_REQUIRED, FREE_MODEL_TRAINING_GUEST_SESSION } from "../src/free-model-choice"
 
 test("disables account-default plugins and preserves the safeguards through shared proxy normalization", () => {
   const request = freeModelRequest(
@@ -111,7 +117,161 @@ test("shared request limit counts serialized UTF-8 bytes at the boundary and lea
   const oversized = { ...request, messages: [{ role: "user", content: `${content}é` }] }
   expect(JSON.stringify(oversized).length).toBeLessThan(4_500_000)
   expect(() => serializeFreeModelRequest(oversized, true)).toThrow(
-    "Context too large for the shared free allowance. Compact this conversation or connect OpenRouter to continue with your own account.",
+    "Context too large for the shared free allowance. Compact this conversation, or use a model from a provider you've connected with your own key.",
   )
   expect(serializeFreeModelRequest(oversized, false)).toBe(JSON.stringify(oversized))
+})
+
+const mayTrain = {
+  id: "poolside/laguna-s-2.1:free",
+  name: "Poolside: Laguna S 2.1",
+  contextLength: 262144,
+  maxOutputTokens: 32768,
+  providers: [{ id: "poolside/fp4", name: "Poolside", retention: "", dataPolicy: "may-train" as const }],
+}
+const lagunaXS = {
+  ...mayTrain,
+  id: "poolside/laguna-xs-2.1:free",
+  name: "Poolside: Laguna XS 2.1",
+  providers: [{ id: "poolside/fp8", name: "Poolside", retention: "", dataPolicy: "may-train" as const }],
+}
+const inkling = {
+  id: "thinkingmachines/inkling:free",
+  name: "Thinking Machines: Inkling",
+  contextLength: 1048576,
+  maxOutputTokens: 262144,
+  toolChoice: false,
+  providers: [
+    { id: "thinkingmachines/nvfp4", name: "Thinking Machines", retention: "", dataPolicy: "may-train" as const },
+  ],
+}
+const unreviewed = {
+  id: "maker/new:free",
+  name: "Maker: New",
+  contextLength: 16000,
+  maxOutputTokens: 4096,
+  providers: [{ id: "maker", name: "Maker", retention: "", dataPolicy: "unreviewed" as const }],
+}
+const all = [mayTrain, inkling, unreviewed, ...FREE_MODEL_FALLBACKS, lagunaXS]
+const hello = (model: string) => ({ model, messages: [{ role: "user", content: "hello" }] })
+
+test("nothing is built for a may-train or unreviewed model until the user accepted, and no-training never asks", () => {
+  for (const model of [mayTrain, inkling, unreviewed]) {
+    expect(() => freeModelRequest(hello(model.id), all)).toThrow(FreeModelTrainingConsentError)
+    expect(() => freeModelRequest(hello(model.id), all, { trainingConsent: false })).toThrow(
+      FREE_MODEL_TRAINING_CONSENT_REQUIRED,
+    )
+  }
+  expect(FREE_MODEL_TRAINING_CONSENT_REQUIRED).toContain("Vector itself never trains on your prompts")
+  expect(FREE_MODEL_TRAINING_CONSENT_REQUIRED).toContain("Nothing was sent")
+  expect(freeModelRequest(hello(FREE_MODEL_FALLBACKS[0].id), all).provider.data_collection).toBe("deny")
+})
+
+test("data collection is allowed only for an accepted, reviewed may-train model; unreviewed ones keep deny", () => {
+  const accepted = { trainingConsent: true }
+  expect(freeModelRequest(hello(mayTrain.id), all, accepted).provider).toEqual({
+    data_collection: "allow",
+    require_parameters: true,
+    only: ["poolside/fp4", "poolside/fp8"],
+    max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
+  })
+  expect(freeModelRequest(hello(unreviewed.id), all, accepted).provider.data_collection).toBe("deny")
+  expect(freeModelRequest(hello(FREE_MODEL_FALLBACKS[0].id), all, accepted).provider.data_collection).toBe("deny")
+  // The server rebuilds the same request from the client's, so a client cannot lift deny on its own.
+  const client = freeModelRequest(hello(FREE_MODEL_FALLBACKS[0].id), all, accepted)
+  expect(
+    freeModelRequest({ ...client, provider: { ...client.provider, data_collection: "allow" } }, all, accepted).provider
+      .data_collection,
+  ).toBe("deny")
+})
+
+test("a session an invited guest worked in reaches only no-training models, even with the owner's acceptance", () => {
+  for (const model of [mayTrain, inkling, unreviewed])
+    expect(() => freeModelRequest(hello(model.id), all, { trainingConsent: true, guest: true })).toThrow(
+      FreeModelGuestSessionError,
+    )
+  expect(FREE_MODEL_TRAINING_GUEST_SESSION).toContain("Nothing was sent")
+  // A no-training choice still goes out, with "deny" and only no-training fallbacks.
+  expect(
+    freeModelRequest(hello(FREE_MODEL_FALLBACKS[0].id), all, { trainingConsent: true, guest: true }),
+  ).toMatchObject({
+    models: FREE_MODEL_FALLBACKS.slice(0, 3).map((model) => model.id),
+    provider: { data_collection: "deny" },
+  })
+})
+
+test("a fallback never weakens the chosen model's data policy", () => {
+  // No-training and unreviewed choices fall back to no-training models only.
+  for (const model of [FREE_MODEL_FALLBACKS[0].id, unreviewed.id])
+    expect(freeModelRequest(hello(model), all, { trainingConsent: true }).models).toEqual(
+      [model, ...FREE_MODEL_FALLBACKS.map((item) => item.id)]
+        .filter((id, index, ids) => ids.indexOf(id) === index)
+        .slice(0, 3),
+    )
+  // An accepted may-train choice falls back only to may-train models of the same provider: never to another
+  // provider whose terms the user was not shown (Poolside's Laguna answered by Thinking Machines, whose free tier takes a
+  // perpetual training licence), and never to a no-training model, which would then be sent data_collection "allow".
+  expect(freeModelRequest(hello(mayTrain.id), all, { trainingConsent: true })).toMatchObject({
+    models: [mayTrain.id, lagunaXS.id],
+    provider: { data_collection: "allow", only: ["poolside/fp4", "poolside/fp8"] },
+  })
+  expect(freeModelRequest(hello(inkling.id), all, { trainingConsent: true })).toMatchObject({
+    models: [inkling.id],
+    provider: { data_collection: "allow", only: ["thinkingmachines/nvfp4"] },
+  })
+  // So "allow" reaches no request that could be served by a no-training model.
+  for (const model of all) {
+    const request = freeModelRequest(hello(model.id), all, { trainingConsent: true })
+    if (request.provider.data_collection !== "allow") continue
+    expect(
+      request.models.filter((id) => all.find((item) => item.id === id)?.providers[0].dataPolicy !== "may-train"),
+    ).toEqual([])
+    expect((request.provider.only ?? []).filter((id) => !id.startsWith(model.providers[0].id.split("/")[0]))).toEqual(
+      [],
+    )
+  }
+})
+
+test("an endpoint without tool_choice gets the same automatic request without it", () => {
+  const tools = [{ type: "function", function: { name: "read" } }]
+  const consent = { trainingConsent: true }
+  expect(freeModelRequest({ ...hello(inkling.id), tools, tool_choice: "auto" }, all, consent)).not.toHaveProperty(
+    "tool_choice",
+  )
+  expect(freeModelRequest({ ...hello(inkling.id), tools }, all, consent)).toMatchObject({ tools })
+  // A forced choice is kept, so OpenRouter refuses it rather than silently ignoring it.
+  expect(freeModelRequest({ ...hello(inkling.id), tools, tool_choice: "required" }, all, consent)).toMatchObject({
+    tool_choice: "required",
+  })
+  expect(freeModelRequest({ ...hello(mayTrain.id), tools, tool_choice: "auto" }, all, consent)).toMatchObject({
+    tool_choice: "auto",
+  })
+})
+
+test("OpenRouter's free router goes out only after the notice, at zero price, asking OpenRouter to skip barred providers", () => {
+  const router = {
+    id: FREE_ROUTER_ID,
+    name: "Free Models Router",
+    contextLength: 200000,
+    maxOutputTokens: 8192,
+    providers: [{ id: "openrouter", name: "OpenRouter", retention: "", dataPolicy: "may-train" as const }],
+  }
+  const models = [...all, router]
+  // It is labelled "May train on your prompts": nothing goes out before the acceptance, nor for a guest's session.
+  expect(() => freeModelRequest(hello(router.id), models)).toThrow(FreeModelTrainingConsentError)
+  expect(() => freeModelRequest(hello(router.id), models, { trainingConsent: true, guest: true })).toThrow(
+    FreeModelGuestSessionError,
+  )
+  const request = freeModelRequest({ ...hello(router.id), max_tokens: 32000 }, models, { trainingConsent: true })
+  // It picks its own model, so it names no providers and has no fallbacks, and never a paid one.
+  expect(request).toMatchObject({ model: router.id, models: [router.id], max_tokens: 8192 })
+  expect(request.provider).toEqual({
+    data_collection: "allow",
+    require_parameters: true,
+    ignore: ["nvidia"],
+    max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
+  })
+  // It is never a fallback for another model, whatever that model's policy.
+  for (const model of all)
+    expect(freeModelRequest(hello(model.id), models, { trainingConsent: true }).models).not.toContain(router.id)
 })

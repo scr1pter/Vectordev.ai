@@ -7,10 +7,12 @@ import { freeModelRequest, serializeFreeModelRequest } from "../../free-model-re
 import { FreeModels } from "../../free-models"
 import { ModelV2 } from "../../model"
 
+/** `guest` says whether an invited guest has worked in the session this route serves (FreeModelGuests.marked). */
 export function freeModelRoute(
   model: ModelV2.Info,
   client: FreeModels.Service["Service"],
   credentials: FreeModels.CredentialsService["Service"],
+  guest: Effect.Effect<boolean>,
 ) {
   const transport = OpenAICompatibleChat.route.transport
   return OpenAICompatibleChat.route
@@ -30,13 +32,18 @@ export function freeModelRoute(
                   catalog: () => Effect.runPromise(client.catalog()),
                   forKey: (key) => Effect.runPromise(client.forKey(key)),
                   credential: (provider) => Effect.runPromise(credentials.get(provider)),
+                  trainingConsent: () => Effect.runPromise(client.trainingConsent()),
+                  guest: () => Effect.runPromise(guest),
                 }),
               catch: (cause) => invalidRequest(cause instanceof Error ? cause.message : "Free model unavailable."),
             })
             const body = yield* Effect.try({
               try: () =>
                 serializeFreeModelRequest(
-                  freeModelRequest({ ...input.request.http?.body, ...input.body, model: model.id }, route.models),
+                  freeModelRequest({ ...input.request.http?.body, ...input.body, model: model.id }, route.models, {
+                    trainingConsent: route.trainingConsent,
+                    guest: route.guest,
+                  }),
                   route.url === FreeModels.SHARED_CHAT_URL,
                 ),
               catch: (cause) =>
@@ -49,7 +56,11 @@ export function freeModelRoute(
               request: LLMRequest.update(input.request, { http: new HttpOptions({}) }),
               endpoint: { ...input.endpoint, baseURL: route.url, path: "" },
               auth: Auth.bearer(Auth.value(route.key)),
-              headers: () => ({ "HTTP-Referer": "https://vectordev.ai/", "X-OpenRouter-Title": "Vector" }),
+              headers: () => ({
+                "HTTP-Referer": "https://vectordev.ai/",
+                "X-OpenRouter-Title": "Vector",
+                ...route.headers,
+              }),
               encodeBody: () => body,
             })
           }),

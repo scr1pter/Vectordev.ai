@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { FREE_MODEL_POLICY_NOTICE, firstFreeModelPolicyNotice } from "./free-model-policy-notice"
+import { FREE_MODEL_TRAINING_OWNER_ONLY } from "@vectordevai/core/free-model-choice"
+import { createVectorClient } from "@vectordevai/sdk/v2/client"
+import {
+  FREE_MODEL_POLICY_NOTICE,
+  acceptFreeModelTraining,
+  firstFreeModelPolicyNotice,
+  freeModelTrainingGate,
+  freeModelTrainingNotice,
+} from "./free-model-policy-notice"
 
 describe("free model policy notice", () => {
   test("shows once per device", () => {
@@ -23,8 +31,119 @@ describe("free model policy notice", () => {
     expect(firstFreeModelPolicyNotice(() => undefined)).toBe(true)
   })
 
-  test("says the providers are not zero data retention", () => {
-    expect(FREE_MODEL_POLICY_NOTICE.description).toContain("Not zero data retention")
-    expect(FREE_MODEL_POLICY_NOTICE.description).toContain("no-training allowlist")
+  test("says Vector does not request zero data retention and that may-train models ask first", () => {
+    expect(FREE_MODEL_POLICY_NOTICE.title).toBe("How Free models inside of Vector handle your data")
+    expect(FREE_MODEL_POLICY_NOTICE.description).toContain("Vector doesn't request zero data retention")
+    expect(FREE_MODEL_POLICY_NOTICE.description).toContain('"May train on your prompts" ask before your first prompt')
+  })
+})
+
+describe("may-train consent gate", () => {
+  const mayTrain = { freeModel: { source: "shared" as const, dataPolicy: "may-train" as const } }
+  const calls: string[] = []
+  const gate = (input: { consent: boolean | Error; ask: boolean; accept: boolean | Error }) =>
+    freeModelTrainingGate({
+      model: mayTrain,
+      consent: async () => {
+        calls.push("consent")
+        if (input.consent instanceof Error) throw input.consent
+        return input.consent
+      },
+      ask: async () => {
+        calls.push("ask")
+        return input.ask
+      },
+      accept: async () => {
+        calls.push("accept")
+        if (input.accept instanceof Error) throw input.accept
+        return input.accept
+      },
+    })
+
+  test("no-training and paid models are never asked about", async () => {
+    calls.length = 0
+    for (const model of [{ freeModel: { source: "shared" as const, dataPolicy: "no-training" as const } }, {}])
+      expect(
+        await freeModelTrainingGate({
+          model,
+          consent: async () => false,
+          ask: async () => false,
+          accept: async () => false,
+        }),
+      ).toBe(true)
+  })
+
+  test("an earlier acceptance lets the prompt go without asking", async () => {
+    calls.length = 0
+    expect(await gate({ consent: true, ask: false, accept: false })).toBe(true)
+    expect(calls).toEqual(["consent"])
+  })
+
+  test("the user is asked once, and only a recorded acceptance sends the prompt", async () => {
+    calls.length = 0
+    expect(await gate({ consent: false, ask: true, accept: true })).toBe(true)
+    expect(calls).toEqual(["consent", "ask", "accept"])
+    expect(await gate({ consent: false, ask: false, accept: true })).toBe(false)
+    expect(await gate({ consent: false, ask: true, accept: false })).toBe(false)
+    expect(await gate({ consent: false, ask: true, accept: new Error("engine offline") })).toBe(false)
+    // An unreadable acceptance asks again rather than sending.
+    calls.length = 0
+    expect(await gate({ consent: new Error("engine offline"), ask: false, accept: true })).toBe(false)
+    expect(calls).toEqual(["consent", "ask"])
+  })
+
+  test("the notice says what the provider may do and that Vector itself never trains", () => {
+    const notice = freeModelTrainingNotice(mayTrain)
+    expect(notice.title).toBe("May train on your prompts")
+    expect(notice.description).toContain("may log your prompts, code and outputs and use them to train its models")
+    expect(notice.description).toContain("Vector itself never trains on your prompts.")
+    expect(
+      freeModelTrainingNotice({ freeModel: { source: "openrouter", dataPolicy: "unreviewed" } }).description,
+    ).toContain("has not reviewed")
+  })
+
+  test("the question names one model but says the acceptance covers every labelled model, reviewed or not", () => {
+    // The dialog shows the selected model's name, while one acceptance lets every labelled model, including unreviewed
+    // ones whose disclaimer the user never saw, receive prompts until it is withdrawn.
+    for (const dataPolicy of ["may-train", "unreviewed"] as const) {
+      const description = freeModelTrainingNotice({ freeModel: { source: "openrouter", dataPolicy } }).description
+      expect(description).toContain('Accepting covers every free model labelled "May train on your prompts"')
+      expect(description).toContain("including ones Vector has not reviewed yet")
+      expect(description).toContain("vector models --decline-training")
+    }
+  })
+})
+
+describe("recording the acceptance", () => {
+  // The app's directory client throws on an error status (context/server-sdk.tsx), so the refusal must still say why.
+  const engine = (answer: () => Promise<Response>) =>
+    createVectorClient({ baseUrl: "http://engine.test", throwOnError: true, fetch: answer }).provider.freeModels
+  const record = async (answer: () => Promise<Response>) => {
+    const shown: string[] = []
+    const accepted = await acceptFreeModelTraining(engine(answer), (description) => shown.push(description))
+    return { accepted, shown }
+  }
+
+  test("an invited guest's refusal says only the owner can accept, and nothing is sent", async () => {
+    expect(
+      await record(async () =>
+        Response.json({ _tag: "ForbiddenError", message: "This operation requires the server owner" }, { status: 403 }),
+      ),
+    ).toEqual({ accepted: false, shown: [FREE_MODEL_TRAINING_OWNER_ONLY] })
+  })
+
+  test("any other failure, or no answer, asks to try again", async () => {
+    const again = { accepted: false, shown: ["Vector couldn't record your choice. Try again."] }
+    expect(await record(async () => Response.json({ message: "boom" }, { status: 500 }))).toEqual(again)
+    expect(
+      await record(async () => {
+        throw new TypeError("fetch failed")
+      }),
+    ).toEqual(again)
+    expect(await record(async () => Response.json({ training: false }))).toEqual(again)
+  })
+
+  test("a recorded acceptance lets the prompt go without a notice", async () => {
+    expect(await record(async () => Response.json({ training: true }))).toEqual({ accepted: true, shown: [] })
   })
 })

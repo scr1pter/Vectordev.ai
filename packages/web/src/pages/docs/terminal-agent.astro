@@ -15,14 +15,13 @@ vector ~/code/myapp --model anthropic/claude-sonnet-5</code><button class="doc-c
             It takes the same session flags as <code>run</code>: <code>--model</code>, <code>--agent</code>, <code>--prompt</code>, <code>--continue</code>, <code>--session</code> and <code>--fork</code>. <code>--mini</code> starts a minimal interface, and <code>--replay</code>, <code>--no-replay</code> and <code>--replay-limit</code> control how much history is redrawn when you resume or resize.
           </p>
           <p>
-            For guarded personal free-model access from 1.99.99, connect your free OpenRouter
-            account with <code>vector providers login --provider openrouter --method "Connect OpenRouter"</code>,
-            then use <code>vector models</code> to find eligible models. Use the saved provider connection or
-            <code>OPENROUTER_API_KEY</code>; a project-only <code>provider.openrouter.options.apiKey</code> is insufficient.
-            This personal setup works whether or not Vector's shared allowance is on. Keep the account unfunded and
-            wait when its free limits are reached; the guarded route does not switch to a paid model or provider.
-            See <a href="/docs/models#free-models">Models and providers</a> for the free-model allowlist,
-            account settings and current availability. Releases before 1.99.99, such as CLI 1.99.7, do not include it.
+            For free models, sign in with <code>vector login</code>, then use <code>vector models</code> to find them
+            under Free models inside of Vector. They run on Vector's shared allowance, with no OpenRouter account of your
+            own, and the guarded route never switches to a paid model or provider. At its limit, wait for the reset or
+            connect a provider with your own key using <code>vector providers login</code>.
+            See <a href="/docs/models#free-models">Models and providers</a> for each free model's data policy,
+            the “May train on your prompts” label and <code>vector models --accept-training</code> (from the next CLI
+            release), limits and current availability.
           </p>
 
           <h2 id="install-the-cli">Install the CLI</h2>

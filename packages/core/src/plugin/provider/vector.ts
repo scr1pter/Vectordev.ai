@@ -2,6 +2,8 @@ import { Effect, Stream } from "effect"
 import { EventV2 } from "../../event"
 import { Integration } from "../../integration"
 import { FreeModels } from "../../free-models"
+import { freeModelDataPolicy, sendsToOpenRouterFree } from "../../free-model-catalog"
+import type { CatalogDraft } from "@vectordevai/plugin/v2/promise"
 import { define } from "../internal"
 
 export const VectorPlugin = define({
@@ -17,12 +19,9 @@ export const VectorPlugin = define({
         const openrouter = yield* credentials.get("openrouter")
         const owned = openrouter ? yield* freeModels.forKey(openrouter) : []
         if (openrouter) catalog.provider.update("openrouter", () => {})
-        for (const item of catalog.provider.list()) {
-          if (item.provider.id !== "openrouter") continue
-          for (const model of item.models.values()) {
-            if (model.id.toLowerCase().endsWith(":free")) catalog.model.remove("openrouter", model.id)
-          }
-        }
+        // OpenRouter models that run on free endpoints, zero-price ones and its free router included, return below
+        // only as reviewed free models.
+        removeOpenRouterFree(catalog)
         if (current.enabled)
           catalog.provider.update("vector", (provider) => {
             provider.name = "Vector"
@@ -46,7 +45,7 @@ export const VectorPlugin = define({
             draft.cost = [{ input: 0, output: 0, cache: { read: 0, write: 0 } }]
             draft.limit = { context: model.contextLength, output: model.maxOutputTokens }
             draft.enabled = !openrouter || owned.some((item) => item.id === model.id)
-            Object.assign(draft, { freeModel: { source: "shared" } })
+            draft.freeModel = { source: "shared", dataPolicy: freeModelDataPolicy(model) }
           })
         }
         for (const model of owned) {
@@ -62,7 +61,7 @@ export const VectorPlugin = define({
             draft.cost = [{ input: 0, output: 0, cache: { read: 0, write: 0 } }]
             draft.limit = { context: model.contextLength, output: model.maxOutputTokens }
             draft.enabled = true
-            Object.assign(draft, { freeModel: { source: "openrouter" } })
+            draft.freeModel = { source: "openrouter", dataPolicy: freeModelDataPolicy(model) }
           })
         }
       }),
@@ -71,8 +70,56 @@ export const VectorPlugin = define({
       Stream.runForEach(() => ctx.catalog.reload()),
       Effect.forkScoped({ startImmediately: true }),
     )
+    // A catalog first read as OFF (a cached answer served at startup) must not hide models that turn on later.
+    yield* freeModels.changes.pipe(
+      Stream.runForEach(() => ctx.catalog.reload()),
+      Effect.forkScoped({ startImmediately: true }),
+    )
     yield* Effect.forever(Effect.sleep("5 minutes").pipe(Effect.andThen(ctx.catalog.reload()))).pipe(
       Effect.forkScoped(),
     )
   }),
 })
+
+/**
+ * Repository configuration loads after the provider plugins, so it can add a free OpenRouter model back, under its own
+ * name or another, or under a provider of another name pointed at openrouter.ai. This runs after it. The runner sends
+ * any such model only through the free-model route, which refuses it; this keeps it out of the lists too.
+ */
+export const FreeModelGuardPlugin = define({
+  id: "free-model-guard",
+  effect: Effect.fn(function* (ctx) {
+    yield* ctx.catalog.transform(
+      Effect.fn(function* (catalog) {
+        removeOpenRouterFree(catalog)
+      }),
+    )
+  }),
+})
+
+// Free models listed by Vector itself carry `freeModel` and stay; the shared allowance's provider is Vector's own.
+function removeOpenRouterFree(catalog: CatalogDraft) {
+  for (const item of catalog.provider.list()) {
+    if (item.provider.id === "vector") continue
+    for (const model of item.models.values()) {
+      if (
+        !model.freeModel &&
+        sendsToOpenRouterFree({
+          providerID: item.provider.id,
+          id: model.id,
+          apiID: model.api.id,
+          destinations: [
+            model.api.url,
+            model.request.body.baseURL,
+            model.api.type === "aisdk" ? model.api.package : undefined,
+            item.provider.api.url,
+            item.provider.request.body.baseURL,
+            item.provider.api.type === "aisdk" ? item.provider.api.package : undefined,
+          ],
+          price: model.cost.find((cost) => !cost.tier),
+        })
+      )
+        catalog.model.remove(item.provider.id, model.id)
+    }
+  }
+}

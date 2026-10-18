@@ -92,8 +92,9 @@ const pluginNames = [
 // review, the browser, the agents, where you work with it, what it ships to,
 // then how it keeps itself honest.
 // Privacy in six claims, each checked against the code and /legal/privacy on 17 October 2026.
-// Keep the "coming soon" labels until Codium sales open; "from 1.99.108" dates the no-training policy to the
-// desktop release that shipped it.
+// Keep the "coming soon" labels until Codium sales open. The free-model claim must hold for 1.99.108, whose free models
+// are all no-training ones, and from 1.99.109, which adds models that may train behind a label and a one-time
+// acceptance: Vector itself never trains.
 const privacyFacts = [
   {
     title: "Local first",
@@ -113,7 +114,7 @@ const privacyFacts = [
   },
   {
     title: "On Vector's own models",
-    text: "Codium, coming soon, routes only to providers OpenRouter records as zero data retention, and from 1.99.108 every included free-model request asks providers not to train on your prompts. They may still keep them.",
+    text: "Codium, coming soon, routes only to providers OpenRouter records as zero data retention. Requests to free models whose providers don't train ask them not to train on your prompts, and free models whose providers may train are labelled May train on your prompts and sent only after you accept that once. Providers may still keep prompts.",
   },
   {
     title: "Counts, not content",
@@ -257,10 +258,10 @@ const trustCards = [
   },
   {
     icon: Sparkles,
-    lead: "Free models on your own account.",
-    text: "From 1.99.99, connect a free OpenRouter account and Vector offers the free coding models it has checked, stopping at their limits instead of switching to a paid one; from 1.99.108, only models on its no-training allowlist.",
+    lead: "Free models with your Vector account.",
+    text: "Sign in to Vector and its free models run on Vector's shared allowance at no cost to you, stopping at their limits instead of switching to a paid one. From desktop 1.99.109, every free OpenRouter model whose terms allow it, with the ones that may train on your prompts labelled and asked about once.",
     href: "/docs/models#free-models",
-    more: "Read about Models included with Vector",
+    more: "Read about Free models inside of Vector",
   },
   {
     icon: Coins,

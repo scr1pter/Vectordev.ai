@@ -1,7 +1,7 @@
 export * as SessionRunnerModel from "./model"
 
 import { makeLocationNode } from "../../effect/app-node"
-import { type Model, type ProviderMetadata } from "@vectordevai/llm"
+import { HttpOptions, LLMRequest, type Model, type ProviderMetadata } from "@vectordevai/llm"
 import * as AnthropicMessages from "@vectordevai/llm/protocols/anthropic-messages"
 import * as OpenAICompatibleChat from "@vectordevai/llm/protocols/openai-compatible-chat"
 import * as OpenAIResponses from "@vectordevai/llm/protocols/openai-responses"
@@ -9,6 +9,14 @@ import { Auth, type AnyRoute } from "@vectordevai/llm/route"
 import { Context, Effect, Layer, Schema } from "effect"
 import { produce } from "immer"
 import { FreeModels } from "../../free-models"
+import { FreeModelGuests } from "../../free-model-guests"
+import { freeModelMayTrain } from "../../free-model-choice"
+import {
+  denyDataCollection,
+  openRouterModelRouting,
+  sendsToOpenRouter,
+  sendsToOpenRouterFree,
+} from "../../free-model-catalog"
 import { ModelPlans } from "../../model-plans"
 import { freeModelRoute } from "./free-model-route"
 import { modelPlanRoute } from "./model-plan-route"
@@ -224,12 +232,15 @@ const apiKey = (model: ModelV2.Info, credential?: Credential.Value) => {
   if (typeof value === "string") return Auth.value(value)
 }
 
-const withDefaults = (model: ModelV2.Info, route: AnyRoute) => {
+const withDefaults = (model: ModelV2.Info, route: AnyRoute, mayTrain: Effect.Effect<boolean>) => {
   const body = model.request.body
   const httpBody = Object.hasOwn(body, "apiKey")
     ? Object.fromEntries(Object.entries(body).filter(([key]) => key !== "apiKey"))
     : body
-  return route.with({
+  const routed = sendsToOpenRouter({ providerID: model.providerID, destinations: destinations(model) })
+    ? withoutUnconsentedTraining(route, model.api.id, mayTrain)
+    : route
+  return routed.with({
     provider: model.providerID,
     endpoint: model.api.url === undefined ? undefined : { baseURL: model.api.url },
     headers: Object.fromEntries(
@@ -239,6 +250,30 @@ const withDefaults = (model: ModelV2.Info, route: AnyRoute) => {
     limits: { context: model.limit.context, output: model.limit.output },
   })
 }
+
+// Fallbacks, presets and plugins in a request to OpenRouter keep working, but some can let OpenRouter answer from another
+// model's endpoints, including a free one or one whose provider may train on prompts (openRouterModelRouting). Such a
+// request asks OpenRouter to deny data collection unless the user accepted the "May train on your prompts" notice in a
+// session no invited guest has worked in. It is checked on the final overlay, after the model's, variant's,
+// credential's and any plugin's body, as each request is sent, so a guest's later input is seen too.
+const withoutUnconsentedTraining = (route: AnyRoute, modelID: string, mayTrain: Effect.Effect<boolean>) =>
+  route.with({
+    transport: {
+      ...route.transport,
+      prepare: (input: Parameters<AnyRoute["transport"]["prepare"]>[0]) =>
+        Effect.gen(function* () {
+          const body = input.request.http?.body
+          if (!openRouterModelRouting(body, modelID).length || (yield* mayTrain))
+            return yield* route.transport.prepare(input)
+          return yield* route.transport.prepare({
+            ...input,
+            request: LLMRequest.update(input.request, {
+              http: new HttpOptions({ ...input.request.http, body: denyDataCollection(body) }),
+            }),
+          })
+        }),
+    },
+  })
 
 const withVariant = (
   model: ModelV2.Info,
@@ -270,6 +305,8 @@ const apiName = (model: ModelV2.Info) =>
 export const fromCatalogModel = (
   model: ModelV2.Info,
   credential?: Credential.Value,
+  /** Whether the user accepted the "May train on your prompts" notice and no invited guest has worked in the session. */
+  mayTrain: Effect.Effect<boolean> = Effect.succeed(false),
 ): Effect.Effect<Model, UnsupportedApiError | UnsafeEndpointError> => {
   const resolved =
     credential?.type !== "key" || credential.metadata === undefined
@@ -286,7 +323,7 @@ export const fromCatalogModel = (
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai") {
     return Effect.succeed(
       withPricing(
-        withDefaults(resolved, OpenAIResponses.route)
+        withDefaults(resolved, OpenAIResponses.route, mayTrain)
           .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
           .model({ id: resolved.api.id }),
         resolved.cost,
@@ -296,7 +333,7 @@ export const fromCatalogModel = (
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/anthropic") {
     return Effect.succeed(
       withPricing(
-        withDefaults(resolved, AnthropicMessages.route)
+        withDefaults(resolved, AnthropicMessages.route, mayTrain)
           .with({ auth: key === undefined ? Auth.none : Auth.header("x-api-key", key) })
           .model({ id: resolved.api.id }),
         resolved.cost,
@@ -306,7 +343,7 @@ export const fromCatalogModel = (
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai-compatible" && resolved.api.url) {
     return Effect.succeed(
       withPricing(
-        withDefaults(resolved, OpenAICompatibleChat.route)
+        withDefaults(resolved, OpenAICompatibleChat.route, mayTrain)
           .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
           .model({ id: resolved.api.id }),
         resolved.cost,
@@ -322,8 +359,15 @@ export const fromCatalogModel = (
   )
 }
 
-export const resolve = (session: SessionSchema.Info, model: ModelV2.Info, credential?: Credential.Value) =>
-  withVariant(model, session.model?.variant).pipe(Effect.flatMap((model) => fromCatalogModel(model, credential)))
+export const resolve = (
+  session: SessionSchema.Info,
+  model: ModelV2.Info,
+  credential?: Credential.Value,
+  mayTrain?: Effect.Effect<boolean>,
+) =>
+  withVariant(model, session.model?.variant).pipe(
+    Effect.flatMap((model) => fromCatalogModel(model, credential, mayTrain)),
+  )
 
 export const supported = (model: ModelV2.Info) =>
   model.providerID === ModelPlans.PROVIDER_ID ||
@@ -333,12 +377,25 @@ export const supported = (model: ModelV2.Info) =>
       model.api.package === "@ai-sdk/anthropic" ||
       (model.api.package === "@ai-sdk/openai-compatible" && model.api.url !== undefined)))
 
+// A free OpenRouter model configured under another name, or under a provider of another name pointed at openrouter.ai,
+// is judged by the API ID it sends, so it takes the free route too, which refuses a model it has not reviewed.
 function requiresFreeRoute(model: ModelV2.Info) {
   return (
     model.providerID === "vector" ||
     !!model.freeModel ||
-    (model.providerID === "openrouter" && model.id.toLowerCase().endsWith(":free"))
+    sendsToOpenRouterFree({
+      providerID: model.providerID,
+      id: model.id,
+      apiID: model.api.id,
+      destinations: destinations(model),
+      price: model.cost.find((cost) => !cost.tier),
+    })
   )
+}
+
+// Whatever decides where a model's requests go.
+function destinations(model: ModelV2.Info) {
+  return [model.api.url, model.request.body.baseURL, model.api.type === "aisdk" ? model.api.package : undefined]
 }
 
 /** Resolves models from the catalog belonging to the current Location runtime. */
@@ -350,43 +407,16 @@ export const locationLayer = Layer.effect(
     const freeModels = yield* FreeModels.Service
     const modelPlans = yield* ModelPlans.Service
     const freeCredentials = yield* FreeModels.CredentialsService
+    const guests = yield* FreeModelGuests.Service
     return Service.of({
       resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
-        // Location plugins populate and filter the catalog asynchronously during layer startup.
-        const defaultModel = session.model
-          ? undefined
-          : yield* catalog.model
-              .default()
-              .pipe(
-                Effect.mapError((error) =>
-                  error._tag === "Catalog.DefaultModelUnavailableError"
-                    ? new ModelUnavailableError({ providerID: error.providerID, modelID: error.modelID })
-                    : new ModelNotSelectedError({ sessionID: session.id }),
-                ),
-              )
-        const selected = session.model
-          ? (yield* catalog.model.available()).find(
-              (model) =>
-                model.id === session.model?.id &&
-                (model.providerID === session.model.providerID ||
-                  (session.model.providerID === "vector" &&
-                    model.providerID === "openrouter" &&
-                    model.freeModel?.source === "openrouter")),
-            )
-          : defaultModel && supported(defaultModel)
-            ? defaultModel
-            : yield* catalog.model.available().pipe(Effect.map(automaticModel))
-        if (!selected && session.model)
-          return yield* new ModelUnavailableError({
-            providerID: session.model.providerID,
-            modelID: session.model.id,
-          })
-        if (!selected) return yield* new ModelNotSelectedError({ sessionID: session.id })
+        const selected = yield* select(catalog, session)
         if (selected.providerID === ModelPlans.PROVIDER_ID)
           return withPricing(modelPlanRoute(selected, modelPlans, freeCredentials), selected.cost)
         // Configuration can overwrite API metadata or add a free ID after catalog validation.
         // Free intent always crosses the final eligibility and zero-price request guard.
-        if (requiresFreeRoute(selected)) return withFreeRoute(freeModelRoute(selected, freeModels, freeCredentials))
+        if (requiresFreeRoute(selected))
+          return withFreeRoute(freeModelRoute(selected, freeModels, freeCredentials, guests.marked(session.id)))
         const provider = yield* catalog.provider.get(selected.providerID)
         const connection = yield* integrations.connection.active(
           provider?.integrationID ?? Integration.ID.make(selected.providerID),
@@ -395,6 +425,10 @@ export const locationLayer = Layer.effect(
           session,
           selected,
           connection ? yield* integrations.connection.resolve(connection) : undefined,
+          // Read as each request is sent. The owner's acceptance never covers a guest's input.
+          guests
+            .marked(session.id)
+            .pipe(Effect.flatMap((guest) => (guest ? Effect.succeed(false) : freeModels.trainingConsent()))),
         )
       }),
     })
@@ -404,9 +438,58 @@ export const locationLayer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer: locationLayer,
-  deps: [Catalog.node, Integration.node, FreeModels.node, FreeModels.credentialsNode, ModelPlans.node],
+  deps: [
+    Catalog.node,
+    Integration.node,
+    FreeModels.node,
+    FreeModels.credentialsNode,
+    FreeModelGuests.node,
+    ModelPlans.node,
+  ],
 })
 
-// Codium spends the account's credits, so it is never chosen automatically.
+/**
+ * The catalog model a session's next turn runs on: the session's own, else the default, else an automatic choice.
+ * Exported so a check made before a prompt is admitted, such as the server's guest check, judges the same model.
+ */
+export const select = Effect.fn("SessionRunnerModel.select")(function* (
+  catalog: Catalog.Interface,
+  session: Pick<SessionSchema.Info, "id" | "model">,
+) {
+  // Location plugins populate and filter the catalog asynchronously during layer startup.
+  const defaultModel = session.model
+    ? undefined
+    : yield* catalog.model
+        .default()
+        .pipe(
+          Effect.mapError((error) =>
+            error._tag === "Catalog.DefaultModelUnavailableError"
+              ? new ModelUnavailableError({ providerID: error.providerID, modelID: error.modelID })
+              : new ModelNotSelectedError({ sessionID: session.id }),
+          ),
+        )
+  const selected = session.model
+    ? (yield* catalog.model.available()).find(
+        (model) =>
+          model.id === session.model?.id &&
+          (model.providerID === session.model.providerID ||
+            (session.model.providerID === "vector" &&
+              model.providerID === "openrouter" &&
+              model.freeModel?.source === "openrouter")),
+      )
+    : defaultModel && supported(defaultModel)
+      ? defaultModel
+      : yield* catalog.model.available().pipe(Effect.map(automaticModel))
+  if (!selected && session.model)
+    return yield* new ModelUnavailableError({
+      providerID: session.model.providerID,
+      modelID: session.model.id,
+    })
+  if (!selected) return yield* new ModelNotSelectedError({ sessionID: session.id })
+  return selected
+})
+
+// Codium spends the account's credits, so it is never chosen automatically. Nor is a free model that may train on
+// prompts: its notice is accepted for a model someone chose, not for one picked for them.
 const automaticModel = (models: readonly ModelV2.Info[]) =>
-  models.find((model) => supported(model) && model.providerID !== ModelPlans.PROVIDER_ID)
+  models.find((model) => supported(model) && model.providerID !== ModelPlans.PROVIDER_ID && !freeModelMayTrain(model))

@@ -1,5 +1,5 @@
-import { afterEach, expect } from "bun:test"
-import { Effect, Layer } from "effect"
+import { afterEach, expect, test } from "bun:test"
+import { Effect, Layer, Stream } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { ModelV2 } from "@vectordevai/core/model"
@@ -20,6 +20,9 @@ const layer = (models = owned) =>
       Layer.succeed(FreeModels.Service, {
         catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
         forKey: () => Effect.succeed(models),
+        trainingConsent: () => Effect.succeed(false),
+        setTrainingConsent: (accepted) => Effect.succeed(accepted),
+        changes: Stream.empty,
       }),
     ],
     [
@@ -131,3 +134,102 @@ for (const id of ["acme/missing:free", "acme/unreviewed:FREE"])
       }),
     { trusted: true, config: { ...config, model: `openrouter/${id}` } },
   )
+
+test("OpenRouter's free router is never anyone's default, whatever its context", () => {
+  const free = (id: string, context: number, dataPolicy: "no-training" | "may-train") => ({
+    id,
+    limit: { context },
+    freeModel: { source: "shared" as const, dataPolicy },
+  })
+  const router = free("openrouter/free", 2_000_000, "may-train")
+  expect(Provider.sort([router, free("poolside/laguna-s-2.1:free", 262_144, "may-train")])[0].id).toBe(
+    "poolside/laguna-s-2.1:free",
+  )
+  expect(Provider.sort([router, free("cohere/north-mini-code:free", 256_000, "no-training")])[0].id).toBe(
+    "cohere/north-mini-code:free",
+  )
+})
+
+// The verifier's medium of 18 October 2026: the router was only ranked last, so a provider whose only model it was
+// still had it as its default, and the engine, the app and ACP then chose it.
+const router = {
+  id: "openrouter/free",
+  name: "Free Models Router",
+  contextLength: 200_000,
+  maxOutputTokens: 8192,
+  providers: [{ id: "openrouter", name: "OpenRouter", retention: "", dataPolicy: "may-train" as const }],
+}
+
+test("a provider whose only model is OpenRouter's free router has no default, and no automatic choice is the router", () => {
+  expect(Provider.defaultModelIDs({ vector: Provider.fromFreeModels([router]) })).toEqual({})
+  expect(Provider.defaultModelIDs({ openrouter: Provider.fromFreeModels([router], "openrouter") })).toEqual({})
+  const shared = Provider.fromFreeModels([router, FREE_MODEL_FALLBACKS[0]])
+  expect(Provider.defaultModelIDs({ vector: shared }).vector).toBe(FREE_MODEL_FALLBACKS[0].id)
+  expect(Provider.automaticModels(Object.values(Provider.fromFreeModels([router]).models))).toEqual([])
+  // Lists still show it, last, for someone to pick.
+  expect(Provider.sort(Object.values(shared.models)).map((model) => String(model.id))).toEqual([
+    FREE_MODEL_FALLBACKS[0].id,
+    router.id,
+  ])
+})
+
+testEffect(layer([router])).instance(
+  "an OpenRouter account that lists only the free router gets no automatic model",
+  () =>
+    Effect.gen(function* () {
+      const provider = yield* Provider.Service
+      const providers = yield* provider.list()
+      expect(providers[ProviderV2.ID.openrouter].models[router.id]?.freeModel).toEqual({
+        source: "openrouter",
+        dataPolicy: "may-train",
+      })
+      expect(Provider.defaultModelIDs(providers).openrouter).toBeUndefined()
+      expect(yield* provider.defaultModel().pipe(Effect.result)).toMatchObject({ _tag: "Failure" })
+    }),
+  { trusted: true, config: { provider: { openrouter: { options: { apiKey: "synthetic-key" } } } } },
+)
+
+// The verifier's low of 18 October 2026: signed out, the CLI said only that no providers were available.
+const signedOut = (enabled: boolean) =>
+  testEffect(
+    LayerNode.compile(Provider.node, [
+      [
+        FreeModels.node,
+        Layer.succeed(FreeModels.Service, {
+          catalog: () => Effect.succeed({ enabled, updatedAt: 1, models: enabled ? [FREE_MODEL_FALLBACKS[0]] : [] }),
+          forKey: () => Effect.succeed([]),
+          trainingConsent: () => Effect.succeed(false),
+          setTrainingConsent: (accepted) => Effect.succeed(accepted),
+          changes: Stream.empty,
+        }),
+      ],
+      [
+        FreeModels.credentialsNode,
+        Layer.succeed(FreeModels.CredentialsService, { get: () => Effect.succeed(undefined) }),
+      ],
+    ]),
+  )
+for (const enabled of [true, false])
+  signedOut(enabled).instance(
+    `signed out with Free models inside of Vector ${enabled ? "on" : "off"}, the missing-provider error ${enabled ? "says to sign in" : "says nothing of free models"}`,
+    () =>
+      Effect.gen(function* () {
+        const provider = yield* Provider.Service
+        expect(yield* provider.freeSignIn()).toBe(enabled)
+        const failure = yield* provider.defaultModel().pipe(Effect.flip)
+        expect(failure).toBeInstanceOf(Provider.NoProvidersError)
+        if (enabled)
+          expect(failure.message).toBe(
+            "No providers are available. Sign in to Vector to use free models: run vector login. Or connect your own provider key with vector providers login.",
+          )
+        if (!enabled) expect(failure.message).toBe("No providers are available")
+      }),
+    { trusted: true, config: {} },
+  )
+
+test("the missing-provider error says to sign in only when that would list free models", () => {
+  expect(new Provider.NoProvidersError({ signIn: true }).message).toContain(
+    "Sign in to Vector to use free models: run vector login.",
+  )
+  expect(new Provider.NoProvidersError({}).message).not.toMatch(/sign in|openrouter/i)
+})

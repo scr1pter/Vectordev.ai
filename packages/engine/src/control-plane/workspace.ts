@@ -7,6 +7,7 @@ import { Context, Effect, FiberMap, Iterable, Layer, Schema, Stream } from "effe
 import { serviceUse } from "@vectordevai/core/effect/service-use"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http"
 import { Database } from "@vectordevai/core/database/database"
+import { FreeModelGuests, GUEST_REQUEST_HEADER } from "@vectordevai/core/free-model-guests"
 import { asc } from "drizzle-orm"
 import { eq } from "drizzle-orm"
 import { inArray } from "drizzle-orm"
@@ -170,6 +171,7 @@ const layer = Layer.effect(
     const flags = yield* RuntimeFlags.Service
     const fs = yield* FSUtil.Service
     const { db } = yield* Database.Service
+    const guests = yield* FreeModelGuests.Service
     const connections = new Map<WorkspaceV2.ID, ConnectionStatus>()
     const syncFibers = yield* FiberMap.make<WorkspaceV2.ID, void, SyncLoopError>()
 
@@ -702,9 +704,13 @@ const layer = Layer.effect(
           { discard: true },
         )
 
+        // The remote engine keeps its own guest marks, so a session an invited guest worked in here says so, and stays
+        // off may-train free models there too (FreeModelGuests).
+        const stealHeaders = new Headers(target.headers)
+        if (yield* guests.marked(input.sessionID)) stealHeaders.set(GUEST_REQUEST_HEADER, "1")
         const response = yield* http.execute(
           HttpClientRequest.post(route(target.url, "/sync/steal"), {
-            headers: new Headers(target.headers),
+            headers: stealHeaders,
             body: HttpBody.jsonUnsafe({ sessionID: input.sessionID }),
           }),
         )
@@ -996,6 +1002,7 @@ export const node = LayerNode.make({
     RuntimeFlags.node,
     FSUtil.node,
     Database.node,
+    FreeModelGuests.node,
   ],
 })
 

@@ -1,6 +1,13 @@
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import { FreeModels } from "@vectordevai/core/free-models"
-import { isFreeModel } from "@vectordevai/schema/free-model"
+import { freeModelDataPolicy } from "@vectordevai/core/free-model-catalog"
+import {
+  FREE_MODEL_RESUME_UNAVAILABLE,
+  FREE_MODEL_TRAINING_BLOCKED,
+  FREE_MODEL_TRAINING_OWNER_ONLY,
+  freeModelMayTrain,
+} from "@vectordevai/core/free-model-choice"
+import { isFreeModel, isFreeModelRef } from "@vectordevai/schema/free-model"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import path from "path"
@@ -132,6 +139,7 @@ export interface Interface {
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
   readonly resumeFreeModels: (
     input: ResumeFreeModelsInput,
+    options?: Pick<PromptOptions, "refuseTrainingFreeModels">,
   ) => Effect.Effect<SessionV1.WithParts, Session.BusyError | FreeModelsResumeError>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
@@ -785,6 +793,26 @@ const layer = Layer.effect(
       }
 
       const model = input.model ?? (yield* currentModel(input.sessionID, ag.model))
+      // Before anything is saved: a sender who cannot accept the training notice, such as an invited guest, must not
+      // reach a may-train free model through the owner's acceptance, whether chosen, kept from the session or named by a
+      // subtask part, which runs a subagent on its own model. Every later request in the session is refused such a
+      // model too, where it is sent (FreeModelGuests); this refuses the prompt itself before it is saved.
+      if (options?.refuseTrainingFreeModels) {
+        const named = [
+          model,
+          ...input.parts.flatMap((part) => (part.type === "subtask" && part.model ? [part.model] : [])),
+        ]
+        const chosen = yield* Effect.forEach(named, (item) =>
+          provider
+            .getModel(item.providerID, item.modelID)
+            .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined))),
+        )
+        if (chosen.some((item) => item && freeModelMayTrain(item))) {
+          const error = new NamedError.Unknown({ message: FREE_MODEL_TRAINING_OWNER_ONLY })
+          yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+          throw error
+        }
+      }
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const full =
         !input.variant && ag.variant && same
@@ -1747,7 +1775,10 @@ const layer = Layer.effect(
       return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
     })
 
-    const resumeFreeModels = Effect.fn("SessionPrompt.resumeFreeModels")(function* (input: ResumeFreeModelsInput) {
+    const resumeFreeModels = Effect.fn("SessionPrompt.resumeFreeModels")(function* (
+      input: ResumeFreeModelsInput,
+      options?: Pick<PromptOptions, "refuseTrainingFreeModels">,
+    ) {
       const validate = Effect.gen(function* () {
         const history = yield* sessions.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)
         const latest = history.at(-1)
@@ -1759,8 +1790,7 @@ const layer = Layer.effect(
           failed.id !== input.messageID ||
           failed.error?.name !== "FreeModelsLimitError" ||
           failed.modelID !== input.modelID ||
-          !["vector", "openrouter"].includes(failed.providerID) ||
-          !input.modelID.endsWith(":free") ||
+          !isFreeModelRef({ providerID: failed.providerID, modelID: input.modelID }) ||
           !user ||
           user.info.id !== failed.parentID ||
           history.some((message) =>
@@ -1775,7 +1805,7 @@ const layer = Layer.effect(
           Effect.mapError(
             () =>
               new FreeModelsResumeError({
-                message: "Connect OpenRouter and choose the same available free model to continue.",
+                message: FREE_MODEL_RESUME_UNAVAILABLE,
               }),
           ),
         )
@@ -1787,10 +1817,24 @@ const layer = Layer.effect(
       })
       yield* state.assertNotBusy(input.sessionID)
       const ownKey = yield* freeCredentials.get("openrouter")
-      if (!ownKey || !(yield* freeModels.forKey(ownKey, true)).some((model) => model.id === input.modelID))
+      if (!ownKey || !(yield* freeModels.forKey(ownKey, true)).some((model) => model.id === input.modelID)) {
+        // A may-train model the shared allowance served is hidden from an account whose privacy settings exclude it.
+        const shared = ownKey ? yield* freeModels.catalog() : undefined
+        const listed = shared?.enabled ? shared.models.find((model) => model.id === input.modelID) : undefined
         return yield* new FreeModelsResumeError({
-          message: "Connect OpenRouter and choose the same available free model to continue.",
+          message:
+            listed && freeModelDataPolicy(listed) !== "no-training"
+              ? FREE_MODEL_TRAINING_BLOCKED
+              : FREE_MODEL_RESUME_UNAVAILABLE,
         })
+      }
+      if (options?.refuseTrainingFreeModels) {
+        const chosen = yield* provider
+          .getModel(ProviderV2.ID.openrouter, input.modelID)
+          .pipe(Effect.orElseSucceed(() => undefined))
+        if (chosen && freeModelMayTrain(chosen))
+          return yield* new FreeModelsResumeError({ message: FREE_MODEL_TRAINING_OWNER_ONLY })
+      }
       yield* validate
       const work = Effect.gen(function* () {
         const current = yield* database.db
@@ -1979,7 +2023,7 @@ const layer = Layer.effect(
 )
 
 function isFreeSelection(model: { providerID: string; modelID: string }) {
-  return ["vector", "openrouter"].includes(model.providerID) && model.modelID.toLowerCase().endsWith(":free")
+  return isFreeModelRef(model)
 }
 
 const ModelRef = Schema.Struct({
@@ -2025,6 +2069,11 @@ export type PromptOptions = {
    * an invited guest. Otherwise it replaces them, as the owner's own budget does.
    */
   readonly tightenBudget?: boolean
+  /**
+   * For a sender who cannot accept the free-model training notice, such as an invited guest: a prompt that would run
+   * on a free model labelled "May train on your prompts" is refused before it is saved, although the owner accepted.
+   */
+  readonly refuseTrainingFreeModels?: boolean
 }
 
 export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput")({

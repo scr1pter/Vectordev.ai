@@ -40,7 +40,8 @@ export const docsNav: DocGroup[] = [
       {
         id: "external-agents",
         title: "Orchestrate Claude Code, Codex and Cursor",
-        blurb: "Run Claude Code, Codex and Cursor in Vector workspaces, on the CLIs and subscriptions you already have.",
+        blurb:
+          "Run Claude Code, Codex and Cursor in Vector workspaces, on the CLIs and subscriptions you already have.",
       },
       {
         id: "automations",
@@ -65,7 +66,8 @@ export const docsNav: DocGroup[] = [
       {
         id: "tokenomics",
         title: "Vector Tokenomics Engine",
-        blurb: "Measures what each run spends from the tokens your provider reports, and stops starting automations once your daily cap is spent.",
+        blurb:
+          "Measures what each run spends from the tokens your provider reports, and stops starting automations once your daily cap is spent.",
       },
       {
         id: "mcp-and-plugins",
@@ -95,7 +97,7 @@ export const docsNav: DocGroup[] = [
       {
         id: "models",
         title: "Models, free models and your own keys",
-        blurb: "Connect a provider account or API key. From 1.99.99, your own OpenRouter account adds free models.",
+        blurb: "Sign in to Vector for free models, or connect a provider account or API key.",
       },
       {
         id: "cloud-services",

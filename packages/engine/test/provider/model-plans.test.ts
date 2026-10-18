@@ -33,6 +33,9 @@ const it = testEffect(
       Layer.succeed(FreeModels.Service, {
         catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
         forKey: () => Effect.succeed([]),
+        trainingConsent: () => Effect.succeed(false),
+        setTrainingConsent: (accepted) => Effect.succeed(accepted),
+        changes: Stream.empty,
       }),
     ],
     [
@@ -70,6 +73,9 @@ const slow = testEffect(
       Layer.succeed(FreeModels.Service, {
         catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
         forKey: () => Effect.succeed([]),
+        trainingConsent: () => Effect.succeed(false),
+        setTrainingConsent: (accepted) => Effect.succeed(accepted),
+        changes: Stream.empty,
       }),
     ],
     [

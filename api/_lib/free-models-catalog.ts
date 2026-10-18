@@ -2,31 +2,33 @@ import { Option, Schema } from "effect"
 import { FREE_MODEL_FALLBACKS, FreeModelCatalog, type FreeModelInfo } from "../../packages/schema/src/free-model.js"
 import {
   FreeModelMetadata,
-  excludedFreeModel,
+  barredFreeModel,
+  freeEndpointPolicy,
+  freeModelDataPolicy,
   freeModelInfo,
-  includedFreeModel,
   isFreeModelID,
-  noTrainingEndpoint,
+  isFreeRouter,
+  offeredFreeModel,
+  personalOnlyFreeModel,
+  reviewedFreeModel,
 } from "../../packages/core/src/free-model-catalog.js"
+import { FREE_MODELS_UNAVAILABLE } from "../../packages/core/src/free-model-choice.js"
 import { ApiError } from "./http.js"
 import { persistentStore } from "./persistent-store.js"
 
-// Never revive a catalog selected under an earlier policy (retired provider-policy endpoint, then ZDR).
-export const FREE_MODELS_CATALOG_KEY = "vector:free-models:catalog:v3:no-training"
+// Never revive a catalog selected under an earlier policy (retired provider-policy endpoint, then ZDR, then the
+// no-training-only allowlist, whose providers carry no data policy).
+export const FREE_MODELS_CATALOG_KEY = "vector:free-models:catalog:v4:policy"
 
 const ROOT = "https://openrouter.ai/api/v1"
-const MAX_AGE = 30 * 60 * 60 * 1000
+// The refresh runs once a day. Two missed runs, not one, take the section down.
+const MAX_AGE = 54 * 60 * 60 * 1000
 const EndpointList = Schema.Struct({ data: Schema.Struct({ endpoints: Schema.Array(Schema.Unknown) }) })
 export const freeModelsEnabled = () => process.env.FREE_MODELS_ENABLED === "true"
 
 export function openRouterHeaders() {
   const key = process.env.OPENROUTER_FREE_API_KEY?.trim() || process.env.OPENROUTER_API_KEY?.trim()
-  if (!key)
-    throw new ApiError(
-      503,
-      "FREE_MODELS_UNAVAILABLE",
-      "Models included with Vector are temporarily unavailable. Connect OpenRouter to use your own account.",
-    )
+  if (!key) throw new ApiError(503, "FREE_MODELS_UNAVAILABLE", FREE_MODELS_UNAVAILABLE)
   return {
     authorization: `Bearer ${key}`,
     "HTTP-Referer": "https://vectordev.ai/",
@@ -55,6 +57,8 @@ export async function refreshFreeModelCatalog(
 ): Promise<FreeModelCatalog> {
   if (!freeModelsEnabled()) return { enabled: false, updatedAt: 0, models: [] }
   const publicModels = await read(`${ROOT}/models`, Schema.Struct({ data: Schema.Array(Schema.Unknown) }), request)
+  // The account's own list applies its privacy settings: with free may-train endpoints not allowed there, those models
+  // are missing and the shared catalog stays no-training only.
   const available = await read(
     `${ROOT}/models/user`,
     Schema.Struct({ data: Schema.Array(Schema.Struct({ id: Schema.String })) }),
@@ -62,61 +66,95 @@ export async function refreshFreeModelCatalog(
     true,
   )
   const allowed = new Set(available.data.map((item) => item.id))
+  // The shared allowance serves reviewed models only; unreviewed and personal-only ones are offered through a user's
+  // own account.
   const candidates = publicModels.data.flatMap((item) => {
     const model = Schema.decodeUnknownOption(FreeModelMetadata)(item)
-    return Option.isSome(model) && includedFreeModel(model.value, now) && allowed.has(model.value.id)
+    return Option.isSome(model) &&
+      reviewedFreeModel(model.value.id) &&
+      !personalOnlyFreeModel(model.value.id) &&
+      offeredFreeModel(model.value, now) &&
+      allowed.has(model.value.id)
       ? [model.value]
       : []
   })
-  // OpenRouter publishes no per-endpoint training flag; the no-training selection keeps allowlisted model and
-  // provider pairs only, and each request also asks OpenRouter to deny data collection.
   const checked = await Promise.all(
     candidates.map(async (model) => {
+      // The free router has no endpoint list of its own; its price and parameters come from its listing.
+      if (isFreeRouter(model.id)) return freeModelInfo(model, [], { reviewedOnly: true })
       // The cron runs once a day, so one unreadable endpoint list drops only its own model, not the whole refresh.
       const endpoints = await read(`${ROOT}/models/${model.id}/endpoints`, EndpointList, request).catch(() => undefined)
-      return endpoints && freeModelInfo(model, endpoints.data.endpoints, { noTraining: true })
+      return endpoints && freeModelInfo(model, endpoints.data.endpoints, { reviewedOnly: true })
     }),
   )
   const models = checked.filter((model): model is FreeModelInfo => model !== undefined)
+  // No-training models first, the long-standing ones in their reviewed order, then by ID, and the free router last.
   const order = new Map(FREE_MODEL_FALLBACKS.map((item, index) => [item.id, index]))
-  models.sort((a, b) => (order.get(a.id) ?? 100) - (order.get(b.id) ?? 100) || a.id.localeCompare(b.id))
-  // With nothing that qualifies, publish OFF so clients hide the section instead of showing it empty.
-  const catalog = { enabled: models.length > 0, updatedAt: now, models }
-  await persistentStore(["SET", FREE_MODELS_CATALOG_KEY, JSON.stringify(catalog), "EX", 30 * 60 * 60], request)
+  models.sort(
+    (a, b) =>
+      Number(isFreeRouter(a.id)) - Number(isFreeRouter(b.id)) ||
+      Number(freeModelDataPolicy(a) !== "no-training") - Number(freeModelDataPolicy(b) !== "no-training") ||
+      (order.get(a.id) ?? 100) - (order.get(b.id) ?? 100) ||
+      a.id.localeCompare(b.id),
+  )
+  // With nothing that qualifies, publish OFF so clients hide the section instead of showing it empty. The free router
+  // lists no endpoints and picks a model at random, so it alone never keeps the section on.
+  const catalog = models.some((model) => !isFreeRouter(model.id))
+    ? { enabled: true, updatedAt: now, models }
+    : { enabled: false, updatedAt: now, models: [] }
+  await persistentStore(["SET", FREE_MODELS_CATALOG_KEY, JSON.stringify(catalog), "EX", MAX_AGE / 1000], request)
   return catalog
 }
 
+/**
+ * The stored catalog, as a client may see it. Only a client that declares it labels may-train models and asks before
+ * the first prompt (`disclosure`) receives them; every other client, including 1.99.108 and CLI 1.99.99, receives the
+ * no-training models only.
+ */
 export async function currentFreeModelCatalog(
   request: typeof fetch = fetch,
   now = Date.now(),
+  options: { disclosure?: boolean } = {},
 ): Promise<FreeModelCatalog> {
   if (!freeModelsEnabled()) return { enabled: false, updatedAt: 0, models: [] }
   const stored = await persistentStore(["GET", FREE_MODELS_CATALOG_KEY], request)
+  // Distinct codes let a probe of /models tell a catalog that was never refreshed from a stale or invalid one.
+  if (stored === null || stored === undefined) throw unavailable("FREE_MODELS_CATALOG_MISSING")
   const json = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(stored)
   const decoded = Option.isSome(json) ? Schema.decodeUnknownOption(FreeModelCatalog)(json.value) : Option.none()
+  if (Option.isNone(decoded)) throw unavailable("FREE_MODELS_CATALOG_INVALID")
+  if (decoded.value.updatedAt > now || now - decoded.value.updatedAt > MAX_AGE)
+    throw unavailable("FREE_MODELS_CATALOG_STALE")
   if (
-    Option.isNone(decoded) ||
-    decoded.value.updatedAt > now ||
-    now - decoded.value.updatedAt > MAX_AGE ||
     decoded.value.models.some(
       (model) =>
         !isFreeModelID(model.id) ||
-        excludedFreeModel(model.id) ||
+        !!barredFreeModel(model.id) ||
         !Number.isSafeInteger(model.contextLength) ||
         model.contextLength < 1 ||
         !Number.isSafeInteger(model.maxOutputTokens) ||
         model.maxOutputTokens < 1 ||
         !model.providers.length ||
-        model.providers.some((provider) => !noTrainingEndpoint(model.id, provider.id)),
+        // Every endpoint must carry the policy the reviewed record gives it, and the record must know it.
+        model.providers.some(
+          (provider) =>
+            provider.dataPolicy === undefined ||
+            provider.dataPolicy === "unreviewed" ||
+            provider.dataPolicy !== freeEndpointPolicy(model.id, provider.id),
+        ),
     )
   )
-    throw new ApiError(
-      503,
-      "FREE_MODELS_CATALOG_UNAVAILABLE",
-      "Models included with Vector are temporarily unavailable. Connect OpenRouter to use your own account.",
-    )
-  // A fresh refresh that found no qualifying model is a deliberate OFF answer, not an outage.
-  if (!decoded.value.enabled || !decoded.value.models.length)
+    throw unavailable("FREE_MODELS_CATALOG_INVALID")
+  // A catalog stored before a model became personal-only must not keep serving it.
+  const shared = decoded.value.models.filter((model) => !personalOnlyFreeModel(model.id))
+  const models = options.disclosure ? shared : shared.filter((model) => freeModelDataPolicy(model) === "no-training")
+  // A fresh refresh that found no qualifying model is a deliberate OFF answer, not an outage. The free router alone, as
+  // an earlier refresh could have stored it, does not count as a qualifying model either.
+  if (!decoded.value.enabled || !models.some((model) => !isFreeRouter(model.id)))
     return { enabled: false, updatedAt: decoded.value.updatedAt, models: [] }
-  return decoded.value
+  return { ...decoded.value, models }
+}
+
+function unavailable(code: string) {
+  return new ApiError(503, code, FREE_MODELS_UNAVAILABLE)
 }

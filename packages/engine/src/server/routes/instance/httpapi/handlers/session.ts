@@ -20,6 +20,9 @@ import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
 import { ModelV2 } from "@vectordevai/core/model"
+import { Provider } from "@/provider/provider"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { freeModelMayTrain, FREE_MODEL_TRAINING_OWNER_ONLY } from "@vectordevai/core/free-model-choice"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { NamedError } from "@vectordevai/core/util/error"
 import { Cause, Effect, Option, Schema, Scope } from "effect"
@@ -71,6 +74,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const todoSvc = yield* Todo.Service
     const summary = yield* SessionSummary.Service
     const events = yield* EventV2Bridge.Service
+    const provider = yield* Provider.Service
+    const guests = yield* FreeModelGuests.Service
     const scope = yield* Scope.Scope
 
     const list = Effect.fn("SessionHttpApi.list")(function* (ctx: { query: typeof ListQuery.Type }) {
@@ -281,12 +286,15 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload?: typeof ForkPayload.Type
     }) {
-      return yield* SessionError.mapStorageNotFound(
+      const forked = yield* SessionError.mapStorageNotFound(
         session.fork({
           sessionID: ctx.params.sessionID,
           messageID: ctx.payload?.messageID,
         }),
       )
+      // A fork copies the history, a guest's messages included, so it keeps the source's guest mark (FreeModelGuests).
+      if (yield* guests.marked(ctx.params.sessionID)) yield* guests.mark(forked.id)
+      return forked
     })
 
     const forkRaw = Effect.fn("SessionHttpApi.forkRaw")(function* (ctx: {
@@ -355,6 +363,21 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof SummarizePayload.Type
     }) {
       yield* revertSvc.cleanup(yield* requireSession(ctx.params.sessionID))
+      // Compaction sends the whole history to the model it names, so a guest may not name one that may train: the
+      // owner's acceptance is not the guest's. The request itself would be refused where it is sent (FreeModelGuests);
+      // this refuses it before a compaction is recorded.
+      if ((yield* RequestPrincipal).kind !== "owner") {
+        const chosen = yield* provider
+          .getModel(ctx.payload.providerID, ctx.payload.modelID)
+          .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
+        if (chosen && freeModelMayTrain(chosen)) {
+          yield* events.publish(Session.Event.Error, {
+            sessionID: ctx.params.sessionID,
+            error: new NamedError.Unknown({ message: FREE_MODEL_TRAINING_OWNER_ONLY }).toObject(),
+          })
+          return yield* new HttpApiError.BadRequest({})
+        }
+      }
       const messages = yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
       const defaultAgent = yield* agentSvc.defaultAgent()
       const currentAgent = messages.findLast((message) => message.info.role === "user")?.info.agent ?? defaultAgent
@@ -373,9 +396,13 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     // The owner's files are theirs to attach from anywhere. A guest's go through the workspace boundary and read
-    // permission, which only the owner can approve, and a guest's budget can only tighten the owner's run limits.
+    // permission, which only the owner can approve, and a guest's budget can only tighten the owner's run limits. A
+    // guest never accepted the free-model training notice, so the owner's acceptance does not carry a guest's prompt to
+    // a model that may train.
     const promptOptions = Effect.gen(function* () {
-      return (yield* RequestPrincipal).kind === "owner" ? { userFile: () => true } : { tightenBudget: true }
+      return (yield* RequestPrincipal).kind === "owner"
+        ? { userFile: () => true }
+        : { tightenBudget: true, refuseTrainingFreeModels: true }
     })
 
     const prompt = Effect.fn("SessionHttpApi.prompt")(function* (ctx: {
@@ -418,12 +445,15 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: { messageID: MessageID; modelID: ModelV2.ID }
     }) {
       yield* requireSession(ctx.params.sessionID)
-      yield* promptSvc.resumeFreeModels({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
-        Effect.catchTag("SessionBusyError", (error) => SessionError.mapBusy(Effect.fail(error))),
-        Effect.catchTag("FreeModelsResumeError", (error) =>
-          Effect.fail(new InvalidRequestError({ message: error.message })),
-        ),
-      )
+      const owner = (yield* RequestPrincipal).kind === "owner"
+      yield* promptSvc
+        .resumeFreeModels({ ...ctx.payload, sessionID: ctx.params.sessionID }, { refuseTrainingFreeModels: !owner })
+        .pipe(
+          Effect.catchTag("SessionBusyError", (error) => SessionError.mapBusy(Effect.fail(error))),
+          Effect.catchTag("FreeModelsResumeError", (error) =>
+            Effect.fail(new InvalidRequestError({ message: error.message })),
+          ),
+        )
       return true
     })
 

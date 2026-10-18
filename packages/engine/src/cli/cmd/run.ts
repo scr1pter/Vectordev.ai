@@ -37,6 +37,7 @@ import {
 import { FormatError, FormatUnknownError } from "../error"
 import { INTERACTIVE_INPUT_ERROR, resolveInteractiveStdin } from "./run/runtime.stdin"
 import { MODEL_SETUP_GUIDANCE } from "@/provider/setup"
+import { FREE_MODELS_SIGN_IN_TERMINAL } from "@vectordevai/core/free-model-choice"
 
 type ModelInput = Parameters<VectorClient["session"]["prompt"]>[0]["model"]
 
@@ -308,7 +309,9 @@ export const RunCommand = effectCmd({
     const { RuntimeFlags } = yield* Effect.promise(() => import("@/effect/runtime-flags"))
     const { InstanceRef } = yield* Effect.promise(() => import("@/effect/instance-ref"))
     const { ServerAuth } = yield* Effect.promise(() => import("@/server/auth"))
+    const { Provider } = yield* Effect.promise(() => import("@/provider/provider"))
     const agentSvc = yield* Agent.Service
+    const providerSvc = yield* Provider.Service
     const flags = yield* RuntimeFlags.Service
     const localInstance = yield* InstanceRef
     yield* Effect.promise(async () => {
@@ -768,7 +771,11 @@ export const RunCommand = effectCmd({
       async function execute(sdk: VectorClient) {
         const available = await sdk.config.providers({}, { throwOnError: true })
         if (!available.data.providers.some((provider) => Object.keys(provider.models).length > 0)) {
-          UI.error(MODEL_SETUP_GUIDANCE)
+          // Only a local engine can say whether signing in would list free models; an attached server runs elsewhere.
+          const signIn =
+            !args.attach &&
+            (await Effect.runPromise(providerSvc.freeSignIn().pipe(Effect.provideService(InstanceRef, localInstance))))
+          UI.error(signIn ? `${MODEL_SETUP_GUIDANCE} ${FREE_MODELS_SIGN_IN_TERMINAL}` : MODEL_SETUP_GUIDANCE)
           process.exit(1)
         }
         const sess = await session(sdk)

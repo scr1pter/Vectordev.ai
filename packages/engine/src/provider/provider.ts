@@ -5,10 +5,31 @@ import {
 } from "@vectordevai/core/plugin/oauth-approval"
 import { ProviderSDK } from "@vectordevai/core/provider-sdk"
 import { FreeModels } from "@vectordevai/core/free-models"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { SessionID } from "@vectordevai/schema/session-id"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
-import type { FreeModelInfo } from "@vectordevai/schema/free-model"
-import { isFreeModel } from "@vectordevai/schema/free-model"
+import {
+  FREE_ROUTER_ID,
+  FreeDataPolicy,
+  isFreeModel,
+  isFreeModelRef,
+  type FreeModelCatalog,
+  type FreeModelInfo,
+} from "@vectordevai/schema/free-model"
+import {
+  denyDataCollection,
+  freeModelDataPolicy,
+  isOpenRouterFreeModel,
+  isOpenRouterURL,
+  openRouterModelRouting,
+  sendsToOpenRouterFree,
+} from "@vectordevai/core/free-model-catalog"
+import {
+  FREE_MODEL_UNLISTED,
+  FREE_MODELS_SIGN_IN_TERMINAL,
+  freeModelMayTrain,
+} from "@vectordevai/core/free-model-choice"
 import { ProviderUnavailable, providerRetired, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
 import {
@@ -41,7 +62,7 @@ import { iife } from "@/util/iife"
 import { Global } from "@vectordevai/core/global"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context, Schema, Stream, Types } from "effect"
+import { Effect, Layer, Context, Option, Schema, Stream, Types } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
@@ -1025,7 +1046,13 @@ export const Model = Schema.Struct({
   providerID: ProviderV2.ID,
   api: ProviderApiInfo,
   name: Schema.String,
-  freeModel: optional(Schema.Struct({ source: Schema.Literals(["shared", "openrouter"]) })),
+  freeModel: optional(
+    Schema.Struct({
+      source: Schema.Literals(["shared", "openrouter"]),
+      // "may-train" and "unreviewed" models carry the "May train on your prompts" label and need one-time consent.
+      dataPolicy: optional(FreeDataPolicy),
+    }),
+  ),
   family: optional(Schema.String),
   capabilities: ProviderCapabilities,
   cost: ProviderCost,
@@ -1101,7 +1128,9 @@ export function toClientInfo(provider: Info): Info {
 }
 
 export function defaultModelIDs<
-  T extends { models: Record<string, { id: string; freeModel?: { source: "shared" | "openrouter" } }> },
+  T extends {
+    models: Record<string, { id: string; freeModel?: { source: "shared" | "openrouter"; dataPolicy?: FreeDataPolicy } }>
+  },
 >(providers: Record<string, T>) {
   return Object.fromEntries(
     Object.entries(providers).flatMap(([id, item]) => {
@@ -1109,7 +1138,7 @@ export function defaultModelIDs<
       const model =
         id === ModelPlans.PROVIDER_ID
           ? Object.values(item.models)[0]
-          : sort(
+          : automaticModels(
               Object.values(item.models).filter(
                 (model) => id !== "openrouter" || model.freeModel?.source === "openrouter",
               ),
@@ -1155,10 +1184,14 @@ export class InitError extends Schema.TaggedErrorClass<InitError>()("ProviderIni
 export class NoProvidersError extends Schema.TaggedErrorClass<NoProvidersError>()("ProviderNoProvidersError", {
   /** Vector Codium is listed, but it is only used when the person chooses one of its models. */
   codium: Schema.optional(Schema.Boolean),
+  /** Free models inside of Vector are on, and signing in to Vector would list them (Provider.freeSignIn). */
+  signIn: Schema.optional(Schema.Boolean),
 }) {
   override get message() {
     if (this.codium)
       return "Vector Codium is available, but Vector never chooses it for you. Choose a Codium model, for example with --model vector-plan/<model>."
+    if (this.signIn)
+      return `No providers are available. ${FREE_MODELS_SIGN_IN_TERMINAL} Or connect your own provider key with vector providers login.`
     return "No providers are available"
   }
 
@@ -1201,6 +1234,11 @@ export interface Interface {
     providerID: string
     modelID: string
   }) => Effect.Effect<{ providerID: ProviderV2.ID; modelID: ModelV2.ID } | undefined>
+  /**
+   * Whether Free models inside of Vector are on but this engine has neither a Vector sign-in nor an OpenRouter key to
+   * list them, so signing in to Vector would.
+   */
+  readonly freeSignIn: () => Effect.Effect<boolean>
 }
 
 interface State {
@@ -1363,6 +1401,47 @@ export function fromModelCatalogProvider(provider: ModelCatalog.Provider): Info 
   }
 }
 
+/** What decides whether a model's requests reach OpenRouter's free endpoints: its names, destinations and price. */
+function openRouterDestination(
+  providerID: string,
+  modelID: string,
+  model: Pick<Model, "api" | "cost">,
+  provider: Pick<Info, "options"> | undefined,
+) {
+  return {
+    providerID,
+    id: modelID,
+    apiID: model.api.id,
+    destinations: [model.api.url, model.api.npm, provider?.options?.baseURL],
+    price: model.cost.unpriced ? undefined : model.cost,
+  }
+}
+
+/**
+ * What clients see of free models. With the shared catalog on, its models are listed under Vector. With it off, only
+ * the shared allowance's own models lose their free tag: free models on the user's own OpenRouter account keep it,
+ * or connecting OpenRouter would show no free section and select no model.
+ */
+export function applyFreeCatalog(providers: Record<string, Info>, catalog: FreeModelCatalog, vectorAllowed: boolean) {
+  if (catalog.enabled && vectorAllowed && catalog.models.length) providers.vector ??= fromFreeModels(catalog.models)
+  if (catalog.enabled) return providers
+  delete providers.vector
+  for (const provider of Object.values(providers))
+    for (const model of Object.values(provider.models))
+      if (model.freeModel && model.freeModel.source !== "openrouter") delete model.freeModel
+  return providers
+}
+
+/**
+ * What an invited guest is offered: no free model labelled "May train on your prompts". A guest's prompts run under
+ * the owner's acceptance, which the guest never gave, so the engine also refuses a guest's prompt to one.
+ */
+export function withoutTrainingFreeModels(providers: Record<string, Info>) {
+  for (const provider of Object.values(providers))
+    for (const [id, model] of Object.entries(provider.models)) if (freeModelMayTrain(model)) delete provider.models[id]
+  return providers
+}
+
 export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "vector" | "openrouter" = "vector"): Info {
   return {
     id: ProviderV2.ID.make(providerID),
@@ -1377,7 +1456,10 @@ export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "ve
           id: ModelV2.ID.make(model.id),
           providerID: ProviderV2.ID.make(providerID),
           name: model.name,
-          freeModel: { source: providerID === "vector" ? "shared" : "openrouter" },
+          freeModel: {
+            source: providerID === "vector" ? "shared" : "openrouter",
+            dataPolicy: freeModelDataPolicy(model),
+          },
           api: {
             id: model.id,
             npm: "@ai-sdk/openai-compatible",
@@ -1481,6 +1563,7 @@ const layer = Layer.effect(
     const freeModels = yield* FreeModels.Service
     const modelPlans = yield* ModelPlans.Service
     const freeCredentials = yield* FreeModels.CredentialsService
+    const guests = yield* FreeModelGuests.Service
     const events = yield* EventV2Bridge.Service
     const runtimeBridge = yield* EffectBridge.make()
     const planID = ProviderV2.ID.make(ModelPlans.PROVIDER_ID)
@@ -1834,13 +1917,16 @@ const layer = Layer.effect(
         // Built-in free credentials and destinations cannot be replaced by project configuration.
         const openRouterKey = yield* freeCredentials.get("openrouter")
         const ownedFree = openRouterKey ? yield* freeModels.forKey(openRouterKey) : []
-        const router = providers[ProviderV2.ID.openrouter]
-        if (router) {
-          for (const modelID of Object.keys(router.models)) {
-            if (modelID.toLowerCase().endsWith(":free")) delete router.models[modelID]
+        // OpenRouter models that run on free endpoints, zero-price ones and its free router included, return below
+        // only as reviewed free models. That holds under any provider pointed at openrouter.ai, and for a model
+        // configured under another name, whose API ID is what is sent.
+        delete providers[ProviderV2.ID.vector]
+        for (const [providerID, item] of Object.entries(providers)) {
+          for (const [modelID, model] of Object.entries(item.models)) {
+            if (sendsToOpenRouterFree(openRouterDestination(providerID, modelID, model, item)))
+              delete item.models[modelID]
           }
         }
-        delete providers[ProviderV2.ID.vector]
         if (freeCatalog.enabled && isProviderAllowed(ProviderV2.ID.vector) && (vectorToken || openRouterKey)) {
           const models = openRouterKey ? ownedFree : freeCatalog.models
           if (models.length) providers[ProviderV2.ID.vector] = fromFreeModels(models)
@@ -1959,6 +2045,12 @@ const layer = Layer.effect(
       Stream.runForEach(() => InstanceState.invalidateAll(state)),
       Effect.forkScoped({ startImmediately: true }),
     )
+    // State built while the free catalog read OFF, such as a cached OFF served at startup, would hide free models for
+    // the whole app session once vectordev.ai turns them on. Rebuild whenever the catalog changes.
+    yield* freeModels.changes.pipe(
+      Stream.runForEach(() => InstanceState.invalidateAll(state)),
+      Effect.forkScoped({ startImmediately: true }),
+    )
 
     // A plan bought, a sign-in or a sign-out must not require restarting the local engine.
     const refreshCodium = Effect.fn("Provider.refreshCodium")(function* (options?: ModelPlans.CatalogOptions) {
@@ -1978,6 +2070,19 @@ const layer = Layer.effect(
     const list = Effect.fn("Provider.list")(() => refreshCodium())
 
     const unavailable = Effect.fn("Provider.unavailable")(() => InstanceState.use(state, (s) => s.unavailable))
+
+    // Every session request names its session (LLMRequestPrep), and so does every model call a guest can cause: prompts,
+    // compaction, titles, summaries, subagents and retries all run inside one. A request with none, such as generating
+    // an agent from the terminal, is the owner's own. Anything but one session ID, such as two joined by a second
+    // spelling of the header, names no session that can be checked, so it is held to the guest rule.
+    const guestRequest = (headers: RequestInit["headers"]) => {
+      const header = new Headers(headers).get("x-session-id")
+      const sessionID =
+        header !== null && /^ses[\w-]*$/.test(header) ? Schema.decodeUnknownOption(SessionID)(header) : Option.none()
+      return header !== null && Option.isNone(sessionID)
+        ? Promise.resolve(true)
+        : runtimeBridge.promise(guests.marked(Option.getOrUndefined(sessionID)))
+    }
 
     async function resolveSDK(model: Model, s: State, envs: Record<string, string | undefined>) {
       try {
@@ -2000,7 +2105,7 @@ const layer = Layer.effect(
         if (
           model.providerID === "vector" ||
           model.freeModel ||
-          (model.providerID === "openrouter" && model.id.toLowerCase().endsWith(":free"))
+          sendsToOpenRouterFree(openRouterDestination(model.providerID, model.id, model, provider))
         ) {
           const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible")
           return createOpenAICompatible({
@@ -2015,8 +2120,18 @@ const layer = Layer.effect(
                   catalog: () => runtimeBridge.promise(freeModels.catalog()),
                   forKey: (key) => runtimeBridge.promise(freeModels.forKey(key)),
                   credential: (provider) => runtimeBridge.promise(freeCredentials.get(provider)),
+                  trainingConsent: () => runtimeBridge.promise(freeModels.trainingConsent()),
+                  guest: () => guestRequest(init?.headers),
                 })
                 const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
+                // Built before the request: a may-train model without the user's acceptance throws, and nothing is sent.
+                const payload = serializeFreeModelRequest(
+                  freeModelRequest({ ...body, model: model.id }, route.models, {
+                    trainingConsent: route.trainingConsent,
+                    guest: route.guest,
+                  }),
+                  route.url === FreeModels.SHARED_CHAT_URL,
+                )
                 return fetch(route.url, {
                   method: "POST",
                   redirect: "error",
@@ -2026,12 +2141,17 @@ const layer = Layer.effect(
                     Authorization: `Bearer ${route.key}`,
                     "HTTP-Referer": "https://vectordev.ai/",
                     "X-OpenRouter-Title": "Vector",
+                    ...route.headers,
                   },
-                  body: serializeFreeModelRequest(
-                    freeModelRequest({ ...body, model: model.id }, route.models),
-                    route.url === FreeModels.SHARED_CHAT_URL,
-                  ),
-                }).then(FreeModels.preserveLimit)
+                  body: payload,
+                })
+                  .then((response) => {
+                    const chosen = route.models.find((item) => item.id === model.id)
+                    return route.source === "openrouter" && chosen
+                      ? FreeModels.explainPolicyRefusal(response, freeModelDataPolicy(chosen))
+                      : response
+                  })
+                  .then(FreeModels.preserveLimit)
               },
               { preconnect: fetch.preconnect },
             ),
@@ -2065,6 +2185,14 @@ const layer = Layer.effect(
         }
 
         const baseURL = resolveBaseURL(model, options, s.varsLoaders[model.providerID], envs)
+        // A base URL filled in from the environment can point any provider at openrouter.ai after the lists were built.
+        if (
+          sendsToOpenRouterFree({
+            ...openRouterDestination(model.providerID, model.id, model, provider),
+            destinations: [baseURL],
+          })
+        )
+          throw new Error(FREE_MODEL_UNLISTED)
 
         if (baseURL !== undefined) options["baseURL"] = baseURL
         if (consent) requirePluginDestination(consent, baseURL)
@@ -2105,6 +2233,27 @@ const layer = Layer.effect(
             init?.body,
           )
           if (body !== undefined) opts.body = body
+          // A request that reaches OpenRouter here skips every free-model check, so it must not name a free model.
+          // Model and provider options can replace the model the SDK sends (`model` in them overrides it). Their
+          // fallbacks, presets and plugins still go out, but where they could let OpenRouter answer from another
+          // model's endpoints, a free one or one that may train on prompts included (openRouterModelRouting), the
+          // request asks OpenRouter to deny data collection unless the user accepted the "May train on your prompts"
+          // notice in a session no invited guest has worked in.
+          if (isOpenRouterURL(input instanceof Request ? input.url : String(input))) {
+            const sent =
+              typeof opts.body === "string"
+                ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(opts.body))
+                : undefined
+            const sentModel = isRecord(sent) ? sent.model : undefined
+            if (typeof sentModel === "string" && isOpenRouterFreeModel(sentModel, undefined))
+              throw new Error(FREE_MODEL_UNLISTED)
+            if (
+              isRecord(sent) &&
+              openRouterModelRouting(sent, sentModel).length &&
+              ((await guestRequest(init?.headers)) || !(await runtimeBridge.promise(freeModels.trainingConsent())))
+            )
+              opts.body = JSON.stringify(denyDataCollection(sent))
+          }
           if (consent) {
             requirePluginDestination(consent, input instanceof Request ? input.url : String(input))
             const current = await runtimeBridge.promise(auth.get(model.providerID).pipe(Effect.orDie))
@@ -2293,7 +2442,9 @@ const layer = Layer.effect(
       const primary = primaryID ? provider.models[primaryID] : undefined
       // Background calls must not turn a free conversation into paid inference, even with a small-model override.
       if (primary && isFreeModel(primary)) return primary
-      if (providerID === "vector") return Object.values(provider.models).find(isFreeModel)
+      // A helper call never moves a conversation onto a free model whose provider may train on prompts.
+      if (providerID === "vector")
+        return Object.values(provider.models).find((model) => isFreeModel(model) && !freeModelMayTrain(model))
       // An explicitly selected Codium conversation keeps helper calls on its credit route at the lowest ceiling.
       if (providerID === ModelPlans.PROVIDER_ID)
         return Object.values(provider.models).toSorted(
@@ -2389,6 +2540,18 @@ const layer = Layer.effect(
       return { providerID: ProviderV2.ID.make(current.providerID), modelID: ModelV2.ID.make(current.modelID) }
     })
 
+    const freeSignIn = Effect.fn("Provider.freeSignIn")(function* () {
+      const cfg = yield* config.get()
+      if (
+        cfg.disabled_providers?.includes("vector") ||
+        (cfg.enabled_providers && !cfg.enabled_providers.includes("vector"))
+      )
+        return false
+      const catalog = yield* freeModels.catalog()
+      if (!catalog.enabled || !catalog.models.length) return false
+      return !(yield* freeCredentials.get("vector")) && !(yield* freeCredentials.get("openrouter"))
+    })
+
     const defaultModel = Effect.fn("Provider.defaultModel")(function* () {
       const cfg = yield* config.get()
       const saved = cfg.model ? yield* savedModel(parseModel(cfg.model)) : undefined
@@ -2414,8 +2577,7 @@ const layer = Layer.effect(
           return { providerID: ProviderV2.ID.openrouter, modelID: owned.id }
         const provider = s.providers[entry.providerID]
         // A vanished free choice must fail as unavailable, never quietly select a paid model.
-        if (["vector", "openrouter"].includes(entry.providerID) && entry.modelID.toLowerCase().endsWith(":free"))
-          return entry
+        if (isFreeModelRef(entry)) return entry
         if (!provider) continue
         if (!provider.models[entry.modelID]) continue
         return { providerID: entry.providerID, modelID: entry.modelID }
@@ -2423,17 +2585,18 @@ const layer = Layer.effect(
 
       const configured = Object.keys(cfg.provider ?? {})
       const providers = Object.values(s.providers).filter((p) => configured.length === 0 || configured.includes(p.id))
-      const free = sort(Object.values(s.providers).flatMap((provider) => Object.values(provider.models))).find(
-        (model) => model.freeModel?.source === "openrouter",
-      )
+      const free = automaticModels(
+        Object.values(s.providers).flatMap((provider) => Object.values(provider.models)),
+      ).find((model) => model.freeModel?.source === "openrouter")
       if (free) return { providerID: free.providerID, modelID: free.id }
       if (s.providers[ProviderV2.ID.openrouter])
         return yield* new NoModelsError({ providerID: ProviderV2.ID.openrouter })
       // Codium spends the account's credits, so it is never chosen automatically; the person picks it.
       const automatic = providers.filter((p) => p.id !== planID)
       const provider = automatic.find((p) => p.id !== "vector") ?? automatic[0]
-      if (!provider) return yield* new NoProvidersError({ codium: s.providers[planID] !== undefined })
-      const [model] = sort(Object.values(provider.models))
+      if (!provider)
+        return yield* new NoProvidersError({ codium: s.providers[planID] !== undefined, signIn: yield* freeSignIn() })
+      const [model] = automaticModels(Object.values(provider.models))
       if (!model) return yield* new NoModelsError({ providerID: provider.id })
       return {
         providerID: provider.id,
@@ -2452,23 +2615,39 @@ const layer = Layer.effect(
       getSmallModel,
       defaultModel,
       savedModel,
+      freeSignIn,
     })
   }),
 )
 
 const priority = ["gpt-5", "claude-sonnet-4", "gemini-3-pro"]
 const smallModelFamilyPriority = ["gemini-flash", "gpt-nano", "claude-haiku"]
-export function sort<
-  T extends { id: string; freeModel?: { source: "shared" | "openrouter" }; limit?: { context: number } },
->(models: T[]) {
+type Sortable = {
+  id: string
+  freeModel?: { source: "shared" | "openrouter"; dataPolicy?: FreeDataPolicy }
+  limit?: { context: number }
+}
+export function sort<T extends Sortable>(models: T[]) {
   return sortBy(
     models,
+    // OpenRouter's free router picks a model at random, so lists show it last.
+    [(model) => (model.id === FREE_ROUTER_ID ? 1 : 0), "asc"],
     [(model) => (model.freeModel?.source === "openrouter" ? 0 : 1), "asc"],
+    // A model whose provider may train on prompts is never chosen automatically ahead of a no-training one.
+    [(model) => (model.freeModel?.dataPolicy && model.freeModel.dataPolicy !== "no-training" ? 1 : 0), "asc"],
     [(model) => (model.freeModel?.source === "openrouter" ? (model.limit?.context ?? 0) : 0), "desc"],
     [(model) => priority.findIndex((filter) => model.id.includes(filter)), "desc"],
     [(model) => (model.id.includes("latest") ? 0 : 1), "asc"],
     [(model) => model.id, "desc"],
   )
+}
+
+/**
+ * The models Vector may choose for someone, best first. OpenRouter's free router picks a model at random, so it is
+ * never chosen automatically, even as a provider's only model; it runs only when someone picks it.
+ */
+export function automaticModels<T extends Sortable>(models: T[]) {
+  return sort(models.filter((model) => model.id !== FREE_ROUTER_ID))
 }
 
 export function parseModel(model: string) {
@@ -2493,6 +2672,7 @@ export const node = LayerNode.make({
     FreeModels.node,
     ModelPlans.node,
     FreeModels.credentialsNode,
+    FreeModelGuests.node,
     EventV2Bridge.node,
   ],
 })

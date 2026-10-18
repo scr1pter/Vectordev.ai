@@ -1,8 +1,4 @@
-import {
-  freeModelsLimitNotice,
-  freeModelsLimitTitle,
-  freeModelsResetLabel,
-} from "@vectordevai/core/free-model-choice"
+import { freeModelsLimitMessage, freeModelsLimitNotice } from "@vectordevai/core/free-model-choice"
 export type ConfigInvalidError = {
   name: "ConfigInvalidError"
   data: {
@@ -33,8 +29,7 @@ function tr(translator: Translator | undefined, key: string, text: string, vars?
 export function formatServerError(error: unknown, translate?: Translator, fallback?: string) {
   const unwrapped = unwrapNamedError(error)
   const limit = freeModelsLimitNotice(unwrapped)
-  if (limit)
-    return `${freeModelsLimitTitle(limit)}. Try again after ${freeModelsResetLabel(limit)}, or connect OpenRouter to continue with your own account.`
+  if (limit) return freeModelsLimitMessage(limit)
   if (isConfigInvalidErrorLike(unwrapped)) return parseReadableConfigInvalidError(unwrapped, translate)
   if (isProviderModelNotFoundErrorLike(unwrapped)) return parseReadableProviderModelNotFoundError(unwrapped, translate)
   const structured = structuredMessage(unwrapped)
