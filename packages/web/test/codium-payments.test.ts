@@ -377,7 +377,8 @@ function charge(input: Partial<Charge> & { amount: number }) {
     paid: true,
     refunded: false,
     disputed: false,
-    created: Math.floor(Date.UTC(2026, 9, 17) / 1000),
+    // Each charge a second after the last, as real ones are: the ledger splits spend among top-ups oldest first.
+    created: Math.floor(Date.UTC(2026, 9, 17) / 1000) + sequence,
     balance_transaction: { id: `txn_buyer${sequence}`, amount: input.amount, fee, net: input.amount - fee },
     refunds: { data: [], has_more: false },
     payment_intent: null,
