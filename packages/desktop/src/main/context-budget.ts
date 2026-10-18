@@ -158,7 +158,10 @@ const DIFFICULTY = {
 
 export function classifyTaskDifficulty(task: string): TaskDifficulty {
   if (!task.trim()) return "trivial"
-  return DIFFICULTY[TaskSize.classify({ text: task }).tier]
+  const result = TaskSize.classify({ text: task })
+  // "ok", "yes" or "continue" reply to the work before them, as the app reads them: never a bare greeting.
+  if (result.tier === "chat" && !TaskSize.social(result)) return "simple"
+  return DIFFICULTY[result.tier]
 }
 
 export function contextBudgetForDifficulty(difficulty: TaskDifficulty) {

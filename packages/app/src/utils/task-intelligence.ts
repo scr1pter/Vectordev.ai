@@ -52,7 +52,11 @@ const DIFFICULTY = {
 
 export function classifyTaskDifficulty(task: string): TaskDifficulty {
   if (!task.trim()) return "trivial"
-  return DIFFICULTY[TaskSize.classify({ text: task }).tier]
+  const result = TaskSize.classify({ text: task })
+  // "ok", "yes", "continue" or "great" reply to the work before them, which only the engine can read them against.
+  // Here they are never trivial (no quick lane) and never pick a model or a reasoning variant of their own.
+  if (result.tier === "chat" && !TaskSize.social(result)) return "simple"
+  return DIFFICULTY[result.tier]
 }
 
 function qualityScore(model: RoutableModel) {

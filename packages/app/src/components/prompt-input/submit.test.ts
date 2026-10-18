@@ -515,7 +515,7 @@ describe("prompt submit worktree selection", () => {
 
 describe("follow-up optimistic echo", () => {
   type SendInput = Parameters<typeof import("./submit").sendFollowupDraft>[0]
-  type SentPart = { id: string; type: string; synthetic?: boolean }
+  type SentPart = { id: string; type: string; synthetic?: boolean; text?: string }
   type Step = { kind: "echo" | "request"; parts: SentPart[]; budget?: unknown; judge?: unknown }
 
   // Real work, so the desktop's file map applies; a question or a light job gets none.
@@ -601,17 +601,25 @@ describe("follow-up optimistic echo", () => {
     expectOneEchoBeforeRequest(await withDesktopContext(() => send()), 1)
   })
 
-  test("sends the judge setting to the engine instead of a hidden policy", async () => {
+  test("sends the judge setting, and the policy an older engine needs to run the judge at all", async () => {
     const steps = await send({ judge: "changes" })
-    expectOneEchoBeforeRequest(steps, 0)
     expect(steps.at(-1)?.judge).toBe("changes")
+    // A current engine reads the setting and drops the policy; an older one runs the judge only when told to.
+    expectOneEchoBeforeRequest(steps, 1)
+    const request = steps.at(-1)?.parts ?? []
+    expect(request.some((part) => part.text?.startsWith("<vector_verified_completion>"))).toBe(true)
     // A draft queued before the scope existed still turns the judge on for large tasks.
     expect((await send({ llmJudge: true })).at(-1)?.judge).toBe("thorough")
-    expect((await send()).at(-1)?.judge).toBeUndefined()
+    const off = await send()
+    expect(off.at(-1)?.judge).toBeUndefined()
+    expectOneEchoBeforeRequest(off, 0)
+    // Only the build agent: Plan mode has nothing to judge, and a custom agent is never judged by a current engine.
+    expectOneEchoBeforeRequest(await send({ judge: "thorough", agent: "plan" }), 0)
+    expectOneEchoBeforeRequest(await send({ judge: "thorough", agent: "reviewer" }), 0)
   })
 
   test("keeps the echoed ids when the judge is on and the desktop adds task context", async () => {
-    expectOneEchoBeforeRequest(await withDesktopContext(() => send({ judge: "thorough" })), 1)
+    expectOneEchoBeforeRequest(await withDesktopContext(() => send({ judge: "thorough" })), 2)
   })
 
   test("adds no file map for a greeting, a question or a light job", async () => {
@@ -711,16 +719,19 @@ describe("submission agent selection", () => {
     ).toBe("review")
   })
 
-  test("leaves greetings on the build and plan agents to the engine, which sizes them itself", () => {
-    // The engine sends a greeting to its quick lane with or without the judge, so the app no longer routes it.
-    for (const current of ["build", "plan"])
+  test("sends a greeting to the quick lane on every agent, so an engine that does not size it answers cheaply too", () => {
+    for (const current of ["build", "reviewer"])
       expect(resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "trivial", current })).toBe(
-        current,
+        "quick",
       )
-    // A custom agent is not sized by the engine, so its greeting still takes the quick lane.
+    // Plan mode keeps its agent; the engine answers its greetings on the quick lane.
     expect(
-      resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "trivial", current: "reviewer" }),
-    ).toBe("quick")
+      resolveExecutionAgent({ planMode: true, quickRequested: false, difficulty: "trivial", current: "plan" }),
+    ).toBe("plan")
+    // A reply that continues the work stays on the agent the user picked.
+    expect(
+      resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "simple", current: "reviewer" }),
+    ).toBe("reviewer")
   })
 
   test("explicit Quick mode takes the quick lane, and Plan mode keeps its agent", () => {

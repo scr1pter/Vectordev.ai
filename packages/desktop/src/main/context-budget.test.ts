@@ -7,6 +7,9 @@ describe("context budgeting", () => {
     expect(classifyTaskDifficulty("hi")).toBe("trivial")
     expect(classifyTaskDifficulty("Good morning!")).toBe("trivial")
     expect(contextBudgetForDifficulty("trivial")).toEqual({ tokenBudget: 0, fileLimit: 0 })
+    // A reply to the work before it is not a greeting.
+    expect(classifyTaskDifficulty("continue")).toBe("simple")
+    expect(classifyTaskDifficulty("yes")).toBe("simple")
   })
 
   test("distinguishes targeted work from broad engineering tasks", () => {

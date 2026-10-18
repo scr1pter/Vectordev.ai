@@ -1,9 +1,9 @@
-// The instruction block that turns "LLM-as-a-judge" on for an isolated parallel-workspace agent.
+// The instruction block that turned "LLM-as-a-judge" on before Vector ran the judge itself.
 //
-// An ordinary session no longer carries it: the engine runs the judge itself after a large task that changed files
-// (the composer sends the setting as `judge` on the prompt), so a small model is never asked to launch a judge, and a
-// greeting can never bring one in. Parallel workspaces run on the V2 session engine, which has no judge of its own
-// yet, so their mission prompt still carries this policy when the setting is on.
+// A current engine runs the judge after a large task that changed files (the composer sends the setting as `judge` on
+// the prompt), so its model is never asked to launch one, and it drops this block before the model sees it. Two places
+// still need it: an engine from before that change, which runs the judge only when its model is told to, and parallel
+// workspaces, which run on the V2 session engine that has no judge of its own yet.
 export const VERIFIED_COMPLETION_POLICY = [
   "<vector_verified_completion>",
   "LLM-as-a-judge is enabled. Completion is a verified state here, not a confident summary — you may not end your turn claiming the work is done until a judge has passed it.",
@@ -15,3 +15,25 @@ export const VERIFIED_COMPLETION_POLICY = [
   "Tell the user the final verdict in your closing message, including which checks you ran.",
   "</vector_verified_completion>",
 ].join("\n")
+
+// Each user message stays in the history and is sent again on every request, so a prompt in a session that already
+// carries the policy gets this pointer instead of another copy.
+export const VERIFIED_COMPLETION_REMINDER =
+  "<vector_verified_completion>LLM-as-a-judge is still enabled: follow the verified-completion policy given earlier in this session.</vector_verified_completion>"
+
+// The full policy, unless a prompt since the last compaction already carries it. A compaction replaces the history
+// it covers, so the policy is given again after one.
+export function completionPolicy(
+  messages: readonly { id: string; role: string; summary?: unknown }[],
+  parts: (messageID: string) => readonly { type: string; text?: string }[] | undefined,
+) {
+  const start = messages.findLastIndex((message) => message.role === "assistant" && message.summary === true) + 1
+  const given = messages
+    .slice(start)
+    .some(
+      (message) =>
+        message.role === "user" &&
+        (parts(message.id) ?? []).some((part) => part.type === "text" && part.text === VERIFIED_COMPLETION_POLICY),
+    )
+  return given ? VERIFIED_COMPLETION_REMINDER : VERIFIED_COMPLETION_POLICY
+}

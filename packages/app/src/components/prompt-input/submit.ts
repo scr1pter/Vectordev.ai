@@ -1,3 +1,4 @@
+import { completionPolicy } from "@/features/judge/verified-completion"
 import type { Message, Session } from "@vectordevai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@vectordevai/core/util/encode"
@@ -63,9 +64,10 @@ export function resolveExecutionAgent(input: {
 }) {
   if (input.planMode) return input.current
   if (input.quickRequested) return "quick"
-  // The engine sizes the build and plan agents' requests itself: a greeting goes to its quick lane whether or not the
-  // judge is on, and the judge runs only after large tasks. A custom agent's greeting still takes the quick lane here.
-  if (input.difficulty === "trivial" && input.current !== "build" && input.current !== "plan") return "quick"
+  // A greeting, thanks or a farewell takes the quick lane from here on every agent, with or without the judge, so an
+  // engine that does not size requests itself (an older Vector, a remote server) also answers it with one small
+  // request. "ok", "yes" or "continue" are not trivial: they continue the work before them, which the engine sizes.
+  if (input.difficulty === "trivial") return "quick"
   return input.current === "quick" ? "build" : input.current
 }
 
@@ -98,9 +100,8 @@ const draftText = (prompt: Prompt) => prompt.map((part) => ("content" in part ? 
 
 const draftImages = (prompt: Prompt) => prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
 
-// Task preparation can add one hidden instruction after the typed text. The judge no longer rides on the prompt as an
-// instruction: the engine runs it after the run, so a held slot for it would go unused.
-const SYNTHETIC_SLOTS = 1
+// Task preparation and the judge policy for older engines can each add one hidden instruction after the typed text.
+const SYNTHETIC_SLOTS = 2
 
 export async function sendFollowupDraft(input: FollowupSendInput) {
   const text = draftText(input.draft.prompt)
@@ -112,8 +113,12 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     difficulty,
     current: input.draft.agent,
   })
-  // The engine decides whether a run is judged, from the request's size and this setting.
+  // A current engine decides whether a run is judged, from the request's size and this setting.
   const judge = input.draft.judge ?? (input.draft.llmJudge ? ("thorough" as const) : undefined)
+  // An engine from before Vector ran the judge itself ignores that setting and runs the judge only when its model is
+  // told to, so a build prompt still carries the policy. A current engine reads the setting, drops the policy before
+  // the model sees it, and judges only large tasks.
+  const legacyJudge = judge !== undefined && agent === "build"
   const setBusy = () => {
     if (!input.optimisticBusy) return
     input.serverSync.session.set("session_status", input.draft.sessionID, { type: "busy" })
@@ -230,7 +235,10 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       difficulty === "trivial" || difficulty === "simple" || replied
         ? undefined
         : await globalThis.window?.api?.prepareAgentTask?.(input.draft.sessionDirectory, text).catch(() => undefined)
-    const syntheticText = preparation?.instruction ? [preparation.instruction] : []
+    const syntheticText = [
+      ...(preparation?.instruction ? [preparation.instruction] : []),
+      ...(legacyJudge ? [completionPolicy(history, (id) => input.sync.data.part?.[id])] : []),
+    ]
     const budget = promptRunBudget({
       configured: input.sync.data.config.budget?.run,
       policy: await cachedSpendPolicy(),

@@ -322,14 +322,14 @@ export const SettingsGeneralV2: Component<{
           />
           <ToggleRow
             title="LLM-as-a-judge"
-            description="When Vector finishes a large task that changed files, a separate judge compares the result against your request. On a failed verdict Vector repairs it and the judge looks again, up to three rounds. Greetings, questions and light tasks are never judged. Costs extra model calls."
+            description="When Vector finishes a task that changed files, a separate judge compares the result against your request. On a failed verdict Vector repairs it and the judge looks again, up to three rounds. Choose below which tasks it checks; greetings and questions are never judged. Costs extra model calls."
             checked={settings.general.llmJudge()}
             onChange={settings.general.setLlmJudge}
           />
           <Show when={settings.general.llmJudge()}>
             <SelectRow
               title="Tasks the judge checks"
-              description="Large tasks are the ones Vector runs with subagents: big changes, migrations, or when you ask it to be thorough."
+              description="Large tasks are the ones Vector runs with subagents: rewrites, migrations, or when you ask it to be thorough. Every task that changes files also includes small fixes."
               options={[
                 { value: "thorough", label: "Large tasks" },
                 { value: "changes", label: "Every task that changes files" },
