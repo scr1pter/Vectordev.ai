@@ -9,7 +9,7 @@ const MAX_SECRETS = 8
 
 export function requirePullRequestDirectory(value: unknown) {
   if (typeof value !== "string" || !value || value.length > 4_096 || !isAbsolute(value)) {
-    throw new Error("Pull request actions require an absolute project path.")
+    throw new Error("Pull request actions require an absolute repository path.")
   }
   return value
 }

@@ -151,7 +151,7 @@ export async function runReleaseCommand(input: ReleaseInput) {
         ok: true,
         text: checked.length
           ? ["Health of every release Vector published:", ...checked.map(healthLine)].join("\n")
-          : "Vector has published no releases of this project yet, so there is nothing to probe.",
+          : "Vector has published no releases of this repository yet, so there is nothing to probe.",
       }
     }
     const release = findRelease(input)

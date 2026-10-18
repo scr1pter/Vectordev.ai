@@ -767,7 +767,7 @@ async function pullRequestContext(cwd: string) {
   const remote = pickBaseRemote(await gitRemotes(directory))
   if (!remote) {
     throw new Error(
-      "This project has no GitHub remote. Add one with: git remote add origin https://github.com/<owner>/<repo>.git",
+      "This repository has no GitHub remote. Add one with: git remote add origin https://github.com/<owner>/<repo>.git",
     )
   }
   return { access, repo: remote.repo }

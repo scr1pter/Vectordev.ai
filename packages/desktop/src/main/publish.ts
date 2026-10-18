@@ -528,7 +528,7 @@ type CheckAccess = {
 }
 
 const PROTECTED_DETAIL =
-  "Protected by Vercel Deployment Protection, so Vector could not open it. Turn on Protection Bypass for Automation in Vector Cloud > Project settings so Vector can check protected deployments."
+  "Protected by Vercel Deployment Protection, so Vector could not open it. Turn on Protection Bypass for Automation in Vector Cloud > Hosting settings so Vector can check protected deployments."
 
 // One probe of the release's health path, as the release check and
 // Observability both run it.
@@ -545,7 +545,7 @@ async function probeHealth(
   if (target.origin !== new URL(url).origin) {
     return {
       kind: "failed",
-      error: `The health path ${settings?.healthPath} leaves the release's address, so Vector did not request it. Set a path such as /api/health in Vector Cloud > Project settings.`,
+      error: `The health path ${settings?.healthPath} leaves the release's address, so Vector did not request it. Set a path such as /api/health in Vector Cloud > Hosting settings.`,
       latencyMs: 0,
     }
   }
@@ -702,15 +702,15 @@ export async function publishProject(
     return { ok: false, target: "vercel", log: "", error, ...extra }
   }
   if (!directory || !(await stat(directory).catch(() => undefined))?.isDirectory()) {
-    return fail("Open a project before publishing.")
+    return fail("Open a repository before publishing.")
   }
   if (
     !(await stat(join(directory, "package.json")).catch(() => undefined)) &&
     !(await stat(join(directory, "index.html")).catch(() => undefined))
   ) {
-    return fail("This project has no package.json or index.html to publish yet.")
+    return fail("This repository has no package.json or index.html to publish yet.")
   }
-  if (activePublishes.has(publishKey)) return fail("A publish is already running for this project.")
+  if (activePublishes.has(publishKey)) return fail("A publish is already running for this repository.")
 
   const command = options.command ?? (await vercelCommand())
   if (!command) return fail(NO_NODE, { errorCode: "no_node" })
@@ -775,7 +775,7 @@ async function deployAndCheck(
       log: preflightLog,
       checks: preflight.checks,
       errorCode: "checks_failed",
-      error: "Required pre-deploy checks failed. Review the evidence, repair the project, and publish again.",
+      error: "Required pre-deploy checks failed. Review the evidence, fix the repository, and publish again.",
     }
   }
 
@@ -858,7 +858,7 @@ async function deployAndCheck(
   // (https://vercel.com/docs/cli/deploy#prod).
   if (!production && remote.current) {
     notes.push(
-      "Vercel treats a project's first deployment as production, so this release is already live in production.",
+      "Vercel treats the first deployment of a Vercel project as production, so this release is already live in production.",
     )
   }
 
@@ -916,7 +916,7 @@ async function deployAndCheck(
       ...failure(
         input,
         emit,
-        `Vercel Deployment Protection kept Vector's release checks out of this production build, so production was not moved to it. Turn on Protection Bypass for Automation in Vector Cloud > Project settings, then publish to production again.`,
+        `Vercel Deployment Protection kept Vector's release checks out of this production build, so production was not moved to it. Turn on Protection Bypass for Automation in Vector Cloud > Hosting settings, then publish to production again.`,
         "checks_blocked",
       ),
       url: deployment.url,
@@ -1055,7 +1055,7 @@ function classifyCliFailure(
   }
   if (/project not found|could not find (?:the )?project|project .* (?:was )?not found/i.test(log)) {
     return {
-      error: `The Vercel CLI could not find the linked project ${projectName}. Link the project again in Vector Cloud > Connections.`,
+      error: `The Vercel CLI could not find the linked Vercel project ${projectName}. Link the Vercel project again in Vector Cloud > Connections.`,
       code: "not_linked",
     }
   }

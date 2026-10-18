@@ -141,8 +141,8 @@ export async function fetchCloudLogs(input: CloudLogsInput, request: CloudFetch 
     return {
       ok: false,
       needsSetup: true,
-      error: `Deployment ${requested} is not in this project's history.`,
-      nextStep: "Call list_deployments to see the deployment ids this project knows about.",
+      error: `Deployment ${requested} is not in this repository's history.`,
+      nextStep: "Call list_deployments to see the deployment ids this repository knows about.",
     }
   }
   // A linked project reads Vercel's own history, so a deployment a git push
@@ -159,8 +159,8 @@ export async function fetchCloudLogs(input: CloudLogsInput, request: CloudFetch 
     return {
       ok: false,
       needsSetup: true,
-      error: "This project has no deployment history yet.",
-      nextStep: "Publish the project first, then read the logs of the deployment that misbehaved.",
+      error: "This repository has no deployment history yet.",
+      nextStep: "Publish the repository first, then read the logs of the deployment that misbehaved.",
     }
   }
   if (source === "runtime") {

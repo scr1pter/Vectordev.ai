@@ -195,8 +195,8 @@ async function describe(input: VercelBridgeInput, scope: CloudScope, options: Ve
     if (!name) return { ok: false as const, error: "Name the new Vercel project with name." }
     return described(
       name,
-      "new project",
-      `Create the Vercel project ${name}${input.teamId ? ` in team ${input.teamId}` : ""}${input.framework ? ` (${input.framework})` : ""}${input.rootDirectory ? ` with root directory ${input.rootDirectory}` : ""}, and link it to this project.`,
+      "new Vercel project",
+      `Create the Vercel project ${name}${input.teamId ? ` in team ${input.teamId}` : ""}${input.framework ? ` (${input.framework})` : ""}${input.rootDirectory ? ` with root directory ${input.rootDirectory}` : ""}, and link it to this repository.`,
     )
   }
   if (action === "link_project") {
@@ -204,8 +204,8 @@ async function describe(input: VercelBridgeInput, scope: CloudScope, options: Ve
       return { ok: false as const, error: "Name the Vercel project to link with projectId (see vercel_projects)." }
     return described(
       input.projectId,
-      "project link",
-      `Link this project to the Vercel project ${input.projectId}. Publishing, domains and variables then act on it.`,
+      "Vercel project link",
+      `Link this repository to the Vercel project ${input.projectId}. Publishing, domains and variables then act on it.`,
     )
   }
   const context = await vercelLinkContext(scope.projectPath)
@@ -213,8 +213,8 @@ async function describe(input: VercelBridgeInput, scope: CloudScope, options: Ve
   if (action === "unlink_project") {
     return described(
       project,
-      "project link",
-      `Unlink the Vercel project ${project} from this project. Nothing changes on Vercel.`,
+      "Vercel project link",
+      `Unlink the Vercel project ${project} from this repository. Nothing changes on Vercel.`,
     )
   }
   if (action === "update_project_settings") {
@@ -279,7 +279,7 @@ async function describe(input: VercelBridgeInput, scope: CloudScope, options: Ve
       project,
       targets.join(", "),
       action === "set_env"
-        ? `Set ${input.key}${stored ? " to the value stored for it in this project's Vector environment" : ""} on the Vercel project ${project} for ${targets.join(", ")}${input.gitBranch ? ` (branch ${input.gitBranch})` : ""}. Deployments pick it up when they are next built.`
+        ? `Set ${input.key}${stored ? " to the value stored for it in this repository's Vector environment" : ""} on the Vercel project ${project} for ${targets.join(", ")}${input.gitBranch ? ` (branch ${input.gitBranch})` : ""}. Deployments pick it up when they are next built.`
         : `Remove ${input.key} from the Vercel project ${project} for ${targets.join(", ")}${input.gitBranch ? ` (branch ${input.gitBranch})` : ""}.`,
     )
   }
@@ -290,13 +290,13 @@ async function describe(input: VercelBridgeInput, scope: CloudScope, options: Ve
       return {
         ok: true as const,
         noop: true,
-        text: `Nothing to pull: this project's .env already has every development value ${project} reveals.`,
+        text: `Nothing to pull: this repository's .env already has every development value ${project} reveals.`,
       }
     }
     return described(
       project,
       "development → local .env",
-      `Write ${written.length} development value(s) from the Vercel project ${project} into Vector's environment for this project and its .env: ${written.map((item) => `${item.key} (${item.action})`).join(", ")}. The agent can read .env, and publishing uploads it to Vercel with the source (a site without a build step must leave it out with .vercelignore).`,
+      `Write ${written.length} development value(s) from the Vercel project ${project} into Vector's environment for this repository and its .env: ${written.map((item) => `${item.key} (${item.action})`).join(", ")}. The agent can read .env, and publishing uploads it to Vercel with the source (a site without a build step must leave it out with .vercelignore).`,
       { planId: plan.id },
     )
   }
@@ -322,7 +322,7 @@ async function describe(input: VercelBridgeInput, scope: CloudScope, options: Ve
       action === "add_domain"
         ? `Attach ${input.domain} to the Vercel project ${project}. Once its DNS points at Vercel, it serves production.`
         : action === "verify_domain"
-          ? `Ask Vercel to verify ${input.domain} on the project ${project} and read its DNS and certificate state.`
+          ? `Ask Vercel to verify ${input.domain} on the Vercel project ${project} and read its DNS and certificate state.`
           : `Detach ${input.domain} from the Vercel project ${project}. The domain stops serving this app.`,
     )
   }
@@ -358,7 +358,7 @@ async function run(input: VercelBridgeInput, scope: CloudScope, options: VercelB
             `${projects.length} Vercel project(s)${input.teamId ? ` in team ${input.teamId}` : ""}:`,
             ...projects.map(
               (item) =>
-                `- ${item.name} (projectId ${item.id}${item.framework ? `, ${item.framework}` : ""}${item.productionUrl ? `, ${item.productionUrl}` : ""})${item.id === linked?.projectId ? " · linked to this project" : ""}`,
+                `- ${item.name} (projectId ${item.id}${item.framework ? `, ${item.framework}` : ""}${item.productionUrl ? `, ${item.productionUrl}` : ""})${item.id === linked?.projectId ? " · linked to this repository" : ""}`,
             ),
           ].join("\n")
         : "No Vercel projects in this scope. Create one with create_project.",
@@ -375,7 +375,7 @@ async function run(input: VercelBridgeInput, scope: CloudScope, options: VercelB
       return {
         ok: true,
         text: [
-          `Vercel is connected${status.account ? ` as ${status.account}` : ""}, but no project is linked.`,
+          `Vercel is connected${status.account ? ` as ${status.account}` : ""}, but no Vercel project is linked.`,
           status.candidate
             ? `This repository's .vercel/project.json names projectId ${status.candidate.projectId}${status.candidate.teamId ? ` (teamId ${status.candidate.teamId})` : ""}; link it with link_project, which the user approves.`
             : "Use vercel_projects then link_project, or create_project.",
@@ -455,7 +455,7 @@ async function run(input: VercelBridgeInput, scope: CloudScope, options: VercelB
           (row) =>
             `- ${row.key}${row.local ? "" : " (not local)"}: ${VERCEL_ENV_TARGETS.map((target) => label[row.targets[target]]).join(" / ")}${row.branchOverrides.length ? ` · branch values: ${row.branchOverrides.join(", ")}` : ""}`,
         ),
-      ].join("\n") || `${diff.project} and this project have no variables.`,
+      ].join("\n") || `${diff.project} and this repository have no variables.`,
     )
   }
   if (command === "env_plan") {
@@ -538,7 +538,7 @@ async function run(input: VercelBridgeInput, scope: CloudScope, options: VercelB
       request,
     )
     return text(
-      `Created the Vercel project ${link.projectName} (projectId ${link.projectId}) and linked it to this project.`,
+      `Created the Vercel project ${link.projectName} (projectId ${link.projectId}) and linked it to this repository.`,
       {
         nextStep: "Publish to deploy it. The first deployment of a new Vercel project is always production.",
       },
@@ -714,5 +714,5 @@ function storedEnvValue(projectPath: string, key: string) {
 }
 
 function missingStoredValue(key: string) {
-  return `${key} has no value in this project's Vector environment. Ask the user to add it in Vector Cloud > Environment variables (never in chat), then call set_env again without a value.`
+  return `${key} has no value in this repository's Vector environment. Ask the user to add it in Vector Cloud > Environment variables (never in chat), then call set_env again without a value.`
 }

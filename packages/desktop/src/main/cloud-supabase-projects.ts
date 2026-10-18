@@ -183,7 +183,7 @@ export async function linkSupabaseProject(
     keys.find((item) => stringField(item, "name") === "anon") ??
     keys.find((item) => stringField(item, "type") === "anon")
   const anonKey = stringField(publicKey, "api_key")
-  if (!anonKey) throw new Error("Supabase did not expose a publishable or anon key for this project.")
+  if (!anonKey) throw new Error("Supabase did not expose a publishable or anon key for this Supabase project.")
   const connection = await connectDatabase(
     input.projectPath,
     input.taskId,
@@ -205,7 +205,7 @@ export async function linkSupabaseProject(
     nextStep:
       [
         client?.dependencyMissing
-          ? "Install @supabase/supabase-js in this project so the generated client can import it."
+          ? "Install @supabase/supabase-js in this repository so the generated client can import it."
           : "",
         supabaseEnvNote(framework) ?? "",
       ]
@@ -216,12 +216,12 @@ export async function linkSupabaseProject(
 
 export function unlinkSupabaseProject(input: { projectPath: string; taskId?: string }) {
   const database = getDatabase(input.projectPath, input.taskId)
-  if (!database) throw new SupabaseSetupError("No Supabase project is linked to this project.", "Nothing to unlink.")
+  if (!database) throw new SupabaseSetupError("No Supabase project is linked to this repository.", "Nothing to unlink.")
   disconnectDatabase(input.projectPath, input.taskId)
   return {
     unlinked: { ref: database.projectRef, name: database.projectName ?? database.projectRef },
     detail:
-      "The project is no longer linked. Its values in .env were left in place and the Supabase project itself was not changed.",
+      "The Supabase project is no longer linked. Its values in .env were left in place and the Supabase project itself was not changed.",
   }
 }
 

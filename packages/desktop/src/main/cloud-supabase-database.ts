@@ -287,7 +287,7 @@ export async function rollbackPlan(context: SupabaseContext, input: { directory:
   const discovery = await discoverMigrations(input.directory)
   if (!discovery.directory) {
     throw new SupabaseSetupError(
-      `This project has no migrations directory (looked for ${MIGRATION_DIRECTORIES.join(", ")}).`,
+      `This repository has no migrations directory (looked for ${MIGRATION_DIRECTORIES.join(", ")}).`,
       "There is nothing to roll back.",
     )
   }

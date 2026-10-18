@@ -398,7 +398,7 @@ export async function applyCloudMigrations(
     return {
       ok: false,
       needsSetup: true,
-      error: `This project has no migrations directory (looked for ${MIGRATION_DIRECTORIES.join(", ")}).`,
+      error: `This repository has no migrations directory (looked for ${MIGRATION_DIRECTORIES.join(", ")}).`,
       nextStep: "Write the schema to supabase/migrations/<timestamp>_<name>.sql first, then apply it.",
     }
   }
@@ -407,7 +407,7 @@ export async function applyCloudMigrations(
     return {
       ok: false,
       needsSetup: true,
-      error: "No Supabase project is connected to this project.",
+      error: "No Supabase project is connected to this repository.",
       nextStep: "Ask the user to open Vector Cloud > Database and connect a Supabase project.",
     }
   }

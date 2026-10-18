@@ -178,7 +178,7 @@ export async function createPullRequest(input: GithubPullRequestInput): Promise<
   const origin = await run("git", ["remote", "get-url", "origin"], { cwd: input.projectPath })
   record("git remote get-url origin", origin)
   if (origin.failed || !origin.stdout.trim()) {
-    return { ok: false, log: logs.join("\n"), error: "Connect this project to a GitHub repository first." }
+    return { ok: false, log: logs.join("\n"), error: "Connect this repository to GitHub first." }
   }
 
   const branchResult = await run("git", ["branch", "--show-current"], { cwd: input.projectPath })
@@ -302,10 +302,10 @@ export async function publishToGithub(input: GithubPublishInput): Promise<Github
   const projectPath = input.projectPath
   const stats = projectPath ? await stat(projectPath).catch(() => undefined) : undefined
   if (!stats?.isDirectory()) {
-    return { ok: false, log: "", error: "Open a project folder before pushing to GitHub." }
+    return { ok: false, log: "", error: "Open a repository folder before pushing to GitHub." }
   }
   if (activeGithubPublishes.has(projectPath)) {
-    return { ok: false, log: "", error: "A GitHub push is already running for this project." }
+    return { ok: false, log: "", error: "A GitHub push is already running for this repository." }
   }
 
   const name = slugifyRepoName(input.name || basename(projectPath))
@@ -366,14 +366,14 @@ export async function publishToGithub(input: GithubPublishInput): Promise<Github
       return {
         ok: false,
         log: logs.join("\n"),
-        error: "This project has no GitHub origin yet. Install GitHub CLI, run `gh auth login`, then try again.",
+        error: "This repository has no GitHub origin yet. Install GitHub CLI, run `gh auth login`, then try again.",
       }
     }
     if (!github.authenticated) {
       return {
         ok: false,
         log: logs.join("\n"),
-        error: "This project has no GitHub origin yet. Run `gh auth login`, then try again.",
+        error: "This repository has no GitHub origin yet. Run `gh auth login`, then try again.",
       }
     }
 
@@ -398,7 +398,7 @@ export async function publishToGithub(input: GithubPublishInput): Promise<Github
     } else if (/name already exists|already exists on this account/.test(lower)) {
       error = `A repository named "${name}" already exists on your account. Try a different name.`
     } else if (/no commits|does not have any commits|nothing to commit/.test(lower)) {
-      error = "This project has no commits to push yet. Add some files, then try again."
+      error = "This repository has no commits to push yet. Add some files, then try again."
     } else {
       error = lastLines(combined, 4) || `gh exited with code ${create.code ?? "unknown"}.`
     }
@@ -446,10 +446,10 @@ export async function pushWithOauth(input: GithubOauthPushInput): Promise<Github
   const projectPath = input.projectPath
   const stats = projectPath ? await stat(projectPath).catch(() => undefined) : undefined
   if (!stats?.isDirectory()) {
-    return { ok: false, log: "", error: "Open a project folder before pushing to GitHub." }
+    return { ok: false, log: "", error: "Open a repository folder before pushing to GitHub." }
   }
   if (activeGithubPublishes.has(projectPath)) {
-    return { ok: false, log: "", error: "A GitHub push is already running for this project." }
+    return { ok: false, log: "", error: "A GitHub push is already running for this repository." }
   }
   const token = await getGithubToken()
   if (!token) return { ok: false, log: "", error: "Sign in to GitHub first." }

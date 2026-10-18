@@ -254,7 +254,7 @@ async function readVercelProjectFile(directory: string): Promise<VercelProjectCa
 function saveLink(projectPath: string, project: unknown, auth: VercelAuth, linkedFrom?: string) {
   const id = stringField(project, "id")
   const name = stringField(project, "name")
-  if (!id || !name) throw new VercelError("provider", "Vercel did not return the project's id and name.")
+  if (!id || !name) throw new VercelError("provider", "Vercel did not return the Vercel project's id and name.")
   return saveCloudProviderProjectLink(projectPath, {
     provider: "vercel",
     projectId: id,
@@ -368,7 +368,7 @@ export async function updateVercelProjectSettings(
     }
     body.nodeVersion = nodeVersion
   }
-  if (!Object.keys(body).length) throw new VercelError("invalid", "Name at least one project setting to change.")
+  if (!Object.keys(body).length) throw new VercelError("invalid", "Name at least one Vercel project setting to change.")
   const context = await vercelLinkContext(projectPath)
   const updated = await vercelRequest(context.auth, `/v9/projects/${encodeURIComponent(context.link.projectId)}`, {
     method: "PATCH",

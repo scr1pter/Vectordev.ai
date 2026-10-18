@@ -221,8 +221,8 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
   const describable = DESCRIBABLE.find((item) => item === action)
   if (known === "describe" && !describable) throw new Error("Choose a Vector Cloud action to describe.")
   if (typeof projectPath !== "string" || !projectPath.trim())
-    throw new Error("Open a project before using Vector Cloud.")
-  if (taskId !== undefined && typeof taskId !== "string") throw new Error("Invalid project session.")
+    throw new Error("Open a repository before using Vector Cloud.")
+  if (taskId !== undefined && typeof taskId !== "string") throw new Error("Invalid session.")
   if (production !== undefined && typeof production !== "boolean") throw new Error("Invalid publish mode.")
   if (provider !== undefined && provider !== "vercel") {
     throw new Error("Invalid cloud provider.")
@@ -288,7 +288,7 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
   // The variables Vector keeps for the project, as Vector Cloud > Environment
   // variables shows them: the prompt names them, never their values.
   const stored = () => listEnv(input.projectPath, input.taskId).map((item) => item.key)
-  const where = workspace.directory !== workspace.projectPath ? "this agent workspace" : "this project"
+  const where = workspace.directory !== workspace.projectPath ? "this agent workspace" : "this repository"
   if (input.action === "write_env_file") {
     const keys = stored()
     return scope(
@@ -296,8 +296,8 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
       basename(input.projectPath),
       "local .env",
       keys.length
-        ? `Write this project's ${keys.length} stored environment ${keys.length === 1 ? "variable" : "variables"} (${keys.join(", ")}) to the .env of ${where}. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.`
-        : `Clear Vector's managed block from the .env of ${where}: no variables are stored for this project.`,
+        ? `Write this repository's ${keys.length} stored environment ${keys.length === 1 ? "variable" : "variables"} (${keys.join(", ")}) to the .env of ${where}. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.`
+        : `Clear Vector's managed block from the .env of ${where}: no variables are stored for this repository.`,
     )
   }
   if (input.action === "remove_stored_env") {
@@ -305,15 +305,15 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
     if (!key || !stored().includes(key)) {
       return {
         ok: false,
-        error: key ? `${key} is not stored for this project.` : "Name the stored variable to remove.",
-        nextStep: "stored_env lists the variables Vector stores for this project.",
+        error: key ? `${key} is not stored for this repository.` : "Name the stored variable to remove.",
+        nextStep: "stored_env lists the variables Vector stores for this repository.",
       }
     }
     return scope(
       "Vector",
       basename(input.projectPath),
       "stored variables",
-      `Remove ${key} from the variables Vector stores for this project. A .env or Vercel copy stays until .env is written again or the environment is synced.`,
+      `Remove ${key} from the variables Vector stores for this repository. A .env or Vercel copy stays until .env is written again or the environment is synced.`,
     )
   }
   if (input.action === "publish") {
@@ -329,7 +329,7 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
         "Vercel",
         target.projectName,
         "production",
-        `Publish ${workspace.directory !== workspace.projectPath ? "this agent workspace" : "this project"} to the Vercel project ${target.projectName}. It has never been deployed, and Vercel makes a project's first deployment production, so this goes live at its production address; release checks run after.`,
+        `Publish ${workspace.directory !== workspace.projectPath ? "this agent workspace" : "this repository"} to the Vercel project ${target.projectName}. It has never been deployed, and Vercel makes its first deployment production, so this goes live at its production address; release checks run after.`,
       )
     }
     if (workspace.directory !== workspace.projectPath) {
@@ -337,7 +337,7 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
         "Vercel",
         target.projectName,
         "preview",
-        `Publish this agent workspace to the Vercel project ${target.projectName} as a preview at its branch address. Production changes only after it is merged into the main project.`,
+        `Publish this agent workspace to the Vercel project ${target.projectName} as a preview at its branch address. Production changes only after it is merged into the repository.`,
       )
     }
     // Nothing to approve when Deployment Protection would keep the checks out
@@ -365,13 +365,13 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
           "Vercel",
           target.projectName,
           "production",
-          `Build this project for production on the Vercel project ${target.projectName} and run the release checks on that build. Production traffic moves to it only if they pass.`,
+          `Build this repository for production on the Vercel project ${target.projectName} and run the release checks on that build. Production traffic moves to it only if they pass.`,
         )
       : scope(
           "Vercel",
           target.projectName,
           "preview",
-          `Publish this project to the Vercel project ${target.projectName} as a preview. Production does not change.`,
+          `Publish this repository to the Vercel project ${target.projectName} as a preview. Production does not change.`,
         )
   }
   const database = getDatabase(input.projectPath, input.taskId)
@@ -387,7 +387,7 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
     }
     return scope(
       "Supabase",
-      "a new project",
+      "a new one",
       "production",
       `Create a new Supabase project${input.organizationId ? ` in organization ${input.organizationId}` : ""} in ${input.region ?? "us-east-1"}. Supabase bills it to that organization.`,
     )
@@ -398,7 +398,7 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
       needsSetup: true,
       error: "No Vector Cloud database is connected.",
       nextStep:
-        "Run create_database to create one on the user's connected Supabase account, or link the user's existing project with link_database (supabase_projects lists them).",
+        "Run create_database to create one on the user's connected Supabase account, or link the user's existing Supabase project with link_database (supabase_projects lists them).",
     }
   }
   if (input.action === "apply_migrations") {
@@ -431,7 +431,7 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
     "Supabase",
     name,
     "local .env",
-    `Write this project's ${keys.length} stored environment ${keys.length === 1 ? "variable" : "variables"} (${keys.join(", ")}) to the .env of ${workspace.directory !== workspace.projectPath ? "this agent workspace" : "this project"}, including the Supabase project ${name}'s public client settings. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.`,
+    `Write this repository's ${keys.length} stored environment ${keys.length === 1 ? "variable" : "variables"} (${keys.join(", ")}) to the .env of ${workspace.directory !== workspace.projectPath ? "this agent workspace" : "this repository"}, including the Supabase project ${name}'s public client settings. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.`,
   )
 }
 
@@ -441,7 +441,7 @@ function publishSetup() {
     needsSetup: true,
     targets: [],
     error: "Connect and link a Vercel project in Vector Cloud before publishing.",
-    nextStep: "Ask the user to connect Vercel and link a project in Vector Cloud > Connections.",
+    nextStep: "Ask the user to connect Vercel and link a Vercel project in Vector Cloud > Connections.",
   }
 }
 
@@ -513,7 +513,7 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
           }
         : { connected: false },
       nextStep: database
-        ? "The project database is ready through Vector Cloud."
+        ? "This repository's database is ready through Vector Cloud."
         : "No database is connected. Offer to create one with create_database, which creates a real Supabase project on the user's connected Supabase account; if the user already has a Supabase project for this app, find it with supabase_projects and link it with link_database (the user approves both).",
     }
   }
@@ -537,7 +537,7 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
         needsSetup: true,
         error: "No Vector Cloud database is connected.",
         nextStep:
-          "Run create_database to create one on the user's connected Supabase account, or link the user's existing project with link_database (supabase_projects lists them).",
+          "Run create_database to create one on the user's connected Supabase account, or link the user's existing Supabase project with link_database (supabase_projects lists them).",
       }
     }
     return {
@@ -562,7 +562,7 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
   if (input.command === "remove_stored_env") {
     const key = input.key?.trim() ?? ""
     if (!listEnv(input.projectPath, input.taskId).some((item) => item.key === key)) {
-      return { ok: false, error: `${key || "That variable"} is not stored for this project.` }
+      return { ok: false, error: `${key || "That variable"} is not stored for this repository.` }
     }
     return {
       ok: true,
@@ -632,11 +632,11 @@ function publishNextStep(result: PublishResult, isolated: boolean) {
   if (result.ok) {
     if (result.environment === "production") {
       return isolated
-        ? `Vercel made this agent workspace's release production, because it was the project's first deployment: it is live at ${result.url}. Tell the user.`
+        ? `Vercel made this agent workspace's release production, because it was the Vercel project's first deployment: it is live at ${result.url}. Tell the user.`
         : undefined
     }
     return isolated
-      ? `This agent workspace's preview is at ${result.url}; tell the user. Merge the workspace into the main project before promoting it to production.`
+      ? `This agent workspace's preview is at ${result.url}; tell the user. Merge the workspace into the repository before promoting it to production.`
       : "This is a preview; production did not change. Publish with production: true only when the user asks to ship to production."
   }
   if (result.errorCode === "no_node")
@@ -644,7 +644,7 @@ function publishNextStep(result: PublishResult, isolated: boolean) {
   if (result.errorCode === "token_rejected")
     return "Ask the user to reconnect Vercel with a new token in Vector Cloud > Connections."
   if (result.errorCode === "not_linked" || result.errorCode === "not_connected") {
-    return "Link a project with link_project (see vercel_projects) or create_project, or ask the user to connect Vercel in Vector Cloud > Connections."
+    return "Link a Vercel project with link_project (see vercel_projects) or create_project, or ask the user to connect Vercel in Vector Cloud > Connections."
   }
   if (result.errorCode === "build_failed") return "Read the build output above, fix the cause, and publish again."
   if (result.errorCode === "checks_blocked") {

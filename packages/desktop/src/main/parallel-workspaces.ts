@@ -706,8 +706,8 @@ function parallelAgentPrompt(record: ParallelWorkspaceRecord) {
       : "You are Vector's Parallel Workspace engineering agent.",
     `You are operating only inside this ${record.isolatedPath === record.sourcePath || teamForWorkspace(record.id)?.topology === "collaborative" ? "shared" : "isolated"} workspace: ${record.isolatedPath}`,
     record.isolatedPath === record.sourcePath
-      ? "This workspace is the main project. Your edits apply directly; preserve other agents' and the user's changes."
-      : `The main project at ${record.sourcePath} must remain untouched.`,
+      ? "This workspace is the repository itself. Your edits apply directly; preserve other agents' and the user's changes."
+      : `The repository at ${record.sourcePath} must remain untouched.`,
     record.teamId ? "Other teammates share this work. Coordinate overlapping edits and preserve their changes." : "",
     record.swarmTaskId ? `Swarm task ID: ${record.swarmTaskId}` : "",
     "Inspect the repository before editing. Make the smallest complete implementation that satisfies the task.",
@@ -740,7 +740,7 @@ function parallelAgentPrompt(record: ParallelWorkspaceRecord) {
 }
 
 function validationLogLines(report: WorkspaceValidationReport) {
-  if (!report.checks.length) return ["No deterministic project checks were detected for this workspace."]
+  if (!report.checks.length) return ["No repository checks were detected for this workspace."]
   return report.checks.flatMap((check) => {
     const command = [check.command, ...check.args].join(" ")
     const status = check.status === "passed" ? "PASS" : check.status === "failed" ? "FAIL" : "SKIP"
@@ -926,7 +926,7 @@ async function noteLowDisk(directory: string, logs: string[]) {
     const free = disk.bavail * disk.bsize
     if (free < LOW_DISK_BYTES) {
       logs.push(
-        `Only ${(free / 1024 ** 3).toFixed(1)} GB of disk space is free; copying the project for this agent may fill the disk.`,
+        `Only ${(free / 1024 ** 3).toFixed(1)} GB of disk space is free; copying the repository for this agent may fill the disk.`,
       )
     }
   } catch {
@@ -1512,7 +1512,8 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
     throw new Error("Open a task session before creating an isolated agent workspace.")
   }
   const sourceStat = await stat(input.sourcePath).catch(() => undefined)
-  if (!sourceStat?.isDirectory()) throw new Error("Choose a valid project folder before creating a parallel workspace.")
+  if (!sourceStat?.isDirectory())
+    throw new Error("Choose a valid repository folder before creating a parallel workspace.")
 
   const createdAt = now()
   const id = randomUUID()
@@ -1585,7 +1586,7 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
   } else {
     logs.push(
       rootGit
-        ? "Main project has uncommitted changes, using isolated copy to preserve current state."
+        ? "The repository has uncommitted changes, using isolated copy to preserve current state."
         : "No git repository found, using isolated copy.",
     )
     await noteLowDisk(workspaceDir, logs)
@@ -1713,7 +1714,9 @@ async function ensureParallelWorkspaceIsolation(record: ParallelWorkspaceRecord)
   if (isolated?.isDirectory()) return record
   const source = await stat(record.sourcePath).catch(() => undefined)
   if (!source?.isDirectory()) {
-    throw new Error("The main project folder no longer exists. Open the project again before rerunning this workspace.")
+    throw new Error(
+      "The repository folder no longer exists. Open the repository again before rerunning this workspace.",
+    )
   }
 
   await rm(dirname(record.isolatedPath), { recursive: true, force: true }).catch(() => undefined)
@@ -1739,16 +1742,16 @@ async function ensureParallelWorkspaceIsolation(record: ParallelWorkspaceRecord)
     turns: appendTurn(current.turns, {
       id: randomUUID(),
       role: "vector",
-      text: "The isolated workspace was missing, so Vector rebuilt it from the main project. The previous conversation could not be carried over.",
+      text: "The isolated workspace was missing, so Vector rebuilt it from the repository. The previous conversation could not be carried over.",
       at: now(),
       state: "done",
     }),
     logs: [
-      "The isolated checkout was missing, so Vector rebuilt it from the current main project before starting the agent.",
+      "The isolated checkout was missing, so Vector rebuilt it from the repository before starting the agent.",
       ...current.logs,
     ].slice(0, 120),
   }))
-  syncBackgroundTask(restored, "Rebuilt the missing isolated workspace from the current main project.")
+  syncBackgroundTask(restored, "Rebuilt the missing isolated workspace from the repository.")
   return restored
 }
 
@@ -1901,7 +1904,7 @@ async function executeExternalParallelWorkspace(
     progress: 0,
     lastAction: followUp
       ? `${runtimeLabel(current.runtime)} is working on your message`
-      : `${runtimeLabel(current.runtime)} is inspecting the isolated project`,
+      : `${runtimeLabel(current.runtime)} is inspecting the agent workspace`,
     lastActivityAt: now(),
     error: undefined,
     turns: followUp
@@ -2043,7 +2046,7 @@ async function executeExternalParallelWorkspace(
     ...current,
     status: "testing",
     progress: 0,
-    lastAction: "Running deterministic project checks",
+    lastAction: "Running repository checks",
     lastActivityAt: now(),
   }))
   syncBackgroundTask(record, `${runtimeLabel(record.runtime)} completed. Running deterministic checks.`)
@@ -2288,7 +2291,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       agentSessionId: sessionId,
       status: "planning",
       progress: 0,
-      lastAction: "Preparing task-specific project context",
+      lastAction: "Preparing task-specific repository context",
       lastActivityAt: now(),
       error: undefined,
       turns: followUp
@@ -2312,7 +2315,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     record = updateRecord(id, (current) => ({
       ...current,
       status: "editing",
-      lastAction: "Agent is inspecting the isolated project",
+      lastAction: "Agent is inspecting the agent workspace",
       lastActivityAt: now(),
     }))
     syncBackgroundTask(record, "Task context prepared; the Vector agent is now working.")
@@ -2354,7 +2357,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       ...current,
       status: "testing",
       progress: 0,
-      lastAction: "Running deterministic project checks",
+      lastAction: "Running repository checks",
       lastActivityAt: now(),
     }))
     syncBackgroundTask(record, "Agent became idle. Running deterministic checks in the isolated workspace.")
@@ -2844,8 +2847,8 @@ async function createCheckpoint(record: ParallelWorkspaceRecord) {
       [
         "# Vector merge checkpoint",
         "",
-        "`main-state.patch` is the main project's staged+unstaged diff against HEAD taken right before this merge.",
-        "Files in `overwritten/` are copies of untracked main-project files this merge replaced.",
+        "`main-state.patch` is the repository's staged+unstaged diff against HEAD taken right before this merge.",
+        "Files in `overwritten/` are copies of untracked repository files this merge replaced.",
         "To undo the merge's effect on a previously untracked file, copy it back from `overwritten/`.",
         "",
       ].join("\n"),
@@ -2867,7 +2870,7 @@ async function createCheckpoint(record: ParallelWorkspaceRecord) {
     )
     await writeFile(
       checkpointPath,
-      "# This project is not a git repository, so there is no diff to capture.\n# Pre-merge copies of every affected file are in `overwritten/`.\n",
+      "# This folder is not a git repository, so there is no diff to capture.\n# Pre-merge copies of every affected file are in `overwritten/`.\n",
       "utf8",
     )
     await writeFile(
@@ -2875,11 +2878,11 @@ async function createCheckpoint(record: ParallelWorkspaceRecord) {
       [
         "# Vector merge checkpoint",
         "",
-        "This project is not a git repository, so Vector copied every file this merge",
+        "This folder is not a git repository, so Vector copied every file this merge",
         "was about to change or delete into `overwritten/` before touching anything.",
         "",
         "To undo the merge for a file, copy it back from `overwritten/` over the version",
-        "in your project. `baseline-hashes.json` records what Vector believed each file",
+        "in your folder. `baseline-hashes.json` records what Vector believed each file",
         "looked like when the workspace was created.",
         "",
       ].join("\n"),
@@ -3061,7 +3064,7 @@ async function mergeGitWorktree(record: ParallelWorkspaceRecord, force: boolean,
   }
   if (collisions.length && !force) {
     throw new MergeConflict(
-      `Merge blocked: ${collisions.slice(0, 8).join(", ")} exist${collisions.length === 1 ? "s" : ""} in your main project with different content. Review or force-merge to overwrite (a backup copy is saved to the checkpoint).`,
+      `Merge blocked: ${collisions.slice(0, 8).join(", ")} exist${collisions.length === 1 ? "s" : ""} in your repository with different content. Review or force-merge to overwrite (a backup copy is saved to the checkpoint).`,
     )
   }
 
@@ -3120,7 +3123,7 @@ async function mergeCopy(record: ParallelWorkspaceRecord, force: boolean, checkp
   }
   if (conflicts.length && !force) {
     throw new MergeConflict(
-      `Merge conflict detected in ${conflicts.slice(0, 8).join(", ")}. Main project changed since workspace creation.`,
+      `Merge conflict detected in ${conflicts.slice(0, 8).join(", ")}. The repository changed since workspace creation.`,
     )
   }
   await recordMergeStarted(record, checkpointPath, refreshed.changedFiles)
@@ -3242,7 +3245,7 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
   if (commit?.message?.trim()) {
     try {
       if (!(await gitRoot(record.sourcePath))) {
-        commitError = "Changes were merged, but the main project is not a git repository, so nothing was committed."
+        commitError = "Changes were merged, but the folder is not a git repository, so nothing was committed."
       } else if (await gitIsClean(record.sourcePath)) {
         commitNote = "Main working tree was already clean after the merge; nothing to commit."
       } else {
@@ -3269,7 +3272,7 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
     pendingCommit: undefined,
     error: commitError || undefined,
     lastAction: commitNote.startsWith("Committed")
-      ? "Merged and committed to the main project"
+      ? "Merged and committed to the repository"
       : `Merged into ${mergeTarget(record)}`,
     lastActivityAt: now(),
     finalSummary: [
@@ -3290,9 +3293,9 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
   syncBackgroundTask(
     merged,
     commitError
-      ? "Merged into the main project, but the commit failed."
+      ? "Merged into the repository, but the commit failed."
       : commitNote.startsWith("Committed")
-        ? "Parallel workspace merged and committed to the main project."
+        ? "Parallel workspace merged and committed to the repository."
         : `Parallel workspace merged into ${mergeTarget(record)}.`,
   )
   return merged
@@ -3300,7 +3303,7 @@ export async function mergeParallelWorkspace(id: string, force = false, commit?:
 
 // A swarm worker merges into the swarm's staging workspace; everything else merges into the project it came from.
 function mergeTarget(record: ParallelWorkspaceRecord) {
-  return record.swarmRole === "worker" ? "swarm staging" : "the main project"
+  return record.swarmRole === "worker" ? "swarm staging" : "the repository"
 }
 
 // Merges in this process whose changes are in the source and that are still removing the isolated copy or committing.
@@ -3344,7 +3347,7 @@ export async function openParallelWorkspacePullRequest(id: string) {
   const refreshed = await refreshParallelWorkspace(id)
   if (refreshed.mergeState !== "none") throw new Error("This workspace is already closed.")
   if (refreshed.isolation !== "git-worktree" || !refreshed.gitBranch) {
-    throw new Error("Pull requests require a Git project with an isolated worktree.")
+    throw new Error("Pull requests require a Git repository with an isolated worktree.")
   }
   if (!refreshed.changedFiles.length) throw new Error("There are no workspace changes to open as a pull request.")
   const record = await validateBeforeIntegration(refreshed)
@@ -3415,7 +3418,7 @@ async function mergeSelectedGitChanges(
     }
     // As in a full merge, forcing cannot get past a conflict without leaving conflict markers in the main project.
     const sourceCheck = await checkPatch(selectedPatch, record.sourcePath)
-    if (!sourceCheck.clean) throw new Error(`Selected changes conflict with the main project.\n${sourceCheck.detail}`)
+    if (!sourceCheck.clean) throw new Error(`Selected changes conflict with the repository.\n${sourceCheck.detail}`)
     const applied = await runGit(["apply", "--3way", "-"], record.sourcePath, {
       allowFailure: true,
       input: selectedPatch,
@@ -3438,7 +3441,7 @@ async function mergeSelectedGitChanges(
     const to = join(record.sourcePath, file)
     const exists = await stat(to).catch(() => undefined)
     if (exists && !(await fileContentsEqual(from, to)) && !force) {
-      throw new Error(`Merge blocked: ${file} exists in your main project with different content.`)
+      throw new Error(`Merge blocked: ${file} exists in your repository with different content.`)
     }
     await backupBeforeOverwrite(checkpointPath, record.sourcePath, file)
     await mkdir(dirname(to), { recursive: true })
@@ -3454,7 +3457,7 @@ async function mergeSelectedCopyChanges(
   checkpointPath: string,
 ) {
   if (selection.hunkIds?.length) {
-    throw new Error("Non-Git projects support selective review one complete file at a time.")
+    throw new Error("Folders without Git support selective review one complete file at a time.")
   }
   const refreshed = await refreshParallelWorkspace(record.id)
   const changed = new Set(refreshed.changedFiles)

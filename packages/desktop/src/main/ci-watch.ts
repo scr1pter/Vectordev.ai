@@ -305,7 +305,7 @@ export async function detectCiRepo(projectPath: string): Promise<{ ok: true; rep
     return {
       ok: false,
       reason: "not-a-repo",
-      detail: "This project is not a git repository, so it has no CI runs.",
+      detail: "This folder is not a git repository, so it has no CI runs.",
       command: "git init",
     }
   }
@@ -315,7 +315,7 @@ export async function detectCiRepo(projectPath: string): Promise<{ ok: true; rep
     return {
       ok: false,
       reason: "no-remote",
-      detail: "This project has no `origin` remote, so there is nowhere to read workflow runs from.",
+      detail: "This repository has no `origin` remote, so there is nowhere to read workflow runs from.",
       command: "git remote add origin https://github.com/<owner>/<repo>.git",
     }
   }

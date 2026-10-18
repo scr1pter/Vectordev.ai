@@ -138,10 +138,10 @@ export async function pushWithOauth(input: GitlabOauthPushInput): Promise<Gitlab
   const projectPath = input.projectPath
   const stats = projectPath ? await stat(projectPath).catch(() => undefined) : undefined
   if (!stats?.isDirectory()) {
-    return { ok: false, log: "", error: "Open a project folder before pushing to GitLab." }
+    return { ok: false, log: "", error: "Open a repository folder before pushing to GitLab." }
   }
   if (activeGitlabPushes.has(projectPath)) {
-    return { ok: false, log: "", error: "A GitLab push is already running for this project." }
+    return { ok: false, log: "", error: "A GitLab push is already running for this repository." }
   }
   const token = getGitlabToken()
   if (!token) return { ok: false, log: "", error: "Sign in to GitLab first." }
@@ -166,7 +166,7 @@ export async function pushWithOauth(input: GitlabOauthPushInput): Promise<Gitlab
     if (input.createNew) {
       try {
         const repo = await createRepo(input.createNew)
-        logs.push(`Created project ${repo.pathWithNamespace}`)
+        logs.push(`Created GitLab project ${repo.pathWithNamespace}`)
         pushUrl = repo.httpUrl
         htmlUrl = repo.webUrl
       } catch (error) {
@@ -222,11 +222,11 @@ export async function pushWithOauth(input: GitlabOauthPushInput): Promise<Gitlab
       error = "GitLab has newer commits. Pull and resolve them before pushing again."
     } else if (/403|permission|protected branch|you are not allowed/.test(lower)) {
       error =
-        "GitLab rejected this push (403). Your token may lack write access to this project — check your role, then try again."
+        "GitLab rejected this push (403). Your token may lack write access to this GitLab project — check your role, then try again."
     } else if (/401|authentication failed|invalid username or password/.test(lower)) {
       error = "GitLab rejected the token. Sign out of GitLab in Vector, sign in again, then retry."
     } else if (/repository not found|could not read from remote|404/.test(lower)) {
-      error = `Project ${pushUrl.replace(/^https?:\/\/gitlab\.com\//, "").replace(/\.git$/, "")} was not found. Check the name and your access.`
+      error = `GitLab project ${pushUrl.replace(/^https?:\/\/gitlab\.com\//, "").replace(/\.git$/, "")} was not found. Check the name and your access.`
     } else {
       error = lastLines(combined, 4) || `git push exited with code ${push.code ?? "unknown"}.`
     }

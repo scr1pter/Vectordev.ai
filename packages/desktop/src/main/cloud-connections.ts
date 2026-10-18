@@ -648,7 +648,7 @@ export function saveCloudProviderProjectLink(
   projectPath: string,
   link: CloudProviderProjectLink,
 ): CloudProviderProjectLink {
-  if (!projectPath.trim()) throw new Error("Open a project before linking a cloud project.")
+  if (!projectPath.trim()) throw new Error("Open a repository before linking a Vercel or Supabase project.")
   const next = [link, ...readLinks(projectPath).filter((item) => item.provider !== link.provider)]
   getStore(LINKS_STORE).set(cloudProjectScopeKey(projectPath), next)
   return link

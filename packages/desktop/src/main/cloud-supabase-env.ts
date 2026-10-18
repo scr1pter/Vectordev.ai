@@ -95,7 +95,7 @@ function supabaseClientSource(framework: SupabaseFramework) {
   return `import { createClient } from "@supabase/supabase-js"
 
 // Vector-managed Supabase client. The values are set in Vector Cloud and written
-// to .env; they are the project's public URL and publishable (anon) key.
+// to .env; they are the Supabase project's public URL and publishable (anon) key.
 const supabaseUrl = ${read(names.url)}
 const supabaseKey = ${read(names.key)}
 
@@ -118,7 +118,7 @@ export async function ensureEnvIgnored(directory: string): Promise<{ added: bool
   if (ignored === true) return { added: false, tracked: false }
   const path = join(directory, ".gitignore")
   const existing = await lstat(path).catch(() => undefined)
-  if (existing && !existing.isFile()) throw new Error("The project's .gitignore must be a regular file.")
+  if (existing && !existing.isFile()) throw new Error("The repository's .gitignore must be a regular file.")
   const text = existing ? await readFile(path, "utf8") : ""
   if (ignored === undefined && /^\s*\/?(?:\.env|\.env\*|\*\.env|\.env\.?\*)\s*$/m.test(text)) {
     return { added: false, tracked: false }

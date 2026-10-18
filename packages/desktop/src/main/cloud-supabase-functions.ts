@@ -133,7 +133,7 @@ export async function deployFunction(context: SupabaseContext, input: { director
       isAbsolute(relativePath) ||
       (await lstat(file)).isSymbolicLink()
     ) {
-      throw new Error(`Function source ${path(file)} must stay inside the project and cannot be a symbolic link.`)
+      throw new Error(`Function source ${path(file)} must stay inside the repository and cannot be a symbolic link.`)
     }
     const content = await readFile(file)
     const text = content.toString("utf8")
@@ -171,7 +171,7 @@ async function requireFunctionDirectory(folder: string, root: string) {
     local === ".." ||
     isAbsolute(local)
   ) {
-    throw new Error("Function source directories must stay inside the project and cannot be symbolic links.")
+    throw new Error("Function source directories must stay inside the repository and cannot be symbolic links.")
   }
 }
 
@@ -244,7 +244,7 @@ export async function setFunctionSecrets(
     const found = env.find((item) => item.key === name.trim())
     if (!found) {
       throw new Error(
-        `${name} is not one of this project's environment variables. Add it in Vector Cloud > Environment variables first.`,
+        `${name} is not one of this repository's environment variables. Add it in Vector Cloud > Environment variables first.`,
       )
     }
     return { name: secretName(found.key), value: found.value }

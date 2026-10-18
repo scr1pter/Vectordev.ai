@@ -1168,9 +1168,13 @@ describe("security check", () => {
         { name: "function_search_path_mutable", level: "WARN" },
       ],
       environment: [
-        { where: "VITE_SUPABASE_SERVICE", reason: "is public but holds this project's service key", level: "ERROR" },
+        {
+          where: "VITE_SUPABASE_SERVICE",
+          reason: "is public but holds the Supabase project's service key",
+          level: "ERROR",
+        },
       ],
-      bundle: [{ where: "assets/index.js", reason: "ships this project's service key", level: "ERROR" }],
+      bundle: [{ where: "assets/index.js", reason: "ships the Supabase project's service key", level: "ERROR" }],
     })
     expectNoSecrets(report)
   })
@@ -1293,7 +1297,7 @@ describe("agent bridge", () => {
     ).toMatchObject({
       ok: false,
       needsSetup: true,
-      error: "NOPE is not in this project's environment.",
+      error: "NOPE is not in this repository's environment.",
     })
     expect(fake.calls).toEqual([])
 
@@ -1330,7 +1334,7 @@ describe("agent bridge", () => {
         project: "organization Ada Labs",
         environment: "account",
         summary:
-          "Create a Supabase organization named Ada Labs on the connected Supabase account. Projects created in it are billed to it.",
+          "Create a Supabase organization named Ada Labs on the connected Supabase account. Supabase projects created in it are billed to it.",
       },
     })
     expect(

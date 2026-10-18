@@ -317,7 +317,7 @@ export async function listRepos(): Promise<GitlabRepo[]> {
     logoutGitlab()
     throw new Error("Your GitLab session expired. Sign in again.")
   }
-  if (!res.ok) throw new Error(`GitLab returned HTTP ${res.status} while listing projects.`)
+  if (!res.ok) throw new Error(`GitLab returned HTTP ${res.status} while listing GitLab projects.`)
   const raw = (await res.json().catch(() => undefined)) as RawProject[] | undefined
   return (Array.isArray(raw) ? raw : []).map(mapGitlabRepo)
 }
@@ -345,9 +345,9 @@ export async function createRepo(input: GitlabCreateRepoInput): Promise<GitlabRe
     // Surface GitLab's own validation detail ("has already been taken") when
     // present — it is friendlier than our generic message.
     const detail = extractGitlabError(body?.message) || (typeof body?.error === "string" ? body.error : "")
-    throw new Error(detail || `GitLab returned HTTP ${res.status} while creating the project.`)
+    throw new Error(detail || `GitLab returned HTTP ${res.status} while creating the GitLab project.`)
   }
-  if (!body?.name) throw new Error("GitLab created the project but returned an unexpected response.")
+  if (!body?.name) throw new Error("GitLab created the new GitLab project but returned an unexpected response.")
   return mapGitlabRepo(body)
 }
 

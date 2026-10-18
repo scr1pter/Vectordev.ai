@@ -129,7 +129,7 @@ export async function runSupabaseCommand(command: unknown, raw: unknown, options
   if (!isSupabaseCommand(command)) return { ok: false, error: "Unsupported Supabase command." }
   const input: Input = raw && typeof raw === "object" ? (raw as Input) : {}
   const requested = text(input, "projectPath")
-  if (!requested) return { ok: false, error: "Open a project before using Supabase." }
+  if (!requested) return { ok: false, error: "Open a repository before using Supabase." }
   // State belongs to the main project; files live where the agent works.
   const scope = await resolveCloudScope(requested, (await options.workspaces?.()) ?? [])
   const project = { projectPath: scope.projectPath, taskId: text(input, "taskId") }
@@ -294,7 +294,7 @@ async function run(
   if (command === "set_function_secrets") {
     if (agent && input.secrets !== undefined) {
       throw new Error(
-        "Secret values are entered in Vector Cloud > Edge functions, never through chat. Pass names from this project's environment instead.",
+        "Secret values are entered in Vector Cloud > Edge functions, never through chat. Pass names from this repository's environment instead.",
       )
     }
     return setFunctionSecrets(context, { secrets: secretPairs(input), fromEnv: list(input, "secretNames") })
@@ -446,23 +446,23 @@ export async function describeSupabaseCommand(
     if (command === "create_organization") {
       const organization = supabaseOrganizationName(required(input, "organizationName"))
       return describe(
-        `Create a Supabase organization named ${organization} on the connected Supabase account. Projects created in it are billed to it.`,
+        `Create a Supabase organization named ${organization} on the connected Supabase account. Supabase projects created in it are billed to it.`,
         { project: `organization ${organization}`, environment: "account" },
       )
     }
     if (command === "create_project") {
       return describe(
         `Create a new Supabase project${text(input, "organizationId") ? ` in organization ${text(input, "organizationId")}` : ""} in ${text(input, "region") ?? "us-east-1"}. Supabase bills it to that organization.`,
-        { project: "a new project" },
+        { project: "a new one" },
       )
     }
     if (!database) {
       return {
         ok: false,
         needsSetup: true,
-        error: "No Supabase project is linked to this project.",
+        error: "No Supabase project is linked to this repository.",
         nextStep:
-          "Create one with create_database, or link an existing project with link_database (supabase_projects lists them).",
+          "Create one with create_database, or link an existing Supabase project with link_database (supabase_projects lists them).",
       }
     }
     if (command === "unlink_database") {
@@ -472,11 +472,11 @@ export async function describeSupabaseCommand(
       return describe(`Pause ${name}. The live app loses its database, auth and storage until it is restored.`)
     }
     if (command === "restore_database") {
-      return describe(`Restore the paused project ${name}. Supabase bills its organization while it runs.`)
+      return describe(`Restore the paused Supabase project ${name}. Supabase bills its organization while it runs.`)
     }
     if (command === "write_database_url") {
       return describe(
-        `Write a server-only DATABASE_URL for ${name} (transaction pooler) to this project's environment and .env. It contains the database password; its value is never shown.`,
+        `Write a server-only DATABASE_URL for ${name} (transaction pooler) to this repository's environment and .env. It contains the database password; its value is never shown.`,
       )
     }
     if (command === "rotate_database_password") {
@@ -486,9 +486,9 @@ export async function describeSupabaseCommand(
       return describe(
         [
           `Reset the database password of ${name}; anything still using the old password stops working.`,
-          bool(input, "writeDatabaseUrl") ? "Write the new DATABASE_URL to this project's environment." : "",
+          bool(input, "writeDatabaseUrl") ? "Write the new DATABASE_URL to this repository's environment." : "",
           vercel
-            ? `Push this project's environment to the Vercel project ${vercel.projectName} (production, preview and development).`
+            ? `Push this repository's environment to the Vercel project ${vercel.projectName} (production, preview and development).`
             : "",
         ]
           .filter(Boolean)
@@ -496,7 +496,7 @@ export async function describeSupabaseCommand(
       )
     }
     if (command === "apply_migrations") {
-      return describe(`Apply this project's pending migrations to ${name}. This changes its live database.`)
+      return describe(`Apply this repository's pending migrations to ${name}. This changes its live database.`)
     }
     if (command === "rollback_migration") {
       const plan = await rollbackPlan(await supabaseContext(project, options), {
@@ -619,14 +619,14 @@ export async function describeSupabaseCommand(
         return {
           ok: false,
           needsSetup: true,
-          error: `${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not in this project's environment.`,
+          error: `${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not in this repository's environment.`,
           nextStep:
             "Ask the user to add the value in Vector Cloud > Environment variables or Edge functions; never ask for it in chat.",
         }
       }
       // A credential leaves Vector for Supabase, so each set asks.
       return describe(
-        `Set the Edge Function secrets ${names.join(", ")} on ${name} from this project's stored environment. Their values are never shown.`,
+        `Set the Edge Function secrets ${names.join(", ")} on ${name} from this repository's stored environment. Their values are never shown.`,
       )
     }
     if (command === "delete_function_secrets") {

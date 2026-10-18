@@ -70,7 +70,7 @@ export async function detectWorkspaceChecks(root: string, changedFiles: string[]
     const runner = await packageRunner(root)
     const preferred = [
       ["typecheck", "Type checking catches cross-file contract errors"],
-      ["check", "Project checks validate framework and compiler contracts"],
+      ["check", "Repository checks validate framework and compiler contracts"],
       ["test", "Tests verify behavior deterministically"],
       ["lint", "Linting catches invalid and unsafe source patterns"],
       ["build", "A production build verifies imports and bundler integration"],

@@ -67,7 +67,7 @@ export async function supabaseContext(
   const database = getDatabase(input.projectPath, input.taskId)
   if (!database?.projectRef) {
     throw new SupabaseSetupError(
-      "No Supabase project is linked to this project.",
+      "No Supabase project is linked to this repository.",
       "Create one or link an existing Supabase project in Vector Cloud > Database (the agent uses create_database or link_database).",
     )
   }
@@ -189,7 +189,7 @@ export async function serviceRoleKey(context: SupabaseContext): Promise<string> 
   if (!key) {
     throw new SupabaseSetupError(
       `Supabase did not give Vector a service key for ${context.projectName}.`,
-      "Reconnect Supabase with a token that can read the project's API keys (secrets:read), then try again.",
+      "Reconnect Supabase with a token that can read the Supabase project's API keys (secrets:read), then try again.",
     )
   }
   context.secrets.push(key)
