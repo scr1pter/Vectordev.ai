@@ -26,7 +26,7 @@ const beats = [
         source: 3,
       },
       {
-        text: " The tools, context and checks around a model shape both the result and the bill. So Vector brings a lean loop of its own for any model, and when a lab's model works best in that lab's agent, Vector runs that agent too.",
+        text: " The tools, context and checks around a model shape both the result and the bill. So Vector brings its own loop, built to carry less with each request and to work with any model, and when a lab's model works best in that lab's agent, Vector runs that agent too.",
       },
     ],
   },
@@ -72,34 +72,35 @@ const sources = [
   },
 ]
 
-// The four pillars. `note` points at a footnote in the proof strip below.
+// The four pillars. `note` points at a footnote in the proof strip below. Each proof is something its own pillar
+// produces: the cost benchmark measures what the harness sends, so it sits under Harness, not under the Run Guard.
 const pillars = [
   {
     id: "harness",
     label: "Harness",
     status: { kind: "today", text: "Today" },
-    title: "A lean agent of its own.",
-    text: "Vector's own engine runs a fixed set of tools, compacts older turns while keeping a protected recent window, and ships nine built-in subagents, four of which can't edit a file. From desktop 1.99.108, subagents work in the background, up to eight in a batch, while you message, steer or stop them. Claude Code, Codex and Cursor Agent run beside it, each in its own copy of the repository.",
-    proof: "About 10,000 tokens of fixed instructions and tool definitions per request, against about 28,000 for Claude Code 2.1.215.",
-    note: "a",
-    small: "Steering background subagents reaches the terminal with the next CLI release.",
+    title: "An agent of its own, with less to carry.",
+    text: "Vector's own engine runs a fixed set of tools, compacts older turns while keeping a protected recent window, and ships nine built-in subagents, four of which can't edit a file. From desktop 1.99.108, subagents work in the background in batches of up to eight, while you message, steer or stop them. In the desktop app, Claude Code, Codex and Cursor Agent run beside it, each in its own copy of the repository.",
+    proof: "64–67% lower modelled cost than Claude Code 2.1.215 on five scripted subagent tasks, from a cold start, offline, 16 October 2026.",
+    note: "b",
+    small: "Steering background subagents reaches the terminal with the next CLI release, and Windows WSL servers once a later desktop release requires that CLI.",
   },
   {
     id: "tokenomics",
     label: "Tokenomics engine",
     status: { kind: "today", text: "Today · desktop" },
     title: "Spend you can leave alone.",
-    text: "The Run Guard stops a run within one step of the cap you set, pauses an agent stuck repeating the same call or error three times, and ends a provider outage after 10 retries or 15 minutes. Subagents and helper runs, Vectorscope reviews included, count against the run that launched them, and a step with no listed price shows as unpriced, not as $0.00.",
-    proof: "64–67% lower modelled cost than Claude Code 2.1.215 on five scripted subagent tasks, from a cold start, offline, 16 October 2026.",
-    note: "b",
-    small: "Caps are off until you set one. Desktop from 1.99.108; the terminal gets the Run Guard with the next CLI release.",
+    text: "The Run Guard stops a run within one step of the cap you set, pauses an agent stuck repeating the same call or error three times, and ends a provider outage after 10 retries or 15 minutes. Subagents and helper runs, Vectorscope reviews included, count against the run that launched them.",
+    proof: "A step with no listed price shows as unpriced, not as $0.00, and with a dollar cap set, 40 unpriced steps stop the run.",
+    note: "c",
+    small: "Caps are off until you set one. Desktop from 1.99.108, not yet on Windows WSL servers; the terminal gets the Run Guard with the next CLI release.",
   },
   {
     id: "velocity",
     label: "Vector Velocity",
     status: { kind: "planned", text: "Planned" },
     title: "Our own model, for this loop.",
-    text: "Vector Velocity is the coding model we plan to build: over 300B parameters (300B+), designed for Vector's loop of planning, tool calls, edits, checks and review. It would sit in the model picker beside every other provider, measured by the same tokenomics.",
+    text: "Vector Velocity is the coding model we plan to build: over 300B parameters (300B+), meant for Vector's loop of planning, tool calls, edits, checks and review. It would sit in the model picker beside every other provider, measured by the same tokenomics.",
     proof: "No weights or benchmarks exist yet, so we make no performance claims. Our privacy policy already covers it: Vector doesn't use your prompts, code or model output to train any model, including one it builds itself.",
     href: "/legal/privacy#training",
     more: "Read the training policy",
@@ -110,7 +111,8 @@ const pillars = [
     status: { kind: "today", text: "Today · desktop" },
     title: "Ship from the accounts you already have.",
     text: "Vector Cloud works inside your own Vercel and Supabase accounts: preview-first publishes, promote and roll back, environment values, domains and logs on Vercel; SQL shown before it runs, migrations, functions and security checks on Supabase. Each deploy checks itself with a secret scan, a health check and its logs read back, and the resources and billing stay with you.",
-    proof: "Every change to a cloud account asks you each time, with no Always allow, and Vercel publishes a preview unless you choose production.",
+    proof: "Every publish, production move, database change or environment write Vector Cloud makes asks you each time, with no Always allow, and Vercel publishes a preview unless you choose production.",
+    small: "Desktop from 1.99.108. On Windows WSL servers, the shell doesn't yet ask before vercel and supabase commands.",
     planned: "The software factory: an issue becomes a reviewed preview in the cloud with no laptop open, and a person still approves the merge.",
   },
 ]
@@ -145,24 +147,25 @@ const models = [
   },
 ]
 
-// The proof strip. Each figure keeps its footnote; the footnotes stay open on the page.
+// The proof strip: six figures, each an edge Vector can show, each with its footnote. The fixed-token comparison
+// is the bar chart above them, so it is not repeated here. The footnotes stay open on the page.
 const figures = [
-  { value: "≈10K vs ≈28K", label: "fixed tokens per request, Vector against Claude Code 2.1.215", note: "a" },
   {
     value: "64–67%",
     label: "lower modelled cost than Claude Code 2.1.215 on five scripted subagent tasks, first session",
     note: "b",
   },
+  { value: "68–74%", label: "lower in a second session of the same five tasks", note: "b" },
   { value: "1 step", label: "how close to the cap you set the Run Guard stops a run, for each agent running", note: "c" },
-  { value: "3", label: "outside agents in one workspace: Claude Code, Codex and Cursor Agent", note: "d" },
-  { value: "$2 · $10", label: "default Vectorscope caps per review and per pull request, on your own key", note: "e" },
-  { value: "$0", label: "for the workspace, on your desktop and in your terminal", note: "f" },
+  { value: "3 times", label: "the same call or error before the Run Guard pauses an agent stuck in a loop", note: "c" },
+  { value: "40", label: "unpriced steps stop a run under a dollar cap, since their spend can't be counted", note: "c" },
+  { value: "$0", label: "for the workspace, on your desktop and in your terminal", note: "d" },
 ]
 
 const notes = [
   {
     id: "a",
-    text: "Vector's offline footprint benchmark (script/agent-eval/footprint.ts), solo-fix scenario, run 17 October 2026 on the desktop 1.99.108 code against Claude Code 2.1.215, five requests each: 9,994 against 27,917 estimated tokens of system instructions and tool definitions sent with each request. Tokens are estimated as characters ÷ 4. Providers cache much of this prefix, so the figure measures what each agent sends, not your bill.",
+    text: "Vector's offline footprint benchmark (script/agent-eval/footprint.ts), solo-fix scenario, run 17 October 2026 on the desktop 1.99.108 code against Claude Code 2.1.215, five requests each: 9,994 against 27,917 estimated tokens of system instructions and tool definitions sent with each request. Tokens are estimated as characters ÷ 4. Providers cache much of this prefix, so the figure measures what each agent sends, not your bill; note b prices it with caching.",
   },
   {
     id: "b",
@@ -170,18 +173,10 @@ const notes = [
   },
   {
     id: "c",
-    text: "Desktop from 1.99.108. Chats and parallel agents run without a cap until you set one in Settings, Spend limits; automations start with limits of $5 a run and $25 a day, which you can change. Before each step the Run Guard checks a catalog-priced estimate; one step can cost more than its estimate, and agents running side by side each finish the step they're on. With a dollar cap set, 40 unpriced steps also stop a run. Dollars are provider-reported tokens at catalog list price, not your provider's invoice. The terminal gets the Run Guard with the next CLI release.",
+    text: "Desktop from 1.99.108. Chats and parallel agents run without a cap until you set one in Settings, Spend limits; automations start with limits of $5 a run and $25 a day, which you can change. Before each step the Run Guard checks a catalog-priced estimate; one step can cost more than its estimate, and agents running side by side each finish the step they're on. With a dollar cap set, 40 unpriced steps also stop a run. Dollars are the tokens your provider reported at catalog list price, or the amount the provider reported when it reports one, not your provider's invoice. Loop pauses are on unless you turn them off. The Run Guard doesn't cap Claude Code, Codex or Cursor Agent, which run on the subscription you already pay for. The terminal gets the Run Guard with the next CLI release, and Windows WSL servers once a later desktop release requires that CLI.",
   },
   {
     id: "d",
-    text: "In the desktop app, each in its own copy of the repository and on the subscription you already pay for. The Run Guard does not cap their spend.",
-  },
-  {
-    id: "e",
-    text: "Vectorscope's defaults, a $2.00 cap for one review and $10.00 across the automatic reviews of one pull request, which you can change. Pull-request reviews run in the GitHub Actions workflow that vector github install adds, on your own provider key.",
-  },
-  {
-    id: "f",
     text: "Free with a Vector account, on macOS, Windows and Linux and in the terminal. Your model provider bills you for the models you use.",
   },
 ]
@@ -198,13 +193,13 @@ const thousands = (value: number) => `${(value / 1000).toFixed(1)}K`
       Free, on your desktop and in your terminal, working on the repository already on your computer.
     </p>
     <p class="ls-body" data-reveal>
-      It isn't a chat box on an editor, and it isn't a wrapper around another company's agent. Vector runs its own
-      agent engine, with its own tools, context handling and nine built-in subagents. In the desktop app, Claude Code,
-      Codex and Cursor Agent run beside it, each in its own copy of the repository, on one dashboard. Vectorscope
-      reviews the change, and Vector Cloud ships it from your own Vercel and Supabase accounts.
+      It isn't a wrapper around another company's agent. Vector runs its own agent engine, with its own tools, context
+      handling and nine built-in subagents. In the desktop app, Claude Code, Codex and Cursor Agent run beside it,
+      each in its own copy of the repository, on one dashboard. Vectorscope reviews the change, and Vector Cloud ships
+      it from your own Vercel and Supabase accounts.
     </p>
     <p class="ls-closer" data-reveal>
-      The work is moving from typing code to directing agents. Vector is built for that part of the job.
+      The work is moving from typing code to directing agents, and Vector is where you direct them.
     </p>
   </div>
 </section>
@@ -239,7 +234,7 @@ const thousands = (value: number) => `${(value / 1000).toFixed(1)}K`
 
   <div class="ls-foot" data-reveal-group>
     <p class="ls-closer" data-reveal>
-      Vector is built for that world: any model, a lean harness, and the economics of every run in view.
+      That is the workspace Vector is: any model you bring, an agent that carries less, and a limit inside the run.
     </p>
     <ol class="ls-sources" data-reveal aria-label="Sources">
       {
@@ -267,11 +262,13 @@ const thousands = (value: number) => `${(value / 1000).toFixed(1)}K`
 <section id="why-vector" data-chapter="Why Vector" class="ls-section" aria-labelledby="why-vector-title">
   <div class="ls-head" data-reveal-group>
     <p class="ls-kicker" data-reveal>Why Vector</p>
-    <h2 id="why-vector-title" class="ls-title" data-reveal>Built for that&nbsp;world.</h2>
-    <p class="ls-subtitle" data-reveal>Bringing your own key is where Vector starts, not what sets it apart.</p>
+    <h2 id="why-vector-title" class="ls-title" data-reveal>What sets Vector&nbsp;apart.</h2>
+    <p class="ls-subtitle" data-reveal>
+      Anyone can let you bring your own key. The edge is what happens around the model.
+    </p>
     <p class="ls-body" data-reveal>
-      Editors were built for a person typing. Vector is built for agents working while you review. Three of these
-      work today. One is planned, and it's labelled that way.
+      An editor is made for a person typing. Vector is built for agents working while you review. Three of these work
+      today; one is planned, and labelled that way.
     </p>
   </div>
 
@@ -299,6 +296,7 @@ const thousands = (value: number) => `${(value / 1000).toFixed(1)}K`
           <p class="ls-pillar-proof">
             {pillar.proof}{pillar.note && <sup class="ls-ref"><a href={`#note-${pillar.note}`} aria-label={`Note ${pillar.note}`}>{pillar.note}</a></sup>}
           </p>
+          {pillar.small && <p class="ls-pillar-small">{pillar.small}</p>}
           {pillar.planned && (
             <p class="ls-pillar-next">
               <span class="ls-chip" data-status="planned">
@@ -307,7 +305,6 @@ const thousands = (value: number) => `${(value / 1000).toFixed(1)}K`
               <span>{pillar.planned}</span>
             </p>
           )}
-          {pillar.small && <p class="ls-pillar-small">{pillar.small}</p>}
           {pillar.href && (
             <a class="ls-pillar-link" href={pillar.href}>
               {pillar.more}

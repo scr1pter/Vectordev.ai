@@ -43,14 +43,14 @@ import { wordmarkCells } from "../lib/wordmark"
 // and the card shelf of what Vector does, each card linked to the docs page that covers it in full.
 
 // The hero's rotating line completes "Vector …". Each phrase is true in desktop 1.99.108; the qualifiers (caps are
-// off until set, the terminal gets the Run Guard and background subagents with the next CLI release) sit in
-// LanderStory's notes. Subagents run up to eight per batch, so the subagent phrase gives that number. The first
-// phrase shows under reduced motion and before the script runs.
+// off until set, the terminal gets the Run Guard and background subagents with the next CLI release, Windows WSL
+// servers later) sit in LanderStory's notes. Eight is the batch size, not a limit on subagents running together.
+// The first phrase shows under reduced motion and before the script runs.
 const heroPhrases = [
-  "has a lean agent of its own.",
+  "has an agent of its own.",
   "runs Claude Code, Codex and Cursor too.",
-  "runs up to eight subagents at once.",
-  "stops within one step of your spend cap.",
+  "runs subagents in batches of up to eight.",
+  "pauses an agent stuck in a loop.",
   "reviews your branch before you push.",
   "ships from your own Vercel and Supabase.",
   "runs in your terminal too.",
@@ -81,7 +81,7 @@ const workspaceFacts = [
   },
   {
     title: "A tokenomics engine",
-    text: "Every chat priced from the tokens your provider reported, at catalog rates, and from desktop 1.99.108 a Run Guard that holds a run to the cap you set.",
+    text: "Each chat priced from the tokens your provider reported where the model has a price, and from desktop 1.99.108 a Run Guard that stops a run within one step of the cap you set.",
   },
 ]
 
@@ -277,8 +277,8 @@ const trustCards = [
   },
   {
     icon: Coins,
-    lead: "Spend, measured not modelled.",
-    text: "Every run records the tokens your provider reported and prices them at catalog rates, then ranks the models you actually use.",
+    lead: "Spend from reported tokens.",
+    text: "Each run of Vector's own agent records the tokens your provider reported and prices them at catalog rates where the model has a price, then ranks the models you actually use.",
     href: "/docs/tokenomics",
     more: "Read about the tokenomics engine",
   },
@@ -328,12 +328,12 @@ const trustCards = [
           </h1>
 
           <p class="headline">
-            Models are a choice. <span class="headline-accent">The harness is the&nbsp;product.</span>
+            The harness shapes the bill. <span class="headline-accent">Vector's own is built&nbsp;lean.</span>
           </p>
 
           <p class="hero-deck simple-deck">
-            Vector is a free workspace for coding agents: its own lean agent, the ones you already pay for, and the cost
-            of every run in plain sight.
+            Vector is a free workspace for coding agents. Its own agent sends a smaller fixed prompt than Claude Code with
+            every request, and in the desktop app a Run Guard stops a run within one step of the cap you set.
           </p>
 
           <p class="hero-ticker">
@@ -342,9 +342,9 @@ const trustCards = [
               >{heroPhrases[0]}</span
             >
             <span class="sr-only"
-              >Vector has a lean agent of its own, runs Claude Code, Codex and Cursor Agent beside it, runs up to eight
-              subagents at once, stops within one step of the spend cap you set, reviews your branch before you push,
-              ships from your own Vercel and Supabase accounts, runs in your terminal too, and has its own 300B+ model
+              >Vector has an agent of its own, runs Claude Code, Codex and Cursor Agent beside it, runs subagents in
+              batches of up to eight, pauses an agent stuck in a loop, reviews your branch before you push, ships from
+              your own Vercel and Supabase accounts, runs in your terminal too, and has its own 300B+ model
               planned.</span
             >
           </p>
@@ -358,13 +358,11 @@ const trustCards = [
           </div>
           <p class="hero-receipt">
             <a href="#proof">
-              <span>fixed tokens per request</span>
+              <span>modelled cost, five scripted subagent tasks</span>
               <span aria-hidden="true">·</span>
-              <span>Vector ≈10.0K</span>
+              <span>Vector 64–67% lower than Claude Code 2.1.215</span>
               <span aria-hidden="true">·</span>
-              <span>Claude Code 2.1.215 ≈27.9K</span>
-              <span aria-hidden="true">·</span>
-              <span>offline, 17 Oct 2026</span>
+              <span>offline, 16 Oct 2026</span>
               <span class="hero-receipt-more">See the numbers</span>
             </a>
           </p>
@@ -392,7 +390,7 @@ const trustCards = [
           Point a swarm of agents at separate branches and let each one spawn subagents for the parts. Set up the
           database, deploy to your own cloud account, and have the change reviewed before it reaches main. Vector does
           all of it in one window, over the repository already on your disk — with a browser it can drive, a tokenomics
-          engine that prices every chat, {pluginCount} one-click plugins, and any MCP server you write yourself.
+          engine that prices each chat where the model has a price, {pluginCount} one-click plugins, and any MCP server you write yourself.
         </p>
         <ul class="story-facts" data-reveal>
           {
