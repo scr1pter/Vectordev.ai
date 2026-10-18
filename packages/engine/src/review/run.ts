@@ -439,7 +439,7 @@ export const run: (
       const first = yield* send(spec.text, deadline - Date.now())
       if (first.timedOut) track.stop ??= "timeout"
       const message = first.timedOut ? undefined : first.message
-      // A project budget.run cap can still stop a specialist through the run guard. Count it as a budget stop, so
+      // A budget.run cap can still stop a specialist through the run guard. Count it as a budget stop, so
       // the files it never reached are reported as not reviewed and the finalize prompt runs.
       if (message?.info.role === "assistant" && message.info.error?.name === "BudgetStopError") track.stop ??= "budget"
       const structured = message?.info.role === "assistant" ? message.info.structured : undefined

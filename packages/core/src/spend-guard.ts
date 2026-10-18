@@ -133,7 +133,7 @@ export function start(rootID: SessionID, budget: RunBudget.Info, loopRules = tru
 }
 
 // The stricter of two budgets, limit by limit, for a source that may tighten the limits it is given and never loosen
-// them, such as an untrusted project's config or an invited guest's prompt. A limit only one side sets applies as it
+// them, such as an invited guest's prompt or a child or batch budget. A limit only one side sets applies as it
 // is; the warning share and the unpriced-step limit are compared with the defaults a side that leaves them out runs
 // with, so `{ warnAt: 1 }` cannot push the warning past WARN_AT.
 export function tighter(base: RunBudget.Info | undefined, next: RunBudget.Info): RunBudget.Info {

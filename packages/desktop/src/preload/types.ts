@@ -344,9 +344,8 @@ export type SpendLimitsAPI = {
   // Omitted limit sets keep their stored value, so a settings pane can save the
   // interactive caps without also rewriting the unattended ones.
   setLimits: (next: Partial<SpendPolicy>) => Promise<SpendPolicy>
-  // With a projectPath the summary also carries that project's own day and
-  // month totals alongside the account-wide ones.
-  status: (projectPath?: string) => Promise<SpendSummary>
+  // Day and month totals across every repository; no repository has its own.
+  status: () => Promise<SpendSummary>
   recent: (limit?: number) => Promise<SpendEvent[]>
 }
 

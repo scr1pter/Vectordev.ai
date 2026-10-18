@@ -21,12 +21,17 @@ export const spendRows = [
 ]
 
 // The Run Guard shipped in desktop 1.99.108; the terminal UI and vector run and its flags get it with the next CLI
-// release, and WSL servers with the later desktop release that requires that CLI. Keep these in step with the
-// Tokenomics page.
+// release, and WSL servers with the later desktop release that requires that CLI. One overall set of limits, with
+// a repository's own budget.run ignored, lands in desktop 1.99.109. Keep these in step with the Tokenomics and
+// Permissions pages.
 export const runGuardRows = [
   [
     "Where caps come from",
-    "Settings → Spend limits in the desktop app for chats and the parallel agents you start, the project's budget.run for chats, the terminal UI and vector run, or vector run --max-cost and --max-steps for one run. Automations use the Left alone limits: $5 a run and $25 a day unless you change them.",
+    "Settings → Spend limits in the desktop app for chats and the parallel agents you start, budget.run in your user config (~/.config/vector/vector.json) for chats, the terminal UI and vector run, or vector run --max-cost and --max-steps for one run. Automations use the Left alone limits: $5 a run and $25 a day unless you change them.",
+  ],
+  [
+    "One set of limits for every repository",
+    "From desktop 1.99.109, spend limits are overall: the day and month limits count spend in all your repositories together, and the per-repository monthly limit in Settings → Spend limits is gone, so set a monthly limit instead. A repository's own budget.run in its vector.json or .vector settings is ignored too, trusted or not, and Vector says so once for each file that still sets one. Desktop 1.99.108 still reads a repository's budget.run. The terminal UI and vector run follow with the next CLI release, and Windows WSL servers once a later desktop release requires that CLI.",
   ],
   [
     "A stop before the step that would cross",

@@ -12,9 +12,9 @@ const DEFAULT_WARN_AT = 0.8
 const UNCAPPED_RUN_SHARE = 0.5
 // The longest window any limit is evaluated over is the calendar month, so a
 // raw event stops being needed once it is two months old. Folding it into a
-// per-day, per-project total loses nothing a limit reads: a local calendar day
-// never straddles a month boundary, and a run never spans days, so the day,
-// month and per-project windows all reproduce exactly from day totals.
+// per-day total loses nothing a limit reads: a local calendar day never
+// straddles a month boundary, and a run never spans days, so the day and month
+// windows reproduce exactly from day totals.
 const RAW_EVENT_RETENTION_DAYS = 62
 // A loop that spends without stopping is exactly what this file exists to
 // catch, so raw events also have a hard ceiling. Crossing it folds every
@@ -25,11 +25,13 @@ const DAY_TOTAL_RETENTION_DAYS = 400
 
 export type SpendSource = "session" | "parallel" | "scheduled"
 
-// One recorded observation of spend. `costUsd` is absent when the provider
-// reported no usage at all — a zero-cost model, or a provider that returns
-// nothing. Such a run is unmeasured rather than free, so the field is never
-// defaulted to 0: a zero would let unknown spend read as proof of cheapness,
-// and would let a day of unmeasured runs sit under a cap it never tested.
+// One recorded observation of spend. `projectPath` is the repository the run
+// worked in, kept as provenance only: every limit and total counts all of them.
+// `costUsd` is absent when the provider reported no usage at all — a zero-cost
+// model, or a provider that returns nothing. Such a run is unmeasured rather
+// than free, so the field is never defaulted to 0: a zero would let unknown
+// spend read as proof of cheapness, and would let a day of unmeasured runs sit
+// under a cap it never tested.
 export type SpendEvent = {
   id: string
   projectPath: string
@@ -65,11 +67,10 @@ export type SpendLimitSet = {
   // scheduled launch.
   perRun?: SpendLimit
   // Calendar day and calendar month in the user's own timezone, counting every
-  // project — the provider bill this protects is account-wide.
+  // repository — the provider bill this protects is account-wide, so there is
+  // no limit for one repository on its own.
   perDay?: SpendLimit
   perMonth?: SpendLimit
-  // The same calendar month, counting only the project the run belongs to.
-  perProjectMonth?: SpendLimit
 }
 
 export type SpendPolicy = {
@@ -78,7 +79,6 @@ export type SpendPolicy = {
 }
 
 export type SpendAllowanceInput = {
-  projectPath: string
   runId: string
   source: SpendSource
   at?: Date
@@ -117,7 +117,6 @@ export type SpendSummary = {
   day: string
   month: string
   all: { day: SpendWindowTotal; month: SpendWindowTotal }
-  project?: { projectPath: string; day: SpendWindowTotal; month: SpendWindowTotal }
   policy: SpendPolicy
 }
 
@@ -157,7 +156,7 @@ export function createSpendLedger(input: { userDataPath: string }) {
   // run's live engine budget, so concurrent launches must not both be handed
   // the same dollars. In memory only: a reservation dies with the process, and
   // so does the run that holds it.
-  const reservations = new Map<string, { usd: number; projectPath: string }>()
+  const reservations = new Map<string, number>()
 
   const load = () => (cached ??= readLedger(file))
 
@@ -284,16 +283,10 @@ export function createSpendLedger(input: { userDataPath: string }) {
     // Other runs in flight may still spend what they hold, so their headroom is
     // counted as spent in every shared window. A run's own reservation is not:
     // re-checking a run must not block it against itself. Holds count under
-    // both policies, just as spend does: the day and month windows are
-    // account-wide, so a scheduled run's hold is money an interactive cap
-    // cannot hand out either.
-    const held = [...reservations].filter((entry) => entry[0] !== allowance.runId).map((entry) => entry[1])
-    const heldAll = sum(held.map((reservation) => reservation.usd))
-    const heldProject = sum(
-      held
-        .filter((reservation) => reservation.projectPath === allowance.projectPath)
-        .map((reservation) => reservation.usd),
-    )
+    // both policies and from every repository, just as spend does: the day and
+    // month windows are account-wide, so a scheduled run's hold is money an
+    // interactive cap cannot hand out either.
+    const held = sum([...reservations].filter((entry) => entry[0] !== allowance.runId).map((entry) => entry[1]))
 
     const checks = [
       {
@@ -302,14 +295,8 @@ export function createSpendLedger(input: { userDataPath: string }) {
         spent: sum(state.events.filter((event) => event.runId === allowance.runId).map((event) => event.costUsd ?? 0)),
         held: 0,
       },
-      { limit: limits.perDay, where: "today", spent: windowTotal(state, { day }).costUsd + heldAll, held: heldAll },
-      { limit: limits.perMonth, where: "this month", spent: monthTotal.costUsd + heldAll, held: heldAll },
-      {
-        limit: limits.perProjectMonth,
-        where: "on this project this month",
-        spent: windowTotal(state, { month, projectPath: allowance.projectPath }).costUsd + heldProject,
-        held: heldProject,
-      },
+      { limit: limits.perDay, where: "today", spent: windowTotal(state, { day }).costUsd + held, held },
+      { limit: limits.perMonth, where: "this month", spent: monthTotal.costUsd + held, held },
     ].filter((check): check is { limit: SpendLimit; where: string; spent: number; held: number } =>
       Boolean(check.limit),
     )
@@ -339,7 +326,7 @@ export function createSpendLedger(input: { userDataPath: string }) {
     // Nothing is awaited between the totals above and this hold, so no other
     // check can read the headroom before it is held.
     if (allowance.reserve && budgetUsd !== undefined && budgetUsd > 0) {
-      reservations.set(allowance.runId, { usd: budgetUsd, projectPath: allowance.projectPath })
+      reservations.set(allowance.runId, budgetUsd)
     }
     const warned = checks.find((check) => check.spent >= check.limit.usd * warnAtOf(check.limit))
     if (warned) {
@@ -356,7 +343,7 @@ export function createSpendLedger(input: { userDataPath: string }) {
     return { allowed: true, state: "ok", remainingUsd, budgetUsd, unmeasuredRuns, unmeasuredNote }
   }
 
-  const summary = async (scope?: { projectPath?: string; at?: Date }): Promise<SpendSummary> => {
+  const summary = async (scope?: { at?: Date }): Promise<SpendSummary> => {
     const state = await load()
     const at = scope?.at ?? new Date()
     const day = localDayKey(at)
@@ -366,13 +353,6 @@ export function createSpendLedger(input: { userDataPath: string }) {
       day,
       month,
       all: { day: windowTotal(state, { day }), month: windowTotal(state, { month }) },
-      project: scope?.projectPath
-        ? {
-            projectPath: scope.projectPath,
-            day: windowTotal(state, { day, projectPath: scope.projectPath }),
-            month: windowTotal(state, { month, projectPath: scope.projectPath }),
-          }
-        : undefined,
       policy: state.policy,
     }
   }
@@ -384,9 +364,9 @@ export function createSpendLedger(input: { userDataPath: string }) {
     summary,
     // Holds `usd` of headroom for a run that is starting. recordRunCost or
     // release gives it back.
-    reserve(runId: string, usd: number, projectPath: string) {
+    reserve(runId: string, usd: number) {
       if (!Number.isFinite(usd) || usd <= 0) return
-      reservations.set(runId, { usd, projectPath })
+      reservations.set(runId, usd)
     },
     // For a run that ends without recording spend, such as one that failed
     // before it reached the engine. Safe to call more than once.
@@ -500,17 +480,14 @@ async function writeLedger(file: string, state: SpendLedgerState) {
   await rename(temp, file)
 }
 
-function windowTotal(
-  state: SpendLedgerState,
-  filter: { day?: string; month?: string; projectPath?: string },
-): SpendWindowTotal {
-  const matches = (day: string, projectPath: string) =>
-    (!filter.day || day === filter.day) &&
-    (!filter.month || day.startsWith(filter.month)) &&
-    (!filter.projectPath || projectPath === filter.projectPath)
+// Every repository's spend lands in every window: no limit or total is kept for
+// one repository on its own.
+function windowTotal(state: SpendLedgerState, filter: { day?: string; month?: string }): SpendWindowTotal {
+  const matches = (day: string) =>
+    (!filter.day || day === filter.day) && (!filter.month || day.startsWith(filter.month))
 
-  const days = state.days.filter((total) => matches(total.day, total.projectPath))
-  const events = state.events.filter((event) => matches(localDayKey(new Date(event.at)), event.projectPath))
+  const days = state.days.filter((total) => matches(total.day))
+  const events = state.events.filter((event) => matches(localDayKey(new Date(event.at))))
   const runs = new Set(events.map((event) => event.runId))
   const measured = new Set(events.filter((event) => event.costUsd !== undefined).map((event) => event.runId))
 
@@ -525,8 +502,8 @@ function windowTotal(
   }
 }
 
-// Folds completed days out of the raw event list into per-day, per-project
-// totals. Today is never folded, so the per-run total of a run that is still
+// Folds completed days out of the raw event list into per-day totals, one row
+// per day and repository as the provenance on each event. Today is never folded, so the per-run total of a run that is still
 // going always reads from raw events and stays exact.
 function prune(state: SpendLedgerState, at: Date): SpendLedgerState {
   const today = localDayKey(at)
@@ -574,12 +551,12 @@ function prune(state: SpendLedgerState, at: Date): SpendLedgerState {
 }
 
 // Merges the events that every total already reads as one: same run, same day,
-// same project, provider, model and source. Per-run, per-day and per-month
+// same repository, provider, model and source. Per-run, per-day and per-month
 // amounts come out identical, and a run stays unmeasured only when none of its
 // merged events reported cost.
 function collapse(events: SpendEvent[]) {
   const grouped = events.reduce((groups, event) => {
-    // A project path can hold any character a filesystem allows, so the parts
+    // A repository path can hold any character a filesystem allows, so the parts
     // join on one none of them can contain.
     const key = [
       localDayKey(new Date(event.at)),
@@ -608,12 +585,17 @@ function collapse(events: SpendEvent[]) {
     .sort((a, b) => a.at.localeCompare(b.at))
 }
 
+// Copies only the overall limits. This is also the migration for 1.99.108's
+// per-repository monthly limit: a stored `perProjectMonth` is not one of them,
+// so it is dropped on the first read and gone from the file at the next write,
+// while every per-run, day and month cap carries over unchanged. It is not
+// folded into `perMonth`, because a cap meant for one repository would then
+// stop every repository at once.
 function normalizeLimitSet(set: SpendLimitSet): SpendLimitSet {
   return {
     perRun: normalizeLimit(set.perRun),
     perDay: normalizeLimit(set.perDay),
     perMonth: normalizeLimit(set.perMonth),
-    perProjectMonth: normalizeLimit(set.perProjectMonth),
   }
 }
 

@@ -8,6 +8,7 @@ import {
 } from "@/features/economics/spend-limits-api"
 import {
   LIMIT_FIELDS,
+  SCOPE_NOTES,
   columnWarnAt,
   parseUsd,
   parseWarnAt,
@@ -26,7 +27,7 @@ const COLUMNS: readonly { key: keyof SpendPolicy; title: string }[] = [
 
 // Bound to the desktop spend ledger. The web build has no ledger, so the
 // settings navigation hides this page there; the fallback covers a direct link.
-export const SettingsSpendLimitsV2: Component<{ repositoryPath?: string }> = (props) => {
+export const SettingsSpendLimitsV2: Component = () => {
   const api = spendLimitsApi()
   return (
     <section class="settings-v2-page">
@@ -44,16 +45,16 @@ export const SettingsSpendLimitsV2: Component<{ repositoryPath?: string }> = (pr
         when={api}
         fallback={<p class="settings-v2-card-description">Spend limits are kept by the Vector desktop app.</p>}
       >
-        {(ledger) => <SpendLimitsPanel api={ledger()} repositoryPath={props.repositoryPath} />}
+        {(ledger) => <SpendLimitsPanel api={ledger()} />}
       </Show>
     </section>
   )
 }
 
-function SpendLimitsPanel(props: { api: SpendLimitsApi; repositoryPath?: string }) {
+function SpendLimitsPanel(props: { api: SpendLimitsApi }) {
   const [error, setError] = createSignal("")
   const [policy, { mutate }] = createResource(() => props.api.limits())
-  const [summary, { refetch: refetchSummary }] = createResource(() => props.api.status(props.repositoryPath))
+  const [summary, { refetch: refetchSummary }] = createResource(() => props.api.status())
   const [recent] = createResource(() => props.api.recent(20))
   // A Warn at typed into a column with no cap yet, applied to its first cap.
   const [pending, setPending] = createSignal<Partial<Record<keyof SpendPolicy, number>>>({})
@@ -95,13 +96,6 @@ function SpendLimitsPanel(props: { api: SpendLimitsApi; repositoryPath?: string 
                 {(value) => summaryLine(value())}
               </Show>
             </h3>
-            <Show when={summary()?.project}>
-              {(project) => (
-                <p class="settings-v2-card-description">
-                  This project: {summaryLine({ all: { day: project().day, month: project().month } })}
-                </p>
-              )}
-            </Show>
             <Show when={(summary()?.all.month.unmeasuredRuns ?? 0) > 0}>
               <p class="settings-v2-card-description">
                 Unmeasured runs reported no usage. They are not counted as free, and they cannot be held to a dollar
@@ -113,12 +107,7 @@ function SpendLimitsPanel(props: { api: SpendLimitsApi; repositoryPath?: string 
       </div>
 
       <div>
-        <p class="settings-v2-card-description">
-          While you watch covers chats and parallel agents you start. Left alone covers automations.
-        </p>
-        <p class="settings-v2-card-description">
-          Chats count against the per-run cap. Day and month totals include automations and parallel agents.
-        </p>
+        <For each={SCOPE_NOTES}>{(note) => <p class="settings-v2-card-description">{note}</p>}</For>
       </div>
 
       <div class="settings-v2-section-grid">

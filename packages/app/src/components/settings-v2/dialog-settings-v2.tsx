@@ -67,7 +67,7 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
   const panel = (item: SettingsTab) => {
     if (item === "account") return <SettingsAccountV2 onUsage={() => setSection("usage")} />
     if (item === "usage") return <SettingsUsageV2 />
-    if (item === "spend") return <SettingsSpendLimitsV2 repositoryPath={props.repositoryPath} />
+    if (item === "spend") return <SettingsSpendLimitsV2 />
     if (item === "about") return <SettingsAboutV2 />
     if (item === "voice") return <SettingsVoiceV2 />
     if (item === "personalization") return <SettingsPersonalizationV2 />

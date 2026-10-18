@@ -2206,12 +2206,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     const ledger = await spendLedger()
     // The headroom is held inside the check, so agents launched beside this
     // one cannot be handed the same dollars.
-    const allowance = await ledger.checkAllowance({
-      projectPath: persisted.sourcePath,
-      runId,
-      source: "parallel",
-      reserve: true,
-    })
+    const allowance = await ledger.checkAllowance({ runId, source: "parallel", reserve: true })
     // Blocked means the money is already spent, so the agent must never start.
     // Throwing lands in the catch below, which is the same failed-record shape
     // every other pre-flight failure uses, so the reason reaches the UI.

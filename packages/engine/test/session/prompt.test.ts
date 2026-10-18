@@ -481,6 +481,23 @@ const useServerConfig = Effect.fn("test.useServerConfig")(function* (config: (ur
   return { dir, llm }
 })
 
+// Run limits come only from the user's own config: a repository's budget.run is ignored, trusted or not. The process
+// environment is the user-level source an instance reads when its config loads.
+const useUserConfig = Effect.fn("test.useUserConfig")(function* (config: Partial<ConfigV1.Info>) {
+  yield* Effect.acquireRelease(
+    Effect.sync(() => {
+      const previous = process.env.VECTOR_CONFIG_CONTENT
+      process.env.VECTOR_CONFIG_CONTENT = JSON.stringify(config)
+      return previous
+    }),
+    (previous) =>
+      Effect.sync(() => {
+        if (previous === undefined) delete process.env.VECTOR_CONFIG_CONTENT
+        else process.env.VECTOR_CONFIG_CONTENT = previous
+      }),
+  )
+})
+
 // Wait for a session's runner to enter a busy state. SessionStatus is flipped
 // inside Runner.startShell's serialized transition, so cancel can't no-op once
 // we observe it.
@@ -4412,9 +4429,8 @@ it.instance(
     Effect.gen(function* () {
       // Turn one costs $0.39 against a $0.40 cap from config. Its 20k-token context, 18k of it cached, prices the
       // next step at $0.74 at the cheapest, so the run stops before it.
-      const { llm } = yield* useServerConfig(
-        pricedCfg({ input: 100, output: 100, cache_read: 10 }, { budget: { run: { usd: 0.4 } } }),
-      )
+      yield* useUserConfig({ budget: { run: { usd: 0.4 } } })
+      const { llm } = yield* useServerConfig(pricedCfg({ input: 100, output: 100, cache_read: 10 }))
       const prompt = yield* SessionPrompt.Service
       const chat = yield* guardedChat()
       yield* llm.push(cachedUsage(reply().tool("first", { value: 1 }).usage({ input: 20_000, output: 100 }), 18_000))
@@ -4653,6 +4669,28 @@ it.instance(
   120_000,
 )
 
+it.instance(
+  "run guard ignores a trusted repository's budget.run",
+  () =>
+    Effect.gen(function* () {
+      // The repository allows one step; spend limits are the user's alone, so the run takes all three.
+      const { llm } = yield* useServerConfig((url) => ({ ...providerCfg(url), budget: { run: { steps: 1 } } }))
+      const prompt = yield* SessionPrompt.Service
+      const guard = yield* SpendGuard.Service
+      const chat = yield* guardedChat()
+      yield* llm.tool("first", { value: 1 })
+      yield* llm.tool("second", { value: 2 })
+      yield* llm.text("second")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+
+      expect(yield* llm.calls).toBe(3)
+      expect(budgetStop(result.info)).toBeUndefined()
+      expect((yield* guard.snapshot(chat.id))?.budget).toEqual({})
+    }),
+  120_000,
+)
+
 // A request whose history carries `text` in a user message, which tells a subagent's requests from its root's.
 const asksFor = (text: string) => (hit: { body: Record<string, unknown> }) =>
   Array.isArray(hit.body.messages) &&
@@ -4820,7 +4858,8 @@ it.instance(
   () =>
     Effect.gen(function* () {
       // No run of the root ever began in this process, as after a restart. The config allows one step.
-      const { llm } = yield* useServerConfig((url) => ({ ...providerCfg(url), budget: { run: { steps: 1 } } }))
+      yield* useUserConfig({ budget: { run: { steps: 1 } } })
+      const { llm } = yield* useServerConfig(providerCfg)
       const prompt = yield* SessionPrompt.Service
       const sessions = yield* Session.Service
       const guard = yield* SpendGuard.Service

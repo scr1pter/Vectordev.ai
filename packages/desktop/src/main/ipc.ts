@@ -478,9 +478,9 @@ export function registerIpcHandlers(deps: Deps) {
     const ledger = await spendLedger()
     return ledger.setPolicy(next)
   })
-  handle("spend-limits-status", async (_event: IpcMainInvokeEvent, projectPath?: string) => {
+  handle("spend-limits-status", async () => {
     const ledger = await spendLedger()
-    return ledger.summary({ projectPath })
+    return ledger.summary()
   })
   handle("spend-limits-recent", async (_event: IpcMainInvokeEvent, limit?: number) => {
     const ledger = await spendLedger()
