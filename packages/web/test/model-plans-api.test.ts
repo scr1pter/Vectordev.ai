@@ -149,7 +149,7 @@ const state = {
   charge: 0,
   keyReadDelay: 0,
   chatDelay: 0,
-  subscriptions: [] as ReturnType<typeof subscription>[],
+  subscriptions: [] as (ReturnType<typeof subscription> & { schedule?: string })[],
 }
 const calls: { path: string; method: string; headers: Headers; body: Record<string, unknown> }[] = []
 const commands: (string | number)[][] = []
@@ -691,6 +691,12 @@ describe("plan changes in Stripe's customer portal", () => {
     await expect(modelPlanPortal(user.id, fetcher, { flow: "change" })).rejects.toMatchObject({
       statusCode: 404,
       code: "MODEL_PLAN_MISSING",
+      message: "There is no paid Codium plan to change.",
+    })
+    await expect(modelPlanPortal(user.id, fetcher, { flow: "cancel" })).rejects.toMatchObject({
+      statusCode: 404,
+      code: "MODEL_PLAN_MISSING",
+      message: "There is no paid Codium plan to cancel.",
     })
     await paid()
     expect(await billing("portal", { flow: "change" })).toMatchObject({ status: 200 })
@@ -709,11 +715,31 @@ describe("plan changes in Stripe's customer portal", () => {
       "flow_data[subscription_cancel][subscription]": "sub_fixture",
       "flow_data[after_completion][redirect][return_url]": "https://vectordev.ai/account?model_plan=ending",
     })
+    // A smaller plan chosen earlier waits in a schedule for the renewal date; Stripe changes nothing more until then.
+    state.subscriptions[0]!.schedule = "sub_sched_fixture"
+    const opened = calls.filter((call) => call.path === "/v1/billing_portal/sessions").length
+    expect(await billing("portal", { flow: "change" })).toMatchObject({
+      status: 409,
+      body: { error: { code: "MODEL_PLAN_CHANGE_SCHEDULED" } },
+    })
+    delete state.subscriptions[0]!.schedule
     state.subscriptions[0]!.cancel_at_period_end = true
     expect(await billing("portal", { flow: "cancel" })).toMatchObject({
       status: 409,
       body: { error: { code: "MODEL_PLAN_ENDING" } },
     })
+    // A plan that is ending cannot be changed either; the person chooses a plan again once it ends.
+    expect(await billing("portal", { flow: "change" })).toMatchObject({
+      status: 409,
+      body: {
+        error: {
+          code: "MODEL_PLAN_ENDING",
+          message:
+            "Your plan ends at the close of this billing period, so it cannot be changed. Choose a plan again after it ends.",
+        },
+      },
+    })
+    expect(calls.filter((call) => call.path === "/v1/billing_portal/sessions")).toHaveLength(opened)
     expect(await billing("portal", { flow: "upgrade" })).toMatchObject({
       status: 400,
       body: { error: { code: "BILLING_FLOW_INVALID" } },

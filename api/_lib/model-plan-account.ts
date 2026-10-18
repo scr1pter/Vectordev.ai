@@ -1068,14 +1068,34 @@ export async function modelPlanPortal(
       "Plan changes are not available right now. Your plan stays as it is.",
     )
   const subscription = options.flow
-    ? (await subscriptions(account.customer, fetcher))
-        .map((value) => paidModelPlan(value, id, options.now))
-        .filter((value) => value !== undefined)
+    ? (await subscriptions(account.customer, fetcher)).flatMap((value) => {
+        const paid = paidModelPlan(value, id, options.now)
+        // A smaller plan chosen in the portal waits for the renewal date in a subscription schedule.
+        return paid ? [{ ...paid, scheduled: stripeRecord(value) && Boolean(value.schedule) }] : []
+      })
     : []
   if (options.flow && subscription.length !== 1)
-    throw new ApiError(404, "MODEL_PLAN_MISSING", "There is no paid Codium plan to change.")
+    throw new ApiError(
+      404,
+      "MODEL_PLAN_MISSING",
+      `There is no paid Codium plan to ${options.flow === "cancel" ? "cancel" : "change"}.`,
+    )
+  // Stripe does not change a subscription that is cancelling or already has a change waiting, so say why here rather
+  // than open a portal step that fails.
   if (options.flow === "cancel" && subscription[0]!.cancelAtPeriodEnd)
     throw new ApiError(409, "MODEL_PLAN_ENDING", "Your plan already ends at the close of this billing period.")
+  if (options.flow === "change" && subscription[0]!.cancelAtPeriodEnd)
+    throw new ApiError(
+      409,
+      "MODEL_PLAN_ENDING",
+      "Your plan ends at the close of this billing period, so it cannot be changed. Choose a plan again after it ends.",
+    )
+  if (options.flow === "change" && subscription[0]!.scheduled)
+    throw new ApiError(
+      409,
+      "MODEL_PLAN_CHANGE_SCHEDULED",
+      "Your plan already has a change waiting for its renewal date. You can change it again after that date.",
+    )
   const flow = options.flow === "change" ? "subscription_update" : "subscription_cancel"
   const result = await modelPlanStripe(
     "billing_portal/sessions",
