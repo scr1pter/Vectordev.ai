@@ -7,9 +7,10 @@ import deleteHandler from "../../../api/account/delete"
 import { verifyCliToken, verifyDeletionGrant, verifyDesktopToken } from "../../../api/_lib/cli-token"
 import {
   deletionConfirmation,
+  deletionNeedsSignIn,
+  deletionReauthPath,
   desktopSignInCallback,
   desktopSignInRequest,
-  signedInRecently,
 } from "../src/lib/desktop-sign-in"
 import { createVectorAccount } from "../../desktop/src/main/vector-account"
 
@@ -301,7 +302,7 @@ test("a code for deleting the account needs a sign-in from the last ten minutes 
   expect(verifyDesktopToken(token)).toEqual({ id: user.id, email: user.email })
 })
 
-test("the deletion confirmation keeps its purpose through sign-in and asks again after five minutes", () => {
+test("the deletion confirmation keeps its purpose through sign-in and asks for Continue only once", () => {
   const input = binding()
   const query = new URLSearchParams({
     desktop: "1",
@@ -312,19 +313,50 @@ test("the deletion confirmation keeps its purpose through sign-in and asks again
   })
   const parsed = desktopSignInRequest(query.toString())!
   expect(parsed.purpose).toBe("delete")
+  expect(parsed.confirmed).toBe(false)
   expect(parsed.returnPath).toContain("purpose=delete")
   expect(desktopSignInRequest(new URL(parsed.returnPath, "https://vectordev.ai").search)).toEqual(parsed)
   const renamed = new URLSearchParams({ ...Object.fromEntries(query), purpose: "rename" })
   expect(() => desktopSignInRequest(renamed.toString())).toThrow("Start sign-in")
-  expect(signedInRecently(session(Date.now() - 60_000))).toBe(true)
-  expect(signedInRecently(session(Date.now() - 6 * 60_000))).toBe(false)
-  expect(signedInRecently("not-a-token")).toBe(false)
-  expect(signedInRecently("a.%%%.b")).toBe(false)
   // Nothing is sent, and nobody is signed out, until the person chooses Continue on the page.
-  expect(deletionConfirmation(false, session(Date.now() - 60_000))).toBe("ask")
-  expect(deletionConfirmation(false, session(Date.now() - 60 * 60_000))).toBe("ask")
-  expect(deletionConfirmation(true, session(Date.now() - 60_000))).toBe("confirm")
-  expect(deletionConfirmation(true, session(Date.now() - 6 * 60_000))).toBe("sign-in-again")
+  expect(deletionConfirmation(false, parsed)).toBe("ask")
+  expect(deletionConfirmation(true, parsed)).toBe("send")
+
+  // Signing in again keeps that Continue, so the page does not ask a second time.
+  const login = new URL(deletionReauthPath(parsed), "https://vectordev.ai")
+  expect(login.pathname).toBe("/login")
+  expect(login.searchParams.get("reauth")).toBe("1")
+  const back = desktopSignInRequest(new URL(login.searchParams.get("returnTo")!, "https://vectordev.ai").search)!
+  expect(back).toEqual({ ...parsed, confirmed: true })
+  expect(deletionConfirmation(false, back)).toBe("send")
+  // The mark means nothing for an ordinary desktop sign-in.
+  const signIn = new URLSearchParams({ ...Object.fromEntries(query), confirmed: "1" })
+  signIn.delete("purpose")
+  expect(desktopSignInRequest(signIn.toString())?.confirmed).toBe(false)
+})
+
+test("whether a deletion needs a fresh sign-in is the API's to say, never the browser clock's", async () => {
+  counts.clear()
+  const confirm = async (signedInAt: number) => {
+    const input = binding()
+    const response = await request(
+      "/code",
+      { state: input.state, challenge: input.challenge, purpose: "delete" },
+      { authorization: `Bearer ${session(signedInAt)}` },
+    )
+    return { status: response.status, payload: await response.json() }
+  }
+  // Six minutes ago is within the API's ten, whatever this browser's clock says.
+  const recent = await confirm(Date.now() - 6 * 60_000)
+  expect(recent.status).toBe(200)
+  expect(deletionNeedsSignIn(recent.status, recent.payload)).toBe(false)
+  const old = await confirm(Date.now() - 11 * 60_000)
+  expect(old).toMatchObject({ status: 401, payload: { error: { code: "RECENT_SIGN_IN_REQUIRED" } } })
+  expect(deletionNeedsSignIn(old.status, old.payload)).toBe(true)
+  // Any other refusal is shown as it is, not answered with another sign-in.
+  expect(deletionNeedsSignIn(401, { error: { code: "SESSION_INVALID" } })).toBe(false)
+  expect(deletionNeedsSignIn(503, { error: { code: "RECENT_SIGN_IN_REQUIRED" } })).toBe(false)
+  expect(deletionNeedsSignIn(401, undefined)).toBe(false)
 })
 
 test("deleting from the desktop runs through the browser's fresh sign-in and ends with the account gone", async () => {

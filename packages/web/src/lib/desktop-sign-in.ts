@@ -1,5 +1,3 @@
-import { Option, Schema } from "effect"
-
 export function desktopSignInRequest(search: string) {
   const query = new URLSearchParams(search)
   if (query.get("desktop") !== "1") return
@@ -25,6 +23,8 @@ export function desktopSignInRequest(search: string) {
     state,
     challenge,
     ...(purpose === "delete" ? { purpose: "delete" as const } : {}),
+    // The person already chose Continue, then signed in again (see deletionReauthPath).
+    confirmed: purpose === "delete" && query.get("confirmed") === "1",
     returnPath: `/auth/cli?${destination}`,
   }
 }
@@ -37,38 +37,27 @@ export function desktopSignInCallback(payload: Record<string, unknown>, state: s
 
 /**
  * What /auth/cli does when Vector asks to confirm deleting the account: wait until the person chooses Continue on the
- * page, so a link alone cannot sign anyone out or send a confirmation; then ask for a fresh sign-in if this one is
- * not recent; then send the confirmation back to Vector.
+ * page, so a link alone cannot sign anyone out or send a confirmation; or go straight on when they chose it before
+ * signing in again. Whether the sign-in is recent enough is the API's to say (deletionNeedsSignIn), so a browser clock
+ * that is off never decides it.
  */
-export function deletionConfirmation(continued: boolean, accessToken: string, now = Date.now()) {
-  if (!continued) return "ask" as const
-  return signedInRecently(accessToken, now) ? ("confirm" as const) : ("sign-in-again" as const)
+export function deletionConfirmation(continued: boolean, request: { confirmed?: boolean }) {
+  return continued || request.confirmed ? ("send" as const) : ("ask" as const)
 }
 
-const SessionClaims = Schema.Struct({
-  amr: Schema.Array(Schema.Struct({ method: Schema.String, timestamp: Schema.Number })),
-})
+/** Whether vectordev.ai refused to confirm a deletion only because this browser's sign-in is not recent. */
+export function deletionNeedsSignIn(status: number, payload: unknown) {
+  const error = payload && typeof payload === "object" && "error" in payload ? payload.error : undefined
+  return (
+    status === 401 &&
+    Boolean(error && typeof error === "object" && "code" in error && error.code === "RECENT_SIGN_IN_REQUIRED")
+  )
+}
 
 /**
- * Whether this browser's sign-in is recent enough to confirm deleting the account. The API allows ten minutes; the
- * page asks for a fresh sign-in after five, so a slow clock or a slow page never sends someone a refusal instead.
+ * Where to sign in again before confirming a deletion. The way back says the person already chose Continue, so they
+ * are not asked twice; it counts only with the fresh sign-in, since the API checks that whatever the link says.
  */
-export function signedInRecently(accessToken: string, now = Date.now()) {
-  const payload = accessToken.split(".")[1]
-  const claims =
-    payload && /^[A-Za-z0-9_-]+$/.test(payload) && payload.length % 4 !== 1
-      ? Option.getOrUndefined(
-          Schema.decodeUnknownOption(Schema.fromJsonString(SessionClaims))(
-            new TextDecoder().decode(Uint8Array.from(atob(base64(payload)), (character) => character.charCodeAt(0))),
-          ),
-        )
-      : undefined
-  const latest = Math.max(0, ...(claims?.amr ?? []).map((entry) => entry.timestamp))
-  return now - latest * 1000 < 5 * 60 * 1000
-}
-
-// JWT segments are base64url without padding; atob reads standard base64.
-function base64(value: string) {
-  const standard = value.replace(/-/g, "+").replace(/_/g, "/")
-  return standard + "=".repeat((4 - (standard.length % 4)) % 4)
+export function deletionReauthPath(request: { returnPath: string }) {
+  return `/login?${new URLSearchParams({ returnTo: `${request.returnPath}&confirmed=1`, reauth: "1" })}`
 }

@@ -2,7 +2,13 @@
 import { Check, Copy, LoaderCircle, RefreshCw, TerminalSquare } from "lucide-react"
 import { useEffect, useState } from "react"
 import { readAccountApiResponse, vectorAccountClient } from "../../../lib/account-client"
-import { deletionConfirmation, desktopSignInCallback, desktopSignInRequest } from "../../../lib/desktop-sign-in"
+import {
+  deletionConfirmation,
+  deletionNeedsSignIn,
+  deletionReauthPath,
+  desktopSignInCallback,
+  desktopSignInRequest,
+} from "../../../lib/desktop-sign-in"
 import "./account.css"
 
 /**
@@ -10,8 +16,8 @@ import "./account.css"
  * a vct_ token to paste into `vector login`; everyone else bounces to /login.
  * With purpose=delete, the desktop app is confirming that the person deleting
  * the account is signed in here: nothing happens until they choose Continue,
- * so a link alone cannot sign anyone out or send a confirmation, and a sign-in
- * older than a few minutes has to be made again.
+ * so a link alone cannot sign anyone out, and a sign-in the API finds older
+ * than ten minutes has to be made again, after which the page goes straight on.
  */
 export function CliTokenPage() {
   const [token, setToken] = useState("")
@@ -28,7 +34,7 @@ export function CliTokenPage() {
 
   // Always read the live session: Supabase rotates access tokens, so a token
   // captured at mount goes stale and would 401 on "New token".
-  const mint = async (confirmed = false) => {
+  const mint = async (continued = false) => {
     setError("")
     const desktopRequest = desktopSignInRequest(location.search)
     const client = await vectorAccountClient()
@@ -38,22 +44,11 @@ export function CliTokenPage() {
       location.replace(`/login?returnTo=${encodeURIComponent(desktopRequest?.returnPath ?? "/auth/cli")}`)
       return
     }
-    const deletion =
-      desktopRequest?.purpose === "delete"
-        ? deletionConfirmation(confirmed, session.data.session.access_token)
-        : undefined
-    if (deletion === "ask") {
-      setEmail(session.data.session.user.email ?? "")
+    setEmail(session.data.session.user.email ?? "")
+    if (desktopRequest?.purpose === "delete" && deletionConfirmation(continued, desktopRequest) === "ask") {
       setConfirm(true)
       return
     }
-    if (desktopRequest && deletion === "sign-in-again") {
-      // Only this browser's session is signed out; the person signs in again and comes straight back here.
-      await client.auth.signOut({ scope: "local" })
-      location.replace(`/login?${new URLSearchParams({ returnTo: desktopRequest.returnPath, reauth: "1" })}`)
-      return
-    }
-    setEmail(session.data.session.user.email ?? "")
     if (desktopRequest) {
       const response = await fetch("/api/account/cli-code", {
         method: "POST",
@@ -68,6 +63,20 @@ export function CliTokenPage() {
           ...(desktopRequest.purpose ? { purpose: desktopRequest.purpose } : {}),
         }),
       })
+      if (
+        desktopRequest.purpose === "delete" &&
+        deletionNeedsSignIn(response.status, await response.clone().json().catch(() => undefined))
+      ) {
+        // Arriving with an earlier Continue but still no fresh sign-in, the page asks rather than signing out again.
+        if (!continued) {
+          setConfirm(true)
+          return
+        }
+        // Only this browser's session is signed out; the person signs in again and comes straight back here.
+        await client.auth.signOut({ scope: "local" })
+        location.replace(deletionReauthPath(desktopRequest))
+        return
+      }
       const payload = await readAccountApiResponse(response, "Vector could not connect this desktop.")
       const link = desktopSignInCallback(payload, desktopRequest.state)
       setCallback(link)
