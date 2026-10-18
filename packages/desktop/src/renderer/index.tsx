@@ -17,15 +17,15 @@ import {
   useCommand,
   useWslServers,
 } from "@vectordevai/app"
-import type { UpdaterState } from "@vectordevai/app/updater"
 import * as Sentry from "@sentry/solid"
 import type { AsyncStorage } from "@solid-primitives/storage"
 import { createMemoryHistory, MemoryRouter, type BaseRouterProps } from "@solidjs/router"
-import { createEffect, createMemo, createResource, createSignal, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createMemo, createResource, onCleanup, onMount, Show } from "solid-js"
 import { render } from "solid-js/web"
 import pkg from "../../package.json"
 import { t } from "./i18n"
 import { initializationData, initializationReady } from "./initialization"
+import { subscribeUpdater } from "./updater-state"
 import { resetZoom, setPinchZoomEnabled, webviewZoom, zoomIn, zoomOut } from "./webview-zoom"
 import { availableStartupServer, readyWslConnections } from "./wsl/connections"
 import { openPathApplication } from "../main/open-path"
@@ -88,8 +88,7 @@ const configureCrashDiagnostics = () => {
 configureCrashDiagnostics()
 observeTelemetryPreference(configureCrashDiagnostics)
 
-const [updaterState, setUpdaterState] = createSignal<UpdaterState>({ status: "disabled" })
-void window.api.updater.subscribe(setUpdaterState)
+const updater = subscribeUpdater(window.api.updater.subscribe)
 
 const deepLinkEvent = "vector:deep-link"
 
@@ -256,7 +255,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     storage,
 
     updater: {
-      state: updaterState,
+      state: updater.state,
       check: () => window.api.updater.check(),
       install: () => window.api.updater.install(),
     },
@@ -375,6 +374,7 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
 
   const [defaultServer] = createResource(() => platform.getDefaultServer?.())
   const [locale] = createResource(loadLocale)
+  const [updaterSettled] = createResource(() => updater.settled)
   const router = (props: BaseRouterProps) => (
     <DesktopMemoryRouter {...props} windowID={platform.windowID ?? "browser"} />
   )
@@ -408,7 +408,8 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
   function App() {
     const wslServers = useWslServers()
     const ready = createMemo(
-      () => !defaultServer.loading && !sidecar.loading && !windowCount.loading && !locale.loading,
+      () =>
+        !defaultServer.loading && !sidecar.loading && !windowCount.loading && !locale.loading && !updaterSettled.loading,
     )
     const servers = createMemo(() => {
       const data = initializationData(sidecar)
