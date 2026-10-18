@@ -517,7 +517,7 @@ export function CodiumQuestions(props: { models: CodiumPricingView["models"] }) 
       answer: (
         <p>
           Start with Codium 10 to try Codium on everyday coding. Codium 50 suits coding with agents most days, Codium
-          100 daily agent work across projects, and Codium 200 long sessions with parallel agents. Whichever plan you
+          100 daily agent work across repositories, and Codium 200 long sessions with parallel agents. Whichever plan you
           choose, a top-up covers a busy week without changing plans.
         </p>
       ),

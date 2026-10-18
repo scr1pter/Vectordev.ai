@@ -167,7 +167,7 @@ export const subagentKinds = [
   ],
   [
     "What they can change",
-    "A subagent can read, edit and run commands like the main agent. Explore, Review, Judge and Security can read your project and run checks, but they cannot edit it. Debug, Test, Performance and Migration can edit.",
+    "A subagent can read, edit and run commands like the main agent. Explore, Review, Judge and Security can read your repository and run checks, but they cannot edit it. Debug, Test, Performance and Migration can edit.",
   ],
   [
     "Where they work",
@@ -321,7 +321,7 @@ export const faqs = [
   {
     question: "Where are model provider keys stored?",
     answer:
-      "Provider credentials are stored with Vector's local application data and are not written into your repository. Keep normal operating-system account security enabled and never paste secrets into project files.",
+      "Provider credentials are stored with Vector's local application data and are not written into your repository. Keep normal operating-system account security enabled and never paste secrets into repository files.",
   },
   {
     question: "Can several agents work on one repository?",
@@ -341,17 +341,17 @@ export const faqs = [
   {
     question: "Can I stop Vector from using subagents?",
     answer:
-      "Yes. In the desktop app, switch off General subagents in Settings → Agents. In the terminal, from 1.99.99, set agent.general.disable to true in ~/.config/vector/vector.json, or in a project's vector.json for that project only. In the terminal it takes effect the next time you start Vector there. Vector's agent then does the work itself, except parts that fit a subagent specialist, which it can still hand to one. You can also still call a specialist yourself with @ and its name.",
+      "Yes. In the desktop app, switch off General subagents in Settings → Agents. In the terminal, from 1.99.99, set agent.general.disable to true in ~/.config/vector/vector.json, or in a repository's vector.json for that repository only. In the terminal it takes effect the next time you start Vector there. Vector's agent then does the work itself, except parts that fit a subagent specialist, which it can still hand to one. You can also still call a specialist yourself with @ and its name.",
   },
   {
     question: "Can I edit code myself?",
     answer:
-      "Yes. Switch from Agent to Editor to search the project, open files in tabs, edit directly, use diagnostics, and keep the same session agent beside the code.",
+      "Yes. Switch from Agent to Editor to search the repository, open files in tabs, edit directly, use diagnostics, and keep the same session agent beside the code.",
   },
   {
     question: "Does the browser replace Chrome or Firefox?",
     answer:
-      "No. It is a controlled project browser for previewing, testing, and completing approved web workflows alongside the active agent session.",
+      "No. It is a controlled browser for previewing the repository, testing, and completing approved web workflows alongside the active agent session.",
   },
   {
     question: "Do I need an API key?",

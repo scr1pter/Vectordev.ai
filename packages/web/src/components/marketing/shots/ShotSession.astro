@@ -136,11 +136,11 @@ const changes = [
 ]
 
 const tests = [
-  "an untrusted project cannot run executable config [2.91ms]",
+  "an untrusted repository cannot run executable config [2.91ms]",
   "a changed fingerprint revokes trust [1.12ms]",
   "a symlinked config resolves before the check [0.84ms]",
-  "project policy cannot widen permissions [0.67ms]",
-  "project MCP servers wait for trust [1.38ms]",
+  "repository policy cannot widen permissions [0.67ms]",
+  "repository MCP servers wait for trust [1.38ms]",
 ]
 
 const clock = (seconds: number, pad: boolean) =>
@@ -243,8 +243,8 @@ const clock = (seconds: number, pad: boolean) =>
           <div class="ss-column">
             <div class="ss-earlier">
               <p class="ss-prose">
-                The three boundaries are staged: fingerprint-bound trust for project executable configuration, a project
-                policy that can only narrow permissions, and a trust check before a project's MCP servers start. Focused
+                The three boundaries are staged: fingerprint-bound trust for repository executable configuration, a repository
+                policy that can only narrow permissions, and a trust check before a repository's MCP servers start. Focused
                 tests pass on the staged tree.
               </p>
               <p class="ss-prose">

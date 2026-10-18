@@ -22,7 +22,7 @@ export const prerender = true
     Vector Cloud.
   </p>
 
-  <h2 id="connect-accounts">Connect an account and select a project</h2>
+  <h2 id="connect-accounts">Connect an account and link a Vercel or Supabase project</h2>
   <p>
     Open Vector Cloud from Home, pick the repository, then open Connections. Desktop 1.99.108 and earlier also open it
     from the Cloud button in a session; from 1.99.109 a task's view has no Cloud controls. Choose Connect to sign in with
@@ -33,16 +33,16 @@ export const prerender = true
     as connected.
   </p>
   <p>
-    For Vercel, pick the personal account or team the project lives in, then link one of its projects or create a new
+    For Vercel, pick the personal account or team the Vercel project lives in, then link one of its Vercel projects or create a new
     one with a framework and root directory. A repository already deployed with the Vercel CLI is linked from its
     .vercel/project.json when you open Vector Cloud; an agent asks before linking it. Choose the Supabase project in Database.
     From 1.99.99, the desktop uses an encrypted temporary callback relay for Vercel, and PKCE for Supabase. Provider client secrets stay on the server. Management tokens are not returned to the renderer after saving.
   </p>
 
-  <h2 id="project-environment">Manage project variables</h2>
+  <h2 id="project-environment">Manage repository variables</h2>
   <p>
     Environment variable names keep the case you enter. Values are encrypted on your device and hidden by default, and
-    drafts and revealed values clear when you change project or task. Each variable is public or server-only, and a
+    drafts and revealed values clear when you change repository or task. Each variable is public or server-only, and a
     server-only value can never use a browser-visible name such as VITE_ or NEXT_PUBLIC_. Add or remove values in Vector, then choose Write to .env to update its
     managed block. Applying an empty list clears that block after the final removal; your lines above the marker remain.
     The file is replaced atomically, symbolic links are rejected, and POSIX systems use private file permissions. Every
@@ -51,7 +51,7 @@ export const prerender = true
     variables and leaves the file as it was until you stop tracking it with git rm --cached .env.
   </p>
   <p>
-    For a detected or configured Vite project, Vector preserves literal dollar signs and backslashes through Vite's
+    For a detected or configured Vite app, Vector preserves literal dollar signs and backslashes through Vite's
     environment parser. Enter literal values rather than expansion expressions. Multiline values and unsupported quote
     combinations are rejected before the file changes; add those in the On Vercel panel below instead, which sends them
     to the linked Vercel project without writing .env. Other frameworks retain their existing serialization.
@@ -61,12 +61,12 @@ export const prerender = true
     type; their values are never shown. Add, change or remove a variable per environment, optionally for one preview
     branch. A value can span several lines, such as a PEM key: Shift+Enter adds a line, and Enter saves. Compare with local compares values by hash. A sync first shows its plan: it creates what is missing and
     updates or deletes only variables an earlier Vector sync wrote, and nothing is written until you apply that plan.
-    Pull development values copies readable development values into this project's .env after you review them.
+    Pull development values copies readable development values into this repository's .env after you review them.
     Publishing uploads .env with the source, so a site without a build step, which Vercel serves from its root, must
     leave it out with .vercelignore; until then its publish stops at the secret scan.
-    Supabase setup adds the project's public URL and key under the names your framework exposes to the browser:
+    Supabase setup adds the Supabase project's public URL and key under the names your framework exposes to the browser:
     NEXT_PUBLIC_ for Next.js, VITE_ for Vite, and plain SUPABASE_URL and SUPABASE_ANON_KEY otherwise. It writes a
-    TypeScript client when the project has a tsconfig.json, and adds .env to .gitignore when git does not already ignore
+    TypeScript client when the repository has a tsconfig.json, and adds .env to .gitignore when git does not already ignore
     it. Secret, service-role, management and user-session keys are rejected for that browser configuration.
   </p>
 
@@ -74,7 +74,7 @@ export const prerender = true
   <p>
     Publish makes a preview unless you choose production and confirm it. A production build is made without moving
     your domains, checked, and promoted only when the required checks pass. Deployments lists everything Vercel has
-    for the project, including git pushes, with Vector's checks attached to the releases it made. From there you can
+    for the Vercel project, including git pushes, with Vector's checks attached to the releases it made. From there you can
     read build or runtime logs, cancel a build, redeploy, promote a staged production build, or roll production back
     to the last deployment that served it and passed Vector's checks. A production redeploy is built without moving
     your domains; promote it when you want it live. After you read a deployment's logs in Logs, Diagnose with the agent
@@ -83,9 +83,9 @@ export const prerender = true
     branch, shown on the workspace and reported in the task.
   </p>
   <p>
-    If Deployment Protection asks visitors to sign in, Vector's checks cannot open a preview. Project settings can
+    If Deployment Protection asks visitors to sign in, Vector's checks cannot open a preview. Hosting settings (the last entry under Setup in Vector Cloud) can
     create a Protection Bypass for Automation secret, kept in Vector's vault, so they can. Without it, a production
-    build the checks cannot open is not promoted, and production stays where it is. Project settings also edit Vercel's framework, root directory, build, output and install
+    build the checks cannot open is not promoted, and production stays where it is. Hosting settings also edit Vercel's framework, root directory, build, output and install
     commands and Node.js version. Domains attaches a domain you own and shows the exact records Vercel asks for, an A
     record for an apex domain or a CNAME for a subdomain, plus any verification record, then verifies them and reports
     the certificate.
@@ -107,8 +107,8 @@ export const prerender = true
     project linked to the repository. The agent can do the same through its cloud tool.
   </p>
   <ul class="feature-list">
-    <li><strong>Projects</strong><span>Link an existing project or create one in the organization you choose, with progress shown while Supabase brings it up. An account with no organization names one and Vector creates it. An interrupted creation is finished rather than duplicated. Pause, restore or unlink the linked project.</span></li>
-    <li><strong>Server credentials</strong><span>Write a server-only DATABASE_URL through the transaction pooler after you confirm. For a project Vector did not create, enter its current database password once instead of resetting it. Rotating the password can update DATABASE_URL and push the environment to Vercel. The password is encrypted on this device and never shown. Vector does not write DATABASE_URL into a .env that git already tracks.</span></li>
+    <li><strong>Supabase projects</strong><span>Link an existing Supabase project or create one in the organization you choose, with progress shown while Supabase brings it up. An account with no organization names one and Vector creates it. An interrupted creation is finished rather than duplicated. Pause, restore or unlink the linked Supabase project.</span></li>
+    <li><strong>Server credentials</strong><span>Write a server-only DATABASE_URL through the transaction pooler after you confirm. For a Supabase project Vector did not create, enter its current database password once instead of resetting it. Rotating the password can update DATABASE_URL and push the environment to Vercel. The password is encrypted on this device and never shown. Vector does not write DATABASE_URL into a .env that git already tracks.</span></li>
     <li><strong>Migrations and SQL</strong><span>See which migrations are applied, pending or changed (including those the Supabase CLI applied), write a new one with its down SQL from Database, apply them after reviewing their SQL, and roll back the latest one with its down migration in supabase/migrations/down/&lt;name&gt;.down.sql. Without a down migration Vector refuses. The Supabase CLI reads neither a "-- down" section nor a .down.sql file next to the migrations: supabase db push runs both as forward SQL. Migration status warns when it finds them. The SQL console runs queries read-only and asks before a query that changes data.</span></li>
     <li><strong>Authentication</strong><span>Edit the site URL and redirect URLs, including your linked Vercel production and preview addresses. Turn email, Google, GitHub and Apple sign-in on or off; client secrets go to Supabase and are not shown again. List, invite and delete users.</span></li>
     <li><strong>Storage and Edge Functions</strong><span>Create, update and delete buckets. Deploy functions from supabase/functions, delete them, and manage their secrets by name.</span></li>
@@ -128,16 +128,16 @@ export const prerender = true
     before it publishes, moves
     production, changes a database, writes a host's environment, .env or the stored variables, or changes a Vercel
     project or domain, and the prompt
-    names the provider, project and environment and shows any SQL that would run. It asks every time: auto-accepting
+    names the provider, the Vercel or Supabase project or the repository it acts on, and the environment, and shows any SQL that would run. It asks every time: auto-accepting
     permissions, a permission rule that allows it and an earlier approval never skip these prompts, and none of them
     offers Always allow. Only the read-only migration dry run can be answered by auto-accept. Vector also looks for
     direct calls to the Vercel or Supabase command-line tool in the agent's shell commands, such as vercel --prod,
     vercel env add or supabase db push, including quoted or escaped spellings such as ve''rcel, calls behind
     wrappers such as timeout, xargs, script, arch or strace, package runners such as npx, pnpm dlx, corepack or deno
     run npm:vercel, node running the CLI's own file, and sh -c, and asks for those the same way every time. Local work
-    such as supabase start does not ask; vercel dev does, since it downloads the project's Development variables.
+    such as supabase start does not ask; vercel dev does, since it downloads the Vercel project's Development variables.
     This is a best-effort check on the command line, not a boundary: a call it cannot see, such as one inside a
-    project script (npm run deploy), behind a variable, an alias or a wrapper it does not know, or in a program that
+    package script (npm run deploy), behind a variable, an alias or a wrapper it does not know, or in a program that
     uses the command-line tool's stored login itself, runs without that prompt. Only the shell sandbox
     (VECTOR_SHELL_SANDBOX=1, off by default), which hides those stored logins from the agent's commands, closes that
     route. Vercel's and Supabase's own MCP servers, added from Plugins or by hand, follow the same rule: a tool that
@@ -154,7 +154,7 @@ export const prerender = true
     renamed column or a whole row comes back hidden. A credential read through a view or a function the query calls is
     not recognised.
     Publishing goes to the Vercel project linked to the repository, as a preview unless you ask for production;
-    without a linked project, the tool returns setup guidance. A failed publish reaches the agent with its failed
+    without a linked Vercel project, the tool returns setup guidance. A failed publish reaches the agent with its failed
     checks and log lines, so it can fix the cause. A failed Vercel deployment never triggers a deployment somewhere
     else. The agent is instructed not to ask for secret values in the chat, and to name the variable to add in
     Environment variables instead.

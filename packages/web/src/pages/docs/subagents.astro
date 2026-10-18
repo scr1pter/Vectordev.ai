@@ -30,7 +30,7 @@ export const prerender = true
           </dl>
           <h2 id="specialists">The eight subagent specialists</h2>
           <p>
-            Explore, Review, Judge and Security can read your project and run checks, but they cannot edit it. Debug,
+            Explore, Review, Judge and Security can read your repository and run checks, but they cannot edit it. Debug,
             Test, Performance and Migration can edit. To ask for one yourself, type <code>@</code> and its name in the
             composer.
           </p>
@@ -58,11 +58,11 @@ export const prerender = true
           <ul class="feature-list">
             <li><strong>In the desktop app</strong><span>Switch off General subagents in Settings → Agents. Changing it stops any work in progress, and the new setting applies from your next message.</span></li>
             <li><strong>In the terminal</strong><span>The terminal reads its own config file, so the desktop switch does not change it. From 1.99.99, add <code>{'"agent": { "general": { "disable": true } }'}</code> to <code>~/.config/vector/vector.json</code> (<code>%USERPROFILE%\.config\vector\vector.json</code> on Windows). It takes effect the next time you start Vector in the terminal.</span></li>
-            <li><strong>For one project</strong><span>From 1.99.99, put the same setting in the project's <code>vector.json</code>. It turns subagents off for that project in the terminal and the desktop app alike, whatever the switch says. Releases before 1.99.99, such as desktop 1.99.8 and npm CLI 1.99.7, do not read <code>vector.json</code>.</span></li>
+            <li><strong>For one repository</strong><span>From 1.99.99, put the same setting in the repository's <code>vector.json</code>. It turns subagents off for that repository in the terminal and the desktop app alike, whatever the switch says. Releases before 1.99.99, such as desktop 1.99.8 and npm CLI 1.99.7, do not read <code>vector.json</code>.</span></li>
           </ul>
           <h2 id="custom-agents">Custom agents</h2>
           <p>
-            Explore, review, judge and security carry a read-only boundary that is re-applied after your repository's config is merged, so a checked-in file cannot turn a read-only reviewer into one that writes; they can still run verification commands from an allowlist such as <code>git diff</code>, <code>git log</code> and the project's test and build scripts.
+            Explore, review, judge and security carry a read-only boundary that is re-applied after your repository's config is merged, so a checked-in file cannot turn a read-only reviewer into one that writes; they can still run verification commands from an allowlist such as <code>git diff</code>, <code>git log</code> and the repository's test and build scripts.
           </p>
           <p>
             A parent can declare which paths each subagent owns, and Vector refuses two siblings that claim overlapping paths; tasks can depend on each other, run in the background and be resumed later by id.

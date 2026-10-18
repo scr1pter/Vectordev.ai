@@ -11,7 +11,7 @@
   "app.lander.features.lsp_enabled.title": "LSP enabled",
   "app.lander.features.lsp_enabled.description": "Automatically loads the right LSPs for the LLM.",
   "app.lander.features.multi_session.title": "Multi-session",
-  "app.lander.features.multi_session.description": "Start multiple agents in parallel on the same project.",
+  "app.lander.features.multi_session.description": "Start multiple agents in parallel on the same repository.",
   "app.lander.features.shareable_links.title": "Shareable links",
   "app.lander.features.shareable_links.description": "Share a link to any sessions for reference or to debug.",
   "app.lander.features.github_copilot.description": "Log in with GitHub to use your Copilot account.",

@@ -17,7 +17,7 @@ interface Props {
 
 const groups = [
   {
-    label: "Project tools",
+    label: "Repository tools",
     items: [
       { icon: "dashboard", name: "Agent Dashboard", link: "dashboard" },
       { icon: "browser", name: "Browser", link: "browser" },
@@ -60,7 +60,7 @@ const compact = Astro.props.compact ?? false
   </div>
 
   <div class="sb-projects" hidden={compact}>
-    <p class="sb-label sb-label-row"><span>Projects</span><ShotIcon name="plus" size={13} /></p>
+    <p class="sb-label sb-label-row"><span>Repositories</span><ShotIcon name="plus" size={13} /></p>
     <p class="sb-project">
       <ShotIcon name="caret" size={13} class="sb-caret" />
       <span class="sb-project-mark"><ShotIcon name="project" size={11} /></span>
@@ -80,7 +80,7 @@ const compact = Astro.props.compact ?? false
 
   {
     groups
-      .filter((group) => !compact || group.label === "Project tools")
+      .filter((group) => !compact || group.label === "Repository tools")
       .map((group) => (
         <div class="sb-group">
           <p class="sb-label">{group.label}</p>
