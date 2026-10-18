@@ -1,0 +1,1102 @@
+---
+// The landing page's argument, between the hero and the product tour: what Vector is, why a workspace like it
+// is where coding goes next, the four things that set it apart, and the measured numbers with their fine print.
+// Every sentence was checked on 17 October 2026 against desktop 1.99.108, npm CLI 1.99.99 and the benchmark
+// archives. Anything that is not live yet carries its label: Next release, Coming soon or Planned. Keep the labels
+// until the thing ships, and keep each benchmark figure next to its date, its caveats and "Codex was not part".
+
+// Why now: three sourced facts. The numbers refer to the sources listed under the beats.
+const beats = [
+  {
+    lead: "Teams already mix models.",
+    parts: [
+      { text: "27% of organisations send different work to different models.", source: 1 },
+      {
+        text: " Yet each lab's agent is built around its own: Claude Code officially supports only Claude models, and Codex defaults to OpenAI's.",
+        source: 2,
+      },
+      { text: " The work needs a home that doesn't belong to one lab." },
+    ],
+  },
+  {
+    lead: "The loop decides what a model can do.",
+    parts: [
+      {
+        text: "OpenAI's prompting guide says its Codex models were trained on its own patch format and terminal tool.",
+        source: 3,
+      },
+      {
+        text: " The tools, context and checks around a model shape both the result and the bill. So Vector brings a lean loop of its own for any model, and when a lab's model works best in that lab's agent, Vector runs that agent too.",
+      },
+    ],
+  },
+  {
+    lead: "Every token is a line on the bill.",
+    parts: [
+      { text: "38% of organisations already set usage limits to control AI cost.", source: 1 },
+      {
+        text: " With agents running in parallel and on schedules, a cap on next month's invoice arrives late. A limit inside the run acts while the agent is still working.",
+      },
+    ],
+  },
+]
+
+const sources = [
+  {
+    id: 1,
+    links: [
+      {
+        label: "Stack Overflow 2026 Developer Survey",
+        href: "https://stackoverflow.blog/2026/10/06/the-results-of-the-2026-developer-survey-are-here/",
+      },
+    ],
+    after: ", published 6 October 2026.",
+  },
+  {
+    id: 2,
+    links: [
+      { label: "Claude Code's LLM gateway docs", href: "https://code.claude.com/docs/en/llm-gateway" },
+      { label: "Codex's models docs", href: "https://learn.chatgpt.com/docs/models" },
+    ],
+    after: ", checked 11–17 October 2026.",
+  },
+  {
+    id: 3,
+    links: [
+      {
+        label: "OpenAI's Codex prompting guide",
+        href: "https://github.com/openai/openai-cookbook/blob/main/examples/gpt-5/codex_prompting_guide.ipynb",
+      },
+    ],
+    after: ", checked 11–17 October 2026.",
+  },
+]
+
+// The four pillars. `note` points at a footnote in the proof strip below.
+const pillars = [
+  {
+    id: "harness",
+    label: "Harness",
+    status: { kind: "today", text: "Today" },
+    title: "A lean agent of its own.",
+    text: "Vector's own engine runs a fixed set of tools, compacts older turns while keeping a protected recent window, and ships nine built-in subagents, four of which can't edit a file. From desktop 1.99.108, subagents work in the background, up to eight in a batch, while you message, steer or stop them. Claude Code, Codex and Cursor Agent run beside it, each in its own copy of the repository.",
+    proof: "About 10,000 tokens of fixed instructions and tool definitions per request, against about 28,000 for Claude Code 2.1.215.",
+    note: "a",
+    small: "Steering background subagents reaches the terminal with the next CLI release.",
+  },
+  {
+    id: "tokenomics",
+    label: "Tokenomics engine",
+    status: { kind: "today", text: "Today · desktop" },
+    title: "Spend you can leave alone.",
+    text: "The Run Guard stops a run within one step of the cap you set, pauses an agent stuck repeating the same call or error three times, and ends a provider outage after 10 retries or 15 minutes. Subagents and helper runs, Vectorscope reviews included, count against the run that launched them, and a step with no listed price shows as unpriced, not as $0.00.",
+    proof: "64–67% lower modelled cost than Claude Code 2.1.215 on five scripted subagent tasks, from a cold start, offline, 16 October 2026.",
+    note: "b",
+    small: "Caps are off until you set one. Desktop from 1.99.108; the terminal gets the Run Guard with the next CLI release.",
+  },
+  {
+    id: "velocity",
+    label: "Vector Velocity",
+    status: { kind: "planned", text: "Planned" },
+    title: "Our own model, for this loop.",
+    text: "Vector Velocity is the coding model we plan to build: over 300B parameters (300B+), designed for Vector's loop of planning, tool calls, edits, checks and review. It would sit in the model picker beside every other provider, measured by the same tokenomics.",
+    proof: "No weights or benchmarks exist yet, so we make no performance claims. Our privacy policy already covers it: Vector doesn't use your prompts, code or model output to train any model, including one it builds itself.",
+    href: "/legal/privacy#training",
+    more: "Read the training policy",
+  },
+  {
+    id: "cloud",
+    label: "Vector Cloud",
+    status: { kind: "today", text: "Today · desktop" },
+    title: "Ship from the accounts you already have.",
+    text: "Vector Cloud works inside your own Vercel and Supabase accounts: preview-first publishes, promote and roll back, environment values, domains and logs on Vercel; SQL shown before it runs, migrations, functions and security checks on Supabase. Each deploy checks itself with a secret scan, a health check and its logs read back, and the resources and billing stay with you.",
+    proof: "Every change to a cloud account asks you each time, with no Always allow, and Vercel publishes a preview unless you choose production.",
+    planned: "The software factory: an issue becomes a reviewed preview in the cloud with no laptop open, and a person still approves the merge.",
+  },
+]
+
+// Where the model comes from. Bring your own key is a fact, not the pitch, so it sits here rather than in the hero.
+const models = [
+  {
+    title: "Your own key",
+    rows: [{ status: { kind: "today", text: "Today" }, text: "Any provider, billed by that provider. Vector adds nothing to the bill." }],
+  },
+  {
+    title: "Free models inside of Vector",
+    rows: [
+      {
+        status: { kind: "today", text: "Today" },
+        text: "Connect your own free OpenRouter account for the free models on Vector's no-training list.",
+      },
+      {
+        status: { kind: "next", text: "Next release" },
+        text: "Every free OpenRouter model Vector is allowed to offer. One whose provider may train on your prompts is labelled “May train on your prompts”, and Vector asks you once before you first use one.",
+      },
+    ],
+  },
+  {
+    title: "Codium",
+    rows: [
+      {
+        status: { kind: "soon", text: "Coming soon" },
+        text: "Low-cost coding models on your Vector account, with plans from $10 a month.",
+      },
+    ],
+    href: "/codium",
+    more: "See Codium plans",
+  },
+]
+
+// The proof strip. Each figure keeps its footnote; the footnotes stay open on the page.
+const figures = [
+  { value: "≈10K vs ≈28K", label: "fixed tokens per request, Vector against Claude Code 2.1.215", note: "a" },
+  {
+    value: "64–67%",
+    label: "lower modelled cost than Claude Code 2.1.215 on five scripted subagent tasks, first session",
+    note: "b",
+  },
+  { value: "1 step", label: "how close to the cap you set the Run Guard stops a run, for each agent running", note: "c" },
+  { value: "3", label: "outside agents in one workspace: Claude Code, Codex and Cursor Agent", note: "d" },
+  { value: "$2 · $10", label: "default Vectorscope caps per review and per pull request, on your own key", note: "e" },
+  { value: "$0", label: "for the workspace, on your desktop and in your terminal", note: "f" },
+]
+
+const notes = [
+  {
+    id: "a",
+    text: "Vector's offline footprint benchmark (script/agent-eval/footprint.ts), solo-fix scenario, run 17 October 2026 on the desktop 1.99.108 code against Claude Code 2.1.215, five requests each: 9,994 against 27,917 estimated tokens of system instructions and tool definitions sent with each request. Tokens are estimated as characters ÷ 4. Providers cache much of this prefix, so the figure measures what each agent sends, not your bill.",
+  },
+  {
+    id: "b",
+    text: "The same harness, run 16 October 2026 on a pre-release build of desktop 1.99.108 against Claude Code 2.1.215, and archived in Vector's repository: five subagent scenarios in which both agents made the same number of requests (explore, general, concurrent readers, dependency handoff and stop), each from a fresh simulated cache. Vector's modelled cost was 64–67% lower in the first session and 68–74% lower in a second. A sixth scenario, steer, is left out because Vector made 10 requests to Claude Code's 9. Requests are priced at Claude Sonnet 4.5 list prices with Anthropic's prompt-caching rules, against a local fake model server.",
+  },
+  {
+    id: "c",
+    text: "Desktop from 1.99.108. Chats and parallel agents run without a cap until you set one in Settings, Spend limits; automations start with limits of $5 a run and $25 a day, which you can change. Before each step the Run Guard checks a catalog-priced estimate; one step can cost more than its estimate, and agents running side by side each finish the step they're on. With a dollar cap set, 40 unpriced steps also stop a run. Dollars are provider-reported tokens at catalog list price, not your provider's invoice. The terminal gets the Run Guard with the next CLI release.",
+  },
+  {
+    id: "d",
+    text: "In the desktop app, each in its own copy of the repository and on the subscription you already pay for. The Run Guard does not cap their spend.",
+  },
+  {
+    id: "e",
+    text: "Vectorscope's defaults, a $2.00 cap for one review and $10.00 across the automatic reviews of one pull request, which you can change. Pull-request reviews run in the GitHub Actions workflow that vector github install adds, on your own provider key.",
+  },
+  {
+    id: "f",
+    text: "Free with a Vector account, on macOS, Windows and Linux and in the terminal. Your model provider bills you for the models you use.",
+  },
+]
+
+const fixedTokens = { vector: 9994, claudeCode: 27917 }
+const thousands = (value: number) => `${(value / 1000).toFixed(1)}K`
+---
+
+<section id="what" data-chapter="What Vector is" class="ls-section" aria-labelledby="what-title">
+  <div class="ls-head" data-reveal-group>
+    <p class="ls-kicker" data-reveal>What Vector is</p>
+    <h2 id="what-title" class="ls-title" data-reveal>One workspace for the agents that write your&nbsp;code.</h2>
+    <p class="ls-subtitle" data-reveal>
+      Free, on your desktop and in your terminal, working on the repository already on your computer.
+    </p>
+    <p class="ls-body" data-reveal>
+      It isn't a chat box on an editor, and it isn't a wrapper around another company's agent. Vector runs its own
+      agent engine, with its own tools, context handling and nine built-in subagents. In the desktop app, Claude Code,
+      Codex and Cursor Agent run beside it, each in its own copy of the repository, on one dashboard. Vectorscope
+      reviews the change, and Vector Cloud ships it from your own Vercel and Supabase accounts.
+    </p>
+    <p class="ls-closer" data-reveal>
+      The work is moving from typing code to directing agents. Vector is built for that part of the job.
+    </p>
+  </div>
+</section>
+
+<section id="why-now" data-chapter="Why now" class="ls-section" aria-labelledby="why-now-title">
+  <div class="ls-head" data-reveal-group>
+    <p class="ls-kicker" data-reveal>Why now</p>
+    <h2 id="why-now-title" class="ls-title" data-reveal>Agents multiplied. Control&nbsp;didn't.</h2>
+    <p class="ls-subtitle" data-reveal>Three things are already true, and together they decide where the work goes.</p>
+  </div>
+
+  <ol class="ls-beats" data-reveal-group>
+    {
+      beats.map((beat, index) => (
+        <li class="ls-beat" data-reveal>
+          <span class="ls-beat-index" aria-hidden="true">
+            {String(index + 1).padStart(2, "0")}
+          </span>
+          <h3>{beat.lead}</h3>
+          {/* Markers sit flush against their sentence: whitespace between expressions renders as a space. */}
+          <p>
+            {beat.parts.map((part) => (
+              <>
+                {part.text}{part.source && <sup class="ls-ref"><a href={`#source-${part.source}`} aria-label={`Source ${part.source}`}>{part.source}</a></sup>}
+              </>
+            ))}
+          </p>
+        </li>
+      ))
+    }
+  </ol>
+
+  <div class="ls-foot" data-reveal-group>
+    <p class="ls-closer" data-reveal>
+      Vector is built for that world: any model, a lean harness, and the economics of every run in view.
+    </p>
+    <ol class="ls-sources" data-reveal aria-label="Sources">
+      {
+        sources.map((source) => (
+          <li id={`source-${source.id}`}>
+            <span class="ls-note-id">{source.id}</span>
+            <span>
+              {source.links.map((link, index) => (
+                <>
+                  {index > 0 && " and "}
+                  <a href={link.href} rel="noopener">
+                    {link.label}
+                  </a>
+                </>
+              ))}
+              {source.after}
+            </span>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+</section>
+
+<section id="why-vector" data-chapter="Why Vector" class="ls-section" aria-labelledby="why-vector-title">
+  <div class="ls-head" data-reveal-group>
+    <p class="ls-kicker" data-reveal>Why Vector</p>
+    <h2 id="why-vector-title" class="ls-title" data-reveal>Built for that&nbsp;world.</h2>
+    <p class="ls-subtitle" data-reveal>Bringing your own key is where Vector starts, not what sets it apart.</p>
+    <p class="ls-body" data-reveal>
+      Editors were built for a person typing. Vector is built for agents working while you review. Three of these
+      work today. One is planned, and it's labelled that way.
+    </p>
+  </div>
+
+  <div class="ls-pillars" data-reveal-group>
+    {
+      pillars.map((pillar) => (
+        <article
+          id={`why-${pillar.id}`}
+          class="ls-pillar"
+          data-planned={pillar.status.kind === "planned" ? "" : undefined}
+          data-lit
+          data-reveal
+          aria-labelledby={`why-${pillar.id}-title`}
+        >
+          <div class="ls-pillar-top">
+            <p class="ls-pillar-label">{pillar.label}</p>
+            <span class="ls-chip" data-status={pillar.status.kind}>
+              {pillar.status.text}
+            </span>
+          </div>
+          <h3 id={`why-${pillar.id}-title`} class="ls-pillar-title">
+            {pillar.title}
+          </h3>
+          <p class="ls-pillar-text">{pillar.text}</p>
+          <p class="ls-pillar-proof">
+            {pillar.proof}{pillar.note && <sup class="ls-ref"><a href={`#note-${pillar.note}`} aria-label={`Note ${pillar.note}`}>{pillar.note}</a></sup>}
+          </p>
+          {pillar.planned && (
+            <p class="ls-pillar-next">
+              <span class="ls-chip" data-status="planned">
+                Planned
+              </span>
+              <span>{pillar.planned}</span>
+            </p>
+          )}
+          {pillar.small && <p class="ls-pillar-small">{pillar.small}</p>}
+          {pillar.href && (
+            <a class="ls-pillar-link" href={pillar.href}>
+              {pillar.more}
+            </a>
+          )}
+        </article>
+      ))
+    }
+  </div>
+
+  <div class="ls-models" data-reveal-group>
+    <h3 class="ls-models-title" data-reveal>Which model runs it</h3>
+    <ul class="ls-models-list">
+      {
+        models.map((model) => (
+          <li data-reveal>
+            <h4>{model.title}</h4>
+            {model.rows.map((row) => (
+              <p>
+                <span class="ls-chip" data-status={row.status.kind}>
+                  {row.status.text}
+                </span>
+                <span>{row.text}</span>
+              </p>
+            ))}
+            {model.href && (
+              <a class="ls-pillar-link" href={model.href}>
+                {model.more}
+              </a>
+            )}
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</section>
+
+<section id="proof" data-chapter="The numbers" class="ls-section" aria-labelledby="proof-title">
+  <div class="ls-head" data-reveal-group>
+    <p class="ls-kicker" data-reveal>The numbers</p>
+    <h2 id="proof-title" class="ls-title" data-reveal>The numbers, with their fine&nbsp;print.</h2>
+    <p class="ls-caveat" data-reveal>
+      Offline benchmarks of what each agent sends for the same scripted steps. Not a live bill or a measure of answer
+      quality, and Codex was not part of them.
+    </p>
+  </div>
+
+  <div class="ls-proof" data-reveal-group>
+    <figure class="ls-bars" data-reveal>
+      <figcaption>
+        Fixed tokens per request<sup class="ls-ref"><a href="#note-a" aria-label="Note a">a</a></sup>
+      </figcaption>
+      <div
+        class="ls-bar-list"
+        role="img"
+        aria-label={`Fixed tokens per request: Vector about ${thousands(fixedTokens.vector)}, Claude Code 2.1.215 about ${thousands(fixedTokens.claudeCode)}.`}
+      >
+        <div class="ls-bar-row" aria-hidden="true">
+          <span class="ls-bar-name">Vector</span>
+          <span class="ls-bar-track">
+            <span
+              class="ls-bar-fill"
+              data-own
+              style={`width:${((fixedTokens.vector / fixedTokens.claudeCode) * 100).toFixed(1)}%`}
+            />
+          </span>
+          <span class="ls-bar-value">{thousands(fixedTokens.vector)}</span>
+        </div>
+        <div class="ls-bar-row" aria-hidden="true">
+          <span class="ls-bar-name">Claude Code 2.1.215</span>
+          <span class="ls-bar-track">
+            <span class="ls-bar-fill" style="width:100%" />
+          </span>
+          <span class="ls-bar-value">{thousands(fixedTokens.claudeCode)}</span>
+        </div>
+      </div>
+    </figure>
+
+    <ul class="ls-figures">
+      {
+        figures.map((figure) => (
+          <li data-reveal>
+            <strong class="ls-figure-value">{figure.value}</strong>
+            <span class="ls-figure-label">
+              {figure.label}<sup class="ls-ref"><a href={`#note-${figure.note}`} aria-label={`Note ${figure.note}`}>{figure.note}</a></sup>
+            </span>
+          </li>
+        ))
+      }
+    </ul>
+
+    <ol class="ls-notes" data-reveal aria-label="Notes on the numbers">
+      {
+        notes.map((note) => (
+          <li id={`note-${note.id}`}>
+            <span class="ls-note-id">{note.id}</span>
+            <span>{note.text}</span>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+</section>
+
+<style>
+  .ls-section {
+    position: relative;
+    padding: clamp(120px, 11vw, 168px) 0 24px;
+    scroll-margin-top: 72px;
+  }
+
+  /* Centred heads like the story sections, with the same dark pool under the words so the glyph field moves
+     around them rather than through them. */
+  .ls-head {
+    position: relative;
+    isolation: isolate;
+    width: var(--landing-content);
+    margin-inline: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .ls-head::before {
+    content: "";
+    position: absolute;
+    inset: -96px -12%;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgba(8, 6, 13, 0.86), rgba(8, 6, 13, 0.62) 55%, rgba(8, 6, 13, 0) 100%);
+  }
+
+  .ls-kicker {
+    margin: 0 0 18px;
+    color: var(--landing-accent);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .ls-title {
+    max-width: 980px;
+    margin: 0;
+    color: var(--landing-title);
+    font-size: 64px;
+    font-weight: 500;
+    line-height: 68px;
+    letter-spacing: -1px;
+    text-wrap: balance;
+  }
+
+  .ls-subtitle {
+    max-width: 820px;
+    margin: 14px 0 0;
+    color: var(--landing-subtitle);
+    font-size: 28px;
+    font-weight: 500;
+    line-height: 35px;
+    letter-spacing: -0.14px;
+    text-wrap: balance;
+  }
+
+  .ls-body {
+    max-width: 640px;
+    margin: 28px 0 0;
+    color: rgba(245, 245, 247, 0.72);
+    font-size: 19px;
+    line-height: 1.6;
+    letter-spacing: -0.005em;
+    text-wrap: pretty;
+  }
+
+  .ls-closer {
+    max-width: 640px;
+    margin: 28px 0 0;
+    color: var(--landing-title);
+    font-size: 21px;
+    font-weight: 500;
+    line-height: 1.45;
+    letter-spacing: -0.012em;
+    text-wrap: balance;
+  }
+
+  .ls-caveat {
+    max-width: 640px;
+    margin: 22px 0 0;
+    color: var(--landing-secondary);
+    font-size: 17px;
+    line-height: 1.55;
+    text-wrap: pretty;
+  }
+
+  /* Footnote markers: a real link with a name a screen reader can say, not a superscript glyph. */
+  .ls-ref {
+    margin-left: 2px;
+    font-size: 0.68em;
+    line-height: 0;
+    vertical-align: super;
+  }
+
+  .ls-ref a {
+    color: var(--landing-accent);
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  .ls-ref a:hover {
+    text-decoration: underline;
+  }
+
+  .ls-ref a:focus-visible,
+  .ls-sources a:focus-visible,
+  .ls-pillar-link:focus-visible {
+    outline: 2px solid var(--landing-accent);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  /* ---- why now ---- */
+
+  .ls-beats {
+    width: var(--landing-content);
+    max-width: 1080px;
+    margin: 56px auto 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 20px;
+    list-style: none;
+  }
+
+  .ls-beat {
+    position: relative;
+    padding: 28px 28px 30px;
+    background: #14121a;
+    border: 1px solid var(--landing-line);
+    border-radius: 24px;
+  }
+
+  .ls-beat-index {
+    display: block;
+    color: rgba(245, 245, 247, 0.4);
+    font-family: var(--font-landing-mono);
+    font-size: 13px;
+    letter-spacing: 0.04em;
+  }
+
+  .ls-beat h3 {
+    margin: 18px 0 0;
+    color: var(--landing-title);
+    font-size: 21px;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.012em;
+  }
+
+  .ls-beat p {
+    margin: 10px 0 0;
+    color: var(--landing-secondary);
+    font-size: 16px;
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+
+  .ls-foot {
+    position: relative;
+    isolation: isolate;
+    width: var(--landing-content);
+    max-width: 1080px;
+    margin: 40px auto 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .ls-foot .ls-closer {
+    margin-top: 0;
+  }
+
+  /* The notes sit on a dark panel of their own: small type over the moving glyph field would not stay legible. */
+  .ls-sources,
+  .ls-notes {
+    margin: 28px 0 0;
+    padding: 18px 22px;
+    background: rgba(14, 11, 20, 0.9);
+    border: 1px solid var(--landing-line);
+    border-radius: 20px;
+    list-style: none;
+    text-align: left;
+    color: rgba(245, 245, 247, 0.6);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .ls-sources {
+    max-width: 720px;
+    display: grid;
+    gap: 6px;
+  }
+
+  .ls-sources li,
+  .ls-notes li {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 8px;
+    scroll-margin-top: 96px;
+  }
+
+  .ls-note-id {
+    color: var(--landing-accent);
+    font-weight: 600;
+  }
+
+  .ls-sources a {
+    color: rgba(245, 245, 247, 0.82);
+    text-decoration: underline;
+    text-decoration-color: rgba(245, 245, 247, 0.3);
+    text-underline-offset: 2px;
+  }
+
+  .ls-sources a:hover {
+    text-decoration-color: var(--landing-accent);
+  }
+
+  /* ---- why vector: four pillars ---- */
+
+  .ls-pillars {
+    width: var(--landing-content);
+    max-width: 1080px;
+    margin: 56px auto 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+  }
+
+  /* Glass on a dark base: the cards sit over the moving glyph field, so the fill stays dense enough for the
+     words. The specular smear follows the pointer (LanderMaterials writes --lx and --ly on [data-lit]). */
+  .ls-pillar {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    padding: 30px 30px 28px;
+    display: flex;
+    flex-direction: column;
+    background: var(--glass-fill), rgba(16, 13, 23, 0.92);
+    border: 1px solid var(--glass-line);
+    border-radius: var(--glass-radius);
+    box-shadow: var(--glass-shadow-soft);
+    scroll-margin-top: 96px;
+  }
+
+  .ls-pillar::before {
+    content: "";
+    position: absolute;
+    inset: -40%;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(
+      40% 50% at var(--lx, 50%) var(--ly, 0%),
+      rgba(255, 255, 255, 0.07),
+      rgba(190, 160, 255, 0.035) 45%,
+      transparent 72%
+    );
+    opacity: 0;
+    transition: opacity 420ms ease;
+  }
+
+  .ls-pillar:hover::before {
+    opacity: 1;
+  }
+
+  /* Planned is drawn, not built: a dashed edge and no glass. */
+  .ls-pillar[data-planned] {
+    background: rgba(14, 11, 20, 0.9);
+    border-style: dashed;
+    border-color: rgba(201, 185, 255, 0.32);
+    box-shadow: none;
+  }
+
+  .ls-pillar-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .ls-pillar-label {
+    margin: 0;
+    color: var(--landing-accent);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .ls-chip {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    color: rgba(245, 245, 247, 0.86);
+    background: rgba(255, 255, 255, 0.05);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .ls-chip[data-status="today"] {
+    color: #a6e8c6;
+    border-color: rgba(97, 201, 150, 0.36);
+    background: rgba(97, 201, 150, 0.08);
+  }
+
+  .ls-chip[data-status="planned"] {
+    color: var(--lavender);
+    border-style: dashed;
+    border-color: rgba(201, 185, 255, 0.5);
+    background: transparent;
+  }
+
+  .ls-pillar-title {
+    margin: 22px 0 0;
+    color: var(--landing-title);
+    font-size: 28px;
+    font-weight: 600;
+    line-height: 1.18;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  .ls-pillar-text {
+    margin: 12px 0 0;
+    color: var(--landing-secondary);
+    font-size: 16px;
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+
+  .ls-pillar-proof {
+    margin: 20px 0 0;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--landing-title);
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 1.5;
+    text-wrap: pretty;
+  }
+
+  .ls-pillar-next {
+    margin: 16px 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 10px;
+    color: var(--landing-secondary);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  .ls-pillar-next > span:last-child {
+    flex: 1 1 220px;
+  }
+
+  .ls-pillar-small {
+    margin: 14px 0 0;
+    color: rgba(245, 245, 247, 0.6);
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+
+  .ls-pillar-link {
+    align-self: flex-start;
+    margin-top: 16px;
+    color: var(--landing-title);
+    font-size: 14.5px;
+    font-weight: 500;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(224, 211, 255, 0.3);
+    padding-bottom: 1px;
+  }
+
+  .ls-pillar-link:hover {
+    color: var(--lavender);
+    border-color: var(--purple-soft);
+  }
+
+  /* ---- which model runs it ---- */
+
+  .ls-models {
+    width: var(--landing-content);
+    max-width: 1080px;
+    margin: 20px auto 0;
+    padding: 28px 30px 30px;
+    background: #14121a;
+    border: 1px solid var(--landing-line);
+    border-radius: var(--glass-radius);
+  }
+
+  .ls-models-title {
+    margin: 0;
+    color: var(--landing-title);
+    font-size: 21px;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.012em;
+  }
+
+  .ls-models-list {
+    margin: 18px 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 24px;
+    list-style: none;
+  }
+
+  .ls-models-list li {
+    display: flex;
+    flex-direction: column;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  .ls-models-list h4 {
+    margin: 0;
+    color: var(--landing-title);
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.35;
+  }
+
+  .ls-models-list p {
+    margin: 10px 0 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    color: var(--landing-secondary);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  /* ---- the numbers ---- */
+
+  .ls-proof {
+    width: var(--landing-content);
+    max-width: 1080px;
+    margin: 52px auto 0;
+  }
+
+  .ls-bars {
+    margin: 0;
+    padding: 26px 30px 28px;
+    background: #14121a;
+    border: 1px solid var(--landing-line);
+    border-radius: var(--glass-radius);
+  }
+
+  .ls-bars figcaption {
+    color: var(--landing-title);
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .ls-bar-list {
+    margin-top: 16px;
+    display: grid;
+    gap: 12px;
+  }
+
+  .ls-bar-row {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr) 64px;
+    align-items: center;
+    gap: 14px;
+    font-size: 14px;
+  }
+
+  .ls-bar-name {
+    color: var(--landing-secondary);
+  }
+
+  .ls-bar-track {
+    height: 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+  }
+
+  /* Colour carries no meaning on its own: each bar's value is printed at its end. */
+  .ls-bar-fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: rgba(245, 245, 247, 0.3);
+  }
+
+  .ls-bar-fill[data-own] {
+    background: linear-gradient(90deg, rgba(201, 185, 255, 0.9), var(--landing-accent));
+  }
+
+  .ls-bar-value {
+    color: var(--landing-title);
+    font-family: var(--font-landing-mono);
+    font-size: 13.5px;
+    text-align: right;
+  }
+
+  .ls-figures {
+    margin: 20px 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 20px;
+    list-style: none;
+  }
+
+  .ls-figures li {
+    padding: 24px 26px 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: #14121a;
+    border: 1px solid var(--landing-line);
+    border-radius: 24px;
+  }
+
+  .ls-figure-value {
+    color: var(--landing-title);
+    font-size: clamp(34px, 3.6vw, 46px);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ls-figure-label {
+    color: var(--landing-secondary);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  .ls-notes {
+    margin-top: 28px;
+    display: grid;
+    gap: 10px;
+  }
+
+  /* ---- breakpoints ---- */
+
+  @media (min-width: 1800px) {
+    .ls-beats,
+    .ls-foot,
+    .ls-pillars,
+    .ls-models,
+    .ls-proof {
+      max-width: 1240px;
+    }
+  }
+
+  @media (max-width: 1100px) {
+    .ls-title {
+      font-size: 56px;
+      line-height: 1.06;
+      letter-spacing: -0.015em;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .ls-beats,
+    .ls-pillars,
+    .ls-models-list {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ls-figures {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 640px) {
+    .ls-section {
+      padding: 88px 0 16px;
+    }
+
+    .ls-kicker {
+      margin-bottom: 14px;
+    }
+
+    .ls-title {
+      font-size: clamp(34px, 10.2vw, 44px);
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+    }
+
+    .ls-subtitle {
+      margin-top: 10px;
+      font-size: 20px;
+      line-height: 1.3;
+      letter-spacing: -0.01em;
+    }
+
+    .ls-body {
+      margin-top: 20px;
+      font-size: 17px;
+    }
+
+    .ls-closer {
+      font-size: 18px;
+    }
+
+    .ls-caveat {
+      font-size: 15.5px;
+    }
+
+    /* On a narrow screen the pool runs the full height of the words, as the story sections do. */
+    .ls-head::before {
+      inset: -80px -20px;
+      background: linear-gradient(
+        to bottom,
+        rgba(8, 6, 13, 0),
+        rgba(8, 6, 13, 0.82) 80px,
+        rgba(8, 6, 13, 0.82) calc(100% - 80px),
+        rgba(8, 6, 13, 0)
+      );
+    }
+
+    .ls-beats,
+    .ls-pillars,
+    .ls-proof {
+      margin-top: 36px;
+    }
+
+    .ls-beats,
+    .ls-pillars {
+      gap: 14px;
+    }
+
+    .ls-beat,
+    .ls-pillar,
+    .ls-models,
+    .ls-bars {
+      padding: 24px 20px 24px;
+      border-radius: 22px;
+    }
+
+    .ls-pillar-title {
+      font-size: 24px;
+    }
+
+    .ls-figures {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 12px;
+    }
+
+    .ls-figures li {
+      padding: 20px;
+      border-radius: 20px;
+    }
+
+    .ls-bar-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px 10px;
+    }
+
+    .ls-bar-name {
+      grid-column: 1 / -1;
+    }
+
+    .ls-models-list {
+      gap: 18px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ls-pillar::before {
+      transition: none;
+    }
+  }
+</style>

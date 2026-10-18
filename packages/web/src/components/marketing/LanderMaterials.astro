@@ -497,7 +497,8 @@
     if (globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return
     if (!globalThis.matchMedia?.("(pointer: fine)")?.matches) return
 
-    const lit = [...document.querySelectorAll(".site-nav, .chapters ul, .palette-box")]
+    // [data-lit] marks the landing cards that carry the same smear (LanderStory's pillars).
+    const lit = [...document.querySelectorAll(".site-nav, .chapters ul, .palette-box, [data-lit]")]
     for (const surface of lit) {
       surface.addEventListener("pointermove", (event) => {
         const box = surface.getBoundingClientRect()
