@@ -86,7 +86,7 @@ export function summarizeWorkspace(input: WorkspaceIntelligenceInput): Workspace
     healthLabel,
     greeting: workedOn
       ? `Welcome back. Recently you worked on ${workedOn}. Today, I recommend ${nextAction.toLowerCase()}`
-      : `Welcome back. Vector is watching project signals and recommends: ${nextAction}`,
+      : `Welcome back. Vector is watching repository signals and recommends: ${nextAction}`,
     openRisks: input.suggestions.filter((item) => item.risk !== "low").map((item) => item.title).slice(0, 4),
     recentActivity: input.activities.slice(0, 4).map((event) => event.title),
     latestCheckpoint: relativeTime(input.latestCheckpointAt),

@@ -210,7 +210,7 @@ describe("experimental HttpApi", () => {
       expect(response.status).toBe(400)
       expect(yield* json(response)).toEqual({
         name: "WorktreeNotGitError",
-        data: { message: "Worktrees are only supported for git projects" },
+        data: { message: "Worktrees are only supported for Git repositories" },
       })
     }),
   )

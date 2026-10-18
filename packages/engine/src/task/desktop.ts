@@ -87,7 +87,7 @@ const layer = Layer.effect(
         .get(id)
         .pipe(Effect.mapError(() => new Error({ code: "not_found", message: "The parent session was not found." })))
       if (session.directory !== (yield* InstanceState.directory))
-        return yield* new Error({ code: "forbidden", message: "Desktop tasks belong to another project." })
+        return yield* new Error({ code: "forbidden", message: "Desktop tasks belong to another repository." })
       return session
     })
     const write = (id: SessionID, record: Stored) => storage.write(["task-bridge", id], record).pipe(Effect.orDie)
@@ -105,7 +105,7 @@ const layer = Layer.effect(
         })
       const record = parsed.value
       if (record.directory !== (yield* InstanceState.directory))
-        return yield* new Error({ code: "forbidden", message: "Desktop tasks belong to another project." })
+        return yield* new Error({ code: "forbidden", message: "Desktop tasks belong to another repository." })
       if (record.runtimeID === RUNTIME_ID && record.expiresAt > clock.currentTimeMillisUnsafe()) return record
       const tasks = record.tasks.map(
         (task): Task.Info => ({

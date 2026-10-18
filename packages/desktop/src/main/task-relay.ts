@@ -137,7 +137,7 @@ export function connectTaskRelay(scope: TaskScope, getEngine: () => Promise<Para
     const result = await (async () => {
       if (command.expiresAt <= Date.now()) throw new Error("The command expired before the desktop could apply it.")
       const task = listAgentTasks(scope).tasks.find((task) => task.id === command.taskID)
-      if (!task) throw new Error("The task no longer belongs to this parent session and project.")
+      if (!task) throw new Error("The task no longer belongs to this parent session and repository.")
       if (command.action === "inspect") return inspectAgentTask({ ...scope, taskID: command.taskID })
       if (command.action === "stop") {
         const result = await stopAgentTask({ ...scope, taskID: command.taskID, reason: command.reason })

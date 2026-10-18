@@ -103,7 +103,7 @@ describe("Cloud environment scope", () => {
     await f.editor.refresh()
     await f.editor.apply()
     expect(f.notices.at(-1)?.text).toBe(
-      "Wrote 1 variable to .env in your project. Added .env to .gitignore so git leaves it out of commits.",
+      "Wrote 1 variable to .env in your repository. Added .env to .gitignore so git leaves it out of commits.",
     )
     expect(f.notices.at(-1)?.text).not.toContain("fixture")
   })

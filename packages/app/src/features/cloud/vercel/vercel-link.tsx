@@ -93,11 +93,11 @@ export function VercelLink(props: {
     setState("busy", "link")
     try {
       const linked = await api.link(props.projectPath, state.selection, teamId())
-      props.notice({ tone: "success", text: `${linked.projectName} is linked to this project.` })
+      props.notice({ tone: "success", text: `${linked.projectName} is linked to this repository.` })
       await load()
       props.onChange?.()
     } catch (caught) {
-      props.notice({ tone: "error", text: vercelErrorText(caught, "Could not link that project.") })
+      props.notice({ tone: "error", text: vercelErrorText(caught, "Could not link that Vercel project.") })
     } finally {
       setState("busy", "")
     }
@@ -121,7 +121,7 @@ export function VercelLink(props: {
       await load()
       props.onChange?.()
     } catch (caught) {
-      props.notice({ tone: "error", text: vercelErrorText(caught, "Could not create the project.") })
+      props.notice({ tone: "error", text: vercelErrorText(caught, "Could not create the Vercel project.") })
     } finally {
       setState("busy", "")
     }
@@ -184,10 +184,10 @@ export function VercelLink(props: {
               >
                 <option value="">
                   {state.busy === "projects"
-                    ? "Loading projects…"
+                    ? "Loading Vercel projects…"
                     : state.projects.length
                       ? `Choose one of ${state.projects.length} Vercel projects`
-                      : "No projects in this team yet"}
+                      : "No Vercel projects in this team yet"}
                 </option>
                 <For each={state.projects}>
                   {(item) => (
@@ -205,7 +205,7 @@ export function VercelLink(props: {
                 disabled={!state.selection || Boolean(state.busy)}
                 onClick={() => void link()}
               >
-                {state.busy === "link" ? "Linking…" : "Link project"}
+                {state.busy === "link" ? "Linking…" : "Link Vercel project"}
               </button>
             </div>
             <Show
@@ -225,7 +225,7 @@ export function VercelLink(props: {
               >
                 <div class="cloud-form-grid">
                   <label>
-                    <span>Project name</span>
+                    <span>Vercel project name</span>
                     <input
                       class="cloud-input w-full font-mono"
                       value={state.name}
@@ -252,8 +252,7 @@ export function VercelLink(props: {
                   </label>
                 </div>
                 <p class="cloud-muted text-[11.5px]">
-                  Created in {scopeName(state.scope || undefined)}. Vercel makes a new project's first deployment
-                  production.
+                  Created in {scopeName(state.scope || undefined)}. Vercel makes its first deployment production.
                 </p>
                 <div class="vercel-actions">
                   <button

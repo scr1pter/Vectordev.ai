@@ -397,12 +397,12 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     build: (v) => remote("https://mcp.stripe.com", { Authorization: `Bearer ${v.token}` }),
   },
 
-  // ── Project tracking ───────────────────────────────────────────────
+  // ── Issues & planning ──────────────────────────────────────────────
   {
     id: "linear",
     name: "Linear",
     blurb: "Turn prompts into tickets, update status, attach changes.",
-    category: "Project tracking",
+    category: "Issues & planning",
     logo: "linear",
     fill: "#8B93F8",
     auth: { kind: "oauth" },
@@ -412,7 +412,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     id: "jira",
     name: "Jira",
     blurb: "Issues, sprints and boards across Atlassian projects.",
-    category: "Project tracking",
+    category: "Issues & planning",
     logo: "jira",
     fill: "#2684FF",
     auth: { kind: "oauth" },
@@ -422,7 +422,7 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     id: "asana",
     name: "Asana",
     blurb: "Tasks, projects and status updates.",
-    category: "Project tracking",
+    category: "Issues & planning",
     logo: "asana",
     fill: "#F06A6A",
     auth: { kind: "oauth" },
@@ -1961,12 +1961,12 @@ export const PLUGIN_CATALOG: PluginDef[] = [
     build: (v) => remote("https://api.perplexity.ai/mcp", { Authorization: `Bearer ${v.token}` }),
   },
 
-  // ── Project tracking ──────────────────────────────────────────────────
+  // ── Issues & planning ─────────────────────────────────────────────────
   {
     id: "atlassian",
     name: "Atlassian",
     blurb: "Jira, Confluence, Bitbucket, Compass, service desk.",
-    category: "Project tracking",
+    category: "Issues & planning",
     logo: "atlassian",
     fill: "#0052CC",
     auth: { kind: "oauth" },

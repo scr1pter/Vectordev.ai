@@ -97,7 +97,14 @@ test("Buy credits lists plans and top-ups by price, and each opens Stripe in Vec
 
   await offers.getByRole("button", { name: "Buy, Codium 10 top-up" }).click()
   await expect(settings.getByText("Your credits are bought. They appear here in a moment.")).toBeVisible()
-  await offers.getByRole("button", { name: "Change plan" }).click()
+  // Before Stripe's confirm page, the button says what a change costs: a bigger plan is charged in full today and
+  // ends what is left of this month's credits.
+  const change = offers.getByRole("button", { name: "Change plan" })
+  await expect(change).toHaveAccessibleDescription(
+    "A bigger plan starts a new month today and is charged in full, and what is left of this month's credits ends then. A smaller plan starts on your renewal date.",
+  )
+  await expect(offers.getByText("A bigger plan starts a new month today and is charged in full")).toBeVisible()
+  await change.click()
   await expect(settings.getByText("Your plan change is saved.")).toBeVisible()
   expect(await billing(page)).toEqual([
     { kind: "topup", pack: "codium-topup-10" },

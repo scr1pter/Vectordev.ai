@@ -119,7 +119,7 @@ describe("merging a workspace Vector closed part-way through", () => {
     const merged = await mergeParallelWorkspace(created.id)
 
     expect(merged.status).toBe("merged")
-    expect(merged.finalSummary).toBe("Merged 2 changed files into the main project.")
+    expect(merged.finalSummary).toBe("Merged 2 changed files into the repository.")
     expect(await Bun.file(join(created.sourcePath, "app.txt")).text()).toBe("one\nTWO\n")
     expect(await Bun.file(join(created.sourcePath, "new.txt")).text()).toBe("added\n")
     expect(await stat(created.isolatedPath).catch(() => undefined)).toBeUndefined()
@@ -226,7 +226,7 @@ describe("merging a workspace Vector closed part-way through", () => {
   })
 
   test.each([false, true])(
-    "a change that conflicts with one committed in the main project is refused before anything is written (force %p)",
+    "a change that conflicts with one committed in the repository is refused before anything is written (force %p)",
     async (force) => {
       await writeFile(join(sourcePath, "app.txt"), "one\ntwo\nthree\n")
       await commitAll(sourcePath)
@@ -250,7 +250,7 @@ describe("merging a workspace Vector closed part-way through", () => {
     },
   )
 
-  test("selected changes that conflict with the main project are refused, even when forced, before anything is written", async () => {
+  test("selected changes that conflict with the repository are refused, even when forced, before anything is written", async () => {
     await writeFile(join(sourcePath, "app.txt"), "one\ntwo\nthree\n")
     await commitAll(sourcePath)
     const created = await workspace(sourcePath)
@@ -260,7 +260,7 @@ describe("merging a workspace Vector closed part-way through", () => {
     const blocked = await mergeParallelWorkspaceSelection(created.id, { files: ["app.txt"] }, true)
 
     expect(blocked.lastAction).toBe("Selective merge blocked")
-    expect(blocked.error).toContain("Selected changes conflict with the main project.")
+    expect(blocked.error).toContain("Selected changes conflict with the repository.")
     expect(await Bun.file(join(sourcePath, "app.txt")).text()).toBe("one\nTWO-user\nthree\n")
     expect((await runGit(["status", "--porcelain"], sourcePath)).stdout.trim()).toBe("")
     expect(await Bun.file(join(created.isolatedPath, "app.txt")).text()).toBe("one\nTWO-agent\nthree\n")
@@ -322,7 +322,7 @@ describe("merging a workspace Vector closed part-way through", () => {
     expect(finished.mergeState).toBe("merged")
     expect(finished.lastAction).toBe("Merged; the requested commit was not made")
     expect(finished.error).toContain("nothing was committed")
-    expect(finished.finalSummary).toContain("Merged 1 changed file into the main project.")
+    expect(finished.finalSummary).toContain("Merged 1 changed file into the repository.")
     expect(await stat(dirname(created.isolatedPath)).catch(() => undefined)).toBeUndefined()
     expect(await Bun.file(join(sourcePath, "a.txt")).text()).toBe("after\n")
   })

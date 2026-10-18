@@ -11,9 +11,9 @@ describe("desktop menu", () => {
     expect(items.every((item) => item.type === "item" && item.command === "logs.export" && !item.action)).toBe(true)
   })
 
-  test("Open from GitHub sits right after Open Project and runs through the command registry", () => {
+  test("Open from GitHub sits right after Open Repository and runs through the command registry", () => {
     const items = DESKTOP_MENU.find((menu) => menu.id === "file")?.items ?? []
-    const open = items.findIndex((item) => item.type === "item" && item.label === "Open Project...")
+    const open = items.findIndex((item) => item.type === "item" && item.label === "Open Repository...")
     expect(open).toBeGreaterThanOrEqual(0)
     expect(items[open + 1]).toEqual({
       type: "item",

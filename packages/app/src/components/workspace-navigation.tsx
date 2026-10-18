@@ -1,6 +1,7 @@
-import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, type JSX } from "solid-js"
+import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js"
 import { usePlatform } from "@/context/platform"
 import { accountChip, type VectorAccountStatus } from "../vector-account"
+import { createUpdateRestart } from "./updater-action"
 
 export type WorkspaceNavigationItem = {
   id: string
@@ -121,52 +122,27 @@ export function WorkspaceNavigation(props: {
   const platform = usePlatform()
   const [localMode, setLocalMode] = createSignal<"agent" | "editor">(props.mode ?? "agent")
   const [helpOpen, setHelpOpen] = createSignal(false)
-  const [updateConfirmOpen, setUpdateConfirmOpen] = createSignal(false)
-  const [updateAnnouncement, setUpdateAnnouncement] = createSignal("")
   const [account, setAccount] = createSignal<VectorAccountStatus>({ authenticated: false, pending: false })
   const mode = () => props.mode ?? localMode()
   const chip = createMemo(() => accountChip(account()))
   // The account chip opens Settings whenever the desktop's account bridge is there, so Update can take the gear's place
   // and Settings stays one click away. Without the bridge the chip is plain text, and the gear stays beside Update.
   const showGear = () => !props.update || !platform.vectorAccount
-  // The agents counted when Update was clicked. The confirmation keeps that number rather than a live one, so agents
-  // that finish while it is open never turn it into "0 agents will stop".
-  const [stopping, setStopping] = createSignal(0)
-  let counting = false
+  const restart = createUpdateRestart({
+    update: () => props.update,
+    install: () => props.onUpdate?.(),
+    runningAgents: props.runningAgents,
+  })
   let updateButton: HTMLButtonElement | undefined
   let updateLater: HTMLButtonElement | undefined
 
-  // Said once when an update becomes ready, never for what was already on screen at launch.
-  createEffect(
-    on(
-      () => (props.update && !props.update.installing ? props.update.version : undefined),
-      (version) => setUpdateAnnouncement(version ? `Vector ${version} is ready. Restart to update.` : ""),
-      { defer: true },
-    ),
-  )
-  createEffect(() => {
-    if (!props.update || props.update.installing) setUpdateConfirmOpen(false)
-  })
-
   const update = async () => {
-    if (!props.update || props.update.installing || counting) return
-    counting = true
-    const running = await Promise.resolve()
-      .then(() => props.runningAgents?.() ?? 0)
-      .catch(() => 0)
-    counting = false
-    if (!props.update || props.update.installing) return
-    if (running > 0) {
-      setStopping(running)
-      setHelpOpen(false)
-      setUpdateConfirmOpen(true)
-      queueMicrotask(() => updateLater?.focus())
-      return
-    }
-    props.onUpdate?.()
+    if (!(await restart.start())) return
+    setHelpOpen(false)
+    queueMicrotask(() => updateLater?.focus())
   }
   const closeUpdateConfirm = () => {
-    setUpdateConfirmOpen(false)
+    restart.setConfirming(false)
     updateButton?.focus()
   }
 
@@ -288,7 +264,7 @@ export function WorkspaceNavigation(props: {
 
         <section data-vector-project-group>
           <div class="flex h-9 items-center gap-2 px-3.5 text-[12px] font-medium text-[color:var(--vx-workspace-text-tertiary)]">
-            <span class="min-w-0 flex-1">Projects</span>
+            <span class="min-w-0 flex-1">Repositories</span>
             <button
               type="button"
               data-tour="nav-new-workspace"
@@ -501,7 +477,7 @@ export function WorkspaceNavigation(props: {
         </section>
 
         <section data-vector-nav-group class="border-t border-[color:var(--vx-line)] px-2 py-3">
-          <div data-vector-nav-label>Project tools</div>
+          <div data-vector-nav-label>Repository tools</div>
           <button type="button" data-vector-nav-item data-tour="nav-agent-dashboard" onClick={props.onAgentDashboard}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
               <rect
@@ -776,7 +752,7 @@ export function WorkspaceNavigation(props: {
         </div>
       </Show>
 
-      <Show when={updateConfirmOpen() && props.update}>
+      <Show when={restart.confirming() && props.update}>
         {(pending) => (
           <div
             data-vector-update-confirm
@@ -793,9 +769,9 @@ export function WorkspaceNavigation(props: {
           >
             <p data-update-confirm-title>Restart to update to Vector {pending().version}?</p>
             <p id="vector-update-confirm-detail" data-update-confirm-detail>
-              {stopping() === 1
+              {restart.stopping() === 1
                 ? "1 agent in the workspace is still running and will stop."
-                : `${stopping()} agents in the workspace are still running and will stop.`}
+                : `${restart.stopping()} agents in the workspace are still running and will stop.`}
             </p>
             <div data-update-confirm-actions>
               <button type="button" data-update-confirm-later ref={updateLater} onClick={closeUpdateConfirm}>
@@ -805,7 +781,7 @@ export function WorkspaceNavigation(props: {
                 type="button"
                 data-update-confirm-restart
                 onClick={() => {
-                  setUpdateConfirmOpen(false)
+                  restart.setConfirming(false)
                   props.onUpdate?.()
                 }}
               >
@@ -825,7 +801,7 @@ export function WorkspaceNavigation(props: {
         }}
       >
         <span data-vector-update-status role="status" aria-live="polite" class="sr-only">
-          {updateAnnouncement()}
+          {restart.announcement()}
         </span>
         <Show
           when={platform.vectorAccount}
@@ -889,7 +865,7 @@ export function WorkspaceNavigation(props: {
           data-tour="nav-getting-started"
           class="grid size-8 place-items-center rounded-[5px] text-white/38 transition hover:bg-white/[0.05] hover:text-white"
           onClick={() => {
-            setUpdateConfirmOpen(false)
+            restart.setConfirming(false)
             setHelpOpen((open) => !open)
           }}
           title="Help"
@@ -918,7 +894,7 @@ export function WorkspaceNavigation(props: {
               disabled={pending().installing}
               aria-busy={pending().installing ? "true" : undefined}
               aria-haspopup={!pending().installing && props.runningAgents ? "dialog" : undefined}
-              aria-expanded={!pending().installing && props.runningAgents ? updateConfirmOpen() : undefined}
+              aria-expanded={!pending().installing && props.runningAgents ? restart.confirming() : undefined}
               aria-label={
                 pending().installing
                   ? `Updating to Vector ${pending().version}`

@@ -516,7 +516,7 @@ export async function applyVercelEnvPull(
   if (prepared.plan.id !== planId) {
     throw new VercelError(
       "conflict",
-      "Vercel's development variables or this project's local ones changed since the preview was made, so nothing was written. Review the new preview and approve it again.",
+      "Vercel's development variables or this repository's local ones changed since the preview was made, so nothing was written. Review the new preview and approve it again.",
     )
   }
   const written = prepared.plan.variables.filter((item) => item.action !== "unchanged")

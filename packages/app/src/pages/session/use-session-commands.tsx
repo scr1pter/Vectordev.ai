@@ -229,7 +229,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     viewCommand({
       id: "vector.codespace.open",
       title: "Open Vector Codespace",
-      description: "Open the synced editor with files, review, and project context.",
+      description: "Open the synced editor with files, review, and repository context.",
       slash: "codespace",
       onSelect: vectorspace,
     }),

@@ -11,12 +11,19 @@ export function cloudPermissionScope(request: Pick<PermissionRequest, "permissio
   }
   const rows = [
     { label: "Provider", value: text("provider") },
-    { label: "Project", value: text("project") },
+    { label: projectLabel(text("provider")), value: text("project") },
     { label: "Environment", value: text("environment") },
   ].filter((row): row is { label: string; value: string } => Boolean(row.value))
   const summary = text("summary")
   if (!summary && !rows.length) return
   return { summary, rows }
+}
+
+// For Vector's own actions (stored variables, the local .env) the named project is the repository; for Vercel
+// and Supabase it is the provider's project, so the label says whose it is.
+function projectLabel(provider: string | undefined) {
+  if (provider === "Vector") return "Repository"
+  return `${provider ?? "Cloud"} project`
 }
 
 // The SQL a prompt is about: a query, a migration and its down file, or the

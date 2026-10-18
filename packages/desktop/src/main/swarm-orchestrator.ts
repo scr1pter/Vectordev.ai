@@ -230,7 +230,7 @@ export function getSwarmRun(id: string) {
 
 export async function createSwarmRun(input: CreateSwarmRunInput, engine: ParallelWorkspaceEngine) {
   const source = await stat(input.sourcePath).catch(() => undefined)
-  if (!source?.isDirectory()) throw new Error("Open a valid project before launching an agent swarm.")
+  if (!source?.isDirectory()) throw new Error("Open a valid repository before launching an agent swarm.")
   const objective = input.objective.trim()
   if (!objective) throw new Error("Describe the objective Vector should decompose.")
   if (!input.primaryProvider.trim() || !input.primaryModel.trim()) {
@@ -271,7 +271,7 @@ export async function createSwarmRun(input: CreateSwarmRunInput, engine: Paralle
     changedFiles: [],
     diff: "",
     riskLevel: "low",
-    summary: "Vector is inspecting the project and decomposing the objective.",
+    summary: "Vector is inspecting the repository and decomposing the objective.",
     logs: [`${createdAt}  Swarm admitted with up to ${maxAgents} tasks and ${maxConcurrency} concurrent workers.`],
   }
   writeRuns([record, ...readRuns()])
@@ -351,7 +351,7 @@ export function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine) {
     updateRun(id, (run) => ({
       ...run,
       status: run.tasks.length ? "running" : "planning",
-      currentStep: run.tasks.length ? "Resuming dependency scheduler" : "Resuming project decomposition",
+      currentStep: run.tasks.length ? "Resuming dependency scheduler" : "Resuming the objective breakdown",
       completedAt: undefined,
       error: undefined,
       stopReason: undefined,
@@ -521,7 +521,7 @@ export async function mergeSwarmRun(id: string, force = false) {
       ...current,
       status: "needs review",
       currentStep: "Aggregate merge blocked",
-      error: merged.error || "The aggregate diff conflicts with the main project.",
+      error: merged.error || "The aggregate diff conflicts with the repository.",
       logs: [...current.logs, `${now()}  Aggregate merge blocked: ${merged.error || "unknown conflict"}`].slice(-240),
     }))
   }
@@ -530,8 +530,8 @@ export async function mergeSwarmRun(id: string, force = false) {
     status: "merged",
     currentStep: "Swarm changes merged into main",
     completedAt: now(),
-    summary: `Merged the swarm's ${current.changedFiles.length} changed file${current.changedFiles.length === 1 ? "" : "s"} into the main project.`,
-    logs: [...current.logs, `${now()}  Aggregate diff merged into the main project.`].slice(-240),
+    summary: `Merged the swarm's ${current.changedFiles.length} changed file${current.changedFiles.length === 1 ? "" : "s"} into the repository.`,
+    logs: [...current.logs, `${now()}  Aggregate diff merged into the repository.`].slice(-240),
   }))
 }
 
@@ -626,7 +626,7 @@ async function executeSwarmRun(id: string, engine: ParallelWorkspaceEngine, cont
       run = updateRun(id, (current) => ({
         ...current,
         coordinatorWorkspaceId: coordinator!.id,
-        currentStep: "Inspecting the project and building a dependency graph",
+        currentStep: "Inspecting the repository and building a dependency graph",
         logs: [...current.logs, `${now()}  Created isolated staging workspace ${coordinator!.id}.`].slice(-240),
       }))
     }
@@ -1024,7 +1024,7 @@ async function readPlannerPlan(
 
 function plannerPrompt(run: SwarmRunRecord) {
   return [
-    "You are Vector's read-only swarm coordinator. Inspect the current project and decompose the objective into a dependency graph of independently executable engineering tasks.",
+    "You are Vector's read-only swarm coordinator. Inspect the current repository and decompose the objective into a dependency graph of independently executable engineering tasks.",
     "Do not edit files. Return exactly one JSON object and no prose.",
     `Create between 2 and ${run.maxAgents} tasks. Use parallel tasks only when their likely file ownership does not overlap. Make dependencies explicit so dependent agents inherit validated staging changes.`,
     "Allowed roles: explore, implement, debug, test, review, security, docs.",

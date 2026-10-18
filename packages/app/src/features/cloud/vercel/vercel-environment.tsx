@@ -370,7 +370,7 @@ export function VercelEnvironment(props: {
         </Show>
 
         <div class="vercel-detail mt-3">
-          <strong class="text-[12.5px]">Sync this project's variables to Vercel</strong>
+          <strong class="text-[12.5px]">Sync this repository's variables to Vercel</strong>
           <p class="cloud-muted text-[11.5px]">
             Creates what is missing, updates and deletes only what a Vector sync wrote before, and leaves variables made
             elsewhere alone. Review the plan; nothing is written until you apply it.
@@ -447,7 +447,9 @@ export function VercelEnvironment(props: {
         <Show when={state.pullPlan}>
           {(current) => (
             <div class="vercel-detail mt-3">
-              <strong class="text-[12.5px]">Development values from {current().project} for this project's .env</strong>
+              <strong class="text-[12.5px]">
+                Development values from {current().project} for this repository's .env
+              </strong>
               <div class="vercel-plan">
                 <For each={current().variables} fallback={<p>Vercel has no readable development values.</p>}>
                   {(item) => (

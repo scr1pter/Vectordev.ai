@@ -12,7 +12,7 @@ import { useHomeSessionDestination } from "../../routes/home/session-destination
 import { useProject } from "../../context/project"
 
 function moveReminderText(directory: string) {
-  return `<system-reminder>The user has changed the current working directory to "${directory}". This is still the same project but at a possibly new location; take this into account when working with any files from now on.</system-reminder>`
+  return `<system-reminder>The user has changed the current working directory to "${directory}". This is still the same repository but at a possibly new location; take this into account when working with any files from now on.</system-reminder>`
 }
 
 export function usePromptMove(input: { projectID: () => string | undefined; sessionID: () => string | undefined }) {
@@ -48,7 +48,7 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
         { throwOnError: true },
       )
       const directory = result.data?.directory
-      if (!directory) throw new Error("No project copy directory returned")
+      if (!directory) throw new Error("No repository copy folder returned")
 
       // Call a location-based route to make sure it's bootstrapped
       // before moving on

@@ -1759,7 +1759,7 @@ export function fixMission(
           `Work on the pull request's code: run \`${fetch} pull/${pr.number}/head\`, then \`git switch -c vectorscope-fix-${pr.number} FETCH_HEAD\`.`,
         ]
       : [
-          "Fix a problem Vectorscope found in the uncommitted changes in this project.",
+          "Fix a problem Vectorscope found in the uncommitted changes in this repository.",
           "",
           "Work on the files as they are here: the changes it reviewed are not committed, and this workspace has them.",
         ]),

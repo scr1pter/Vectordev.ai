@@ -90,14 +90,14 @@ export async function writeDatabaseUrl(
   if (input.consent !== true) {
     throw new SupabaseSetupError(
       "Writing DATABASE_URL needs the user's explicit consent, because it contains the database password.",
-      "Ask the user whether to write a server-only DATABASE_URL for this project, then run the action again with their consent.",
+      "Ask the user whether to write a server-only DATABASE_URL for this repository, then run the action again with their consent.",
     )
   }
   if (input.password) context.secrets.push(input.password)
   const password = input.password ?? databasePassword(context)
   if (!password) {
     throw new SupabaseSetupError(
-      `Vector does not know the database password of ${context.projectName}, because the project was not created or rotated here.`,
+      `Vector does not know the database password of ${context.projectName}, because the Supabase project was not created or rotated here.`,
       "Ask the user to enter the current database password in Vector Cloud > Database, where Vector keeps it encrypted. Rotating it instead (rotate_database_password) breaks anything still using the old one.",
     )
   }

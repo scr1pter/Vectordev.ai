@@ -388,7 +388,7 @@ async function copyProjectTree(source: string, target: string) {
 // strategy in parallel-workspaces.ts, kept minimal for a one-shot run.
 export async function prepareWorkspace(projectPath: string): Promise<PrepareWorkspaceResult> {
   const path = projectPath?.trim()
-  if (!path) throw new Error("Open a project before running an external agent.")
+  if (!path) throw new Error("Open a repository before running an external agent.")
   const stats = await stat(path).catch(() => undefined)
   if (!stats?.isDirectory()) throw new Error(`"${path}" is not a folder Vector can run an agent in.`)
 
@@ -626,7 +626,7 @@ export function createAgentChat(runtime: CodingAgentRuntime, roots: string[] = [
       kind === "thinking"
         ? "Thinking"
         : /read|search|grep|glob/i.test(name)
-          ? "Reading project"
+          ? "Reading repository"
           : /edit|write|patch|file_change/i.test(name)
             ? "Updating files"
             : /shell|bash|command|exec/i.test(name)

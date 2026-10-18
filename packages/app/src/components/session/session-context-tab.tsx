@@ -81,7 +81,7 @@ export function SessionContextTab() {
   const ledger = createMemo(() => [
     {
       label: "Session",
-      value: info()?.title || "Untitled project",
+      value: info()?.title || "Untitled session",
     },
     {
       label: "Messages",

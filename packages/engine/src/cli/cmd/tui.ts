@@ -70,13 +70,14 @@ export function resolveThreadDirectory(project?: string, envPWD = process.env.PW
 }
 
 export const TuiThreadCommand = cmd({
-  command: "$0 [project]",
+  command: "$0 [repository]",
   describe: "start vector tui",
   builder: (yargs) =>
     withNetworkOptions(yargs)
-      .positional("project", {
+      .positional("repository", {
         type: "string",
-        describe: "path to start vector in",
+        alias: "project",
+        describe: "path to the repository to start vector in",
       })
       .option("model", {
         type: "string",
@@ -161,7 +162,7 @@ export const TuiThreadCommand = cmd({
 
       const { runMini } = await import("./run")
       await runMini({
-        directory: resolveThreadDirectory(args.project),
+        directory: resolveThreadDirectory(args.repository),
         continue: args.continue,
         session: args.session,
         fork: args.fork,
@@ -195,9 +196,9 @@ export const TuiThreadCommand = cmd({
         return
       }
 
-      // Resolve relative --project paths from PWD, then use the real cwd after
+      // Resolve relative repository paths from PWD, then use the real cwd after
       // chdir so the thread and worker share the same directory key.
-      const next = resolveThreadDirectory(args.project)
+      const next = resolveThreadDirectory(args.repository)
       const file = await target()
       try {
         process.chdir(next)

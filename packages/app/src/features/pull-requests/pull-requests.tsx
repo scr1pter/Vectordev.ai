@@ -857,7 +857,7 @@ export function PullRequests(props: {
 
   const changesSummary = () => {
     const changes = panel.changes
-    if (!props.projectPath) return "Open a project to review its changes"
+    if (!props.projectPath) return "Open a repository to review its changes"
     if (!changes) return panel.checking ? "Checking for changes…" : "Staged, unstaged and new files"
     if (!changes.files) return "No uncommitted changes"
     return `${changes.files} uncommitted ${changes.files === 1 ? "file" : "files"} · +${changes.additions} −${changes.deletions}`
@@ -1806,11 +1806,11 @@ export function PullRequests(props: {
                 ? "Checking for changes…"
                 : panel.changes
                   ? "No uncommitted changes"
-                  : "Vector couldn't read this project's changes"}
+                  : "Vector couldn't read this repository's changes"}
             </p>
             <p class="max-w-[380px] text-[12px] leading-relaxed text-[color:var(--vx-text-muted)]">
               Vectorscope reviews what you haven't committed yet: staged and unstaged edits, and new files git doesn't
-              ignore. Change something in this project, then check again.
+              ignore. Change something in this repository, then check again.
             </p>
           </div>
         }

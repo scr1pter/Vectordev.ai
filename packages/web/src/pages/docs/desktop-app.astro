@@ -7,23 +7,23 @@ export const prerender = true
 <DocsPage id="desktop-app">
 
           <p>
-            Agent and Editor are two modes over the same local repository and session, with project-wide file search,
+            Agent and Editor are two modes over the same local repository and session, with repository-wide file search,
             diagnostics, a terminal, browser, review, and the same agent beside the file you opened.
           </p>
 
           <h2 id="agent-editor">Agent and Editor</h2>
           <p>
-            Switch to Editor when you want to work directly: search the project, open files in tabs, edit with language
+            Switch to Editor when you want to work directly: search the repository, open files in tabs, edit with language
             support, or keep the same agent beside the file and ask it to make the change.
           </p>
           <ul class="feature-list">
-            <li><strong>Find a file</strong><span>Use project search to open a file full-screen in a persistent tab.</span></li>
+            <li><strong>Find a file</strong><span>Use repository search to open a file full-screen in a persistent tab.</span></li>
             <li><strong>Edit normally</strong><span>Your changes are written to the active repository or isolated workspace.</span></li>
             <li><strong>Ask beside the code</strong><span>The session does not restart when you switch views, so the agent keeps the task and its history.</span></li>
           </ul>
           <p class="note">
-            The session header can hand the project to the editor or terminal you already use — Visual Studio Code,
-            Sublime Text, TextMate, Android Studio, Antigravity, Ghostty or the system terminal — or copy the project
+            The session header can hand the repository to the editor or terminal you already use — Visual Studio Code,
+            Sublime Text, TextMate, Android Studio, Antigravity, Ghostty or the system terminal — or copy the repository
             path. It also carries the toggles for the file tree, Changes and Terminal.
           </p>
 
@@ -50,7 +50,7 @@ export const prerender = true
 
           <h2 id="workspace-rail">The rail, the palette and search</h2>
           <p>
-            The slim rail down the left edge is the app's top-level navigation: Home, Projects, Search, Agent Dashboard, Browser, Pull Requests, Plugins, Connections and Settings, with a help cluster for Docs, Best practices, Changelog, Diagnostics, Support and Send feedback.
+            The slim rail down the left edge is the app's top-level navigation: Home, Repositories, Search, Agent Dashboard, Browser, Pull Requests, Plugins, Connections and Settings, with a help cluster for Docs, Best practices, Changelog, Diagnostics, Support and Send feedback.
           </p>
           <ul class="feature-list">
             <li><strong>Command palette</strong><span>Searches every action by category and runs it without the mouse. Shortcuts are editable and can be reset to their defaults, and some actions live only here, such as adding the current file selection to the prompt context.</span></li>
@@ -66,7 +66,7 @@ export const prerender = true
 
           <h2 id="settings">Settings</h2>
           <p>
-            Click your name at the bottom of the sidebar to open <strong>Settings</strong> at <strong>Account</strong>, or use the gear beside it, <strong>Settings</strong> in the Help menu, or Cmd+, (Ctrl+, on Windows and Linux). When an update has downloaded, an <strong>Update</strong> button takes the gear's place: it restarts Vector into the new version, and first asks whether to stop any agents in the workspace that are still running.
+            Click your name at the bottom of the sidebar to open <strong>Settings</strong> at <strong>Account</strong>, or use the gear beside it, <strong>Settings</strong> in the Help menu, or Cmd+, (Ctrl+, on Windows and Linux). When an update has downloaded, an <strong>Update</strong> button takes the gear's place: it restarts Vector into the new version, and first asks whether to stop any agents in the workspace that are still running. From 1.99.109 Home shows the same <strong>Update</strong> button too, just before its <strong>Settings</strong> button.
           </p>
           <ul class="feature-list">
             <li><strong>Account</strong><span>Your Vector sign-in, your Vector Codium plan with the share of this month's credits left, and the way to delete your account. Desktop app only; signed out, it offers Sign in.</span></li>

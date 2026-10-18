@@ -1406,6 +1406,75 @@ it.effect("says once per file that a repository's run limits are ignored", () =>
   }),
 )
 
+// Parallel agents load a repository from new folders: Git worktrees and copies. The notice is about the repository, so
+// they are not told again, and the list of files already told about stays short.
+describe("the ignored budget.run notice", () => {
+  const collect = Effect.gen(function* () {
+    const notices: string[] = []
+    const listener = (event: GlobalEvent) => {
+      if (event.payload.type === "tui.toast.show" && event.payload.properties.title === "Repository spend cap ignored")
+        notices.push(event.payload.properties.message)
+    }
+    GlobalBus.on("event", listener)
+    yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", listener)))
+    return notices
+  })
+  const git = (cwd: string, ...args: string[]) => Effect.promise(() => Bun.$`git ${args}`.cwd(cwd).quiet())
+
+  it.effect("shows once for a repository and its agent worktrees", () =>
+    Effect.gen(function* () {
+      const global = yield* tmpdirScoped()
+      const repository = yield* tmpdirScoped({ git: true })
+      const agent = yield* tmpdirScoped()
+      yield* writeConfigEffect(path.join(repository, ".vector"), { budget: { run: { usd: 1.25 } } })
+      yield* git(repository, "add", ".vector/vector.json")
+      yield* git(repository, "commit", "-m", "spend cap")
+      yield* git(repository, "worktree", "add", "-b", "agent", agent)
+      const notices = yield* collect
+
+      expect((yield* withGlobalConfigDir(global, withInstanceDir(repository, Config.use.get()))).budget).toBeUndefined()
+      expect((yield* withGlobalConfigDir(global, withInstanceDir(agent, Config.use.get()))).budget).toBeUndefined()
+      expect(notices).toHaveLength(1)
+      expect(notices[0]).toContain(`This repository's ${path.join(".vector", "vector.json")} sets budget.run`)
+    }),
+  )
+
+  it.effect("shows once for a folder without Git and the copies made of it", () =>
+    Effect.gen(function* () {
+      const global = yield* tmpdirScoped()
+      const folders = [yield* tmpdirScoped(), yield* tmpdirScoped()]
+      for (const folder of folders)
+        yield* writeConfigEffect(path.join(folder, ".vector"), { budget: { run: { usd: 1.75 } } })
+      const notices = yield* collect
+
+      for (const folder of folders)
+        expect((yield* withGlobalConfigDir(global, withInstanceDir(folder, Config.use.get()))).budget).toBeUndefined()
+      expect(notices).toHaveLength(1)
+    }),
+  )
+
+  it.effect("remembers only the most recent files it told about", () =>
+    Effect.gen(function* () {
+      const global = yield* tmpdirScoped()
+      const folder = yield* tmpdirScoped()
+      const file = path.join(Global.Path.state, "ignored-repository-budgets.json")
+      const old = Array.from({ length: 250 }, (_, index) => `old:${index}`)
+      yield* Effect.promise(() => fs.mkdir(Global.Path.state, { recursive: true }))
+      yield* Effect.promise(() => fs.writeFile(file, JSON.stringify(old)))
+      yield* writeConfigEffect(path.join(folder, ".vector"), { budget: { run: { usd: 2.5 } } })
+      const notices = yield* collect
+
+      yield* withGlobalConfigDir(global, withInstanceDir(folder, Config.use.get()))
+      expect(notices).toHaveLength(1)
+      const kept: string[] = yield* Effect.promise(() => Bun.file(file).json())
+      expect(kept).toHaveLength(200)
+      expect(kept).not.toContain("old:0")
+      expect(kept.at(-2)).toBe("old:249")
+      expect(kept.at(-1)).toStartWith("content:")
+    }),
+  )
+})
+
 it.instance("lets an untrusted project turn sharing off", () =>
   withGlobalConfig({ config: { share: "auto" } }, () =>
     Effect.gen(function* () {

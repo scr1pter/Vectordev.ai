@@ -12,7 +12,7 @@ export type TaskScope = { parentSessionID: string; sourcePath: string }
 
 function scope(input: TaskScope) {
   if (!input.parentSessionID?.trim() || !input.sourcePath?.trim())
-    throw new Error("A task session and project are required.")
+    throw new Error("A task session and repository are required.")
   return { parentSessionId: input.parentSessionID, sourcePath: input.sourcePath }
 }
 
@@ -61,7 +61,7 @@ export function listTaskWorkspaces(input: TaskScope) {
 
 export function inspectAgentTask(input: TaskScope & { taskID: string }): Task.InspectResult {
   const task = listAgentTasks(input).tasks.find((task) => task.id === input.taskID)
-  if (!task) throw new Error("The task does not belong to this session and project.")
+  if (!task) throw new Error("The task does not belong to this session and repository.")
   const workspace = listTaskWorkspaces(input).find((record) => workspaceTaskID(record) === input.taskID)
   const swarm = listSwarmRuns(scope(input)).find((run) => run.id === task.groupID)
   const child = swarm?.tasks.find((entry) => `swarm:${swarm.id}:${entry.id}` === task.id)
@@ -85,7 +85,7 @@ export function inspectAgentTask(input: TaskScope & { taskID: string }): Task.In
 
 export async function stopAgentTask(input: TaskScope & { taskID: string; reason?: string }): Promise<Task.StopResult> {
   const task = listAgentTasks(input).tasks.find((task) => task.id === input.taskID)
-  if (!task) throw new Error("The task does not belong to this session and project.")
+  if (!task) throw new Error("The task does not belong to this session and repository.")
   if (!task.controls.stop) return { tasks: [task] }
   const workspace = listTaskWorkspaces(input).find((record) => workspaceTaskID(record) === input.taskID)
   const swarm = listSwarmRuns(scope(input)).find((run) => run.id === task.groupID)
@@ -101,7 +101,7 @@ export async function messageAgentTask(
   input: TaskScope & { taskID: string; text: string },
 ): Promise<Task.MessageResult> {
   const workspace = listTaskWorkspaces(input).find((record) => workspaceTaskID(record) === input.taskID)
-  if (!workspace) throw new Error("The task does not belong to this session and project.")
+  if (!workspace) throw new Error("The task does not belong to this session and repository.")
   const result = await messageParallelWorkspace(workspace.id, input.text)
   return { taskID: input.taskID, messageID: result.messageID, delivery: "steer", accepted: true }
 }

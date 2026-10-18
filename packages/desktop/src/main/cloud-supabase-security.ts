@@ -182,7 +182,7 @@ function environmentLeaks(projectPath: string, taskId: string | undefined, servi
 }
 
 function secretKind(value: string, serviceKey?: string) {
-  if (serviceKey && value.includes(serviceKey)) return "this project's service key"
+  if (serviceKey && value.includes(serviceKey)) return "the Supabase project's service key"
   if (/\bsb_secret_[A-Za-z0-9_-]{8,}/.test(value)) return "a Supabase secret key"
   if (/\bsbp_[A-Za-z0-9]{20,}/.test(value)) return "a Supabase access token"
   if (/postgres(?:ql)?:\/\/[^:\s/@]+:[^@\s]+@/i.test(value)) return "a database password"

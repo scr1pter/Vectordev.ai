@@ -19,9 +19,9 @@ export function formatTrustStatus(status: WorkspaceTrust.Status, approved: boole
     `Workspace: ${status.workspace}`,
     `Fingerprint: ${status.fingerprint}`,
     `Status: ${status.trusted ? "trusted" : "untrusted"}`,
-    ...(pure ? ["Executable project config: disabled by --pure"] : []),
+    ...(pure ? ["Executable repository config: disabled by --pure"] : []),
     ...(approved
-      ? ["Trust approved. Rerun the command or restart Vector to load trusted executable project config."]
+      ? ["Trust approved. Rerun the command or restart Vector to load trusted executable repository config."]
       : []),
   ].join("\n")
 }

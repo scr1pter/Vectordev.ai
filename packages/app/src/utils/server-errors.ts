@@ -52,8 +52,8 @@ function structuredMessage(error: unknown) {
 export function formatWorkspaceFailure(message: string) {
   if (!message.includes("FileSystem.realPath")) return message
   const path = message.match(/FileSystem\.realPath\s*\(([^)]+)\)/)?.[1]
-  if (!path) return "The project folder is unavailable. Reopen an existing project folder."
-  return `The project folder is unavailable: ${path}. Reopen the project from its existing folder.`
+  if (!path) return "The repository folder is unavailable. Reopen an existing repository folder."
+  return `The repository folder is unavailable: ${path}. Reopen the repository from its existing folder.`
 }
 
 function unwrapNamedError(error: unknown): unknown {

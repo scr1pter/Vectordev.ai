@@ -873,7 +873,7 @@ const layer = Layer.effect(
         return {
           status: {
             status: "failed",
-            error: `MCP header "${unsafeHeader}" must reference an environment variable or encrypted vault credential, such as "Bearer {env:MCP_TOKEN}". Vector does not store raw MCP credentials in project configuration.`,
+            error: `MCP header "${unsafeHeader}" must reference an environment variable or encrypted vault credential, such as "Bearer {env:MCP_TOKEN}". Vector does not store raw MCP credentials in repository configuration.`,
           } satisfies Status,
         }
       }

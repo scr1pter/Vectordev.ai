@@ -1,4 +1,4 @@
-import { createMemo } from "solid-js"
+import { createContext, createEffect, createMemo, createSignal, on, useContext } from "solid-js"
 import type { UpdaterPlatform, UpdaterState } from "@/updater"
 import { usePlatform } from "@/context/platform"
 import { useLanguage } from "@/context/language"
@@ -34,6 +34,69 @@ export function navigationUpdate(state: UpdaterState | undefined) {
   if (state?.status === "ready") return { version: state.version, installing: false }
   if (state?.status === "installing") return { version: state.version, installing: true }
   return undefined
+}
+
+/** A downloaded update, or one installing, as an Update button shows it. */
+export type PendingUpdate = { version: string; installing: boolean }
+
+/**
+ * What the shell gives every Update button: the update, how to restart into it, and how many agents a restart would
+ * stop. The sidebar gets it as props; Home, which shows no sidebar, reads it here.
+ */
+export const UpdateActionContext = createContext<{
+  update: () => PendingUpdate | undefined
+  install: () => void
+  runningAgents: () => number | Promise<number>
+}>()
+
+export const useUpdateAction = () => useContext(UpdateActionContext)
+
+/**
+ * A click on Update. It counts the agents a restart would stop and, above zero, asks first, keeping the count from the
+ * click rather than a live one, so agents that finish while it is open never turn it into "0 agents will stop". With
+ * none running it restarts at once. It also says once, never for what was on screen at launch, that an update is ready.
+ */
+export function createUpdateRestart(input: {
+  update: () => PendingUpdate | undefined
+  install: () => void
+  runningAgents?: () => number | Promise<number>
+}) {
+  const [confirming, setConfirming] = createSignal(false)
+  const [stopping, setStopping] = createSignal(0)
+  const [announcement, setAnnouncement] = createSignal("")
+  const ready = () => {
+    const update = input.update()
+    return update && !update.installing ? update : undefined
+  }
+  let counting = false
+  createEffect(
+    on(
+      () => ready()?.version,
+      (version) => setAnnouncement(version ? `Vector ${version} is ready. Restart to update.` : ""),
+      { defer: true },
+    ),
+  )
+  createEffect(() => {
+    if (!ready()) setConfirming(false)
+  })
+  // True when it opened the confirmation, so the caller can move focus into it.
+  const start = async () => {
+    if (!ready() || counting) return false
+    counting = true
+    const running = await Promise.resolve()
+      .then(() => input.runningAgents?.() ?? 0)
+      .catch(() => 0)
+    counting = false
+    if (!ready()) return false
+    if (running > 0) {
+      setStopping(running)
+      setConfirming(true)
+      return true
+    }
+    input.install()
+    return false
+  }
+  return { confirming, setConfirming, stopping, announcement, start }
 }
 
 // The agents a restart into the update stops, from every repository rather than the task on screen: each engine

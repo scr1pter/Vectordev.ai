@@ -30,7 +30,7 @@ export const controlPlaneHandlers = HttpApiBuilder.group(RootHttpApi, "controlPl
 function message(error: MoveSession.Error) {
   if (error instanceof SessionV2.NotFoundError) return `Session not found: ${error.sessionID}`
   if (error instanceof MoveSession.DestinationProjectMismatchError)
-    return "Destination directory belongs to another project"
+    return "Destination folder belongs to another repository"
   if (error instanceof MoveSession.ApplyChangesError)
     return `Unable to apply your changes in the destination directory. The files may conflict with existing changes.`
   return error.message

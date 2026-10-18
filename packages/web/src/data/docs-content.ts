@@ -27,11 +27,11 @@ export const spendRows = [
 export const runGuardRows = [
   [
     "Where caps come from",
-    "Settings → Spend limits in the desktop app for chats and the parallel agents you start, budget.run in your user config (~/.config/vector/vector.json) for chats, the terminal UI and vector run, or vector run --max-cost and --max-steps for one run. Automations use the Left alone limits: $5 a run and $25 a day unless you change them.",
+    "Settings → Spend limits in the desktop app, for its chats and the parallel agents you start; budget.run in the terminal's user config (~/.config/vector/vector.json, or %USERPROFILE%\\.config\\vector\\vector.json on Windows) for the terminal UI and vector run, which the desktop app does not read; or vector run --max-cost and --max-steps for one run. Automations use the Left alone limits: $5 a run and $25 a day unless you change them.",
   ],
   [
     "One set of limits for every repository",
-    "From desktop 1.99.109, spend limits are overall: the day and month limits count spend in all your repositories together, and the per-repository monthly limit in Settings → Spend limits is gone, so set a monthly limit instead. A repository's own budget.run in its vector.json or .vector settings is ignored too, trusted or not, and Vector says so once for each file that still sets one. Desktop 1.99.108 still reads a repository's budget.run. The terminal UI and vector run follow with the next CLI release, and Windows WSL servers once a later desktop release requires that CLI.",
+    "From desktop 1.99.109, spend limits are overall: the day and month limits count spend in all your repositories together, and the per-repository monthly limit in Settings → Spend limits is gone, so set a monthly limit instead. A repository's own budget.run in its vector.json or .vector settings is ignored too, trusted or not, and Vector says so once for each repository file that still sets one, not again for the repository's agent worktrees or copies. Desktop 1.99.108 still reads a repository's budget.run. The terminal UI and vector run follow with the next CLI release, and Windows WSL servers once a later desktop release requires that CLI.",
   ],
   [
     "A stop before the step that would cross",
@@ -167,7 +167,7 @@ export const subagentKinds = [
   ],
   [
     "What they can change",
-    "A subagent can read, edit and run commands like the main agent. Explore, Review, Judge and Security can read your project and run checks, but they cannot edit it. Debug, Test, Performance and Migration can edit.",
+    "A subagent can read, edit and run commands like the main agent. Explore, Review, Judge and Security can read your repository and run checks, but they cannot edit it. Debug, Test, Performance and Migration can edit.",
   ],
   [
     "Where they work",
@@ -321,7 +321,7 @@ export const faqs = [
   {
     question: "Where are model provider keys stored?",
     answer:
-      "Provider credentials are stored with Vector's local application data and are not written into your repository. Keep normal operating-system account security enabled and never paste secrets into project files.",
+      "Provider credentials are stored with Vector's local application data and are not written into your repository. Keep normal operating-system account security enabled and never paste secrets into repository files.",
   },
   {
     question: "Can several agents work on one repository?",
@@ -341,17 +341,17 @@ export const faqs = [
   {
     question: "Can I stop Vector from using subagents?",
     answer:
-      "Yes. In the desktop app, switch off General subagents in Settings → Agents. In the terminal, from 1.99.99, set agent.general.disable to true in ~/.config/vector/vector.json, or in a project's vector.json for that project only. In the terminal it takes effect the next time you start Vector there. Vector's agent then does the work itself, except parts that fit a subagent specialist, which it can still hand to one. You can also still call a specialist yourself with @ and its name.",
+      "Yes. In the desktop app, switch off General subagents in Settings → Agents. In the terminal, from 1.99.99, set agent.general.disable to true in ~/.config/vector/vector.json, or in a repository's vector.json for that repository only. In the terminal it takes effect the next time you start Vector there. Vector's agent then does the work itself, except parts that fit a subagent specialist, which it can still hand to one. You can also still call a specialist yourself with @ and its name.",
   },
   {
     question: "Can I edit code myself?",
     answer:
-      "Yes. Switch from Agent to Editor to search the project, open files in tabs, edit directly, use diagnostics, and keep the same session agent beside the code.",
+      "Yes. Switch from Agent to Editor to search the repository, open files in tabs, edit directly, use diagnostics, and keep the same session agent beside the code.",
   },
   {
     question: "Does the browser replace Chrome or Firefox?",
     answer:
-      "No. It is a controlled project browser for previewing, testing, and completing approved web workflows alongside the active agent session.",
+      "No. It is a controlled browser for previewing the repository, testing, and completing approved web workflows alongside the active agent session.",
   },
   {
     question: "Do I need an API key?",

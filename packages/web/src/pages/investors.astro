@@ -564,9 +564,9 @@ const stack = [
     </div>
     <div class="ip-people">
       <div class="ip-person"><div class="ip-fit-label">Primary</div><h3>CTOs and engineering leads, seed to Series B</h3><p class="ip-why">Lets the team use Claude Code, Codex, Cursor and any model in one place, shows what each session and model costs, and reviews every GitHub pull request without a per-seat review tool.</p></div>
-      <div class="ip-person"><div class="ip-fit-label">Primary</div><h3>Founding engineers</h3><p class="ip-why">Runs several agents at once on existing subscriptions, delegates to specialists, tests the running app in a real browser and merges only after the project's own checks pass.</p></div>
+      <div class="ip-person"><div class="ip-fit-label">Primary</div><h3>Founding engineers</h3><p class="ip-why">Runs several agents at once on existing subscriptions, delegates to specialists, tests the running app in a real browser and merges only after the repository's own checks pass.</p></div>
       <div class="ip-person"><div class="ip-fit-label">Growth</div><h3>Technical solo founders</h3><p class="ip-why">Free to start with free models, and ships from the task: environment variables, Supabase migrations and Vercel deploys.</p></div>
-      <div class="ip-person"><div class="ip-fit-label">Growth</div><h3>Agencies and dev shops</h3><p class="ip-why">Keeps each client's model bill separate with their own keys, tracks spend per project, keeps rules in each repo and runs scheduled agents across many repos.</p></div>
+      <div class="ip-person"><div class="ip-fit-label">Growth</div><h3>Agencies and dev shops</h3><p class="ip-why">Keeps each client's model bill separate with their own keys, tracks spend per session and run, keeps rules in each repo and runs scheduled agents across many repos.</p></div>
     </div>
   </section>
 
@@ -603,7 +603,7 @@ const stack = [
         <ol class="ip-line">
           <li><b>Intake</b><span>A GitHub issue, a ticket or a schedule starts the work.</span></li>
           <li><b>Build</b><span>Agents from any vendor, on any model, each in its own cloud copy of the repository.</span></li>
-          <li><b>Check</b><span>The project's tests, the repair loop, a secret scan, Vectorscope review and a spend cap on every change.</span></li>
+          <li><b>Check</b><span>The repository's tests, the repair loop, a secret scan, Vectorscope review and a spend cap on every change.</span></li>
           <li><b>Preview</b><span>A pull request with a Vercel preview and its own Supabase branch database.</span></li>
           <li><b>Approve</b><span>A person merges and ships to production. The line never does that on its own.</span></li>
         </ol>
@@ -643,7 +643,7 @@ const stack = [
         <li><strong>Unsigned installers.</strong> macOS and Windows show a warning on first launch until code signing is set up.</li>
         <li><strong>Windows and Linux trail macOS</strong> in testing and maturity.</li>
         <li><strong>No SOC 2, SSO or admin console</strong> for larger companies yet.</li>
-        <li><strong>Interactive spend caps are opt-in.</strong> Desktop 1.99.108 holds interactive sessions and parallel agents to a live spend cap only once you set one, in Settings, Spend limits or a project's budget.run; none is set by default, and only scheduled agents stop at a default cap. In the terminal, the vector run --max-cost and --max-steps flags arrive with the next CLI release, and Windows WSL servers keep the 1.99.99 engine, without the cap, until a later desktop release requires the new CLI. Vercel and Supabase connect with pasted tokens until hosted sign-in is approved.</li>
+        <li><strong>Interactive spend caps are opt-in.</strong> Desktop 1.99.108 holds interactive sessions and parallel agents to a live spend cap only once you set one, in Settings, Spend limits or a repository's budget.run; none is set by default, and only scheduled agents stop at a default cap. In the terminal, the vector run --max-cost and --max-steps flags arrive with the next CLI release, and Windows WSL servers keep the 1.99.99 engine, without the cap, until a later desktop release requires the new CLI. Vercel and Supabase connect with pasted tokens until hosted sign-in is approved.</li>
         <li><strong>Built on open source.</strong> The agent core is adapted from an MIT-licensed open-source coding agent; the workspace, orchestration, cost and review layers are Vector's own.</li>
       </ul>
     </div>

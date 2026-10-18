@@ -185,7 +185,7 @@ describe("anonymous API abuse controls", () => {
       .join("\n")
 
     expect(result).toMatchObject({ status: 200, body: { reply: "Open the code editor." } })
-    expect(systemContext).toContain("Project group in the sidebar — also called Codespace")
+    expect(systemContext).toContain("The tools group in the sidebar — also called Codespace")
     expect(systemContext).not.toContain("attacker controlled")
     expect(systemContext).not.toContain(injection)
     expect(JSON.stringify(upstreamBody)).not.toContain(injection)

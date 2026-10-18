@@ -97,7 +97,7 @@ function countLabel(count: number, total: number, query: string) {
 }
 
 function categoryRank(category: string) {
-  if (category === "Project Commands") {
+  if (category === "Repository Commands") {
     return 0
   }
 
@@ -448,7 +448,7 @@ export function RunCommandMenuBody(props: {
         (item) =>
           ({
             action: "slash",
-            category: item.source === "mcp" ? "MCP Commands" : "Project Commands",
+            category: item.source === "mcp" ? "MCP Commands" : "Repository Commands",
             name: item.name,
             display: item.name,
             footer: `/${item.name}`,

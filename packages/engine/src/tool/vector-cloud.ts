@@ -460,7 +460,7 @@ function formatReport(action: Action, report: CloudReport) {
   if (action === "create_database") {
     if (report.needsChoice) {
       return lines(
-        report.error ?? "Vector needs to know which Supabase organization the new project belongs to.",
+        report.error ?? "Vector needs to know which Supabase organization the new Supabase project belongs to.",
         `Organizations: ${
           report.organizations
             ?.map((item) => `${item.name} (organizationId ${item.id}${item.plan ? `, ${item.plan} plan` : ""})`)
@@ -477,10 +477,10 @@ function formatReport(action: Action, report: CloudReport) {
     }
     return lines(
       report.createdNow
-        ? "Created a new Supabase project and connected it to this project."
-        : "No database was created; this project already has one connected.",
+        ? "Created a new Supabase project and connected it to this repository."
+        : "No database was created; this repository already has one connected.",
       `Database: ${JSON.stringify(report.database ?? { connected: false })}`,
-      report.applied ? `Project environment prepared: ${JSON.stringify(report.applied)}` : undefined,
+      report.applied ? `Repository environment prepared: ${JSON.stringify(report.applied)}` : undefined,
       report.nextStep,
     )
   }
@@ -532,7 +532,7 @@ function formatReport(action: Action, report: CloudReport) {
   if (action === "database_status" || action === "prepare_database") {
     return [
       `Vector Cloud database: ${JSON.stringify(report.database ?? { connected: false })}`,
-      report.applied ? `Project environment prepared: ${JSON.stringify(report.applied)}` : undefined,
+      report.applied ? `Repository environment prepared: ${JSON.stringify(report.applied)}` : undefined,
       report.nextStep ?? report.error,
     ]
       .filter((line): line is string => Boolean(line))
@@ -541,7 +541,7 @@ function formatReport(action: Action, report: CloudReport) {
   if (action === "prepare_auth") {
     return [
       `Vector Cloud authentication backend: ${JSON.stringify(report.database ?? { connected: false })}`,
-      report.applied ? `Project environment prepared: ${JSON.stringify(report.applied)}` : undefined,
+      report.applied ? `Repository environment prepared: ${JSON.stringify(report.applied)}` : undefined,
       report.nextStep ?? report.error,
     ]
       .filter((line): line is string => Boolean(line))
@@ -553,16 +553,16 @@ function formatReport(action: Action, report: CloudReport) {
         typeof item === "object" && item !== null && typeof Reflect.get(item, "key") === "string",
     )
     return variables.length
-      ? `Variables Vector stores for this project (names only; values never reach you): ${variables
+      ? `Variables Vector stores for this repository (names only; values never reach you): ${variables
           .map((item) => `${item.key} (${item.visibility === "public" ? "public" : "server-only"})`)
           .join(", ")}`
-      : "Vector stores no environment variables for this project. The user adds them in Vector Cloud > Environment variables."
+      : "Vector stores no environment variables for this repository. The user adds them in Vector Cloud > Environment variables."
   }
   if (action === "write_env_file") {
     return `Wrote the stored variables to .env: ${JSON.stringify(report.applied)}. Do not read .env or print its values.`
   }
   if (action === "remove_stored_env") {
-    return `Removed ${report.removed} from the variables Vector stores for this project. Still stored: ${nameList(
+    return `Removed ${report.removed} from the variables Vector stores for this repository. Still stored: ${nameList(
       (report.variables ?? []).filter((item): item is string => typeof item === "string"),
     )}. Write .env again (write_env_file) or sync Vercel to drop older copies.`
   }

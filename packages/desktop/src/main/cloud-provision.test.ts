@@ -447,7 +447,7 @@ describe("createCloudDatabase", () => {
 
     expect(report.ok).toBe(false)
     expect(report.error).toContain("INIT_FAILED")
-    expect(report.nextStep).toContain("Link another existing project in Vector Cloud > Database")
+    expect(report.nextStep).toContain("Link another existing Supabase project in Vector Cloud > Database")
     expect(report.nextStep).not.toContain("supabase.com")
     expect(getDatabase(project)).toBeNull()
     // Nothing is left for Finish setup or create_database to resume.
@@ -490,7 +490,7 @@ describe("createCloudDatabase", () => {
 
     expect(report.ok).toBe(false)
     expect(report.error).toContain("maximum number of active free projects")
-    expect(report.nextStep).toContain("Link an existing project")
+    expect(report.nextStep).toContain("Link an existing Supabase project")
     expect(report.nextStep).toContain("Do not upgrade a plan or retry in another organization automatically")
     expect(getDatabase(project)).toBeNull()
   })
@@ -504,7 +504,7 @@ describe("createCloudDatabase", () => {
     expect(report.ok).toBe(false)
     expect(report.error).toContain("was created, but Vector could not finish connecting it")
     expect(report.nextStep).toContain("newprojectref01")
-    expect(report.nextStep).toContain("Do not create another project")
+    expect(report.nextStep).toContain("Do not create another Supabase project")
     expect(report.nextStep).not.toContain("supabase.com")
   })
 

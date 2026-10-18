@@ -31,7 +31,7 @@ describe("pull request bridge input", () => {
   })
 
   test("rejects relative directories and unbounded content", () => {
-    expect(() => requirePullRequestDirectory("../other-project")).toThrow("absolute project path")
+    expect(() => requirePullRequestDirectory("../other-project")).toThrow("absolute repository path")
     expect(() => requirePullRequestLimit(501)).toThrow("between 1 and 500")
     expect(() => requirePullRequestText("", "Title", 256, false)).toThrow("Title is invalid")
     expect(() => requirePullRequestText("x".repeat(257), "Title", 256)).toThrow("Title is invalid")

@@ -70,6 +70,8 @@ import { useMarked } from "@vectordevai/ui/context/marked"
 import { preloadMarkdown } from "@vectordevai/session-ui/markdown-cache"
 import { normalizeUsageSummary, usageStreakCalendar } from "@/utils/usage-summary"
 import { VectorAsciiField } from "@/components/vector-ascii-field"
+import { HomeUpdate } from "@/components/home-update"
+import { useUpdateAction } from "@/components/updater-action"
 import {
   Automations,
   automationsApi,
@@ -700,6 +702,9 @@ export function NewHome() {
     })
   }
 
+  // The shell's Update action, so Home shows Update too: it has no sidebar.
+  const updateAction = useUpdateAction()
+
   function openSettings() {
     void import("@/components/settings-v2/dialog-settings-v2").then((module) => {
       dialog.show(() => <module.DialogSettings repositoryPath={newSessionProject()?.worktree} />)
@@ -783,6 +788,15 @@ export function NewHome() {
                 </svg>
                 Vector Cloud
               </button>
+              <Show when={updateAction}>
+                {(action) => (
+                  <HomeUpdate
+                    update={action().update()}
+                    onUpdate={action().install}
+                    runningAgents={action().runningAgents}
+                  />
+                )}
+              </Show>
               <button type="button" data-variant="secondary" onClick={openSettings}>
                 <IconV2 name="settings-gear" />
                 Settings

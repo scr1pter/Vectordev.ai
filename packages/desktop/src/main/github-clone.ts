@@ -342,7 +342,7 @@ async function reusableClone(git: string, environment: AgentEnvironment, names: 
     // The folder may hold the user's own work, so the message never suggests deleting it.
     fail(
       "exists",
-      `"${context.folder}" in ${context.parent} has a clone of ${context.repo} that Vector can't confirm is complete. Open it with Open Project, or choose another folder name.`,
+      `"${context.folder}" in ${context.parent} has a clone of ${context.repo} that Vector can't confirm is complete. Open it with Open Repository, or choose another folder name.`,
       { suggestedFolder: await suggestFolder(context) },
     )
   }

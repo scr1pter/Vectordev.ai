@@ -162,7 +162,7 @@ export function VercelDeployments(props: {
   const repair = (deployment: VercelDeployment, release?: CloudDeployment) =>
     props.onRepair(
       deployRepairPrompt({
-        project: state.status?.link?.projectName ?? "this project",
+        project: state.status?.link?.projectName ?? "this repository",
         environment: deployment.target === "production" ? "production" : "preview",
         url: deployment.url,
         deploymentId: deployment.id,

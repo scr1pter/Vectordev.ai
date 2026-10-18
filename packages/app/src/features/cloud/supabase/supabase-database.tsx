@@ -96,7 +96,7 @@ export function SupabaseDatabase(
       await props.onDatabaseChange()
       props.notice({
         tone: "success",
-        text: `Linked. Vector wrote the project's public URL and key to .env${
+        text: `Linked. Vector wrote the Supabase project's public URL and key to .env${
           report.client?.created ? ` and created ${report.client.path}` : ""
         }.${report.nextStep ? ` ${report.nextStep}` : ""}`,
       })
@@ -117,7 +117,7 @@ export function SupabaseDatabase(
       setProgress([])
       const report = await props.client.createProject(organizationId, regionId)
       if (report.needsChoice) {
-        props.notice({ tone: "info", text: "Choose which Supabase organization the new project belongs to." })
+        props.notice({ tone: "info", text: "Choose which Supabase organization the new Supabase project belongs to." })
         return
       }
       if (failed(props.notice, report)) {
@@ -238,7 +238,7 @@ export function SupabaseDatabase(
           <div class="cloud-panel">
             <PanelHead
               title="Connect Supabase"
-              detail="Connect your Supabase account to create a project or link one you already have."
+              detail="Connect your Supabase account to create a Supabase project or link one you already have."
             >
               <button class="cloud-button" data-variant="primary" type="button" onClick={props.onOpenConnections}>
                 Set up Supabase connection
@@ -269,7 +269,7 @@ export function SupabaseDatabase(
                   <div class="sb-confirm mt-3">
                     <span>
                       Vector started creating {pending().projectName} ({pending().region}) and it is not linked yet.
-                      Finish it instead of creating another project.
+                      Finish it instead of creating another Supabase project.
                     </span>
                     <button
                       class="cloud-button"
@@ -309,7 +309,7 @@ export function SupabaseDatabase(
                     disabled={!selection() || Boolean(busy())}
                     onClick={() => void link()}
                   >
-                    {busy() === "link" ? "Linking…" : "Use this project"}
+                    {busy() === "link" ? "Linking…" : "Use this Supabase project"}
                   </button>
                 </div>
               </Show>
@@ -345,7 +345,7 @@ export function SupabaseDatabase(
               <Show when={mode() === "create" && projects()?.organizations.length}>
                 <div class="sb-grid mt-3">
                   <label class="sb-field">
-                    <span>Organization (billed for the project)</span>
+                    <span>Organization (billed for the Supabase project)</span>
                     <select
                       class="cloud-input"
                       value={organization()}
@@ -395,7 +395,8 @@ export function SupabaseDatabase(
                   </button>
                   <span class="cloud-muted text-[12px]">
                     Supabase bills {chosenOrganization()?.name ?? "the chosen organization"}
-                    {chosenOrganization()?.plan ? ` (${chosenOrganization()?.plan} plan)` : ""} for the new project.
+                    {chosenOrganization()?.plan ? ` (${chosenOrganization()?.plan} plan)` : ""} for the new Supabase
+                    project.
                   </span>
                 </div>
               </Show>
@@ -458,8 +459,8 @@ export function SupabaseDatabase(
             </PanelHead>
             <label class="sb-field mt-3">
               <span>
-                Current database password, for a project Vector did not create. Vector keeps it encrypted and never
-                shows it; leave it empty if Vector created or rotated the password.
+                Current database password, for a Supabase project Vector did not create. Vector keeps it encrypted and
+                never shows it; leave it empty if Vector created or rotated the password.
               </span>
               <input
                 class="cloud-input"
@@ -693,7 +694,7 @@ export function SupabaseDatabase(
             <Show when={pendingWrite()}>
               <div class="sb-confirm mt-3">
                 <span>
-                  This query changes data in {props.projectName ?? "the linked project"} (production). Run it?
+                  This query changes data in {props.projectName ?? "the linked Supabase project"} (production). Run it?
                 </span>
                 <span class="sb-actions">
                   <button class="cloud-button" type="button" onClick={() => setPendingWrite("")}>

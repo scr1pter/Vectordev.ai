@@ -20,7 +20,7 @@ const finished = [
     status: "done",
     time: "2m 41s",
     tokens: "286.4k",
-    text: "List every place a project can make Vector run something: config files, MCP server definitions, hooks and scripts.",
+    text: "List every place a repository can make Vector run something: config files, MCP server definitions, hooks and scripts.",
   },
   {
     title: "Audit fingerprint storage",
@@ -31,12 +31,12 @@ const finished = [
     text: "Check how a trusted folder's fingerprint is stored and compared, and whether a moved or edited folder keeps its trust.",
   },
   {
-    title: "Trace project config loading",
+    title: "Trace repository config loading",
     kind: "Subagent",
     status: "done",
     time: "3m 05s",
     tokens: "402.7k",
-    text: "Follow project configuration from disk to the permission layer and note where an untrusted value can widen it.",
+    text: "Follow repository configuration from disk to the permission layer and note where an untrusted value can widen it.",
   },
   {
     title: "Review MCP server launch policy",
@@ -44,7 +44,7 @@ const finished = [
     status: "done",
     time: "4m 47s",
     tokens: "688.0k",
-    text: "Review the staged launch checks for MCP servers declared by the project rather than by the user.",
+    text: "Review the staged launch checks for MCP servers declared by the repository rather than by the user.",
   },
   {
     title: "Write trust prompt tests",
@@ -92,7 +92,7 @@ const finished = [
     status: "done",
     time: "1m 49s",
     tokens: "118.6k",
-    text: "Time fingerprinting on a large repository to make sure opening a project stays fast.",
+    text: "Time fingerprinting on a large repository to make sure opening a repository stays fast.",
   },
   {
     title: "Draft a trusted folders note",
@@ -173,7 +173,7 @@ const id = Astro.props.id
               Perform a final read-only application security review of the currently staged patch in ~/Vectordev.ai on
               branch security-boundaries, comparing the staged diff to HEAD and considering origin/main where relevant,
               without editing any files. Focus on the intended security boundaries: explicit fingerprint-bound workspace trust
-              for project executable configuration; untrusted project policy that cannot widen permissions or launch MCP
+              for repository executable configuration; untrusted repository policy that cannot widen permissions or launch MCP
               servers; and the checks that keep the generated client in step with both.
             </p>
             <h5 class="bgt-phases-label">Phases</h5>

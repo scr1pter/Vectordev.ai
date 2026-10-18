@@ -43,7 +43,7 @@ test("Cloud permission details retain the full SQL and exact account scope", () 
   })
   expect(details?.rows).toEqual([
     { label: "Provider", value: "Supabase" },
-    { label: "Project", value: "shop" },
+    { label: "Supabase project", value: "shop" },
     { label: "Environment", value: "production" },
   ])
   expect(details?.summary).toBe("Apply migration")

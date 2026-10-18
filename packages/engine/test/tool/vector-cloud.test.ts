@@ -909,7 +909,7 @@ describe("vector_cloud Vercel actions", () => {
       expect(reads.permissions).toEqual([])
       expect(listed.map((item) => item.command)).toEqual(["stored_env"])
       expect(names.output).toBe(
-        "Variables Vector stores for this project (names only; values never reach you): STRIPE_SECRET_KEY (server-only), VITE_SITE_NAME (public)",
+        "Variables Vector stores for this repository (names only; values never reach you): STRIPE_SECRET_KEY (server-only), VITE_SITE_NAME (public)",
       )
 
       const written = yield* bridge(

@@ -245,7 +245,7 @@ export function createBrowserPlanner(deps: {
     const directory = await deps.resolveDirectory()
     if (!directory)
       throw new Error(
-        "Open a project before running Browser Agent so Vector can use the selected project model safely.",
+        "Open a repository before running Browser Agent so Vector can use the repository's selected model safely.",
       )
     const model = deps.model()
     if (!model) throw new Error("Connect and select a model before running Browser Agent.")

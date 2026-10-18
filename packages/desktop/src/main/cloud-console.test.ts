@@ -404,7 +404,7 @@ describe("cloud bridge publish destination", () => {
       provider: "Vector",
       environment: "local .env",
       summary:
-        "Write this project's 2 stored environment variables (STRIPE_SECRET_KEY, VITE_SITE_NAME) to the .env of this project. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.",
+        "Write this repository's 2 stored environment variables (STRIPE_SECRET_KEY, VITE_SITE_NAME) to the .env of this repository. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.",
     })
     expect(await command({ command: "write_env_file" })).toEqual({
       ok: true,
@@ -413,7 +413,7 @@ describe("cloud bridge publish destination", () => {
     expect(await readFile(join(project, ".env"), "utf8")).toContain("STRIPE_SECRET_KEY=fixture-server-secret")
     expect(await command({ command: "describe", action: "remove_stored_env", key: "MISSING" })).toMatchObject({
       ok: false,
-      error: "MISSING is not stored for this project.",
+      error: "MISSING is not stored for this repository.",
     })
     expect(
       (await command({ command: "describe", action: "remove_stored_env", key: "VITE_SITE_NAME" })).scope,
@@ -443,7 +443,7 @@ describe("cloud bridge publish destination", () => {
         provider: "Vercel",
         project: "vercel app",
         environment: "preview",
-        summary: "Publish this project to the Vercel project vercel app as a preview. Production does not change.",
+        summary: "Publish this repository to the Vercel project vercel app as a preview. Production does not change.",
       },
     })
     expect((await describe({ action: "publish", production: false })).scope.environment).toBe("preview")
@@ -462,7 +462,7 @@ describe("cloud bridge publish destination", () => {
       ok: true,
       scope: {
         provider: "Supabase",
-        project: "a new project",
+        project: "a new one",
         summary:
           "Create a new Supabase project in organization org_1 in eu-west-2. Supabase bills it to that organization.",
       },
@@ -488,7 +488,7 @@ describe("cloud bridge publish destination", () => {
       project: "shop-db",
       environment: "local .env",
       summary:
-        "Write this project's 3 stored environment variables (API_URL, SUPABASE_URL, SUPABASE_ANON_KEY) to the .env of this project, including the Supabase project shop-db's public client settings. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.",
+        "Write this repository's 3 stored environment variables (API_URL, SUPABASE_URL, SUPABASE_ANON_KEY) to the .env of this repository, including the Supabase project shop-db's public client settings. Values are not shown here, but once they are in .env the agent can read them: the read tool and shell commands that name the file ask first, auto-accept answers that prompt, and a program the agent runs can open the file without one.",
     })
     expect(JSON.stringify(prepare)).not.toContain("api.fixture.invalid")
     const missing = await bridgeCommand(bridge, { command: "describe" })
@@ -534,7 +534,7 @@ describe("cloud bridge publish destination", () => {
       })
       expect(await command({ command: "publish" })).toMatchObject({
         ok: true,
-        nextStep: expect.stringContaining("Merge the workspace into the main project"),
+        nextStep: expect.stringContaining("Merge the workspace into the repository"),
       })
       expect(published).toEqual([
         expect.objectContaining({
@@ -553,7 +553,7 @@ describe("cloud bridge publish destination", () => {
       // and the database is looked up in the project's scope.
       expect(await command({ command: "apply_migrations", dryRun: true })).toMatchObject({
         ok: false,
-        error: "No Supabase project is connected to this project.",
+        error: "No Supabase project is connected to this repository.",
       })
       await connectDatabase(project, undefined, {
         provider: "supabase",

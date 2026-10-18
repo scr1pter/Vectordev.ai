@@ -22,7 +22,7 @@ test("first run shows the activation checklist and dismissing persists", async (
   await expect(page.getByText("run vector login there", { exact: false })).toBeVisible()
   await expect(page.getByRole("button", { name: "Use my own API key →" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Start free →" })).toHaveCount(0)
-  await expect(page.getByText("Create or open a project")).toBeVisible()
+  await expect(page.getByText("Create or open a repository")).toBeVisible()
   await page.getByRole("button", { name: "Keep building" }).click()
   await expect(checklist).not.toBeVisible()
 

@@ -78,7 +78,7 @@ export function useMcpRemove() {
       showToast({
         variant: "success",
         title: "Integration removed",
-        description: `${name} and its stored credentials were removed from this project.`,
+        description: `${name} and its stored credentials were removed from this repository.`,
       }),
     onError: (error) =>
       showToast({

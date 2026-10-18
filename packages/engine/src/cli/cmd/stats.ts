@@ -68,7 +68,7 @@ export const StatsCommand = effectCmd({
         describe: "show model statistics (default: hidden). Pass a number to show top N, otherwise shows all",
       })
       .option("project", {
-        describe: "filter by project (default: all projects, empty string: current project)",
+        describe: "filter by repository (default: all repositories, empty string: current repository)",
         type: "string",
       }),
   handler: Effect.fn("Cli.stats")(function* (args) {

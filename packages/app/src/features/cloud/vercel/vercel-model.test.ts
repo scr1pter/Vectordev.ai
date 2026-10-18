@@ -194,7 +194,7 @@ describe("publish outcome", () => {
       "Fix cart",
     )
     expect(outcome.text).toContain("Preview of Fix cart live at https://shop-git-agent-fix-acme.vercel.app.")
-    expect(outcome.text).toContain("let them through in Project settings")
+    expect(outcome.text).toContain("let them through in Hosting settings")
   })
 
   test("a failure carries the desktop's own reason", () => {

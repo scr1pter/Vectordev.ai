@@ -407,6 +407,8 @@ export const use = serviceUse(Service)
 // tokens/headers) are written here instead of the committable vector.json, so the files
 // must stay gitignored.
 const LOCAL_CONFIG_FILES = ["vector.local.json", "vector.local.jsonc"]
+// How many repository files the ignored budget.run notice remembers having told the user about.
+const IGNORED_BUDGETS_KEPT = 200
 
 /**
  * Where the integrations a user adds from the app are kept for one project. They are the user's choice, not the
@@ -605,10 +607,15 @@ const layer = Layer.effect(
       return yield* Effect.uninterruptible(cachedGlobal)
     })
 
-    // A repository's budget.run stopped applying when spend limits became one overall set. Say so once per file, so a
-    // cap someone relied on does not disappear silently, without repeating it on every load.
+    // A repository's budget.run stopped applying when spend limits became one overall set. Say so once per repository
+    // file, so a cap someone relied on does not disappear silently, without repeating it on every load. Parallel agents
+    // and copies of a repository load it from new folders, so a file is remembered by the repository it belongs to
+    // (its remote or first commit, which worktrees and copies share) and its path inside it rather than by where it
+    // sits on disk. A folder without Git has no such identity; its copies share the file's content instead. Only the
+    // most recent files are remembered, so the list cannot grow without bound.
     const noticeIgnoredRunBudgets = Effect.fn("Config.noticeIgnoredRunBudgets")(function* (
       workspace: string,
+      repository: string,
       sources: string[],
     ) {
       yield* Effect.logWarning("ignoring budget.run in repository config; spend limits cover every repository", {
@@ -621,10 +628,27 @@ const layer = Layer.effect(
         ),
         Effect.orElseSucceed((): string[] => []),
       )
-      const fresh = sources.filter((source) => !noticed.includes(source))
+      const entries = yield* Effect.forEach(sources, (source) =>
+        Effect.gen(function* () {
+          const relative = path.relative(workspace, source) || source
+          if (repository !== "global") return { relative, key: `${repository}:${relative}` }
+          const content = (yield* fs.readFileStringSafe(source).pipe(Effect.orElseSucceed(() => undefined))) ?? ""
+          return {
+            relative,
+            key: `content:${createHash("sha256").update(`${relative}\n${content}`).digest("hex").slice(0, 32)}`,
+          }
+        }),
+      )
+      const fresh = entries.filter((entry) => !noticed.includes(entry.key))
       if (!fresh.length) return
-      yield* fs.writeWithDirs(file, JSON.stringify([...noticed, ...fresh])).pipe(Effect.ignore)
-      const files = fresh.map((source) => path.relative(workspace, source) || source).join(" and ")
+      const keys = fresh.map((entry) => entry.key)
+      yield* fs
+        .writeWithDirs(
+          file,
+          JSON.stringify([...noticed.filter((key) => !keys.includes(key)), ...keys].slice(-IGNORED_BUDGETS_KEPT)),
+        )
+        .pipe(Effect.ignore)
+      const files = fresh.map((entry) => entry.relative).join(" and ")
       GlobalBus.emit("event", {
         directory: "global",
         payload: {
@@ -1077,7 +1101,7 @@ const layer = Layer.effect(
           deps.push(yield* dependencies.prepare().pipe(Effect.forkDetach))
         }
 
-        if (ignoredRunBudgets.length) yield* noticeIgnoredRunBudgets(workspace, ignoredRunBudgets)
+        if (ignoredRunBudgets.length) yield* noticeIgnoredRunBudgets(workspace, ctx.project.id, ignoredRunBudgets)
 
         const settings = WorkspaceTrust.hasInputs(trustSnapshot)
         const desktop = Flag.VECTOR_CLIENT === "desktop"

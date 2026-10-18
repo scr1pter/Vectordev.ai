@@ -46,7 +46,7 @@ export function recentConnectedWorkspaces<WorkspaceInfo extends { id: string; ti
 }
 
 export function warpReminderText(dir: string) {
-  return `<system-reminder>The user has changed the current working directory to "${dir}". This is still the same project but at a possibly new location; take this into account when working with any files from now on.</system-reminder>`
+  return `<system-reminder>The user has changed the current working directory to "${dir}". This is still the same repository but at a possibly new location; take this into account when working with any files from now on.</system-reminder>`
 }
 
 async function loadWorkspaceAdapters(input: {
@@ -216,7 +216,7 @@ export function DialogWorkspaceSelect(props: {
       {
         title: "None",
         value: { type: "none" as const },
-        description: "Use the local project",
+        description: "Use the local repository",
         category: "Choose workspace",
       },
       ...recent.map((workspace: Workspace) => ({

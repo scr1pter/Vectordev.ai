@@ -1106,7 +1106,7 @@ describe("vector_cloud Vercel actions over the bridge", () => {
     // Linking goes through link_project, which the tool asks about first.
     expect(await command({ command: "describe", action: "link_project", projectId: remote.id })).toMatchObject({
       ok: true,
-      scope: { environment: "project link" },
+      scope: { environment: "Vercel project link" },
     })
   })
 
@@ -1121,7 +1121,7 @@ describe("vector_cloud Vercel actions over the bridge", () => {
         provider: "Vercel",
         project: "fresh",
         environment: "production",
-        summary: expect.stringContaining("Vercel makes a project's first deployment production"),
+        summary: expect.stringContaining("Vercel makes its first deployment production"),
       },
     })
     const live = api.addDeployment({ projectId: remote.id, target: "production" })
@@ -1198,7 +1198,7 @@ describe("vector_cloud Vercel actions over the bridge", () => {
     })
     expect(described).toMatchObject({
       ok: true,
-      scope: { environment: "production", summary: expect.stringContaining("value stored for it in this project") },
+      scope: { environment: "production", summary: expect.stringContaining("value stored for it in this repository") },
     })
     const set = await command({ command: "set_env", key: "STRIPE_SECRET", targets: ["production"] })
     expect(set).toMatchObject({ ok: true, text: "Created STRIPE_SECRET on shop for production." })

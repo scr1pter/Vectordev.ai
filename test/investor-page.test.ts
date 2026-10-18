@@ -29,7 +29,7 @@ test("the investor page says interactive spend caps shipped in desktop 1.99.108 
   )
   expect(DEFAULT_SPEND_POLICY.interactive).toEqual({})
   expect(page).toContain(
-    "Desktop 1.99.108 holds interactive sessions and parallel agents to a live spend cap only once you set one, in Settings, Spend limits or a project's budget.run; none is set by default",
+    "Desktop 1.99.108 holds interactive sessions and parallel agents to a live spend cap only once you set one, in Settings, Spend limits or a repository's budget.run; none is set by default",
   )
   expect(page).toContain("desktop 1.99.108 already holds interactive runs to a live spend cap once you set one")
   // The CLI flags and WSL engines did not ship with the desktop, so the page must not present them as shipped.

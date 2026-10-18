@@ -332,8 +332,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       .then(() => true)
       .catch((err) => {
         showToast({
-          title: "Project folder unavailable",
-          description: formatServerError(err, language.t, "Reopen the project from its existing folder."),
+          title: "Repository folder unavailable",
+          description: formatServerError(err, language.t, "Reopen the repository from its existing folder."),
           variant: "error",
           duration: 10_000,
         })

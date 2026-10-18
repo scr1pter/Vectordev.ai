@@ -132,9 +132,15 @@ export function CodiumPurchase(props: { plan?: { id: string; cancelAtPeriodEnd?:
                   <For each={current().plans}>{(offer) => row(offer, "plan")}</For>
                 </ul>
                 <Show when={offersPlanChange(props.plan, current().enabled)}>
-                  <div>
+                  <div class="codium-purchase-change">
+                    {/* Stripe's confirm page shows the charge but not the credits it ends, so say both first. */}
+                    <p id="codium-purchase-change-terms" class="codium-purchase-muted">
+                      A bigger plan starts a new month today and is charged in full, and what is left of this month's
+                      credits ends then. A smaller plan starts on your renewal date.
+                    </p>
                     <ButtonV2
                       variant="outline"
+                      aria-describedby="codium-purchase-change-terms"
                       disabled={props.billing.busy()}
                       onClick={() => void props.billing.run({ kind: "portal", flow: "change" })}
                     >

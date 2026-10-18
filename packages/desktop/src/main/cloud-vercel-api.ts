@@ -161,7 +161,7 @@ export function vercelFailure(status: number, body: unknown, token: string) {
   if (status === 403) {
     return new VercelError(
       "forbidden",
-      `Vercel refused the request: ${message} The connected token may not have access to this team or project.`,
+      `Vercel refused the request: ${message} The connected token may not have access to this team or Vercel project.`,
       status,
     )
   }
@@ -231,7 +231,7 @@ export async function vercelLinkContext(projectPath: string): Promise<VercelLink
   if (!link) {
     throw new VercelError(
       "not_linked",
-      "No Vercel project is linked to this project. Link or create one in Vector Cloud > Connections.",
+      "No Vercel project is linked to this repository. Link or create one in Vector Cloud > Connections.",
     )
   }
   const auth = await vercelAuth(linkTeamId(link) ?? null)

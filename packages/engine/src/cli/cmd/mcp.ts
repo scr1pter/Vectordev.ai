@@ -521,7 +521,7 @@ export const McpAddCommand = effectCmd({
           message: "Location",
           options: [
             {
-              label: "Current project",
+              label: "Current repository",
               value: projectConfigPath,
               hint: projectConfigPath,
             },

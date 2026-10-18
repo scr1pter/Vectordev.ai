@@ -30699,7 +30699,7 @@
               }
             }
           ],
-          "description": "New project copy"
+          "description": "New repository copy"
         },
         "dialog.move_session.delete": {
           "anyOf": [
@@ -30897,7 +30897,7 @@
               }
             }
           ],
-          "description": "Delete project copy"
+          "description": "Delete repository copy"
         },
         "dialog.move_session.refresh": {
           "anyOf": [
@@ -31095,7 +31095,7 @@
               }
             }
           ],
-          "description": "Refresh project copies"
+          "description": "Refresh repository copies"
         },
         "prompt.autocomplete.prev": {
           "anyOf": [

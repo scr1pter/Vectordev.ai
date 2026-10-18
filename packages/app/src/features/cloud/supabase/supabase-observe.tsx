@@ -54,7 +54,7 @@ export function SupabaseLogs(props: SupabasePanelProps & { icon: JSX.Element; on
     if (!query) return
     props.onDiagnose?.(
       supabaseLogsPrompt({
-        project: props.projectName ?? "this project",
+        project: props.projectName ?? "linked to this repository",
         service: query.service,
         label: SERVICES.find((item) => item.id === query.service)?.label ?? query.service,
         minutes: query.minutes,
@@ -216,7 +216,9 @@ export function SupabaseSecurity(
                 class="cloud-button"
                 type="button"
                 disabled={busy()}
-                onClick={() => props.onFix?.(securityFixPrompt(props.projectName ?? "this project", report()!))}
+                onClick={() =>
+                  props.onFix?.(securityFixPrompt(props.projectName ?? "linked to this repository", report()!))
+                }
               >
                 Fix with the agent
               </button>

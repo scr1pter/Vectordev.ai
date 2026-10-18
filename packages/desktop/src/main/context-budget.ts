@@ -351,7 +351,7 @@ function architectureSummary(files: { path: string; dependencies: string[] }[]) 
     .slice(0, 10)
     .map(([name, count]) => `${name} (${count})`)
   const edges = files.reduce((total, file) => total + file.dependencies.length, 0)
-  return `${files.length} indexed source files across ${areas.join(", ") || "the project root"}; ${edges} local dependency links mapped.`
+  return `${files.length} indexed source files across ${areas.join(", ") || "the repository root"}; ${edges} local dependency links mapped.`
 }
 
 export async function createContextBudgetPack(
@@ -445,7 +445,7 @@ async function keywordContextBudgetPack(
         file.path,
       )
     ) {
-      addScore(file.path, 5, "project entry/configuration file")
+      addScore(file.path, 5, "repository entry/configuration file")
     }
   }
 

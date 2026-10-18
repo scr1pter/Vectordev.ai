@@ -310,7 +310,7 @@ export function getDeployment(projectPath: string, taskId: string | undefined, i
   const deployment = readDeployments().find(
     (item) => item.id === id && item.projectPath === projectPath && supportedDeployment(item),
   )
-  if (!deployment) throw new Error("That deployment is no longer in this project's history.")
+  if (!deployment) throw new Error("That deployment is no longer in this repository's history.")
   return deployment
 }
 
@@ -322,7 +322,7 @@ export function updateDeployment(
 ): CloudDeployment {
   const records = readDeployments()
   const deployment = records.find((item) => item.id === id && item.projectPath === projectPath)
-  if (!deployment) throw new Error("That deployment is no longer in this project's history.")
+  if (!deployment) throw new Error("That deployment is no longer in this repository's history.")
   const next = { ...deployment, ...update, id: deployment.id, projectPath }
   writeDeployments(records.map((item) => (item.id === id ? next : item)))
   return next
@@ -336,7 +336,7 @@ export function markDeploymentPromoted(
 ): CloudDeployment {
   const records = readDeployments()
   const selected = records.find((item) => item.id === id && item.projectPath === projectPath)
-  if (!selected) throw new Error("That deployment is no longer in this project's history.")
+  if (!selected) throw new Error("That deployment is no longer in this repository's history.")
   const promotedAt = now()
   const updated = transitionReleaseRecords(records, selected.id, {
     productionUrl: input.productionUrl,
@@ -541,7 +541,7 @@ export async function detectBuildSettings(
   directory = projectPath,
 ): Promise<CloudBuildSettings> {
   const stats = directory ? await stat(directory).catch(() => undefined) : undefined
-  if (!stats?.isDirectory()) throw new Error("Open a project folder before detecting its build settings.")
+  if (!stats?.isDirectory()) throw new Error("Open a repository folder before detecting its build settings.")
 
   const packageJson = await readFile(join(directory, "package.json"), "utf8")
     .then(parsePackageManifest)
@@ -679,7 +679,7 @@ export function setBuildSettings(
     outputDirectory === ".." ||
     outputDirectory.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
   ) {
-    throw new Error("The output directory must stay inside the current project.")
+    throw new Error("The output directory must stay inside the repository.")
   }
   const settings: CloudBuildSettings = {
     framework: (input.framework ?? "").trim() || "Other",
@@ -808,7 +808,7 @@ export async function applyEnv(
 ): Promise<{ written: string; gitignoreUpdated: boolean }> {
   const stats = directory ? await stat(directory).catch(() => undefined) : undefined
   if (!stats?.isDirectory()) {
-    throw new Error("Open a project folder before applying environment variables.")
+    throw new Error("Open a repository folder before applying environment variables.")
   }
   const project = readProject(projectPath)
   const vars = listEnv(projectPath)
@@ -840,7 +840,7 @@ export async function applyEnv(
     if (error.code !== "ENOENT") throw error
   })
   if (existingFile && !existingFile.isFile()) {
-    throw new Error("The project's .env must be a regular file, not a symbolic link or directory.")
+    throw new Error("The repository's .env must be a regular file, not a symbolic link or directory.")
   }
   const existing = await open(envPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
     .then(async (file) => {
@@ -911,7 +911,7 @@ export function normalizeCloudDomain(raw: string): string {
 
 function requireProject(projectPath: string): string {
   const path = (projectPath ?? "").trim()
-  if (!path) throw new Error("Open a project first.")
+  if (!path) throw new Error("Open a repository first.")
   return path
 }
 

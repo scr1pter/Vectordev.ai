@@ -235,7 +235,7 @@ export function describeSensitiveBrowserAction(
   // On the Vercel and Supabase dashboards almost any button can change the
   // account the vector_cloud prompts protect, so every click there asks.
   if (dashboard) {
-    return `Click ${name} on the ${dashboard} dashboard, where a click can deploy, promote, roll back or change the project`
+    return `Click ${name} on the ${dashboard} dashboard, where a click can deploy, promote, roll back or change the ${dashboard} project`
   }
 }
 

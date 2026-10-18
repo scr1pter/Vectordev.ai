@@ -812,7 +812,7 @@ export function createScheduledAgents(
       const prompt = input.prompt?.trim()
       if (!prompt) throw new Error("Write a prompt for the scheduled agent to run.")
       const targets = normalizeTargets(input)
-      if (targets.length === 0) throw new Error("Choose at least one project directory for the scheduled agent.")
+      if (targets.length === 0) throw new Error("Choose at least one repository folder for the scheduled agent.")
       const model = normalizeModel(input.model)
       if (!model && targets.some((target) => !target.sessionId)) {
         throw new Error("Choose a model for this automation before scheduling a fresh session.")

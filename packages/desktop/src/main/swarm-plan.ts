@@ -165,7 +165,7 @@ export function fallbackSwarmPlan(objective: string, maxTasks = 4): SwarmPlan {
     [
       {
         id: "map-project",
-        title: "Map the relevant project surface",
+        title: "Map the relevant parts of the repository",
         prompt: `Inspect the repository for the smallest set of files, dependencies, conventions, and risks needed to complete this objective. Do not edit files. Objective: ${objective}`,
         role: "explore",
         dependsOn: [],
@@ -175,7 +175,7 @@ export function fallbackSwarmPlan(objective: string, maxTasks = 4): SwarmPlan {
       {
         id: "implement-objective",
         title: "Implement the objective",
-        prompt: `Implement the complete objective using the project map from the dependency task. Keep the change focused and production-ready. Objective: ${objective}`,
+        prompt: `Implement the complete objective using the repository map from the dependency task. Keep the change focused and production-ready. Objective: ${objective}`,
         role: "implement",
         dependsOn: ["map-project"],
         fileHints: [],

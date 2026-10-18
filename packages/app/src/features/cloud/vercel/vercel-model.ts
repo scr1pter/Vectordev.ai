@@ -180,7 +180,7 @@ export function publishOutcome(result: PublishResult, workspaceName?: string) {
       `${production ? "Production release" : workspaceName ? `Preview of ${workspaceName}` : "Preview"} live at ${result.url}.`,
       production ? "" : "Production did not change.",
       result.protectedChecks === "skipped"
-        ? `Deployment Protection kept Vector's checks out of this ${production ? "release" : "preview"}; let them through in Project settings.`
+        ? `Deployment Protection kept Vector's checks out of this ${production ? "release" : "preview"}; let them through in Hosting settings.`
         : "",
       ...(result.notes ?? []),
     ]

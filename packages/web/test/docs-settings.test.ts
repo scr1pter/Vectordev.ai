@@ -20,6 +20,7 @@ test("the desktop app docs describe today's Settings, not the removed pages", as
   expect(text).toContain("Click your name at the bottom of the sidebar to open Settings at Account")
   expect(text).toContain("Settings in the Help menu, or Cmd+,")
   expect(text).toContain("an Update button takes the gear's place")
+  expect(text).toContain("Home shows the same Update button too, just before its Settings button")
   expect(text).toContain(
     "Vector has one look, its own dark theme, and shows its interface in your computer's language.",
   )

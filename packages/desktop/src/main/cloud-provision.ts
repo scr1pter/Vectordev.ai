@@ -295,7 +295,7 @@ async function waitForHealthyProject(
         stage: "waiting",
         projectRef,
         status,
-        message: `Supabase reports the project as ${status ?? "starting"} (check ${attempt} of ${options.attempts}).`,
+        message: `Supabase reports it as ${status ?? "starting"} (check ${attempt} of ${options.attempts}).`,
       })
       if (status === HEALTHY_STATUS) return { healthy: true, status, region, attempts: attempt }
       if (status && FAILED_STATUSES.has(status)) return { healthy: false, status, region, attempts: attempt }
@@ -315,7 +315,7 @@ async function fetchAnonKey(token: string, projectRef: string, request: CloudFet
     values.find((item) => stringField(item, "name") === "anon") ??
     values.find((item) => stringField(item, "type") === "anon")
   const anonKey = stringField(publicKeyRecord, "api_key")
-  if (!anonKey) throw new Error("Supabase did not expose a publishable or anon key for the new project.")
+  if (!anonKey) throw new Error("Supabase did not expose a publishable or anon key for the new Supabase project.")
   return anonKey
 }
 
@@ -330,7 +330,7 @@ async function linkCreatedProject(
   progress?.({
     stage: "linking",
     projectRef: record.projectRef,
-    message: `Connecting ${record.projectName} to this project.`,
+    message: `Connecting ${record.projectName} to this repository.`,
   })
   const anonKey = await fetchAnonKey(token, record.projectRef, request)
   // The manual flow's own helper: it writes the project URL and public key into
@@ -349,7 +349,7 @@ async function linkCreatedProject(
     },
     input.directory,
   )
-  if (!connection) throw new Error("Vector could not record the new Supabase project for this project.")
+  if (!connection) throw new Error("Vector could not record the new Supabase project for this repository.")
   writeProvisionRecord(input.projectPath, { ...record, linkedAt: now() })
   return {
     ok: true,
@@ -386,7 +386,7 @@ async function provision(
       createdNow: false,
       database: databaseSummary(existing),
       nextStep:
-        "This project already has a database connected, so nothing was created. Use prepare_database to wire it into the code, or call create_database with force to add a second Supabase project anyway.",
+        "This repository already has a database connected, so nothing was created. Use prepare_database to wire it into the code, or call create_database with force to add a second Supabase project anyway.",
     }
   }
 
@@ -437,7 +437,7 @@ async function provision(
     return {
       ok: false,
       needsSetup: true,
-      error: "This Supabase account has no organizations, so there is nothing to create a project in.",
+      error: "This Supabase account has no organizations, so there is nothing to create a Supabase project in.",
       nextStep:
         "Ask the user what to name one and create it with create_organization (the user approves it, or creates it in Vector Cloud > Database), then run create_database again.",
     }
@@ -457,7 +457,7 @@ async function provision(
       organizations,
       error: input.organizationId
         ? `This Supabase account has no organization with id ${input.organizationId}.`
-        : "This Supabase account has more than one organization, and the new project has to belong to one of them.",
+        : "This Supabase account has more than one organization, and the new Supabase project has to belong to one of them.",
       nextStep:
         "Ask the user which organization the database should live in, then call create_database again with that organizationId.",
     }
@@ -478,7 +478,7 @@ async function provision(
     body: JSON.stringify({ name, organization_id: chosen.id, region, db_pass: password }),
   })
   const projectRef = stringField(created, "ref") ?? stringField(created, "id")
-  if (!projectRef) throw new Error("Supabase accepted the project but did not return its reference.")
+  if (!projectRef) throw new Error("Supabase accepted the new Supabase project but did not return its reference.")
   context.createdRef = projectRef
 
   const record: ProvisionRecord = {
@@ -519,7 +519,7 @@ function notHealthyReport(
   const waitedMs = poll.attempts * intervalMs
   // The timeout is not a failure of the project, only of the wait, so it says
   // what exists and how to finish it — never "try creating one again".
-  const resume = `Do not create another one. Run create_database again in a minute and it will finish linking this same project (${record.projectRef}).`
+  const resume = `Do not create another one. Run create_database again in a minute and it will finish linking this same Supabase project (${record.projectRef}).`
   return {
     ok: false,
     waitedMs,
@@ -529,7 +529,7 @@ function notHealthyReport(
         ? `${record.projectName} was created, but Supabase is not listing it on the account yet.`
         : `${record.projectName} was created but is still ${poll.status ?? "starting"} after ${Math.round(waitedMs / 1000)}s.`,
     nextStep: failed
-      ? `Nothing is connected to this project, and Vector no longer tries to finish ${record.projectName}. Link another existing project in Vector Cloud > Database (supabase_projects, then link_database), or create a new one, which Supabase bills as another project.`
+      ? `Nothing is connected to this repository, and Vector no longer tries to finish ${record.projectName}. Link another existing Supabase project in Vector Cloud > Database (supabase_projects, then link_database), or create a new one, which Supabase bills as another Supabase project.`
       : resume,
   }
 }
@@ -554,7 +554,7 @@ export async function createCloudDatabase(
     // has to finish that one instead of buying a second.
     const created = context.createdRef
     const resume = created
-      ? ` The project Vector created (${created}) does exist, so do not create another one — run create_database again to finish linking it.`
+      ? ` The Supabase project Vector created (${created}) does exist, so do not create another one — run create_database again to finish linking it.`
       : ""
     if (status === 401) {
       return {
@@ -568,7 +568,7 @@ export async function createCloudDatabase(
       return {
         ok: false,
         error: `The Supabase project was created, but Vector could not finish connecting it: ${message}`,
-        nextStep: `Run create_database again to finish linking ${created}; it resumes that same project. Do not create another project.`,
+        nextStep: `Run create_database again to finish linking ${created}; it resumes that same Supabase project. Do not create another Supabase project.`,
       }
     }
     // Free organizations cap how many projects they may hold, and a card on
@@ -577,9 +577,9 @@ export async function createCloudDatabase(
     const limited = status === 402 || status === 403 || /limit|quota|exceed|payment|billing|upgrade/i.test(message)
     return {
       ok: false,
-      error: `Supabase would not create the project: ${message}`,
+      error: `Supabase would not create the new database: ${message}`,
       nextStep: limited
-        ? "Supabase declined this request because of an account or plan limit. Link an existing project in Vector Cloud > Database, or wait until the provider confirms capacity is available. Do not upgrade a plan or retry in another organization automatically."
+        ? "Supabase declined this request because of an account or plan limit. Link an existing Supabase project in Vector Cloud > Database, or wait until the provider confirms capacity is available. Do not upgrade a plan or retry in another organization automatically."
         : "Report this to the user as Supabase reported it, and offer to link an existing Supabase project instead (supabase_projects, then link_database).",
     }
   }

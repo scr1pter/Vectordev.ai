@@ -23,6 +23,7 @@ import {
   navigationUpdate,
   navigationUpdateFailure,
   runningAgentCount,
+  UpdateActionContext,
 } from "@/components/updater-action"
 import { pathKey } from "@/utils/path-key"
 import { listSwarmWorkers } from "@/utils/swarm-workers"
@@ -1769,8 +1770,8 @@ export default function NewLayout(props: ParentProps) {
       })
     ) {
       showToast({
-        title: "Open a project first",
-        description: "Agent workspaces belong to the project you are working on.",
+        title: "Open a repository first",
+        description: "Agent workspaces belong to the repository you are working on.",
       })
       return
     }
@@ -1872,11 +1873,11 @@ export default function NewLayout(props: ParentProps) {
       return
     }
     if (!sourcePath) {
-      setParallelError("No active project path is loaded. Open a project first, then launch an isolated agent.")
+      setParallelError("No repository is open. Open a repository first, then launch an isolated agent.")
       return
     }
     if (!taskPrompt) {
-      setParallelError("Describe the project work this isolated agent should handle.")
+      setParallelError("Describe the work this isolated agent should handle.")
       return
     }
     const runtimes = parallelCompareRuntimes() ? readyComparisonRuntimes() : [parallelRuntime()]
@@ -2059,7 +2060,7 @@ export default function NewLayout(props: ParentProps) {
       return
     }
     if (!sourcePath) {
-      setParallelError("No active project path is loaded. Open a project before launching a swarm.")
+      setParallelError("No repository is open. Open a repository before launching a swarm.")
       return
     }
     if (!objective) {
@@ -2270,7 +2271,7 @@ export default function NewLayout(props: ParentProps) {
     if (!sessionID) {
       showToast({
         title: "Main agent unavailable",
-        description: "Open the original project session before switching agents.",
+        description: "Open the original session before switching agents.",
       })
       return
     }
@@ -2702,7 +2703,7 @@ export default function NewLayout(props: ParentProps) {
   const openTerminalPanel = () => {
     if (!requireTaskRoute("Terminal")) return
     if (!sessionCommandRegistered("terminal.toggle")) {
-      showToast({ title: "Terminal is not ready", description: "Open a project first, then try Terminal again." })
+      showToast({ title: "Terminal is not ready", description: "Open a repository first, then try Terminal again." })
       return
     }
     setSidePanelOpen(false)
@@ -2715,8 +2716,8 @@ export default function NewLayout(props: ParentProps) {
   const startTask = () => {
     if (!sessionCommandRegistered("tab.new")) {
       showToast({
-        title: "Open a project first",
-        description: "Start becomes available after Vector has a project workspace.",
+        title: "Open a repository first",
+        description: "Start becomes available after Vector has a repository open.",
       })
       return
     }
@@ -2763,7 +2764,7 @@ export default function NewLayout(props: ParentProps) {
     if (preparation === "missing-project") {
       setWorkspaceMode("agent")
       showToast({
-        title: "Open a project first",
+        title: "Open a repository first",
         description: "Vector needs a project-backed task before its editor can open.",
       })
       return
@@ -2775,7 +2776,7 @@ export default function NewLayout(props: ParentProps) {
         setWorkspaceMode("agent")
         showToast({
           title: "Draft is no longer available",
-          description: "Open the project again, then choose Editor.",
+          description: "Open the repository again, then choose Editor.",
         })
         return
       }
@@ -2854,8 +2855,8 @@ export default function NewLayout(props: ParentProps) {
     const directory = await resolveActiveProjectPath()
     if (!directory) {
       showToast({
-        title: "Open a project first",
-        description: "MCP servers are scoped to a project so their tools cannot access unrelated files.",
+        title: "Open a repository first",
+        description: "MCP servers are scoped to a repository so their tools cannot access unrelated files.",
       })
       return
     }
@@ -2877,7 +2878,7 @@ export default function NewLayout(props: ParentProps) {
     const directory = await resolveActiveProjectPath()
     if (!directory) {
       showToast({
-        title: "Open a project first",
+        title: "Open a repository first",
         description: "Plugins install as project-scoped MCP servers so their tools cannot access unrelated files.",
       })
       return
@@ -2968,8 +2969,8 @@ export default function NewLayout(props: ParentProps) {
   const requireTaskRoute = (feature: string) => {
     if (taskConversationRoute() && activeProjectPath()) return true
     showToast({
-      title: "Open a project first",
-      description: `${feature} is available inside an active Vector project.`,
+      title: "Open a repository first",
+      description: `${feature} is available inside an open repository.`,
     })
     return false
   }
@@ -3064,7 +3065,7 @@ export default function NewLayout(props: ParentProps) {
     },
     {
       id: "project",
-      title: "Create or open a project",
+      title: "Create or open a repository",
       detail: "Choose the codebase Vector should work inside.",
       done: onboardingProjectDone(),
       cta: "Open",
@@ -3072,8 +3073,8 @@ export default function NewLayout(props: ParentProps) {
         setOnboardingOpen(false)
         navigate("/code")
         showToast({
-          title: "Open a project",
-          description: "Choose a local project, then give Vector one concrete outcome.",
+          title: "Open a repository",
+          description: "Choose a local repository, then give Vector one concrete outcome.",
         })
       },
     },
@@ -3250,7 +3251,7 @@ export default function NewLayout(props: ParentProps) {
   )
   const projectDisplayName = () => {
     const path = activeTaskScope().projectPath
-    if (!path) return "No project loaded"
+    if (!path) return "No repository open"
     return path.split(/[\\/]/).filter(Boolean).at(-1) || path
   }
   const refreshEngineeringConsole = async () => {
@@ -3261,7 +3262,7 @@ export default function NewLayout(props: ParentProps) {
     showToast(
       path
         ? { title: "Engineering Console refreshed", description: `Connected to ${projectDisplayName()}.` }
-        : { title: "No active project", description: "Open a project to enable project-scoped engineering tools." },
+        : { title: "No repository open", description: "Open a repository to enable its engineering tools." },
     )
   }
 
@@ -3437,6 +3438,12 @@ export default function NewLayout(props: ParentProps) {
     void installUpdate(platform.updater, (message) =>
       showToast(navigationUpdateFailure(message, () => openSettingsAt("about"))),
     )
+  // The same Update for Home, which shows no sidebar.
+  const updateAction = {
+    update: () => navigationUpdate(platform.updater?.state()),
+    install: installUpdateFromNavigation,
+    runningAgents: countRunningAgents,
+  }
 
   const renderExternalAgentWorkspace = (recordAccessor: () => ParallelWorkspaceRecord) => {
     const record = () => recordAccessor()
@@ -3709,7 +3716,14 @@ export default function NewLayout(props: ParentProps) {
         }}
       >
         <div class="min-h-0 w-full flex-1">
-          <Show when={parallelWorkspaceIDFromRoute()} fallback={<Suspense>{props.children}</Suspense>}>
+          <Show
+            when={parallelWorkspaceIDFromRoute()}
+            fallback={
+              <UpdateActionContext.Provider value={updateAction}>
+                <Suspense>{props.children}</Suspense>
+              </UpdateActionContext.Provider>
+            }
+          >
             {(workspaceID) => (
               <Show
                 when={routedParallelWorkspace()}
@@ -3861,7 +3875,7 @@ export default function NewLayout(props: ParentProps) {
                 >
                   {parallelLaunchMode() === "swarm"
                     ? "Vector plans dependencies, assigns specialists, validates their work, and prepares one aggregate review."
-                    : "A separate Vector session works in its own git worktree or managed project copy."}
+                    : "A separate Vector session works in its own git worktree or a managed copy of the repository."}
                 </p>
               </div>
               <button
@@ -3993,7 +4007,8 @@ export default function NewLayout(props: ParentProps) {
                       >
                         <span class="block text-[11px] font-semibold">Shared worktree</span>
                         <span class="mt-0.5 block text-[9.5px] leading-3 opacity-70">
-                          One branch off HEAD that the whole team edits. Your project stays untouched until you merge.
+                          One branch off HEAD that the whole team edits. Your repository stays untouched until you
+                          merge.
                         </span>
                       </button>
                       <button
@@ -4009,7 +4024,8 @@ export default function NewLayout(props: ParentProps) {
                       >
                         <span class="block text-[11px] font-semibold">Directly on main</span>
                         <span class="mt-0.5 block text-[9.5px] leading-3 opacity-70">
-                          Agents edit your real project files. Nothing to merge — the changes are already there.
+                          Agents edit your repository's files directly. Nothing to merge — the changes are already
+                          there.
                         </span>
                       </button>
                     </div>
@@ -4073,7 +4089,7 @@ export default function NewLayout(props: ParentProps) {
                           {(joined) => (
                             <p class="mt-1.5 text-[10px] leading-4 text-white/45">
                               {joined().topology === "shared-main"
-                                ? "This team edits your project files directly — there is nothing to merge afterwards."
+                                ? "This team edits your repository's files directly — there is nothing to merge afterwards."
                                 : "This agent joins the team's existing shared checkout and sees the edits already in it."}
                             </p>
                           )}
@@ -4503,8 +4519,8 @@ export default function NewLayout(props: ParentProps) {
                   </label>
                 </div>
                 <p class="rounded-[10px] border border-amber-300/15 bg-amber-300/[0.045] px-3 py-2 text-[11px] leading-5 text-amber-100/68">
-                  Concurrent agents share your configured provider keys and can multiply usage. Your main project
-                  remains untouched until you approve the final diff.
+                  Concurrent agents share your configured provider keys and can multiply usage. Your repository remains
+                  untouched until you approve the final diff.
                 </p>
               </Show>
 
@@ -5451,7 +5467,7 @@ export default function NewLayout(props: ParentProps) {
                     <div class="px-1 text-[11.5px] leading-5 text-white/45">
                       {parallelLaunchMode() === "swarm"
                         ? "Workers merge validated results into a hidden staging workspace. Your main files remain unchanged until you approve the aggregate diff."
-                        : "This agent receives its own isolated copy of the current project. Your main files stay unchanged until you review and merge."}
+                        : "This agent receives its own isolated copy of the repository. Your main files stay unchanged until you review and merge."}
                     </div>
                     <Show when={parallelError()}>
                       <div class="rounded-[10px] border border-rose-400/25 bg-rose-400/[0.08] px-3 py-2 text-[12px] leading-5 text-rose-200">
@@ -5958,7 +5974,7 @@ export default function NewLayout(props: ParentProps) {
                     <h2 class="mt-5 text-xl font-semibold text-white">Create a parallel agent chat</h2>
                     <p class="mt-2 text-sm leading-6 text-white/55">
                       Each chat has the same Vector agent experience, its own isolated files, and an explicit review
-                      step before anything reaches your main project.
+                      step before anything reaches your repository.
                     </p>
                     <button
                       type="button"
@@ -6141,7 +6157,9 @@ export default function NewLayout(props: ParentProps) {
                           }
                         >
                           <div class="min-h-0 flex-1 overflow-hidden">
-                            <Suspense>{props.children}</Suspense>
+                            <UpdateActionContext.Provider value={updateAction}>
+                              <Suspense>{props.children}</Suspense>
+                            </UpdateActionContext.Provider>
                           </div>
                         </Show>
                       }
@@ -6186,8 +6204,8 @@ export default function NewLayout(props: ParentProps) {
                             <section class="rounded-[14px] border border-[color:var(--vx-purple)]/25 bg-[color-mix(in_srgb,var(--vx-stage)_90%,transparent)] p-5">
                               <div class="text-[13px] font-semibold text-white/85">Commit all changes to main</div>
                               <p class="mt-1 max-w-2xl text-[12.5px] leading-6 text-white/55">
-                                Merges this agent's entire isolated worktree into your main project and records a real
-                                git commit. Vector checkpoints main first; you can undo the commit with{" "}
+                                Merges this agent's entire isolated worktree into your repository and records a real git
+                                commit. Vector checkpoints main first; you can undo the commit with{" "}
                                 <code class="rounded bg-white/[0.06] px-1 text-white/70">git reset --soft HEAD~1</code>.
                               </p>
                               <div class="mt-3 flex flex-wrap items-center gap-2">
@@ -6397,7 +6415,7 @@ export default function NewLayout(props: ParentProps) {
                                 <span>This workspace is {record().mergeState}. Its record stays here as history.</span>
                               }
                             >
-                              Merging checkpoints your main project first; approve individual hunks above for a partial
+                              Merging checkpoints your repository first; approve individual hunks above for a partial
                               merge.
                             </Show>
                           </div>
@@ -6505,8 +6523,8 @@ export default function NewLayout(props: ParentProps) {
         onFind={() => {
           if (!taskRoute() || !sessionCommandRegistered("file.open")) {
             showToast({
-              title: "Open a project first",
-              description: "Project search becomes available inside an active workspace.",
+              title: "Open a repository first",
+              description: "Repository search becomes available inside an active workspace.",
             })
             return
           }
@@ -6517,9 +6535,9 @@ export default function NewLayout(props: ParentProps) {
         onSettings={openSettings}
         settingsKeybind={command.keybind("settings.open")}
         onAccount={openAccountSettings}
-        update={navigationUpdate(platform.updater?.state())}
-        onUpdate={installUpdateFromNavigation}
-        runningAgents={countRunningAgents}
+        update={updateAction.update()}
+        onUpdate={updateAction.install}
+        runningAgents={updateAction.runningAgents}
       />
 
       <DialogReportBug open={reportBugOpen()} onClose={() => setReportBugOpen(false)} />
@@ -6534,7 +6552,7 @@ export default function NewLayout(props: ParentProps) {
           // The review runs on the user's own project, as the read-only review agent under read-only session
           // rules; another person's code is never opened as an instance.
           const directory = activeWorkspaceScope().sourcePath
-          if (!directory) throw new Error("Open a project before running a review.")
+          if (!directory) throw new Error("Open a repository before running a review.")
           // The reviewers run as hidden helper sessions. Their spend counts towards the open task when there is one,
           // and the panel shows it live either way.
           const parentID = activeWorkspaceScope().parentSessionId
@@ -6648,7 +6666,7 @@ export default function NewLayout(props: ParentProps) {
                 />
               </svg>
             </span>
-            <span>New project</span>
+            <span>New session</span>
             <kbd>{platform.os === "macos" ? "⌘N" : "Ctrl+N"}</kbd>
           </button>
         </div>
@@ -6702,8 +6720,8 @@ export default function NewLayout(props: ParentProps) {
               onClick={() => {
                 if (!taskRoute() || !sessionCommandRegistered("file.open")) {
                   showToast({
-                    title: "Open a project first",
-                    description: "Search becomes available after Vector has an active project workspace.",
+                    title: "Open a repository first",
+                    description: "Search becomes available after Vector has a repository open.",
                   })
                   return
                 }
@@ -6721,7 +6739,7 @@ export default function NewLayout(props: ParentProps) {
                   stroke-linecap="round"
                 />
               </svg>
-              Find in project
+              Find in repository
             </button>
             <button
               type="button"
@@ -6788,7 +6806,7 @@ export default function NewLayout(props: ParentProps) {
             </button>
           </div>
           <div data-vector-nav-group class="mt-5 flex flex-col gap-0.5 px-2">
-            <div data-vector-nav-label>Project</div>
+            <div data-vector-nav-label>Repository</div>
             <button
               type="button"
               data-vector-nav-item
@@ -6890,7 +6908,7 @@ export default function NewLayout(props: ParentProps) {
             <img src="/vector-logo.png" alt="" class="size-9 rounded-xl object-cover" />
             <div class="min-w-0 flex-1">
               <div class="truncate text-sm font-semibold text-white">Engineering Console</div>
-              <div class="truncate text-xs text-white/55">Live project services and execution state</div>
+              <div class="truncate text-xs text-white/55">Live repository services and execution state</div>
             </div>
             <button
               type="button"
@@ -6924,7 +6942,7 @@ export default function NewLayout(props: ParentProps) {
                 </span>
               </div>
               <div class="mt-2 truncate font-mono text-[11px] text-white/42">
-                {activeProjectPath() || "Open a project to activate project-scoped tools"}
+                {activeProjectPath() || "Open a repository to activate its tools"}
               </div>
               <div class="mt-3 grid grid-cols-3 gap-2">
                 <div class="rounded-xl bg-white/[0.035] px-3 py-2">
@@ -6978,7 +6996,7 @@ export default function NewLayout(props: ParentProps) {
               <div class="space-y-1">
                 <button type="button" class="vector-engineering-row" onClick={() => void openMcpDialog()}>
                   <span>MCP servers</span>
-                  <small>Project tool connections</small>
+                  <small>Repository tool connections</small>
                 </button>
                 <button type="button" class="vector-engineering-row" onClick={() => void openPluginsDialog()}>
                   <span>Plugins</span>
@@ -7004,7 +7022,7 @@ export default function NewLayout(props: ParentProps) {
                 when={backgroundTaskRecords().length}
                 fallback={
                   <div class="rounded-xl border border-dashed border-[color:var(--vx-line)] px-3 py-5 text-center text-xs text-white/42">
-                    No project activity yet.
+                    No activity in this repository yet.
                   </div>
                 }
               >

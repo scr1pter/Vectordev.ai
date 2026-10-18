@@ -20,7 +20,7 @@ export function NewSessionView(_props: NewSessionViewProps) {
       <div class="absolute right-5 top-4 z-30 flex items-center gap-2">
         <TooltipV2
           placement="bottom"
-          value="Context window appears after the first message in this project."
+          value="Context window appears after the first message in this session."
         >
           <button
             type="button"
@@ -61,7 +61,7 @@ export function NewSessionView(_props: NewSessionViewProps) {
           </div>
           <span>Vector Agent</span>
           <h1>What should we work on?</h1>
-          <p>Ask for a build, repair, review, or explanation. Vector will inspect the project before it acts.</p>
+          <p>Ask for a build, repair, review, or explanation. Vector will inspect the repository before it acts.</p>
         </div>
       </div>
     </div>
