@@ -1556,6 +1556,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       onSubmit: props.onSubmit,
       executionMode,
       llmJudge: settings.general.llmJudge,
+      judgeScope: settings.general.judgeScope,
       autoModelRouting: settings.general.autoModelRouting,
       connectProvider: () => setModelStartNudge((count) => count + 1),
       confirmFreeModelTraining: (model) => {

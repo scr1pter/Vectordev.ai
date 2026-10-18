@@ -10,6 +10,7 @@ import { SessionID } from "@vectordevai/schema/session-id"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
 import {
+  FREE_MODEL_FALLBACKS,
   FREE_ROUTER_ID,
   FreeDataPolicy,
   isFreeModel,
@@ -1051,6 +1052,8 @@ export const Model = Schema.Struct({
       source: Schema.Literals(["shared", "openrouter"]),
       // "may-train" and "unreviewed" models carry the "May train on your prompts" label and need one-time consent.
       dataPolicy: optional(FreeDataPolicy),
+      // "optional" when Vector may switch the model's reasoning off for a greeting.
+      reasoning: optional(Schema.Literals(["optional", "mandatory"])),
     }),
   ),
   family: optional(Schema.String),
@@ -1443,6 +1446,12 @@ export function withoutTrainingFreeModels(providers: Record<string, Info>) {
 }
 
 export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "vector" | "openrouter" = "vector"): Info {
+  // A catalog published before it said whether a model may reason without it says nothing; the reviewed fallback for
+  // the same model fills that in, so switching reasoning off does not wait on a catalog deploy.
+  const reasoning = (model: FreeModelInfo) => {
+    const value = model.reasoning ?? FREE_MODEL_FALLBACKS.find((item) => item.id === model.id)?.reasoning
+    return value === "optional" || value === "mandatory" ? { reasoning: value } : {}
+  }
   return {
     id: ProviderV2.ID.make(providerID),
     name: providerID === "vector" ? "Vector" : "OpenRouter",
@@ -1459,6 +1468,7 @@ export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "ve
           freeModel: {
             source: providerID === "vector" ? "shared" : "openrouter",
             dataPolicy: freeModelDataPolicy(model),
+            ...reasoning(model),
           },
           api: {
             id: model.id,

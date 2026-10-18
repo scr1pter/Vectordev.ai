@@ -9,6 +9,7 @@ import { Context, Effect, Exit, Layer } from "effect"
 import * as Stream from "effect/Stream"
 import { streamText, wrapLanguageModel, type ModelMessage, type Tool } from "ai"
 import type { LLMEvent, UsageInput } from "@vectordevai/llm"
+import type { TaskSize } from "@vectordevai/core/task-size"
 import { LLMClient } from "@vectordevai/llm/route"
 import type { LLMClientService } from "@vectordevai/llm/route"
 import type { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
@@ -49,6 +50,8 @@ export type StreamInput = {
   system: string[]
   messages: ModelMessage[]
   small?: boolean
+  // Reasoning effort from the request's task size (LLMRequestPrep.prepare).
+  effort?: TaskSize.Effort
   tools: Record<string, Tool>
   retries?: number
   toolChoice?: "auto" | "required" | "none"

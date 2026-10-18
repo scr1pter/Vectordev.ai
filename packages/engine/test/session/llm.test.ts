@@ -1273,6 +1273,68 @@ describe("session.llm.stream", () => {
     },
   )
 
+  for (const effort of ["off", "default", "high"] as const)
+    it.instance(
+      `the openai-compatible SDK puts a reasoning object from the request's effort in the body at ${effort} effort`,
+      () =>
+        Effect.gen(function* () {
+          const fixture = loadFixture(vivgridFixture.providerID, vivgridFixture.modelID)
+          const request = waitRequest(
+            "/chat/completions",
+            new Response(createChatStream("Hello"), {
+              status: 200,
+              headers: { "Content-Type": "text/event-stream" },
+            }),
+          )
+          const resolved = yield* Provider.use.getModel(
+            ProviderV2.ID.make(vivgridFixture.providerID),
+            ModelV2.ID.make(fixture.model.id),
+          )
+          // The options a free model whose reasoning is optional gets (ProviderTransform.effortOptions), on a model
+          // without the free proxy in front: the proxy forwards `reasoning` and drops `reasoning_effort`, so the
+          // object itself has to reach the body.
+          const model = {
+            ...resolved,
+            variants: { none: { reasoning: { effort: "none" } }, high: { reasoning: { effort: "high" } } },
+          }
+          const sessionID = SessionID.make("session-sized-reasoning")
+          const agent = { name: "build", mode: "primary", options: {}, permission: [] } satisfies Agent.Info
+          yield* drain({
+            user: {
+              id: MessageID.make("msg_sized-reasoning"),
+              sessionID,
+              role: "user",
+              time: { created: Date.now() },
+              agent: agent.name,
+              model: { providerID: model.providerID, modelID: model.id },
+            },
+            sessionID,
+            model,
+            agent,
+            effort,
+            system: ["You are a helpful assistant."],
+            messages: [{ role: "user", content: "hi" }],
+            tools: {},
+          })
+          const body = (yield* Effect.promise(() => request)).body
+          expect(body.reasoning).toEqual(
+            effort === "off" ? { effort: "none" } : effort === "high" ? { effort: "high" } : undefined,
+          )
+          expect(body.reasoning_effort).toBeUndefined()
+        }),
+      {
+        trusted: true,
+        config: () => ({
+          enabled_providers: [vivgridFixture.providerID],
+          provider: {
+            [vivgridFixture.providerID]: {
+              options: { apiKey: "test-key", baseURL: `${state.server!.url.origin}/v1` },
+            },
+          },
+        }),
+      },
+    )
+
   const cerebrasFixture = { providerID: "cerebras", modelID: "gpt-oss-120b" }
   it.instance(
     "replays Cerebras assistant reasoning using the provider-supported field",

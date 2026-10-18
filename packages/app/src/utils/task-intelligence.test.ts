@@ -6,6 +6,7 @@ import {
   routeModelForTask,
   routeVariantForTask,
   supportsImageInput,
+  workOpen,
 } from "./task-intelligence"
 
 type TestModel = {
@@ -88,9 +89,91 @@ describe("task intelligence", () => {
       expect(routeModelForImages({ current, available: [current, paid] })).toEqual({ model: undefined, routed: false })
     })
 
-  test("keeps conversational messages in the quick lane", () => {
+  test("keeps social messages in the quick lane unless work waits on the user", () => {
     expect(classifyTaskDifficulty("hello!")).toBe("trivial")
     expect(classifyTaskDifficulty("fix login.ts")).toBe("standard")
+    for (const text of [
+      "thanks!",
+      "thanks, that works",
+      "bye",
+      "great",
+      "what can you do?",
+      "thanks for the help",
+      "what is vector?",
+      "hello again",
+    ]) {
+      expect(classifyTaskDifficulty(text), text).toBe("trivial")
+      // While the agent waits on an answer, even a thanks answers that work.
+      expect(classifyTaskDifficulty(text, { open: true }), text).toBe("standard")
+    }
+    // An image, a file or a named subagent makes it work, as the engine sizes it: "help" with a screenshot of an error.
+    for (const text of ["hi", "thanks", "help", ""]) {
+      expect(classifyTaskDifficulty(text, { images: 1 }), text).toBe("standard")
+      expect(classifyTaskDifficulty(text, { files: 1 }), text).toBe("standard")
+      expect(classifyTaskDifficulty(text, { agents: ["explore"] }), text).toBe("standard")
+    }
+  })
+
+  test("a reply that continues the work, or anything that is not social, is never trivial and routes no variant", () => {
+    // "continue" or "yes" goes to the agent the user picked, which sizes it against the work it continues; the quick
+    // lane would answer it with no tools and no history.
+    for (const text of [
+      "continue",
+      "yes",
+      "go ahead",
+      "try again",
+      "do it",
+      "sure",
+      "ok",
+      "no thanks",
+      "sounds good",
+      "lgtm",
+      "ship to vercel",
+      "switch the codebase to Go",
+      "keep it simple",
+      // A thanks with a request after it, with no comma between them.
+      "thanks for the update ship it to vercel",
+      "thanks for the fix what about tests?",
+    ]) {
+      const difficulty = classifyTaskDifficulty(text)
+      expect(difficulty, text).toBe("standard")
+      expect(routeVariantForTask({ difficulty, variants: ["low", "high"] }), text).toBeUndefined()
+    }
+    // Only the user's own ask makes work complex.
+    expect(classifyTaskDifficulty("be thorough: migrate the app to the new router")).toBe("complex")
+    expect(classifyTaskDifficulty("migrate the app to the new router across 40 files")).toBe("standard")
+  })
+
+  test("work is open when the agent's last reply asked something or its run did not finish", () => {
+    const reply = (text: string, extra: object = {}) => {
+      const message = { id: "m", role: "assistant", time: { created: 1, completed: 2 }, finish: "stop", ...extra }
+      return workOpen([{ id: "u", role: "user", time: { created: 0 } }, message], (id) =>
+        id === "m" ? [{ type: "text", text }] : [],
+      )
+    }
+    expect(reply("Fixed the typo.")).toBe(false)
+    expect(reply("Fixed the typo. Anything else?")).toBe(false)
+    expect(reply("Deployed. Do you want me to keep the preview URL?")).toBe(true)
+    // An offer or a closing line without a question mark waits on nothing, as the engine reads it.
+    expect(reply("Deployed. Let me know if this works for you.")).toBe(false)
+    expect(reply("Deployed. I can also add a preview alias if you want.")).toBe(false)
+    // A question before a summary list still waits.
+    expect(reply("Should I keep the preview URL?\n\n**Summary:**\n- vercel.json")).toBe(true)
+    expect(reply("Migrating the routes", { error: { name: "MessageAbortedError" } })).toBe(true)
+    expect(reply("Migrated 12 of", { finish: "length" })).toBe(true)
+    expect(reply("Still going", { time: { created: 1 } })).toBe(true)
+    expect(workOpen([], () => [])).toBe(false)
+    // A greeting's reply waits on nothing, even when its small talk asks back.
+    expect(reply("I'm doing great, thanks for asking! How about you?", { agent: "quick" })).toBe(false)
+    expect(reply("Hey! How's your day going?", { agent: "build", size: "chat" })).toBe(false)
+    // The agent asked through the question tool and the user dismissed it.
+    const asked = (status: string) =>
+      workOpen([{ id: "m", role: "assistant", time: { created: 1, completed: 2 }, finish: "stop" }], () => [
+        { type: "text", text: "I need one decision before I go on." },
+        { type: "tool", tool: "question", state: { status } },
+      ])
+    expect(asked("error")).toBe(true)
+    expect(asked("completed")).toBe(false)
   })
 
   test("routes complex work to a meaningfully stronger model in the same provider", () => {

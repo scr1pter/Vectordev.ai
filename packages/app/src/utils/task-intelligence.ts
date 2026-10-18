@@ -1,6 +1,7 @@
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { freeModelMayTrain, type FreeModelChoice } from "@vectordevai/core/free-model-choice"
 import { isFreeModelRef } from "@vectordevai/schema/free-model"
+import { TaskSize } from "@vectordevai/core/task-size"
 
 export type TaskDifficulty = "trivial" | "simple" | "standard" | "complex"
 
@@ -42,34 +43,72 @@ export function isFreeModelSelection(model: RoutableModel) {
   )
 }
 
-const TRIVIAL_TASK =
-  /^(?:hi|hey|hello|yo|sup|thanks|thank you|ok|okay|cool|nice|good morning|good afternoon|good evening)[!.?\s]*$/i
-const ACTION_TERMS =
-  /\b(?:add|build|change|debug|delete|edit|fix|implement|improve|investigate|refactor|remove|rename|repair|test|update)\b/i
-const COMPLEX_TERMS = [
-  /\barchitecture\b/i,
-  /\bmigrat(?:e|ion)\b/i,
-  /\brefactor\b/i,
-  /\bmulti[- ]?file\b/i,
-  /\bcodebase\b/i,
-  /\bend[- ]?to[- ]?end\b/i,
-  /\bproduction[- ]?ready\b/i,
-  /\bparallel\b/i,
-  /\bperformance\b/i,
-  /\bsecurity\b/i,
-  /\b(?:build|implement|fix|test) (?:everything|all|the entire|the whole)\b/i,
-]
+// One classifier for the engine, the app and desktop: TaskSize. The app's names for the sizes predate it. Only a sender
+// picks Light, so a message the app classifies is trivial (a social message), standard or, when the user asks for it,
+// complex.
+const DIFFICULTY = {
+  chat: "trivial",
+  light: "simple",
+  standard: "standard",
+  thorough: "complex",
+} as const satisfies Record<TaskSize.Tier, TaskDifficulty>
 
-export function classifyTaskDifficulty(task: string): TaskDifficulty {
-  const text = task.trim()
-  if (!text || TRIVIAL_TASK.test(text)) return "trivial"
-  const paths = new Set(text.match(/[A-Za-z0-9_@./-]+\.[A-Za-z0-9]{1,8}/g) ?? [])
-  const complexSignals = COMPLEX_TERMS.filter((pattern) => pattern.test(text)).length
-  if (text.length >= 900 || paths.size >= 4 || complexSignals >= 2) return "complex"
-  if (complexSignals === 1 && (text.length >= 260 || ACTION_TERMS.test(text))) return "complex"
-  if (ACTION_TERMS.test(text) || text.length >= 180 || paths.size >= 2) return "standard"
-  return "simple"
+// Only a social message is trivial, and only when no work is waiting on the user (`open`): then even a "thanks" answers
+// or follows up that work, so it goes to the engine with the history rather than to the quick lane. A message with
+// files, images or a named subagent is never trivial, as the engine sizes it: "help" with a screenshot of an error
+// needs the tools.
+export function classifyTaskDifficulty(
+  task: string,
+  input: { open?: boolean; files?: number; images?: number; agents?: readonly string[] } = {},
+): TaskDifficulty {
+  if (!task.trim() && !input.files && !input.images && !input.agents?.length) return "trivial"
+  return DIFFICULTY[TaskSize.classify({ text: task, ...input }).tier]
 }
+
+type HistoryMessage = {
+  id: string
+  role: string
+  agent?: string
+  size?: string
+  error?: unknown
+  finish?: string
+  time: { created: number; completed?: number }
+}
+type HistoryPart = { type: string; text?: string; synthetic?: boolean; tool?: string; state?: { status?: string } }
+
+/**
+ * Whether a session's work is waiting on the user, as the engine reads it: the agent's last reply asked or offered
+ * something, it asked through the question tool and the user dismissed it, or its run did not finish (it failed, was
+ * stopped, or is still going). A greeting's reply is never open: its "How about you?" waits on nothing.
+ */
+export function workOpen(
+  messages: readonly HistoryMessage[],
+  parts: (messageID: string) => readonly HistoryPart[] | undefined,
+) {
+  const last = messages.findLast((message) => message.role === "assistant")
+  if (!last) return false
+  if (last.size === "chat" || last.agent === "quick") return false
+  if (last.error || !last.time.completed || UNFINISHED.has(last.finish ?? "")) return true
+  if (
+    (parts(last.id) ?? []).some(
+      (part) => part.type === "tool" && part.tool === "question" && part.state?.status !== "completed",
+    )
+  )
+    return true
+  // The agent's closing words, not a later card without text such as the judge's.
+  const text = messages
+    .filter((message) => message.role === "assistant")
+    .map((message) =>
+      (parts(message.id) ?? [])
+        .flatMap((part) => (part.type === "text" && !part.synthetic && part.text?.trim() ? [part.text] : []))
+        .join("\n"),
+    )
+    .findLast((item) => item.length > 0)
+  return TaskSize.asks(text ?? "")
+}
+
+// Finish reasons of a run that stopped before its answer was done, as the engine reads them.
+const UNFINISHED = new Set(["length", "tool-calls", "unknown", "error", "content-filter"])
 
 function qualityScore(model: RoutableModel) {
   const label = `${model.id} ${model.name} ${model.family ?? ""}`.toLowerCase()

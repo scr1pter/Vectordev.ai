@@ -656,7 +656,13 @@ const succeedVoid = (deferred: Deferred.Deferred<void>) => {
   Effect.runSync(Deferred.succeed(deferred, void 0).pipe(Effect.ignore))
 }
 
-const user = Effect.fn("test.user")(function* (sessionID: SessionID, text: string, agent = "build") {
+const user = Effect.fn("test.user")(function* (
+  sessionID: SessionID,
+  text: string,
+  agent = "build",
+  // The sender's size; tests of the full build harness pin Thorough so a generic prompt is not sized down.
+  size?: SessionV1.User["size"],
+) {
   const session = yield* Session.Service
   const msg = yield* session.updateMessage({
     id: MessageID.ascending(),
@@ -665,6 +671,7 @@ const user = Effect.fn("test.user")(function* (sessionID: SessionID, text: strin
     agent,
     model: ref,
     time: { created: Date.now() },
+    ...(size ? { size } : {}),
   })
   yield* session.updatePart({
     id: PartID.ascending(),
@@ -1106,15 +1113,15 @@ it.instance("a session reads its instruction files once, so an edit mid-session 
       title: "Pinned",
       permission: [{ permission: "*", pattern: "*", action: "allow" }],
     })
-    yield* turn(chat.id, "hello")
+    yield* turn(chat.id, "inspect the repository")
     // Like the agent updating .vector/BRAIN.md: the file changes between requests of one session.
     yield* Effect.promise(() => Bun.write(rules, "# Second rules"))
-    yield* turn(chat.id, "again")
+    yield* turn(chat.id, "inspect it again")
     const fresh = yield* sessions.create({
       title: "Fresh",
       permission: [{ permission: "*", pattern: "*", action: "allow" }],
     })
-    yield* turn(fresh.id, "hello")
+    yield* turn(fresh.id, "inspect the repository")
 
     const bodies = (yield* llm.hits).map((hit) => JSON.stringify(hit.body))
     expect(bodies).toHaveLength(3)
@@ -1137,7 +1144,7 @@ withMcpInstructions.instance(
         permission: [{ permission: "*", pattern: "*", action: "allow" }],
       })
       yield* llm.hang
-      yield* user(chat.id, "hello")
+      yield* user(chat.id, "inspect the repository")
 
       const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
       yield* awaitWithTimeout(llm.wait(1), "timed out waiting for MCP instruction request", "10 seconds")
@@ -1206,7 +1213,7 @@ const firstRequestBody = Effect.fn("test.firstRequestBody")(function* (input: {
       : {}),
   })
   yield* llm.hang
-  yield* user(chat.id, "hello", input.agent)
+  yield* user(chat.id, "hello", input.agent, "thorough")
 
   const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
   yield* awaitWithTimeout(llm.wait(1), "timed out waiting for the first model request", "10 seconds")
@@ -1250,7 +1257,13 @@ it.instance(
         Effect.gen(function* () {
           const chat = yield* sessions.create({ title: "Pinned" })
           yield* llm.text("ok")
-          yield* prompt.prompt({ sessionID: chat.id, agent: "build", model, parts: [{ type: "text", text: "hello" }] })
+          yield* prompt.prompt({
+            sessionID: chat.id,
+            agent: "build",
+            model,
+            size: "thorough",
+            parts: [{ type: "text", text: "hello" }],
+          })
         })
 
       yield* run(ref)
@@ -2059,7 +2072,7 @@ it.instance(
         subagent_type: "general",
       })
       yield* llm.hang
-      yield* user(chat.id, "hello")
+      yield* user(chat.id, "hello", "build", "thorough")
 
       const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
 
@@ -2483,7 +2496,9 @@ it.instance("prompt submitted during an active run is included in the next LLM i
     expect(inputs).toHaveLength(2)
     const messages = inputs.at(-1)?.messages
     if (!Array.isArray(messages)) throw new Error("expected LLM messages")
-    expect(messages.at(-1)).toEqual({ role: "user", content: "second" })
+    // The joined prompt is the newest message; the request's size guidance rides along with it.
+    expect(messages.at(-1)).toMatchObject({ role: "user" })
+    expect(JSON.stringify(messages.at(-1))).toContain("second")
   }),
 )
 
@@ -4065,7 +4080,7 @@ it.instance(
       yield* llm.hold("alpha verified", deferredAsPromise(gate))
       yield* llm.hold("beta verified", deferredAsPromise(gate))
       yield* llm.text("Both reports reviewed")
-      yield* user(chat.id, "Inspect the two independent areas")
+      yield* user(chat.id, "Inspect the two independent areas", "build", "thorough")
       const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
       yield* awaitWithTimeout(llm.wait(3), "second child was serialized behind first completion", "8 seconds")
       expect(yield* sessions.children(chat.id)).toHaveLength(2)
@@ -4145,7 +4160,7 @@ for (const mode of ["legacy", "hybrid", "plugin-schema", "plugin-inplace", "lega
         )
         if (valid) yield* llm.text("child verified")
         yield* llm.text("parent verified tool outcome")
-        yield* user(chat.id, "Inspect the assigned area")
+        yield* user(chat.id, "Inspect the assigned area", "build", "thorough")
         yield* prompt.loop({ sessionID: chat.id })
         expect(yield* Effect.promise(() => Bun.file(log).exists())).toBe(mode !== "hybrid")
         expect(yield* sessions.children(chat.id)).toHaveLength(valid ? 1 : 0)
@@ -4441,6 +4456,8 @@ const guardedChat = Effect.fn("test.guardedChat")(function* (budget?: { usd?: nu
     sessionID: chat.id,
     agent: "build",
     noReply: true,
+    // The full build harness: a generic prompt is Work, which offers no subagents.
+    size: "thorough",
     parts: [{ type: "text", text: "go" }],
     ...(budget ? { budget } : {}),
   })

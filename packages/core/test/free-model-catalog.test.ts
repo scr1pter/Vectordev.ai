@@ -346,3 +346,18 @@ test("denying data collection keeps every other setting and replaces whatever al
       provider: { data_collection: "deny" },
     })
 })
+
+test("reasoning is optional only when OpenRouter says it is not mandatory and every endpoint takes the parameter", () => {
+  const info = (model: object, endpoints: object[] = [endpoint]) =>
+    freeModelInfo({ ...cohere, ...model }, endpoints, { reviewedOnly: false })?.reasoning
+  expect(info({ reasoning: { mandatory: false } })).toBe("optional")
+  expect(info({ reasoning: { mandatory: true } })).toBe("mandatory")
+  // Unstated: the model keeps its own default.
+  expect(info({})).toBeUndefined()
+  const noReasoning = {
+    ...endpoint,
+    supported_parameters: endpoint.supported_parameters.filter((item: string) => item !== "reasoning"),
+  }
+  // An endpoint without the parameter is said outright, so no client falls back to a value that would send it.
+  expect(info({ reasoning: { mandatory: false } }, [noReasoning])).toBe("unsupported")
+})

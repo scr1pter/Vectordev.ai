@@ -127,6 +127,8 @@ test("personal discovery validates live endpoints without the shared service and
       name: "cohere/north-mini-code",
       contextLength: 8000,
       maxOutputTokens: 2048,
+      // This endpoint takes no reasoning parameter, which the catalog says outright.
+      reasoning: "unsupported",
       providers: [
         {
           id: "cohere/checked",

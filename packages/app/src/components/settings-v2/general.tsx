@@ -1,6 +1,7 @@
 import { Component, JSX, Show, createResource, createSignal, onCleanup } from "solid-js"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { Switch } from "@vectordevai/ui/v2/switch-v2"
+import { SelectV2 } from "@vectordevai/ui/v2/select-v2"
 import { Icon, type IconProps } from "@vectordevai/ui/icon"
 import { useSettings } from "@/context/settings"
 import "./settings-v2.css"
@@ -85,6 +86,40 @@ const ToggleRow: Component<{
     </div>
     <div class="settings-v2-row-control settings-v2-row-control--compact">
       <Switch checked={props.checked} onChange={props.onChange} />
+    </div>
+  </div>
+)
+
+type Option = {
+  value: string
+  label: string
+}
+
+const pickOption = (options: Option[], value: string) => options.find((option) => option.value === value) ?? options[0]
+
+const SelectRow: Component<{
+  title: string
+  description?: string
+  options: Option[]
+  value: string
+  onChange: (value: string) => void
+}> = (props) => (
+  <div class="settings-v2-row-modern">
+    <div class="settings-v2-row-copy">
+      <div class="settings-v2-row-title">{props.title}</div>
+      <Show when={props.description}>
+        <div class="settings-v2-row-description">{props.description}</div>
+      </Show>
+    </div>
+    <div class="settings-v2-row-control">
+      <SelectV2
+        appearance="inline"
+        options={props.options}
+        current={pickOption(props.options, props.value)}
+        value={(option) => option.value}
+        label={(option) => option.label}
+        onSelect={(option) => option && props.onChange(option.value)}
+      />
     </div>
   </div>
 )
@@ -231,10 +266,22 @@ export const SettingsGeneralV2: Component<{
           />
           <ToggleRow
             title="LLM-as-a-judge"
-            description="When Vector finishes, a separate judge compares the result against your request and the checks it ran. On a failed verdict it names the specific repair and Vector fixes it, up to three rounds. Applies to every prompt and every agent workspace, and costs extra model calls."
+            description="When Vector finishes a task that changed files, a separate judge compares the result against your request. On a failed verdict Vector repairs it and the judge looks again, up to three rounds. Choose below which tasks it checks; greetings and questions are never judged. Costs extra model calls."
             checked={settings.general.llmJudge()}
             onChange={settings.general.setLlmJudge}
           />
+          <Show when={settings.general.llmJudge()}>
+            <SelectRow
+              title="Tasks the judge checks"
+              description="Large tasks are the ones Vector runs with subagents: when you ask it to be thorough, or when the agent finds the work is large. Every task that changes files also includes small fixes."
+              options={[
+                { value: "thorough", label: "Large tasks" },
+                { value: "changes", label: "Every task that changes files" },
+              ]}
+              value={settings.general.judgeScope()}
+              onChange={(value) => settings.general.setJudgeScope(value === "changes" ? "changes" : "thorough")}
+            />
+          </Show>
         </Card>
       </div>
     </Page>

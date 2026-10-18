@@ -125,8 +125,7 @@ describe("ProviderTransform.options - setCacheKey", () => {
 })
 
 describe("ProviderTransform.reasoningContextBody", () => {
-  const body = (model: string) =>
-    JSON.stringify({ model, input: [], reasoning: { effort: "medium", summary: "auto" } })
+  const body = (model: string) => JSON.stringify({ model, input: [], reasoning: { effort: "medium", summary: "auto" } })
 
   test("sets the documented field on a reasoning request to the GPT-5.6 family and GPT-6.1 Sol", () => {
     for (const id of ["gpt-6.1-sol", "openai/gpt-6.1-sol", "gpt-5.6", "gpt-5.6-terra", "gpt-5.6-codex"]) {
@@ -362,16 +361,13 @@ describe("ProviderTransform.options - GPT textVerbosity", () => {
     "gpt-6-astra",
     "gpt-6.1-sol",
     "openai/gpt-6-luna",
-  ])(
-    "%s names the session as its prompt cache key, as the Codex CLI does, and honors an explicit opt-out",
-    (id) => {
-      const model = createGpt5Model(id)
-      expect(ProviderTransform.options({ model, sessionID }).promptCacheKey).toBe(sessionID)
-      expect(
-        ProviderTransform.options({ model, sessionID, providerOptions: { setCacheKey: false } }).promptCacheKey,
-      ).toBeUndefined()
-    },
-  )
+  ])("%s names the session as its prompt cache key, as the Codex CLI does, and honors an explicit opt-out", (id) => {
+    const model = createGpt5Model(id)
+    expect(ProviderTransform.options({ model, sessionID }).promptCacheKey).toBe(sessionID)
+    expect(
+      ProviderTransform.options({ model, sessionID, providerOptions: { setCacheKey: false } }).promptCacheKey,
+    ).toBeUndefined()
+  })
 
   test.each(["gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"])(
     "%s retains concise output without reducing reasoning effort",
@@ -5028,4 +5024,60 @@ describe("ProviderTransform.options - GPT-6 reasoning defaults", () => {
       const result = ProviderTransform.options({ model: model(id), sessionID: "s", providerOptions: {} })
       expect(result.reasoningEffort).toBeUndefined()
     })
+})
+
+describe("ProviderTransform.effortOptions", () => {
+  const withVariants = (input: Record<string, unknown>) => {
+    const model = { capabilities: { reasoning: true }, limit: { output: 64_000 }, ...input } as any
+    model.variants = ProviderTransform.variants(model)
+    return model
+  }
+  const gpt = withVariants({
+    id: "openai/gpt-5.2",
+    providerID: "openai",
+    api: { id: "gpt-5.2", url: "https://api.openai.com", npm: "@ai-sdk/openai" },
+    release_date: "2026-01-01",
+  })
+  const haiku = withVariants({
+    id: "anthropic/claude-haiku-4-5",
+    providerID: "anthropic",
+    api: { id: "claude-haiku-4-5", url: "https://api.anthropic.com", npm: "@ai-sdk/anthropic" },
+  })
+
+  test("a greeting gets the weakest setting, a thorough job high, and default sets nothing", () => {
+    expect(ProviderTransform.effortOptions(gpt, "off")).toEqual(ProviderTransform.smallOptions(gpt))
+    expect(ProviderTransform.effortOptions(gpt, "high")).toEqual(gpt.variants.high)
+    expect(ProviderTransform.effortOptions(gpt, "default")).toEqual({})
+  })
+
+  test("never picks xhigh or max on its own", () => {
+    for (const effort of ["off", "default", "high"] as const) {
+      const options = JSON.stringify(ProviderTransform.effortOptions(gpt, effort))
+      expect(options).not.toContain("xhigh")
+      expect(options).not.toContain("max")
+    }
+  })
+
+  test("budget-style thinking runs a greeting without thinking", () => {
+    expect(Object.keys(haiku.variants)[0]).toBe("high")
+    expect(ProviderTransform.effortOptions(haiku, "off")).toEqual({})
+  })
+
+  test("a free model switches reasoning off only where the catalog says it may", () => {
+    const free = (reasoning?: "optional" | "mandatory") =>
+      ({
+        providerID: "vector",
+        api: { id: "cohere/north-mini-code:free", npm: "@ai-sdk/openai-compatible" },
+        capabilities: { reasoning: false },
+        variants: {},
+        freeModel: { source: "shared", ...(reasoning ? { reasoning } : {}) },
+      }) as any
+    expect(ProviderTransform.effortOptions(free("optional"), "off")).toEqual({ reasoning: { effort: "none" } })
+    // Work and Thorough keep the model's own reasoning.
+    expect(ProviderTransform.effortOptions(free("optional"), "default")).toEqual({})
+    expect(ProviderTransform.effortOptions(free("optional"), "high")).toEqual({})
+    expect(ProviderTransform.effortOptions(free("mandatory"), "off")).toEqual({})
+    // Titles and summaries on such a model run without reasoning too.
+    expect(ProviderTransform.smallOptions(free("optional"))).toEqual({ reasoning: { effort: "none" } })
+  })
 })

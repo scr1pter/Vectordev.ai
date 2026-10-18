@@ -1,10 +1,9 @@
-// The instruction block that turns "LLM-as-a-judge" on for a run.
+// The instruction block that turned "LLM-as-a-judge" on before Vector ran the judge itself.
 //
-// It lives here rather than beside the composer because both entry points need
-// it: an ordinary session prompt and an isolated parallel-workspace agent. The
-// setting is meant for testing and automation, so it has to apply to every
-// prompt in every workspace — a verification rule that only covers one of the
-// two surfaces cannot be relied on to catch a regression.
+// A current engine runs the judge after a large task that changed files (the composer sends the setting as `judge` on
+// the prompt), so its model is never asked to launch one, and it drops this block before the model sees it. Two places
+// still need it: an engine from before that change, which runs the judge only when its model is told to, and parallel
+// workspaces, which run on the V2 session engine that has no judge of its own yet.
 export const VERIFIED_COMPLETION_POLICY = [
   "<vector_verified_completion>",
   "LLM-as-a-judge is enabled. Completion is a verified state here, not a confident summary — you may not end your turn claiming the work is done until a judge has passed it.",
@@ -37,14 +36,4 @@ export function completionPolicy(
         (parts(message.id) ?? []).some((part) => part.type === "text" && part.text === VERIFIED_COMPLETION_POLICY),
     )
   return given ? VERIFIED_COMPLETION_REMINDER : VERIFIED_COMPLETION_POLICY
-}
-
-// Two lanes can never satisfy the policy. `plan` produces no implementation to
-// verify, and `quick` — the greeting lane — is configured with `"*": "deny"` in
-// the engine's agent registry, so it has no task tool and cannot spawn the judge
-// subagent at all. Everything else is judged.
-const UNJUDGEABLE_AGENTS = new Set(["plan", "quick"])
-
-export function shouldUseCompletionJudge(input: { enabled: boolean; agent: string }) {
-  return input.enabled && !UNJUDGEABLE_AGENTS.has(input.agent)
 }

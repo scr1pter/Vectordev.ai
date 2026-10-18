@@ -26,6 +26,7 @@ import { effectCmd } from "../effect-cmd"
 import { EOL } from "os"
 import { Filesystem } from "@/util/filesystem"
 import { isRecord } from "@/util/record"
+import type { TaskSize } from "@vectordevai/schema/task-size"
 import {
   createVectorClient,
   type Event,
@@ -283,6 +284,18 @@ export const RunCommand = effectCmd({
         type: "number",
         describe: "stop this run after this many model steps",
       })
+      .option("size", {
+        type: "string",
+        choices: ["auto", "chat", "light", "standard", "thorough"],
+        describe:
+          "how much harness each prompt gets: auto (default) sizes it from what it says; only thorough offers subagents",
+      })
+      .option("judge", {
+        type: "string",
+        choices: ["off", "thorough", "changes"],
+        describe:
+          "run LLM-as-a-judge after large tasks that changed files (thorough) or after every task that changed files (changes)",
+      })
       .option("auto", {
         type: "boolean",
         describe: "auto-approve permissions that are not explicitly denied (dangerous!)",
@@ -375,6 +388,10 @@ export const RunCommand = effectCmd({
       }
 
       const budget = budgetFrom(args)
+      const sizing = {
+        ...(args.size ? { size: args.size as TaskSize.Choice } : {}),
+        ...(args.judge ? { judge: args.judge as TaskSize.JudgeMode } : {}),
+      }
 
       if (interactive && !process.stdout.isTTY) {
         die("--mini requires a TTY stdout")
@@ -1142,6 +1159,7 @@ export const RunCommand = effectCmd({
               arguments: message,
               variant: args.variant,
               budget,
+              ...sizing,
             })
             if (result.error) {
               rejectRequest(result.error)
@@ -1159,6 +1177,7 @@ export const RunCommand = effectCmd({
             model,
             variant: args.variant,
             budget,
+            ...sizing,
             parts: [...files, { type: "text", text: message }],
           })
           if (result.error) {
@@ -1185,6 +1204,7 @@ export const RunCommand = effectCmd({
             model,
             variant: args.variant,
             budget,
+            sizing,
             files,
             initialInput,
             createSession: createFreshSession,
@@ -1222,6 +1242,7 @@ export const RunCommand = effectCmd({
               model,
               variant: args.variant,
               budget,
+              sizing,
               replay,
               replayLimit: args["replay-limit"],
               files,
@@ -1321,6 +1342,8 @@ export async function runMini(input: MiniCommandInput) {
     "max-cost": undefined,
     maxCost: undefined,
     "max-steps": undefined,
+    size: undefined,
+    judge: undefined,
     maxSteps: undefined,
     demo: input.demo ?? false,
   })

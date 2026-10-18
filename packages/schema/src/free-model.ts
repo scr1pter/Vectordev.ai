@@ -24,6 +24,11 @@ export const FreeModelInfo = Schema.Struct({
       dataPolicy: Schema.optional(FreeDataPolicy),
     }),
   ),
+  // Whether the model reasons, from OpenRouter's supported parameters: "optional" means Vector may switch reasoning off
+  // for a greeting; "unsupported" means an endpoint does not take the parameter. Absent when OpenRouter
+  // did not say, or on a catalog published before this field existed; Vector then uses the reviewed fallback for that
+  // model, if it has one, and otherwise the model keeps its own default.
+  reasoning: Schema.optional(Schema.Literals(["optional", "mandatory", "unsupported"])),
 })
 export type FreeModelInfo = typeof FreeModelInfo.Type
 
@@ -89,6 +94,7 @@ export const FREE_MODEL_FALLBACKS: readonly FreeModelInfo[] = [
     contextLength: 256000,
     maxOutputTokens: 64000,
     providers: [{ id: "cohere", name: "Cohere", retention: NO_TRAINING_RETENTION, dataPolicy: "no-training" }],
+    reasoning: "optional",
   },
   {
     // OpenRouter lists this free preview until 31 December 2026.

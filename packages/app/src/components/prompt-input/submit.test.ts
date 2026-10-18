@@ -4,7 +4,6 @@ import type { Prompt } from "@/context/prompt"
 let createPromptSubmit: typeof import("./submit").createPromptSubmit
 let resolveExecutionAgent: typeof import("./submit").resolveExecutionAgent
 let resolveSubmissionAgent: typeof import("./submit").resolveSubmissionAgent
-let shouldUseCompletionJudge: typeof import("./submit").shouldUseCompletionJudge
 
 const createdClients: string[] = []
 const createdSessions: string[] = []
@@ -272,7 +271,6 @@ beforeAll(async () => {
   createPromptSubmit = mod.createPromptSubmit
   resolveExecutionAgent = mod.resolveExecutionAgent
   resolveSubmissionAgent = mod.resolveSubmissionAgent
-  shouldUseCompletionJudge = mod.shouldUseCompletionJudge
 })
 
 beforeEach(() => {
@@ -483,9 +481,10 @@ describe("prompt submit worktree selection", () => {
     await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
     await new Promise((resolve) => setTimeout(resolve, 0))
 
+    // The person picked the quick lane, so the engine answers there and never escalates it to Work.
     expect(sentPrompts.at(-1)).toEqual({
       directory: "/repo/main",
-      input: expect.objectContaining({ agent: "quick", executionMode: "normal" }),
+      input: expect.objectContaining({ agent: "quick", executionMode: "normal", size: "chat" }),
     })
   })
 
@@ -521,10 +520,18 @@ describe("prompt submit worktree selection", () => {
 
 describe("follow-up optimistic echo", () => {
   type SendInput = Parameters<typeof import("./submit").sendFollowupDraft>[0]
-  type SentPart = { id: string; type: string; synthetic?: boolean }
-  type Step = { kind: "echo" | "request"; parts: SentPart[]; budget?: unknown }
+  type SentPart = { id: string; type: string; synthetic?: boolean; text?: string }
+  type Step = {
+    kind: "echo" | "request"
+    parts: SentPart[]
+    budget?: unknown
+    judge?: unknown
+    agent?: string
+    size?: unknown
+  }
 
-  const text = "describe the colors in this picture and explain what the square could represent"
+  // Real work, so the desktop's file map applies; a greeting gets none.
+  const text = "add a caption under this picture that names its colors and what the square could represent"
   const pasted = {
     type: "image" as const,
     id: "pasted-image",
@@ -546,8 +553,9 @@ describe("follow-up optimistic echo", () => {
 
   const send = async (
     draft: Partial<import("./submit").FollowupDraft> = {},
-    history: { role: string }[] = [],
+    history: object[] = [],
     config: object = {},
+    parts: Record<string, SentPart[]> = {},
   ) => {
     const { sendFollowupDraft } = await import("./submit")
     // One ordered log, so a test also sees when the echo happens relative to the request.
@@ -555,15 +563,28 @@ describe("follow-up optimistic echo", () => {
     await sendFollowupDraft({
       client: {
         session: {
-          promptAsync: async (input: { parts: SentPart[]; budget?: unknown }) => {
-            steps.push({ kind: "request", parts: input.parts, budget: input.budget })
+          promptAsync: async (input: {
+            parts: SentPart[]
+            budget?: unknown
+            judge?: unknown
+            agent?: string
+            size?: unknown
+          }) => {
+            steps.push({
+              kind: "request",
+              parts: input.parts,
+              budget: input.budget,
+              judge: input.judge,
+              agent: input.agent,
+              size: input.size,
+            })
             return { data: undefined }
           },
         },
       } as unknown as SendInput["client"],
       serverSync: { session: { set: () => undefined } } as unknown as SendInput["serverSync"],
       sync: {
-        data: { command: [], message: { "session-1": history }, config },
+        data: { command: [], message: { "session-1": history }, part: parts, config },
         session: {
           optimistic: {
             add: (value: { parts: SentPart[] }) => void steps.push({ kind: "echo", parts: value.parts }),
@@ -606,12 +627,91 @@ describe("follow-up optimistic echo", () => {
     expectOneEchoBeforeRequest(await withDesktopContext(() => send()), 1)
   })
 
-  test("keeps the echoed ids when verified completion adds its policy", async () => {
-    expectOneEchoBeforeRequest(await send({ llmJudge: true }), 1)
+  test("sends the judge setting, and the policy an older engine needs to run the judge at all", async () => {
+    const steps = await send({ judge: "changes" })
+    expect(steps.at(-1)?.judge).toBe("changes")
+    // A current engine reads the setting and drops the policy; an older one runs the judge only when told to.
+    expectOneEchoBeforeRequest(steps, 1)
+    const request = steps.at(-1)?.parts ?? []
+    expect(request.some((part) => part.text?.startsWith("<vector_verified_completion>"))).toBe(true)
+    // A draft queued before the scope existed still turns the judge on for large tasks.
+    expect((await send({ llmJudge: true })).at(-1)?.judge).toBe("thorough")
+    const off = await send()
+    expect(off.at(-1)?.judge).toBeUndefined()
+    expectOneEchoBeforeRequest(off, 0)
+    // Only the build agent: Plan mode has nothing to judge, and a custom agent is never judged by a current engine.
+    expectOneEchoBeforeRequest(await send({ judge: "thorough", agent: "plan" }), 0)
+    expectOneEchoBeforeRequest(await send({ judge: "thorough", agent: "reviewer" }), 0)
   })
 
-  test("keeps the echoed ids when both instructions are added", async () => {
-    expectOneEchoBeforeRequest(await withDesktopContext(() => send({ llmJudge: true })), 2)
+  test("keeps the echoed ids when the judge is on and the desktop adds task context", async () => {
+    expectOneEchoBeforeRequest(await withDesktopContext(() => send({ judge: "thorough" })), 2)
+  })
+
+  test("adds no file map for a greeting, and adds it for any work, small actions included", async () => {
+    const map = async (content: string) =>
+      (
+        await withDesktopContext(() => send({ prompt: [{ type: "text", content, start: 0, end: content.length }] }))
+      ).at(-1)?.parts.filter((part) => part.synthetic).length
+    expect(await map("hi")).toBe(0)
+    for (const content of ["ship to vercel", "fix the typo in README.md", "what does this function do?"])
+      expect(await map(content), content).toBe(1)
+  })
+
+  test("sends a thanks to the quick lane only when no work waits on the user", async () => {
+    const thanks = (history: object[], parts: Record<string, SentPart[]> = {}) =>
+      send({ prompt: [{ type: "text", content: "thanks", start: 0, end: 6 }] }, history, {}, parts).then(
+        (steps) => steps.at(-1)?.agent,
+      )
+    const reply = (id: string, text: string, extra: object = {}) => ({
+      history: [{ id, role: "assistant", time: { created: 1, completed: 2 }, finish: "stop", ...extra }],
+      parts: { [id]: [{ id: `${id}-text`, type: "text", text }] },
+    })
+    const done = reply("done", "Fixed the typo in README.md.")
+    expect(await thanks(done.history, done.parts)).toBe("quick")
+    // The automatic quick lane is not a pick: a current engine sizes it and can escalate it to Work.
+    const automatic = await send({ prompt: [{ type: "text", content: "thanks", start: 0, end: 6 }] }, done.history)
+    expect(automatic.at(-1)?.size).toBeUndefined()
+    // A thanks with a request after it is work, for the picked agent with the history.
+    for (const content of ["thanks for the update ship it to vercel", "thanks for that run the tests"])
+      expect(
+        (await send({ prompt: [{ type: "text", content, start: 0, end: content.length }] }, done.history)).at(-1)
+          ?.agent,
+        content,
+      ).toBe("build")
+    // An offer or a closing line without a question mark waits on nothing.
+    const offered = reply("offered", "Fixed the typo. Let me know if this works for you.")
+    expect(await thanks(offered.history, offered.parts)).toBe("quick")
+    // The agent asked something: the thanks answers that work, which the engine sizes with the history.
+    const asked = reply("asked", "Deployed. Do you want me to keep the preview URL?")
+    expect(await thanks(asked.history, asked.parts)).toBe("build")
+    // The run did not finish.
+    const failed = reply("failed", "Migrating the routes", { error: { name: "MessageAbortedError" } })
+    expect(await thanks(failed.history, failed.parts)).toBe("build")
+    // The user dismissed the agent's question: the work still waits on them.
+    const dismissed = {
+      history: done.history,
+      parts: {
+        done: [...done.parts.done, { id: "done-question", type: "tool", tool: "question", state: { status: "error" } }],
+      },
+    }
+    expect(await thanks(dismissed.history, dismissed.parts as unknown as Record<string, SentPart[]>)).toBe("build")
+    // A greeting's reply asks back, but waits on nothing.
+    const smallTalk = reply("chat", "I'm doing great, thanks for asking! How about you?", { agent: "quick" })
+    expect(await thanks(smallTalk.history, smallTalk.parts)).toBe("quick")
+  })
+
+  test("sends a greeting or a help with an image, a file or a named subagent to the agent the user picked", async () => {
+    const mention = { type: "file" as const, path: "src/app.ts", content: "@src/app.ts", start: 3, end: 14 }
+    for (const word of ["hi", "thanks", "help"]) {
+      const typed = { type: "text" as const, content: word, start: 0, end: word.length }
+      const withImage = await send({ prompt: [typed, pasted] })
+      expect(withImage.at(-1)?.agent, word).toBe("build")
+      expect(files(withImage.at(-1)?.parts ?? []), word).toHaveLength(1)
+      expect((await send({ prompt: [typed, mention] })).at(-1)?.agent, word).toBe("build")
+    }
+    // The same words alone are a greeting for the quick lane.
+    expect((await send({ prompt: [{ type: "text", content: "hi", start: 0, end: 2 }] })).at(-1)?.agent).toBe("quick")
   })
 
   test("sends exactly the echoed parts when nothing is added", async () => {
@@ -619,7 +719,11 @@ describe("follow-up optimistic echo", () => {
   })
 
   test("adds the desktop's file map only before the session's first reply", async () => {
-    expectOneEchoBeforeRequest(await withDesktopContext(() => send({}, [{ role: "user" }, { role: "assistant" }])), 0)
+    const history = [
+      { id: "u", role: "user", time: { created: 0 } },
+      { id: "a", role: "assistant", time: { created: 1, completed: 2 }, finish: "stop" },
+    ]
+    expectOneEchoBeforeRequest(await withDesktopContext(() => send({}, history)), 0)
   })
 
   test("sends the interactive per-run cap on top of the configured run budget", async () => {
@@ -702,67 +806,34 @@ describe("submission agent selection", () => {
     ).toBe("review")
   })
 
-  test("judges every prompt that produces work once enabled", () => {
-    // Testing and automation is the point of the setting, so it must not skip
-    // requests it privately judges small — a gate like that hides regressions.
-    expect(shouldUseCompletionJudge({ enabled: true, agent: "build" })).toBe(true)
-    expect(shouldUseCompletionJudge({ enabled: true, agent: "review" })).toBe(true)
+  test("sends a greeting to the quick lane on every agent, so an engine that does not size it answers cheaply too", () => {
+    for (const current of ["build", "reviewer"])
+      expect(resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "trivial", current })).toBe(
+        "quick",
+      )
+    // Plan mode keeps its agent; the engine answers its greetings on the quick lane.
+    expect(
+      resolveExecutionAgent({ planMode: true, quickRequested: false, difficulty: "trivial", current: "plan" }),
+    ).toBe("plan")
+    // A reply that continues the work stays on the agent the user picked.
+    expect(
+      resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "simple", current: "reviewer" }),
+    ).toBe("reviewer")
   })
 
-  test("does not silently route a judged trivial prompt into the tool-less quick agent", () => {
+  test("explicit Quick mode takes the quick lane, and Plan mode keeps its agent", () => {
     expect(
-      resolveExecutionAgent({
-        planMode: false,
-        quickRequested: false,
-        difficulty: "trivial",
-        current: "build",
-        judgeEnabled: true,
-      }),
-    ).toBe("build")
-    expect(
-      resolveExecutionAgent({
-        planMode: false,
-        quickRequested: false,
-        difficulty: "trivial",
-        current: "build",
-        judgeEnabled: false,
-      }),
+      resolveExecutionAgent({ planMode: false, quickRequested: true, difficulty: "standard", current: "build" }),
     ).toBe("quick")
-  })
-
-  test("promotes explicit quick mode when verified completion is enabled", () => {
     expect(
-      resolveExecutionAgent({
-        planMode: false,
-        quickRequested: true,
-        difficulty: "standard",
-        current: "build",
-        judgeEnabled: true,
-      }),
-    ).toBe("build")
+      resolveExecutionAgent({ planMode: true, quickRequested: true, difficulty: "trivial", current: "plan" }),
+    ).toBe("plan")
   })
 
-  test("repairs a stale quick agent before applying verified completion", () => {
+  test("repairs a stale quick agent for ordinary work", () => {
     expect(
-      resolveExecutionAgent({
-        planMode: false,
-        quickRequested: false,
-        difficulty: "standard",
-        current: "quick",
-        judgeEnabled: true,
-      }),
+      resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "standard", current: "quick" }),
     ).toBe("build")
-  })
-
-  test("skips the lanes that cannot satisfy the policy", () => {
-    // plan produces no implementation to verify; quick is denied every tool in
-    // agent.ts, so it cannot spawn the judge subagent at all.
-    expect(shouldUseCompletionJudge({ enabled: true, agent: "plan" })).toBe(false)
-    expect(shouldUseCompletionJudge({ enabled: true, agent: "quick" })).toBe(false)
-  })
-
-  test("stays off when the setting is off", () => {
-    expect(shouldUseCompletionJudge({ enabled: false, agent: "build" })).toBe(false)
   })
 })
 

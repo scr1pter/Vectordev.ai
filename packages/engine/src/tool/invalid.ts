@@ -14,7 +14,10 @@ export const InvalidTool = Tool.define(
     execute: (params: { tool: string; error: string }) =>
       Effect.succeed({
         title: "Invalid Tool",
-        output: `The arguments provided to the tool are invalid: ${params.error}`,
+        // A small model may call a tool its request's size does not offer, such as task on a Standard request.
+        output: /unavailable tool|no such tool/i.test(params.error)
+          ? `The ${params.tool} tool is not offered for this request. Do the work with the tools you have; if it truly needs ${params.tool}, call escalate when it is offered.`
+          : `The arguments provided to the tool are invalid: ${params.error}`,
         metadata: {},
       }),
   }),

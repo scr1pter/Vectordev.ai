@@ -13,6 +13,7 @@ import { Effect, Record } from "effect"
 import { jsonSchema, tool as aiTool, type ModelMessage, type Tool } from "ai"
 import type { Plugin } from "@/plugin"
 import { mergeDeep } from "remeda"
+import type { TaskSize } from "@vectordevai/core/task-size"
 
 const USER_AGENT = `vector/${InstallationVersion}`
 
@@ -27,6 +28,9 @@ type PrepareInput = {
   readonly system: string[]
   readonly messages: ModelMessage[]
   readonly small?: boolean
+  // Reasoning effort from the request's task size. The user's own pick wins, except that a greeting ("off") never
+  // reasons at whatever effort the user chose for real work.
+  readonly effort?: TaskSize.Effort
   readonly tools: Record<string, Tool>
   readonly provider: Provider.Info
   readonly auth: Auth.Info | undefined
@@ -84,9 +88,15 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     system.push(header, rest.join("\n"))
   }
 
-  const variant =
+  const picked =
     !input.small && input.model.variants && input.user.model.variant
       ? input.model.variants[input.user.model.variant]
+      : undefined
+  const variant = input.effort === "off" ? {} : (picked ?? {})
+  // Sizing sets effort only where neither the user nor the agent's config did.
+  const sized =
+    !input.small && input.effort && (input.effort === "off" || !picked)
+      ? ProviderTransform.effortOptions(input.model, input.effort)
       : {}
   const base = input.small
     ? ProviderTransform.smallOptions(input.model)
@@ -95,7 +105,10 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         sessionID: input.sessionID,
         providerOptions: input.provider.options,
       })
-  const options = mergeOptions(mergeOptions(mergeOptions(base, input.model.options), input.agent.options), variant)
+  const options = mergeOptions(
+    mergeOptions(mergeOptions(mergeOptions(base, input.model.options), sized), input.agent.options),
+    variant,
+  )
   if (
     input.model.api.npm === "@ai-sdk/azure" &&
     (input.provider.options.useCompletionUrls || input.model.options.useCompletionUrls || options.useCompletionUrls)

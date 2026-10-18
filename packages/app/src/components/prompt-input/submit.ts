@@ -1,8 +1,4 @@
-import {
-  completionPolicy,
-  shouldUseCompletionJudge,
-  VERIFIED_COMPLETION_POLICY,
-} from "@/features/judge/verified-completion"
+import { completionPolicy } from "@/features/judge/verified-completion"
 import type { Message, Session } from "@vectordevai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@vectordevai/core/util/encode"
@@ -36,6 +32,7 @@ import {
   routeModelForTask,
   routeVariantForTask,
   type TaskDifficulty,
+  workOpen,
 } from "@/utils/task-intelligence"
 import { modelDisplayName } from "@/utils/provider-brand"
 import { FREE_MODEL_POLICY_NOTICE, firstFreeModelPolicyNotice } from "@/utils/free-model-policy-notice"
@@ -67,22 +64,17 @@ export function resolveExecutionAgent(input: {
   quickRequested: boolean
   difficulty: TaskDifficulty
   current: string
-  judgeEnabled: boolean
 }) {
   if (input.planMode) return input.current
-  if (!input.quickRequested && input.difficulty !== "trivial") {
-    return input.judgeEnabled && input.current === "quick" ? "build" : input.current
-  }
-  if (!input.judgeEnabled) return "quick"
-
-  // The quick agent has no tools, so it cannot launch the independent judge.
-  // An enabled verification contract takes precedence over either automatic
-  // trivial routing or the quick-mode shortcut instead of silently disabling
-  // the feature the user explicitly turned on.
+  if (input.quickRequested) return "quick"
+  // A greeting, thanks or a farewell takes the quick lane from here on every agent, with or without the judge, so an
+  // engine that does not size requests itself (an older Vector, a remote server) also answers it with one small
+  // request. A current engine sizes it as a build request and offers escalate there, so a message misread as social
+  // still goes on as Work. "ok", "yes" or "continue", and anything sent while work waits on the user, are not trivial:
+  // they continue the work before them, which the engine sizes.
+  if (input.difficulty === "trivial") return "quick"
   return input.current === "quick" ? "build" : input.current
 }
-
-export { shouldUseCompletionJudge, VERIFIED_COMPLETION_POLICY }
 
 export type FollowupDraft = {
   sessionID: string
@@ -94,7 +86,11 @@ export type FollowupDraft = {
   variant?: string
   difficulty?: TaskDifficulty
   executionMode?: "normal" | "fast"
+  // When LLM-as-a-judge is on: which runs Vector judges. A draft queued before this field existed carries llmJudge.
+  judge?: "thorough" | "changes"
   llmJudge?: boolean
+  // The composer's Quick mode: the person picked the quick lane, so the engine answers there and never escalates it.
+  size?: "chat"
 }
 
 type FollowupSendInput = {
@@ -111,21 +107,41 @@ const draftText = (prompt: Prompt) => prompt.map((part) => ("content" in part ? 
 
 const draftImages = (prompt: Prompt) => prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
 
-// Task preparation and verified completion can each add one hidden instruction after the typed text.
+// What a message carries besides its text, as the engine counts it when it sizes the message: a greeting with a
+// screenshot, a file or a named subagent is never a bare reply.
+const attachments = (prompt: Prompt, context: readonly unknown[]) => {
+  const images = draftImages(prompt).filter((part) => part.mime.startsWith("image/")).length
+  return {
+    images,
+    files: prompt.filter((part) => part.type === "file" || part.type === "image").length - images + context.length,
+    agents: prompt.flatMap((part) => (part.type === "agent" ? [part.name] : [])),
+  }
+}
+
+// Task preparation and the judge policy for older engines can each add one hidden instruction after the typed text.
 const SYNTHETIC_SLOTS = 2
 
 export async function sendFollowupDraft(input: FollowupSendInput) {
   const text = draftText(input.draft.prompt)
   const images = draftImages(input.draft.prompt)
-  const difficulty = input.draft.difficulty ?? classifyTaskDifficulty(text)
+  const difficulty =
+    input.draft.difficulty ??
+    classifyTaskDifficulty(text, {
+      open: workOpen(input.sync.data.message?.[input.draft.sessionID] ?? [], (id) => input.sync.data.part?.[id]),
+      ...attachments(input.draft.prompt, input.draft.context),
+    })
   const agent = resolveExecutionAgent({
     planMode: input.draft.agent === "plan",
     quickRequested: input.draft.agent === "quick",
     difficulty,
     current: input.draft.agent,
-    judgeEnabled: input.draft.llmJudge === true,
   })
-  const llmJudge = shouldUseCompletionJudge({ enabled: input.draft.llmJudge === true, agent })
+  // A current engine decides whether a run is judged, from the request's size and this setting.
+  const judge = input.draft.judge ?? (input.draft.llmJudge ? ("thorough" as const) : undefined)
+  // An engine from before Vector ran the judge itself ignores that setting and runs the judge only when its model is
+  // told to, so a build prompt still carries the policy. A current engine reads the setting, drops the policy before
+  // the model sees it, and judges only large tasks.
+  const legacyJudge = judge !== undefined && agent === "build"
   const setBusy = () => {
     if (!input.optimisticBusy) return
     input.serverSync.session.set("session_status", input.draft.sessionID, { type: "busy" })
@@ -166,6 +182,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
         variant: input.draft.variant,
         executionMode: input.draft.executionMode,
         ...(budget ? { budget } : {}),
+        ...(judge ? { judge } : {}),
         parts: images.map((attachment) => ({
           id: Identifier.ascending("part"),
           type: "file" as const,
@@ -232,8 +249,8 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       return false
     }
 
-    // The file map is a starting point for a session. On a later message it would stay in the history and be sent
-    // again on every request, while the agent already knows the code it has read.
+    // The file map is a starting point for a session's real work. On a later message it would stay in the history and
+    // be sent again on every request, while the agent already knows the code it has read; a greeting needs none.
     const history = input.sync.data.message?.[input.draft.sessionID] ?? []
     const replied = history.some((message) => message.role === "assistant")
     const preparation =
@@ -242,7 +259,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
         : await globalThis.window?.api?.prepareAgentTask?.(input.draft.sessionDirectory, text).catch(() => undefined)
     const syntheticText = [
       ...(preparation?.instruction ? [preparation.instruction] : []),
-      ...(llmJudge ? [completionPolicy(history, (id) => input.sync.data.part?.[id])] : []),
+      ...(legacyJudge ? [completionPolicy(history, (id) => input.sync.data.part?.[id])] : []),
     ]
     const budget = promptRunBudget({
       configured: input.sync.data.config.budget?.run,
@@ -259,6 +276,8 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       variant: input.draft.variant,
       executionMode: input.draft.executionMode,
       ...(budget ? { budget } : {}),
+      ...(judge ? { judge } : {}),
+      ...(input.draft.size && agent === "quick" ? { size: input.draft.size } : {}),
     })
     return true
   } catch (err) {
@@ -293,6 +312,7 @@ type PromptSubmitInput = {
   onSubmit?: () => void
   executionMode?: Accessor<"normal" | "quick" | "fast">
   llmJudge?: Accessor<boolean>
+  judgeScope?: Accessor<"thorough" | "changes">
   autoModelRouting?: Accessor<boolean>
   connectProvider?: () => void
   /** Asks once before the first prompt to a free model whose provider may train on prompts; false keeps it unsent. */
@@ -454,8 +474,15 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
+    // A social message takes the quick lane only when no work waits on the user; then it answers that work.
+    const open = params.id ? workOpen(sync().data.message?.[params.id] ?? [], (id) => sync().data.part?.[id]) : false
     const difficulty =
-      mode === "normal" && !text.trim().startsWith("/") ? classifyTaskDifficulty(text) : ("standard" as const)
+      mode === "normal" && !text.trim().startsWith("/")
+        ? classifyTaskDifficulty(text, {
+            open,
+            ...attachments([...currentPrompt.filter((part) => part.type !== "image"), ...images], context),
+          })
+        : ("standard" as const)
     // Hiding a model in Settings is how the first-run tour tells people to
     // control what Vector uses, so routing must not reach past that filter and
     // pick something they deliberately turned off.
@@ -513,13 +540,12 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       current: currentAgent.name,
       available: local.agent.list(),
     })
-    const judgeEnabled = input.llmJudge?.() ?? false
+    const judge = input.llmJudge?.() ? (input.judgeScope?.() ?? "thorough") : undefined
     const agent = resolveExecutionAgent({
       planMode: isPlanMode,
       quickRequested: requestedExecutionMode === "quick",
       difficulty,
       current: resolvedAgent,
-      judgeEnabled,
     })
 
     if (!(await workspaceAvailable())) return
@@ -645,7 +671,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       variant,
       difficulty,
       executionMode,
-      llmJudge: judgeEnabled,
+      ...(judge ? { judge } : {}),
+      ...(requestedExecutionMode === "quick" && agent === "quick" ? { size: "chat" as const } : {}),
     }
 
     const clearInput = () => {
@@ -714,6 +741,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             model: `${model.providerID}/${model.modelID}`,
             variant,
             executionMode,
+            ...(judge ? { judge } : {}),
             parts: images.map((attachment) => ({
               id: Identifier.ascending("part"),
               type: "file" as const,

@@ -426,6 +426,9 @@ const fragmentKinds: readonly FragmentKind[] = ["text", "reasoning", "tool input
 
 const fragmentID = (kind: FragmentKind, suffix: string) => `${kind === "tool input" ? "call" : kind}-${suffix}`
 
+// A turn of the shared sizing conversation where the agent asks through the question tool and the user dismisses it.
+const DISMISSED = "(dismissed question)"
+
 const fragmentFixture = (kind: FragmentKind, id: string, chunks: readonly string[]): FragmentFixture => {
   const text = chunks.join("")
   switch (kind) {
@@ -763,6 +766,121 @@ describe("SessionRunnerLLM", () => {
         { role: "user", content: [{ type: "text", text: "Second" }] },
       ])
       expect(yield* session.messages({ sessionID })).toHaveLength(2)
+    }),
+  )
+
+  it.effect("offers a social message no tools and any other request every tool", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register(
+        Object.fromEntries(
+          ["read", "edit", "todowrite", "question"].map((name) => [
+            name,
+            Tool.make({
+              description: name,
+              input: Schema.Struct({}),
+              output: Schema.String,
+              execute: () => Effect.succeed(name),
+            }),
+          ]),
+        ),
+      )
+      const session = yield* SessionV2.Service
+      const turn = Effect.fnUntraced(function* (text: string) {
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text }), resume: false })
+        requests.length = 0
+        response = fragmentFixture("text", `text-${text}`, ["Done."]).completeEvents
+        yield* session.resume(sessionID)
+        return requests[0]?.tools.map((tool) => tool.name) ?? []
+      })
+      expect(yield* turn("hi")).toEqual([])
+      // A small action, a large one and a style word all get the same tools: no word list lowers Work.
+      for (const text of ["ship to vercel", "switch the codebase to Go", "keep it simple, fix the typo in README.md"])
+        expect(yield* turn(text), text).toEqual(expect.arrayContaining(["read", "edit", "todowrite", "question"]))
+    }),
+  )
+
+  it.effect("sizes the same conversation as the V1 runner: social messages bare, everything else with tools", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const registry = yield* ToolRegistry.Service
+      const questions = yield* QuestionV2.Service
+      yield* registry.register({
+        ...Object.fromEntries(
+          ["read", "edit", "todowrite"].map((name) => [
+            name,
+            Tool.make({
+              description: name,
+              input: Schema.Struct({}),
+              output: Schema.String,
+              execute: () => Effect.succeed(name),
+            }),
+          ]),
+        ),
+        question: Tool.make({
+          description: "Ask the user",
+          input: Schema.Struct({}),
+          output: Schema.Struct({}),
+          execute: (_, context) =>
+            questions.ask({ sessionID: context.sessionID, questions: [] }).pipe(Effect.as({}), Effect.orDie),
+        }),
+      })
+      const session = yield* SessionV2.Service
+      const turn = Effect.fnUntraced(function* (text: string, answer: string) {
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text }), resume: false })
+        requests.length = 0
+        if (answer !== DISMISSED) {
+          responses = undefined
+          response = fragmentFixture("text", `text-${text}`, [answer]).completeEvents
+          yield* session.resume(sessionID)
+          return (requests[0]?.tools.length ?? 0) > 0
+        }
+        // The agent asks through the question tool and the user dismisses it. The provider reports the step as
+        // stopped, as some do with a tool call, so only the dismissed question says the work waits on the user.
+        responses = [
+          [
+            LLMEvent.stepStart({ index: 0 }),
+            LLMEvent.toolCall({ id: `call-${text}`, name: "question", input: {} }),
+            LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+            LLMEvent.finish({ reason: "stop" }),
+          ],
+          [],
+        ]
+        const run = yield* session.resume(sessionID).pipe(Effect.exit, Effect.forkChild)
+        let pending = yield* questions.list()
+        while (pending.length === 0) {
+          yield* Effect.yieldNow
+          pending = yield* questions.list()
+        }
+        yield* questions.reject(pending[0]!.id)
+        yield* Fiber.join(run)
+        return (requests[0]?.tools.length ?? 0) > 0
+      })
+      // The same conversation, with the same replies, as "the V1 runner sizes a conversation the way V2 does" in the
+      // engine's task-size test: true where the turn is offered tools.
+      const conversation = [
+        ["hi", "Hi! How can I help you today?", false],
+        ["ship to vercel", "Deployed. Do you want me to keep the preview URL?", true],
+        // A "no" answers the agent's question, so it is never a bare reply.
+        ["no", "Removed the preview URL.", true],
+        ["thanks, that works", "You're welcome!", false],
+        ["be thorough: port the TUI to Rust", "Here is the plan in three phases. Shall I start?", true],
+        ["build the app", "Ported the renderer. Should I go on with the input layer?", true],
+        // A thanks while the agent waits on an answer follows up that work.
+        ["thanks", "Going on with the input layer.", true],
+        ["continue", "Ported every screen. Let me know if this works for you.", true],
+        // Thorough ends with its run: a closing line asks nothing, so a thanks is bare and a new request is Work.
+        ["thanks!", "Anytime!", false],
+        ["fix the typo in README", "Fixed the typo.", true],
+        // A greeting's reply that asks back waits on nothing, so the small talk that answers it stays bare.
+        ["hey, how are you?", "I'm doing great, thanks for asking! How about you?", false],
+        ["great, thanks!", "Glad to hear it!", false],
+        // The user dismissed the agent's question: the thanks after it follows up that work.
+        ["which router should I use?", DISMISSED, true],
+        ["thanks", "Going with the new router.", true],
+      ] as const
+      for (const [text, answer, tools] of conversation) expect(yield* turn(text, answer), text).toBe(tools)
     }),
   )
 

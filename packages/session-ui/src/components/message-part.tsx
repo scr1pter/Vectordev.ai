@@ -1610,8 +1610,12 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
   const meta = createMemo(() => {
     if (props.message.role !== "assistant") return ""
     const agent = (props.message as AssistantMessage).agent
+    // The size Vector gave the request says why a run did or did not bring in subagents or the judge. A greeting's
+    // reply already reads as the quick lane, so it carries no size.
+    const size = (props.message as AssistantMessage).size
     const items = [
       agent ? agent[0]?.toUpperCase() + agent.slice(1) : "",
+      size && size !== "chat" ? i18n.t(`ui.message.size.${size}`) : "",
       model(),
       duration(),
       interrupted() ? i18n.t("ui.message.interrupted") : "",
