@@ -86,6 +86,7 @@ describe("memory page model", () => {
     expect(holdLabel(undefined)).toContain("once you approve it")
     expect(holdLabel(undefined)).not.toContain("another session confirms")
     expect(holdLabel("web")).toContain("reaches outside this computer")
+    expect(holdLabel("mcp")).toContain("an MCP server's prompt")
     expect(kindLabel("failure")).toBe("Past failure")
   })
 

@@ -252,7 +252,7 @@ function withheld(entries: readonly BrainSchema.Entry[]) {
 
 function holdReason(hold: BrainSchema.Hold | undefined) {
   if (hold === "web") return "this session read web content or ran a command that reaches outside this computer"
-  if (hold === "mcp") return "this session ran an MCP tool"
+  if (hold === "mcp") return "this session ran an MCP tool or an MCP server's prompt"
   if (hold === "subagent") return "this session took a subagent's report"
   if (hold === "guest") return "an invited guest is in this session"
   if (hold === "untrusted-repository") return "this repository's settings are not trusted"
