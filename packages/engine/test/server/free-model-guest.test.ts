@@ -526,3 +526,22 @@ test("no one is offered or sent OpenRouter's free router or a zero-price stealth
     },
   )
 }, 90_000)
+
+test("a session warped here from an engine where a guest worked in it stays off may-train models", async () => {
+  await serve(async (h) => {
+    // This engine is the remote workspace. The engine warping the session in replays its history, then steals it
+    // with the owner's credentials, saying an invited guest worked in it there.
+    const session = await newSession(h, h.owner)
+    const stolen = await h.send("/sync/steal", { ...h.owner, [GUEST_REQUEST_HEADER]: "1" }, { sessionID: session })
+    expect(stolen.status).toBe(200)
+    await h.send(`/session/${session}/message`, h.owner, {
+      model: { providerID: "vector", modelID: laguna.id },
+      parts: [{ type: "text", text: "owner prompt after the warp" }],
+    })
+    expect(h.toLaguna()).toEqual([])
+    const errors = (await messages(h, session)).flatMap((message) =>
+      message.info.error?.data?.message ? [message.info.error.data.message] : [],
+    )
+    expect(errors.some((message) => message.includes(FREE_MODEL_TRAINING_GUEST_SESSION))).toBe(true)
+  })
+}, 60_000)

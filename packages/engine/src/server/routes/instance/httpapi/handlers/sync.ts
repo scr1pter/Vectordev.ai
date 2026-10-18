@@ -2,6 +2,7 @@ import { Workspace } from "@/control-plane/workspace"
 import * as InstanceState from "@/effect/instance-state"
 import { Session } from "@/session/session"
 import { Database } from "@vectordevai/core/database/database"
+import { FreeModelGuests, GUEST_REQUEST_HEADER } from "@vectordevai/core/free-model-guests"
 import { EventV2 } from "@vectordevai/core/event"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventTable } from "@vectordevai/core/event/sql"
@@ -12,6 +13,7 @@ import { lte } from "drizzle-orm"
 import { not } from "drizzle-orm"
 import { or } from "drizzle-orm"
 import { Effect, Scope } from "effect"
+import { HttpServerRequest } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { HistoryPayload, ReplayPayload, SessionPayload } from "../groups/sync"
@@ -23,6 +25,7 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
     const scope = yield* Scope.Scope
     const events = yield* EventV2Bridge.Service
     const { db } = yield* Database.Service
+    const guests = yield* FreeModelGuests.Service
 
     const start = Effect.fn("SyncHttpApi.start")(function* () {
       yield* workspace
@@ -61,6 +64,10 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
     const steal = Effect.fn("SyncHttpApi.steal")(function* (ctx: { payload: typeof SessionPayload.Type }) {
       const workspaceID = yield* InstanceState.workspaceID
       if (!workspaceID) return yield* new HttpApiError.BadRequest({})
+      // A session an invited guest worked in on the engine it comes from stays off may-train free models here too
+      // (FreeModelGuests). Marks are kept per engine and are not part of the replayed history.
+      if ((yield* HttpServerRequest.HttpServerRequest).headers[GUEST_REQUEST_HEADER] === "1")
+        yield* guests.mark(ctx.payload.sessionID)
 
       yield* session.setWorkspace({ sessionID: ctx.payload.sessionID, workspaceID })
 

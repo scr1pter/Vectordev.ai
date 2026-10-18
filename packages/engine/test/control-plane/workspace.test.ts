@@ -32,6 +32,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { FreeModelGuests, GUEST_REQUEST_HEADER } from "@vectordevai/core/free-model-guests"
 
 const originalEnv = {
   VECTOR_AUTH_CONTENT: process.env.VECTOR_AUTH_CONTENT,
@@ -51,6 +52,7 @@ const workspaceLayer = (experimentalWorkspaces: boolean) =>
       Database.node,
       InstanceStore.node,
       Ripgrep.node,
+      FreeModelGuests.node,
     ]),
     [
       [RuntimeFlags.node, RuntimeFlags.layer({ experimentalWorkspaces })],
@@ -1118,6 +1120,54 @@ describe("workspace CRUD", () => {
             expect(calls[4].json).toEqual({ sessionID: session.id })
             expect((yield* sessionSvc.get(session.id)).title).toBe("from source history")
             expect(yield* sessionSequenceOwner(session.id)).toBe(target.id)
+          }),
+        { git: true },
+      )
+    })
+  })
+})
+
+describe("session warp and invited guests", () => {
+  it.live("sessionWarp tells a remote workspace that an invited guest worked in the session", () => {
+    const steals: FetchCall[] = []
+    return Effect.gen(function* () {
+      yield* HttpServer.serveEffect()(
+        Effect.gen(function* () {
+          const req = yield* HttpServerRequest.HttpServerRequest
+          const bodyText = yield* req.text
+          if (new URL(req.url, "http://localhost").pathname === "/warp-target/sync/steal")
+            steals.push({
+              url: new URL(req.url, "http://localhost"),
+              method: req.method,
+              headers: new Headers(req.headers),
+              json: JSON.parse(bodyText),
+            })
+          return yield* HttpServerResponse.json({ sessionID: "ok" })
+        }),
+      )
+      const url = yield* serverUrl()
+      yield* provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const workspace = yield* Workspace.Service
+            const sessionSvc = yield* SessionNs.Service
+            const guests = yield* FreeModelGuests.Service
+            const instance = yield* requireInstance
+            const targetType = unique("warp-guest-target")
+            const target = workspaceInfo(instance.project.id, targetType, { directory: "remote-target-dir" })
+            yield* insertWorkspace(target)
+            registerAdapter(instance.project.id, targetType, remoteAdapter(`${url}/warp-target`).adapter)
+            // The remote engine keeps its own marks, so only the steal can tell it a guest worked in the session.
+            const shared = yield* sessionSvc.create({})
+            yield* guests.mark(shared.id)
+            yield* workspace.sessionWarp({ workspaceID: target.id, sessionID: shared.id })
+            // The owner's own session is not marked as a guest's.
+            const own = yield* sessionSvc.create({})
+            yield* workspace.sessionWarp({ workspaceID: target.id, sessionID: own.id })
+            expect(steals.map((call) => [call.json, call.headers.get(GUEST_REQUEST_HEADER)])).toEqual([
+              [{ sessionID: shared.id }, "1"],
+              [{ sessionID: own.id }, null],
+            ])
           }),
         { git: true },
       )

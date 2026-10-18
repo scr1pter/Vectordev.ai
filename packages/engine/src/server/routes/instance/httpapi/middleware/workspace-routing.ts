@@ -310,17 +310,22 @@ function routeWorkspace<E>(
           ),
         ),
       MissingWorkspace: ({ workspaceID }) => Effect.succeed(missingWorkspaceResponse(workspaceID)),
-      // The remote engine sees the owner's credentials, so a guest's request says it is a guest's.
+      // The remote engine sees the owner's credentials, so a guest's request says it is a guest's. The session is
+      // marked here too, so it keeps the mark if it is warped back to this engine.
       Remote: ({ request, workspace, target, url, path }) =>
-        proxyRemote(
-          client,
-          request,
-          workspace,
-          principal.kind === "guest"
-            ? { ...target, headers: [...new Headers(target.headers).entries(), [GUEST_REQUEST_HEADER, "1"]] }
-            : target,
-          url,
-          path,
+        guestInput.pipe(
+          Effect.andThen(
+            proxyRemote(
+              client,
+              request,
+              workspace,
+              principal.kind === "guest"
+                ? { ...target, headers: [...new Headers(target.headers).entries(), [GUEST_REQUEST_HEADER, "1"]] }
+                : target,
+              url,
+              path,
+            ),
+          ),
         ),
       Local: ({ directory, workspaceID, sessionID }) =>
         guestInput.pipe(

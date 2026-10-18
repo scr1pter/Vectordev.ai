@@ -330,6 +330,9 @@ describe("HttpApi workspace routing middleware", () => {
       )
       expect((yield* HttpClientRequest.post("/session/ses_shared/message").pipe(HttpClient.execute)).status).toBe(200)
       expect(forwarded).toEqual(["1"])
+      // This engine marks the session as well, so the mark holds if the session is warped back here.
+      const guests = yield* FreeModelGuests.Service
+      expect(yield* guests.marked(SessionID.make("ses_shared"))).toBe(true)
     }),
   )
 
