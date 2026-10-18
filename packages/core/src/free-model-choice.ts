@@ -18,7 +18,7 @@ export const FREE_MODEL_TRAINING_DISCLAIMER =
 export const FREE_MODEL_UNREVIEWED_DISCLAIMER =
   "Vector has not reviewed this free model's data policy yet, so treat it as one whose provider may train on your prompts and code. Vector itself never trains on your prompts."
 /** Shown, and sent as the error, when a prompt to such a model is stopped because it was never accepted. */
-export const FREE_MODEL_TRAINING_CONSENT_REQUIRED = `${FREE_MODEL_TRAINING_DISCLAIMER} Nothing was sent. Accept this once in Vector's model picker, or run "vector models --accept-training", then send again.`
+export const FREE_MODEL_TRAINING_CONSENT_REQUIRED = `${FREE_MODEL_TRAINING_DISCLAIMER} Nothing was sent. Accept it once when Vector asks, or run "vector models --accept-training", then send again.`
 /** OpenRouter has separate privacy settings for free and paid models; the free one decides whether these route at all. */
 /** OpenRouter has separate privacy settings for free and paid models; the free one decides whether these route at all. */
 export const FREE_MODEL_TRAINING_BLOCKED =

@@ -108,8 +108,8 @@ export function Home() {
             <text fg={theme.textMuted}>{OPENROUTER_ACCOUNT_COPY}</text>
             <text fg={theme.textMuted}>{FREE_MODELS_DATA_POLICY}</text>
             <text fg={theme.textMuted}>
-              Free models labelled "{FREE_MODEL_TRAINING_LABEL}" may be used by their providers to train models. Vector
-              asks once before sending to one, and never trains on your prompts itself.
+              Providers of free models labelled "{FREE_MODEL_TRAINING_LABEL}" may use your prompts to train their
+              models. Vector asks once before sending to one, and never trains on your prompts itself.
             </text>
             <text
               fg={theme.primary}
