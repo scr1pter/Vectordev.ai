@@ -24,7 +24,7 @@ import { createMemoryHistory, MemoryRouter, type BaseRouterProps } from "@solidj
 import { createEffect, createMemo, createResource, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { render } from "solid-js/web"
 import pkg from "../../package.json"
-import { initI18n, t } from "./i18n"
+import { t } from "./i18n"
 import { initializationData, initializationReady } from "./initialization"
 import { resetZoom, setPinchZoomEnabled, webviewZoom, zoomIn, zoomOut } from "./webview-zoom"
 import { availableStartupServer, readyWslConnections } from "./wsl/connections"
@@ -87,8 +87,6 @@ const configureCrashDiagnostics = () => {
 
 configureCrashDiagnostics()
 observeTelemetryPreference(configureCrashDiagnostics)
-
-void initI18n()
 
 const [updaterState, setUpdaterState] = createSignal<UpdaterState>({ status: "disabled" })
 void window.api.updater.subscribe(setUpdaterState)

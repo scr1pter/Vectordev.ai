@@ -55,29 +55,9 @@ export type Locale =
 type RawDictionary = typeof appEn & typeof desktopEn
 type Dictionary = i18n.Flatten<RawDictionary>
 
-const LOCALES: readonly Locale[] = [
-  "en",
-  "zh",
-  "zht",
-  "ko",
-  "de",
-  "es",
-  "fr",
-  "da",
-  "ja",
-  "pl",
-  "ru",
-  "uk",
-  "bs",
-  "ar",
-  "no",
-  "br",
-]
-
-function detectLocale(): Locale {
-  if (typeof navigator !== "object") return "en"
-
-  const languages = navigator.languages?.length ? navigator.languages : [navigator.language]
+// The renderer's own strings, such as the native file dialogs' titles, follow the computer's language like the rest of
+// the app. A language saved by an older Vector is never read: there is no picker left to change it back.
+export function detectLocale(languages = computerLanguages()): Locale {
   for (const language of languages) {
     if (!language) continue
     if (language.toLowerCase().startsWith("en")) return "en"
@@ -108,38 +88,6 @@ function detectLocale(): Locale {
   return "en"
 }
 
-function parseLocale(value: unknown): Locale | null {
-  if (!value) return null
-  if (typeof value !== "string") return null
-  if ((LOCALES as readonly string[]).includes(value)) return value as Locale
-  return null
-}
-
-function parseRecord(value: unknown) {
-  if (!value || typeof value !== "object") return null
-  if (Array.isArray(value)) return null
-  return value as Record<string, unknown>
-}
-
-function parseStored(value: unknown) {
-  if (typeof value !== "string") return value
-  try {
-    return JSON.parse(value) as unknown
-  } catch {
-    return value
-  }
-}
-
-function pickLocale(value: unknown): Locale | null {
-  const direct = parseLocale(value)
-  if (direct) return direct
-
-  const record = parseRecord(value)
-  if (!record) return null
-
-  return parseLocale(record.locale)
-}
-
 const base = i18n.flatten({ ...appEn, ...desktopEn })
 
 function build(locale: Locale): Dictionary {
@@ -161,34 +109,15 @@ function build(locale: Locale): Dictionary {
   return { ...base, ...i18n.flatten(appKo), ...i18n.flatten(desktopKo) }
 }
 
-const state = {
-  locale: detectLocale(),
-  dict: base as Dictionary,
-  init: undefined as Promise<Locale> | undefined,
-}
+const dict = build(detectLocale())
 
-state.dict = build(state.locale)
-
-const translate = i18n.translator(() => state.dict, i18n.resolveTemplate)
+const translate = i18n.translator(() => dict, i18n.resolveTemplate)
 
 export function t(key: keyof Dictionary, params?: Record<string, string | number>) {
   return translate(key, params)
 }
 
-export function initI18n(): Promise<Locale> {
-  const cached = state.init
-  if (cached) return cached
-
-  const promise = (async () => {
-    const raw = await window.api.storeGet("vector.global.dat", "language").catch(() => null)
-    const value = parseStored(raw)
-    const next = pickLocale(value) ?? state.locale
-
-    state.locale = next
-    state.dict = build(next)
-    return next
-  })().catch(() => state.locale)
-
-  state.init = promise
-  return promise
+function computerLanguages(): readonly (string | undefined)[] {
+  if (typeof navigator !== "object") return []
+  return navigator.languages?.length ? navigator.languages : [navigator.language]
 }
