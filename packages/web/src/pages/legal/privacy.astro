@@ -75,23 +75,39 @@ export const prerender = true
     </p>
     <p>
       Model requests use the provider you connect and its service and account, except for Vector Codium and
-      Vector's shared allowance for Models included with Vector, described below. Vector no longer uses
+      Vector's shared allowance for Free models inside of Vector, described below. Vector no longer uses
       the former third-party model gateway. Requests can pass through a configured gateway
       or proxy. Each recipient's retention, abuse-review, and model-training rules depend on the service and
       your agreement or settings with it. Vector does not promise that every provider offers zero retention
       or excludes all request content from training.
     </p>
     <p id="included-models">
-      <strong>Models included with Vector and OpenRouter.</strong> When you choose one of the Models included
-      with Vector, through Vector's shared allowance or your own OpenRouter account, your request content goes to
+      <strong>Free models inside of Vector and OpenRouter.</strong> When you choose one of the Free models inside
+      of Vector, through Vector's shared allowance or your own OpenRouter account, your request content goes to
       OpenRouter and to the model provider serving that model. The shared allowance passes through Vector's
-      server to check your account and limits. These providers may retain prompts and outputs under their own
-      policies; they are not zero data retention services. Vector requests that your prompts and outputs are
-      not used for training: each request asks OpenRouter to deny data collection, which excludes endpoints
-      OpenRouter records as training on prompts, and is limited to the models and providers on Vector's allowlist.
-      The allowlist is on our <a href="/docs/models#free-models">Models and providers</a> page. This relies on the
-      providers' published policies and OpenRouter's records, not an independent audit, and does not change your
-      own OpenRouter account settings.
+      server to check your account and limits, and sends OpenRouter a one-way hash of your Vector account
+      identifier with each request. None of these providers is a zero data retention service; each keeps prompts
+      and outputs under its own policy. The models fall into two groups:
+    </p>
+    <ul>
+      <li>
+        <strong>No-training models.</strong> By OpenRouter's records their providers do not train on prompts.
+        Each request to them asks OpenRouter to deny data collection.
+      </li>
+      <li>
+        <strong>Models labelled “May train on your prompts”.</strong> Their providers may log your prompts, code
+        and outputs and use them to train their models, or Vector has not yet reviewed their policy and treats
+        them that way. From desktop 1.99.109 and the next CLI release, Vector labels these models and asks you once
+        before sending your first prompt to one; nothing is sent to them until you accept. In the terminal,
+        <code>vector models --decline-training</code> withdraws that choice. Earlier versions of Vector are offered
+        no-training models only. Don't use these models with private repositories, secrets or personal data.
+      </li>
+    </ul>
+    <p>
+      Vector itself never trains on your prompts, as the Training paragraph below says. Each model's group is on
+      our <a href="/docs/models#free-models">Models and providers</a> page. This relies on the providers'
+      published policies and OpenRouter's records, not an independent audit, and does not change your own
+      OpenRouter account settings, which can hide models that may train.
     </p>
     <p id="codium">
       <strong>Vector Codium.</strong> When you choose a Vector Codium model, your request content goes from Vector

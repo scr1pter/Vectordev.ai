@@ -27,16 +27,41 @@ export const prerender = true
             and Cursor runtimes still use your own installed CLIs and their authentication.
           </p>
 
-          <h2 id="free-models">Models included with Vector</h2>
+          <h2 id="free-models">Free models inside of Vector</h2>
           <p>
             From 1.99.99, Vector offers guarded access through your own free OpenRouter account.
-            In Settings → Providers, choose Connect OpenRouter, then choose an eligible model under
-            Models included with Vector, marked Your OpenRouter account. This personal section works whether or
-            not Vector's shared allowance is on. Its selection is limited to the explicit free variants on Vector's
-            allowlist, each with online, tool-capable, zero-price endpoints from the provider allowlisted for it:
-            today Cohere's North Mini Code, served by Cohere, and Dots3-Note Preview, served by AtlasCloud.
-            A new free model is not offered until Vector adds it to the allowlist, so this is not every model
-            OpenRouter lists as free.
+            In Settings → Providers, choose Connect OpenRouter, then choose a model under
+            Free models inside of Vector, marked Your OpenRouter account. This personal section works whether or
+            not Vector's shared allowance is on. Every model is an explicit free variant with online, tool-capable,
+            zero-price endpoints, and the guarded route never switches to a paid model or provider.
+          </p>
+          <p>
+            From desktop 1.99.109 and the next CLI release, Vector offers every such free model OpenRouter lists,
+            except NVIDIA's trial endpoints, whose terms allow evaluation only. Each one carries the data policy
+            Vector recorded for the provider serving it, reviewed on 17 October 2026:
+          </p>
+          <ul>
+            <li>
+              <strong>No training:</strong> Cohere's North Mini Code (Cohere, kept up to 30 days), Dots3-Note
+              Preview (AtlasCloud, which does not publish how long it keeps prompts), Google's Gemma 4 26B and 31B
+              (Google AI Studio, kept up to 55 days) and XingChen's Xing4.0 (Phala). Each request asks OpenRouter to
+              deny data collection.
+            </li>
+            <li>
+              <strong>May train on your prompts:</strong> Poolside's Laguna S 2.1 and XS 2.1 (free until 31 October
+              2026), Liquid's LFM2.5-2.6B and Thinking Machines' Inkling and Inkling Small. Their providers may log
+              your prompts, code and outputs and use them to train their models. A free model Vector has not yet
+              reviewed carries the same label, is offered only through your own OpenRouter account, and its
+              requests still ask OpenRouter to deny data collection.
+            </li>
+          </ul>
+          <p>
+            The model picker, the terminal's model list and <code>vector models</code> show
+            “May train on your prompts” on those models. Before your first prompt to one, Vector asks you once,
+            and nothing is sent until you accept. In the terminal, <code>vector models --accept-training</code> accepts
+            and <code>vector models --decline-training</code> withdraws. Vector itself never trains on your prompts.
+            Vector never picks one of these models for you ahead of a no-training model. Desktop 1.99.108 and
+            CLI 1.99.99 are offered no-training models only.
           </p>
           <p>
             Keep that account free: do not buy credits, add a payment method, enable automatic top-ups,
@@ -47,15 +72,16 @@ export const prerender = true
             a paid model or provider. <a href="https://openrouter.ai/docs/api_reference/limits">Check OpenRouter's current limits.</a>
           </p>
           <p>
-            Prompts are processed by OpenRouter and the selected model provider. These models are not zero data
-            retention: providers may keep prompts and outputs under their own policies. Vector requests that they
-            are not used for training: every request asks OpenRouter to deny data collection, which excludes
-            endpoints OpenRouter records as training on prompts, and is limited to the allowlisted providers.
-            This relies on the providers' published policies and OpenRouter's records, not an independent audit. It does not cover Vector's local history, OpenRouter account logging or other
+            Prompts are processed by OpenRouter and the selected model provider. None of these models is zero data
+            retention: providers may keep prompts and outputs under their own policies. Your OpenRouter account's
+            privacy settings decide whether models that may train are listed for you at all; if they are hidden,
+            allow free models from providers that may train on your data in OpenRouter's privacy settings, or choose
+            a no-training model. The policies rely on the providers' published terms and OpenRouter's records, not an
+            independent audit. They do not cover Vector's local history, OpenRouter account logging or other
             connected services. Review those settings before sending confidential code.
             Other provider connections have their own terms. Releases before 1.99.99, such as desktop 1.99.8, do not
-            include this route. Vector's shared allowance serves the same allowlisted models, under the same
-            no-training rules, to any signed-in Vector account without an OpenRouter account, through Vector's
+            include this route. Vector's shared allowance serves the reviewed models, under the same labels and
+            consent, to any signed-in Vector account without an OpenRouter account, through Vector's
             server, which checks the account and its limits. It serves them only while Vector's service has it
             switched on, and the picker shows it, as Shared Vector allowance, only while it has models to serve.
           </p>
@@ -76,9 +102,10 @@ export const prerender = true
 vector models anthropic --verbose</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
           <p>
             From 1.99.99, your personal account adds eligible models under
-            <strong>Models included with Vector</strong>, marked Your OpenRouter account, independently of
-            Vector's shared allowance. Display names omit <code>:free</code>; selectors retain it. Human guidance
-            goes to stderr, while stdout keeps plain model selectors. Connect your own account with
+            <strong>Free models inside of Vector</strong>, marked Your OpenRouter account, independently of
+            Vector's shared allowance. Display names omit <code>:free</code>; selectors retain it. Human guidance,
+            including the “May train on your prompts” label from the next CLI release, goes to stderr, while stdout
+            keeps plain model selectors. Connect your own account with
             <code>vector providers login --provider openrouter --method "Connect OpenRouter"</code>.
           </p>
           <p>
