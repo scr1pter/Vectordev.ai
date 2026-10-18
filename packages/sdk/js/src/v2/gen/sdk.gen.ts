@@ -169,7 +169,6 @@ import type {
   MemoryListResponses,
   MemoryRemoveErrors,
   MemoryRemoveResponses,
-  MemorySettings,
   MemorySettingsGetErrors,
   MemorySettingsGetResponses,
   MemorySettingsUpdateErrors,
@@ -3603,7 +3602,7 @@ export class Settings extends HeyApiClient {
     parameters?: {
       directory?: string
       workspace?: string
-      memorySettings?: MemorySettings
+      learning?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3614,7 +3613,7 @@ export class Settings extends HeyApiClient {
           args: [
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
-            { key: "memorySettings", map: "body" },
+            { in: "body", key: "learning" },
           ],
         },
       ],

@@ -24,11 +24,12 @@ export function LocalMemoryPanel() {
     <div class="settings-v2-card settings-v2-card--wide">
       <div class="settings-v2-card-head">
         <div class="settings-v2-card-copy">
-          <h3 class="settings-v2-card-title">Local memory</h3>
+          <h3 class="settings-v2-card-title">Your memory file</h3>
           <p class="settings-v2-card-description">
-            Save durable facts about how you work and Vector will carry them across every repository. Memory is a plain
-            Markdown file stored only on this computer. When the file exists, Vector automatically includes its contents
-            in built-in agent context sent to the model provider you selected.
+            Write durable facts about how you work and Vector carries them across every repository. It is a plain
+            Markdown file stored only on this computer. Vector sends up to about 800 tokens of it with each work request to
+            the model provider you selected, and the rest only when it is relevant. Never to an invited guest's session
+            or a model that may train on prompts.
           </p>
         </div>
       </div>
@@ -36,7 +37,7 @@ export function LocalMemoryPanel() {
       <div class="settings-v2-card-body">
         <Show
           when={!editor.unavailable()}
-          fallback={<p class="settings-v2-card-description">Local memory is available in the Vector desktop app.</p>}
+          fallback={<p class="settings-v2-card-description">Your memory file can be edited in the Vector desktop app.</p>}
         >
           <div class="rounded-[8px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] px-3 py-2.5">
             <Show

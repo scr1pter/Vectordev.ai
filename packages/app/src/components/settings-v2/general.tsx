@@ -7,7 +7,6 @@ import { useSettings } from "@/context/settings"
 import "./settings-v2.css"
 
 import { usePlatform } from "@/context/platform"
-import { LocalMemoryPanel } from "@/features/memory/local-memory-panel"
 import { observeTelemetryPreference, setTelemetryEnabled, telemetryEnabled } from "@/features/privacy/telemetry"
 
 export type SettingsSection = "general" | "notifications" | "accessibility"
@@ -194,10 +193,9 @@ export const SettingsGeneralV2: Component<{
     <Page
       eyebrow="General"
       title="General"
-      description="Manage Vector's local behavior, memory, diagnostics, and verification defaults."
+      description="Manage Vector's local behavior, diagnostics, and verification defaults. Memory has a page of its own."
     >
       <div class="settings-v2-section-grid">
-        <LocalMemoryPanel />
         <Card
           icon="status"
           title="Crash diagnostics"

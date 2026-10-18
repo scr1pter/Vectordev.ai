@@ -3,10 +3,11 @@ import { filterSettingsGroups, isSettingsTab, settingsGroups, settingsItemCount 
 
 describe("settings registry", () => {
   test("keeps every settings page reachable", () => {
-    expect(settingsItemCount(settingsGroups)).toBe(12)
+    expect(settingsItemCount(settingsGroups)).toBe(13)
     expect(settingsGroups.flatMap((group) => group.items.map((item) => item.value))).toEqual([
       "account",
       "general",
+      "memory",
       "usage",
       "spend",
       "subagents",
@@ -39,8 +40,13 @@ describe("settings registry", () => {
     ])
     expect(filterSettingsGroups("update").flatMap((group) => group.items.map((item) => item.value))).toEqual(["about"])
     expect(filterSettingsGroups("memory").flatMap((group) => group.items.map((item) => item.value))).toEqual([
-      "general",
+      "memory",
     ])
+  })
+
+  test("finds the Memory page, which replaced the rules page and the Local memory card, by what people call them", () => {
+    for (const query of ["rules", "RULES.md", "MEMORY.md", "forget", "remember", "brain"])
+      expect(filterSettingsGroups(query).flatMap((group) => group.items.map((item) => item.value))).toEqual(["memory"])
   })
 
   test("finds spend limits by budget vocabulary", () => {

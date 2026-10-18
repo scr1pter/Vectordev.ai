@@ -12,6 +12,7 @@ export type SettingsTab =
   | "about"
   | "trust"
   | "subagents"
+  | "memory"
 
 export type SettingsItem = {
   value: SettingsTab
@@ -50,7 +51,24 @@ export const settingsGroups: readonly SettingsGroup[] = [
         value: "general",
         label: "General",
         icon: "sliders",
-        keywords: ["data", "memory", "judge", "routing", "diagnostics", "privacy"],
+        keywords: ["data", "judge", "routing", "diagnostics", "privacy"],
+      },
+      {
+        value: "memory",
+        label: "Memory",
+        icon: "brain",
+        keywords: [
+          "memory",
+          "rules",
+          "remember",
+          "forget",
+          "learned",
+          "brain",
+          "MEMORY.md",
+          "RULES.md",
+          "preferences",
+          "lessons",
+        ],
       },
       {
         value: "usage",

@@ -16,12 +16,12 @@ export const MemoryListQuery = Schema.Struct({
 })
 
 export const MemoryStats = Schema.Struct({
-  active: Schema.Number,
-  review: Schema.Number,
-  archived: Schema.Number,
-  rules: Schema.Number,
-  learned: Schema.Number,
-  digestTokens: Schema.Number,
+  active: Schema.Finite,
+  review: Schema.Finite,
+  archived: Schema.Finite,
+  rules: Schema.Finite,
+  learned: Schema.Finite,
+  digestTokens: Schema.Finite,
   learning: Schema.Boolean,
 }).annotate({ identifier: "MemoryStats" })
 
@@ -64,12 +64,16 @@ export const MemorySettings = Schema.Struct({
   learning: Schema.Boolean,
 }).annotate({ identifier: "MemorySettings" })
 
+export const MemorySettingsPayload = Schema.Struct({
+  learning: Schema.Boolean,
+})
+
 export const MemoryTidy = Schema.Struct({
-  merged: Schema.Number,
-  promoted: Schema.Number,
-  archived: Schema.Number,
-  dropped: Schema.Number,
-  stale: Schema.Number,
+  merged: Schema.Finite,
+  promoted: Schema.Finite,
+  archived: Schema.Finite,
+  dropped: Schema.Finite,
+  stale: Schema.Finite,
 }).annotate({ identifier: "MemoryTidy" })
 
 export class MemoryApiError extends Schema.ErrorClass<MemoryApiError>("MemoryError")(
@@ -154,7 +158,7 @@ export const MemoryApi = HttpApi.make("memory")
         HttpApiEndpoint.post("erase", `${root}/erase`, {
           query: WorkspaceRoutingQuery,
           payload: MemoryErasePayload,
-          success: described(Schema.Number, "How many entries were erased"),
+          success: described(Schema.Finite, "How many entries were erased"),
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "memory.erase",
@@ -185,7 +189,7 @@ export const MemoryApi = HttpApi.make("memory")
         ),
         HttpApiEndpoint.patch("configure", `${root}/settings`, {
           query: WorkspaceRoutingQuery,
-          payload: MemorySettings,
+          payload: MemorySettingsPayload,
           success: described(MemorySettings, "Memory settings after the change"),
         }).annotateMerge(
           OpenApi.annotations({

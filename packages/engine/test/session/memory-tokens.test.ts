@@ -350,3 +350,47 @@ it.instance(
     }),
   60_000,
 )
+
+it.instance(
+  "the agent learns in one session through the memory tool, and a later session recalls it",
+  () =>
+    Effect.gen(function* () {
+      const dir = (yield* TestInstance).directory
+      const llm = yield* TestLLMServer
+      const fs = yield* FSUtil.Service
+      yield* fs.writeWithDirs(path.join(dir, "vector.json"), JSON.stringify(providerConfig(llm.url)))
+      const snapshot = yield* Effect.promise(() => WorkspaceTrust.snapshot(dir, [path.join(dir, "vector.json")]))
+      yield* Effect.promise(() => WorkspaceTrust.approve(Global.Path.state, snapshot))
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const send = Effect.fnUntraced(function* (text: string) {
+        const chat = yield* sessions.create({
+          title: "Pinned",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text }] })
+        return chat.id
+      })
+
+      yield* llm.tool("memory", {
+        action: "add",
+        kind: "decision",
+        text: "Staging deploys come only from the release branch.",
+        quote: "we deploy staging from the release branch only",
+      })
+      yield* llm.text("Noted.")
+      const first = yield* send("Remember this: we deploy staging from the release branch only.")
+      const tool = (yield* sessions.messages({ sessionID: first }))
+        .flatMap((message) => message.parts)
+        .find((part) => part.type === "tool" && part.tool === "memory")
+      expect(tool?.type === "tool" && tool.state.status === "completed" ? tool.state.output : "").toContain("Saved as m")
+
+      const before = (yield* llm.hits).length
+      yield* llm.text("Deploying.")
+      yield* send("Deploy the staging environment now")
+      const body = JSON.stringify((yield* llm.hits)[before]?.body ?? {})
+      expect(body).toContain("vector_memory_recall")
+      expect(body).toContain("Staging deploys come only from the release branch.")
+    }),
+  60_000,
+)

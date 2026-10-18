@@ -1,0 +1,237 @@
+/* Settings > Memory. Built from the settings tokens so it follows the app's theme; the accent is kept to the
+   active segment and the review count, as elsewhere in Settings. */
+
+.settings-memory .settings-v2-card + .settings-v2-card {
+  margin-top: 12px;
+}
+
+.settings-memory-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 10px;
+}
+
+.settings-memory-segments {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--vx-line);
+  border-radius: 9px;
+  gap: 2px;
+}
+
+.settings-memory-segments button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--v2-text-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-memory-segments button:hover {
+  color: var(--v2-text-text-base);
+}
+
+.settings-memory-segments button.is-active {
+  background: var(--vx-surface);
+  color: var(--v2-text-text-base);
+  box-shadow: inset 0 0 0 1px var(--vx-line);
+}
+
+.settings-memory-count {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vector-accent) 22%, transparent);
+  color: var(--v2-text-text-base);
+  font-size: 10.5px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.settings-memory-search,
+.settings-memory-input,
+.settings-memory-kind,
+.settings-memory-edit {
+  border: 1px solid var(--vx-line);
+  border-radius: 8px;
+  background: var(--vx-surface);
+  color: var(--v2-text-text-base);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.settings-memory-search:focus,
+.settings-memory-input:focus,
+.settings-memory-kind:focus,
+.settings-memory-edit:focus {
+  border-color: var(--v2-border-border-focus, var(--vx-line-strong));
+}
+
+.settings-memory-search {
+  flex: 1 1 180px;
+  min-width: 0;
+  padding: 6px 10px;
+}
+
+.settings-memory-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+
+.settings-memory-kind {
+  padding: 6px 8px;
+}
+
+.settings-memory-input {
+  flex: 1 1 240px;
+  min-width: 0;
+  padding: 7px 10px;
+}
+
+.settings-memory-notice,
+.settings-memory-error,
+.settings-memory-warning {
+  margin: 0 16px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-memory-notice {
+  color: var(--v2-text-text-muted);
+}
+
+.settings-memory-error {
+  color: var(--v2-state-fg-danger);
+}
+
+.settings-memory-warning {
+  margin: 10px 0 0;
+  color: var(--vx-amber);
+}
+
+.settings-memory-list {
+  display: grid;
+  gap: 8px;
+  padding: 0 16px 16px;
+}
+
+.settings-memory-empty {
+  margin: 4px 0;
+  color: var(--v2-text-text-faint);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.settings-memory-row {
+  padding: 11px 13px;
+  border: 1px solid var(--vx-line);
+  border-radius: 10px;
+  background: var(--v2-background-bg-layer-01, transparent);
+}
+
+.settings-memory-row.is-waiting {
+  border-color: color-mix(in srgb, var(--vx-amber) 40%, var(--vx-line));
+}
+
+.settings-memory-row.is-off {
+  opacity: 0.6;
+}
+
+.settings-memory-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-memory-kind-badge,
+.settings-memory-tag {
+  padding: 1px 7px;
+  border: 1px solid var(--vx-line);
+  border-radius: 999px;
+  color: var(--v2-text-text-muted);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.settings-memory-kind-badge[data-kind="rule"] {
+  color: var(--v2-text-text-base);
+  border-color: var(--vx-line-strong, var(--vx-line));
+}
+
+.settings-memory-tag--warn {
+  border-color: color-mix(in srgb, var(--vx-amber) 45%, transparent);
+  color: var(--vx-amber);
+}
+
+.settings-memory-id {
+  margin-left: auto;
+  color: var(--v2-text-text-faint);
+  font-family: var(--font-family-mono);
+  font-size: 10.5px;
+}
+
+.settings-memory-text {
+  margin: 7px 0 0;
+  color: var(--v2-text-text-base);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.settings-memory-edit {
+  width: 100%;
+  min-height: 72px;
+  margin-top: 7px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.settings-memory-meta,
+.settings-memory-hold {
+  margin: 5px 0 0;
+  color: var(--v2-text-text-faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.settings-memory-hold {
+  color: var(--vx-amber);
+}
+
+.settings-memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.settings-memory-file-hint,
+.settings-memory-confirm {
+  color: var(--v2-text-text-faint);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.settings-memory-confirm {
+  color: var(--v2-text-text-base);
+}
+
+.settings-memory-erase p {
+  margin: 0 0 10px;
+  color: var(--v2-text-text-base);
+  font-size: 12.5px;
+}

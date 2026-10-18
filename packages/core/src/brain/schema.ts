@@ -53,7 +53,7 @@ export type Hold = typeof Hold.Type
 export const Source = Schema.Struct({
   /** The file the entry is read from, for entries that mirror a file. */
   file: Schema.String,
-  line: Schema.optional(Schema.Number),
+  line: Schema.optional(Schema.Finite),
 })
 
 export const Entry = Schema.Struct({
@@ -65,16 +65,16 @@ export const Entry = Schema.Struct({
   pinned: Schema.Boolean,
   text: Schema.String,
   paths: Schema.Array(Schema.String),
-  confidence: Schema.Number,
-  uses: Schema.Number,
+  confidence: Schema.Finite,
+  uses: Schema.Finite,
   stale: Schema.Boolean,
   hold: Schema.optional(Hold),
   source: Schema.optional(Source),
   supersededBy: Schema.optional(Schema.String),
   related: Schema.Array(Schema.String),
-  lastUsedAt: Schema.optional(Schema.Number),
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  lastUsedAt: Schema.optional(Schema.Finite),
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
 }).annotate({ identifier: "MemoryEntry" })
 export type Entry = typeof Entry.Type
 
@@ -84,6 +84,6 @@ export const Evidence = Schema.Struct({
   quote: Schema.optional(Schema.String),
   command: Schema.optional(Schema.String),
   sessionID: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
+  createdAt: Schema.Finite,
 }).annotate({ identifier: "MemoryEvidence" })
 export type Evidence = typeof Evidence.Type

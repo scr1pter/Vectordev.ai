@@ -2871,28 +2871,28 @@ export type MemoryEntry = {
   pinned: boolean
   text: string
   paths: Array<string>
-  confidence: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  uses: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  confidence: number
+  uses: number
   stale: boolean
   hold?: "web" | "mcp" | "subagent" | "untrusted-repository" | "guest" | "instruction-like" | "hidden-unicode"
   source?: {
     file: string
-    line?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    line?: number
   }
   supersededBy?: string
   related: Array<string>
-  lastUsedAt?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  createdAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  updatedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  lastUsedAt?: number
+  createdAt: number
+  updatedAt: number
 }
 
 export type MemoryStats = {
-  active: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  review: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  archived: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  rules: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  learned: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  digestTokens: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  active: number
+  review: number
+  archived: number
+  rules: number
+  learned: number
+  digestTokens: number
   learning: boolean
 }
 
@@ -2913,7 +2913,7 @@ export type MemoryEvidence = {
   quote?: string
   command?: string
   sessionID?: string
-  createdAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  createdAt: number
 }
 
 export type MemoryDetail = {
@@ -2931,11 +2931,11 @@ export type MemoryError = {
 }
 
 export type MemoryTidy = {
-  merged: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  promoted: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  archived: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  dropped: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  stale: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  merged: number
+  promoted: number
+  archived: number
+  dropped: number
+  stale: number
 }
 
 export type MemorySettings = {
@@ -11721,7 +11721,7 @@ export type MemoryEraseResponses = {
   /**
    * How many entries were erased
    */
-  200: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  200: number
 }
 
 export type MemoryEraseResponse = MemoryEraseResponses[keyof MemoryEraseResponses]
@@ -11791,7 +11791,9 @@ export type MemorySettingsGetResponses = {
 export type MemorySettingsGetResponse = MemorySettingsGetResponses[keyof MemorySettingsGetResponses]
 
 export type MemorySettingsUpdateData = {
-  body?: MemorySettings
+  body?: {
+    learning: boolean
+  }
   path?: never
   query?: {
     directory?: string
