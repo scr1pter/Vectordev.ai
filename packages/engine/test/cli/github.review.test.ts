@@ -7,10 +7,16 @@ import { $ } from "bun"
 import { afterAll, describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
-import { ManagedRuntime, type Effect } from "effect"
+import { Effect, ManagedRuntime } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { buildAnchorIndex, fromGitHubFiles, parseUnifiedDiff, type GitHubPrFile } from "@vectordevai/core/review/diff"
-import { noteCommitGone, noteMonthBudget, noteRebase, noteSuperseded } from "@vectordevai/core/review/format"
+import {
+  noteCannotStart,
+  noteCommitGone,
+  noteMonthBudget,
+  noteRebase,
+  noteSuperseded,
+} from "@vectordevai/core/review/format"
 import { selectFindings } from "@vectordevai/core/review/select"
 import { SUMMARY_MARKER, emptyState, parseFindingMarker, readState, stateMarker } from "@vectordevai/core/review/state"
 import type { ModelFinding, ModelReport, ReviewCost, ReviewOutcome, ReviewState } from "@vectordevai/core/review/types"
@@ -21,6 +27,9 @@ import { Git } from "../../src/git"
 import type { ResolvedModel } from "../../src/review/model"
 import { normalizeFindings, type RunInput } from "../../src/review/run"
 import { tmpdir } from "../fixture/fixture"
+import { cliIt, type CliFixture } from "../lib/cli-process"
+import { reply } from "../lib/llm-server"
+import { testProviderConfig } from "../lib/test-provider"
 
 const OWNER = "o"
 const REPO = "r"
@@ -727,6 +736,7 @@ async function job(
     dryRun?: boolean
     expectedHead?: string
     botLogin?: string
+    resolveModel?: () => Promise<ResolvedModel>
   } = {},
 ) {
   const runner = options.runner ?? (await w.repo.runner(w.fake.pull.head.sha))
@@ -759,7 +769,7 @@ async function job(
     }),
     git: createReviewGit({ directory: runner, run: runGit }),
     runReview: review.run,
-    resolveModel: async () => MODEL,
+    resolveModel: options.resolveModel ?? (async () => MODEL),
     log: (line) => log.push(line),
     now: () => NOW,
     nonce: () => `run${++nonce}`,
@@ -1055,6 +1065,91 @@ describe("vector github review against a fake GitHub", () => {
       expect(state(w)).toMatchObject({ head: w.head, reviews: 1 })
     },
     TIMEOUT,
+  )
+
+  test(
+    "5b. a model that cannot run fails the job even when GitHub cannot list the comments to say why",
+    async () => {
+      await using w = await world()
+      w.fake.faults.push({ method: "GET", path: /\/issues\/7\/comments$/, status: 502, times: 100 })
+      const reason = "acme/model needs ACME_API_KEY."
+      const { result, log } = await job(w, reviewer(), {
+        resolveModel: () => Promise.reject(new Error(reason)),
+      })
+      expect(result.exitCode).toBe(1)
+      expect(result.error).toBe(reason)
+      expect(log).toContain(`Configuration error: ${reason}`)
+      expect(posts(w, /\/pulls\/7\/reviews$/)).toHaveLength(0)
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "5c. a model that cannot run says nothing on a pull request the settings skip without a word",
+    async () => {
+      const reason = "acme/model needs ACME_API_KEY."
+      const broken = { resolveModel: () => Promise.reject(new Error(reason)) }
+      const skipped: { name: string; review?: Json; labels?: string[]; draft?: boolean }[] = [
+        // A default skip label that the workflow's own `if:` lets through.
+        { name: "no-review label", labels: ["no-review"] },
+        { name: "paused", labels: ["vector:paused"] },
+        { name: "skipLabels", review: { skipLabels: ["wip"] }, labels: ["WIP"] },
+        { name: "skipAuthors", review: { skipAuthors: ["carol"] } },
+        { name: "skipBranches", review: { skipBranches: ["feat*"] } },
+        { name: "draft", draft: true },
+      ]
+      for (const item of skipped) {
+        await using w = await world(
+          item.review ? { baseFiles: { ".vector/review.json": JSON.stringify(item.review) } } : {},
+        )
+        if (item.labels) w.fake.pull.labels = item.labels
+        if (item.draft) w.fake.pull.draft = true
+        const { result, log } = await job(w, reviewer(), broken)
+        expect({ name: item.name, exitCode: result.exitCode, comments: w.fake.issueComments.length }).toEqual({
+          name: item.name,
+          exitCode: 0,
+          comments: 0,
+        })
+        expect(log.some((line) => line.startsWith("Skipped: "))).toBe(true)
+        expect(posts(w, /\/issues\/7\/comments$/)).toHaveLength(0)
+      }
+
+      // An automatic run on a head that is already reviewed leaves the summary as it was.
+      await using w = await world()
+      await job(w, reviewer({ findings: () => [TOKEN_AT_IMPORT] }))
+      const before = sticky(w)!.body
+      const { result } = await job(w, reviewer(), broken)
+      expect(result.exitCode).toBe(0)
+      expect(sticky(w)!.body).toBe(before)
+      expect(w.fake.issueComments.filter((comment) => comment.body.includes(SUMMARY_MARKER))).toHaveLength(1)
+    },
+    TIMEOUT * 2,
+  )
+
+  test(
+    "5d. a model that cannot run still says why when the review would have run",
+    async () => {
+      const reason = "acme/model needs ACME_API_KEY."
+      const broken = { resolveModel: () => Promise.reject(new Error(reason)) }
+      // A command overrides the skip label, so the person who asked hears why nothing happened.
+      await using w = await world()
+      w.fake.pull.labels = ["no-review"]
+      const command: RouteComment = { id: 7001, kind: "issue", author: "alice", body: "/vector review" }
+      const asked = await job(w, reviewer(), { ...broken, trigger: "command", comment: command })
+      expect(asked.result.exitCode).toBe(1)
+      expect(asked.result.error).toBe(reason)
+      expect(sticky(w)!.body).toContain(noteCannotStart(reason))
+
+      // A new head on a reviewed pull request is due a review, so it gets the note too.
+      await using reviewed = await world()
+      await job(reviewed, reviewer({ findings: () => [TOKEN_AT_IMPORT] }))
+      await push(reviewed, { "src/list.ts": UNRELATED_LIST })
+      const pushed = await job(reviewed, reviewer(), broken)
+      expect(pushed.result.exitCode).toBe(1)
+      expect(sticky(reviewed)!.body).toContain(noteCannotStart(reason))
+      expect(state(reviewed)).toMatchObject({ reviews: 1 })
+    },
+    TIMEOUT * 2,
   )
 
   test(
@@ -1662,3 +1757,191 @@ describe("vector github review: ids, failures and edge cases", () => {
     TIMEOUT,
   )
 })
+
+// The workflow's review job as it runs in Actions: the real `vector github review` command, the real reviewer on the
+// fake LLM, and the fake GitHub above.
+describe("vector github review: the workflow's command end to end", () => {
+  const actions = (w: World, llmUrl: string, event: { name: string; path: string }) => ({
+    GITHUB_ACTIONS: "true",
+    GITHUB_REPOSITORY: `${OWNER}/${REPO}`,
+    GITHUB_EVENT_NAME: event.name,
+    GITHUB_EVENT_PATH: event.path,
+    GITHUB_API_URL: w.fake.url,
+    GITHUB_RUN_ID: "1",
+    GITHUB_TOKEN: "test-token-placeholder",
+    VECTOR_WORKFLOW_VERSION: "2",
+    VECTOR_DISABLE_USAGE: "1",
+    VECTOR_REVIEW_PR: String(PR),
+    VECTOR_REVIEW_REF: w.head,
+    MODEL: "lmstudio/test-model",
+    VECTOR_PURE: "1",
+    VECTOR_DISABLE_PROJECT_CONFIG: "1",
+    VECTOR_CONFIG_CONTENT: JSON.stringify({ ...testProviderConfig(llmUrl), snapshot: false }),
+  })
+  const setup = (home: string, payload: (w: World) => Json) =>
+    Effect.gen(function* () {
+      const w = yield* Effect.acquireRelease(
+        Effect.promise(() => world()),
+        (w) => Effect.promise(() => w[Symbol.asyncDispose]()),
+      )
+      const runner = yield* Effect.promise(() => w.repo.runner(w.head))
+      const event = path.join(home, "event.json")
+      yield* Effect.promise(() => Bun.write(event, JSON.stringify(payload(w))))
+      return { w, runner, event }
+    })
+  const opened = (w: World): Json => ({
+    action: "opened",
+    number: PR,
+    pull_request: {
+      number: PR,
+      draft: false,
+      user: { login: "carol" },
+      labels: [],
+      head: { sha: w.head, ref: "feature", repo: { full_name: `${OWNER}/${REPO}` } },
+      base: { sha: w.base, ref: "main", repo: { full_name: `${OWNER}/${REPO}` } },
+    },
+    repository: { full_name: `${OWNER}/${REPO}` },
+  })
+  const answers = (llm: CliFixture["llm"]) =>
+    Effect.gen(function* () {
+      yield* llm.pushMatch(
+        (hit) => lastUserText(hit.body).includes("You are Vector's code reviewer"),
+        reply()
+          .tool("StructuredOutput", {
+            summary: "Adds page() to the list helpers.",
+            risk: "medium",
+            files: [{ path: "src/list.ts", note: "page() added" }],
+            findings: [OFF_BY_ONE],
+          })
+          .usage({ input: 1200, output: 300 }),
+      )
+      yield* llm.pushMatch(
+        (hit) => lastUserText(hit.body).includes("You are Vector's security reviewer"),
+        reply()
+          .tool("StructuredOutput", { summary: "Nothing else.", risk: "low", files: [], findings: [] })
+          .usage({ input: 900, output: 40 }),
+      )
+      yield* llm.pushMatch(
+        (hit) => lastUserText(hit.body).includes("You are checking candidate findings"),
+        reply().tool("StructuredOutput", { results: [] }).usage({ input: 500, output: 20 }),
+      )
+    })
+
+  cliIt.live(
+    "an opened pull request is reviewed on the real reviewer, and the review and its tokens are posted",
+    ({ llm, vector, home }) =>
+      Effect.gen(function* () {
+        const { w, runner, event } = yield* setup(home, opened)
+        yield* answers(llm)
+        const result = yield* vector.spawn(["github", "review"], {
+          cwd: runner,
+          timeoutMs: 100_000,
+          env: actions(w, llm.url, { name: "pull_request", path: event }),
+        })
+        vector.expectExit(result, 0, "the review job")
+        const reviews = posts(w, /\/pulls\/7\/reviews$/)
+        expect(reviews).toHaveLength(1)
+        const comments = reviews[0]!.body!["comments"] as Json[]
+        expect(comments.map((comment) => [comment["path"], comment["line"]])).toEqual([["src/list.ts", 22]])
+        const body = sticky(w)!.body
+        expect(body).toContain("## Vectorscope review · Risk: High")
+        expect(body).toContain("**1 blocking** on the changed lines")
+        // What the reviewers spent reaches the pull request, not just the job's log.
+        expect(body).toContain("(2.6k in / 360 out)")
+        expect(state(w)).toMatchObject({ head: w.head, reviews: 1, inlinePosted: 1 })
+      }),
+    120_000,
+  )
+
+  cliIt.live(
+    "a writer's /vectorscope review comment is answered with eyes, the review, then +1",
+    ({ llm, vector, home }) =>
+      Effect.gen(function* () {
+        const { w, runner, event } = yield* setup(home, (w) => {
+          const comment = w.fake.addIssueComment(PR, "/vectorscope review", { login: "alice", type: "User" }, 5001)
+          return {
+            action: "created",
+            comment: { id: comment.id, body: comment.body, user: comment.user },
+            issue: { number: PR, pull_request: { url: `${w.fake.url}/repos/${OWNER}/${REPO}/pulls/${PR}` } },
+            repository: { full_name: `${OWNER}/${REPO}` },
+          }
+        })
+        yield* answers(llm)
+        const result = yield* vector.spawn(["github", "review"], {
+          cwd: runner,
+          timeoutMs: 100_000,
+          env: actions(w, llm.url, { name: "issue_comment", path: event }),
+        })
+        vector.expectExit(result, 0, "the review job")
+        expect(posts(w, /\/pulls\/7\/reviews$/)).toHaveLength(1)
+        expect(posts(w, /\/issues\/comments\/5001\/reactions$/).map((request) => request.body?.["content"])).toEqual([
+          "eyes",
+          "+1",
+        ])
+      }),
+    120_000,
+  )
+
+  cliIt.live(
+    "a model whose key the workflow does not pass fails the job and says which secret on the pull request",
+    ({ llm, vector, home }) =>
+      Effect.gen(function* () {
+        const { w, runner, event } = yield* setup(home, opened)
+        const result = yield* vector.spawn(["github", "review"], {
+          cwd: runner,
+          timeoutMs: 100_000,
+          env: {
+            ...actions(w, llm.url, { name: "pull_request", path: event }),
+            MODEL: "anthropic/claude-sonnet-4-5",
+          },
+        })
+        vector.expectExit(result, 1, "the review job")
+        const reason =
+          "anthropic/claude-sonnet-4-5 needs ANTHROPIC_API_KEY. Add it as a repository secret and pass it to the Review step in .github/workflows/vector.yml."
+        expect(result.stderr).toContain(reason)
+        expect(result.stderr).not.toContain("older Vector")
+        expect(sticky(w)!.body).toContain(noteCannotStart(reason))
+        expect(posts(w, /\/pulls\/7\/reviews$/)).toHaveLength(0)
+        expect(yield* llm.hits).toHaveLength(0)
+      }),
+    120_000,
+  )
+
+  cliIt.live(
+    "a retired model whose key is passed is called retired, not a missing secret, on the pull request",
+    ({ llm, vector, home }) =>
+      Effect.gen(function* () {
+        const { w, runner, event } = yield* setup(home, opened)
+        const result = yield* vector.spawn(["github", "review"], {
+          cwd: runner,
+          timeoutMs: 100_000,
+          env: {
+            ...actions(w, llm.url, { name: "pull_request", path: event }),
+            MODEL: "deepinfra/zai-org/GLM-4.5",
+            DEEPINFRA_API_KEY: "test-placeholder-not-a-key",
+          },
+        })
+        vector.expectExit(result, 1, "the review job")
+        const reason =
+          "Deep Infra has retired zai-org/GLM-4.5. Set MODEL in .github/workflows/vector.yml to one of its current models."
+        expect(result.stderr).toContain(reason)
+        expect(result.stderr).not.toContain("needs DEEPINFRA_API_KEY")
+        expect(sticky(w)!.body).toContain(noteCannotStart(reason))
+        expect(yield* llm.hits).toHaveLength(0)
+      }),
+    120_000,
+  )
+})
+
+function lastUserText(body: Record<string, unknown>) {
+  const messages: unknown[] = Array.isArray(body["messages"]) ? body["messages"] : []
+  const user = messages.findLast((message) => isJson(message) && message["role"] === "user")
+  const content = isJson(user) ? user["content"] : undefined
+  if (typeof content === "string") return content
+  const parts: unknown[] = Array.isArray(content) ? content : []
+  return parts.map((part) => (isJson(part) && typeof part["text"] === "string" ? part["text"] : "")).join("\n")
+}
+
+function isJson(value: unknown): value is Json {
+  return typeof value === "object" && value !== null
+}

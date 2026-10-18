@@ -27,6 +27,7 @@ import {
   buildSummaryBody,
   inlineLeads,
   noteAlreadyReviewed,
+  noteCannotStart,
   noteCommitGone,
   noteFailed,
   noteForcePush,
@@ -201,6 +202,10 @@ export async function executeReviewJob(ctx: ReviewJobContext, deps: ReviewJobDep
     // still failing after its retries, exits 0, with a note when there is a summary comment to put it in.
     const message = messageOf(error)
     deps.log(`The review could not start: ${message}`)
+    if (seen.cannotStart) {
+      deps.log(`Configuration error: ${seen.cannotStart}`)
+      return { exitCode: 1, posted: { reviewIds: [] }, error: seen.cannotStart }
+    }
     const status = statusOf(error)
     if (status === 401 || status === 403 || status === 404)
       return { exitCode: 1, posted: { reviewIds: [] }, error: message }
@@ -219,6 +224,7 @@ export async function executeReviewJob(ctx: ReviewJobContext, deps: ReviewJobDep
 // What the job had read when it failed, for the note it leaves.
 interface Seen {
   sticky?: { id: number; body: string }
+  cannotStart?: string // why the model cannot run, which fails the job whatever GitHub does
 }
 
 async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen): Promise<ReviewJobResult> {
@@ -233,7 +239,7 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
     posted,
     ...(error ? { error } : {}),
   })
-  // A configuration error fails the job and posts nothing.
+  // A configuration error fails the job and posts nothing, except a model that cannot run, which says so (step 4).
   const configError = (message: string) => {
     log(`Configuration error: ${message}`)
     return finish(1, message)
@@ -285,7 +291,6 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
     (value) => value,
     (error: unknown) => new Error(messageOf(error)),
   )
-  if (model instanceof Error) return configError(model.message)
   // review.json's cheaper first pass; the double-check stays on `model`.
   const triage = config.triageModel
     ? await deps.resolveModel({ trigger: ctx.trigger, exact: config.triageModel }).then(
@@ -293,7 +298,9 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
         (error: unknown) => new Error(`triageModel: ${messageOf(error)}`),
       )
     : undefined
-  if (triage instanceof Error) return configError(triage.message)
+  // A model that cannot run fails the job only once the skips below have had their say, so a pull request the settings
+  // skip without a word stays quiet. If GitHub fails before then, executeReviewJob still fails the job with this.
+  seen.cannotStart = model instanceof Error ? model.message : triage instanceof Error ? triage.message : undefined
 
   // 3. Earlier state.
   const comments = await gh.listIssueComments(ctx.pr)
@@ -374,6 +381,24 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
     size,
     monthCostUsd: month?.costUsd,
   })
+  if (decision.skip && decision.notify === "none") {
+    log(`Skipped: ${decision.reason}.`)
+    return finish(0)
+  }
+  // The job fails either way; without a note the pull request shows only a red check, and a person who commented
+  // `/vector review` sees nothing at all. The note is best effort, and wins over a skip's note: it names what to fix.
+  const cannotStart = async (message: string) => {
+    await upsertSticky(
+      buildNoteBody({
+        previous: stickyBody,
+        note: noteCannotStart(message),
+        state: sticky ? readState(sticky.body) : undefined,
+      }),
+    ).catch((error: unknown) => log(`Could not post why the review cannot start: ${messageOf(error)}`))
+    return configError(message)
+  }
+  if (model instanceof Error) return cannotStart(model.message)
+  if (triage instanceof Error) return cannotStart(triage.message)
   if (decision.skip) {
     log(`Skipped: ${decision.reason}.`)
     if (decision.notify === "summary") {

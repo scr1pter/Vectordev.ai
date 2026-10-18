@@ -1209,7 +1209,7 @@ async function runSpecialist(input: {
   stop: Promise<StopReason>
 }): Promise<SpecialistResult> {
   const { client, directory, name } = input
-  let failure: string | undefined
+  const errors: unknown[] = []
   // A helper session: out of every session list, its spend counted towards the session the review started from.
   const created = await client.session
     .create({
@@ -1220,12 +1220,17 @@ async function runSpecialist(input: {
       ...(input.parentID ? { parentID: input.parentID } : {}),
     })
     .catch((cause: unknown) => {
-      failure = errorText(cause)
+      errors.push(cause)
       return undefined
     })
   const sessionID = created?.data?.id
   if (!sessionID)
-    return { name, status: "failed", detail: failure ?? "Vector could not create a review session.", usage: NO_USAGE }
+    return {
+      name,
+      status: "failed",
+      detail: failureOf(errors) ?? "Vector could not create a review session.",
+      usage: NO_USAGE,
+    }
   input.onSession(sessionID)
 
   const ask = (text: string) =>
@@ -1240,11 +1245,11 @@ async function runSpecialist(input: {
       })
       .then(
         (result) => {
-          failure = errorText(result.data?.info.error) ?? failure
+          errors.push(result.data?.info.error)
           return result.data
         },
         (cause: unknown) => {
-          failure = errorText(cause) ?? failure
+          errors.push(cause)
           return undefined
         },
       )
@@ -1258,6 +1263,10 @@ async function runSpecialist(input: {
     await client.session.abort({ sessionID, directory }).catch(() => undefined)
     message = await within(first, ABORT_GRACE_MS)
   }
+  // The run guard ended the reviewer early (a repeating loop, a project budget.run cap). Its findings still come
+  // back through the finalize prompt, but the files it never reached were not reviewed, so the review is partial.
+  const guarded = guardStop(message)
+  if (guarded && status === "ok") status = "stopped"
 
   // A stopped session, or one that answered without a report, gets the finalize prompt in the same session: its
   // findings exist only in its own context.
@@ -1283,8 +1292,29 @@ async function runSpecialist(input: {
     report = reportOf(answer)
   }
   const usage = await usageOf(client, sessionID, directory)
-  if (report) return { name, status, sessionID, report, usage }
-  return { name, status: "failed", sessionID, detail: failure ?? "No review came back.", usage }
+  if (report) return { name, status, sessionID, report, usage, ...(guarded ? { detail: guarded } : {}) }
+  return { name, status: "failed", sessionID, detail: failureOf(errors) ?? "No review came back.", usage }
+}
+
+// Why a reviewer failed, from its turns' errors in order. A turn that only missed the report or was stopped says less
+// than a provider's own error, which can come from either turn: a first turn the provider refused makes the finalize
+// turn miss the report too, and a stop or a first turn that answered in prose leaves the finalize turn to hit, say, an
+// empty balance.
+function failureOf(errors: unknown[]) {
+  const known = errors.flatMap((error) => {
+    const text = errorText(error)
+    if (!text) return []
+    const name = typeof error === "object" && error && "name" in error ? error.name : undefined
+    return [{ text, vague: name === "StructuredOutputError" || name === "MessageAbortedError" }]
+  })
+  return (known.find((error) => !error.vague) ?? known[0])?.text
+}
+
+// What the run guard said when it stopped a reviewer's turn.
+function guardStop(message: ReviewMessage | undefined) {
+  const error = message?.info.error
+  if (!error || typeof error !== "object" || !("name" in error) || error.name !== "BudgetStopError") return undefined
+  return errorText(error) ?? "Vector's run guard stopped it."
 }
 
 type VerifyRun = { status: "ok" | "skipped" | "failed"; sessionID?: string; verdicts: VerifyResult[]; usage: Usage }
@@ -1432,8 +1462,13 @@ function partialBanners(runs: readonly SpecialistResult[], timeoutMs: number): s
   const kept = "the findings below are the ones Vector had confirmed by then."
   if (runs.some((run) => run.status === "timeout"))
     out.push(`**Partial review.** Stopped at the ${Math.round(timeoutMs / 60_000)}-minute time limit; ${kept}`)
-  else if (runs.some((run) => run.status === "stopped"))
+  else if (runs.some((run) => run.status === "stopped" && !run.detail))
     out.push(`**Partial review.** Stopped before it finished; ${kept}`)
+  for (const run of runs)
+    if (run.status === "stopped" && run.detail) {
+      const detail = sanitizeModelMarkdown(run.detail.replace(/\s+/g, " ").slice(0, 200)).replace(/[.\s]+$/, "")
+      out.push(`**Partial review.** Vector's run guard stopped the ${run.name} reviewer: ${detail}; ${kept}`)
+    }
   for (const run of runs)
     if (run.status === "failed") {
       // Engine and provider errors are not Vector's own text, so they are sanitized like model text.

@@ -509,6 +509,79 @@ describe("runReview", () => {
     })
   })
 
+  test("a reviewer the run guard paused is a partial review, with the guard's reason", async () => {
+    const paused =
+      "Paused a repeating loop: `read` returned the same result for the same input 3 times, with no new results or file changes in between."
+    const { client } = fakeClient({
+      files: { "src/list.ts": HEAD, ...NO_VERIFY },
+      reply: (call) => {
+        if (call.parts?.[0]?.text === buildFinalizePrompt()) return answer(report())
+        const message = answer(undefined)
+        const error = { name: "BudgetStopError", data: { reason: "loop", message: paused } }
+        return { ...message, info: { ...message.info, error } }
+      },
+    })
+    const outcome = (await run(client))!
+    expect(outcome.specialists[0]).toMatchObject({ name: "review", status: "stopped", detail: paused })
+    expect(outcome.banners.join("\n")).toContain("**Partial review.** Vector's run guard stopped the review reviewer:")
+    expect(outcome.selection.inline).toHaveLength(1)
+  })
+
+  test("a failed review names its first turn's error, not the finalize turn's that followed from it", async () => {
+    const { client } = fakeClient({
+      files: { "src/list.ts": HEAD, ...NO_VERIFY },
+      reply: (call) => {
+        const message = answer(undefined, 0)
+        const finalize = call.parts?.[0]?.text === buildFinalizePrompt()
+        const error = finalize
+          ? { name: "StructuredOutputError", data: { message: "Model did not produce structured output" } }
+          : { name: "APIError", data: { message: "This model does not support tools" } }
+        return { ...message, info: { ...message.info, error } }
+      },
+    })
+    await expect(run(client)).rejects.toThrow("Vector could not finish this review: This model does not support tools")
+  })
+
+  test("a failed review whose first turn only missed the report names the finalize turn's provider error", async () => {
+    const { client } = fakeClient({
+      files: { "src/list.ts": HEAD, ...NO_VERIFY },
+      reply: (call) => {
+        const message = answer(undefined, 0)
+        const finalize = call.parts?.[0]?.text === buildFinalizePrompt()
+        const error = finalize
+          ? { name: "APIError", data: { message: "Your credit balance is too low" } }
+          : { name: "StructuredOutputError", data: { message: "Model did not produce structured output" } }
+        return { ...message, info: { ...message.info, error } }
+      },
+    })
+    await expect(run(client)).rejects.toThrow("Vector could not finish this review: Your credit balance is too low")
+  })
+
+  test("a stopped review whose finalize turn failed names the provider's error, not the stop", async () => {
+    const controller = new AbortController()
+    let release = (_message: ReviewMessage) => {}
+    const { client } = fakeClient({
+      files: { "src/list.ts": HEAD, ...NO_VERIFY },
+      reply: (input) => {
+        if (input.parts?.[0]?.text === buildFinalizePrompt()) {
+          const message = answer(undefined, 0)
+          const error = { name: "APIError", data: { message: "Your credit balance is too low" } }
+          return { ...message, info: { ...message.info, error } }
+        }
+        queueMicrotask(() => controller.abort())
+        return new Promise<ReviewMessage>((resolve) => {
+          release = resolve
+        })
+      },
+      onAbort: () =>
+        release({
+          info: { role: "assistant", error: { name: "MessageAbortedError", data: { message: "Aborted" } } },
+          parts: [],
+        }),
+    })
+    await expect(run(client, { signal: controller.signal })).rejects.toThrow("Your credit balance is too low")
+  })
+
   test("a failed review whose security reviewer's history is unreadable states its spend as a floor", async () => {
     const progress: Parameters<NonNullable<ReviewRunInput["onProgress"]>>[0][] = []
     const { client } = fakeClient({

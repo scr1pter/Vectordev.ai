@@ -458,6 +458,14 @@ export function noteFailed(error: string, cost?: ReviewCost): string {
   return `Vector could not finish this review: ${reason}.${cost ? ` ${failedSpend(cost)}` : ""} Comment \`/vector review\` to try again.`
 }
 
+// The workflow cannot run a review at all, such as a model whose key is not passed in. The job fails as well; this
+// says why on the pull request, where the person who asked for the review is looking.
+export function noteCannotStart(error: string): string {
+  const reason =
+    sanitizeProse(clip(oneLine(error), MAX_ERROR * 2), undefined).replace(/[.\s]+$/, "") || "an unknown error"
+  return `Vectorscope could not start this review: ${reason}. Comment \`/vector review\` once that is fixed.`
+}
+
 export function failedSpend(cost: ReviewCost): string {
   return `Used before it stopped: ${costWording(cost)}.`
 }

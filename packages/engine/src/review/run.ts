@@ -460,7 +460,7 @@ export const run: (
       const finalValue = spec.decode(finalStructured !== undefined ? finalStructured : lastText(final))
       if (finalValue === undefined && track.denied) return done(undefined, "stopped", track.stop, track.stop)
       if (finalValue === undefined)
-        return done(undefined, "failed", track.stop, errorOf(final) ?? errorOf(message) ?? "no report")
+        return done(undefined, "failed", track.stop, errorOf([message, final]) ?? "no report")
       const status = track.stop === "timeout" ? "timeout" : track.stop ? "stopped" : "ok"
       return done(finalValue, status, track.stop, track.stop)
     }).pipe(
@@ -770,12 +770,20 @@ function lastText(message: SessionV1.WithParts | undefined) {
   return message?.parts.findLast((part) => part.type === "text")?.text ?? ""
 }
 
-function errorOf(message: SessionV1.WithParts | undefined) {
-  const error = message?.info.role === "assistant" ? message.info.error : undefined
+// Why a reviewer failed, from its turns in order. A turn that only missed the report or was stopped says less than a
+// provider's own error, which can come from either turn: a first turn refused by the provider makes the finalizer miss
+// the report too, and a first turn that answered in prose leaves the finalizer to hit, say, an empty balance.
+function errorOf(messages: (SessionV1.WithParts | undefined)[]) {
+  const errors = messages.flatMap((message) =>
+    message?.info.role === "assistant" && message.info.error ? [message.info.error] : [],
+  )
+  const error = errors.find((item) => !VAGUE_ERRORS.has(item.name)) ?? errors[0]
   if (!error) return undefined
   const data: { message?: unknown } | undefined = error.data
   return typeof data?.message === "string" ? `${error.name}: ${data.message}` : error.name
 }
+
+const VAGUE_ERRORS = new Set(["StructuredOutputError", "MessageAbortedError"])
 
 // The review's summary and file notes lead; the security specialist's findings and notes are added to them.
 function mergeReports(reports: ModelReport[]): ModelReport {

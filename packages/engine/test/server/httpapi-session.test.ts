@@ -398,6 +398,59 @@ describe("session HttpApi", () => {
     { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
+  // Vectorscope's reviewers prompt with a JSON schema. The stored message comes back from the database as plain JSON,
+  // and the response encoder refused it, so the app could not read what a review spent.
+  it.instance(
+    "serves the messages of a session prompted with an output schema",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const headers = { "x-vector-directory": test.directory }
+        const svc = yield* Session.Service
+        const session = yield* createSession({ title: "structured", internal: "vectorscope.review" })
+        const schema = { type: "object", properties: { summary: { type: "string" } }, required: ["summary"] }
+        const info = yield* svc.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: session.id,
+          agent: "review",
+          model: { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("test") },
+          format: new SessionV1.OutputFormatJsonSchema({ type: "json_schema", schema, retryCount: 0 }),
+          time: { created: Date.now() },
+        })
+        yield* svc.updatePart({
+          id: PartID.ascending(),
+          sessionID: session.id,
+          messageID: info.id,
+          type: "text",
+          text: "review",
+        })
+        const plain = yield* createTextMessage(session.id, "plain")
+        yield* svc.updateMessage({ ...plain.info, format: new SessionV1.OutputFormatText({ type: "text" }) })
+
+        const messages = yield* requestJson<SessionV1.WithParts[]>(
+          pathFor(SessionPaths.messages, { sessionID: session.id }),
+          { headers },
+        )
+        expect(messages.map((message) => (message.info.role === "user" ? message.info.format : undefined))).toEqual([
+          { type: "json_schema", schema, retryCount: 0 },
+          { type: "text" },
+        ])
+        expect(
+          yield* requestJson<SessionV1.WithParts>(
+            pathFor(SessionPaths.message, { sessionID: session.id, messageID: info.id }),
+            { headers },
+          ),
+        ).toMatchObject({ info: { id: info.id, format: { type: "json_schema", schema, retryCount: 0 } } })
+        const page = yield* requestJson<SessionV1.WithParts[]>(
+          `${pathFor(SessionPaths.messages, { sessionID: session.id })}?limit=1`,
+          { headers },
+        )
+        expect(page).toHaveLength(1)
+      }),
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
+  )
+
   it.live("uses the persisted session directory for prompt requests", () =>
     Effect.gen(function* () {
       const llm = yield* TestLLMServer
