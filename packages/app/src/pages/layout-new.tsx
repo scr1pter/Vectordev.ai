@@ -3214,8 +3214,6 @@ export default function NewLayout(props: ParentProps) {
     })
   }
 
-  // Rules were reachable only by knowing they lived in Settings, which is the
-  // same as not shipping them. This opens that panel directly.
   const activeParallelCount = createMemo(
     () => parallelRecords().filter((record) => isParallelWorkspaceRunning(record)).length,
   )
