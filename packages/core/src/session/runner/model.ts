@@ -1,7 +1,7 @@
 export * as SessionRunnerModel from "./model"
 
 import { makeLocationNode } from "../../effect/app-node"
-import { type Model, type ProviderMetadata } from "@vectordevai/llm"
+import { HttpOptions, LLMRequest, type Model, type ProviderMetadata } from "@vectordevai/llm"
 import * as AnthropicMessages from "@vectordevai/llm/protocols/anthropic-messages"
 import * as OpenAICompatibleChat from "@vectordevai/llm/protocols/openai-compatible-chat"
 import * as OpenAIResponses from "@vectordevai/llm/protocols/openai-responses"
@@ -10,8 +10,13 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { produce } from "immer"
 import { FreeModels } from "../../free-models"
 import { FreeModelGuests } from "../../free-model-guests"
-import { freeModelMayTrain, openRouterRoutingRefused } from "../../free-model-choice"
-import { openRouterModelRouting, sendsToOpenRouter, sendsToOpenRouterFree } from "../../free-model-catalog"
+import { freeModelMayTrain } from "../../free-model-choice"
+import {
+  denyDataCollection,
+  openRouterModelRouting,
+  sendsToOpenRouter,
+  sendsToOpenRouterFree,
+} from "../../free-model-catalog"
 import { ModelPlans } from "../../model-plans"
 import { freeModelRoute } from "./free-model-route"
 import { modelPlanRoute } from "./model-plan-route"
@@ -88,26 +93,12 @@ export class UnsafeEndpointError extends Schema.TaggedErrorClass<UnsafeEndpointE
   }
 }
 
-export class OpenRouterRoutingError extends Schema.TaggedErrorClass<OpenRouterRoutingError>()(
-  "SessionRunnerModel.OpenRouterRoutingError",
-  {
-    providerID: ProviderV2.ID,
-    modelID: ModelV2.ID,
-    fields: Schema.Array(Schema.String),
-  },
-) {
-  override get message() {
-    return openRouterRoutingRefused(this.fields)
-  }
-}
-
 export type Error =
   | ModelNotSelectedError
   | ModelUnavailableError
   | VariantUnavailableError
   | UnsupportedApiError
   | UnsafeEndpointError
-  | OpenRouterRoutingError
   | Integration.AuthorizationError
 
 export interface Interface {
@@ -241,12 +232,15 @@ const apiKey = (model: ModelV2.Info, credential?: Credential.Value) => {
   if (typeof value === "string") return Auth.value(value)
 }
 
-const withDefaults = (model: ModelV2.Info, route: AnyRoute) => {
+const withDefaults = (model: ModelV2.Info, route: AnyRoute, mayTrain: Effect.Effect<boolean>) => {
   const body = model.request.body
   const httpBody = Object.hasOwn(body, "apiKey")
     ? Object.fromEntries(Object.entries(body).filter(([key]) => key !== "apiKey"))
     : body
-  return route.with({
+  const routed = sendsToOpenRouter({ providerID: model.providerID, destinations: destinations(model) })
+    ? withoutUnconsentedTraining(route, model.api.id, mayTrain)
+    : route
+  return routed.with({
     provider: model.providerID,
     endpoint: model.api.url === undefined ? undefined : { baseURL: model.api.url },
     headers: Object.fromEntries(
@@ -256,6 +250,30 @@ const withDefaults = (model: ModelV2.Info, route: AnyRoute) => {
     limits: { context: model.limit.context, output: model.limit.output },
   })
 }
+
+// Fallbacks, presets and plugins in a request to OpenRouter keep working, but some can let OpenRouter answer from another
+// model's endpoints, including a free one or one whose provider may train on prompts (openRouterModelRouting). Such a
+// request asks OpenRouter to deny data collection unless the user accepted the "May train on your prompts" notice in a
+// session no invited guest has worked in. It is checked on the final overlay, after the model's, variant's,
+// credential's and any plugin's body, as each request is sent, so a guest's later input is seen too.
+const withoutUnconsentedTraining = (route: AnyRoute, modelID: string, mayTrain: Effect.Effect<boolean>) =>
+  route.with({
+    transport: {
+      ...route.transport,
+      prepare: (input: Parameters<AnyRoute["transport"]["prepare"]>[0]) =>
+        Effect.gen(function* () {
+          const body = input.request.http?.body
+          if (!openRouterModelRouting(body, modelID).length || (yield* mayTrain))
+            return yield* route.transport.prepare(input)
+          return yield* route.transport.prepare({
+            ...input,
+            request: LLMRequest.update(input.request, {
+              http: new HttpOptions({ ...input.request.http, body: denyDataCollection(body) }),
+            }),
+          })
+        }),
+    },
+  })
 
 const withVariant = (
   model: ModelV2.Info,
@@ -287,7 +305,9 @@ const apiName = (model: ModelV2.Info) =>
 export const fromCatalogModel = (
   model: ModelV2.Info,
   credential?: Credential.Value,
-): Effect.Effect<Model, UnsupportedApiError | UnsafeEndpointError | OpenRouterRoutingError> => {
+  /** Whether the user accepted the "May train on your prompts" notice and no invited guest has worked in the session. */
+  mayTrain: Effect.Effect<boolean> = Effect.succeed(false),
+): Effect.Effect<Model, UnsupportedApiError | UnsafeEndpointError> => {
   const resolved =
     credential?.type !== "key" || credential.metadata === undefined
       ? model
@@ -300,19 +320,10 @@ export const fromCatalogModel = (
       new UnsafeEndpointError({ providerID: resolved.providerID, modelID: resolved.id, url: resolved.api.url }),
     )
   }
-  // The request body overlay, with the variant's and the credential's, is sent as is: on OpenRouter it must not let
-  // another model answer, which could be a free one outside the free-model checks.
-  const routing = sendsToOpenRouter({ providerID: resolved.providerID, destinations: destinations(resolved) })
-    ? openRouterModelRouting(resolved.request.body, resolved.api.id)
-    : []
-  if (routing.length)
-    return Effect.fail(
-      new OpenRouterRoutingError({ providerID: resolved.providerID, modelID: resolved.id, fields: routing }),
-    )
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai") {
     return Effect.succeed(
       withPricing(
-        withDefaults(resolved, OpenAIResponses.route)
+        withDefaults(resolved, OpenAIResponses.route, mayTrain)
           .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
           .model({ id: resolved.api.id }),
         resolved.cost,
@@ -322,7 +333,7 @@ export const fromCatalogModel = (
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/anthropic") {
     return Effect.succeed(
       withPricing(
-        withDefaults(resolved, AnthropicMessages.route)
+        withDefaults(resolved, AnthropicMessages.route, mayTrain)
           .with({ auth: key === undefined ? Auth.none : Auth.header("x-api-key", key) })
           .model({ id: resolved.api.id }),
         resolved.cost,
@@ -332,7 +343,7 @@ export const fromCatalogModel = (
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai-compatible" && resolved.api.url) {
     return Effect.succeed(
       withPricing(
-        withDefaults(resolved, OpenAICompatibleChat.route)
+        withDefaults(resolved, OpenAICompatibleChat.route, mayTrain)
           .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
           .model({ id: resolved.api.id }),
         resolved.cost,
@@ -348,8 +359,15 @@ export const fromCatalogModel = (
   )
 }
 
-export const resolve = (session: SessionSchema.Info, model: ModelV2.Info, credential?: Credential.Value) =>
-  withVariant(model, session.model?.variant).pipe(Effect.flatMap((model) => fromCatalogModel(model, credential)))
+export const resolve = (
+  session: SessionSchema.Info,
+  model: ModelV2.Info,
+  credential?: Credential.Value,
+  mayTrain?: Effect.Effect<boolean>,
+) =>
+  withVariant(model, session.model?.variant).pipe(
+    Effect.flatMap((model) => fromCatalogModel(model, credential, mayTrain)),
+  )
 
 export const supported = (model: ModelV2.Info) =>
   model.providerID === ModelPlans.PROVIDER_ID ||
@@ -407,6 +425,10 @@ export const locationLayer = Layer.effect(
           session,
           selected,
           connection ? yield* integrations.connection.resolve(connection) : undefined,
+          // Read as each request is sent. The owner's acceptance never covers a guest's input.
+          guests
+            .marked(session.id)
+            .pipe(Effect.flatMap((guest) => (guest ? Effect.succeed(false) : freeModels.trainingConsent()))),
         )
       }),
     })

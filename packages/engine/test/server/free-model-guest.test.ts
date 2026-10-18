@@ -660,20 +660,27 @@ test("a free OpenRouter model configured under another name, or under a provider
   )
 }, 90_000)
 
-test("a request to OpenRouter outside the free-model checks never lets another model answer, nor names a free one", async () => {
+test("a request to OpenRouter outside the free-model checks keeps its fallbacks and plugins, and never reaches an endpoint that may train without the owner's acceptance", async () => {
   // The verifier's medium of 18 October 2026: a model named like a paid one reached the owner's OpenRouter key with
   // fallbacks onto free endpoints in its options (`models`), or with `model` in its options, which replaces the model
-  // the SDK sends; and a provider at "openrouter.ai." (a trailing dot) skipped the host check.
-  const paid = {
+  // the SDK sends; and a provider at "openrouter.ai." (a trailing dot) skipped the host check. The integrator's decision
+  // of 18 October 2026: regular OpenRouter models keep their fallbacks, presets and plugins, web search included, and
+  // such a request asks OpenRouter to deny data collection unless the owner accepted the "May train on your prompts"
+  // notice, which never covers a session an invited guest has worked in.
+  const routed = {
     "acme/paid-fallback": {
       name: "Paid with a free fallback",
-      options: { models: ["poolside/laguna-s-2.1:free"], provider: { data_collection: "allow" } },
+      options: { models: ["poolside/laguna-s-2.1:free"], provider: { data_collection: "allow", sort: "price" } },
     },
-    "acme/paid-override": { name: "Paid with a free override", options: { model: "poolside/laguna-s-2.1:free" } },
-    "acme/paid-router": { name: "Paid with the router as fallback", options: { models: ["openrouter/free"] } },
+    "acme/paid-router": {
+      name: "Paid with the router as fallback",
+      options: { models: ["openrouter/free"], route: "fallback" },
+    },
     "acme/paid-preset": { id: "acme/paid@preset/free-coding", name: "Paid with a preset" },
-    "acme/paid-plugins": { name: "Paid with plugins", options: { plugins: [{ id: "auto-router" }] } },
+    "acme/paid-plugins": { name: "Paid with a routing plugin", options: { plugins: [{ id: "auto-router" }] } },
   }
+  const web = { name: "Paid with web search", options: { plugins: [{ id: "web", max_results: 3 }] } }
+  const consent = FreeModels.createClient({ consentFile: FreeModels.trainingConsentFile() })
   await serve(
     async (h) => {
       const listed = (await (await h.get("/provider", h.owner)).json()) as {
@@ -681,44 +688,85 @@ test("a request to OpenRouter outside the free-model checks never lets another m
       }
       // A free model under a provider at a trailing-dot host is held to the free-model list like any other.
       expect(Object.keys(listed.all.find((provider) => provider.id === "dot-proxy")?.models ?? {})).toEqual([])
-      for (const [who, headers] of [
-        ["guest", h.guest],
-        ["owner", h.owner],
-      ] as const) {
+      // Sends every model in one new session, and returns what reached openrouter.ai for each.
+      const run = async (who: string, headers: Record<string, string>) => {
         const session = await newSession(h, headers)
-        for (const modelID of [...Object.keys(paid), "poolside/laguna-xs-2.1:free"])
+        const models = [...Object.keys(routed), "acme/paid-web", "acme/paid-override", "poolside/laguna-xs-2.1:free"]
+        for (const modelID of models)
           await h.send(`/session/${session}/message`, headers, {
             model: { providerID: modelID.includes(":free") ? "dot-proxy" : "or-proxy", modelID },
             parts: [{ type: "text", text: `${who} secret via ${modelID}` }],
           })
         const errors = (await messages(h, session)).flatMap((item) => item.info.error?.data?.message ?? [])
-        expect(errors.some((message) => message.includes("lets OpenRouter answer with another model"))).toBe(true)
+        // A free model named in options is still refused before anything is sent, and one under a trailing-dot host is
+        // not listed at all.
         expect(errors.some((message) => message.includes(FREE_MODEL_UNLISTED))).toBe(true)
+        // Later requests in the session carry earlier prompts in their history, so each is matched by the model it names.
+        const sent = (modelID: string) =>
+          h.outbound
+            .filter(
+              (item) =>
+                item.url.startsWith("https://openrouter.ai/api/v1") &&
+                item.text.includes(`${who} secret via ${modelID}`),
+            )
+            .map((item) => JSON.parse(item.text) as Record<string, unknown> & { provider?: Record<string, unknown> })
+            .filter(
+              (body) => body.model === (modelID === "acme/paid-preset" ? "acme/paid@preset/free-coding" : modelID),
+            )
+        // Nothing named a free model on the way to OpenRouter.
+        expect(h.outbound.filter((item) => item.model?.includes(":free"))).toEqual([])
+        return sent
       }
-      expect(h.outbound.filter((item) => item.text.includes("secret via"))).toEqual([])
-      // The control: the same provider and key with provider preferences only still sends.
-      const session = await newSession(h, h.owner)
-      await h.send(`/session/${session}/message`, h.owner, {
-        model: { providerID: "or-proxy", modelID: "acme/paid-plain" },
-        parts: [{ type: "text", text: "owner prompt on a paid model" }],
+
+      // The owner accepted, in a session no guest has worked in: the configuration goes out as it is.
+      const owner = await run("owner", h.owner)
+      expect(owner("acme/paid-fallback")[0]).toMatchObject({
+        models: ["poolside/laguna-s-2.1:free"],
+        provider: { data_collection: "allow", sort: "price" },
       })
-      expect(
-        h.outbound.filter(
-          (item) => item.url.startsWith("https://openrouter.ai/api/v1") && item.model === "acme/paid-plain",
-        ).length,
-      ).toBeGreaterThan(0)
+      expect(owner("acme/paid-router")[0]).toMatchObject({ models: ["openrouter/free"], route: "fallback" })
+      expect(owner("acme/paid-router")[0].provider).toBeUndefined()
+      expect(owner("acme/paid-preset")[0]).toMatchObject({ model: "acme/paid@preset/free-coding" })
+      expect(owner("acme/paid-plugins")[0]).toMatchObject({ plugins: [{ id: "auto-router" }] })
+      expect(owner("acme/paid-web")[0]).toMatchObject({ plugins: [{ id: "web", max_results: 3 }] })
+
+      // A guest's session, though the owner accepted, and the owner's own once the acceptance is withdrawn: every
+      // fallback, preset and routing plugin still goes out, asking OpenRouter to deny data collection.
+      const guest = await run("guest", h.guest)
+      await consent.setTrainingConsent(false)
+      const withdrawn = await run("withdrawn", h.owner)
+      for (const sent of [guest, withdrawn]) {
+        for (const modelID of Object.keys(routed)) {
+          expect(sent(modelID).length).toBeGreaterThan(0)
+          for (const body of sent(modelID)) expect(body.provider?.data_collection).toBe("deny")
+        }
+        expect(sent("acme/paid-fallback")[0]).toMatchObject({
+          models: ["poolside/laguna-s-2.1:free"],
+          provider: { data_collection: "deny", sort: "price" },
+        })
+        expect(sent("acme/paid-router")[0]).toMatchObject({ models: ["openrouter/free"], route: "fallback" })
+        expect(sent("acme/paid-preset")[0]).toMatchObject({ model: "acme/paid@preset/free-coding" })
+        expect(sent("acme/paid-plugins")[0]).toMatchObject({ plugins: [{ id: "auto-router" }] })
+        // Web search never changes the model, so it goes out as configured.
+        expect(sent("acme/paid-web")[0]).toMatchObject({ plugins: [{ id: "web", max_results: 3 }] })
+        expect(sent("acme/paid-web")[0].provider).toBeUndefined()
+      }
     },
     {
       config: (base) => ({
         provider: {
           ...testProviderConfig(base).provider,
-          // Providers of other names sending to openrouter.ai, which this test refuses and records.
+          // Providers of other names sending to openrouter.ai, whose requests this test records and refuses.
           "or-proxy": {
             npm: "@ai-sdk/openai-compatible",
             options: { apiKey: "sk-or-synthetic-not-a-key", baseURL: "https://openrouter.ai/api/v1" },
             models: {
-              ...paid,
-              "acme/paid-plain": { name: "Paid", options: { provider: { data_collection: "deny" } } },
+              ...routed,
+              "acme/paid-web": web,
+              "acme/paid-override": {
+                name: "Paid with a free override",
+                options: { model: "poolside/laguna-s-2.1:free" },
+              },
             },
           },
           "dot-proxy": {

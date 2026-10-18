@@ -1,6 +1,8 @@
 import { expect } from "bun:test"
-import { DateTime, Effect, Schema, Stream } from "effect"
+import { DateTime, Effect, Layer, Schema, Stream } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import { LLM } from "@vectordevai/llm"
+import { LLMClient, RequestExecutor } from "@vectordevai/llm/route"
 import { Catalog } from "@vectordevai/core/catalog"
 import { Config } from "@vectordevai/core/config"
 import { ConfigProviderPlugin } from "@vectordevai/core/config/plugin/provider"
@@ -365,21 +367,27 @@ for (const scenario of [
 }
 
 // The verifier's medium of 18 October 2026: a model named like a paid one went out on the generic route with fallbacks
-// onto OpenRouter's free endpoints in its request body, with the owner's key and a guest's text, and a provider at
-// "openrouter.ai." (a trailing dot) skipped the host check.
+// onto OpenRouter's free endpoints in its request body, with the owner's key and a guest's text. The integrator's
+// decision on the fix (18 October 2026): regular OpenRouter models keep their fallbacks, presets and plugins, web search
+// included, but where those could reach another model's endpoints the request asks OpenRouter to deny data collection,
+// unless the user accepted the "May train on your prompts" notice in a session no invited guest has worked in.
 for (const scenario of [
   {
-    name: "a paid-named OpenRouter model whose request body falls back to a free model is refused before it is sent",
+    name: "a paid OpenRouter model keeps its free fallback, which may not train without the notice accepted",
     providerID: "openrouter",
     modelID: "acme/paid-model",
     model: {
       api: { id: "acme/paid-model", url: "https://openrouter.ai/api/v1" },
-      request: { body: { models: ["poolside/laguna-s-2.1:free"], provider: { data_collection: "allow" } } },
+      request: {
+        body: { models: ["poolside/laguna-s-2.1:free"], provider: { data_collection: "allow", sort: "price" } },
+      },
     },
-    refused: ["models"],
+    consent: false,
+    guest: false,
+    sent: { models: ["poolside/laguna-s-2.1:free"], provider: { data_collection: "deny", sort: "price" } },
   },
   {
-    name: "a paid-named model under another provider whose variant falls back to the free router is refused",
+    name: "a variant's fallback onto the free router may not train in a session a guest has worked in, accepted or not",
     providerID: "or-proxy",
     modelID: "acme/paid-model",
     variant: "cheap",
@@ -387,38 +395,87 @@ for (const scenario of [
       api: { id: "acme/paid-model", url: "https://eu.openrouter.ai/api/v1" },
       variants: [{ id: "cheap", body: { models: ["openrouter/free"], route: "fallback" } }],
     },
-    refused: ["models", "route"],
+    consent: true,
+    guest: true,
+    sent: { models: ["openrouter/free"], route: "fallback", provider: { data_collection: "deny" } },
   },
   {
-    name: "fallbacks set on the provider rather than the model are refused too",
+    name: "fallbacks set on the provider follow its configuration once the owner accepted, with no guest",
     providerID: "openrouter",
     modelID: "acme/paid-model",
-    providerBody: { models: ["thinkingmachines/inkling:free"] },
+    providerBody: { models: ["thinkingmachines/inkling:free"], provider: { data_collection: "allow" } },
     model: { api: { id: "acme/paid-model", url: "https://openrouter.ai/api/v1" } },
-    refused: ["models"],
+    consent: true,
+    guest: false,
+    sent: { models: ["thinkingmachines/inkling:free"], provider: { data_collection: "allow" } },
   },
   {
-    name: "an OpenRouter preset named in the model ID is refused",
+    name: "an OpenRouter preset named in the model ID is sent, asking that its models not train",
     providerID: "or-proxy",
     modelID: "acme/paid-preset",
     model: { api: { id: "acme/paid@preset/free-coding", url: "https://openrouter.ai/api/v1" } },
-    refused: ["preset"],
+    consent: false,
+    guest: false,
+    sent: { model: "acme/paid@preset/free-coding", provider: { data_collection: "deny" } },
+  },
+  {
+    name: "a plugin that can pick another model is sent, asking that the model it picks not train",
+    providerID: "openrouter",
+    modelID: "acme/paid-model",
+    model: {
+      api: { id: "acme/paid-model", url: "https://openrouter.ai/api/v1" },
+      request: { body: { plugins: [{ id: "web" }, { id: "auto-router", allowed_models: ["*"] }] } },
+    },
+    consent: false,
+    guest: false,
+    sent: {
+      plugins: [{ id: "web" }, { id: "auto-router", allowed_models: ["*"] }],
+      provider: { data_collection: "deny" },
+    },
+  },
+  {
+    name: "the web search plugin goes out unchanged, even for a guest, since it never changes the model",
+    providerID: "openrouter",
+    modelID: "acme/paid-model",
+    model: {
+      api: { id: "acme/paid-model", url: "https://openrouter.ai/api/v1" },
+      request: { body: { plugins: [{ id: "web", max_results: 3 }] } },
+    },
+    consent: false,
+    guest: true,
+    sent: { plugins: [{ id: "web", max_results: 3 }] },
+    unchanged: ["provider"],
+  },
+  {
+    name: "a fallback a plugin adds to the request as it is sent is seen too",
+    providerID: "openrouter",
+    modelID: "acme/paid-model",
+    model: { api: { id: "acme/paid-model", url: "https://openrouter.ai/api/v1" } },
+    request: { models: ["liquid/lfm-2.5-2.6b:free"] },
+    consent: false,
+    guest: false,
+    sent: { models: ["liquid/lfm-2.5-2.6b:free"], provider: { data_collection: "deny" } },
+  },
+  {
+    name: "provider preferences alone still send a paid OpenRouter model as configured",
+    providerID: "or-proxy",
+    modelID: "acme/paid-model",
+    model: {
+      api: { id: "acme/paid-model", url: "https://openrouter.ai/api/v1" },
+      request: { body: { provider: { data_collection: "allow", zdr: true } } },
+    },
+    consent: false,
+    guest: true,
+    sent: { provider: { data_collection: "allow", zdr: true } },
   },
   {
     name: "a free model under a provider at a trailing-dot OpenRouter host takes the free route, which refuses it",
     providerID: "proxy",
     modelID: "renamed",
     model: { api: { id: "poolside/laguna-s-2.1:free", url: "https://openrouter.ai./api/v1" } },
+    consent: true,
+    guest: false,
     unlisted: true,
-  },
-  {
-    name: "provider preferences alone still send a paid OpenRouter model on the generic route",
-    providerID: "or-proxy",
-    modelID: "acme/paid-model",
-    model: {
-      api: { id: "acme/paid-model", url: "https://openrouter.ai/api/v1" },
-      request: { body: { provider: { data_collection: "deny", zdr: true } } },
-    },
   },
 ] as {
   name: string
@@ -427,7 +484,11 @@ for (const scenario of [
   variant?: string
   providerBody?: Record<string, unknown>
   model: Record<string, unknown> & { api: Record<string, unknown> }
-  refused?: string[]
+  request?: Record<string, unknown>
+  consent: boolean
+  guest: boolean
+  sent?: Record<string, unknown>
+  unchanged?: string[]
   unlisted?: boolean
 }[]) {
   it.effect(scenario.name, () =>
@@ -474,7 +535,6 @@ for (const scenario of [
         time: { created: DateTime.makeUnsafe(0), updated: DateTime.makeUnsafe(0) },
         location: { directory: AbsolutePath.make("/synthetic-project") },
       })
-      // An invited guest has worked in this session, and the owner has accepted the notice.
       const resolved = yield* Effect.gen(function* () {
         const resolver = yield* SessionRunnerModel.Service
         return yield* resolver.resolve(session)
@@ -482,7 +542,7 @@ for (const scenario of [
         Effect.provide(SessionRunnerModel.locationLayer),
         Effect.provideService(
           FreeModelGuests.Service,
-          FreeModelGuests.Service.of({ mark: () => Effect.void, marked: () => Effect.succeed(true) }),
+          FreeModelGuests.Service.of({ mark: () => Effect.void, marked: () => Effect.succeed(scenario.guest) }),
         ),
         Effect.provideService(
           ModelPlans.Service,
@@ -491,30 +551,41 @@ for (const scenario of [
             request: () => Promise.reject(new Error("Codium is off in this test")),
           }),
         ),
-        Effect.provideService(FreeModels.Service, { ...freeModels, trainingConsent: () => Effect.succeed(true) }),
+        Effect.provideService(FreeModels.Service, {
+          ...freeModels,
+          trainingConsent: () => Effect.succeed(scenario.consent),
+        }),
         Effect.provideService(FreeModels.CredentialsService, credentials),
-        Effect.result,
       )
-      if (scenario.refused) {
-        expect(resolved).toMatchObject({
-          _tag: "Failure",
-          failure: { _tag: "SessionRunnerModel.OpenRouterRoutingError", fields: scenario.refused },
-        })
-        if (resolved._tag === "Failure") expect(resolved.failure.message).toContain("Nothing was sent")
-        return
-      }
-      if (resolved._tag === "Failure") throw new Error(`Unexpected failure: ${resolved.failure.message}`)
-      const prepared = yield* resolved.success.route
-        .prepareTransport(
-          { model: resolved.success.id, messages: [{ role: "user", content: "guest secret" }], stream: true },
-          LLM.request({ model: resolved.success, prompt: "guest secret" }),
-        )
-        .pipe(Effect.result)
+      // Every request the route makes is recorded here, and none reaches a network.
+      const outbound: { url: string; body: Record<string, unknown> }[] = []
+      const streamed = yield* LLMClient.stream(
+        LLM.request({
+          model: resolved,
+          prompt: "guest secret",
+          ...(scenario.request ? { http: { body: scenario.request } } : {}),
+        }),
+      ).pipe(
+        Stream.runDrain,
+        Effect.result,
+        Effect.provide(LLMClient.layer.pipe(Layer.provide(RequestExecutor.fetchLayer))),
+        Effect.provideService(
+          FetchHttpClient.Fetch,
+          Object.assign(
+            async (input: RequestInfo | URL, init?: RequestInit) => {
+              outbound.push({ url: String(input), body: await new Response(init?.body).json() })
+              return new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } })
+            },
+            { preconnect: fetch.preconnect },
+          ),
+        ),
+      )
       if (scenario.unlisted) {
-        expect(prepared).toMatchObject({
+        expect(streamed).toMatchObject({
           _tag: "Failure",
           failure: { reason: { _tag: "InvalidRequest", message: FREE_MODEL_UNLISTED } },
         })
+        expect(outbound).toEqual([])
         // The guard after configuration keeps it out of the lists too.
         const catalog = yield* Catalog.Service
         yield* FreeModelGuardPlugin.effect(host)
@@ -523,8 +594,12 @@ for (const scenario of [
         ).toBeUndefined()
         return
       }
-      // The control: nothing here names another model, so the generic route builds the request.
-      expect(prepared._tag).toBe("Success")
+      // One request, on the generic route to OpenRouter, with the user's configuration kept.
+      expect(outbound).toHaveLength(1)
+      expect(outbound[0].url).toStartWith(String(scenario.model.api.url))
+      expect(outbound[0].body).toMatchObject({ model: scenario.model.api.id, ...scenario.sent })
+      for (const key of scenario.unchanged ?? []) expect(outbound[0].body[key]).toBeUndefined()
+      expect(JSON.stringify(outbound[0].body)).toContain("guest secret")
     }),
   )
 }

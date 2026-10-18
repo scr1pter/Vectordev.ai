@@ -48,14 +48,6 @@ export const FREE_MODEL_TRAINING_BLOCKED =
  * data_collection.
  */
 export const FREE_MODEL_UNLISTED = `This model runs on OpenRouter's free endpoints but isn't one of the ${FREE_MODELS_TITLE}, so Vector doesn't send it. Nothing was sent. Choose a model from ${FREE_MODELS_TITLE}.`
-/**
- * Sent as the error when a request to OpenRouter outside the free-model route carries settings that let OpenRouter
- * answer with another model (openRouterModelRouting), which could be one of its free models outside the free-model
- * checks.
- */
-export function openRouterRoutingRefused(fields: readonly string[]) {
-  return `This model's configuration sets ${[...new Set(fields)].join(", ")} for OpenRouter, which lets OpenRouter answer with another model, possibly one of its free models outside the checks for ${FREE_MODELS_TITLE}, so Vector doesn't send it. Nothing was sent. Remove that from the model's or its provider's configuration.`
-}
 /** Vector itself asks for no-training routing for a model it has not reviewed, so no account setting can lift it. */
 export const FREE_MODEL_UNREVIEWED_BLOCKED =
   "Vector has not reviewed this free model's data policy yet, so it asks OpenRouter to route it only to providers that don't train on prompts, and none of this model's providers qualifies. Choose another free model."

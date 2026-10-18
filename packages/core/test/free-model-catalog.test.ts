@@ -4,6 +4,7 @@ import {
   FREE_MODEL_POLICY_REVIEWED,
   REVIEWED_FREE_ENDPOINTS,
   barredFreeModel,
+  denyDataCollection,
   eligibleFreeModel,
   freeEndpointPolicy,
   freeModelDataPolicy,
@@ -301,15 +302,40 @@ test("OpenRouter settings that let another model answer are named, and provider 
       "acme/paid-model",
     ),
   ).toEqual(["models"])
-  expect(openRouterModelRouting({ route: "fallback", preset: "coding", plugins: [] }, "acme/paid")).toEqual([
-    "route",
-    "preset",
-    "plugins",
-  ])
-  // A preset can also be named in the model ID.
+  expect(
+    openRouterModelRouting({ route: "fallback", preset: "coding", plugins: [{ id: "auto-router" }] }, "acme/paid"),
+  ).toEqual(["route", "preset", "plugins"])
+  // A preset can also be named in the model ID, and one of OpenRouter's routers picks the model itself.
   expect(openRouterModelRouting({}, "acme/paid@preset/free-coding")).toEqual(["preset"])
   expect(openRouterModelRouting(undefined, "@preset/free-coding")).toEqual(["preset"])
+  expect(openRouterModelRouting({}, " OpenRouter/Auto")).toEqual(["model"])
+  // Plugins that keep the model, such as web search, are not named; one that is not known to is.
+  expect(
+    openRouterModelRouting({ plugins: [{ id: "web", max_results: 3 }, { id: "file-parser" }] }, "acme/paid"),
+  ).toEqual([])
+  for (const plugins of [[{ id: "web" }, { id: "pareto-router" }], [{}], ["web"], { id: "web" }])
+    expect(openRouterModelRouting({ plugins }, "acme/paid")).toEqual(["plugins"])
   // Provider preferences only choose among the named model's endpoints, and are how a request asks for no training.
   for (const body of [{}, { provider: { data_collection: "deny", zdr: true } }, { usage: { include: true } }, "x", []])
     expect(openRouterModelRouting(body, "acme/paid")).toEqual([])
+})
+
+test("denying data collection keeps every other setting and replaces whatever allowed it", () => {
+  // The integrator's decision of 18 October 2026: such requests still go out, asking not to train.
+  const body = {
+    models: ["openrouter/free"],
+    plugins: [{ id: "web" }],
+    provider: { data_collection: "allow", sort: "price" },
+  }
+  expect(denyDataCollection(body)).toEqual({
+    models: ["openrouter/free"],
+    plugins: [{ id: "web" }],
+    provider: { data_collection: "deny", sort: "price" },
+  })
+  expect(body.provider.data_collection).toBe("allow")
+  for (const provider of [undefined, "allow", ["x"], null])
+    expect(denyDataCollection({ route: "fallback", provider })).toEqual({
+      route: "fallback",
+      provider: { data_collection: "deny" },
+    })
 })

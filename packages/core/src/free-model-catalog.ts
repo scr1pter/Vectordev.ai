@@ -197,24 +197,57 @@ export function sendsToOpenRouter(model: { readonly providerID: string; readonly
   )
 }
 
-// OpenRouter request fields that let it answer with a model other than the one a request names: fallback models
-// (`models`, with `route`), presets, and plugins, such as the Auto Router's list of models it may pick. Provider
-// preferences (`provider`) only choose among the endpoints of the model named, and are how a request asks for no
-// training or zero retention, so they stay.
-const OPENROUTER_MODEL_ROUTING_FIELDS = ["models", "route", "preset", "plugins"]
+// OpenRouter request fields that let it answer from the endpoints of a model other than the one a request names:
+// fallback models (`models`, with `route`) and presets, which can set anything. Provider preferences (`provider`) only
+// choose among the endpoints of the model named, and are where a request asks for no training, so they are not here.
+const OPENROUTER_MODEL_ROUTING_FIELDS = ["models", "route", "preset"]
+// Plugins that leave the answering model alone: web search, PDF parsing and response healing. Any other, such as the
+// Auto Router's list of models it may pick, may let OpenRouter answer with another model.
+const OPENROUTER_MODEL_KEEPING_PLUGINS = new Set(["web", "file-parser", "response-healing"])
 
 /**
- * The settings in a request to OpenRouter, outside the free-model route, that could let OpenRouter answer with another
- * model, a free one included: the guest rule, the training notice and data_collection would not apply to it. `body`
- * is what the request body carries beyond the protocol's own fields, and `modelID` the model it names, which can name
- * a preset (`@preset/…`). Configuration of a model or its provider can set all of these, so such a request is refused.
+ * The settings in a request to OpenRouter, outside the free-model route, that could let OpenRouter answer from another
+ * model's endpoints, including a free one or one whose provider may train on prompts, which the free-model checks
+ * never see. `body` is what the request body carries beyond the protocol's own fields, and `modelID` the model it
+ * names, which can name a preset (`@preset/…`) or one of OpenRouter's routers (`openrouter/auto`). Such a request is
+ * still sent, with its fallbacks, presets and plugins, but asks OpenRouter to deny data collection
+ * (denyDataCollection) unless the user accepted the "May train on your prompts" notice in a session no invited guest
+ * has worked in.
  */
 export function openRouterModelRouting(body: unknown, modelID: unknown) {
-  const fields =
-    typeof body === "object" && body !== null && !Array.isArray(body)
-      ? OPENROUTER_MODEL_ROUTING_FIELDS.filter((key) => Object.hasOwn(body, key))
-      : []
-  return typeof modelID === "string" && modelID.includes("@preset/") ? [...fields, "preset"] : fields
+  const fields = jsonRecord(body) ?? {}
+  const id = typeof modelID === "string" ? modelID.trim().toLowerCase() : ""
+  return [
+    ...OPENROUTER_MODEL_ROUTING_FIELDS.filter((key) => Object.hasOwn(fields, key)),
+    ...(Object.hasOwn(fields, "plugins") && !keepsModel(fields.plugins) ? ["plugins"] : []),
+    ...(id.includes("@preset/") ? ["preset"] : []),
+    ...(id.startsWith("openrouter/") ? ["model"] : []),
+  ]
+}
+
+/**
+ * The request body asking OpenRouter to route only to endpoints that don't collect prompts for training
+ * (`provider.data_collection: "deny"`), whatever the configuration set there, keeping every other provider preference.
+ */
+export function denyDataCollection(body: unknown): Record<string, unknown> {
+  const fields = jsonRecord(body) ?? {}
+  return { ...fields, provider: { ...jsonRecord(fields.provider), data_collection: "deny" } }
+}
+
+function keepsModel(plugins: unknown) {
+  return (
+    Array.isArray(plugins) &&
+    plugins.every((plugin) => {
+      const id = jsonRecord(plugin)?.id
+      return typeof id === "string" && OPENROUTER_MODEL_KEEPING_PLUGINS.has(id)
+    })
+  )
+}
+
+function jsonRecord(value: unknown) {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
 }
 
 /** Why a free model is never offered, when its terms bar Vector's use. */
