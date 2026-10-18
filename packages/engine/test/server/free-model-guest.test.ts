@@ -236,6 +236,18 @@ test("OpenRouter's free router is offered to the owner with the label, never to 
       })
       expect(refused.ok).toBe(false)
       expect(await messages(h, guest)).toEqual([])
+      // Nor on the v2 route: the guest may not switch a session to it, nor prompt one the owner switched.
+      const switched = await h.send(`/api/session/${guest}/model`, h.guest, {
+        model: { providerID: "vector", id: router.id },
+      })
+      expect(switched.status).toBe(403)
+      expect(
+        (await h.send(`/api/session/${guest}/model`, h.owner, { model: { providerID: "vector", id: router.id } }))
+          .status,
+      ).toBe(204)
+      const v2 = await h.send(`/api/session/${guest}/prompt`, h.guest, { prompt: { text: "hello" }, resume: false })
+      expect(v2.status).toBe(403)
+      expect(((await v2.json()) as { message: string }).message).toBe(FREE_MODEL_TRAINING_OWNER_ONLY)
       // The owner, who accepted, reaches the shared allowance with the router: zero price, no providers named, NVIDIA
       // asked to be skipped, and the acceptance sent.
       const own = await newSession(h, h.owner)
