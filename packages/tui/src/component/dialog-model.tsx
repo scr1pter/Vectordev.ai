@@ -1,9 +1,14 @@
 import {
   FREE_MODELS_TITLE,
+  freeModelMayTrain,
   freeModelName,
   freeModelSource,
+  freeModelTrainingDisclaimer,
+  freeModelTrainingLabel,
   preferOwnFreeModels,
 } from "@vectordevai/core/free-model-choice"
+import { useSDK } from "../context/sdk"
+import { DialogConfirm } from "../ui/dialog-confirm"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { createMemo, createSignal, onMount } from "solid-js"
 import { useLocal } from "../context/local"
@@ -21,6 +26,7 @@ export function DialogModel(props: { providerID?: string }) {
   const local = useLocal()
   const sync = useSync()
   const dialog = useDialog()
+  const sdk = useSDK()
   const [query, setQuery] = createSignal("")
   // Account models can arrive after startup, as when vectordev.ai answers a first Codium catalog read slowly.
   onMount(() => void sync.refreshProviders().catch(() => undefined))
@@ -52,7 +58,7 @@ export function DialogModel(props: { providerID?: string }) {
             description: provider.name,
             category,
             onSelect: () => {
-              onSelect(provider.id, model.id)
+              void onSelect(provider.id, model.id)
             },
           },
         ]
@@ -86,18 +92,18 @@ export function DialogModel(props: { providerID?: string }) {
               value: { providerID: provider.id, modelID: model },
               title,
               releaseDate: info.release_date,
-              description:
-                freeModelSource(info) ??
-                (favorites.some((item) => item.providerID === provider.id && item.modelID === model)
+              description: info.freeModel
+                ? [freeModelSource(info), freeModelTrainingLabel(info)].filter(Boolean).join(" · ")
+                : favorites.some((item) => item.providerID === provider.id && item.modelID === model)
                   ? "(Favorite)"
-                  : undefined),
+                  : undefined,
               category: info.freeModel ? FREE_MODELS_TITLE : connected() ? provider.name : undefined,
               // What search reads (searchModelOptions): the catalogue name and, once a provider
               // is connected, its name. Never the heading.
               searchName: title,
               searchProvider: connected() ? provider.name : undefined,
               onSelect() {
-                onSelect(provider.id, model)
+                void onSelect(provider.id, model)
               },
             }
           }),
@@ -155,7 +161,26 @@ export function DialogModel(props: { providerID?: string }) {
     return value.name
   })
 
-  function onSelect(providerID: string, modelID: string) {
+  async function onSelect(providerID: string, modelID: string) {
+    // A free model whose provider may train on prompts is chosen only after the one-time acceptance, which the engine
+    // also requires before it sends anything to one.
+    const info = sync.data.provider.find((item) => item.id === providerID)?.models[modelID]
+    if (info && freeModelMayTrain(info)) {
+      const consent = await sdk.client.provider.freeModels.consent().catch(() => undefined)
+      if (consent?.data?.training !== true) {
+        const accepted = await DialogConfirm.show(
+          dialog,
+          freeModelTrainingLabel(info) ?? "May train on your prompts",
+          freeModelTrainingDisclaimer(info) ?? "",
+          "Accept",
+        )
+        if (accepted !== true) return
+        const recorded = await sdk.client.provider.freeModels
+          .setConsent({ freeModelConsent: { training: true } })
+          .catch(() => undefined)
+        if (recorded?.data?.training !== true) return
+      }
+    }
     local.model.set({ providerID, modelID }, { recent: true })
     const list = local.model.variant.list()
     const cur = local.model.variant.selected()

@@ -1,6 +1,7 @@
 import { providerNoticeTracker, unavailableModel } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
 import { retainFreeModelSelection } from "@vectordevai/schema/free-model"
+import { freeModelMayTrain } from "@vectordevai/core/free-model-choice"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { createStore } from "solid-js/store"
 import { createSimpleContext } from "./helper"
@@ -237,7 +238,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         const free = sync.data.provider
           .flatMap((provider) => Object.values(provider.models))
           .filter((model) => model.freeModel?.source === "openrouter")
-          .toSorted((a, b) => b.limit.context - a.limit.context)[0]
+          // Never chosen for the user ahead of a no-training model: a may-train model needs their own choice.
+          .toSorted(
+            (a, b) => Number(freeModelMayTrain(a)) - Number(freeModelMayTrain(b)) || b.limit.context - a.limit.context,
+          )[0]
         if (free) return { providerID: "openrouter", modelID: free.id }
         if (sync.data.provider.some((provider) => provider.id === "openrouter")) return
         // Codium spends the account's credits, so it is never chosen automatically, even as the only provider.

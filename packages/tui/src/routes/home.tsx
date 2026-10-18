@@ -1,4 +1,9 @@
-import { FREE_MODELS_DATA_POLICY, FREE_MODELS_TITLE, OPENROUTER_ACCOUNT_COPY } from "@vectordevai/core/free-model-choice"
+import {
+  FREE_MODEL_TRAINING_LABEL,
+  FREE_MODELS_DATA_POLICY,
+  FREE_MODELS_TITLE,
+  OPENROUTER_ACCOUNT_COPY,
+} from "@vectordevai/core/free-model-choice"
 import { createDialogProviderOptions } from "../component/dialog-provider"
 import { useTheme } from "../context/theme"
 import { Prompt, type PromptRef } from "../component/prompt"
@@ -88,21 +93,24 @@ export function Home() {
             <Prompt ref={bind} right={<pluginRuntime.Slot name="home_prompt_right" />} placeholders={placeholder} />
           </pluginRuntime.Slot>
         </box>
-        <Show
-          when={
-            sync.data.provider.length === 0 &&
-            sync.data.provider_next.all.some((provider) =>
-              Object.values(provider.models).some((model) => model.freeModel),
-            )
-          }
-        >
+        {/* With nothing connected, Connect OpenRouter is the free way to start, whether or not the shared allowance is
+            on: it was hidden whenever the shared catalog read OFF. */}
+        <Show when={sync.data.provider.length === 0}>
           <box width="100%" maxWidth={promptMaxWidth()} paddingTop={1} gap={1}>
             <text fg={theme.text}>{FREE_MODELS_TITLE}</text>
             <text fg={theme.textMuted}>
-              Sign in with vector login for a shared allowance, or use /connect to choose OpenRouter.
+              {sync.data.provider_next.all.some((provider) =>
+                Object.values(provider.models).some((model) => model.freeModel?.source === "shared"),
+              )
+                ? "Sign in with vector login for a shared allowance, or use /connect to choose OpenRouter."
+                : "Use /connect to choose OpenRouter and use free models with your own account."}
             </text>
             <text fg={theme.textMuted}>{OPENROUTER_ACCOUNT_COPY}</text>
             <text fg={theme.textMuted}>{FREE_MODELS_DATA_POLICY}</text>
+            <text fg={theme.textMuted}>
+              Free models labelled "{FREE_MODEL_TRAINING_LABEL}" may be used by their providers to train models. Vector
+              asks once before sending to one, and never trains on your prompts itself.
+            </text>
             <text
               fg={theme.primary}
               onMouseUp={() => {
