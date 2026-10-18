@@ -1,15 +1,17 @@
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { Match, Show, Switch, createMemo, createSignal, onCleanup, onMount } from "solid-js"
+import { CodiumBillingStatus, CodiumPurchase, createCodiumBilling } from "@/components/codium-purchase"
 import { usePlatform } from "@/context/platform"
 import { accountChip, type VectorAccountStatus } from "@/vector-account"
-import { accountIdentity, codiumSummary } from "./account-model"
+import { accountIdentity, codiumSummary, deletionStep, sameEmail } from "./account-model"
 import "./settings-v2.css"
 import "./settings-account.css"
 
 /**
- * Settings > Account: who is signed in, their Vector Codium plan, and the way out. The desktop main process holds the
- * account token and reads the Codium status, so neither reaches this page; it only ever sees shares and states.
+ * Settings > Account: who is signed in, their Vector Codium plan and billing, and deleting the account. The desktop
+ * main process holds the account token, reads the Codium status and runs Stripe in its own billing window, so none of
+ * it reaches this page; it only ever sees shares, states and prices.
  */
 export function SettingsAccountV2(props: { onUsage: () => void }) {
   const platform = usePlatform()
@@ -18,7 +20,11 @@ export function SettingsAccountV2(props: { onUsage: () => void }) {
   const [loaded, setLoaded] = createSignal(false)
   const [codium, setCodium] = createSignal<ModelPlanStatus.Status>()
   const [busy, setBusy] = createSignal(false)
-  const [deleting, setDeleting] = createSignal<"confirm" | "opened">()
+  const [purchasing, setPurchasing] = createSignal(false)
+  // Deleting: the confirmation step the person opened, what they typed, and how the last attempt went.
+  const [deleting, setDeleting] = createSignal(false)
+  const [typed, setTyped] = createSignal("")
+  const [deletion, setDeletion] = createSignal<{ busy?: boolean; error?: string; deleted?: boolean }>({})
   const chip = createMemo(() => accountChip(account()))
   const identity = createMemo(() => accountIdentity(account()))
   const summary = createMemo(() => codiumSummary(codium()))
@@ -30,6 +36,9 @@ export function SettingsAccountV2(props: { onUsage: () => void }) {
     const current = summary()
     return current.kind === "error" ? current.text : undefined
   })
+
+  const step = createMemo(() => deletionStep(deleting(), account().deletion))
+  const typedMatches = createMemo(() => sameEmail(typed(), account().email))
 
   const refreshCodium = async () => {
     const read = platform.vectorAccount?.codium
@@ -53,7 +62,12 @@ export function SettingsAccountV2(props: { onUsage: () => void }) {
     onCleanup(
       vectorAccount.onChange((next) => {
         // Another account, or none, has nothing of the last one's to delete. A profile refresh keeps the step.
-        if (next.email !== account().email) setDeleting(undefined)
+        if (next.email !== account().email) {
+          setDeleting(false)
+          setTyped("")
+          // Signing in again, after a deletion or as someone else, starts the page afresh.
+          if (next.authenticated) setDeletion({})
+        }
         setAccount(next)
         setLoaded(true)
         // Signing in or out changes whose plan this shows.
@@ -82,12 +96,55 @@ export function SettingsAccountV2(props: { onUsage: () => void }) {
       .finally(() => setBusy(false))
   }
 
-  // Deletion needs a fresh sign-in on vectordev.ai, which the desktop's token is not, so the confirmation there,
-  // typing the account's email, is the one that deletes it.
-  const continueDeletion = () => {
-    platform.openLink(ModelPlanStatus.MANAGE_URL)
-    setDeleting("opened")
+  const billing = createCodiumBilling(refreshCodium)
+
+  // The desktop's own account token never deletes the account: it is stored on this machine and carries the email to
+  // type. So deletion asks for a fresh sign-in in the browser, and the desktop deletes with what that sign-in gives.
+  const confirmDeletion = async () => {
+    const vectorAccount = platform.vectorAccount
+    if (!vectorAccount?.confirmDeletion || !typedMatches()) return
+    setDeletion({})
+    await vectorAccount
+      .confirmDeletion()
+      .then(setAccount)
+      .catch(() => setDeletion({ error: "Vector could not start the confirmation. Try again." }))
   }
+  const keepAccount = () => {
+    setDeleting(false)
+    setTyped("")
+    setDeletion({})
+    void platform.vectorAccount
+      ?.cancelDeletion?.()
+      .then(setAccount)
+      .catch(() => undefined)
+  }
+  const deleteAccount = async () => {
+    const remove = platform.vectorAccount?.deleteAccount
+    if (!remove || deletion().busy) return
+    setDeletion({ busy: true })
+    const result = await remove(typed()).catch(() => ({
+      deleted: false as const,
+      message: "Vector could not delete your account. Try again.",
+    }))
+    if (result.deleted) {
+      setDeleting(false)
+      setTyped("")
+      setDeletion({ deleted: true })
+      return
+    }
+    setDeletion({ error: result.message })
+  }
+
+  // A failed step of deleting, or a confirmation the browser sign-in could not give, shows where the person is looking.
+  const DeletionError = () => (
+    <Show when={deletion().error ?? account().error}>
+      {(error) => (
+        <p role="alert" class="settings-account-error">
+          {error()}
+        </p>
+      )}
+    </Show>
+  )
 
   return (
     <section class="settings-v2-page settings-account-page" data-component="settings-account">
@@ -96,7 +153,7 @@ export function SettingsAccountV2(props: { onUsage: () => void }) {
           <p class="settings-v2-page-kicker">Vector account</p>
           <h2 class="settings-v2-page-title">Account</h2>
           <p class="settings-v2-page-subtitle">
-            Your Vector sign-in, your Vector Codium plan and the credits left this month.
+            Your Vector sign-in, your Vector Codium plan and billing, and the credits left this month.
           </p>
         </div>
       </div>
@@ -135,8 +192,20 @@ export function SettingsAccountV2(props: { onUsage: () => void }) {
             when={account().authenticated}
             fallback={
               <Show when={loaded()} fallback={<p role="status">Checking your Vector account…</p>}>
-                <h3>Not signed in</h3>
-                <p>Sign in to connect this app to your Vector account. Your provider keys are managed separately.</p>
+                <Show
+                  when={deletion().deleted}
+                  fallback={
+                    <>
+                      <h3>Not signed in</h3>
+                      <p>
+                        Sign in to connect this app to your Vector account. Your provider keys are managed separately.
+                      </p>
+                    </>
+                  }
+                >
+                  <h3>Your Vector account was deleted</h3>
+                  <p role="status">This app is signed out. Your provider keys and repositories are untouched.</p>
+                </Show>
               </Show>
             }
           >
@@ -148,7 +217,7 @@ export function SettingsAccountV2(props: { onUsage: () => void }) {
               Finish signing in in your browser, then return to Vector.
             </p>
           </Show>
-          <Show when={account().error}>
+          <Show when={step() === "closed" && account().error}>
             {(error) => (
               <p role="alert" class="settings-account-error">
                 {error()}
@@ -279,14 +348,35 @@ export function SettingsAccountV2(props: { onUsage: () => void }) {
             <ButtonV2 variant="outline" icon="status" onClick={props.onUsage}>
               View usage
             </ButtonV2>
-            <Show when={plan()?.billing}>
-              <ButtonV2 variant="outline" icon="link" onClick={() => platform.openLink(ModelPlanStatus.MANAGE_URL)}>
-                Manage billing
+            <Show when={summary().kind === "plan" || summary().kind === "coming-soon"}>
+              <ButtonV2
+                variant="outline"
+                aria-expanded={purchasing()}
+                onClick={() =>
+                  platform.vectorAccount?.offers
+                    ? setPurchasing((value) => !value)
+                    : platform.openLink(ModelPlanStatus.PURCHASE_URL)
+                }
+              >
+                Buy credits
               </ButtonV2>
             </Show>
-            <Show when={plan()?.purchase}>
-              <ButtonV2 variant="outline" icon="link" onClick={() => platform.openLink(ModelPlanStatus.PURCHASE_URL)}>
-                Buy credits
+            <Show when={codium()?.plan && !codium()?.plan?.cancelAtPeriodEnd && summary().kind === "plan"}>
+              <ButtonV2
+                variant="outline"
+                disabled={billing.busy()}
+                onClick={() => void billing.run({ kind: "portal", flow: "cancel" })}
+              >
+                Cancel plan
+              </ButtonV2>
+            </Show>
+            <Show when={plan()?.billing}>
+              <ButtonV2
+                variant="outline"
+                disabled={billing.busy()}
+                onClick={() => void billing.run({ kind: "portal" })}
+              >
+                Manage billing and invoices
               </ButtonV2>
             </Show>
             <Show when={summary().kind !== "coming-soon"}>
@@ -295,6 +385,10 @@ export function SettingsAccountV2(props: { onUsage: () => void }) {
               </ButtonV2>
             </Show>
           </div>
+          <Show when={purchasing()}>
+            <CodiumPurchase plan={codium()?.plan} billing={billing} />
+          </Show>
+          <CodiumBillingStatus billing={billing} />
         </div>
       </Show>
 
@@ -307,7 +401,7 @@ export function SettingsAccountV2(props: { onUsage: () => void }) {
             </div>
           </div>
           <Switch>
-            <Match when={deleting() === "confirm"}>
+            <Match when={step() === "type"}>
               <div class="settings-account-confirm" role="group" aria-label="Confirm account deletion">
                 <p>
                   Vector deletes your account and sign-in and stops the CLI tokens this account has issued. Any Vector
@@ -315,39 +409,81 @@ export function SettingsAccountV2(props: { onUsage: () => void }) {
                   Repositories on this machine are not touched, and neither is anything you have already published to
                   your own cloud accounts.
                 </p>
-                <p>
-                  Deletion is confirmed on vectordev.ai: Vector opens your account page, where you sign in if asked,
-                  choose Delete account and type {account().email} to confirm.
-                </p>
+                <label class="settings-account-field">
+                  <span>Type {account().email} to confirm</span>
+                  <input
+                    type="email"
+                    autocomplete="off"
+                    spellcheck={false}
+                    value={typed()}
+                    onInput={(event) => setTyped(event.currentTarget.value)}
+                  />
+                </label>
+                <p>Then confirm it is you by signing in to vectordev.ai again in your browser.</p>
+                <DeletionError />
                 <div class="settings-account-links">
-                  <ButtonV2 variant="danger" onClick={continueDeletion}>
-                    Continue on vectordev.ai
+                  <ButtonV2 variant="danger" disabled={!typedMatches()} onClick={() => void confirmDeletion()}>
+                    Confirm with your Vector sign-in
                   </ButtonV2>
-                  <ButtonV2 variant="outline" onClick={() => setDeleting(undefined)}>
+                  <ButtonV2 variant="outline" onClick={keepAccount}>
+                    Keep my account
+                  </ButtonV2>
+                  <ButtonV2 variant="ghost" onClick={() => platform.openLink(ModelPlanStatus.MANAGE_URL)}>
+                    Delete on vectordev.ai instead
+                  </ButtonV2>
+                </div>
+              </div>
+            </Match>
+            <Match when={step() === "confirming"}>
+              <div class="settings-account-confirm" role="group" aria-label="Confirm account deletion">
+                <p role="status">
+                  Finish signing in to vectordev.ai in your browser. Vector asks for a fresh sign-in before it deletes
+                  your account, then brings you back here.
+                </p>
+                <DeletionError />
+                <div class="settings-account-links">
+                  <ButtonV2 variant="outline" onClick={() => void confirmDeletion()}>
+                    Open the browser again
+                  </ButtonV2>
+                  <ButtonV2 variant="outline" onClick={keepAccount}>
                     Keep my account
                   </ButtonV2>
                 </div>
               </div>
             </Match>
-            <Match when={deleting() === "opened"}>
-              <div class="settings-account-confirm" role="status">
-                <p>
-                  Your account page is open in your browser. Once the account is deleted, sign out here so this app
-                  forgets it.
-                </p>
+            <Match when={step() === "confirmed"}>
+              <div class="settings-account-confirm" role="group" aria-label="Confirm account deletion">
+                <p>Confirmed. Delete {account().email} now? This cannot be undone.</p>
+                <Show when={!typedMatches()}>
+                  <label class="settings-account-field">
+                    <span>Type {account().email} to confirm</span>
+                    <input
+                      type="email"
+                      autocomplete="off"
+                      spellcheck={false}
+                      value={typed()}
+                      onInput={(event) => setTyped(event.currentTarget.value)}
+                    />
+                  </label>
+                </Show>
+                <DeletionError />
                 <div class="settings-account-links">
-                  <ButtonV2 variant="outline" onClick={continueDeletion}>
-                    Open vectordev.ai again
+                  <ButtonV2
+                    variant="danger"
+                    disabled={deletion().busy || !typedMatches()}
+                    onClick={() => void deleteAccount()}
+                  >
+                    {deletion().busy ? "Deleting…" : "Delete my account"}
                   </ButtonV2>
-                  <ButtonV2 variant="outline" disabled={busy()} onClick={() => void act("logout")}>
-                    Sign out
+                  <ButtonV2 variant="outline" disabled={deletion().busy} onClick={keepAccount}>
+                    Keep my account
                   </ButtonV2>
                 </div>
               </div>
             </Match>
             <Match when={true}>
               <div class="settings-account-links">
-                <ButtonV2 variant="ghost" onClick={() => setDeleting("confirm")}>
+                <ButtonV2 variant="ghost" onClick={() => setDeleting(true)}>
                   Delete account…
                 </ButtonV2>
               </div>

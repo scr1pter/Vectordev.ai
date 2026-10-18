@@ -2,6 +2,7 @@ import { Button } from "@vectordevai/ui/button"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { createSignal, onCleanup, onMount, Show } from "solid-js"
 import { usePlatform } from "@/context/platform"
+import { CodiumBillingStatus, createCodiumBilling, useCodiumPurchase } from "./codium-purchase"
 
 /** Vector Codium plan and balances. The desktop main process reads them, so the account token never reaches here. */
 export function SettingsVectorCodium() {
@@ -28,6 +29,8 @@ export function SettingsVectorCodium() {
       )
       .finally(() => setBusy(false))
   }
+  const billing = createCodiumBilling(refresh)
+  const purchase = useCodiumPurchase()
   onMount(() => {
     const account = platform.vectorAccount
     if (!account?.codium) return
@@ -108,12 +111,19 @@ export function SettingsVectorCodium() {
           )}
         </Show>
         <div class="flex flex-wrap gap-2">
-          <Show when={status()?.signedIn && status()?.enabled}>
-            <Button onClick={() => platform.openLink(ModelPlanStatus.PURCHASE_URL)}>Buy credits</Button>
+          {/* In the desktop the plans and top-ups open in Vector, where each reads Coming soon until Codium is on sale. */}
+          <Show when={status()?.signedIn && (platform.vectorAccount?.billing || status()?.enabled)}>
+            <Button
+              onClick={() =>
+                platform.vectorAccount?.billing ? purchase() : platform.openLink(ModelPlanStatus.PURCHASE_URL)
+              }
+            >
+              Buy credits
+            </Button>
           </Show>
-          <Show when={plan() || status()?.purchased.bought}>
-            <Button variant="secondary" onClick={() => platform.openLink(ModelPlanStatus.MANAGE_URL)}>
-              Manage plan
+          <Show when={plan() || status()?.purchased.bought || status()?.customer}>
+            <Button variant="secondary" disabled={billing.busy()} onClick={() => void billing.run({ kind: "portal" })}>
+              Manage billing and invoices
             </Button>
           </Show>
           <Show when={status()?.signedIn}>
@@ -122,6 +132,7 @@ export function SettingsVectorCodium() {
             </Button>
           </Show>
         </div>
+        <CodiumBillingStatus billing={billing} />
       </section>
     </Show>
   )

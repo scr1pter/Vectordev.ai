@@ -21,7 +21,8 @@ import { requireServerKey } from "@/utils/session-route"
 import type { ServerScope } from "@/utils/server-scope"
 import { formatServerError } from "@/utils/server-errors"
 import { showToast } from "@/utils/toast"
-import { codiumActions } from "@/components/codium-error"
+import { codiumActions, codiumErrorText } from "@/components/codium-error"
+import { useCodiumPurchase } from "@/components/codium-purchase"
 import { createNotificationEventGate, sessionNotificationAllowed } from "./notification-event-gate"
 
 type NotificationBase = {
@@ -125,6 +126,7 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
     const server = useServer()
     const tabs = useTabs()
     const platform = usePlatform()
+    const purchase = useCodiumPurchase()
     const settings = useSettings()
     const language = useLanguage()
     const owner = getOwner()
@@ -157,6 +159,7 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
             directory: activeDirectory,
             sessionID: activeSession,
             platform,
+            purchase,
             settings,
             language,
           }),
@@ -214,6 +217,8 @@ function createServerNotificationState(input: {
   directory: Accessor<string | undefined>
   sessionID: Accessor<string | undefined>
   platform: ReturnType<typeof usePlatform>
+  /** Opens the Codium plans and top-ups, for a notice about running out of credits. */
+  purchase: () => void
   settings: ReturnType<typeof useSettings>
   language: ReturnType<typeof useLanguage>
 }) {
@@ -393,11 +398,11 @@ function createServerNotificationState(input: {
         const codium = ModelPlanStatus.failureAction(error)
         showToast({
           title: language.t("notification.session.error.title"),
-          description,
+          description: codium ? codiumErrorText(description, platform) : description,
           variant: "error",
           duration: 10_000,
           // A Codium notice offers what fixes it, such as signing in to Vector again.
-          ...(codium ? { actions: codiumActions(codium, platform) } : {}),
+          ...(codium ? { actions: codiumActions(codium, platform, input.purchase) } : {}),
         })
       }
       if (settings.notifications.errors()) {

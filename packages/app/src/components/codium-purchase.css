@@ -1,0 +1,111 @@
+/* The Codium plans and top-ups, on Settings > Account and in the purchase dialog. Vector's own neutrals; lavender
+   only marks the current plan. */
+.codium-purchase {
+  display: grid;
+  gap: 16px;
+  max-width: 860px;
+}
+
+.codium-purchase-group {
+  display: grid;
+  gap: 8px;
+}
+
+.codium-purchase-head h4 {
+  margin: 0;
+  color: var(--settings-text, var(--vx-text));
+  font-size: 12.5px;
+  font-weight: 560;
+}
+
+.codium-purchase-head p,
+.codium-purchase-muted {
+  margin: 2px 0 0;
+  color: var(--settings-muted, var(--vx-text-subtle));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.codium-purchase ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.codium-purchase-offer {
+  display: grid;
+  align-content: space-between;
+  justify-items: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--settings-line-strong, var(--vx-line-strong));
+  border-radius: 10px;
+  background: var(--settings-control, var(--vx-control));
+}
+
+.codium-purchase-offer > div {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+}
+
+.codium-purchase-offer [data-component="button-v2"] {
+  white-space: nowrap;
+}
+
+.codium-purchase-name {
+  overflow: hidden;
+  color: var(--settings-text, var(--vx-text));
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codium-purchase-price {
+  color: var(--settings-muted, var(--vx-text-subtle));
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.codium-purchase-current {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--vx-purple-soft);
+  color: var(--vx-purple-bright);
+  font-size: 11px;
+  font-weight: 560;
+  white-space: nowrap;
+}
+
+.codium-purchase-notice {
+  margin: 0;
+  color: var(--settings-muted, var(--vx-text-subtle));
+  font-size: 12px;
+}
+
+.codium-purchase-notice[data-kind="done"] {
+  color: var(--vx-green);
+}
+
+.codium-purchase-notice[data-kind="error"],
+.codium-purchase-error {
+  margin: 0;
+  color: var(--vx-red);
+  font-size: 12px;
+}
+
+/* The dialog's body clips by default; eight offers need to scroll on a short window. */
+[data-component="dialog-v2"] .codium-purchase-dialog [data-slot="dialog-body"] {
+  display: grid;
+  gap: 12px;
+  width: min(640px, calc(100vw - 48px));
+  max-height: min(620px, calc(100vh - 180px));
+  padding: 0 16px 16px;
+  overflow-y: auto;
+}

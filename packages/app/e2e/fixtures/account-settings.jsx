@@ -1,13 +1,19 @@
 import { render } from "solid-js/web"
+import { DialogProvider } from "@vectordevai/ui/context/dialog"
 import { PlatformProvider } from "../../src/context/platform"
 import { SettingsWorkspace } from "../../src/components/settings-v2"
+import { CodiumError } from "../../src/components/codium-error"
 import { yieldLaunchScreen } from "../../src/features/launch/launch-bridge"
 import "../../src/index.css"
 import "../../src/vector-premium.css"
 
 // Settings > Account against a stand-in for the desktop's account bridge. The query picks the account: ?account=
-// signed-out, signed-in (no photo) or photo, and ?codium= coming-soon, plan, low, ended or error. Links the page opens
-// and account actions it takes are kept on window.accountFixture for the spec to read.
+// signed-out, signed-in (no photo) or photo, ?codium= coming-soon, plan, low, ended, none (on sale, never bought) or
+// error, and ?billing= how the
+// billing window ends (completed, cancelled, closed, website or failed). Links the page opens, billing requests and
+// account actions it takes are kept on window.accountFixture for the spec to read; accountFixture.confirm() stands in
+// for the browser sign-in that confirms deleting the account. ?view=codium-error shows a Codium turn that ran out of
+// credits instead of Settings.
 const query = new URLSearchParams(location.search)
 const renewsAt = Date.UTC(2026, 10, 1, 12)
 const codium = {
@@ -46,6 +52,14 @@ const codium = {
     empty: false,
     low: false,
   },
+  none: {
+    signedIn: true,
+    enabled: true,
+    access: false,
+    purchased: { bought: false },
+    empty: true,
+    low: false,
+  },
   error: {
     signedIn: true,
     enabled: false,
@@ -74,7 +88,26 @@ const initial =
       ? { ...signedIn, avatar: photo }
       : signedIn
 
-const state = { account: initial, opened: [], actions: [] }
+// What /api/model-plans/config lists, by name and price; nothing is available while Codium is coming soon.
+const sale = codium.enabled
+const offers = {
+  enabled: sale,
+  plans: [10, 50, 100, 200].map((price) => ({
+    id: `vector-${price}`,
+    name: `Codium ${price}`,
+    price,
+    available: sale,
+  })),
+  topups: [10, 50, 100, 200].map((price) => ({
+    id: `codium-topup-${price}`,
+    name: `Codium ${price} top-up`,
+    price,
+    available: sale,
+  })),
+}
+const outcome = query.get("billing") ?? "completed"
+
+const state = { account: initial, opened: [], actions: [], billing: [], codiumReads: 0 }
 const listeners = new Set()
 const change = (next) => {
   state.account = next
@@ -82,6 +115,8 @@ const change = (next) => {
   return next
 }
 window.accountFixture = state
+// The fresh sign-in in the browser came back with its confirmation.
+state.confirm = () => change({ ...state.account, deletion: "confirmed" })
 
 const platform = {
   platform: "desktop",
@@ -105,10 +140,33 @@ const platform = {
       state.actions.push("logout")
       return change({ authenticated: false, pending: false })
     },
-    codium: async () =>
-      state.account.authenticated
+    codium: async () => {
+      state.codiumReads += 1
+      return state.account.authenticated
         ? codium
-        : { signedIn: false, enabled: false, access: false, purchased: { bought: false }, empty: false, low: false },
+        : { signedIn: false, enabled: false, access: false, purchased: { bought: false }, empty: false, low: false }
+    },
+    offers: async () => offers,
+    billing: async (request) => {
+      state.billing.push(request)
+      return outcome === "failed"
+        ? { outcome, message: "Subscription management is temporarily unavailable." }
+        : { outcome }
+    },
+    confirmDeletion: async () => {
+      state.actions.push("confirmDeletion")
+      return change({ ...state.account, deletion: "confirming" })
+    },
+    cancelDeletion: async () => {
+      state.actions.push("cancelDeletion")
+      const { deletion: _, ...rest } = state.account
+      return change(rest)
+    },
+    deleteAccount: async (email) => {
+      state.actions.push(`delete ${email}`)
+      change({ authenticated: false, pending: false })
+      return { deleted: true }
+    },
     onChange: (listener) => {
       listeners.add(listener)
       return () => listeners.delete(listener)
@@ -120,7 +178,16 @@ yieldLaunchScreen("app")
 render(
   () => (
     <PlatformProvider value={platform}>
-      <SettingsWorkspace section="account" />
+      <DialogProvider>
+        {query.get("view") === "codium-error" ? (
+          <CodiumError
+            text="You have no Codium credits available. Buy credits to use Codium models."
+            action="credits"
+          />
+        ) : (
+          <SettingsWorkspace section="account" />
+        )}
+      </DialogProvider>
     </PlatformProvider>
   ),
   document.querySelector("#root"),
