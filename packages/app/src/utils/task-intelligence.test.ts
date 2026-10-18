@@ -74,14 +74,28 @@ describe("task intelligence", () => {
   test("keeps conversational messages in the quick lane", () => {
     expect(classifyTaskDifficulty("hello!")).toBe("trivial")
     expect(classifyTaskDifficulty("fix login.ts")).toBe("standard")
-    for (const text of ["thanks!", "bye", "what can you do?"])
+    for (const text of ["thanks!", "bye", "what can you do?", "thanks for the help", "what is vector?", "hello again"])
       expect(classifyTaskDifficulty(text), text).toBe("trivial")
   })
 
   test("a reply that continues the work is never trivial and never routes a variant", () => {
     // "continue" or "yes" goes to the agent the user picked, which sizes it against the work it continues; the quick
     // lane would answer it with no tools and no history.
-    for (const text of ["continue", "yes", "go ahead", "try again", "do it", "next", "sure", "ok", "great"]) {
+    // A decline or an approval closes or carries out the work before it, which only the engine can read it against.
+    for (const text of [
+      "continue",
+      "yes",
+      "go ahead",
+      "try again",
+      "do it",
+      "next",
+      "sure",
+      "ok",
+      "great",
+      "no thanks",
+      "sounds good",
+      "lgtm",
+    ]) {
       const difficulty = classifyTaskDifficulty(text)
       expect(difficulty, text).toBe("simple")
       expect(routeVariantForTask({ difficulty, variants: ["low", "high"] }), text).toBeUndefined()

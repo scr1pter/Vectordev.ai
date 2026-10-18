@@ -35,6 +35,12 @@ export type Input = {
    * not finish (it was interrupted, failed or stopped). Then anything but a social message is a reply inside that work.
    */
   readonly open?: boolean
+  /**
+   * Whether the reply right before this message closed by offering more, optional work ("Want me to also update the
+   * docs?"). A plain "no thanks" to it leaves nothing to do, so it is answered directly; a "no" to a real question
+   * ("Should I keep the old API?") is an answer inside the work.
+   */
+  readonly offer?: boolean
   /** The request asks for structured output, which needs a tool call. */
   readonly structured?: boolean
   /** false turns automatic sizing off: every request gets the full harness unless the sender picks a size. */
@@ -165,7 +171,7 @@ export function classify(input: Input): Result {
 
   const plain = !input.files && !input.images && cues.agents.length === 0
   const raw = input.text
-  const bare = plain && !PATH.test(raw) && !URL_PATTERN.test(raw) && !raw.includes("`") && text.length <= 60
+  const bare = plain && !PATH.test(raw) && !URL_PATTERN.test(raw) && !raw.includes("`") && text.length <= 80
   const phrase = bare ? chatPhrase(lower) : undefined
   // A greeting, thanks, a farewell, emoji or a question about Vector is a direct reply, whatever came before it.
   if (phrase && SOCIAL.has(phrase)) return result("chat", "auto", [phrase === "vector" ? "about-vector" : phrase])
@@ -194,11 +200,19 @@ export function classify(input: Input): Result {
   const limit = (tier: Tier) =>
     noSubagents ? min(tier, "standard") : capped ? min(tier, signals.thorough.length > 0 ? "standard" : "light") : tier
 
+  // A plain "no thanks" to an offer of more work closes that work: nothing is left to do, so it is a direct reply, and
+  // the engine's judge still checks the work it closes.
+  if (input.offer && phrase === "decline") return result("chat", "auto", ["decline"])
   // A reply inside the work before it keeps that work's size and never lowers it: anything sent while that work is
-  // still open, and a "yes", a "continue" or a "go ahead, ..." at any time. A whole-message reply takes the size as it
-  // is; a longer one is raised by what it asks for itself.
-  if (previous && (phrase === "accept" || phrase === "directive" || input.open || continuing(lower))) {
-    const tier = phrase ? previous : max(previous, own ?? previous)
+  // still open; a "yes", a "continue" or a "go ahead, ..." at any time; and a short message about that work, one that
+  // points back at it ("build it", "implement the plan", "option 2") or names nothing of its own ("use postgres",
+  // "approved"). A whole-message reply takes the size as it is; a longer one is raised by what it asks for itself.
+  const replying =
+    phrase === "accept" || phrase === "approve" || phrase === "directive" || input.open || continuing(lower)
+  if (previous && (replying || (!phrase && refers(lower, own, signals.question)))) {
+    // A message that is only near the work, saying nothing of its size, is still at least Standard: nothing in it says
+    // it is small.
+    const tier = phrase ? previous : max(previous, own ?? (replying ? previous : "standard"))
     const reasons = [input.open ? "answer" : "continue", ...(tier !== previous ? ownReasons : [])]
     return result(limit(tier), "inherited", reasons, !noJudge)
   }
@@ -212,12 +226,7 @@ export function classify(input: Input): Result {
 
 /** Whether an assistant's closing text asks the user for a decision or offers more work, so a short "ok" answers it. */
 export function asks(text: string) {
-  // A closing pleasantry ("Anything else?", "Let me know if you need anything else.") offers nothing to answer.
-  const tail = sentences(text.trim().slice(-600))
-    .filter((sentence) => !PLEASANTRY.test(sentence.toLowerCase()))
-    .join(" ")
-    .slice(-400)
-    .toLowerCase()
+  const tail = closing(text).join(" ").slice(-400)
   if (tail.endsWith("?")) return true
   return ASKS.test(tail)
 }
@@ -230,7 +239,37 @@ export function waits(text: string) {
   const tail = text.trim().replace(/[\s*_`)\]]+$/, "")
   if (!tail.endsWith("?")) return false
   const start = Math.max(...[".", "!", "?", "\n"].map((mark) => tail.lastIndexOf(mark, tail.length - 2))) + 1
-  return !PLEASANTRY.test(tail.slice(start).toLowerCase())
+  return !pleasantry(tail.slice(start))
+}
+
+/**
+ * Whether a reply closes by offering more, optional work: "Want me to also update the docs?", "I can also add tests if
+ * you like." A plain "no thanks" declines such an offer and leaves nothing to do. A question the work itself turns on
+ * ("Should I keep the old API?", "Which router?") is not an offer: a "no" to it is an answer.
+ */
+export function offers(text: string) {
+  const last = closing(text).findLast((sentence) => sentence.endsWith("?") || ASKS.test(sentence))
+  return last !== undefined && OFFER.test(last)
+}
+
+/** The sentences a reply closes with, lowercased, without the closing pleasantries that offer nothing to answer. */
+function closing(text: string) {
+  return sentences(text.trim().slice(-600))
+    .filter((sentence) => !pleasantry(sentence))
+    .map((sentence) => sentence.trim().toLowerCase().replace(/[’‘]/g, "'"))
+}
+
+// A closing courtesy that offers no particular work: the whole sentence is one, so "What would you like me to do
+// first?" after a plan is still a question.
+function pleasantry(sentence: string) {
+  return PLEASANTRY.test(
+    sentence
+      .toLowerCase()
+      .replace(/[’‘]/g, "'")
+      .replace(/[\s*_`)\]!?.:;,😊🙂👋]+$/u, "")
+      .replace(/^[\s*_`(\[]+/, "")
+      .trim(),
+  )
 }
 
 /**
@@ -304,8 +343,8 @@ function measure(text: string, lower: string, input: Input) {
   ]
   // A question about code is Standard, how-to questions included, and never Thorough on its own words: the agent
   // raises it with escalate when the answer turns out to need large work.
-  if (question && !fixing) return { thorough: [], standard: [...thorough, ...standard], light: [] }
-  return { thorough, standard, light: standard.length > 0 ? [] : light(lower, input) }
+  if (question && !fixing) return { thorough: [], standard: [...thorough, ...standard], light: [], question }
+  return { thorough, standard, light: standard.length > 0 ? [] : light(lower, input), question }
 }
 
 // A short, single, clearly small action: deploying or shipping, a git step, running the tests or a script, fixing a typo,
@@ -319,7 +358,7 @@ function light(lower: string, input: Input): string[] {
     const kind = SMALL_ACTIONS.find(([, pattern]) => pattern.test(polite(clause)))?.[0]
     if (kind) return [...found, kind]
     // "install react and react-dom": a bare package name after "and" is another object of the install before it.
-    const install = index > 0 && INSTALL.test(polite(list[index - 1]!)) && PACKAGE.test(clause.trim())
+    const install = index > 0 && INSTALL.test(polite(list[index - 1]!)) && PACKAGE_ONLY.test(clause.trim())
     return install ? found : undefined
   }, [])
   return kinds && kinds.length > 0 ? [...new Set(kinds)] : []
@@ -353,8 +392,19 @@ function continuing(lower: string) {
   return [parts[0], parts.at(-1)].some((part) => {
     if (!part) return false
     const kinds = replyKinds(words(part))
-    return kinds !== undefined && (kinds.has("accept") || kinds.has("directive"))
+    return kinds !== undefined && (kinds.has("accept") || kinds.has("approve") || kinds.has("directive"))
   })
+}
+
+// A short message about the work before it. One that points back at that work ("build it", "implement the plan", "go
+// with option b", "the second one") continues it whatever it asks for itself; one that gives no size of its own ("use
+// postgres", "approved", "start") is most likely about that work too, since nothing else is in view. A question about
+// the work is still a question, and a longer message is a request of its own.
+function refers(lower: string, own: Tier | undefined, question: boolean) {
+  if (question) return false
+  const count = lower.split(/\s+/).filter(Boolean).length
+  if (count > 10) return false
+  return own === undefined ? count <= 6 : BACK.test(lower)
 }
 
 // The message without a leading reply ("yes, ", "ok go ahead and "), so what it asks for is measured on its own.
@@ -393,40 +443,84 @@ function imperative(clause: string) {
 }
 
 function words(text: string) {
+  return plainWords(text).map(collapse)
+}
+
+function plainWords(text: string) {
   return text
     .replace(/[’']/g, "")
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .split(/\s+/)
     .filter(Boolean)
-    .map(collapse)
 }
 
 function sentences(text: string) {
   return text.split(/(?<=[.!?])\s+|\n+/).filter((sentence) => sentence.trim())
 }
 
-type Phrase = "greeting" | "thanks" | "farewell" | "reaction" | "ack" | "accept" | "directive" | "vector" | "emoji"
+type Phrase =
+  | "greeting"
+  | "thanks"
+  | "farewell"
+  | "reaction"
+  | "ack"
+  | "decline"
+  | "accept"
+  | "approve"
+  | "directive"
+  | "vector"
+  | "emoji"
 
+// A whole message that is only short replies and social phrases, clause by clause: "thanks, that worked!", "hey, you
+// there?", "sounds good, go ahead". Any clause that is something else (a request, a question about the code) makes it
+// not one. The strongest kind wins, so "thanks, go ahead" continues the work and "no, thanks" declines.
 function chatPhrase(lower: string): Phrase | undefined {
   if (EMOJI_ONLY.test(lower)) return "emoji"
   const all = words(lower)
+  // A question about Vector is read whole first, so the "vector" in "what is vector?" is not dropped as a vocative.
+  if (VECTOR_QUESTIONS.has(all.join(" "))) return "vector"
+  if (all.length > 0 && dropVocatives(all).length === 0) return "greeting"
+  const kinds = clauses(lower).map(clauseKinds)
+  if (kinds.length === 0 || kinds.some((kind) => kind === undefined)) return undefined
+  const found = new Set(kinds.flatMap((kind) => [...(kind ?? [])]))
+  return PHRASE_ORDER.find((kind) => found.has(kind))
+}
+
+function clauseKinds(clause: string): Set<Phrase> | undefined {
+  const all = plainWords(clause)
   const trimmed = dropVocatives(all)
-  if (trimmed.length === 0) return all.length > 0 ? "greeting" : undefined
-  const phrase = collapse(trimmed.join(" "))
-  if (VECTOR_QUESTIONS.has(phrase)) return "vector"
-  // "hi there, how are you" and "hey vector what's up": a greeting with an optional how-are-you.
+  // Only a vocative ("there", "vector"): nothing to add.
+  if (trimmed.length === 0) return new Set()
+  // Word sets hold collapsed spellings ("hiii" is "hi"); patterns read the words as typed.
+  const typed = trimmed.join(" ")
+  const phrase = collapse(typed)
+  const whole = collapse(all.join(" "))
+  if (VECTOR_QUESTIONS.has(whole) || VECTOR_QUESTIONS.has(phrase)) return new Set(["vector"])
+  if (SMALL_TALK.has(whole) || SMALL_TALK.has(phrase)) return new Set(["greeting"])
+  // "hi there, how are you", "hey vector what's up", "hello again": a greeting with an optional how-are-you.
   const greeting = [...GREETINGS].find((item) => phrase === item || phrase.startsWith(`${item} `))
-  const after = greeting ? phrase.slice(greeting.length).trim() : undefined
-  if (greeting && (after === "" || (after !== undefined && SMALL_TALK.has(dropVocatives(after.split(" ")).join(" ")))))
-    return "greeting"
-  if (SMALL_TALK.has(phrase)) return "greeting"
-  if (THANKS.has(phrase)) return "thanks"
-  if (FAREWELLS.has(phrase)) return "farewell"
-  if (THANKS.has(dropTrailing(phrase))) return "thanks"
-  // "sounds good, go ahead" or "yes please do": replies built only from short replies take the strongest of them.
-  const kinds = replyKinds(phrase.split(" "))
-  if (!kinds) return undefined
-  return (["directive", "accept", "thanks", "ack", "reaction"] as const).find((kind) => kinds.has(kind))
+  const after = greeting ? dropVocatives(phrase.slice(greeting.length).trim().split(" ").filter(Boolean)).join(" ") : ""
+  if (greeting && (after === "" || after === "again" || SMALL_TALK.has(after))) return new Set(["greeting"])
+  if (FAREWELLS.has(phrase)) return new Set(["farewell"])
+  if (thanked(typed)) return new Set(["thanks"])
+  // "sounds good, go ahead" or "yes please do": short replies, longest first, read as sent before vocatives are
+  // dropped, so "all good" is not read as "good".
+  const replies = replyKinds(whole.split(" ")) ?? replyKinds(phrase.split(" "))
+  if (replies) return replies
+  // "it works now", "that fixed it": the user reporting back, which answers the work like an "ok".
+  if (SUCCESS.test(typed)) return new Set(["ack"])
+  return undefined
+}
+
+// A thanks, with what it thanks for ("thanks for the help", "thank you for fixing that") or a courtesy after it
+// ("thanks again"), but never a new ask hidden in it ("thanks for that, now add tests").
+function thanked(typed: string) {
+  const phrase = collapse(typed)
+  if (THANKS.has(phrase) || THANKS.has(dropTrailing(phrase))) return true
+  const match = /^(.+?) for (.+)$/.exec(typed)
+  if (!match || !THANKS.has(collapse(match[1]!))) return false
+  const rest = match[2]!
+  return rest.split(" ").length <= 6 && ![ASKING, ACTION, BUILD, FIX, EDIT].some((pattern) => pattern.test(rest))
 }
 
 // Splits a short message into known short replies, longest first, or gives up when any word is left over.
@@ -447,14 +541,14 @@ function strip(text: string, pattern: RegExp) {
 }
 
 function dropVocatives(words: string[]) {
-  const start = words.findIndex((word) => !VOCATIVES.has(word))
+  const start = words.findIndex((word) => !VOCATIVES.has(collapse(word)))
   if (start === -1) return []
-  const end = words.findLastIndex((word) => !VOCATIVES.has(word))
+  const end = words.findLastIndex((word) => !VOCATIVES.has(collapse(word)))
   return words.slice(start, end + 1)
 }
 
 function dropTrailing(phrase: string) {
-  return phrase.replace(/ (?:so much|a lot|again|man|dude|bro|mate)$/, "")
+  return phrase.replace(/ (?:so much|a lot|a ton|again|in advance|man|dude|bro|mate)$/, "")
 }
 
 // Letters typed more than once in a row ("hiii", "heyyy", "thanksss") match their plain spelling. Both sides of every
@@ -477,7 +571,7 @@ function prose(text: string) {
     .trim()
 }
 
-const VOCATIVES = new Set(["vector", "there", "team", "everyone", "all", "buddy", "friend", "mate", "guys", "folks"])
+const VOCATIVES = set(["vector", "there", "team", "everyone", "all", "buddy", "friend", "mate", "guys", "folks"])
 const GREETINGS = set([
   "hi",
   "hey",
@@ -584,13 +678,11 @@ const ACK = set([
   "fine",
   "right",
   "ok cool",
-  "lgtm",
-  "sounds good",
-  "looks good",
   "noted",
-  "sounds great",
-  "looks great",
-  // Declines answer an offer the same way: "no thanks" to "Want me to also update the docs?".
+])
+// Declines: they answer a question inside the work ("Should I keep the old API?" "no"), or close an offer of more work
+// ("Want me to also update the docs?" "no thanks"), which leaves nothing to do.
+const DECLINES = set([
   "no",
   "nope",
   "nah",
@@ -598,8 +690,11 @@ const ACK = set([
   "no thank you",
   "not now",
   "not yet",
+  "not needed",
   "maybe later",
   "thats all",
+  "thats it",
+  "thats enough",
   "all good",
   "im good",
   "were good",
@@ -607,6 +702,14 @@ const ACK = set([
   "no need",
   "never mind",
   "nevermind",
+  "skip it",
+  "skip that",
+  "leave it",
+  "stop here",
+  "stop there",
+  "stop for now",
+  // The tail of a decline: "stop here for now".
+  "for now",
 ])
 // Acceptances: on their own they make no sense without something to accept, so they always continue the request
 // before them.
@@ -636,6 +739,9 @@ const ACCEPT = set([
   "both",
   "all of them",
 ])
+// Approvals of what the agent proposed: they continue it like an acceptance, but next to a thanks ("thanks, looks
+// great") they close the work instead.
+const APPROVALS = set(["sounds good", "looks good", "sounds great", "looks great", "lgtm", "approved", "agreed"])
 const DIRECTIVES = set([
   "go",
   "go ahead",
@@ -661,6 +767,7 @@ const DIRECTIVES = set([
   "next one",
   "resume",
 ])
+// Questions about Vector itself, read whole: "vector" in them is the subject, not a vocative.
 const VECTOR_QUESTIONS = set([
   "who are you",
   "what are you",
@@ -677,17 +784,49 @@ const VECTOR_QUESTIONS = set([
   "who built you",
   "what is vector",
   "whats vector",
+  "who made vector",
+  "who built vector",
+  "who makes vector",
+  "who created vector",
+  "what does vector do",
+  "what can vector do",
+  "how does vector work",
+  "how do i use vector",
+  "how to use vector",
   "help",
   "are you an ai",
   "are you a bot",
+  "are you human",
 ])
 const REPLIES = [
   ["directive", DIRECTIVES],
   ["accept", ACCEPT],
+  ["approve", APPROVALS],
+  ["decline", DECLINES],
   ["ack", ACK],
   ["reaction", REACTIONS],
   ["thanks", THANKS],
 ] as const
+// The strongest kind in a message of short replies wins: a "go ahead" or a "yes" anywhere continues the work, a "no"
+// declines it, and a thanks or a greeting with only courtesy around it is social.
+const PHRASE_ORDER = [
+  "directive",
+  "accept",
+  "decline",
+  "thanks",
+  "farewell",
+  "greeting",
+  "vector",
+  "emoji",
+  "approve",
+  "ack",
+  "reaction",
+] as const satisfies readonly Phrase[]
+// The user reporting that it works, as typed: "it works now", "that fixed it", "thats what i wanted".
+const SUCCESS =
+  /^(?:(?:it|its|that|thats|this|everything|all|the (?:build|tests?|app|fix|deploy|site|page))(?: is| was| are| now)? )?(?:works?|worked|working|fixed|solved|resolved|passing|passes|passed|green|builds)(?: now| again| perfectly| great| fine| well| as expected| for me)*$|^(?:that|it|this) (?:did it|did the trick|fixed it|solved it|helped|was it)$|^thats (?:what i (?:wanted|needed)|perfect|exactly it|exactly what i wanted)$|^(?:problem solved|all set|all good now|looks good now)$/
+// Words that make a thanks also a new ask: "thanks for that, can you now ...".
+const ASKING = /\b(?:can|could|would|will|please|pls|now|also|next|then|but|need|want)\b/
 const SOCIAL = new Set<Phrase>(["greeting", "thanks", "farewell", "emoji", "vector"])
 const SOCIAL_REASONS = new Set(["greeting", "thanks", "farewell", "emoji", "about-vector"])
 const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\u200d|\ufe0f|[\u{1F3FB}-\u{1F3FF}]|\s)+$/u
@@ -804,6 +943,9 @@ const NOT_IMPERATIVE = new Set([
   "any",
   "each",
 ])
+// A pointer back at the work before: a pronoun, the agent's own plan or proposal, or one of the options it laid out.
+const BACK =
+  /\b(?:it|this|that|them|these|those|(?:the|your|that|this) (?:plan|above|proposal|suggestion|approach|recommendation|idea|version|design|draft|steps|phases|rest|same)|(?:option|phase|step|part|approach|choice|variant|alternative|stage) (?:\d+|[a-e]|one|two|three|four|five)|(?:the )?(?:first|second|third|fourth|fifth|last|other|former|latter|next) (?:one|option|approach|phase|step|choice|part))\b/
 // Picking the work back up, at the start of a message.
 const CONTINUING =
   /^(?:continue|proceed|resume|keep going|carry on|go on|finish|complete|do the rest|pick up where|pick it up|retry|try again)\b/
@@ -879,7 +1021,7 @@ const ACTION =
 const SMALL_EDIT =
   /\b(?:typos?|spelling|misspell\w*|(?:fix|update|add|remove|delete|edit|change|reword|rewrite|tweak|clean up|correct|improve)\s+(?:the |a |an |this |that |these |those |my |some |its |their )?(?:[\w-]+ )?(?:comments?|docstrings?)|a comment|the comment|wording|copy text|readme|console\.log|log line|whitespace|indentation|version (?:number|bump)|bump (?:the )?version|lint (?:errors?|warnings?)|formatting|a label|the label|the title|the colou?r|padding|margin|font size)\b/
 const OPERATION =
-  /\b(?:deploy|ship|publish|preview|release|roll ?back|commit|push|pull|merge|rebase|stash|install|uninstall)\b|\b(?:run|start|restart|stop|kick off|rerun|re-run) (?:the |all |my )?(?:tests?|test suite|build|dev server|server|app|linter|lint|typecheck|type check|migrations?|script|command)\b|\bbuild (?:it|this|the (?:app|project|repo|repository|site|package))\b|\b(?:open|create|make|raise) (?:a |the )?(?:pr|pull request)\b/
+  /\b(?:deploy|ship|publish|preview|release|roll ?back|commit|push|pull|merge|rebase|stash|install|uninstall)\b|\b(?:npm|bun|pnpm|yarn) (?:add|remove|i)\b|\b(?:run|start|restart|stop|kick off|rerun|re-run) (?:the |all |my )?(?:tests?|test suite|build|dev server|server|app|linter|lint|typecheck|type check|migrations?|script|command)\b|\bbuild (?:it|this|the (?:app|project|repo|repository|site|package))\b|\b(?:open|create|make|raise) (?:a |the )?(?:pr|pull request)\b/
 // A question about the code: a wh-word or a request to explain, or an auxiliary question that ends in "?". "Do the rest"
 // and "find the bug" are instructions, not questions.
 const QUESTION = /^(?:what|where|why|how|when|which|who|whose|explain|describe|tell me|walk me through|summari[sz]e)\b/
@@ -891,52 +1033,107 @@ const SCOPE =
   /\b(?:every(?:thing|where|one|body)?|entire(?:ly)?|whole|across|throughout|all over|codebase|code base|monorepo|(?:repo|repository|project)[- ]wide|all (?:the |of the |our |my |of our )?(?!(?:changes|tests?|specs?|of it|of them)\b)[\w-]+|\d+\s+(?:\w+\s+)?(?:files|modules|routes|pages|components|packages|repos|repositories|services|apps))\b/
 // A failure, or a question about one, is never a small action: it needs looking into first.
 const FAILURE =
-  /\b(?:fail\w*|(?<!spelling )errors?|erroring|exceptions?|broken|break\w*|bugs?|buggy|crash\w*|wrong|issues?|problems?|not work\w*|doesn'?t|won'?t|can'?t|isn'?t|aren'?t|didn'?t|why|how|[45]\d\d)\b/
-const INSTALL =
-  /^(?:(?:npm|bun|pnpm|yarn) (?:install|i|add|remove|uninstall)|install|uninstall|reinstall)(?:\s+\S+){0,6}$|^(?:add|remove) (?:the )?\S+ (?:package|dependency|dev ?dependency|dep)(?:\s+\S+){0,4}$/
-const PACKAGE = /^[@\w][\w@/.^~-]*$/
-// The small actions a Light request may be made of. Each is matched against a whole clause, so "run the tests and fix
-// what fails" or "merge the two config loaders" is not one.
+  /\b(?:fail\w*|(?<!spelling )errors?|erroring|exceptions?|broken|broke|break\w*|regress\w*|bugs?|buggy|crash\w*|wrong|issues?|problems?|not work\w*|doesn'?t|won'?t|can'?t|isn'?t|aren'?t|didn'?t|why|how|[45]\d\d)\b/
+// The small actions a Light request may be made of. Each one is its verb and its own object, matched against a whole
+// clause: what it deploys and where, the package it installs, the branch or flag of a git step, the script it runs.
+// Nothing may follow the object, so "build the app with next.js", "deploy a new microservice for billing", "git bisect
+// to find the commit that broke login" and "run the migration that splits the users table" are not small actions.
+// Words that join a second idea onto an action ("with ...", "for ...", "after ...", "to find ...", "that ..."): an
+// object never contains one.
+const LINK =
+  "(?:a|an|and|or|but|with|without|for|after|before|while|when|once|until|unless|if|so|that|which|who|where|about|using|via|by|like|then|to|into|onto|in|on|of|from|than|because|instead)"
+// One word of an object: a name, a path, a version or a ref.
+const WORD = `(?!${LINK}\\b)[\\w@./:#~^+=-]+`
+// Where an action goes: "to vercel", "to the app store", "onto main".
+const TARGET = `(?:to|on|onto|into) (?:the )?${WORD}(?: ${WORD})?`
+// What a deploy, a publish or a ship may name: what is already built, a version, or a named package or app.
+const DEPLOYABLE = `(?:it|this|that|them|v?\\d[\\w.-]*|(?:the |my |our |this )?(?:app|site|website|backend|frontend|api|server|docs|build|changes|branch|fix|hotfix|release|latest(?: version| changes)?|preview|package|worker|functions?|project|code|update|new version|current branch)|[\\w@]+[./@-][\\w./@-]*)`
+// What a git step may name: a flag, a ref or a branch, a remote, or what it commits or pushes.
+const GIT_ARG = `(?:-{1,2}[\\w-]+(?:=\\S+)?|\\w*[\\d./_@#:~^-][\\w./_@#:~^-]*|main|master|origin|upstream|head|dev|develop|staging|prod|production|trunk|it|this|that|them|everything|the|my|all|last|latest|current|(?:changes|commits?|tags?|branch|branches|fix|work|files?|updates?|stash)|${WORD} branch|${TARGET}|(?:from|off|off of) (?:the )?${WORD})`
+const RUNNABLE =
+  "(?:tests?|test suite|suite|specs?|build|linter|lint|typecheck|type ?check|type-check|formatter|prettier|eslint|biome|dev server|server|app|migrations?|script|seed|codegen|benchmarks?|storybook)"
+// A file or a path the action runs on: "packages/core", "utils.ts".
+const PATHY = "[\\w@.-]*[/.][\\w@./-]+"
+const ARG = `(?!${LINK}\\b)\\S+`
+// A package name, never "the" or a linking word.
+const PACKAGE = `(?!(?:the|${LINK})\\b)[@\\w][\\w@/.^~=:-]*`
+const PACKAGE_ONLY = new RegExp(`^${PACKAGE}$`)
+const INSTALL = new RegExp(
+  `^(?:(?:npm|bun|pnpm|yarn) (?:install|i|add|remove|uninstall)|install|uninstall|reinstall)(?: (?:-{1,2}[\\w-]+|${PACKAGE})){0,6}$|^(?:add|remove) (?:the )?${PACKAGE} (?:package|dependency|dev ?dependency|dep|library)$`,
+)
 const SMALL_ACTIONS: ReadonlyArray<readonly [kind: string, pattern: RegExp]> = [
   ["operation", INSTALL],
-  ["operation", /^(?:re-?)?deploy(?:\s+\S+){0,6}$|^publish(?:\s+\S+){0,6}$/],
-  ["operation", /^ship (?:it|this|that|them|the (?:app|site|build|release|changes|branch|fix)|to \S+)(?:\s+\S+){0,4}$/],
+  ["operation", new RegExp(`^(?:re-?deploy|deploy|publish|ship)(?: ${DEPLOYABLE})?(?: ${TARGET})?$`)],
   [
     "operation",
-    /^(?:commit|push|force[- ]push|rebase|stash|amend|cherry[- ]pick|squash|tag|checkout|check out|git \S+)(?:\s+\S+){0,8}$/,
+    new RegExp(
+      `^(?:git )?commit(?: ${GIT_ARG}){0,3}(?: (?:with|using) (?:a |an |the )?(?:${WORD} )?(?:commit )?message\\b.*| -m .+)?$`,
+    ),
   ],
   [
     "operation",
-    /^pull(?: (?:the )?(?:latest|changes|main|master|origin|upstream))?(?:\s+\S+){0,3}$|^fetch(?: (?:origin|upstream|all|--all|the latest|main|tags))?$/,
+    new RegExp(
+      `^(?:git (?!${LINK}\\b)[\\w-]+(?: (?:pop|apply|drop|list|show|add|remove|set-url|start|reset|good|bad))?|push|force[- ]push|pull|fetch|rebase|amend|squash|tag|cherry[- ]pick|checkout|check out)(?: ${GIT_ARG}){0,4}$`,
+    ),
   ],
+  ["operation", new RegExp(`^stash(?: (?:pop|apply|drop|list|show|push|save|clear))?(?: ${GIT_ARG}){0,2}$`)],
   [
     "operation",
     /^merge(?: (?:main|master|dev|develop|origin\/\S+|upstream|it|this|the (?:pr|pull request|branch|changes)|(?:the |this )?\S+ branch|#?\d+))?(?: (?:into|in|to|with) \S+(?: branch)?)?$/,
   ],
   [
     "operation",
-    /^(?:switch|change) to (?:the )?\S+ branch$|^(?:create|make|start|open) (?:a )?(?:new )?branch(?:\s+\S+){0,4}$/,
-  ],
-  ["operation", /^(?:open|create|make|raise|draft|submit|file) (?:a |the )?(?:draft )?(?:pr|pull request)(?:\s+\S+){0,8}$/],
-  [
-    "operation",
-    /^(?:run|rerun|re-run|start|restart|stop|kick off|execute|launch) (?:the |all the |all |my |our )?(?:unit |e2e |integration |focused )?(?:tests?|test suite|specs?|build|linter|lint|typecheck|type ?check|type-check|formatter|prettier|eslint|biome|dev server|server|app|migrations?|script|seed|codegen|benchmarks?|storybook)(?:\s+\S+){0,6}$/,
+    new RegExp(
+      `^(?:switch|change) to (?:the )?${WORD}(?: branch)?$|^(?:create|make|start|open) (?:a )?(?:new )?branch(?: (?:called|named) ${WORD}| ${WORD})?(?: (?:from|off|off of) ${WORD})?$`,
+    ),
   ],
   [
     "operation",
-    /^(?:run|execute) (?:`[^`]+`|(?:npm|bun|bunx|pnpm|yarn|npx|make|cargo|go|python3?|pytest|deno|node|just|turbo|uv|docker)\b|\S+\.(?:sh|py|ts|js|mjs|rb)\b)(?:\s+\S+){0,6}$|^(?:npm|bun|bunx|pnpm|yarn|npx) \S+(?:\s+\S+){0,5}$/,
+    new RegExp(
+      `^(?:open|create|make|raise|draft|submit|file) (?:a |the )?(?:draft |new )?(?:pr|pull request)(?: (?:for|to|against|into|on|from) (?:the |this |my )?${WORD}(?: branch)?)?$`,
+    ),
   ],
-  ["operation", /^build (?:it|this|the (?:app|project|repo|repository|site|package|docs|image|binary|container))(?:\s+\S+){0,4}$/],
+  [
+    "operation",
+    new RegExp(
+      `^(?:run|rerun|re-run|start|restart|stop|kick off|execute|launch) (?:the |all the |all |my |our )?(?:${WORD} )?${RUNNABLE}(?: (?:for|in|on|against|of) (?:the )?${WORD}(?: ${WORD})?| -{1,2}\\S+| ${PATHY}){0,2}$`,
+    ),
+  ],
+  [
+    "operation",
+    new RegExp(
+      `^(?:run|execute) (?:\`[^\`]+\`|(?:npm|bun|bunx|pnpm|yarn|npx|make|cargo|go|python3?|pytest|deno|node|just|turbo|uv|uvx|docker)(?: ${ARG}){0,6}|\\S+\\.(?:sh|py|ts|js|mjs|rb)(?: ${ARG}){0,4})$|^(?:npm|bun|bunx|pnpm|yarn|npx)(?: ${ARG}){1,5}$`,
+    ),
+  ],
+  [
+    "operation",
+    /^build(?: (?:it|this|that|(?:the |my |our )(?:app|project|repo|repository|site|package|packages|docs|image|binary|container|frontend|backend|cli|extension)))?(?: for (?:prod|production|release|dev|development|debug|ios|android|web|windows|mac|macos|linux))?$/,
+  ],
   [
     "small-edit",
-    /^(?:fix|correct) (?:the |a |an |this |that |these |those |some |two |three |\d+ |my |its )?(?:typos?|spelling(?: mistakes?| errors?)?|misspellings?|misspelled \S+)(?:\s+\S+){0,6}$/,
+    new RegExp(
+      `^(?:fix|correct) (?:the |a |an |this |that |these |those |some |two |three |\\d+ |my |its )?(?:typos?|spelling(?: mistakes?| errors?)?|misspellings?|misspelled ${WORD})(?: (?:in|on) (?:the |this |my |our )?${WORD}(?: ${WORD})?)?$`,
+    ),
   ],
-  ["small-edit", /^rename(?:\s+\S+){1,8}$/],
   [
     "small-edit",
-    /^(?:format|reformat|prettify|lint)(?: (?:it|this|that|everything|the (?:file|files|code|project|repo)|\S+\.\w+))?(?: with \S+)?$|^fix (?:the )?(?:formatting|indentation|whitespace)(?:\s+\S+){0,6}$/,
+    // Renaming one thing, never the whole app or repository.
+    new RegExp(
+      `^rename (?:the )?(?:(?!(?:${SYSTEM})\\b)${WORD} )?(?!(?:${SYSTEM})\\b)${WORD} (?:to|as) ${WORD}(?: (?:in|on) (?:the )?${WORD})?$`,
+    ),
   ],
-  ["small-edit", /^(?:bump|increment|update|set) (?:the )?(?:package |app )?version(?: number)?(?:\s+\S+){0,4}$/],
+  [
+    "small-edit",
+    new RegExp(
+      `^(?:format|reformat|prettify|lint)(?: (?:it|this|that|everything|the (?:file|files|code|project|repo)|\\S+\\.\\w+))?(?: with \\S+)?$|^fix (?:the )?(?:formatting|indentation|whitespace)(?: (?:in|of|on) (?:the |this )?${WORD}(?: ${WORD})?)?$`,
+    ),
+  ],
+  [
+    "small-edit",
+    new RegExp(
+      `^(?:bump|increment|update|set) (?:the )?(?:package |app )?version(?: number)?(?: (?:to|of) (?:the )?${WORD}(?: ${WORD})?)?$`,
+    ),
+  ],
 ]
 // A deadlock, a race, a leak, a hang or a crash, and "why does ... fail": problems that take real investigation.
 const HARD_FAILURE =
@@ -945,9 +1142,13 @@ const WHY_FAIL =
   /^why (?:does|do|did|is|are|was|were|would|might)\b.*\b(?:fail\w*|break\w*|broken|errors?|erroring|throw\w*|time[sd]? ?out|timing out|slow\w*|wrong|stop\w*|exit\w*|not work\w*)\b|^why (?:doesn'?t|won'?t|isn'?t|aren'?t|can'?t|don'?t|didn'?t|wasn'?t)\b/
 const ASKS =
   /\b(?:shall i|should i|shall we|should we|want me to|want me|would you like|would you prefer|do you want|let me know|if you(?:'d| would)? (?:like|want|prefer|wish)|if you want|ready to (?:proceed|go|publish|deploy)|confirm|approve|okay to|ok to|go ahead\?|i (?:can|could) also|we (?:can|could) also|next,? i(?:'d| would|'ll| will| can| could| plan to)|i(?:'d)? (?:recommend|suggest)|happy to|the next steps? (?:would|is|are|could)|i can (?:go ahead|take care of|do that|handle))\b/
-// Closing courtesies that offer no particular work, a greeting reply's "How can I help?" included.
+// Closing courtesies that offer no particular work, a greeting reply's "How can I help?" included. Each is a whole
+// sentence: one that names work ("What would you like me to do first?") asks something.
 const PLEASANTRY =
-  /\b(?:anything else|something else|anything more|any other (?:changes|questions|tasks)|any questions|further (?:help|questions|changes)|help with anything|how can i help|what can i (?:help(?: you)? with|do for you)|what would you like(?: me)? to (?:work on|do)|what are we working on)\b/
+  /^(?:(?:is there )?(?:anything|something) else(?: (?:i can (?:help(?: you)? with|do(?: for you)?)|you(?:'d| would)? like(?: me to (?:do|help with|look at))?|you need(?: help with)?|on your mind))?|(?:do you have )?any (?:other |more |further )?questions|(?:let me know|feel free to (?:ask|reach out|let me know)|just let me know) if (?:you (?:need|have|want) )?(?:anything else|any (?:other |more |further )?(?:questions|changes|help))(?: (?:i can help with|you need))?|if you need anything else(?:, (?:just )?let me know)?|(?:how can i|how may i) help(?: you)?(?: today| further)?|what can i (?:help(?: you)? with|do for you)(?: today)?|what (?:would you like|do you want)(?: me)? to (?:work on|do)(?: today)?|what are we working on(?: today)?|happy to help(?: further| with anything else)?|hope (?:this|that) helps)$/
+// An offer of more, optional work in a reply's closing question or sentence.
+const OFFER =
+  /\b(?:want me to|would you like me to|do you want me to|should i also|shall i also|i (?:can|could) also|if you(?:'d| would)? like,? i (?:can|could)|if you want,? i (?:can|could)|let me know if you(?:'d| would)? like me to|happy to (?:also )?(?:add|update|write|do|make|look|take|help))\b/
 const CLOUD =
   /\b(?:vercel|supabase|deploy\w*|ship (?:it|this|to)|publish\w*|preview|production|prod|rollback|roll back|env vars?|environment variables?|database|db|auth|login|log in|sign[- ]?in|sign[- ]?up|domain|hosting|hosted)\b/
 const BROWSER =

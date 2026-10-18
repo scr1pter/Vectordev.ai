@@ -298,12 +298,166 @@ describe("TaskSize.classify", () => {
     expect(tier("yes, thanks", { previous: "light" })).toBe("light")
     // Without a question or an offer, a plain acknowledgement or reaction is just a reply.
     expect(tier("ok", { previous: "light" })).toBe("chat")
-    expect(tier("sounds good", { previous: "thorough" })).toBe("chat")
     expect(tier("great", { previous: "standard" })).toBe("chat")
+    // An approval is not: "sounds good" to a plan carries the plan out.
+    expect(tier("sounds good", { previous: "thorough" })).toBe("thorough")
     // Thanks is thanks even after a question.
     expect(tier("thanks", { previous: "light", open: true })).toBe("chat")
     // A first message has nothing to continue.
     expect(tier("continue")).toBe("chat")
+  })
+
+  test("a small action takes only its own object: anything after it is work of its own", () => {
+    for (const text of [
+      // Building something new is not compiling it.
+      "build this app with next.js",
+      "build the app with next.js",
+      "build the site with astro",
+      "build it in rust",
+      "build this in svelte",
+      // A deploy of something new, or after more work, or with new infrastructure.
+      "deploy a new microservice for billing",
+      "deploy after adding rate limiting",
+      "deploy to aws with terraform",
+      "deploy the backend with the new auth flow",
+      "ship it with the new pricing page",
+      // Writing content to publish.
+      "publish a blog post about the launch",
+      // A git step aimed at a hunt, a script aimed at a data change, a PR that describes new work.
+      "git bisect to find the commit that broke login",
+      "run the migration that splits the users table",
+      "open a pr that adds oauth",
+      // Renaming the whole app or repository.
+      "rename the project to Nova",
+      "rename the app to Nova",
+    ])
+      expect(tier(text), text).toBe("standard")
+    // A failure word in any tense keeps a step from being small.
+    expect(tier("git checkout the commit that broke login")).toBe("standard")
+    expect(tier("git revert the commit that regressed search")).toBe("standard")
+    // The object itself is fine: a target, a package, a branch, a flag, a path.
+    for (const text of [
+      "deploy the backend to staging",
+      "publish the package to npm",
+      "ship v2",
+      "git push --force",
+      "git checkout -b rust-port",
+      "rebase onto main",
+      "pull the latest changes",
+      "commit with a good message",
+      "run the tests in packages/core",
+      "run the e2e tests",
+      "rename UserService to AccountService",
+      "fix the typo in the readme",
+      "install react and react-dom",
+      "npx prettier --check src",
+      "build it",
+      "build the app for production",
+    ])
+      expect(tier(text), text).toBe("light")
+  })
+
+  test("after work, a message that points back at it or names nothing of its own continues it", () => {
+    // A Thorough plan that ended without asking anything, then the user's go-ahead in their own words.
+    for (const text of [
+      "build it",
+      "build this",
+      "ok build it",
+      "great, build it",
+      "looks good, build it",
+      "perfect. build it.",
+      "build it now",
+      "let's build it",
+      "ship it",
+      "implement it",
+      "now implement it",
+      "implement the plan",
+      "execute the plan",
+      "make it happen",
+      "start",
+      "option 2",
+      "go with option b",
+      "the second one",
+      "approved",
+      "lgtm",
+      "great plan",
+      "lets go with that",
+      "use postgres",
+      "looks good",
+    ]) {
+      const result = TaskSize.classify({ text, previous: "thorough" })
+      expect(result.tier, text).toBe("thorough")
+      expect(result.source, text).toBe("inherited")
+    }
+    // With nothing before it, "build it" is a compile, and a small one; after small work it stays small.
+    expect(tier("build it")).toBe("light")
+    expect(tier("ship it", { previous: "light" })).toBe("light")
+    // A message that says nothing of its own size is never lowered below Standard by small work before it.
+    expect(tier("dark mode", { previous: "light" })).toBe("standard")
+    // A self-contained request after finished work is sized on its own, and a question is still a question.
+    expect(tier("fix the typo in README", { previous: "thorough" })).toBe("light")
+    expect(tier("what does parseArgs do?", { previous: "thorough" })).toBe("standard")
+    expect(tier("why did you do it that way?", { previous: "thorough" })).toBe("standard")
+    expect(tier("add a settings page with a dark mode toggle and tests for the parser", { previous: "thorough" })).toBe(
+      "standard",
+    )
+  })
+
+  test("a social message with a few words of courtesy is still social", () => {
+    for (const text of [
+      "thanks for the help",
+      "thank you for your help",
+      "thanks for fixing that",
+      "thanks, that worked!",
+      "thanks, that fixed it",
+      "it works, thanks",
+      "works now, thank you",
+      "ty!! works perfectly",
+      "thank you, looks great",
+      "hello again",
+      "hey, you there?",
+      "what is vector?",
+      "what's vector",
+      "who made vector?",
+      "how do I use vector?",
+    ]) {
+      const result = TaskSize.classify({ text })
+      expect(result.tier, text).toBe("chat")
+      expect(TaskSize.social(result), text).toBe(true)
+      // Social whatever came before it, even inside open work.
+      expect(tier(text, { previous: "thorough", open: true }), text).toBe("chat")
+    }
+    // A report that it works is a reply to the work, not a social message on its own.
+    expect(TaskSize.social(TaskSize.classify({ text: "awesome, it works now" }))).toBe(false)
+    expect(tier("it works now", { previous: "thorough", open: true })).toBe("thorough")
+    // Courtesy around a new ask, or a report that it still fails, is not social.
+    for (const text of [
+      "thanks, now fix the other one",
+      "thanks for that, now add tests",
+      "thanks for the help can you also add tests",
+      "thanks but it's still broken",
+      "hello, deploy it",
+      "how do I normalize a vector?",
+    ])
+      expect(tier(text), text).not.toBe("chat")
+  })
+
+  test("a plain no to an offer of more work is a direct reply; a no to a real question is an answer", () => {
+    for (const text of ["no", "no thanks", "nope, that's all", "not now", "stop here for now", "no need"]) {
+      const result = TaskSize.classify({ text, previous: "thorough", open: true, offer: true })
+      expect(result, text).toMatchObject({ tier: "chat", reasons: ["decline"] })
+      // It closes the work, so a client must not send it on the greeting lane: the engine judges the work it closes.
+      expect(TaskSize.social(result), text).toBe(false)
+    }
+    // "Should I convert them to the new loader API?" "no": the work goes on without the loader API.
+    expect(TaskSize.classify({ text: "no", previous: "thorough", open: true })).toMatchObject({
+      tier: "thorough",
+      source: "inherited",
+    })
+    // A no with more to it is a reply inside the work.
+    expect(tier("no, convert them to the new loader api", { previous: "thorough", open: true, offer: true })).toBe(
+      "thorough",
+    )
   })
 
   test("force words count only as an instruction about this request", () => {
@@ -410,6 +564,26 @@ describe("TaskSize helpers", () => {
     expect(TaskSize.asks("Done. Anything else?")).toBe(false)
     expect(TaskSize.asks("Fixed the typo. Let me know if you need anything else.")).toBe(false)
     expect(TaskSize.asks("I can also add tests for this if you want. Anything else?")).toBe(true)
+  })
+
+  test("a question that names work is not a pleasantry", () => {
+    // "What would you like me to do first?" after a plan asks the user to pick from it.
+    expect(TaskSize.asks("Here is the plan in three phases. What would you like me to do first?")).toBe(true)
+    expect(TaskSize.waits("Here is the plan in three phases. What would you like me to do first?")).toBe(true)
+    // A greeting reply's courtesy still offers nothing.
+    expect(TaskSize.asks("Hi! How can I help you today?")).toBe(false)
+    expect(TaskSize.asks("Hi! What would you like to work on?")).toBe(false)
+    expect(TaskSize.asks("Done. Is there anything else I can help with?")).toBe(false)
+    expect(TaskSize.asks("Fixed it. Happy to help!")).toBe(false)
+  })
+
+  test("offers tells an offer of more work from a question the work turns on", () => {
+    expect(TaskSize.offers("Migrated all 40 routes. Want me to also update the docs?")).toBe(true)
+    expect(TaskSize.offers("Done. I can also add tests for this if you like.")).toBe(true)
+    expect(TaskSize.offers("Migrated 30 routes. Should I also migrate the tests? Anything else?")).toBe(true)
+    expect(TaskSize.offers("Migrated 20 of 40 routes. Should I convert them to the new loader API?")).toBe(false)
+    expect(TaskSize.offers("I found two routers. Which one should I keep?")).toBe(false)
+    expect(TaskSize.offers("Done. Anything else?")).toBe(false)
   })
 
   test("waits tells a question the work waits on from an offer or a pleasantry", () => {
