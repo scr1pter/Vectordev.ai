@@ -86,7 +86,7 @@ Do all of this in **test mode** first, for the preview test run in [section 4](#
 4. **Auto top-up** (Settings → Credits). Turn it on and set:
    - **Threshold:** at least what the funding check needs at your busiest point: the credits customers will hold, plus the credits they buy in about 90 minutes, plus the credits of your largest purchase, all multiplied by 1.1, plus $20 (see the margin variables below). If the threshold is lower, the balance can sit between the two: auto top-up does not fire, and sales stay paused until you add credits or raise the threshold.
    - **Amount:** at least a week of expected model spend, so the card is charged in a few large purchases rather than many small ones.
-   - Example: at the busiest point customers hold $400 of credits, buy $60 of credits in 90 minutes, and your largest purchase grants $100. Set the threshold to at least ($400 + $60 + $100) × 1.1 + $20 = $636.
+   - Example: at the busiest point customers hold $400 of credits and buy $60 of credits in 90 minutes. With L for the credits your largest purchase grants, set the threshold to at least ($400 + $60 + L) × 1.1 + $20, which is $526 + 1.1 × L.
 5. **Fee.** OpenRouter charges a fee on every credit purchase, auto top-ups included (5.5% by card when this was written). Set `CODIUM_OPENROUTER_FEE_PERCENT` to the fee its credits page shows, so the ledger's estimate stays right.
 6. **Resale terms.** OpenRouter's [terms, section 7](https://openrouter.ai/terms) restrict reselling API access. Confirm Codium is covered by suitable commercial terms before selling.
 

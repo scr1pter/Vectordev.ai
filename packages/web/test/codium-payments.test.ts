@@ -681,7 +681,7 @@ describe("sales follow Vector's OpenRouter balance", () => {
   test("purchases made between checks cannot together sell more than the balance covers", async () => {
     funded(300)
     expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", required: 13000 })
-    // Four buyers open $200 top-ups ($100 of credits each) at the same moment. With the 10% and $20 margin the $300
+    // Four buyers open $200 top-ups ($100 of fixture credits each) at the same moment. With the 10% and $20 margin the $300
     // balance covers two: a third would need ($100 × 3) × 1.1 + $20 = $350.
     const buyers = ["1", "2", "3", "4"].map((digit) => ({
       id: user.id.replace(/^4/, digit),
@@ -709,7 +709,7 @@ describe("sales follow Vector's OpenRouter balance", () => {
   test("one buyer's paid top-ups keep their reservations, so buying again and again cannot oversell", async () => {
     funded(300)
     expect(await checkCodiumFunding(fetcher)).toMatchObject({ status: "open", required: 13000 })
-    // The same buyer pays for $200 top-ups ($100 of credits each) one after another, before the next check counts any
+    // The same buyer pays for $200 top-ups ($100 of fixture credits each) one after another, before the next check counts any
     // of them as owed. The $300 balance covers two: a third would need ($100 × 3) × 1.1 + $20 = $350.
     const outcomes = await [1, 2, 3].reduce(
       async (previous) => [
