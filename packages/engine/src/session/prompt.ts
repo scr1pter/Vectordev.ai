@@ -612,38 +612,50 @@ const layer = Layer.effect(
 
     // LLM-as-a-judge, run by Vector itself once a run that changed files has finished, when the request's size and the
     // user's setting call for it: after a Thorough run, or after every run that changed files. No model is asked to
-    // launch the judge, so a greeting can never bring it in, and its cost is bounded at MAX_JUDGE_ROUNDS per request.
+    // launch the judge, so a greeting can never bring it in, and its cost is bounded at MAX_JUDGE_ROUNDS per run.
     // The judge is an ordinary subagent of the session, so its card and its cost show in the conversation that ran it.
     const judgeGate = Effect.fn("SessionPrompt.judgeGate")(function* (input: {
       session: Session.Info
       msgs: SessionV1.WithParts[]
       lastUser: SessionV1.User
       lastAssistant: SessionV1.Assistant
+      // Messages after this ID were written by this run, which decides the requests it answered.
+      since: MessageID
+      // Judge runs this run has already made.
+      rounds: number
     }) {
       if (!sizable(input.session, input.lastUser) || input.lastUser.agent !== "build") return "done" as const
       if (input.lastAssistant.error || (yield* guard.stopped(input.session.id))) return "done" as const
+      if (input.rounds >= MAX_JUDGE_ROUNDS) return "done" as const
       const sizing = (yield* config.get()).sizing
-      const request = SessionTaskSize.size({
+      const requests = SessionTaskSize.size({
         messages: input.msgs,
         caching: false,
         lifetime: 0,
         auto: sizing?.auto,
         judge: sizing?.judge,
-      }).at(-1)
-      if (!request || request.judge === "off") return "done" as const
-      if (request.judge === "thorough" ? request.tier !== "thorough" : request.tier === "chat") return "done" as const
-      const runs = SessionTaskSize.judgeRuns(request)
-      if (runs.length >= MAX_JUDGE_ROUNDS) return "done" as const
+      })
+      const last = requests.at(-1)
+      // Work that stopped to ask the user something is not finished. A "yes" to it continues the request, and the
+      // judge looks at both once that run ends.
+      if (!last || TaskSize.waits(SessionTaskSize.closingText(last.messages))) return "done" as const
+      const lastMessage = input.msgs.find((message) => message.info.id === input.lastAssistant.id)
+      if (
+        lastMessage?.parts.some(
+          (part) => part.type === "tool" && part.tool === "question" && part.state.status !== "completed",
+        )
+      )
+        return "done" as const
       // Only work that changed files since the last verdict is judged.
-      const changed = SessionTaskSize.changedFiles(request, runs.at(-1)?.messageID)
-      if (changed.length === 0) return "done" as const
+      const work = SessionTaskSize.judgeable(requests, input.since)
+      if (!work) return "done" as const
       const judge = yield* agents.get("judge")
       const parent = yield* agents.get("build")
       if (!judge || judge.mode === "primary" || !parent) return "done" as const
       if (Permission.evaluate("task", "judge", parent.permission, input.session.permission ?? []).action === "deny")
         return "done" as const
 
-      const round = runs.length + 1
+      const round = input.rounds + 1
       const sessionID = input.session.id
       const ctx = yield* InstanceState.context
       const promptOps = yield* ops()
@@ -656,7 +668,7 @@ const layer = Layer.effect(
         mode: parent.name,
         agent: parent.name,
         variant: input.lastUser.model.variant,
-        size: request.tier,
+        size: last.tier,
         path: { cwd: ctx.directory, root: ctx.worktree },
         cost: 0,
         tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -666,7 +678,7 @@ const layer = Layer.effect(
         time: { created: Date.now() },
       })
       const args = {
-        prompt: judgeBrief(request, changed),
+        prompt: judgeBrief(work.requests, work.files, last),
         description: round === 1 ? "Check the finished work" : `Check the repairs (round ${round})`,
         subagent_type: "judge",
         background: false,
@@ -1617,6 +1629,10 @@ const layer = Layer.effect(
       const sessionID = session.id
       let structured: unknown
       let step = 0
+      // Every message this run writes sorts after this ID, which is how the judge finds the requests the run answered.
+      const since = MessageID.ascending()
+      // The judge's rounds in this run; a compaction may summarise earlier verdicts out of view.
+      let judged = 0
       // Before the first request, so a prompt arriving after the cache expired sends the cleared history.
       if (!resumed) yield* compaction.prune({ sessionID }).pipe(Effect.ignore)
 
@@ -1666,7 +1682,11 @@ const layer = Layer.effect(
           yield* Effect.logInfo("exiting loop", { "session.id": sessionID })
           // LLM-as-a-judge runs here, once the agent has finished, when the request's size and the user's setting
           // call for it. A FAIL sends its findings back and the run goes on to repair them.
-          if ((yield* judgeGate({ session, msgs, lastUser, lastAssistant })) === "repair") continue
+          const gate = yield* judgeGate({ session, msgs, lastUser, lastAssistant, since, rounds: judged })
+          if (gate === "repair") {
+            judged++
+            continue
+          }
           break
         }
 
@@ -1744,6 +1764,27 @@ const layer = Layer.effect(
             overflow: task.overflow,
           })
           if (result === "stop") break
+          // The summary may replace the message that opened the request it covers. The marker records the request,
+          // so it keeps its size and its judge, and a "continue" after it has work to continue.
+          if (sized) {
+            const visible = new Set(
+              (yield* MessageV2.filterCompactedEffect(sessionID).pipe(
+                Effect.provideService(Database.Service, database),
+              )).map((message) => message.info.id),
+            )
+            const carried = SessionTaskSize.carry(sized, (message) => !visible.has(message.info.id))
+            if (carried)
+              yield* sessions.updatePart({
+                id: PartID.ascending(),
+                messageID: lastUser.id,
+                sessionID,
+                type: "text",
+                text: `The request this compaction summarised stays ${TaskSize.label(carried.tier)}.`,
+                synthetic: true,
+                ignored: true,
+                metadata: { [SessionTaskSize.CARRIED]: carried },
+              } satisfies SessionV1.TextPart)
+          }
           continue
         }
 
@@ -1840,7 +1881,7 @@ const layer = Layer.effect(
             invokedAgents,
             messages: msgs,
             promptOps,
-            ...(build ? { taskSize: { tier: build.tier, escalated: build.escalated } } : {}),
+            ...(build ? { taskSize: { tier: build.tier } } : {}),
           }).pipe(
             Effect.provideService(Session.Service, sessions),
             Effect.provideService(Plugin.Service, plugin),
@@ -2238,8 +2279,15 @@ const layer = Layer.effect(
           variant: input.variant,
           executionMode: input.executionMode,
           budget: input.budget,
-          // A command's template is a workflow someone wrote, not a measure of the job, so it is sized by declaration.
-          size: input.size && input.size !== "auto" ? input.size : (cmd.size ?? "standard"),
+          // The sender's size, then the command's own, then what the template asks for. With sizing off, the run gets
+          // the full harness like any other request.
+          ...(input.size && input.size !== "auto"
+            ? { size: input.size }
+            : cmd.size
+              ? { size: cmd.size }
+              : (yield* config.get()).sizing?.auto === false
+                ? {}
+                : { size: commandSize(template) }),
           ...(input.judge ? { judge: input.judge } : {}),
         },
         // @file references in an MCP prompt or a skill are not the user's choice; the user's own attachments are.
@@ -2277,6 +2325,15 @@ function sizable(session: Session.Info, user: SessionV1.User) {
   return !session.parentID && !session.internal && (user.agent === "build" || user.agent === "plan")
 }
 
+// A command's template is a workflow someone wrote: it is sized from what it asks for, but its length is documentation
+// rather than a measure of the job, and a command is never a bare reply.
+function commandSize(template: string): TaskSize.Tier {
+  const result = TaskSize.classify({ text: template })
+  if (result.tier === "chat") return "light"
+  if (result.tier === "thorough" && result.reasons.every((reason) => reason === "long")) return "standard"
+  return result.tier
+}
+
 // Whether the provider caches the prompt prefix, so a smaller tool set on the next request would write it again.
 function caches(model: Provider.Model) {
   return ProviderTransform.usesCacheBreakpoints(model) || (model.cost?.cache?.read ?? 0) > 0
@@ -2288,7 +2345,8 @@ function caches(model: Provider.Model) {
 function sizeNotes(messages: SessionV1.WithParts[], requests: readonly SessionTaskSize.Request[]) {
   const notes = new Map(
     requests.flatMap((request) => {
-      const user = request.users.at(-1)
+      // A request whose opening message a compaction summarised carries its note on the compaction marker.
+      const user = request.users.at(-1) ?? request.messages.find((message) => message.info.role === "user")
       if (!user || user.info.role !== "user" || user.info.agent !== "build") return []
       const text = TaskSize.note(request.result.tier, { escalate: true, judge: request.judge !== "off" })
       return text ? [[user.info.id, text] as const] : []
@@ -2357,14 +2415,21 @@ function delegation(
   }
 }
 
-function judgeBrief(request: SessionTaskSize.Request, changed: readonly string[]) {
-  const report = SessionTaskSize.closingText(request.messages).slice(-4000)
+function judgeBrief(
+  requests: readonly SessionTaskSize.Request[],
+  changed: readonly string[],
+  last: SessionTaskSize.Request,
+) {
+  const report = SessionTaskSize.closingText(last.messages).slice(-4000)
   return [
     "Vector asks you to judge finished work before it is reported as done.",
     "",
     "The user's request, verbatim:",
     "<request>",
-    SessionTaskSize.requestText(request).slice(0, 8000),
+    requests
+      .map((request) => SessionTaskSize.requestText(request))
+      .join("\n\n")
+      .slice(0, 8000),
     "</request>",
     "",
     "Files changed for it:",
@@ -2457,7 +2522,7 @@ export const CommandInput = Schema.Struct({
   executionMode: Schema.optional(Schema.Union([Schema.Literal("normal"), Schema.Literal("fast")])),
   // The run budget for the run the command starts, as on PromptInput.
   budget: Schema.optional(RunBudget.Info),
-  // As on PromptInput. A command's run is Standard unless the command or the sender sets a size.
+  // As on PromptInput. Without a size from the sender or the command, Vector sizes the run from the template.
   size: Schema.optional(TaskSize.Choice),
   judge: Schema.optional(TaskSize.JudgeMode),
   // Inlined (no identifier annotation) to keep the original SDK output — the

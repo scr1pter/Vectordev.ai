@@ -840,7 +840,7 @@
               },
               "size": {
                 "$ref": "#/$defs/TaskSizeTier",
-                "description": "How much harness the command's run gets: chat, light, standard or thorough (default: standard). Only thorough offers subagents."
+                "description": "How much harness the command's run gets: chat, light, standard or thorough. When unset, Vector sizes the run from what the template asks for. Only thorough offers subagents."
               }
             },
             "required": [

@@ -72,6 +72,52 @@ function assistant(text: string, finish = "stop", tools: { tool: string; metadat
 const size = (messages: SessionV1.WithParts[], caching = false, lifetime = 60_000) =>
   SessionTaskSize.size({ messages, caching, lifetime })
 
+// A reply that wrote a file, as a completed write call.
+function wrote(file: string, text = "Wrote it.", finish = "tool-calls") {
+  const message = assistant(text, finish, [{ tool: "write" }])
+  const part = message.parts.find((item) => item.type === "tool")
+  if (part?.type === "tool" && part.state.status === "completed") part.state.input = { filePath: file }
+  return message
+}
+
+// The compaction marker a summary answers, with what the runner recorded of the request it summarised.
+function marker(carried?: SessionTaskSize.Carried) {
+  const message = user("")
+  message.parts = [
+    { id: PartID.ascending(), sessionID, messageID: message.info.id, type: "compaction", auto: true },
+    ...(carried
+      ? [
+          {
+            id: PartID.ascending(),
+            sessionID,
+            messageID: message.info.id,
+            type: "text" as const,
+            text: "recorded",
+            synthetic: true,
+            ignored: true,
+            metadata: { [SessionTaskSize.CARRIED]: carried },
+          },
+        ]
+      : []),
+  ]
+  return message
+}
+
+function recorded(part: SessionV1.Part): SessionTaskSize.Carried[] {
+  return part.type === "text" && part.metadata?.[SessionTaskSize.CARRIED]
+    ? [part.metadata[SessionTaskSize.CARRIED]]
+    : []
+}
+
+function summary(parent: SessionV1.WithParts) {
+  const message = assistant("Summary of the work so far.")
+  if (message.info.role === "assistant") {
+    message.info.summary = true
+    message.info.parentID = parent.info.id
+  }
+  return message
+}
+
 describe("SessionTaskSize.size", () => {
   test("a message sent while the run is going joins its request and can only raise it", () => {
     const requests = size([
@@ -97,6 +143,20 @@ describe("SessionTaskSize.size", () => {
     ])
     expect(requests.map((request) => request.tier)).toEqual(["standard", "chat"])
     expect(requests[0]?.escalated).toBe(true)
+  })
+
+  test("two raises take a light request to thorough; the highest raise counts", () => {
+    const requests = size([
+      user("rename getUser to fetchUser"),
+      assistant("More than a rename.", "tool-calls", [
+        { tool: "escalate", metadata: { from: "light", to: "standard" } },
+      ]),
+      assistant("It spans every package.", "tool-calls", [
+        { tool: "escalate", metadata: { from: "standard", to: "thorough" } },
+      ]),
+      assistant("Renamed."),
+    ])
+    expect(requests[0]?.tier).toBe("thorough")
   })
 
   test("a continue after a thanks exchange continues the work, not the thanks", () => {
@@ -174,6 +234,81 @@ describe("SessionTaskSize.size", () => {
     expect(size([user("migrate everything")])[0]?.judge).toBe("off")
     // "Skip the judge" in the message wins for that request.
     expect(size([user("be thorough but skip the judge", { judge: "thorough" })])[0]?.judge).toBe("off")
+  })
+
+  test("a request whose opening a compaction summarised keeps the size, judge and words it recorded", () => {
+    // The opening message is out of view; only the marker, its summary and the continue are left.
+    const opening = MessageID.ascending()
+    const compaction = marker({
+      opened: opening,
+      tier: "thorough",
+      judge: "thorough",
+      text: "migrate the app to the new router across 40 files",
+      files: ["/r/router.ts"],
+      cloud: false,
+      browser: false,
+      agents: [],
+    })
+    const messages = [
+      compaction,
+      summary(compaction),
+      user("Continue if you have next steps.", { synthetic: true }),
+      assistant("Migrated the router."),
+    ]
+    const requests = size(messages)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.tier).toBe("thorough")
+    expect(requests[0]?.judge).toBe("thorough")
+    expect(SessionTaskSize.requestText(requests[0]!)).toContain("new router")
+    // The judge still sees the work the summary replaced.
+    expect(SessionTaskSize.judgeable(requests, opening)?.files).toEqual(["/r/router.ts"])
+    // A "continue" afterwards continues that work with its size, never as a bare reply.
+    const next = size([...messages, user("continue")])
+    expect(next.map((request) => request.tier)).toEqual(["thorough", "thorough"])
+    // A message that joined the summarised request in the retained tail stays part of it.
+    const start = MessageID.ascending()
+    const joined = user("also update the docs")
+    const reading = assistant("Updating.", "tool-calls", [{ tool: "read" }])
+    const later = marker({ ...compaction.parts.flatMap(recorded)[0]!, opened: start })
+    const tail = size([later, summary(later), joined, reading])
+    expect(tail).toHaveLength(1)
+    expect(tail[0]?.users).toHaveLength(1)
+    expect(tail[0]?.tier).toBe("thorough")
+  })
+
+  test("a continue after a compaction that recorded nothing is a light job, not a bare reply", () => {
+    const compaction = marker()
+    const requests = size([compaction, summary(compaction), user("continue")])
+    expect(requests.at(-1)?.tier).toBe("light")
+    expect(size([compaction, summary(compaction), user("hi")]).at(-1)?.tier).toBe("chat")
+  })
+
+  test("the judge checks every request the run answered, and the work a yes continues", () => {
+    const since = MessageID.ascending()
+    // A message sent during the final step opens its own request after the large one.
+    const joined = size([
+      user("migrate the app to the new router across 40 files", { judge: "thorough" }),
+      wrote("/r/router.ts"),
+      assistant("Migrated the router."),
+      user("also fix the typo in README", { judge: "thorough" }),
+      assistant("Fixed the typo."),
+    ])
+    expect(joined.map((request) => request.tier)).toEqual(["thorough", "light"])
+    const work = SessionTaskSize.judgeable(joined, since)
+    // The judge reads both requests: the large one qualifies the work, and the joined one is part of it.
+    expect(work?.requests).toHaveLength(2)
+    expect(work?.files).toEqual(["/r/router.ts"])
+
+    // A yes to the agent's question, in a later run, takes the work it answers to the judge.
+    const ask = user("migrate the app to the new router across 40 files", { judge: "thorough" })
+    const before = [ask, wrote("/r/router.ts"), assistant("Migrated 30 routes. Should I also migrate the tests?")]
+    const later = MessageID.ascending()
+    const answered = size([...before, user("yes", { judge: "thorough" }), assistant("Migrated the tests.")])
+    expect(answered.map((request) => request.tier)).toEqual(["thorough", "thorough"])
+    expect(SessionTaskSize.judgeable(answered, later)?.files).toEqual(["/r/router.ts"])
+    // A light follow-up that is not a continuation is judged on its own, and in "thorough" mode it is not.
+    const unrelated = size([...before, user("fix the typo in README", { judge: "thorough" }), assistant("Fixed.")])
+    expect(SessionTaskSize.judgeable(unrelated, later)).toBeUndefined()
   })
 
   test("changed files come from patches and completed edits after the last verdict", () => {

@@ -12,7 +12,7 @@ export const Info = Schema.Struct({
   subtask: Schema.optional(Schema.Boolean),
   size: Schema.optional(TaskSize.Tier).annotate({
     description:
-      "How much harness the command's run gets: chat, light, standard or thorough (default: standard). Only thorough offers subagents.",
+      "How much harness the command's run gets: chat, light, standard or thorough. When unset, Vector sizes the run from what the template asks for. Only thorough offers subagents.",
   }),
 })
 export type Info = Schema.Schema.Type<typeof Info>

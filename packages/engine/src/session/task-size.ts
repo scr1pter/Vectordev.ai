@@ -2,6 +2,7 @@ export * as SessionTaskSize from "./task-size"
 
 import { TaskSize } from "@vectordevai/core/task-size"
 import { SessionV1 } from "@vectordevai/core/v1/session"
+import { isRecord } from "@/util/record"
 
 // Sizes the request a run is answering from the projected history alone, on every step. Nothing is decided at
 // admission: a prompt stores only what the sender chose (`size`, `judge`), and a completed escalate call is the durable
@@ -9,6 +10,28 @@ import { SessionV1 } from "@vectordevai/core/v1/session"
 
 /** The hidden instruction the app sent with every prompt while LLM-as-a-judge was on, before Vector ran the judge. */
 export const LEGACY_JUDGE_POLICY = "<vector_verified_completion>"
+
+/** Where a compaction marker records the request it summarised, on a hidden text part's metadata. */
+export const CARRIED = "vector_request"
+
+/**
+ * What a compaction keeps of the request it summarised. The summary replaces the message that opened the request, so
+ * without this the request would lose its size, its judge and its words, and a "continue" after it would have nothing
+ * to continue.
+ */
+export type Carried = {
+  /** The user message that opened the request. */
+  readonly opened: string
+  readonly tier: TaskSize.Tier
+  readonly judge: TaskSize.JudgeMode
+  /** What the user typed, for the judge's brief. */
+  readonly text: string
+  /** Files the summarised part of the request changed since its last verdict. */
+  readonly files: readonly string[]
+  readonly cloud: boolean
+  readonly browser: boolean
+  readonly agents: readonly string[]
+}
 
 export type Request = {
   /** The user's own messages in this request, oldest first: the one that opened it and any that joined it. */
@@ -23,6 +46,8 @@ export type Request = {
   /** The size, and cues, whose tools and policies the request is sent with; see `offered` in `size`. */
   readonly offered: { readonly tier: TaskSize.Tier; readonly cloud: boolean; readonly browser: boolean }
   readonly judge: TaskSize.JudgeMode
+  /** What a compaction recorded of this request, when the summary replaced the message that opened it. */
+  readonly carried?: Carried
 }
 
 export type Input = {
@@ -52,31 +77,45 @@ export function size(input: Input): Request[] {
   // starts the visible history again) resets them to the request's own size.
   let sticky: Request["offered"] | undefined
   let end = 0
+  // A compaction that recorded nothing (one from before Vector recorded requests) still leaves work to continue: a
+  // "continue" or a "yes" after it is a Light job with tools and history, never a bare reply.
+  const compacted = input.messages.some((message) => message.parts.some((part) => part.type === "compaction"))
   for (const group of groups(input.messages)) {
     const previous = sized.at(-1)
     // What a "continue" or a "yes" continues: the last request that was more than a greeting, since a "thanks" and its
     // reply in between are not the work.
     const prior = sized.findLast((request) => request.tier !== "chat")
     const asked = previous ? TaskSize.asks(closingText(previous.messages)) : false
-    const result = group.users.reduce<TaskSize.Result | undefined>((current, user) => {
-      const next = TaskSize.classify({
-        ...describe(user),
-        previous: current?.tier ?? prior?.tier,
-        asked: current ? false : asked,
-        auto: input.auto,
-      })
-      if (!current) return next
-      // A message that joined the run raises it; it never shrinks what the request already is.
-      return TaskSize.rank(next.tier) > TaskSize.rank(current.tier)
-        ? { ...next, judge: next.judge && current.judge }
-        : current
-    }, undefined)!
+    const result = group.users.reduce<TaskSize.Result | undefined>(
+      (current, user) => {
+        const next = TaskSize.classify({
+          ...describe(user),
+          previous: current?.tier ?? prior?.tier ?? (compacted ? "light" : undefined),
+          asked: current ? false : asked,
+          auto: input.auto,
+        })
+        if (!current) return next
+        // A message that joined the run raises it; it never shrinks what the request already is.
+        return TaskSize.rank(next.tier) > TaskSize.rank(current.tier)
+          ? { ...next, judge: next.judge && current.judge }
+          : current
+      },
+      group.carried && {
+        tier: group.carried.tier,
+        source: "auto",
+        reasons: ["compacted"],
+        cloud: group.carried.cloud,
+        browser: group.carried.browser,
+        judge: group.carried.judge !== "off",
+        agents: group.carried.agents,
+      },
+    )!
     const raised = escalation(group.messages)
     const tier = raised ? TaskSize.max(result.tier, raised) : result.tier
     const inherited = result.source === "inherited" && prior !== undefined
     const cloud = result.cloud || used.cloud || (inherited && prior.offered.cloud)
     const browser = result.browser || used.browser || (inherited && prior.offered.browser)
-    const start = group.users[0].info.time.created
+    const start = (group.users[0] ?? group.messages[0]).info.time.created
     const cold = !input.caching || sticky === undefined || start - end > input.lifetime
     const offered =
       tier === "chat"
@@ -96,15 +135,81 @@ export function size(input: Input): Request[] {
       tier,
       escalated: raised !== undefined,
       offered,
-      judge: judgeMode(group.users, input.judge, result.judge),
+      judge: judgeMode(group.users, group.carried?.judge ?? input.judge, result.judge),
+      ...(group.carried ? { carried: group.carried } : {}),
     })
   }
   return sized
 }
 
 /** The text a request's user typed, for the judge's brief. */
-export function requestText(request: Pick<Request, "users">) {
-  return request.users.map((user) => typed(user)).join("\n\n")
+export function requestText(request: Pick<Request, "users" | "carried">) {
+  return [...(request.carried ? [request.carried.text] : []), ...request.users.map((user) => typed(user))]
+    .filter(Boolean)
+    .join("\n\n")
+}
+
+/**
+ * What a compaction records of the request it is about to summarise, from the messages its summary replaces: the
+ * request's size, judge and words, and the files it changed since its last verdict.
+ */
+export function carry(request: Request, hidden: (message: SessionV1.WithParts) => boolean): Carried | undefined {
+  if (request.tier === "chat") return
+  const opened = request.users[0]?.info.id ?? request.carried?.opened
+  if (!opened) return
+  const messages = request.messages.filter(hidden)
+  const verdict = judgeRuns({ messages }).at(-1)?.messageID
+  return {
+    opened,
+    tier: request.tier,
+    judge: request.judge,
+    text: requestText(request).slice(0, 8000),
+    files: [...new Set([...(verdict ? [] : (request.carried?.files ?? [])), ...changedFiles({ messages }, verdict)])],
+    cloud: request.offered.cloud,
+    browser: request.offered.browser,
+    agents: request.result.agents,
+  }
+}
+
+/**
+ * The work Vector's judge checks when a run ends: every request the run answered, with the requests they continue (a
+ * "yes" to the agent's question carries the work it answers), when one of them qualifies for the judge. A message that
+ * joined during the final step opens its own request, so judging only the last one would miss the work before it.
+ * Undefined when nothing qualifies or no file changed since the last verdict.
+ */
+export function judgeable(requests: readonly Request[], since: string) {
+  const touched = requests.findIndex((request) =>
+    request.messages.some((message) => message.info.role === "assistant" && message.info.id > since),
+  )
+  const last = requests.at(-1)
+  if (touched === -1 || !last || !last.result.judge) return
+  const unit = requests.slice(origin(requests, touched))
+  // "thorough" judges Thorough work; "changes" judges any work.
+  const qualifies = unit.some(
+    (request) =>
+      request.judge !== "off" &&
+      request.tier !== "chat" &&
+      (request.judge === "changes" || request.tier === "thorough"),
+  )
+  if (!qualifies) return
+  const verdict = unit.flatMap(judgeRuns).at(-1)?.messageID
+  const files = [
+    ...new Set([
+      // A verdict the summary kept in view is newer than anything the summary replaced.
+      ...(verdict ? [] : unit.flatMap((request) => request.carried?.files ?? [])),
+      ...unit.flatMap((request) => changedFiles(request, verdict)),
+    ]),
+  ]
+  if (files.length === 0) return
+  // The judge reads everything the user asked for in that work, not only the request that qualified it.
+  return { requests: unit.filter((request) => request.tier !== "chat"), files }
+}
+
+// The request a continuation goes back to: "yes" or "continue" inherits the last request before it that was work.
+function origin(requests: readonly Request[], index: number): number {
+  if (requests[index]?.result.source !== "inherited") return index
+  const prior = requests.slice(0, index).findLastIndex((request) => request.tier !== "chat")
+  return prior === -1 ? index : origin(requests, prior)
 }
 
 /** Files the request changed after the given message: its recorded patches, and its completed edits and writes. */
@@ -177,28 +282,43 @@ export function real(message: SessionV1.WithParts) {
   )
 }
 
+type Group = { users: SessionV1.WithParts[]; messages: SessionV1.WithParts[]; closed: boolean; carried?: Carried }
+
 function groups(messages: readonly SessionV1.WithParts[]) {
   // The projected history can be reordered around a compaction; message IDs are monotonic.
   const sorted = messages.toSorted((a, b) => (a.info.id < b.info.id ? -1 : a.info.id > b.info.id ? 1 : 0))
-  return sorted.reduce<{ users: SessionV1.WithParts[]; messages: SessionV1.WithParts[]; closed: boolean }[]>(
-    (list, message) => {
-      const current = list.at(-1)
-      if (real(message)) {
-        // A message sent while the run is going joins it; one sent after the run answered opens the next request.
-        if (!current || current.closed) return [...list, { users: [message], messages: [message], closed: false }]
-        current.users.push(message)
-        current.messages.push(message)
-        return list
-      }
-      if (!current) return list
+  const visible = new Set<string>(sorted.map((message) => message.info.id))
+  return sorted.reduce<Group[]>((list, message) => {
+    const carried = carriedOf(message)
+    if (carried && !visible.has(carried.opened)) {
+      // The summary replaced the message that opened this request: the request goes on from what the compaction
+      // recorded, with every message after its opening that is still in view.
+      const joined = list.filter((group) => group.messages[0]!.info.id > carried.opened)
+      return [
+        ...list.filter((group) => group.messages[0]!.info.id < carried.opened),
+        {
+          users: joined.flatMap((group) => group.users),
+          messages: [...joined.flatMap((group) => group.messages), message],
+          closed: false,
+          carried,
+        },
+      ]
+    }
+    const current = list.at(-1)
+    if (real(message)) {
+      // A message sent while the run is going joins it; one sent after the run answered opens the next request.
+      if (!current || current.closed) return [...list, { users: [message], messages: [message], closed: false }]
+      current.users.push(message)
       current.messages.push(message)
-      if (message.info.role === "assistant" && terminal(message.info)) current.closed = true
-      // Vector's own follow-ups (a judge's findings, a task notification, a compaction's continue) continue the run.
-      if (message.info.role === "user") current.closed = false
       return list
-    },
-    [],
-  )
+    }
+    if (!current) return list
+    current.messages.push(message)
+    if (message.info.role === "assistant" && terminal(message.info)) current.closed = true
+    // Vector's own follow-ups (a judge's findings, a task notification, a compaction's continue) continue the run.
+    if (message.info.role === "user") current.closed = false
+    return list
+  }, [])
 }
 
 function terminal(info: SessionV1.Assistant) {
@@ -223,19 +343,47 @@ function describe(message: SessionV1.WithParts) {
   }
 }
 
+// The highest size the agent raised the request to; a raise only ever goes up.
 function escalation(messages: readonly SessionV1.WithParts[]) {
-  for (const message of messages) {
-    if (message.info.role !== "assistant") continue
-    for (const part of message.parts) {
-      if (part.type !== "tool" || part.tool !== "escalate" || part.state.status !== "completed") continue
+  return messages
+    .flatMap((message) => (message.info.role === "assistant" ? message.parts : []))
+    .flatMap((part) => {
+      if (part.type !== "tool" || part.tool !== "escalate" || part.state.status !== "completed") return []
       const to = part.state.metadata?.to
-      if (to === "light" || to === "standard" || to === "thorough") return to as TaskSize.Tier
-    }
+      return to === "light" || to === "standard" || to === "thorough" ? [to as TaskSize.Tier] : []
+    })
+    .reduce<TaskSize.Tier | undefined>((highest, to) => (highest ? TaskSize.max(highest, to) : to), undefined)
+}
+
+function carriedOf(message: SessionV1.WithParts): Carried | undefined {
+  if (message.info.role !== "user") return
+  const value = message.parts.flatMap((part) =>
+    part.type === "text" && part.synthetic && part.ignored && isRecord(part.metadata?.[CARRIED])
+      ? [part.metadata[CARRIED]]
+      : [],
+  )[0]
+  if (!value || typeof value.opened !== "string" || !isTier(value.tier)) return
+  return {
+    opened: value.opened,
+    tier: value.tier,
+    judge: value.judge === "thorough" || value.judge === "changes" ? value.judge : "off",
+    text: typeof value.text === "string" ? value.text : "",
+    files: Array.isArray(value.files) ? value.files.filter((file): file is string => typeof file === "string") : [],
+    cloud: value.cloud === true,
+    browser: value.browser === true,
+    agents: Array.isArray(value.agents)
+      ? value.agents.filter((agent): agent is string => typeof agent === "string")
+      : [],
   }
+}
+
+function isTier(value: unknown): value is TaskSize.Tier {
+  return value === "chat" || value === "light" || value === "standard" || value === "thorough"
 }
 
 function judgeMode(
   users: readonly SessionV1.WithParts[],
+  // The config's setting, or what a compaction recorded for the request.
   configured: TaskSize.JudgeMode | undefined,
   allowed: boolean,
 ): TaskSize.JudgeMode {
