@@ -49,6 +49,8 @@ export interface Finding extends ModelFinding {
   side: Side
   source: "review" | "security"
   verified?: boolean
+  // Other places the same defect was reported in this run, as "path:line". Selection folds them into this finding.
+  also?: string[]
 }
 
 export type AnchorFailure = "file-not-in-diff" | "line-outside-diff" | "no-patch"
@@ -81,6 +83,8 @@ export type DropReason =
   | "duplicate"
   | "dismissed"
   | "rejected-by-verify"
+  | "unconfirmed" // after a triage pass, the review model did not confirm it
+  | "nit" // a nit or a style finding, while nits are off
 
 export interface PriorFinding {
   id: string
@@ -97,6 +101,8 @@ export interface PriorFinding {
   threadId?: string
   fixedIn?: string
   dismissedBy?: string
+  // The other lines of this file its comment or listing names as the same defect, at the current head.
+  also?: number[]
 }
 
 export interface Selection {
@@ -126,6 +132,7 @@ export interface SummaryFinding {
   sha: string
   status: PriorFinding["status"]
   fixedIn?: string
+  also?: number[] // the other lines of this file it names as the same defect
 }
 
 export interface ReviewState {
@@ -187,6 +194,17 @@ export interface ReviewOutcome {
   sessions: string[]
   stats: { files: number; additions: number; deletions: number }
   notes: string[] // deterministic summary notes (generated header, moved comments, superseded)
+  // What each pass spent, from its session's recorded usage. Absent when no pass reported usage.
+  passes?: ReviewPass[]
+}
+
+export interface ReviewPass {
+  name: "review" | "security" | "verify"
+  model: string // "provider/model"
+  costUsd?: number // absent when the pass's usage carried no price
+  input: number // cache reads and writes included
+  output: number
+  cacheRead: number
 }
 
 // `.vector/review.json`. Environment variables override it, and it overrides DEFAULT_REVIEW_CONFIG.
@@ -216,6 +234,11 @@ export interface ReviewConfig {
   maxCostUsdPerMonth: number // 0 = none; install writes REVIEW_MAX_COST_USD_PER_MONTH=50 for paid models
   timeoutMinutes: number
   model?: string // "provider/model"
+  // A cheaper "provider/model" for the first pass. The review and security reviewers run on it, and every finding
+  // above a nit is then double-checked on `model`; only the ones it confirmed are reported, and `verify` cannot be off.
+  triageModel?: string
+  // Style nits are left out unless this is true or minSeverity is "nit".
+  nits: boolean
   paths: { path: string; instructions: string }[] // JSON alternative to review.md sections
 }
 
@@ -243,5 +266,6 @@ export const DEFAULT_REVIEW_CONFIG: ReviewConfig = {
   maxCostUsdPerPr: 10,
   maxCostUsdPerMonth: 0,
   timeoutMinutes: 12,
+  nits: false,
   paths: [],
 }

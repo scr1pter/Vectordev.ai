@@ -30,6 +30,7 @@ export interface ResolveInput {
   flag?: string // `vector review --model`
   config?: string // `model` from .vector/review.json
   env?: Record<string, string | undefined> // MODEL and REVIEW_AUTO_MODEL; process.env by default
+  exact?: string // this "provider/model" and no other, such as review.json's triageModel
 }
 
 // CI (auto and command): REVIEW_AUTO_MODEL for automatic runs only, then review.json, then MODEL.
@@ -45,9 +46,11 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
 
   const ci = input.trigger === "auto" || input.trigger === "command"
   const agent = ci ? undefined : (yield* config.get()).agent?.["review"]
-  const chosen = ci
-    ? first([input.trigger === "auto" ? env.REVIEW_AUTO_MODEL : undefined, input.config, env.MODEL])
-    : first([input.flag, input.config, agent?.model])
+  const chosen =
+    first([input.exact]) ??
+    (ci
+      ? first([input.trigger === "auto" ? env.REVIEW_AUTO_MODEL : undefined, input.config, env.MODEL])
+      : first([input.flag, input.config, agent?.model]))
   const free =
     chosen || !ci
       ? undefined

@@ -2,8 +2,8 @@
 import { writeFile } from "node:fs/promises"
 import { isAbsolute, join, relative, resolve } from "node:path"
 import { parseArgs } from "node:util"
-import { renderPatch } from "../../packages/core/src/review/diff"
 import { DEFAULT_SLACK, scoreReview, totalScores, type ReviewScore } from "../../packages/core/src/review/eval"
+import { packChanges } from "../../packages/core/src/review/pack"
 import { buildReviewPrompt, type PromptInput } from "../../packages/core/src/review/prompt"
 import { decodeReport, REVIEW_REPORT_JSON_SCHEMA } from "../../packages/core/src/review/schema"
 import type { ModelReport } from "../../packages/core/src/review/types"
@@ -170,15 +170,21 @@ async function main() {
   return runs.some((run) => run.status === "error") ? 1 : 0
 }
 
+// The app and the engine pack an untrusted change the same way: each changed file once, annotated when that is no
+// larger than its diff and its text together.
 function promptInput(fixture: Fixture): PromptInput {
+  const packed = packChanges({
+    inline: fixture.files,
+    headFiles: fixture.headFiles.map((file) => ({ path: file.path, text: file.text, exact: true })),
+  })
   return {
     mode: "full",
     trust: "untrusted",
     base: BASE_SHA,
     head: HEAD_SHA,
     pr: fixture.pr,
-    diff: renderPatch(fixture.files),
-    headFiles: fixture.headFiles.map((file) => ({ path: file.path, text: file.text, exact: true })),
+    diff: packed.diff,
+    headFiles: packed.headFiles,
     maxComments: MAX_COMMENTS,
   }
 }

@@ -25,6 +25,8 @@ import {
 const NEAR = 3
 // Two nearby findings in one run are the same one only with titles at least this alike (or the same fix or code).
 const SAME_TITLE = 0.3
+// The same defect reported at several places in one file: titles at least this alike, same category and severity.
+const REPEAT_TITLE = 0.6
 // An earlier finding whose thread GitHub marked outdated has no line, so it matches by title alone, this alike.
 const OUTDATED_TITLE = 0.5
 const TEAM_PENALTY = 0.15
@@ -36,11 +38,13 @@ const LARGE_CHANGE = 800
 const DROP_ORDER: DropReason[] = [
   "empty",
   "low-confidence",
+  "nit",
   "ignored-path",
   "unknown-path",
   "duplicate",
   "dismissed",
   "rejected-by-verify",
+  "unconfirmed",
 ]
 
 export interface SelectInput {
@@ -49,7 +53,8 @@ export interface SelectInput {
   head: string
   trust: Trust
   mode: "full" | "incremental"
-  config: Pick<ReviewConfig, "minConfidence" | "minSeverity" | "maxComments" | "maxCommentsPerPr" | "suggestions">
+  config: Pick<ReviewConfig, "minConfidence" | "minSeverity" | "maxComments" | "maxCommentsPerPr" | "suggestions"> &
+    Partial<Pick<ReviewConfig, "nits">>
   prior?: PriorFinding[] // classified by classifyPrior, with current head lines
   focus?: FocusHunk[]
   inlinePosted?: number // state.inlinePosted
@@ -135,14 +140,26 @@ export function computeRisk(input: {
   return input.modelRisk === "medium" || input.modelRisk === "high" ? "medium" : "low"
 }
 
+// Nits are reported only when asked for: `nits: true`, or a minSeverity of "nit".
+export function wantsNits(config: Partial<Pick<ReviewConfig, "nits" | "minSeverity">>): boolean {
+  return config.nits === true || config.minSeverity === "nit"
+}
+
+// A nit, or a style finding short of blocking: what is left out while nits are off.
+export function isNit(finding: Pick<Finding, "severity" | "category">): boolean {
+  return finding.severity === "nit" || (finding.category === "style" && finding.severity !== "blocking")
+}
+
 export function selectFindings(input: SelectInput): Selection {
   const { config } = input
+  const asked = wantsNits(config)
   const drops = new Map<DropReason, number>()
   const drop = (reason: DropReason, count = 1) => drops.set(reason, (drops.get(reason) ?? 0) + count)
   for (const entry of input.dropped ?? []) drop(entry.reason, entry.count)
 
-  // 1–3. Empty findings, ignored and unknown paths, low confidence. A path written as "./x" or "b/x", or a
-  // renamed file's old path, becomes the diff's own path, so matching and anchoring agree.
+  // 1–3. Empty findings, ignored and unknown paths, low confidence, and nits unless they were asked for. A path
+  // written as "./x" or "b/x", or a renamed file's old path, becomes the diff's own path, so matching and anchoring
+  // agree.
   const index = buildAnchorIndex(input.anchors)
   const kept: Finding[] = []
   for (const finding of input.findings) {
@@ -152,12 +169,14 @@ export function selectFindings(input: SelectInput): Selection {
     else if (input.ignored?.(path)) drop("ignored-path")
     else if (!entry && input.knownPath && !input.knownPath(path)) drop("unknown-path")
     else if (finding.confidence < config.minConfidence) drop("low-confidence")
+    else if (!asked && isNit(finding)) drop("nit")
     else kept.push({ ...finding, path })
   }
 
   // 4. Dedupe within the run, by id and then by location. The stronger finding is kept. Nearby findings are one only
   // when their titles are alike, they carry the same fix, or two reviewers flagged the same code, so a missing test
-  // three lines from a bug stays its own finding.
+  // three lines from a bug stays its own finding. An id leaves the line out, so the same id further down the file is
+  // the same defect at another place: the kept finding names it (6b).
   const codes = new Map<Finding, string>()
   const codeOf = (finding: Finding) => {
     let code = codes.get(finding)
@@ -168,14 +187,28 @@ export function selectFindings(input: SelectInput): Selection {
     }
     return code
   }
+  // Kept finding → the other places it stands for, as "path:line". A duplicate hands over the places it named, and
+  // its own place too when it is somewhere else.
+  const places = new Map<Finding, string[]>()
+  const fold = (into: Finding, finding: Finding, elsewhere = true) =>
+    places.set(into, [
+      ...(places.get(into) ?? []),
+      ...(places.get(finding) ?? []),
+      ...(finding.also ?? []),
+      ...(elsewhere ? [`${finding.path}:${finding.line}`] : []),
+    ])
   const unique: Finding[] = []
   for (const finding of kept.sort(stronger)) {
-    const other = unique.find((entry) => entry.id === finding.id || sameFinding(entry, finding, codeOf))
+    const other =
+      unique.find(
+        (entry) => (entry.id === finding.id && !apart(entry, finding)) || sameFinding(entry, finding, codeOf),
+      ) ?? unique.find((entry) => entry.id === finding.id)
     if (!other) {
       unique.push(finding)
       continue
     }
     drop("duplicate")
+    fold(other, finding, apart(other, finding))
     // The security reviewer's copy of a defect the code reviewer found keeps the code reviewer's category.
     if (
       other.source === "security" &&
@@ -207,7 +240,11 @@ export function selectFindings(input: SelectInput): Selection {
   const claim = (entry: PriorFinding) => available.splice(available.indexOf(entry), 1)
   for (const finding of candidates.sort(order)) {
     const match = matchPrior(finding, available)
-    if (!match || match.status === "outdated") posting.push(finding)
+    if (!match) {
+      // An open comment that already names this place as the same defect covers it, unless it got worse since.
+      const named = namedBy(finding, available)
+      if (!named || (finding.severity === "blocking" && named.severity !== "blocking")) posting.push(finding)
+    } else if (match.status === "outdated") posting.push(finding)
     else if (match.status === "dismissed") drop("dismissed")
     else if (match.status === "fixed" || (finding.severity === "blocking" && match.severity !== "blocking")) {
       claim(match)
@@ -217,12 +254,37 @@ export function selectFindings(input: SelectInput): Selection {
     // Otherwise it is still open: counted and listed through `stillOpen`, never commented again.
   }
 
+  // 6b. The same defect at several places in one file is one finding. The strongest keeps its line and names the
+  // others in its body, so a repeated pattern is one comment instead of one per occurrence. It runs after earlier
+  // findings are matched, so a place the team dismissed never takes a new place with it, and a finding that continues
+  // an earlier one stays its own. A finding carried from an earlier review keeps the places it already names.
+  const folded: Finding[] = []
+  for (const finding of posting) {
+    const first = continues.has(finding.id) ? undefined : folded.find((entry) => repeats(entry, finding, codeOf))
+    if (!first) {
+      folded.push(finding)
+      continue
+    }
+    drop("duplicate")
+    fold(first, finding)
+  }
+  for (const finding of folded) {
+    const named = places.get(finding)
+    if (!named) continue
+    const also = [...new Set([...(finding.also ?? []), ...named])]
+      .filter((place) => place !== `${finding.path}:${finding.line}`)
+      .toSorted((a, b) => lineOf(a) - lineOf(b))
+    if (!also.length) continue
+    finding.also = also
+    finding.body = withAlso(finding.body, also)
+  }
+
   // 7–9. Anchors, the incremental focus, and severity.
   const outsideDiff: Selection["outsideDiff"] = []
   const elsewhere: Finding[] = []
   const nits: Finding[] = []
   const placed: PlacedFinding[] = []
-  for (const finding of posting) {
+  for (const finding of folded) {
     const resolved = resolveAnchor(index, finding)
     if (!resolved.ok) outsideDiff.push({ ...finding, reason: resolved.reason })
     else if (
@@ -336,6 +398,59 @@ function sameFinding(a: Finding, b: Finding, code: (finding: Finding) => string)
   if (fix(a) && fix(a) === fix(b)) return true
   return a.source !== b.source && code(a) !== "" && code(a) === code(b)
 }
+
+// One defect repeated further down the same file: what sameFinding leaves apart because the lines are far apart.
+// Alike titles are not enough ("Missing null check on user" and "... on session" are two bugs): the code at both
+// places, or the fix, must be the same too.
+function repeats(a: Finding, b: Finding, code: (finding: Finding) => string): boolean {
+  if (a.path !== b.path || a.side !== b.side || a.category !== b.category || a.severity !== b.severity) return false
+  if (titleSimilarity(a.title, b.title) < REPEAT_TITLE) return false
+  const fix = (finding: Finding) => (finding.suggestion ?? "").replace(/\s+/g, " ").trim()
+  return (code(a) !== "" && code(a) === code(b)) || (fix(a) !== "" && fix(a) === fix(b))
+}
+
+// The same finding twice on one side of a file, further apart than one place: the same defect in two places.
+function apart(a: Finding, b: Finding): boolean {
+  return a.side === b.side && gap(a.line, a.endLine ?? a.line, b.line, b.endLine ?? b.line) > NEAR
+}
+
+// An open earlier finding whose comment names this finding's place as another place of the same defect.
+function namedBy(finding: Finding, prior: readonly PriorFinding[]): PriorFinding | undefined {
+  return prior.find(
+    (entry) =>
+      entry.status === "open" &&
+      entry.path === finding.path &&
+      entry.side === finding.side &&
+      categoryGroup(entry.category) === categoryGroup(finding.category) &&
+      titleSimilarity(finding.title, entry.title) >= REPEAT_TITLE &&
+      (entry.also ?? []).some((line) => gap(finding.line, finding.endLine ?? finding.line, line, line) <= NEAR),
+  )
+}
+
+function lineOf(place: string) {
+  return Number(place.slice(place.lastIndexOf(":") + 1))
+}
+
+// The lines a finding's "also at" sentence names, read back from a comment Vector posted. The last sentence is
+// Vector's own: it ends the finding's text.
+export function namedLines(text: string): number[] {
+  const last = [...text.matchAll(ALSO_LINES)].at(-1)
+  return last ? [...(last[1] ?? "").matchAll(/\d+/g)].map((match) => Number(match[0])) : []
+}
+
+const ALSO_LINES = /The same problem is also at lines? ((?:\d+, )*\d+(?: and \d+)?)\./g
+
+// "path:line" entries of one file, as the sentence a reader sees under the finding. A sentence written by an earlier
+// fold is replaced, so a carried finding never lists a place twice.
+function withAlso(body: string, also: readonly string[]): string {
+  const lines = [...new Set(also.map(lineOf))].toSorted((a, b) => a - b)
+  const list = lines.length === 1 ? lines[0] : `${lines.slice(0, -1).join(", ")} and ${lines.at(-1)}`
+  const sentence = `The same problem is also at ${lines.length === 1 ? "line" : "lines"} ${list}.`
+  const own = body.replace(ALSO_SENTENCE, "").trim()
+  return own ? `${own}\n\n${sentence}` : sentence
+}
+
+const ALSO_SENTENCE = /\s*The same problem is also at lines? [\d, ]+(?: and \d+)?\.\s*$/
 
 function isInjection(finding: Finding): boolean {
   return finding.title.trim().toLowerCase() === INJECTION_TITLE.toLowerCase()

@@ -27,11 +27,11 @@ export const prerender = true
             On the next push it reviews only what changed and says what got fixed instead of repeating itself.
           </p>
           <dl class="doc-rows">
-            <div><dt>What you get</dt><dd>A summary that is edited in place, and one review per push that contains only new comments. Severities are Blocking, Concern and Nit; nits and anything outside the changed lines stay in the summary. Vectorscope only ever comments. It never approves or blocks a pull request, unless you set <code>failOn</code> to make its check fail on blocking issues.</dd></div>
+            <div><dt>What you get</dt><dd>A summary that is edited in place, and one review per push that contains only new comments. Severities are Blocking, Concern and Nit. Nits and style points are left out unless you set <code>nits</code> to true; anything outside the changed lines stays in the summary. Vectorscope only ever comments. It never approves or blocks a pull request, unless you set <code>failOn</code> to make its check fail on blocking issues.</dd></div>
             <div><dt>Commands</dt><dd><code>/vectorscope review</code> reviews again, <code>/vectorscope review full</code> starts over, and <code>/vectorscope pause</code> or <code>/vectorscope resume</code> turns automatic reviews off or on for one pull request (or add the <code>vector:paused</code> label). Reply <code>/vectorscope fix</code> on a comment and Vectorscope applies that fix. <code>/vs</code> is the short form; <code>/vector</code> and <code>/vx</code> still work, so workflows installed before the name existed keep running. General coding tasks on issues continue to use <code>/vector</code> or <code>/vx</code>. A person with write access, or the pull request's author, can resolve a comment or react to it with a thumbs-down, and Vectorscope won't raise it again. Commands need write access.</dd></div>
-            <div><dt>Your rules</dt><dd>Write plain-English rules in <code>.vector/review.md</code>. A <code>## path: src/billing/**</code> heading scopes the rules under it. Tune limits in <code>.vector/review.json</code>: <code>maxComments</code> (10), <code>minSeverity</code> (concern), <code>minConfidence</code> (0.7), <code>ignore</code>, <code>security</code>, <code>maxCostUsd</code>. Both are read from the base branch, so a pull request can't change the rules it is reviewed under, except by editing the workflow file, which needs write access.</dd></div>
+            <div><dt>Your rules</dt><dd>Write plain-English rules in <code>.vector/review.md</code>. A <code>## path: src/billing/**</code> heading scopes the rules under it. Tune limits in <code>.vector/review.json</code>: <code>maxComments</code> (10), <code>minSeverity</code> (concern), <code>minConfidence</code> (0.7), <code>nits</code> (false), <code>ignore</code>, <code>security</code>, <code>maxCostUsd</code>, <code>triageModel</code>. Both are read from the base branch, so a pull request can't change the rules it is reviewed under, except by editing the workflow file, which needs write access.</dd></div>
             <div><dt>Low noise</dt><dd>Lockfiles, build output, generated and vendored files, snapshots and binaries are skipped and listed. Drafts, dependency bots and pull requests labelled <code>vector:skip</code> are skipped. To review drafts too, delete the <code>draft == false</code> line from <code>.github/workflows/vector.yml</code>. Very large pull requests get a note with a cost estimate instead of a review.</dd></div>
-            <div><dt>Cost</dt><dd>Your model provider bills usage under your own credentials. Every review ends with the model, the tokens, what it cost and the total for that pull request. Each review stops at <code>maxCostUsd</code> ($2.00), automatic reviews of one pull request stop at <code>maxCostUsdPerPr</code> ($10.00), and <code>REVIEW_MAX_COST_USD_PER_MONTH</code> in the workflow caps a month. Set <code>REVIEW_AUTO_MODEL</code> to use a cheaper model for automatic reviews.</dd></div>
+            <div><dt>Cost</dt><dd>Your model provider bills usage under your own credentials. Every review ends with the model, the tokens, what it cost and the total for that pull request. Each review stops at <code>maxCostUsd</code> ($2.00), automatic reviews of one pull request stop at <code>maxCostUsdPerPr</code> ($10.00), and <code>REVIEW_MAX_COST_USD_PER_MONTH</code> in the workflow caps a month. Set <code>REVIEW_AUTO_MODEL</code> to use a cheaper model for automatic reviews, or <code>triageModel</code> in <code>.vector/review.json</code> to run the first pass on a cheaper model and double-check its findings on your review model.</dd></div>
           </dl>
 
           <h2 id="choose-a-model">Choose a model</h2>
@@ -222,7 +222,7 @@ vector github review --pr 482 --dry-run</code><button class="doc-cmd-copy" type=
             A review is not a diff in a prompt. Each specialist gets a read-only session and, with it:
           </p>
           <ul class="feature-list">
-            <li><strong>The changed files at head</strong><span>Whole files where they fit, otherwise the hunks with context.</span></li>
+            <li><strong>The changed files at head</strong><span>The diff, and the reviewer opens the changed files in full. On an untrusted pull request the working tree is the base branch, so the prompt carries each changed file's head version, once: a numbered view with the added and removed lines marked replaces its diff where that is no longer than both together. A file over 200 lines keeps 20 lines around each change and folds the rest; a file too large to include is shown by its hunks with context. A re-review shows files with nothing new by their changed lines only.</span></li>
             <li><strong>Their callers</strong><span>Declarations found in the added lines, then grep hits for where those symbols are used elsewhere.</span></li>
             <li><strong>Their history</strong><span><code>git log</code> and blame for the changed ranges, so a line that was deliberately written that way reads as such.</span></li>
             <li><strong>The conversation</strong><span>Human review comments already on the pull request.</span></li>
@@ -244,12 +244,25 @@ vector github review --pr 482 --dry-run</code><button class="doc-cmd-copy" type=
             request's author controls. On an untrusted pull request a committable fix is offered only after the verify
             pass confirms the finding.
           </p>
+          <p>
+            With <code>triageModel</code> set in <code>.vector/review.json</code>, the review and security passes run on
+            that model, and every finding above a nit is then checked on your review model, even with
+            <code>verify</code> set to off. Only the findings your review model confirmed are posted. An earlier
+            finding the cheaper pass calls fixed is marked fixed, and its thread resolved, only when your review model
+            confirms that too. If that check doesn't finish, the cheaper pass's findings are left out, earlier findings
+            stay open, and the summary says so.
+            Nits, when you turn them on, are listed in the summary without that check. <code>vector review</code> and
+            the desktop panel list what each pass spent when a review has more than one pass.
+          </p>
 
           <h3 id="noise-control">Noise control</h3>
           <p>
             Selection is where a review stops being a wall of text. A finding below <code>minConfidence</code> (0.7) or
-            below <code>minSeverity</code> (concern) does not go on a line; nits and anything outside the changed lines
-            are listed in the summary instead.
+            below <code>minSeverity</code> (concern) does not go on a line, and anything outside the changed lines is
+            listed in the summary instead. Nits and style points are dropped unless <code>nits</code> is true or
+            <code>minSeverity</code> is nit. The same defect reported at several places in one file, with the same code or
+            the same fix at each, becomes one finding that names the other lines, and a later review doesn't post a
+            place again while the comment that names it is open.
           </p>
           <p>
             The cap for a run is the smaller of <code>maxComments</code> (10) and what is left of

@@ -65,6 +65,7 @@ import { decideSkip, type SkipReason } from "@vectordevai/core/review/skip"
 import {
   SUMMARY_MARKER,
   classifyPrior,
+  followAlso,
   emptyState,
   findSticky,
   mergePrior,
@@ -177,7 +178,7 @@ export interface ReviewJobDeps {
   gh: ReviewGitHub
   git: ReviewGit
   runReview: (input: RunInput) => Promise<ReviewOutcome>
-  resolveModel: (input: { trigger: Trigger; config?: string }) => Promise<ResolvedModel>
+  resolveModel: (input: { trigger: Trigger; config?: string; exact?: string }) => Promise<ResolvedModel>
   log: (line: string) => void
   now: () => number
   dryRun?: boolean
@@ -285,6 +286,14 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
     (error: unknown) => new Error(messageOf(error)),
   )
   if (model instanceof Error) return configError(model.message)
+  // review.json's cheaper first pass; the double-check stays on `model`.
+  const triage = config.triageModel
+    ? await deps.resolveModel({ trigger: ctx.trigger, exact: config.triageModel }).then(
+        (value) => value,
+        (error: unknown) => new Error(`triageModel: ${messageOf(error)}`),
+      )
+    : undefined
+  if (triage instanceof Error) return configError(triage.message)
 
   // 3. Earlier state.
   const comments = await gh.listIssueComments(ctx.pr)
@@ -553,7 +562,17 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
       fromComments.push(prior)
       findingThreads.set(root.id, { thread, body: root.body })
     }
-    const merged = mergePrior(fromState, fromComments)
+    // The other places a comment names are lines of the commit it was raised on, so they follow the code from there.
+    const moves = new Map<string, Promise<DiffFile[] | undefined>>()
+    const followed = await Promise.all(
+      fromComments.map(async (prior) => {
+        if (!prior.also?.length || head.startsWith(prior.sha)) return prior
+        if (!moves.has(prior.sha)) moves.set(prior.sha, deps.git.diff(prior.sha, head).catch(() => undefined))
+        const changes = await moves.get(prior.sha)
+        return changes ? followAlso(prior, changes) : prior
+      }),
+    )
+    const merged = mergePrior(fromState, followed)
     const open = merged.filter((prior) => prior.status === "open")
     const infos = new Map<number, ThreadInfo>()
     const logins = new Set<string>()
@@ -636,6 +655,7 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
       ),
       config,
       model,
+      ...(triage ? { triage } : {}),
       knownPath: known,
       onProgress: (event) =>
         log(event.type === "cost" ? `Spent $${event.costUsd.toFixed(4)}` : `${event.name}: ${event.status}`),

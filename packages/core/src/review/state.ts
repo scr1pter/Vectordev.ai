@@ -4,6 +4,7 @@
 import { DEFAULT_MENTIONS, parseReviewCommand } from "./command"
 import { mapLine, touched, type DiffFile } from "./diff"
 import type { TeamPattern } from "./prompt"
+import { namedLines } from "./select"
 import {
   CATEGORIES,
   SEVERITIES,
@@ -162,7 +163,8 @@ export interface FindingComment {
   threadId?: string
 }
 
-// An inline finding rebuilt from one of Vector's own review comments. Callers pass only bot-authored comments.
+// An inline finding rebuilt from one of Vector's own review comments. Callers pass only bot-authored comments. The
+// other places its text names are lines of the commit it was raised on; followAlso moves them to this head.
 export function priorFromComment(comment: FindingComment): PriorFinding | undefined {
   const marker = parseFindingMarker(comment.body)
   if (!marker) return undefined
@@ -181,7 +183,23 @@ export function priorFromComment(comment: FindingComment): PriorFinding | undefi
   }
   if (comment.threadId) prior.threadId = comment.threadId
   if (marker.fixedIn) prior.fixedIn = marker.fixedIn
+  const also = namedLines(comment.body)
+  if (also.length) prior.also = also
   return prior
+}
+
+// An earlier finding's other places, moved through `changes` from the commit that named them to this head. A place
+// whose code was deleted is left out. A LEFT finding's places are base lines, which do not move.
+export function followAlso(prior: PriorFinding, changes: DiffFile[]): PriorFinding {
+  if (!prior.also?.length || prior.side === "LEFT") return prior
+  return { ...prior, also: followLines(changes, prior.path, prior.also) }
+}
+
+function followLines(changes: DiffFile[], path: string, lines: readonly number[]): number[] {
+  return lines.flatMap((line) => {
+    const mapped = mapLine(changes, path, line)
+    return mapped === "deleted" ? [] : [mapped]
+  })
 }
 
 // Summary-only findings from the state, moved from the last reviewed head to this head. `changes` is the diff between
@@ -204,6 +222,9 @@ export function priorFromState(state: ReviewState, changes?: DiffFile[]): PriorF
       status: finding.status,
     }
     if (finding.fixedIn) prior.fixedIn = finding.fixedIn
+    const also =
+      changes && finding.side === "RIGHT" && finding.also ? followLines(changes, finding.path, finding.also) : finding.also
+    if (also?.length) prior.also = also
     return prior
   })
 }
@@ -381,6 +402,8 @@ function summaryFindings(previous: readonly SummaryFinding[], input: NextStateIn
     if (prior.line !== null) entry.line = prior.line
     if (prior.status === "fixed" && prior.fixedIn) entry.fixedIn = short(prior.fixedIn)
     else delete entry.fixedIn
+    if (prior.also?.length) entry.also = prior.also
+    else delete entry.also
   }
   const selection = input.selection
   if (!selection) return [...byId.values()]
@@ -395,6 +418,11 @@ function summaryFindings(previous: readonly SummaryFinding[], input: NextStateIn
 }
 
 export function toSummaryFinding(finding: Finding, head: string): SummaryFinding {
+  const also = (finding.also ?? []).flatMap((place) => {
+    const at = place.lastIndexOf(":")
+    const line = Number(place.slice(at + 1))
+    return place.slice(0, at) === finding.path && Number.isInteger(line) && line > 0 ? [line] : []
+  })
   return {
     id: finding.id,
     path: finding.path,
@@ -405,6 +433,7 @@ export function toSummaryFinding(finding: Finding, head: string): SummaryFinding
     title: finding.title.slice(0, MAX_STATE_TITLE),
     sha: short(head),
     status: "open",
+    ...(also.length ? { also } : {}),
   }
 }
 
@@ -441,7 +470,8 @@ function tier(finding: SummaryFinding): number {
 // Encoding: short keys, a table of paths, severities, categories and statuses as small integers, and full SHAs
 // only for head and base, as base64url JSON. encodeState prunes first, so the result is never over 16,000 chars.
 
-type CompactFinding = [string, number, number, number, number, number, string, string, number, string?]
+// The last two are optional: fixedIn ("" when only the places follow), then the other places' lines.
+type CompactFinding = [string, number, number, number, number, number, string, string, number, string?, number[]?]
 
 interface CompactState {
   v: 1
@@ -484,7 +514,8 @@ function encodeRaw(state: ReviewState): string {
       short(finding.sha),
       STATUSES.indexOf(finding.status),
     ]
-    if (finding.fixedIn) entry.push(short(finding.fixedIn))
+    if (finding.fixedIn || finding.also?.length) entry.push(finding.fixedIn ? short(finding.fixedIn) : "")
+    if (finding.also?.length) entry.push(finding.also)
     return entry
   })
   const compact: CompactState = {
@@ -546,7 +577,7 @@ export function decodeState(payload: string): ReviewState | undefined {
 
 function decodeFinding(entry: unknown, paths: (string | undefined)[]): SummaryFinding | undefined {
   if (!Array.isArray(entry)) return undefined
-  const [id, pathIndex, line, side, severity, category, title, sha, status, fixedIn] = entry
+  const [id, pathIndex, line, side, severity, category, title, sha, status, fixedIn, also] = entry
   const path = typeof pathIndex === "number" ? paths[pathIndex] : undefined
   const decoded = {
     severity: typeof severity === "number" ? SEVERITIES[severity] : undefined,
@@ -569,6 +600,10 @@ function decodeFinding(entry: unknown, paths: (string | undefined)[]): SummaryFi
     status: decoded.status,
   }
   if (isSha(fixedIn)) finding.fixedIn = fixedIn
+  const places = Array.isArray(also)
+    ? also.filter((place): place is number => typeof place === "number" && Number.isInteger(place) && place > 0)
+    : []
+  if (places.length) finding.also = places
   return finding
 }
 

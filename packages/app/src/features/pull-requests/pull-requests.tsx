@@ -2,6 +2,8 @@ import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, Show
 import { createStore } from "solid-js/store"
 import { githubApi, GithubDeviceSignIn } from "@/components/github-connect"
 import {
+  afterFixes,
+  askAgentPrompt,
   buildDesktopReview,
   checksForReview,
   dismissalRule,
@@ -10,6 +12,9 @@ import {
   countBySeverity,
   estimateText,
   findingGroups,
+  findingSections,
+  keptDismissals,
+  passLines,
   REBUILT_HINT,
   repoOf,
   reviewEvents,
@@ -17,10 +22,12 @@ import {
   reviewSpendText,
   type ReviewSpend,
   skippedText,
+  verificationChip,
   type ReviewCheckout,
   type ReviewEstimate,
   type ReviewEvent,
   type ReviewFindingView,
+  type ReviewFix,
   type LineComment,
   type PullRequestChecks,
   type ReviewOutcomeLite,
@@ -211,6 +218,11 @@ const BUTTON =
   "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-[6px] px-3 py-1.5 text-[12.5px] font-medium transition duration-150 disabled:cursor-default disabled:opacity-45"
 const PRIMARY = `${BUTTON} bg-[color:var(--vx-purple)] text-white hover:enabled:brightness-110`
 const SECONDARY = `${BUTTON} border border-[color:var(--vx-line-strong)] bg-[color:var(--vx-control)] text-[color:var(--vx-text)] hover:enabled:bg-[color:var(--vx-control-hover)]`
+// Lavender as the one accent on a finding: the action that fixes it in place.
+const FIX_ACTION =
+  "inline-flex items-center gap-1.5 rounded-[6px] border border-[color:color-mix(in_srgb,var(--vx-purple-bright)_45%,transparent)] bg-[color:var(--vx-purple-soft)] px-2.5 py-1 text-[11.5px] font-medium text-[color:var(--vx-purple-bright)] transition hover:enabled:brightness-110 disabled:cursor-default disabled:opacity-60"
+const FINDING_ACTION =
+  "inline-flex items-center gap-1.5 rounded-[6px] border border-[color:var(--vx-line-strong)] bg-[color:var(--vx-control)] px-2.5 py-1 text-[11.5px] font-medium text-[color:var(--vx-text)] transition hover:bg-[color:var(--vx-control-hover)]"
 const GHOST = `${BUTTON} text-[color:var(--vx-text-subtle)] hover:enabled:bg-[color:var(--vx-control)] hover:enabled:text-[color:var(--vx-text)]`
 const DANGER = `${BUTTON} border border-[color:color-mix(in_srgb,var(--vx-red)_45%,transparent)] text-[color:var(--vx-red)] hover:enabled:bg-[color:color-mix(in_srgb,var(--vx-red)_12%,transparent)]`
 const FIELD =
@@ -370,12 +382,10 @@ function Grounding(props: { outcome: ReviewOutcomeLite }) {
                   ? "bg-[color:color-mix(in_srgb,var(--vx-green)_12%,transparent)] text-[color:var(--vx-green)]"
                   : "bg-[color:color-mix(in_srgb,var(--vx-amber)_12%,transparent)] text-[color:var(--vx-amber)]"
               }`}
-              title="A second pass re-read the code behind each finding and dropped the ones that were not real."
+              title={verificationChip(checked()).title}
             >
               <Icon name="check" class="size-3" />
-              {checked().status === "ok"
-                ? `Double-checked ${checked().checked} · ${checked().rejected} dropped`
-                : "Not double-checked"}
+              {verificationChip(checked()).label}
             </span>
           )}
         </Show>
@@ -419,6 +429,10 @@ function FindingCard(props: {
   menuOpen: boolean
   canFix: boolean
   canRemember: boolean
+  // Set when the finding's fix can be applied to the user's checkout, with where applying it stands.
+  applyState?: "idle" | "applying" | "applied" | "changed" | "failed"
+  onApply?: () => void
+  onAsk?: () => void
   onMenu: (open: boolean) => void
   onDismiss: (reason: string) => void
   onRestore: () => void
@@ -521,16 +535,50 @@ function FindingCard(props: {
                 </div>
               )}
             </Show>
+            <Show when={props.applyState === "changed" || props.applyState === "failed"}>
+              <p class="mt-2 text-[11.5px] text-[color:var(--vx-amber)]">
+                {props.applyState === "changed"
+                  ? "Those lines changed since the review, so the fix was not applied."
+                  : "The fix could not be applied."}
+              </p>
+            </Show>
             <div class="mt-3 flex flex-wrap items-center gap-1.5">
+              <Show when={props.onApply}>
+                <button
+                  type="button"
+                  class={FIX_ACTION}
+                  disabled={props.applyState === "applying" || props.applyState === "applied"}
+                  title="Replaces the reviewed lines in your checkout with the suggested change. Nothing is committed."
+                  onClick={() => props.onApply?.()}
+                >
+                  <Icon name={props.applyState === "applied" ? "check" : "wand"} class="size-3" />
+                  {props.applyState === "applying"
+                    ? "Applying…"
+                    : props.applyState === "applied"
+                      ? "Fix applied"
+                      : "Apply fix"}
+                </button>
+              </Show>
+              <Show when={props.onAsk}>
+                <button
+                  type="button"
+                  class={FINDING_ACTION}
+                  title="Sends this finding to the agent in the task you have open, to check it and fix it in your checkout."
+                  onClick={() => props.onAsk?.()}
+                >
+                  <Icon name="comment" class="size-3" />
+                  Ask the agent
+                </button>
+              </Show>
               <Show when={props.canFix}>
                 <button
                   type="button"
-                  class="inline-flex items-center gap-1.5 rounded-[6px] border border-[color:var(--vx-line-strong)] bg-[color:var(--vx-control)] px-2.5 py-1 text-[11.5px] font-medium text-[color:var(--vx-text)] transition hover:bg-[color:var(--vx-control-hover)]"
+                  class={FINDING_ACTION}
                   title="Opens an isolated agent workspace with this finding as its task. You start it."
                   onClick={props.onFix}
                 >
-                  <Icon name="wand" class="size-3" />
-                  Fix with agent
+                  <Icon name="plus" class="size-3" />
+                  Fix in a new workspace
                 </button>
               </Show>
               <div class="relative">
@@ -651,6 +699,10 @@ export function PullRequests(props: {
   onChanges?: () => Promise<WorkingTreeChanges | undefined>
   // The model automatic reviews would run on, with its provider's key variables (see workflowModel).
   automaticReviewModel?: () => { model: string; keys: string[]; reason?: string } | undefined
+  // Applies a finding's fix to the open project's files (see applyReviewFix).
+  onApplyFix?: (fix: ReviewFix) => Promise<"applied" | "changed">
+  // Hands a prompt to the agent in the task on screen, or starts one with it.
+  onAskAgent?: (text: string) => void
 }) {
   const [status, setStatus] = createSignal<AccessStatus>()
   const [list, setList] = createSignal<PullRequest[]>([])
@@ -686,6 +738,8 @@ export function PullRequests(props: {
   // Finding id → why it was dismissed. Dismissed findings stay visible, struck through, and are never posted.
   const [dismissed, setDismissed] = createSignal<Record<string, string>>({})
   const [menuFor, setMenuFor] = createSignal<string>()
+  // Finding id → where applying its fix stands.
+  const [applied, setApplied] = createSignal<Record<string, "applying" | "applied" | "changed" | "failed">>({})
   const [query, setQuery] = createSignal("")
   const [severityFilter, setSeverityFilter] = createSignal<"all" | ReviewFindingView["severity"]>("all")
   const [ciRuns, setCiRuns] = createSignal<CiRun[]>([])
@@ -726,11 +780,8 @@ export function PullRequests(props: {
     const outcome = review()
     return outcome ? reviewEvents(withoutDismissed(outcome.selection, dismissedIds())) : undefined
   }
-  // Dismissed findings sink to the bottom of their list.
-  const visibleFindings = () =>
-    groups()
-      .flatMap((group) => (severityFilter() === "all" || group.severity === severityFilter() ? group.findings : []))
-      .toSorted((a, b) => Number(Boolean(dismissed()[a.id])) - Number(Boolean(dismissed()[b.id])))
+  // One section per severity; dismissed findings sink to the bottom of theirs.
+  const sections = () => findingSections(groups(), { filter: severityFilter(), dismissed: dismissed() })
   const canFix = () =>
     Boolean(
       (globalThis.window as unknown as { api?: { parallelWorkspaces?: unknown } } | undefined)?.api?.parallelWorkspaces,
@@ -928,6 +979,7 @@ export function PullRequests(props: {
     setReviewFailed(false)
     setSeverityFilter("all")
     setDismissed({})
+    setApplied({})
     setMenuFor(undefined)
     setPosted(false)
     setPostedNote(undefined)
@@ -1027,12 +1079,16 @@ export function PullRequests(props: {
     setBusy(undefined)
   }
 
-  const runReview = async () => {
+  // "Review again" passes the review on screen, so files that did not change are not sent again; fresh sends all.
+  const runReview = async (fresh = false) => {
     const bridge = api()
     const opened = selected()
     const projectPath = props.projectPath
     const request = { path: projectPath, revision: projectRevision }
     if (!bridge || !opened || !projectPath || reviewRun()) return
+    const last = review()
+    const previous = !fresh && last?.pr === opened.number ? last : undefined
+    const kept = previous ? dismissed() : {}
     const controller = new AbortController()
     // Opening another pull request waits for the review, so the run still being this one means the selection is too.
     const current = () =>
@@ -1042,6 +1098,7 @@ export function PullRequests(props: {
     setReviewRun({ controller, subject: opened.number })
     setSeverityFilter("all")
     setDismissed({})
+    setApplied({})
     setMenuFor(undefined)
     setPostedNote(undefined)
     setBusy("Checking for new commits…")
@@ -1093,6 +1150,7 @@ export function PullRequests(props: {
               },
               diff,
               ...(checks?.length ? { checks } : {}),
+              ...(previous ? { previous } : {}),
             },
             controller,
             current,
@@ -1102,14 +1160,18 @@ export function PullRequests(props: {
     if (reviewRun()?.controller === controller) setReviewRun(undefined)
     if (!active) return
     setReview(outcome)
+    if (outcome) setDismissed(keptDismissals(kept, outcome, previous))
     setBusy(undefined)
   }
 
   // The open project's uncommitted changes, read by the engine; no pull request and no GitHub sign-in needed.
-  const reviewChanges = async () => {
+  const reviewChanges = async (fresh = false) => {
     const projectPath = props.projectPath
     const request = { path: projectPath, revision: projectRevision }
     if (!projectPath || reviewRun()) return
+    const last = review()
+    const previous = !fresh && last && last.pr === undefined ? last : undefined
+    const kept = previous ? dismissed() : {}
     const controller = new AbortController()
     const current = () =>
       props.open &&
@@ -1119,17 +1181,22 @@ export function PullRequests(props: {
     resetReview()
     setBusy("Reading your changes…")
     setError(undefined)
-    const outcome = await requestReview({ uncommitted: true }, controller, current)
+    const outcome = await requestReview({ uncommitted: true, ...(previous ? { previous } : {}) }, controller, current)
     const active = current()
     if (reviewRun()?.controller === controller) setReviewRun(undefined)
     if (!active) return
     setReview(outcome)
+    if (outcome) setDismissed(keptDismissals(kept, outcome, previous))
     setBusy(undefined)
     void loadChanges(projectPath)
   }
 
   // Hands one review to the layout. The cost estimate waits for the user, and progress shows while the run is current.
-  const requestReview = (target: ReviewTarget, controller: AbortController, current: () => boolean) =>
+  const requestReview = (
+    target: ReviewTarget & Pick<ReviewRequest, "previous">,
+    controller: AbortController,
+    current: () => boolean,
+  ) =>
     props
       .onReview({
         ...target,
@@ -1262,6 +1329,41 @@ export function PullRequests(props: {
     props.onClose()
   }
 
+  // Writes the finding's suggested change into the user's checkout, once the lines still read as they were reviewed.
+  // Fixes apply one at a time, so each reads the file the one before it wrote, and each allows for the lines the
+  // review's earlier fixes moved or rewrote next to it.
+  let applying = Promise.resolve()
+  const applyFix = async (finding: ReviewFindingView) => {
+    const fix = finding.apply
+    const apply = props.onApplyFix
+    const state = applied()[finding.id]
+    if (!fix || !apply || state === "applying" || state === "applied") return
+    setApplied((current) => ({ ...current, [finding.id]: "applying" }))
+    const turn = applying.then(async () => {
+      const earlier = groups()
+        .flatMap((group) => group.findings)
+        .flatMap((other) => (other.apply && applied()[other.id] === "applied" ? [other.apply] : []))
+      const edit = afterFixes(fix, earlier)
+      const result = edit
+        ? await apply(edit).catch((cause: unknown) => {
+            setError(`Vector could not apply the fix: ${pullRequestErrorMessage(cause)}`)
+            return "failed" as const
+          })
+        : ("changed" as const)
+      setApplied((current) => ({ ...current, [finding.id]: result }))
+    })
+    applying = turn
+    await turn
+  }
+
+  // Hands the finding to the agent in the task on screen, which works in the checkout that was reviewed.
+  const askAgent = (finding: ReviewFindingView) => {
+    const ask = props.onAskAgent
+    if (!ask) return
+    ask(askAgentPrompt(panel.view === "changes" ? undefined : selected(), finding))
+    props.onClose()
+  }
+
   const createPr = async (event: SubmitEvent) => {
     event.preventDefault()
     const bridge = api()
@@ -1356,11 +1458,13 @@ export function PullRequests(props: {
               ? liveSpend()
                 ? `Reviewing… · ${reviewSpendText(liveSpend()!)} so far`
                 : "Reviewing…"
-              : review()
-                ? `Reviewed ${subject.pr ? review()!.head.slice(0, 7) : "your uncommitted changes"} · ${reviewFooter(review()!)}`
-                : liveSpend()
-                  ? `${reviewFailed() ? "Review failed" : "Review stopped"} · ${reviewSpendText(liveSpend()!)}`
-                  : "Not reviewed yet"}
+              : review()?.unchanged
+                ? `No changes since the last review of ${subject.pr ? review()!.head.slice(0, 7) : "your uncommitted changes"} · nothing was sent`
+                : review()
+                  ? `Reviewed ${subject.pr ? review()!.head.slice(0, 7) : "your uncommitted changes"} · ${reviewFooter(review()!)}`
+                  : liveSpend()
+                    ? `${reviewFailed() ? "Review failed" : "Review stopped"} · ${reviewSpendText(liveSpend()!)}`
+                    : "Not reviewed yet"}
           </div>
         </div>
         <Show
@@ -1371,6 +1475,11 @@ export function PullRequests(props: {
               disabled={Boolean(busy()) || (!subject.pr && !panel.changes?.files)}
               class={review() ? SECONDARY : PRIMARY}
               onClick={() => void (subject.pr ? runReview() : reviewChanges())}
+              title={
+                review()
+                  ? "Reviews the files that changed since the last review; the rest keep their findings."
+                  : undefined
+              }
             >
               <Icon name={review() ? "refresh" : "scope"} />
               {review() ? "Review again" : subject.pr ? "Review with Vector" : "Review my changes"}
@@ -1445,6 +1554,36 @@ export function PullRequests(props: {
                   </p>
                 </Show>
                 <Grounding outcome={outcome()} />
+                <Show when={outcome().unchanged}>
+                  <div class="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[6px] border border-[color:var(--vx-line)] bg-[color:var(--vx-canvas)] px-3 py-2 text-[12px] leading-relaxed text-[color:var(--vx-text-subtle)]">
+                    <span class="min-w-0 flex-1">
+                      Nothing changed since the last review, so nothing was sent to a model. These are its findings.
+                    </span>
+                    <button
+                      type="button"
+                      class={GHOST}
+                      onClick={() => void (subject.pr ? runReview(true) : reviewChanges(true))}
+                    >
+                      Review everything again
+                    </button>
+                  </div>
+                </Show>
+                <Show when={!outcome().unchanged && outcome().carried}>
+                  {(carried) => (
+                    <p class="mt-2.5 text-[11.5px] leading-relaxed text-[color:var(--vx-text-muted)]">
+                      Only the files that changed since the last review were reviewed again; {carried()}{" "}
+                      {carried() === 1 ? "finding was" : "findings were"} carried over from the others.
+                    </p>
+                  )}
+                </Show>
+                <Show when={passLines(outcome()).length > 1}>
+                  <div class="mt-3">
+                    <div class={SECTION_TITLE}>Cost by pass</div>
+                    <ul class="mt-1 flex flex-col gap-0.5 font-mono text-[11px] text-[color:var(--vx-text-subtle)]">
+                      <For each={passLines(outcome())}>{(line) => <li>{line}</li>}</For>
+                    </ul>
+                  </div>
+                </Show>
                 <For each={[...outcome().banners, ...outcome().notes]}>
                   {(note) => (
                     <p class="mt-2.5 rounded-[6px] border border-[color:color-mix(in_srgb,var(--vx-amber)_30%,transparent)] bg-[color:color-mix(in_srgb,var(--vx-amber)_8%,transparent)] px-3 py-2 text-[12px] leading-relaxed text-[color:var(--vx-amber)]">
@@ -1503,21 +1642,35 @@ export function PullRequests(props: {
                   </For>
                 </div>
               </div>
-              <div class="flex flex-col gap-2 px-4 pb-4">
-                <For each={visibleFindings()}>
-                  {(finding) => (
-                    <FindingCard
-                      finding={finding}
-                      dismissed={dismissed()[finding.id]}
-                      menuOpen={menuFor() === finding.id}
-                      uncommitted={!subject.pr}
-                      canFix={canFix()}
-                      canRemember={Boolean(rulesApi() && props.projectPath)}
-                      onMenu={(open) => setMenuFor(open ? finding.id : undefined)}
-                      onDismiss={(reason) => void dismiss(finding, reason)}
-                      onRestore={() => restore(finding)}
-                      onFix={() => fixWithAgent(finding)}
-                    />
+              <div class="flex flex-col gap-4 px-4 pb-4">
+                <For each={sections()}>
+                  {(section) => (
+                    <section aria-label={`${section.label} findings`} class="flex flex-col gap-2">
+                      <h3 class="flex items-center gap-2 text-[11.5px] font-semibold text-[color:var(--vx-text-subtle)]">
+                        <span class="size-1.5 rounded-full" style={{ background: SEVERITY[section.severity].tone }} />
+                        {section.label}
+                        <span class="font-normal text-[color:var(--vx-text-muted)]">{section.open}</span>
+                      </h3>
+                      <For each={section.findings}>
+                        {(finding) => (
+                          <FindingCard
+                            finding={finding}
+                            dismissed={dismissed()[finding.id]}
+                            menuOpen={menuFor() === finding.id}
+                            uncommitted={!subject.pr}
+                            canFix={canFix()}
+                            canRemember={Boolean(rulesApi() && props.projectPath)}
+                            applyState={applied()[finding.id] ?? "idle"}
+                            onApply={finding.apply && props.onApplyFix ? () => void applyFix(finding) : undefined}
+                            onAsk={finding.ask && props.onAskAgent ? () => askAgent(finding) : undefined}
+                            onMenu={(open) => setMenuFor(open ? finding.id : undefined)}
+                            onDismiss={(reason) => void dismiss(finding, reason)}
+                            onRestore={() => restore(finding)}
+                            onFix={() => fixWithAgent(finding)}
+                          />
+                        )}
+                      </For>
+                    </section>
                   )}
                 </For>
               </div>

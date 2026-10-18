@@ -3,7 +3,7 @@
 
 import type { DiffFile } from "./diff"
 import { isSensitivePath } from "./ignore"
-import type { ReviewConfig } from "./types"
+import type { CostKind, ReviewConfig } from "./types"
 
 export type Specialist = "review" | "security"
 
@@ -50,6 +50,15 @@ export function diffBudgetChars(context: number, maxDiffChars: number): number {
   // × 3.5 × 0.3 = × 21/20, kept in integers so the result is exact.
   const chars = Math.floor(((context - reserve) * 21) / 20)
   return Math.min(Math.max(chars, 8_000), maxDiffChars)
+}
+
+// The cost kind of a review whose passes ran on models of these kinds. Free passes add nothing to a priced or a
+// subscription one; any other mix has no single price to show.
+export function combineCostKinds(kinds: readonly CostKind[]): CostKind {
+  const distinct = [...new Set(kinds)]
+  if (distinct.length === 1) return distinct[0]!
+  const paid = distinct.filter((kind) => kind !== "free")
+  return paid.length === 1 && paid[0] !== "unknown" ? paid[0]! : "unknown"
 }
 
 // The refusal for a model below MIN_CONTEXT, or undefined when it is large enough.

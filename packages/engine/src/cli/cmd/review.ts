@@ -314,6 +314,10 @@ export function executeLocalReview<RunR, ModelR>(
 
     // 5. The model, and what running tests on this branch would mean.
     const model = yield* deps.resolveModel({ trigger: "local", flag: options.model, config: config.model, env })
+    // review.json's cheaper first pass; the double-check stays on `model`.
+    const triage = config.triageModel
+      ? yield* deps.resolveModel({ trigger: "local", exact: config.triageModel, env })
+      : undefined
     const modelName = `${model.providerID}/${model.modelID}`
     if (options.checks) {
       const start = target.kind === "branch" ? range.mergeBase : yield* branchStart(git, root, range.head, base)
@@ -403,6 +407,7 @@ export function executeLocalReview<RunR, ModelR>(
       ),
       config,
       model,
+      ...(triage ? { triage } : {}),
       ...(options.checks ? { checks: true } : {}),
       knownPath,
       onProgress: (event) => {

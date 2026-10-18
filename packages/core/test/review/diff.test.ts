@@ -14,6 +14,7 @@ import {
   mergeFocus,
   parseUnifiedDiff,
   patchIdOf,
+  renderAnnotated,
   renderPatch,
   resolveAnchor,
   suggestionAllowed,
@@ -436,6 +437,52 @@ describe("applyPatch", () => {
     expect(applyPatch("something\n", file("src/added.ts"))).toBeUndefined()
     expect(applyPatch("export function gone() {\n  return 1\n}\n", file("src/removed.ts"))).toBe("")
     expect(applyPatch("x", file("assets/logo.png"))).toBeUndefined()
+  })
+})
+
+describe("renderAnnotated", () => {
+  test("numbers every head line, marks added lines and shows removed lines where they were", () => {
+    const text = renderAnnotated(file("src/list.ts"), listHead)!
+    expect(text.split("\n").slice(3, 8)).toEqual([
+      " 4",
+      " 5   export function last(items) {",
+      // A removed line carries its base line number, which a LEFT-side finding anchors to.
+      " 6 -   return items[items.length]",
+      " 6 +   return items[items.length - 1]",
+      " 7   }",
+    ])
+    expect(text).toContain("19 +   if (!items) return 0")
+    // One block holds the whole change, so the diff and the head text need not both be sent.
+    expect(text.length).toBeLessThan(renderPatch([file("src/list.ts")]).length + listHead.length)
+  })
+
+  test("folds long unchanged runs with their head and base lines, and keeps short ones", () => {
+    const text = renderAnnotated(file("src/list.ts"), listHead, { foldAbove: 5, context: 1 })!
+    expect(text).toContain("⋯ lines 8-17 unchanged (base lines 8-17)")
+    expect(text).toContain(" 1   export function first(items) {")
+    expect(text).toContain("21   }")
+    const [moved] = diff(
+      "--- a/x.ts",
+      "+++ b/x.ts",
+      "@@ -1,2 +1,4 @@",
+      "+import a",
+      "+import b",
+      " one",
+      " two",
+      ...Array.from({ length: 10 }, (_, index) => ` same ${index + 1}`),
+    )
+    const head = ["import a", "import b", "one", "two", ...Array.from({ length: 10 }, (_, i) => `same ${i + 1}`)]
+    expect(
+      renderAnnotated(moved, head.join("\n") + "\n", { foldAbove: 5, context: 1 })!
+        .split("\n")
+        .at(-1),
+    ).toBe("⋯ lines 4-14 unchanged (base lines 2-12)")
+  })
+
+  test("refuses a text that is not the head, a deleted file and a binary", () => {
+    expect(renderAnnotated(file("src/list.ts"), listBase)).toBeUndefined()
+    expect(renderAnnotated(file("src/removed.ts"), "")).toBeUndefined()
+    expect(renderAnnotated(file("assets/logo.png"), "x")).toBeUndefined()
   })
 })
 

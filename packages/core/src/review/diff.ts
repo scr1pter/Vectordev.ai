@@ -562,6 +562,82 @@ export function matchPostImage(text: string, file: DiffFile): boolean {
   return file.status !== "added" || lines.length === count
 }
 
+// The head version of a file with its line numbers, the lines the change added marked "+", and the removed lines
+// shown as "-" where they were, with their base line number, so a finding on removed code can anchor to the LEFT side
+// although the diff is not sent. It holds what the file's diff and its full head text hold, once, so
+// a prompt can show it in place of both. In a file longer than `foldAbove` lines, only `context` lines around each
+// change are kept, and each run left out becomes one "⋯" line with its head and base line numbers. undefined when
+// `headText` is not the diff's post-image.
+export function renderAnnotated(
+  file: DiffFile,
+  headText: string,
+  options: { context?: number; foldAbove?: number } = {},
+): string | undefined {
+  if (file.binary || file.status === "deleted" || !matchPostImage(headText, file)) return undefined
+  const head = splitLines(headText)
+  const context = options.context ?? ANNOTATED_CONTEXT
+  const fold = head.length > (options.foldAbove ?? ANNOTATED_FOLD_ABOVE)
+  const added = new Set<number>()
+  // The head line each run of removed lines sits before, and their base line numbers and text.
+  const removed = new Map<number, { line: number; text: string }[]>()
+  for (const hunk of file.hunks) {
+    let next = hunk.newLines === 0 ? hunk.newStart + 1 : hunk.newStart
+    for (const line of hunk.lines) {
+      if (line.kind === "del")
+        removed.set(next, [...(removed.get(next) ?? []), { line: line.oldLine!, text: line.text }])
+      else {
+        if (line.kind === "add") added.add(line.newLine!)
+        next = line.newLine! + 1
+      }
+    }
+  }
+  const changed = [...added, ...[...removed.keys()].flatMap((line) => [line - 1, line])]
+  const near = (line: number) => changed.some((at) => Math.abs(at - line) <= context)
+  // A fold line costs about as much as a few code lines, so a short run is shown rather than folded.
+  const hidden = head.map((_, index) => fold && !added.has(index + 1) && !near(index + 1))
+  for (const run of runs(hidden)) if (run.end - run.start < MIN_FOLD) hidden.fill(false, run.start, run.end)
+  const width = String(head.length).length
+  const row = (number: string, mark: string, text: string) =>
+    text ? `${number.padStart(width)} ${mark} ${text}` : `${number.padStart(width)} ${mark}`.trimEnd()
+  const span = (from: number, to: number) => (from === to ? `line ${from}` : `lines ${from}-${to}`)
+  const out: string[] = []
+  const counts = { added: 0, removed: 0 }
+  for (const line of Array.from({ length: head.length + 1 }, (_, index) => index + 1)) {
+    for (const gone of removed.get(line) ?? []) {
+      out.push(row(String(gone.line), "-", gone.text))
+      counts.removed++
+    }
+    if (line > head.length) break
+    if (hidden[line - 1]) {
+      // The first line of a folded run writes the fold for the whole run.
+      if (hidden[line - 2]) continue
+      const last = line + hidden.slice(line - 1).findIndex((value) => !value) - 1
+      const end = last < line ? head.length : last
+      const base = line - counts.added + counts.removed
+      out.push(`⋯ ${span(line, end)} unchanged (base ${span(base, base + end - line)})`)
+      continue
+    }
+    out.push(row(String(line), added.has(line) ? "+" : " ", head[line - 1]))
+    if (added.has(line)) counts.added++
+  }
+  return out.join("\n")
+}
+
+// Runs of true values, as [start, end) indexes.
+function runs(values: boolean[]) {
+  return values.reduce<{ start: number; end: number }[]>((out, value, index) => {
+    if (!value) return out
+    const last = out.at(-1)
+    if (last && last.end === index) last.end = index + 1
+    else out.push({ start: index, end: index + 1 })
+    return out
+  }, [])
+}
+
+const MIN_FOLD = 4
+const ANNOTATED_CONTEXT = 20
+const ANNOTATED_FOLD_ABOVE = 200
+
 // Head line ranges of each hunk's new side. A hunk that only deletes sits between newStart and newStart + 1.
 function hunkSpan(hunk: DiffHunk): [number, number] {
   if (hunk.newLines === 0) return [Math.max(1, hunk.newStart), hunk.newStart + 1]

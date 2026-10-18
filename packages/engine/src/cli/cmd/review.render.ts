@@ -8,6 +8,7 @@ import type {
   PlacedFinding,
   ReviewCost,
   ReviewOutcome,
+  ReviewPass,
   Severity,
   SkippedFile,
 } from "@vectordevai/core/review/types"
@@ -127,6 +128,8 @@ export function renderLocalReview(input: RenderInput): string {
   if (tail.length) lines.push("", ...tail)
 
   lines.push("", paint(ANSI.dim, footer(outcome)))
+  const passes = outcome.passes ?? []
+  if (passes.length > 1) lines.push(paint(ANSI.dim, passesLine(passes, outcome.cost)))
   return lines.join("\n") + "\n"
 }
 
@@ -220,9 +223,23 @@ function footer(outcome: ReviewOutcome): string {
   return parts.join(" · ")
 }
 
+// "By pass: review $0.0123 (40.1k in / 2.0k out) · double-check $0.0031 (9.2k in / 0.4k out)". Dollar amounts only
+// when the review as a whole is priced.
+function passesLine(passes: ReviewPass[], cost: ReviewCost | undefined): string {
+  const priced = cost?.kind === "priced"
+  const name = { review: "review", security: "security", verify: "double-check" } as const
+  return `By pass: ${passes
+    .map(
+      (pass) =>
+        `${name[pass.name]} ${priced && pass.costUsd !== undefined ? `${formatUsd(pass.costUsd)} ` : ""}(${formatTokens(pass.input)} in / ${formatTokens(pass.output)} out)`,
+    )
+    .join(" · ")}`
+}
+
 // Section 5.5, as in the summary comment's footer.
 function costText(cost: ReviewCost): string {
   if (cost.kind === "priced") return formatUsd(cost.costUsd)
+  if (cost.kind === "free") return "free"
   if (cost.kind === "plan") return "subscription sign-in, no per-token price"
   return "cost unknown: no price is listed for this model"
 }

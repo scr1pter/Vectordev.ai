@@ -12,7 +12,7 @@ import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { parseUnifiedDiff } from "@vectordevai/core/review/diff"
-import { noteVerifySkipped } from "@vectordevai/core/review/format"
+import { noteTriageFixedUnchecked, noteTriageUnchecked, noteVerifySkipped } from "@vectordevai/core/review/format"
 import {
   DEFAULT_REVIEW_CONFIG,
   type ModelFinding,
@@ -1192,6 +1192,249 @@ describe("Review.run", () => {
         const permission = yield* Permission.Service
         expect(yield* permission.list()).toEqual([])
         for (const body of yield* modelRequests(llm)) expect(toolNames(body)).not.toContain("bash")
+      }),
+    TIMEOUT,
+  )
+
+  it.instance(
+    "runs the first pass on the triage model and double-checks every concern on the review model",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const llm = yield* TestLLMServer
+        const fs = yield* FSUtil.Service
+        const provider = testProviderConfig(llm.url)
+        Object.assign(provider.provider.lmstudio.models, {
+          "cheap-model": { ...provider.provider.lmstudio.models["test-model"], id: "cheap-model", name: "Cheap" },
+        })
+        yield* fs.writeWithDirs(
+          path.join(test.directory, "vector.json"),
+          JSON.stringify({ $schema: "https://vectordev.ai/config.json", ...provider }),
+        )
+        yield* fs.writeWithDirs(path.join(test.directory, "src/list.ts"), LIST_SOURCE)
+        yield* Effect.promise(() => trustWorkspace(test.directory))
+        const cheap = { ...ref, modelID: ModelV2.ID.make("cheap-model"), context: 100_000, costKind: "free" as const }
+
+        yield* llm.pushMatch(
+          REVIEW,
+          reply()
+            .tool("StructuredOutput", report([finding({ severity: "concern" })]))
+            .usage({ input: 2_000, output: 100 }),
+        )
+        yield* llm.pushMatch(
+          VERIFY,
+          reply().tool("StructuredOutput", { results: [] }).usage({ input: 1_000, output: 50 }),
+        )
+        const outcome = yield* Review.run(
+          input(test.directory, { triage: cheap, config: config({ verify: "blocking" }) }),
+        )
+        const hits = yield* llm.hits
+        expect(hits.filter(REVIEW).map((hit) => hit.body.model)).toEqual(["cheap-model"])
+        expect(hits.filter(VERIFY).map((hit) => hit.body.model)).toEqual(["test-model"])
+        expect(outcome.specialists.map((item) => [item.name, item.status])).toEqual([
+          ["review", "ok"],
+          ["verify", "ok"],
+        ])
+        expect(outcome.passes?.map((pass) => [pass.name, pass.model, pass.input, pass.output])).toEqual([
+          ["review", "lmstudio/cheap-model", 2_000, 100],
+          ["verify", "lmstudio/test-model", 1_000, 50],
+        ])
+        expect(outcome.cost?.model).toBe("lmstudio/cheap-model + lmstudio/test-model")
+        // The review model gave no verdict, so the cheap model's concern is not reported.
+        expect(outcome.selection.inline).toEqual([])
+        expect(outcome.selection.dropped).toEqual([{ reason: "unconfirmed", count: 1 }])
+
+        // Without a triage model the same concern is not double-checked under verify "blocking".
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", report([finding({ severity: "concern" })])))
+        const plain = yield* Review.run(input(test.directory, { config: config({ verify: "blocking" }) }))
+        expect(plain.specialists.map((item) => item.name)).toEqual(["review"])
+        expect((yield* llm.hits).filter(VERIFY)).toHaveLength(1)
+      }),
+    TIMEOUT,
+  )
+
+  it.instance(
+    "after a triage pass reports only what the review model confirmed, even with verify off or the check skipped",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const llm = yield* TestLLMServer
+        const fs = yield* FSUtil.Service
+        const provider = testProviderConfig(llm.url)
+        Object.assign(provider.provider.lmstudio.models, {
+          "cheap-model": { ...provider.provider.lmstudio.models["test-model"], id: "cheap-model", name: "Cheap" },
+        })
+        yield* fs.writeWithDirs(
+          path.join(test.directory, "vector.json"),
+          JSON.stringify({ $schema: "https://vectordev.ai/config.json", ...provider }),
+        )
+        yield* fs.writeWithDirs(path.join(test.directory, "src/list.ts"), LIST_SOURCE)
+        yield* Effect.promise(() => trustWorkspace(test.directory))
+        const cheap = { ...ref, modelID: ModelV2.ID.make("cheap-model"), context: 100_000, costKind: "free" as const }
+        const blocking = finding()
+        const concern = finding({ line: 2, severity: "concern", title: "index is computed but never checked" })
+        const [blockingID] = Review.normalizeFindings([blocking], "review", LIST).map((item) => item.id)
+
+        // verify "off" does not turn the double-check off under a triage model; only the confirmed finding stays.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", report([blocking, concern])))
+        yield* llm.pushMatch(
+          VERIFY,
+          reply().tool("StructuredOutput", {
+            results: [{ id: blockingID, verdict: "confirmed", reason: "Reproduced." }],
+          }),
+        )
+        const off = yield* Review.run(input(test.directory, { triage: cheap, config: config({ verify: "off" }) }))
+        expect(off.specialists.map((item) => [item.name, item.status])).toEqual([
+          ["review", "ok"],
+          ["verify", "ok"],
+        ])
+        expect(off.selection.inline.map((item) => [item.id, item.verified])).toEqual([[blockingID, true]])
+        expect(off.selection.dropped).toEqual([{ reason: "unconfirmed", count: 1 }])
+
+        // With too little budget left for the double-check, nothing from the cheap pass is reported, and the note
+        // says why.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", report([blocking, concern])))
+        const skipped = yield* Review.run(
+          input(test.directory, {
+            triage: cheap,
+            model: priced,
+            config: config({ verify: "blocking", maxCostUsd: 0.000_001 }),
+          }),
+        )
+        expect(skipped.specialists.at(-1)).toEqual({ name: "verify", status: "skipped", steps: 0, detail: "budget" })
+        expect(skipped.selection.inline).toEqual([])
+        expect(skipped.selection.dropped).toEqual([{ reason: "unconfirmed", count: 2 }])
+        expect(skipped.notes).toContain(noteTriageUnchecked(2, "lmstudio/cheap-model", "lmstudio/test-model"))
+        expect(skipped.notes).not.toContain(noteVerifySkipped())
+      }),
+    TIMEOUT,
+  )
+
+  it.instance(
+    "after a triage pass an earlier finding counts as fixed only once the review model confirmed it",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const llm = yield* TestLLMServer
+        const fs = yield* FSUtil.Service
+        const provider = testProviderConfig(llm.url)
+        Object.assign(provider.provider.lmstudio.models, {
+          "cheap-model": { ...provider.provider.lmstudio.models["test-model"], id: "cheap-model", name: "Cheap" },
+        })
+        yield* fs.writeWithDirs(
+          path.join(test.directory, "vector.json"),
+          JSON.stringify({ $schema: "https://vectordev.ai/config.json", ...provider }),
+        )
+        yield* fs.writeWithDirs(path.join(test.directory, "src/list.ts"), LIST_SOURCE)
+        yield* Effect.promise(() => trustWorkspace(test.directory))
+        const cheap = { ...ref, modelID: ModelV2.ID.make("cheap-model"), context: 100_000, costKind: "free" as const }
+        const open = {
+          id: "abcdef012345",
+          where: "inline" as const,
+          path: "src/list.ts",
+          line: 3,
+          side: "RIGHT" as const,
+          severity: "blocking" as const,
+          category: "security" as const,
+          title: "Token is never verified",
+          sha: "1111111",
+          status: "open" as const,
+          commentId: 9,
+        }
+        const claimed = { ...report([]), priorStatus: [{ id: open.id, status: "fixed", reason: "looks fine" }] }
+        const triaged = input(test.directory, { triage: cheap, prior: [open], config: config({ verify: "all" }) })
+
+        // The review model gives no verdict on the claim: the finding stays open.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", claimed))
+        yield* llm.pushMatch(VERIFY, reply().tool("StructuredOutput", { results: [] }))
+        const unconfirmed = yield* Review.run(triaged)
+        const checks = (yield* llm.hits).filter(VERIFY)
+        expect(checks.map((hit) => hit.body.model)).toEqual(["test-model"])
+        expect(lastUserText(checks[0]!.body)).toContain(`<untrusted_fixed_claim id="${open.id}"`)
+        expect(unconfirmed.report.priorStatus ?? []).toEqual([])
+
+        // It rejects the claim: still open.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", claimed))
+        yield* llm.pushMatch(
+          VERIFY,
+          reply().tool("StructuredOutput", {
+            results: [{ id: open.id, verdict: "rejected", reason: "verify() is still skipped." }],
+          }),
+        )
+        expect((yield* Review.run(triaged)).report.priorStatus ?? []).toEqual([])
+
+        // It confirms the fix: now it counts.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", claimed))
+        yield* llm.pushMatch(
+          VERIFY,
+          reply().tool("StructuredOutput", {
+            results: [{ id: open.id, verdict: "confirmed", reason: "verify() runs first now." }],
+          }),
+        )
+        expect((yield* Review.run(triaged)).report.priorStatus).toEqual([
+          { id: open.id, status: "fixed", reason: "looks fine" },
+        ])
+
+        // With too little budget left for the check, the claim is not taken, and the summary says so.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", claimed))
+        const skipped = yield* Review.run({
+          ...triaged,
+          model: priced,
+          config: config({ verify: "all", maxCostUsd: 0.000_001 }),
+        })
+        expect(skipped.specialists.at(-1)).toMatchObject({ name: "verify", status: "skipped" })
+        expect(skipped.report.priorStatus ?? []).toEqual([])
+        expect(skipped.notes).toEqual([noteTriageFixedUnchecked(1, "lmstudio/cheap-model", "lmstudio/test-model")])
+
+        // Without a triage model the review model's own word stands, as before.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", claimed))
+        const plain = yield* Review.run(input(test.directory, { prior: [open] }))
+        expect(plain.report.priorStatus).toEqual([{ id: open.id, status: "fixed", reason: "looks fine" }])
+        expect((yield* llm.hits).filter(VERIFY)).toHaveLength(3)
+      }),
+    TIMEOUT,
+  )
+
+  it.instance(
+    "sends an untrusted change once, annotated, and only the changed lines of a file with nothing new",
+    () =>
+      Effect.gen(function* () {
+        const { llm, directory } = yield* useServer()
+        const other = parseUnifiedDiff(
+          [
+            "diff --git a/src/other.ts b/src/other.ts",
+            "--- a/src/other.ts",
+            "+++ b/src/other.ts",
+            "@@ -1,3 +1,3 @@",
+            " export function other() {",
+            "-  return 1",
+            "+  return 2",
+            " }",
+          ].join("\n"),
+        )
+        const files = [...LIST, ...other]
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", report()))
+        yield* Review.run(
+          input(directory, {
+            trust: "untrusted",
+            mode: "incremental",
+            since: "3".repeat(40),
+            files,
+            anchors: files,
+            focus: [{ path: "src/list.ts", start: 1, end: 4 }],
+            headFiles: [
+              { path: "src/list.ts", text: LIST_SOURCE, exact: true },
+              { path: "src/other.ts", text: "export function other() {\n  return 2\n}\n", exact: true },
+            ],
+          }),
+        )
+        const text = lastUserText((yield* llm.hits).find(REVIEW)!.body)
+        expect(text).toContain('<untrusted_pr_file path="src/list.ts" exact="true" annotated="true">')
+        expect(text).toContain("2 +   const index = items.length")
+        expect(text).not.toContain('<untrusted_pr_file path="src/other.ts"')
+        expect(text).toContain("@@ -2,1 +2,1 @@\n-  return 1\n+  return 2")
+        expect(text).not.toContain(" export function other() {")
+        expect(text).toContain("their diff is shown without context lines")
       }),
     TIMEOUT,
   )

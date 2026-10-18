@@ -31,6 +31,8 @@ import { taskScopeId, taskScopeSearch, type TaskScope } from "@/utils/task-scope
 import { WORKSPACE_FILE_SAVED_EVENT, workspaceFileSavedDetail } from "@/utils/workspace-file-saved"
 import { WORKSPACE_MODE_CHANGED_EVENT, workspaceModeFromEvent, type WorkspaceMode } from "@/utils/workspace-mode"
 import {
+  applyReviewFix,
+  askAgent,
   reviewCatalog,
   runReview,
   trackReviewSpend,
@@ -6490,6 +6492,17 @@ export default function NewLayout(props: ParentProps) {
             : Promise.resolve(undefined)
         }}
         automaticReviewModel={() => workflowModel(reviewModels(), byokProviders.connected())}
+        onApplyFix={(fix) => {
+          const directory = activeWorkspaceScope().sourcePath
+          if (!directory) return Promise.reject(new Error("Open a repository before applying a fix."))
+          return applyReviewFix(serverSDK().createClient({ directory, throwOnError: true }), directory, fix)
+        }}
+        onAskAgent={(text) =>
+          askAgent(text, (prompt) => {
+            const directory = activeWorkspaceScope().sourcePath
+            if (directory) tabs.newDraft({ server: server.key, directory }, prompt, { send: true })
+          })
+        }
       />
 
       <AgentDashboard

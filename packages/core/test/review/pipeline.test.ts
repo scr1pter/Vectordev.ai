@@ -1,6 +1,7 @@
 // The review core end to end, strung together the way the GitHub job does it (section 3.11): a model's answer becomes
 // one posted review and a sticky summary whose state reads back. On the next push the posted comment and the state
-// come back as earlier findings, so a fix is recognised and a reworded finding is not posted twice.
+// come back as earlier findings, so a fix is recognised and a reworded finding is not posted twice. Nits are asked
+// for, so the summary's nit list is covered too.
 
 import { describe, expect, test } from "bun:test"
 import {
@@ -37,6 +38,7 @@ const SECOND = "e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4"
 const BOT = "github-actions[bot]"
 const REPO = { owner: "o", repo: "r" }
 const NOW = Date.UTC(2026, 8, 14, 14, 2)
+const CONFIG = { ...DEFAULT_REVIEW_CONFIG, nits: true }
 const COST: ReviewCost = {
   costUsd: 0.21,
   input: 17_200,
@@ -171,7 +173,7 @@ function firstRun() {
     head: FIRST,
     trust: "trusted",
     mode: "full",
-    config: DEFAULT_REVIEW_CONFIG,
+    config: CONFIG,
     knownPath: () => true,
     modelRisk: report.risk,
   })
@@ -322,7 +324,7 @@ describe("the review core end to end", () => {
       head: SECOND,
       trust: "trusted",
       mode: "incremental",
-      config: DEFAULT_REVIEW_CONFIG,
+      config: CONFIG,
       prior,
       focus: focusHunks(secondPr, push),
       inlinePosted: first.state.inlinePosted,
