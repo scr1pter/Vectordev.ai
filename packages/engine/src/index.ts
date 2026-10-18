@@ -34,6 +34,7 @@ import { PluginCommand } from "./cli/cmd/plug"
 import { VectorLoginCommand, VectorLogoutCommand, VectorWhoamiCommand } from "./cli/cmd/vector-login"
 import { OrgCommand } from "./cli/cmd/org"
 import { TrustCommand } from "./cli/cmd/trust"
+import { MemoryCommand } from "./cli/cmd/memory"
 import { Heap } from "./cli/heap"
 import { disposeRuntimes } from "./effect/runtime-cleanup"
 import { assertSecurityEnvironment } from "@vectordevai/core/flag/security"
@@ -143,6 +144,7 @@ const cli = yargs(args)
   .command(PluginCommand)
   .command(DbCommand)
   .command(TrustCommand)
+  .command(MemoryCommand)
   .fail((msg, err) => {
     if (msg) UI.error(msg)
     if (

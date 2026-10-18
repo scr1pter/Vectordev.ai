@@ -56,6 +56,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { AppNodeBuilderV1 } from "./app-node-builder-v1"
 import { SessionProjector } from "@vectordevai/core/session/projector"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { Brain } from "@vectordevai/core/brain/brain"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -90,6 +91,7 @@ export const AppLayer = AppNodeBuilderV1.build(
     SessionSummary.node,
     SessionPrompt.node,
     SpendGuard.node,
+    Brain.node,
     Instruction.node,
     LLM.node,
     LSP.node,
