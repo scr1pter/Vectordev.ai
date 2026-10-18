@@ -305,8 +305,8 @@ const layer: Layer.Layer<
         current = path.dirname(current)
       }
 
-      // Scoped rules and memory about this file come with it, once per session: the rule for src/routes/** when a
-      // route is read, the repair a repeated failure needed when a file it touched is read.
+      // Memory about this file comes with it, once per session: a lesson cited from it, or the repair a repeated
+      // failure needed when a file it touched is read. Scoped rules are already in the digest, so they never repeat.
       const claimed = s.claims.get(messageID) ?? new Set<string>()
       const attached = yield* brain.attach(yield* place(), {
         file: target,

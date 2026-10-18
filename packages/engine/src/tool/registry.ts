@@ -25,6 +25,7 @@ import { SkillTool } from "./skill"
 import { MemoryTool } from "./memory"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { Git } from "@/git"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
 import { ConfigDependencies } from "@/config/dependencies"
@@ -500,6 +501,7 @@ export const node = LayerNode.make({
     Instruction.node,
     Brain.node,
     FreeModelGuests.node,
+    Git.node,
     FSUtil.node,
     EventV2Bridge.node,
     httpClient,

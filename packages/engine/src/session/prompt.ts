@@ -1898,6 +1898,7 @@ const layer = Layer.effect(
         // budget its size allows. It is saved on the message, so later steps send the same bytes and the cache holds.
         if (!quick && sized && sized.tier !== "chat" && !session.parentID && !session.internal)
           msgs = yield* recallFor({ sessionID, msgs, user: lastUser, tier: sized.tier, personal })
+        msgs = yield* personalRecall(msgs, personal)
         msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
           Effect.provideService(RuntimeFlags.Service, flags),
           Effect.provideService(FSUtil.Service, fsys),
@@ -2194,17 +2195,51 @@ const layer = Layer.effect(
         sessionID: input.sessionID,
       })
       if (!result.text) return input.msgs
+      // Only the repository's lines are saved with the message; personal ones are filled in for each request below.
       const part = yield* sessions.updatePart({
         id: PartID.ascending(),
         messageID: message.info.id,
         sessionID: input.sessionID,
         type: "text",
-        text: result.text,
+        text: result.shared ?? "",
         synthetic: true,
-        metadata: { [SessionMemory.RECALL]: { ids: [...result.ids], tokens: result.tokens } },
+        metadata: {
+          [SessionMemory.RECALL]: { ids: [...result.ids], tokens: result.tokens, personal: [...(result.personal ?? [])] },
+        },
       } satisfies SessionV1.TextPart)
       message.parts.push(part)
       return input.msgs
+    })
+
+    // Recalled personal memory is never saved in the transcript, so a session that is shared, exported or opened by an
+    // invited guest later does not carry the owner's personal memory, and forgetting an entry takes it out of later
+    // requests too. Each request fills it in from the brain while personal memory is allowed for it; the lines are the
+    // same from step to step, so the provider's cache still holds.
+    const personalRecall = Effect.fn("SessionPrompt.personalRecall")(function* (
+      msgs: SessionV1.WithParts[],
+      personal: boolean,
+    ) {
+      if (!personal) return msgs
+      const recalls = msgs.flatMap((message) =>
+        message.parts.flatMap((part) => {
+          const recall = SessionMemory.recall(part)
+          return recall?.personal.length ? [recall] : []
+        }),
+      )
+      if (recalls.length === 0) return msgs
+      const lines = yield* brain.lines(
+        yield* instruction.place(),
+        recalls.flatMap((recall) => recall.ids),
+        { personal: true },
+      )
+      return msgs.map((message) => ({
+        ...message,
+        parts: message.parts.map((part) => {
+          const recall = SessionMemory.recall(part)
+          if (part.type !== "text" || !recall?.personal.length) return part
+          return { ...part, text: Brain.recallText(recall.ids.flatMap((id) => lines.get(id) ?? [])) }
+        }),
+      }))
     })
 
     const loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.loop")(function* (

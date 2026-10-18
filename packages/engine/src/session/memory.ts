@@ -1,5 +1,6 @@
 export * as SessionMemory from "./memory"
 
+import path from "path"
 import { fileURLToPath } from "url"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
@@ -54,16 +55,22 @@ export function files(message: SessionV1.WithParts) {
   })
 }
 
+/**
+ * The memory a part recalled: every entry's id, and which of them are the user's personal memory. Personal lines are
+ * not saved with the part, so each request fills them in again while personal memory is allowed.
+ */
+export function recall(part: SessionV1.Part) {
+  if (part.type !== "text" || !part.synthetic) return undefined
+  const value = part.metadata?.[RECALL]
+  if (!value || typeof value !== "object" || !("ids" in value) || !Array.isArray(value.ids)) return undefined
+  const strings = (list: unknown) =>
+    Array.isArray(list) ? list.filter((id: unknown): id is string => typeof id === "string") : []
+  return { ids: strings(value.ids), personal: "personal" in value ? strings(value.personal) : [] }
+}
+
 /** The memory already in this conversation: recalled into a message, or attached to a read result. */
 export function injected(messages: readonly SessionV1.WithParts[]) {
-  const recalled = messages.flatMap((message) =>
-    message.parts.flatMap((part) => {
-      if (part.type !== "text" || !part.synthetic) return []
-      const value = part.metadata?.[RECALL]
-      if (!value || typeof value !== "object" || !("ids" in value) || !Array.isArray(value.ids)) return []
-      return value.ids.filter((id: unknown): id is string => typeof id === "string")
-    }),
-  )
+  const recalled = messages.flatMap((message) => message.parts.flatMap((part) => recall(part)?.ids ?? []))
   return new Set([...recalled, ...attachedMemory([...messages])])
 }
 
@@ -74,6 +81,11 @@ export function recalled(message: SessionV1.WithParts) {
 
 function normal(text: string) {
   return text.toLowerCase().replace(/[\s"'`]+/g, " ").trim()
+}
+
+/** The request message this step answers: what the user typed last. */
+export function request(messages: readonly SessionV1.WithParts[]) {
+  return messages.filter((message) => message.info.role === "user" && typed(message)).slice(-1)
 }
 
 /** Whether the user said this, word for word, in a message of this conversation. */
@@ -107,13 +119,18 @@ function check(command: string) {
     .join(" ")
 }
 
+// The checks a lesson can be learned from: test, lint, build and typecheck runners. `test -f x` fails and then passes
+// once `touch x` ran, and proves nothing.
+const CHECK =
+  /(?:^|[\s;&|(])(?:(?:bun|npm|pnpm|yarn|deno)\s+(?:run\s+)?(?:test|lint|build|check|typecheck|tsc|e2e|verify|spec)[\w:.-]*|(?:bunx|npx|pnpx|pnpm\s+exec|yarn\s+exec|npm\s+exec)\s+(?:tsc|vitest|jest|eslint|biome|playwright|prettier|mocha|oxlint)|tsc|tsgo|vitest|jest|pytest|mypy|pyright|ruff|eslint|biome|oxlint|rspec|phpunit|xcodebuild|mvn|gradlew?|\.\/gradlew|cargo\s+(?:test|check|build|clippy|nextest)|go\s+(?:test|build|vet)|dotnet\s+(?:test|build)|swift\s+(?:test|build)|mix\s+test|make|python3?\s+-m\s+(?:pytest|unittest|mypy))(?=\s|$)/
+
 /**
  * Whether this command passed in the conversation after the same check failed earlier in it: the outcome a lesson
  * about it is worth remembering for. A check that only ever passed proves nothing was learned.
  */
 export function checked(messages: readonly SessionV1.WithParts[], command: string) {
   const wanted = normal(command)
-  if (!wanted) return false
+  if (!wanted || !CHECK.test(wanted)) return false
   const all = runs(messages)
   const passed = all.findLastIndex((run) => run.exit === 0 && (run.command === wanted || run.command.includes(wanted)))
   if (passed < 0) return false
@@ -124,13 +141,46 @@ export function checked(messages: readonly SessionV1.WithParts[], command: strin
 }
 
 /**
- * Why memory learned in this conversation has to wait for the user: it read the web, used the browser or Vector
- * Cloud, ran an MCP tool, or took a subagent's report. Memory poisoning works by planting text the agent later saves as
- * its own, so once outside content is in the history, every write is held for review.
+ * Whether the agent changed this file in the conversation: edited, wrote or patched it, or named it in a shell
+ * command. A file the agent changed cannot vouch for a memory, because the agent could have written the line itself.
+ */
+export function touched(messages: readonly SessionV1.WithParts[], file: string, root: string) {
+  const relative = path.relative(root, file).split(path.sep).join("/")
+  const name = path.basename(file)
+  return messages.some((message) =>
+    message.parts.some((part) => {
+      if (part.type !== "tool") return false
+      const input = part.state.input
+      if (part.tool === "edit" || part.tool === "write")
+        return typeof input.filePath === "string" && path.resolve(root, input.filePath) === file
+      if (part.tool === "apply_patch") return typeof input.patchText === "string" && input.patchText.includes(relative)
+      if (part.tool === "bash") return typeof input.command === "string" && input.command.includes(name)
+      return false
+    }),
+  )
+}
+
+// Shell commands whose output is someone else's text: a URL fetched, a hosted issue or pull request read, a remote's
+// history pulled, or a package run straight from a registry. Their output reaches the agent like a web page does.
+const REMOTE =
+  /(?:^|[\s;&|(`$])(?:curl|wget|xh|https?|aria2c|gh|glab|ssh|scp|sftp|ftp|uvx|git\s+(?:fetch|pull|clone|ls-remote|remote\s+update|submodule\s+update)|(?:pnpm|yarn)\s+dlx|pipx\s+run|(?:npx|bunx|pnpx|npm\s+exec)(?!\s+(?:--?\S+\s+)*(?:tsc|vitest|jest|eslint|biome|prettier|playwright|tsx|turbo|oxlint|mocha)(?=\s|$)))(?=\s|$)/
+
+/**
+ * Why memory learned in this conversation has to wait for the user: it read the web (with a web tool or a shell
+ * command that fetches), used the browser or Vector Cloud, ran an MCP tool, or took a subagent's report. Memory
+ * poisoning works by planting text the agent later saves as its own, so once outside content is in the history, every
+ * write is held for review.
  */
 export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hold | undefined {
-  const tools = messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part.tool] : [])))
+  const calls = messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part] : [])))
+  const tools = calls.map((part) => part.tool)
   if (tools.some((tool) => tool === "webfetch" || tool === "websearch" || tool === "browser" || tool === "vector_cloud"))
+    return "web"
+  if (
+    calls.some(
+      (part) => part.tool === "bash" && typeof part.state.input.command === "string" && REMOTE.test(part.state.input.command),
+    )
+  )
     return "web"
   if (tools.some((tool) => tool === "task" || tool === "task_manage" || tool === "send_teammate_message"))
     return "subagent"

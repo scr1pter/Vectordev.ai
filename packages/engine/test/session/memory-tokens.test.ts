@@ -335,7 +335,8 @@ it.instance(
       expect(digest).toContain("Money is integer cents, never floats.")
       expect(digest).toContain("Keep answers short")
       expect(digest).not.toContain("Code review: do not flag")
-      expect(digest).not.toContain("Route handlers stay thin")
+      // A scoped rule binds whichever tool touches its files, so it is in the digest rather than left to a read.
+      expect(digest).toContain("Route handlers stay thin; logic lives in services (applies to src/routes/**)")
       // No BRAIN.md bulk in the cached prefix.
       expect(digest).not.toContain("billing change")
       expect(recall("light")).toContain("login button label")
@@ -391,6 +392,55 @@ it.instance(
       const body = JSON.stringify((yield* llm.hits)[before]?.body ?? {})
       expect(body).toContain("vector_memory_recall")
       expect(body).toContain("Staging deploys come only from the release branch.")
+    }),
+  60_000,
+)
+
+it.instance(
+  "recalled personal memory reaches the model but never the saved transcript",
+  () =>
+    Effect.gen(function* () {
+      const dir = (yield* TestInstance).directory
+      const llm = yield* TestLLMServer
+      const fs = yield* FSUtil.Service
+      yield* fs.writeWithDirs(path.join(dir, "vector.json"), JSON.stringify(providerConfig(llm.url)))
+      const snapshot = yield* Effect.promise(() => WorkspaceTrust.snapshot(dir, [path.join(dir, "vector.json")]))
+      yield* Effect.promise(() => WorkspaceTrust.approve(Global.Path.state, snapshot))
+      const brain = yield* Brain.Service
+      const place = yield* (yield* Instruction.Service).place()
+      yield* brain.propose(place, {
+        kind: "preference",
+        text: "I ship staging deploys from the release branch on Fridays only.",
+        scope: "personal",
+        origin: "user",
+      })
+      yield* brain.propose(place, {
+        kind: "decision",
+        text: "Staging deploys run through the release workflow in CI.",
+        scope: "repository",
+        origin: "user",
+      })
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Pinned", permission: [{ permission: "*", pattern: "*", action: "allow" }] })
+      const before = (yield* llm.hits).length
+      yield* llm.text("Deploying.")
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        model: ref,
+        size: "light",
+        parts: [{ type: "text", text: "Ship the staging deploy from the release branch" }],
+      })
+      const body = JSON.stringify((yield* llm.hits)[before]?.body ?? {})
+      expect(body).toContain("Fridays only")
+      expect(body).toContain("release workflow in CI")
+      const saved = (yield* sessions.messages({ sessionID: chat.id }))
+        .flatMap((message) => message.parts)
+        .flatMap((part) => (part.type === "text" && part.synthetic && part.metadata?.["vector.memory.recall"] ? [part] : []))
+      expect(saved).toHaveLength(1)
+      expect(saved[0]?.text).toContain("release workflow in CI")
+      expect(saved[0]?.text).not.toContain("Fridays")
     }),
   60_000,
 )

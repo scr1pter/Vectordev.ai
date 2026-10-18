@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto"
-import fs from "node:fs/promises"
 import path from "path"
 import { Effect, Schema } from "effect"
 import { Brain } from "@vectordevai/core/brain/brain"
@@ -7,6 +6,7 @@ import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { SessionID } from "@vectordevai/schema/session-id"
+import { Git } from "@/git"
 import { Instruction } from "../session/instruction"
 import { SessionMemory } from "../session/memory"
 import * as Tool from "./tool"
@@ -32,12 +32,17 @@ type Metadata = {
   hold?: BrainSchema.Hold
 }
 
-export const MemoryTool = Tool.define<typeof Parameters, Metadata, Brain.Service | Instruction.Service | FreeModelGuests.Service>(
+export const MemoryTool = Tool.define<
+  typeof Parameters,
+  Metadata,
+  Brain.Service | Instruction.Service | FreeModelGuests.Service | Git.Service
+>(
   "memory",
   Effect.gen(function* () {
     const brain = yield* Brain.Service
     const instruction = yield* Instruction.Service
     const guests = yield* FreeModelGuests.Service
+    const git = yield* Git.Service
 
     return {
       description: DESCRIPTION,
@@ -46,8 +51,9 @@ export const MemoryTool = Tool.define<typeof Parameters, Metadata, Brain.Service
         Effect.gen(function* () {
           const place = yield* instruction.place()
           const guest = yield* guests.marked(SessionID.make(ctx.sessionID))
-          // The owner's personal memory is not for a session an invited guest drives.
-          const personal = !guest
+          // The owner's personal memory is not for a session an invited guest drives, nor for a model that may train on
+          // prompts. The session runtime says which the model is; without its word, personal memory stays out.
+          const personal = !guest && ctx.extra?.mayTrain === false
 
           if (params.action === "search") {
             const found = yield* brain.search(place, {
@@ -83,11 +89,18 @@ export const MemoryTool = Tool.define<typeof Parameters, Metadata, Brain.Service
           // Writes: what the session took in decides whether they wait for the user.
           const hold = guest ? "guest" : place.held ? "untrusted-repository" : SessionMemory.taint(ctx.messages)
 
+          // An entry the agent may not see here is one it may not change either.
+          const target = params.id && params.action !== "add" ? yield* brain.get(place, params.id, { personal }) : undefined
+          if (params.id && params.action !== "add" && !target) return refused(params.action, `No memory ${params.id} here.`)
+
           if (params.action === "forget") {
             if (!params.id) return refused("forget", "Say which memory to forget, by id.")
             // The agent only puts an entry away; the user deletes for good in Settings > Memory. A session that read
-            // outside content may not put anything away at all, so planted text cannot wipe what Vector knows.
+            // outside content may not put anything away at all, so planted text cannot wipe what Vector knows, and
+            // what the user wrote (or a file says) is theirs to put away.
             if (hold) return refused("forget", "This session took in outside content, so ask the user to forget it in Settings > Memory.")
+            if (target?.entry.origin !== "agent")
+              return refused("forget", `${params.id} is the user's own, so ask them to put it away in Settings > Memory.`)
             const result = yield* brain.update(place, params.id, { action: "archive" }, "agent")
             if (!result || result.type === "refused") return refused("forget", result?.type === "refused" ? result.message : `No memory ${params.id} here.`)
             return {
@@ -99,7 +112,12 @@ export const MemoryTool = Tool.define<typeof Parameters, Metadata, Brain.Service
 
           if (!params.text) return refused(params.action, "Give the text to remember.")
           if (params.action === "update" && !params.id) return refused("update", "Say which memory to update, by id.")
-          const evidence = yield* verify(params, ctx, place.root)
+          if (params.file && SECRET_FILE.test(params.file.replace(/\\/g, "/")))
+            return refused(
+              params.action,
+              "Vector does not cite .env, key or credentials files as evidence. Quote the user, or cite another file.",
+            )
+          const evidence = yield* verify(params, ctx, place.root, git)
           const result = yield* brain.propose(place, {
             kind: params.kind ?? "lesson",
             text: params.text,
@@ -129,29 +147,44 @@ export const MemoryTool = Tool.define<typeof Parameters, Metadata, Brain.Service
   }),
 )
 
+// Files whose lines are secrets, never evidence.
+const SECRET_FILE =
+  /(?:^|\/)(?:\.env(?:\.[\w.-]+)?|\.npmrc|\.pypirc|\.netrc|\.git-credentials|id_[a-z0-9]+|[\w.-]+\.(?:pem|key|p12|pfx)|credentials(?:\.json)?|secrets?\.(?:json|ya?ml|toml|txt|env))$/i
+
 // Evidence is checked here against the conversation and the files, never taken from the model's word: a quote must be
-// the user's own, a file must hold the quoted line, and a command must have failed and then passed in this session.
+// the user's own, a file line must be committed in a file the agent did not change in this session, and a command must
+// be a check that failed and then passed in it. The brain then checks that the evidence states the memory at all.
 const verify = Effect.fnUntraced(function* (
   params: Schema.Schema.Type<typeof Parameters>,
   ctx: Tool.Context<Metadata>,
   root: string,
+  git: Git.Interface,
 ) {
   if (params.command)
     return { type: "check" as const, command: params.command, verified: SessionMemory.checked(ctx.messages, params.command) }
   if (params.file && params.quote) {
     const target = path.resolve(root, params.file)
-    const inside = FSUtil.contains(root, target)
-    const content = inside ? yield* Effect.promise(() => fs.readFile(target, "utf8").catch(() => undefined)) : undefined
-    const found = content !== undefined && normal(content).includes(normal(params.quote)) && normal(params.quote).length >= 6
+    const file = path.relative(root, target).split(path.sep).join("/")
+    // The committed file, so a line the agent wrote this session, or a file it created, cannot vouch for itself.
+    const committed =
+      FSUtil.contains(root, target) && !SessionMemory.touched(ctx.messages, target, root)
+        ? yield* git.show(root, "HEAD", file)
+        : ""
     return {
       type: "file" as const,
-      path: path.relative(root, target).split(path.sep).join("/"),
+      path: file,
       quote: params.quote,
-      ...(content !== undefined ? { hash: createHash("sha256").update(content).digest("hex").slice(0, 16) } : {}),
-      verified: found,
+      ...(committed ? { hash: createHash("sha256").update(committed).digest("hex").slice(0, 16) } : {}),
+      verified: committed !== "" && normal(params.quote).length >= 6 && normal(committed).includes(normal(params.quote)),
     }
   }
-  if (params.quote) return { type: "message" as const, quote: params.quote, verified: SessionMemory.quoted(ctx.messages, params.quote) }
+  if (params.quote)
+    return {
+      type: "message" as const,
+      quote: params.quote,
+      // Personal memory follows the user everywhere, so it takes what they said in the message this step answers.
+      verified: SessionMemory.quoted(params.scope === "personal" ? SessionMemory.request(ctx.messages) : ctx.messages, params.quote),
+    }
   return undefined
 })
 
@@ -167,9 +200,9 @@ function describe(entry: BrainSchema.Entry) {
 }
 
 function evidenceLine(item: BrainSchema.Evidence) {
-  if (item.type === "message") return `the user said "${item.quote ?? ""}"`
-  if (item.type === "file") return `${item.path ?? "a file"}: "${item.quote ?? ""}"`
-  if (item.type === "check") return `\`${item.command ?? ""}\` passed after failing`
+  if (item.type === "message") return item.quote ? `the user said "${item.quote}"` : "a quote Vector could not check"
+  if (item.type === "file") return item.quote ? `${item.path ?? "a file"}: "${item.quote}"` : `${item.path ?? "a file"}, unchecked`
+  if (item.type === "check") return item.command ? `\`${item.command}\` passed after failing` : "a check Vector could not confirm"
   if (item.type === "file-item") return "a file"
   return "the user saved it"
 }
@@ -177,11 +210,16 @@ function evidenceLine(item: BrainSchema.Evidence) {
 function written(result: Exclude<Brain.WriteResult, { type: "refused" }>) {
   const id = result.entry.id
   if (result.type === "added") return `Saved as ${id}.`
-  if (result.type === "merged") return `Already known as ${id}; added this evidence to it.`
-  if (result.type === "promoted") return `Confirmed ${id}, which an earlier session proposed; it is in use now.`
+  // The words already kept, so the agent knows what memory says rather than assuming its own wording was saved.
+  if (result.type === "merged") {
+    if (result.entry.status === "active") return `Already known as ${id}: "${result.entry.text}"`
+    if (result.entry.status === "archived") return `Already in memory as ${id}, put away: "${result.entry.text}"`
+    return `Already in memory as ${id}, waiting for the user's review: "${result.entry.text}"`
+  }
+  if (result.type === "promoted") return `Confirmed ${id}: "${result.entry.text}". It is in use now.`
   if (result.type === "superseded") return `Saved as ${id}, replacing ${result.previous}.`
   if (result.type === "proposed")
-    return `Saved ${id} as a proposal: Vector could not check its evidence, so it is used once another session confirms it or the user approves it.`
+    return `Saved ${id} as a proposal, not in use yet: its evidence did not check out (a quote or file line has to say what the memory says), or it changes what the user wrote. The user can approve it in Settings > Memory.`
   return `Saved ${id} for the user's review (${holdReason(result.entry.hold)}). It is not used until they approve it.`
 }
 

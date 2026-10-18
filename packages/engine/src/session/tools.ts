@@ -22,6 +22,7 @@ import { PartID } from "./schema"
 import { EffectBridge } from "@/effect/bridge"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
+import { freeModelMayTrain } from "@vectordevai/core/free-model-choice"
 import { isRecord } from "@/util/record"
 import { NativePatch } from "./llm/native-patch"
 
@@ -67,6 +68,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     callID: options.toolCallId,
     extra: {
       model: input.model,
+      // Whether the model may train on prompts, for tools that keep the owner's personal memory away from such a model.
+      mayTrain: freeModelMayTrain(input.model),
       invokedAgents: input.invokedAgents,
       promptOps: input.promptOps,
       ...(input.taskSize ? { taskSize: input.taskSize } : {}),

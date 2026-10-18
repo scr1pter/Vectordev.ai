@@ -388,7 +388,7 @@ describe("Instruction.systemPaths global config", () => {
     }),
   )
 
-  it.live("a scoped repository rule comes with a matching file when it is read, once per conversation", () =>
+  it.live("a scoped repository rule is in the digest, and memory about a file comes with it once per conversation", () =>
     withFiles(
       {
         ".vector/RULES.md": "- Money is integer cents.\n- Keep handlers thin (applies to src/routes/**)\n",
@@ -397,14 +397,29 @@ describe("Instruction.systemPaths global config", () => {
       (dir) =>
         Effect.gen(function* () {
           const svc = yield* Instruction.Service
+          const brain = yield* Brain.Service
+          const place = yield* svc.place()
+          // A scoped rule binds an edit, a write or a patch as much as a read, so every request carries it.
+          const digest = yield* brain.digest(place, { personal: true, index: true })
+          expect(digest.text).toContain("Keep handlers thin (applies to src/routes/**)")
+          yield* brain.propose(place, {
+            kind: "lesson",
+            text: "Route handlers validate input with the shared schema helpers.",
+            scope: "repository",
+            origin: "user",
+            paths: ["src/routes"],
+          })
           const first = yield* svc.resolve([], path.join(dir, "src", "routes", "user.ts"), MessageID.make("msg_memory-1"))
-          expect(first.map((item) => item.content).join("\n")).toContain("Keep handlers thin")
+          const attached = first.map((item) => item.content).join("\n")
+          expect(attached).toContain("shared schema helpers")
+          // The rule is already in the digest, so a read never repeats it.
+          expect(attached).not.toContain("Keep handlers thin")
           // The same message reading the file again gets nothing more.
           expect(yield* svc.resolve([], path.join(dir, "src", "routes", "user.ts"), MessageID.make("msg_memory-1"))).toEqual(
             [],
           )
-          // A later message sees the rule already attached in its history.
-          const history = loaded(first[0]!.filepath)
+          // A later message sees the memory already attached in its history.
+          const history = loaded(first.find((item) => item.filepath.startsWith("memory:"))!.filepath)
           expect(yield* svc.resolve(history, path.join(dir, "src", "routes", "user.ts"), MessageID.make("msg_memory-2"))).toEqual(
             [],
           )
