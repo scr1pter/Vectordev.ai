@@ -7,7 +7,8 @@ export const prerender = true
 
 // Comparison grid. Each cell is [mark, text]: y = yes, p = partly, n = no. Facts come from each company's own docs and
 // pricing pages, re-checked 15 October 2026 (see the sources list at the foot of the page). Cursor moved to new plans
-// on 12 October 2026, so its cells follow the new pricing page.
+// on 12 October 2026, so its cells follow the new pricing page. Codex's cells name no price, so the grid never sets a
+// Codex price against Vector's free workspace.
 const products = [
   { name: "Cursor", kind: "AI code editor (SpaceX)" },
   { name: "Codex", kind: "OpenAI" },
@@ -55,7 +56,7 @@ const groups = [
           ["p", "Read-only research and review helpers"],
           ["n", "None documented"],
         ],
-        vector: ["y", "8 built in: explore, review, judge, security, debug, test, performance, migration"],
+        vector: ["y", "9 built in: general, explore, review, judge, debug, test, security, performance, migration; they run in the background and can be steered"],
       },
     ],
   },
@@ -67,7 +68,7 @@ const groups = [
         note: "In place of a separate review bot",
         cells: [
           ["y", "Bugbot from the $30 plan, about $1–1.50 a run"],
-          ["y", "@codex review, on plans from $20/mo"],
+          ["y", "@codex review, on paid plans"],
           ["y", "Team and Enterprise, billed on tokens; Anthropic puts the average at $15–25 a review"],
           ["n", "Security scan before publishing"],
           ["n", "App security scan"],
@@ -96,7 +97,7 @@ const groups = [
           ["y", "Remote browser against the preview"],
           ["p", "Testing agent; cannot test sign-in steps"],
         ],
-        vector: ["y", "Browser agent; Vercel deploys get a browser smoke test by default"],
+        vector: ["y", "Browser agent; Vercel publishes get a browser smoke test by default"],
       },
     ],
   },
@@ -113,7 +114,7 @@ const groups = [
           ["y", "Built-in hosting and database"],
           ["y", "Built-in backend, database and hosting"],
         ],
-        vector: ["y", "Vercel publishing with health checks; Supabase migrations with a dry run"],
+        vector: ["y", "Vector Cloud: Vercel previews with health and browser checks; Supabase SQL shown before it runs"],
       },
       {
         cap: "Live multiplayer",
@@ -142,7 +143,7 @@ const groups = [
           ["p", "Credits per message, credit limits"],
           ["p", "Monthly credits, not dollars"],
         ],
-        vector: ["y", "Sessions priced from provider-reported tokens wherever the model has a price, subagents included, with model advice"],
+        vector: ["y", "Sessions priced from provider-reported tokens wherever the model has a price, subagents included, with a live cap you set"],
       },
       {
         cap: "Any model, any provider",
@@ -163,7 +164,7 @@ const groups = [
           ["y", "Any local or remote repo"],
           ["y", "Local repos and cloud tasks"],
           ["y", "Any repo, terminal and IDE"],
-          ["p", "Cloud projects; cannot import a repo"],
+          ["p", "Cloud-hosted apps; cannot import a repo"],
           ["p", "Imports a repo into its cloud"],
         ],
         vector: ["y", "Desktop and CLI on your machine"],
@@ -173,12 +174,12 @@ const groups = [
         note: "Agents, review and testing included",
         cells: [
           ["p", "Limited free tier; review and cloud agents from $30/mo"],
-          ["p", "Free desktop tier; CLI, IDE and review from $20/mo"],
+          ["p", "Free desktop tier; CLI, IDE and review on paid plans"],
           ["n", "Not on the free plan; from $17/mo"],
           ["p", "5 build credits a day free, 30 a month"],
           ["p", "25 messages a month free"],
         ],
-        vector: ["y", "Free workspace; bring a model account or use free models"],
+        vector: ["y", "Free workspace; bring a model account, a local model or your own free OpenRouter account"],
       },
     ],
   },
@@ -192,87 +193,68 @@ const markLabel = { y: "Yes", p: "Partly", n: "No" }
 const markClass = { y: "ip-yes", p: "ip-part", n: "ip-no" }
 const vectorMarkClass = { y: "ip-vec-yes", p: "ip-vec-part", n: "ip-no" }
 
-// Open-weight, coding-specialised models since 2024 by total parameters (billions), from their public model cards.
-// x is the position on a log scale from 5B to 1.5T; y is a beeswarm offset in pixels so close sizes do not overlap.
-const scale = (billions: number) => ((Math.log10(billions) - Math.log10(5)) / (Math.log10(1500) - Math.log10(5))) * 100
-const models = [
-  { name: "Seed-Coder-8B", maker: "ByteDance Seed", size: 8, y: 0 },
-  { name: "Mellum2", maker: "JetBrains", size: 12, y: 0 },
-  { name: "DeepSeek-Coder-V2-Lite", maker: "DeepSeek", size: 16, y: 0 },
-  { name: "Codestral", maker: "Mistral", size: 22, y: 0 },
-  { name: "Devstral Small 2", maker: "Mistral", size: 24, y: 12 },
-  { name: "North Mini Code", maker: "Cohere", size: 30, y: -12 },
-  { name: "Qwen3-Coder-30B-A3B", maker: "Qwen", size: 30.5, y: 12 },
-  { name: "Qwen2.5-Coder-32B", maker: "Qwen", size: 32, y: -24 },
-  { name: "KAT-Dev", maker: "Kwaipilot", size: 33, y: 24 },
-  { name: "Laguna XS 2.1", maker: "Poolside", size: 33, y: -36 },
-  { name: "KAT-Coder-V2.5-Dev", maker: "Kwaipilot", size: 35, y: 0 },
-  { name: "Kimi-Dev-72B", maker: "Moonshot", size: 72, y: 0 },
-  { name: "KAT-Dev-72B-Exp", maker: "Kwaipilot", size: 72, y: -12 },
-  { name: "Qwen3-Coder-Next", maker: "Qwen", size: 80, y: 12 },
-  { name: "Laguna S 2.1", maker: "Poolside", size: 118, y: 0 },
-  { name: "Devstral 2", maker: "Mistral", size: 123, y: -12 },
-  { name: "Laguna M.1", maker: "Poolside", size: 225, y: 0 },
-  { name: "DeepSeek-Coder-V2", maker: "DeepSeek", size: 236, y: -12 },
-  { name: "Qwen3-Coder-480B-A35B", maker: "Qwen", size: 480, y: 0 },
-  { name: "Kimi K2.7 Code", maker: "Moonshot", size: 1000, y: 0 },
-]
-const sizeLabel = (billions: number) => (billions >= 1000 ? `${billions / 1000}T` : `${billions}B`)
-const buckets = [
-  { label: "8–35B", models: models.filter((model) => model.size <= 35) },
-  { label: "72–123B", models: models.filter((model) => model.size > 35 && model.size < 200) },
-  { label: "225B–1T", models: models.filter((model) => model.size >= 200) },
-]
-const bucketCentre = (bucket: (typeof buckets)[number]) =>
-  (scale(bucket.models[0].size) + scale(bucket.models[bucket.models.length - 1].size)) / 2
-const ticks = [10, 30, 100, 300, 1000]
-// Velocity's planned size is "over 300 billion", as the README and the landing page have said since September 2026.
-const velocityAt = scale(300)
-
 const stack = [
   {
+    job: "Running many agents",
+    today: "Conductor $50 Pro · Superset $15–20 per user",
+    vector: "Outside agents beside Vector's, each in an isolated checkout, merged after tests and a secret scan.",
+    fit: "Replaces locally",
+  },
+  {
     job: "AI code review",
-    today: "CodeRabbit $24–30 per developer · Greptile $30 per seat plus credits · Graphite $40 per user · Cursor Bugbot about $1–1.50 a run · Claude Code Review billed on tokens, averaging $15–25 a review",
-    vector: "Vectorscope reviews pull requests on GitHub, in the desktop app and in the CLI, with a security reviewer on sensitive paths, a verify pass that re-checks blocking findings and drops the ones it cannot confirm, and a spend limit per review.",
-    fit: "Replaces on GitHub",
+    today: "CodeRabbit from $24 per developer · Greptile $30 per seat",
+    vector: "Vectorscope on GitHub, desktop and CLI, with a verify pass that re-checks blocking findings. No Vector fee.",
+    fit: "Does the job",
   },
   {
-    job: "Multi-agent orchestration",
-    today: "Conductor free on Mac, $50 Pro, $60 per user Teams · Superset free for one user, $15–20 per user",
-    vector: "Vector's agent and your installed Claude Code, Codex and Cursor Agent run in parallel, isolated checkouts on one dashboard, merged after your tests and a secret scan.",
-    fit: "Replaces for local work",
-  },
-  {
-    job: "Agent cost tracking",
-    today: "Helicone $79 Pro · Langfuse $29 Core, $199 Pro",
-    vector: "Tokenomics prices Vector sessions from provider-reported tokens wherever the model has a price, subagents included, labels free, ChatGPT plan, Codium and unpriced steps instead, and recommends models from measured runs.",
+    job: "Cost tracking and caps",
+    today: "Helicone $79 Pro · Langfuse $29–199",
+    vector: "Sessions priced wherever the model has a price; the Run Guard stops a run at your cap, within one step for each agent running.",
     fit: "Covers coding agents",
   },
   {
-    job: "Browser testing by an agent",
-    today: "Momentic $125 a month plus usage · QA Wolf billed per credit and runner minute",
-    vector: "A browser agent tests the running app, and Vercel deploys get a health check and a browser smoke test by default.",
-    fit: "Overlaps",
-  },
-  {
-    job: "Separate agent apps",
-    today: "Without an orchestrator, Claude Code, Codex and Cursor each run in their own window with their own history",
-    vector: "One dashboard runs all of them on your existing subscriptions, next to Vector's own agent.",
-    fit: "Runs them",
-  },
-  {
-    job: "Deploy and database consoles",
-    today: "Vercel and Supabase dashboards, opened by hand",
-    vector: "Publishing, environment variables and Supabase migrations with a dry run, started from the task.",
+    job: "Deploys and databases",
+    today: "Vercel and Supabase dashboards, by hand",
+    vector: "Vector Cloud previews, rolls back and migrates on your Vercel and Supabase accounts, showing SQL first and asking before every account change.",
     fit: "Controls them",
   },
+]
+
+// The checked-in offline archive docs/benchmarks/vector-efficiency-2026-10 (summary.json, integrated HTTP cells): Vector
+// on the Messages API against Claude Code 2.1.215, medians of three repetitions, in US dollars per task. Both agents made
+// the same number of model requests in every task. Each runtime's simulated cache is fresh at the start of a repetition
+// and carries across its tasks and sessions within it; the second session is a new process with that cache warm.
+// Only the three fix tasks are quoted: the archive's fourth, long-loop, scripts a read of src/args.ts, a file its
+// fixture does not have, so both agents get an error result for that step. Bars put 20 cents at 100%.
+const bench = [
+  { id: "solo-fix", label: "Fix a bug: test, read, edit, re-test", first: { vector: 0.051005, claude: 0.153329 }, second: { vector: 0.020625, claude: 0.081438 } },
+  { id: "delegate-explore", label: "Hand exploration to a subagent, then verify", first: { vector: 0.035368, claude: 0.141836 }, second: { vector: 0.026053, claude: 0.103717 } },
+  { id: "delegate-general", label: "Hand a task to a general subagent, then verify", first: { vector: 0.039049, claude: 0.149377 }, second: { vector: 0.024817, claude: 0.100459 } },
+]
+const sessions = [
+  { key: "first", name: "First" },
+  { key: "second", name: "Second" },
+] as const
+const cents = (usd: number) => (Math.round(usd * 1000) / 10).toFixed(1)
+const barWidth = (usd: number) => `${((usd / 0.2) * 100).toFixed(1)}%`
+const saving = (pair: { vector: number; claude: number }) => Math.round((1 - pair.vector / pair.claude) * 100)
+
+// The newest very large coding model from each of four makers, checked 17 October 2026 against each model card or
+// maker's announcement. Cursor and Cognition publish no sizes for Composer 2.5 or SWE-2, so fromBase marks the active
+// size of the open base each names: Kimi K2.5 (32B active) and Kimi K3 (104B active). Vector Velocity is in development
+// and the page gives it only "under 20B parameters active per token": no total, base model or compute provider.
+const largeModels = [
+  { name: "Qwen3-Coder-480B-A35B", maker: "Qwen", active: 35, fromBase: false, weights: "Open (Apache 2.0)", agent: "Qwen Code, Cline" },
+  { name: "Composer 2.5", maker: "Cursor", active: 32, fromBase: true, weights: "Not published", agent: "Cursor" },
+  { name: "SWE-2", maker: "Cognition", active: 104, fromBase: true, weights: "Not published", agent: "Devin" },
+  { name: "Kimi K2.7 Code", maker: "Moonshot", active: 32, fromBase: false, weights: "Open (Modified MIT)", agent: "Kimi Code CLI" },
 ]
 ---
 
 {/* The investor one-pager. Unlisted: noindex, not linked from the site, shared by link only. */}
 <MarketingLayout
   title="Vector · Investor one-pager"
-  description="Vector, the control room for AI coding agents: how it compares, the tools it replaces, why it plans to build its own coding model, the offline cost benchmark, roadmap and business model."
+  description="Why Vector is inevitable: the workspace that runs the labs' agents side by side cannot belong to a lab. Vector's free agent workspace, its offline benchmark, the model it is building and its roadmap to many more cloud services."
   noindex
 >
   <div class="ip-root">
@@ -286,104 +268,50 @@ const stack = [
   </header>
 
   <section class="ip-thesis" aria-labelledby="thesis-title">
-    <div class="ip-eyebrow">For teams that build with AI agents</div>
-    <h1 id="thesis-title">The control room for AI <em>coding agents</em>.</h1>
-    <p class="ip-lede">Teams now use several coding agents, such as Claude Code, Codex and Cursor, then pay for a review bot, an orchestration app and a cost tracker on top, often per seat. Vector puts that stack in one free workspace: its own agent beside Claude Code, Codex and Cursor Agent, any model, code review, browser testing, deploys and a price on each Vector session whose model has one. Next, it plans to build <strong>Vector Velocity</strong>, its own large coding model for that loop.</p>
+    <div class="ip-eyebrow">Why Vector is inevitable</div>
+    <h1 id="thesis-title">The workspace that runs the labs' agents side by side cannot <em>belong to a lab</em>.</h1>
+    <p class="ip-lede">Over a quarter of organisations send different work to different models,<sup>1</sup> yet each lab builds its agent around its own. <strong>Vector is the neutral harness:</strong> its own lean agent beside Claude Code, Codex and Cursor Agent, on any model, with review, testing and deploys built in. The workspace is free; Vector plans to earn on model credits, its own model and its own cloud services.</p>
     <div class="ip-facts">
-      <div class="ip-fact"><strong class="ip-num">219</strong><span>providers in the model catalog, plus local and free models</span></div>
-      <div class="ip-fact"><strong class="ip-num">3</strong><span>outside agents run inside Vector: Claude Code, Codex, Cursor Agent</span></div>
-      <div class="ip-fact"><strong class="ip-num">58–64%</strong><span>lower modelled request cost than Claude Code on the same scripted tasks, offline*</span></div>
-      <div class="ip-fact"><strong class="ip-num">$0</strong><span>for the workspace on macOS, Windows, Linux and the terminal</span></div>
+      <div class="ip-fact"><strong class="ip-num">67–75%</strong><span>less modelled spend than Claude Code in a first session, offline*</span></div>
+      <div class="ip-fact"><strong class="ip-num">219</strong><span>model providers and 8,184 models, plus local ones</span></div>
+      <div class="ip-fact"><strong class="ip-num">3</strong><span>outside agents: Claude Code, Codex, Cursor Agent</span></div>
+      <div class="ip-fact"><strong class="ip-num">$0</strong><span>for the workspace, on desktop and in the terminal</span></div>
     </div>
   </section>
 
-  <section class="ip-section ip-two" aria-label="Problem and product">
-    <div class="ip-problem">
-      <div class="ip-section-head">
-        <div class="ip-eyebrow">The problem</div>
-        <h2>AI agents multiplied. Control didn't.</h2>
-      </div>
-      <ul class="ip-clean">
-        <li><strong>Without an orchestrator, every agent is a separate island.</strong> Each vendor's agent runs in its own window, so three agents means three places to look.</li>
-        <li><strong>The labs' own agents are built around their own models:</strong> Claude Code officially supports only Claude models, and Codex defaults to OpenAI's, with other providers through compatible endpoints, though 27% of organisations already send different work to different models.<sup>1</sup></li>
-        <li><strong>The rest is a stack of subscriptions.</strong> AI review, agent orchestration and cost tracking are bought separately, review and orchestration often per developer.</li>
-        <li><strong>The bill per task is hard to see.</strong> Spend mostly arrives as credits, limits or a monthly invoice, and no single tool prices each task across vendors, while 38% of organisations already set usage limits to control AI cost.<sup>1</sup></li>
-      </ul>
-    </div>
-    <div class="ip-section ip-today">
-      <div class="ip-section-head">
-        <div class="ip-eyebrow">What Vector does today</div>
-        <h2>One workspace. Your agents. Any model.</h2>
-      </div>
-      <div class="ip-caps">
-        <div class="ip-cap"><h3>Your agents, one dashboard</h3><p>Vector's agent and your installed Claude Code, Codex and Cursor Agent each run in an isolated checkout, on one dashboard that flags clashes, then merge back after your tests and a secret scan.</p></div>
-        <div class="ip-cap"><h3>Any model</h3><p>8,184 models from 219 providers in Vector's catalog, connected with your own key or sign-in, plus any OpenAI-compatible or local endpoint and free models through OpenRouter.</p></div>
-        <div class="ip-cap"><h3>Vectorscope review</h3><p>Pull-request review on GitHub, desktop and CLI, with a verify pass that re-checks blocking findings and drops the ones it cannot confirm. An issue comment becomes a branch and a PR listing the commands it ran and their results.</p></div>
-        <div class="ip-cap"><h3>Specialist subagents</h3><p>Explore, Review, Judge, Security, Debug, Test, Performance and Migration specialists run in the background and report back.</p></div>
-        <div class="ip-cap"><h3>Tokenomics</h3><p>Vector prices each session from the tokens the provider reported wherever the model has a price, subagents included. Free models, ChatGPT plan, Codium and unpriced steps are labelled instead of priced. Vector recommends models once a task type has three measured runs.</p></div>
-        <div class="ip-cap"><h3>Test and ship from the task</h3><p>A browser agent tests the running app. Environment variables, Supabase migrations with a dry run, and Vercel publishing with health and browser checks.</p></div>
-      </div>
-      <p class="ip-footnote"><strong>New in desktop 1.99.108, published 17 October 2026:</strong> fuller Vercel and Supabase controls, with approval for every account change and the exact SQL shown for database changes; Models included with Vector under a no-training policy, through your own free OpenRouter account or, while Vector's service has it on, Vector's shared allowance for a free Vector account; Codium plans, with sales marked Coming soon until payments are connected; and helper sessions such as reviews kept out of the session list while their tokens and cost stay visible.</p>
-    </div>
-  </section>
-
-  <section class="ip-section" aria-labelledby="compare-title">
+  <section class="ip-section" aria-labelledby="now-title">
     <div class="ip-section-head">
-      <div class="ip-eyebrow">Where Vector is different</div>
-      <h2 id="compare-title">Twelve capabilities, six products</h2>
-      <p>Each cell says how that product handles it today. Vector chose these rows because they are the jobs it is built for: it has {vectorFullMarks} of the {allRows.length} in full, and the closest in this grid, {closest.name}, has {Math.max(...fullMarks)}.</p>
+      <div class="ip-eyebrow">Why now</div>
+      <h2 id="now-title">Three shifts make a neutral harness inevitable</h2>
     </div>
-    <div class="ip-legend" aria-label="Legend">
-      <span><i class="ip-sym ip-yes" aria-hidden="true">✓</i>Yes</span>
-      <span><i class="ip-sym ip-part" aria-hidden="true"></i>Partly</span>
-      <span><i class="ip-sym ip-no" aria-hidden="true">✕</i>No</span>
+    <div class="ip-reasons">
+      <div class="ip-reason">
+        <span class="ip-reason-n ip-num">01</span>
+        <h3>The labs close ranks</h3>
+        <p>Labs sell their own agents (Claude Code passed $2.5B in run-rate revenue in February 2026) and cut others off: Anthropic limited Windsurf's access to Claude and blocked third-party tools from Claude Pro and Max, and OpenAI says Cursor's access ends on 12 November 2026.</p>
+      </div>
+      <div class="ip-reason">
+        <span class="ip-reason-n ip-num">02</span>
+        <h3>Good models are cheap and open</h3>
+        <p>The price of a given level of performance falls 9x to 900x a year,<sup>2</sup> and Cursor's Composer 2.5 and Cognition's SWE-2 are built on Moonshot's open Kimi models. The model alone is no moat, and a harness can now afford its own.</p>
+      </div>
+      <div class="ip-reason">
+        <span class="ip-reason-n ip-num">03</span>
+        <h3>Every token is a line on the bill</h3>
+        <p>38% of organisations set usage limits to control AI cost,<sup>1</sup> and Cursor ran at negative gross margins until its own model and cheaper open ones lifted it to slightly positive (TechCrunch, April 2026). The harness decides how many tokens a task takes.</p>
+      </div>
     </div>
-    <div class="ip-grid-wrap">
-      <table class="ip-compare">
-        <thead>
-          <tr>
-            <th scope="col">Capability</th>
-            {products.map((product) => <th scope="col">{product.name}<small>{product.kind}</small></th>)}
-            <th scope="col" class="ip-vec">Vector<small>Agent workspace</small></th>
-          </tr>
-        </thead>
-        {groups.map((group) => (
-          <tbody>
-            <tr class="ip-group"><th scope="rowgroup" colspan="7">{group.name}</th></tr>
-            {group.rows.map((row) => (
-              <tr>
-                <th scope="row">{row.cap}<span>{row.note}</span></th>
-                {row.cells.map((cell, index) => (
-                  <td data-label={products[index].name}>
-                    <i class={`ip-sym ${markClass[cell[0] as "y" | "p" | "n"]}`} aria-label={markLabel[cell[0] as "y" | "p" | "n"]}>{cell[0] === "y" ? "✓" : cell[0] === "n" ? "✕" : ""}</i>
-                    <span class="ip-cell">{cell[1]}</span>
-                  </td>
-                ))}
-                <td class="ip-vec" data-label="Vector">
-                  <i class={`ip-sym ${vectorMarkClass[row.vector[0] as "y" | "p" | "n"]}`} aria-label={markLabel[row.vector[0] as "y" | "p" | "n"]}>{row.vector[0] === "y" ? "✓" : ""}</i>
-                  <span class="ip-cell">{row.vector[1]}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        ))}
-        <tfoot>
-          <tr class="ip-tally">
-            <th scope="row">Full marks<span>Rows marked Yes, out of {allRows.length}</span></th>
-            {fullMarks.map((count, index) => <td data-label={products[index].name}><b class="ip-num">{count}</b></td>)}
-            <td class="ip-vec" data-label="Vector"><b class="ip-num">{vectorFullMarks}</b></td>
-          </tr>
-        </tfoot>
-      </table>
+    <div class="ip-callout ip-answer">
+      <h3>And if a lab cuts Vector off?</h3>
+      <p>Vector depends on no single lab. It runs each vendor's own CLI, installed and signed in by the developer, and its own agent runs on any provider in its catalog or a local model. If one door closes, the work moves to another model.</p>
     </div>
-    <p class="ip-footnote"><strong>Where Vector matches the field:</strong> parallel agents in worktrees, subagents, AI pull-request review, issue-to-PR, browser testing and local repos. Cursor, Codex and Claude Code have these too, and Lovable and Base44 lead on live collaboration and built-in hosting. Orchestrators such as Conductor and Superset, not in this grid, also run Claude Code, Codex and other agents side by side in isolated workspaces. Vector's edge is running them beside its own agent, on any model, with a price on each Vector session whose model has one. Competitor details come from each company's official docs and pricing pages, checked 15 October 2026; sources are listed at the end.</p>
   </section>
 
   <section class="ip-section" aria-labelledby="stack-title">
     <div class="ip-section-head">
-      <div class="ip-eyebrow">What Vector consolidates</div>
-      <h2 id="stack-title">One workspace instead of a stack of tools</h2>
-      <p>Teams buy each of these jobs separately today, often per developer. Vector does the core job of each inside the free workspace, on the team's own model account. The specialists go deeper in their own lanes; Vector's advantage is that the jobs share one place, one set of agents and one bill.</p>
+      <div class="ip-eyebrow">All in one · desktop 1.99.108</div>
+      <h2 id="stack-title">One free workspace in place of a stack of tools</h2>
+      <p>Teams buy these separately today, often per developer. Vector does the core of each in one free workspace.</p>
     </div>
     <div class="ip-stack" role="list">
       <div class="ip-stack-head" aria-hidden="true"><span>Job</span><span>What teams buy today · list price a month</span><span>In Vector, free</span></div>
@@ -395,264 +323,248 @@ const stack = [
         </div>
       ))}
     </div>
-    <div class="ip-callouts">
-      <div class="ip-callout">
-        <strong class="ip-num">$240–480<small> a month</small></strong>
-        <p>What a 10-developer team pays CodeRabbit for AI review alone at list price, from Essentials ($24 a developer) to Team ($48), billed annually, before any model usage. In Vector, Vectorscope does that job on GitHub inside the free workspace; reviews run on the team's own model account, so they still use tokens, capped by default at $2 a review.</p>
-      </div>
-      <div class="ip-callout">
-        <strong class="ip-num">$1.5B</strong>
-        <p>CodeRabbit's valuation for AI review alone (Series C, August 2026), and Cursor agreed to buy Graphite in December 2025. Orchestration on its own is harder to charge for: Vibe Kanban's maker shut down in April 2026 with most users on its free tier. Vector gives the whole workspace away and plans to earn from Codium, the model credits it will sell inside the workspace once payments are connected.</p>
-      </div>
+    <div class="ip-callout">
+      <strong class="ip-num">$1.5B</strong>
+      <p>CodeRabbit's valuation for AI review alone (Series C, August 2026). Vectorscope does that job in the free workspace.</p>
     </div>
-    <p class="ip-footnote"><strong>Controlled, not hosted:</strong> Vector deploys to Vercel and migrates Supabase on the team's own accounts. Hosting, databases and billing for them stay with those providers.</p>
+    <details class="ip-details ip-grid-details">
+      <summary>{`Twelve capabilities, six products · Vector has ${vectorFullMarks}, ${closest.name} has ${Math.max(...fullMarks)}`}</summary>
+      <div class="ip-grid-body">
+        <p class="ip-muted ip-small">Each cell says how that product handles it today. Vector chose these rows because they are the jobs it is built for: it has {vectorFullMarks} of the {allRows.length} in full, and the closest in this grid, {closest.name}, has {Math.max(...fullMarks)}.</p>
+        <div class="ip-legend" aria-label="Legend">
+          <span><i class="ip-sym ip-yes" aria-hidden="true">✓</i>Yes</span>
+          <span><i class="ip-sym ip-part" aria-hidden="true"></i>Partly</span>
+          <span><i class="ip-sym ip-no" aria-hidden="true">✕</i>No</span>
+        </div>
+        <div class="ip-grid-wrap">
+          <table class="ip-compare">
+            <thead>
+              <tr>
+                <th scope="col">Capability</th>
+                {products.map((product) => <th scope="col">{product.name}<small>{product.kind}</small></th>)}
+                <th scope="col" class="ip-vec">Vector<small>Agent workspace</small></th>
+              </tr>
+            </thead>
+            {groups.map((group) => (
+              <tbody>
+                <tr class="ip-group"><th scope="rowgroup" colspan="7">{group.name}</th></tr>
+                {group.rows.map((row) => (
+                  <tr>
+                    <th scope="row">{row.cap}<span>{row.note}</span></th>
+                    {row.cells.map((cell, index) => (
+                      <td data-label={products[index].name}>
+                        <i class={`ip-sym ${markClass[cell[0] as "y" | "p" | "n"]}`} aria-label={markLabel[cell[0] as "y" | "p" | "n"]}>{cell[0] === "y" ? "✓" : cell[0] === "n" ? "✕" : ""}</i>
+                        <span class="ip-cell">{cell[1]}</span>
+                      </td>
+                    ))}
+                    <td class="ip-vec" data-label="Vector">
+                      <i class={`ip-sym ${vectorMarkClass[row.vector[0] as "y" | "p" | "n"]}`} aria-label={markLabel[row.vector[0] as "y" | "p" | "n"]}>{row.vector[0] === "y" ? "✓" : ""}</i>
+                      <span class="ip-cell">{row.vector[1]}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            ))}
+            <tfoot>
+              <tr class="ip-tally">
+                <th scope="row">Full marks<span>Rows marked Yes, out of {allRows.length}</span></th>
+                {fullMarks.map((count, index) => <td data-label={products[index].name}><b class="ip-num">{count}</b></td>)}
+                <td class="ip-vec" data-label="Vector"><b class="ip-num">{vectorFullMarks}</b></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <p class="ip-footnote"><strong>Where Vector matches the field:</strong> parallel agents in worktrees, subagents, AI pull-request review, issue-to-PR, browser testing and local repos. Cursor, Codex and Claude Code have these too, Lovable and Base44 lead on live collaboration and built-in hosting, and orchestrators such as Conductor and Superset also run several agents side by side. Vector's edge is doing these jobs in one free workspace, beside its own agent, on any model, with a price on each Vector session whose model has one. Competitor details come from each company's official docs and pricing pages, checked 15 October 2026.</p>
+      </div>
+    </details>
+    <p class="ip-footnote"><strong>Status:</strong> every row ships in desktop 1.99.108, but on a Windows WSL server and in the 1.99.99 CLI the Run Guard, repository trust and the new subagent controls do not apply yet. List prices checked 15–17 October 2026. <strong>Privacy:</strong> Vector itself never trains on prompts or code, and prompts follow each model provider's rules. Requests to free models whose providers don't train ask them not to, and free models whose providers may train are labelled May train on your prompts and sent only after the user accepts that once.</p>
   </section>
 
-  <section class="ip-section" aria-labelledby="privacy-title">
-    <div class="ip-section-head">
-      <div class="ip-eyebrow">Privacy</div>
-      <h2 id="privacy-title">Your code stays on your computer, and Vector trains on none of it</h2>
-      <p>Vector is local-first. Sessions, history and checkpoints stay on the developer's computer. Vector's servers keep no prompts or code, apart from what a user chooses to publish or send to support. Nothing in Vector collects data for training. Prompts still go to the model provider the user picks, under that provider's rules, so picking the provider is how users control their privacy.</p>
+  <section class="ip-section ip-bench" aria-labelledby="bench-title">
+    <div class="ip-bench-claim">
+      <div class="ip-eyebrow">Measured offline</div>
+      <h2 id="bench-title"><span class="ip-big ip-num">67–75%</span> less modelled spend than Claude Code in a first session*</h2>
+      <p class="ip-bench-second"><b class="ip-num">75%</b> less in a second session, with the simulated cache warm.</p>
+      <p class="ip-muted">Same three scripted fix tasks, same number of model requests, same list rates, against Claude Code 2.1.215. The gap is what each sends: in the archived run, Vector's first request in a new session was about 9,000 tokens, Claude Code's about 30,000.</p>
     </div>
-    <ul class="ip-clean">
-      <li><strong>Local first.</strong> Sessions, history and checkpoints are kept on the user's computer, in a local database and Vector's own data folder. Session history does not sync to Vector. The one exception is a share link the user chooses to publish, which is public for 30 days at most.</li>
-      <li><strong>No prompts kept on Vector's servers.</strong> With the user's own key or a ChatGPT sign-in, prompts go straight from the computer to that provider. A model on the user's own computer keeps them there. On Vector's own model routes, the gateway passes prompts and replies through without storing or logging them.</li>
-      <li><strong>Nothing collected for training.</strong> No part of Vector gathers prompts or code to train a model, so there is no setting to switch off. Velocity, the model Vector plans to build, will not be trained on customers' code.</li>
-      <li><strong>Zero retention on Codium.</strong> Every Codium request asks OpenRouter to route only to providers it records as zero data retention and to deny data collection. It sends OpenRouter a one-way hash of the account ID, never the user's email or name. <span class="ip-status">In development</span></li>
-      <li><strong>Free models, labelled by training.</strong> Requests to free models whose providers don't train ask that prompts are not used for training. Free models whose providers may train are labelled “May train on your prompts” and are sent only after the user accepts that once. Providers may keep prompts under their own policies.</li>
-      <li><strong>Counts, not content.</strong> Usage counts are totals, such as sessions and tokens, with the app version, platform and the models used most. They never include prompts, code, file names, model output or keys, and users can switch them off. Crash reports are off by default, OpenTelemetry sends data only to an endpoint the user sets, and desktop dictation runs on a local Whisper model.</li>
-    </ul>
-    <p class="ip-muted"><strong class="ip-ink">How that compares on personal plans.</strong> On personal plans of Codex and Claude Code, whether your sessions train their models depends on a setting. OpenAI may train on ChatGPT and Codex content from Free, Plus and Pro accounts unless the user turns off “Improve the model for everyone”. Codex has a separate “Include environments” setting, and rating a reply can let OpenAI train on that whole conversation even after opting out. Anthropic trains on Claude Free, Pro and Max accounts, Claude Code included, when the user's training setting is on, and keeps that data for up to five years, or 30 days with the setting off. Both companies offer an opt-out, and neither trains on business or API data by default. Vector itself trains on nothing, so it has no such setting. Prompts sent through a ChatGPT sign-in or through Claude Code inside Vector still follow that company's setting.<sup>2</sup></p>
-    <p class="ip-footnote"><strong>What Vector cannot change:</strong> a prompt sent to a model provider follows that provider's rules. A user who signs in with ChatGPT, or runs Claude Code or Codex inside Vector, is still under OpenAI's or Anthropic's terms for that account. Codium's zero-retention routing relies on OpenRouter's records and the providers' published policies, not an independent audit. Usage counts are on by default.</p>
+    <div class="ip-bars" role="img" aria-label={`Modelled cost per scripted task in US cents, Vector versus Claude Code: ${bench.map((row) => `${row.label.toLowerCase()}, first session ${cents(row.first.vector)} versus ${cents(row.first.claude)}, second session ${cents(row.second.vector)} versus ${cents(row.second.claude)}`).join("; ")}.`}>
+      <div class="ip-bar-key" aria-hidden="true"><span><i class="ip-fill ip-v"></i>Vector</span><span><i class="ip-fill ip-c"></i>Claude Code</span><span>US cents per task, by session</span></div>
+      {bench.map((row) => (
+        <div class="ip-bar-row">
+          <b class="ip-bar-task">{row.label}</b>
+          {sessions.map((session) => (
+            <div class="ip-bar-session">
+              <span class="ip-bar-name">{session.name}</span>
+              <div class="ip-bar-pair">
+                <div class="ip-track"><div class="ip-fill ip-v" style={`width:${barWidth(row[session.key].vector)}`}><i>{cents(row[session.key].vector)}¢</i></div></div>
+                <div class="ip-track"><div class="ip-fill ip-c" style={`width:${barWidth(row[session.key].claude)}`}><i>{cents(row[session.key].claude)}¢</i></div></div>
+              </div>
+              <span class="ip-save">{saving(row[session.key])}% less</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
   </section>
 
   <section class="ip-section" aria-labelledby="model-title">
     <div class="ip-section-head">
       <div class="ip-eyebrow">The model layer</div>
-      <h2 id="model-title">Why Vector plans to build its own coding model</h2>
-      <p>Every coding tool sells software but pays for tokens. Whoever owns the model controls the cost line, the speed and the roadmap.</p>
-    </div>
-    <div class="ip-reasons">
-      <div class="ip-reason">
-        <span class="ip-reason-n ip-num">01</span>
-        <h3>Model spend is the cost line</h3>
-        <p>Coding tools pay for every token they serve. Cursor ran at negative gross margins until its own Composer model and cheaper open models brought it to slightly positive (TechCrunch, April 2026). A model Vector owns lets Vector set its own price and serving speed.</p>
-      </div>
-      <div class="ip-reason">
-        <span class="ip-reason-n ip-num">02</span>
-        <h3>The model vendors sell competing agents</h3>
-        <p>Claude Code alone passed $2.5B in run-rate revenue (Anthropic, February 2026). Access also gets withdrawn: Anthropic cut Windsurf's direct Claude capacity with less than five days' notice (June 2025) and blocked third-party coding tools from using Claude Pro and Max subscriptions (January 2026). After SpaceX bought Cursor, OpenAI said Cursor's access to its models ends on 12 November 2026.</p>
-      </div>
-      <div class="ip-reason">
-        <span class="ip-reason-n ip-num">03</span>
-        <h3>Models are trained for one harness</h3>
-        <p>OpenAI's guide for its Codex models says they were trained on its own patch format and terminal tool, and may not be on other tools. Cursor trained Composer with reinforcement learning inside Cursor's own agent, and Cognition built SWE-1.5 together with its own harness. On Terminal-Bench 4.0, the top 19 of 35 entries each run a lab's model in that lab's own agent. Vector's loop of specialists, review pass and cross-agent merge checks is nobody's training target but Vector's.</p>
-      </div>
+      <h2 id="model-title">Neutral on models, with one built for its own harness</h2>
+      <p>Vector runs any model the developer picks. Coding models are now trained inside a harness, as Composer and SWE-1.5 were, so Vector is building Velocity for its own: one more choice in the picker, designed to cost significantly less to run than the very large coding models.</p>
     </div>
 
     <div class="ip-gap">
       <div class="ip-gap-head">
-        <h3>Large open coding models are rare, and the two largest are paired with their makers' own agents.</h3>
+        <h3 id="large-title">Four very large coding models run 32B to 104B parameters for every token</h3>
+        <p>The newest very large coding model from each of four makers.</p>
       </div>
-      <figure class="ip-chart">
-        <div class="ip-plot" role="img" aria-label={`Strip chart of ${models.length} open-weight coding-specialised models by total parameters, on a log scale: ${buckets.map((bucket) => `${bucket.models.length} between ${bucket.label}`).join(", ")}. A dashed line marks Vector Velocity's planned size of 300B+; only Qwen3-Coder-480B and Kimi K2.7 Code are larger than 300B.`}>
-          <div class="ip-clusters" aria-hidden="true">
-            {buckets.map((bucket) => (
-              <span style={`left:${bucketCentre(bucket).toFixed(2)}%`}><b class="ip-num">{bucket.models.length}</b> models<br />{bucket.label}</span>
+      <div class="ip-four-wrap">
+        <table class="ip-four" aria-labelledby="large-title">
+          <thead>
+            <tr><th scope="col">Model</th><th scope="col">Active per token</th><th scope="col">Weights</th><th scope="col">Ships with</th></tr>
+          </thead>
+          <tbody>
+            {largeModels.map((model) => (
+              <tr>
+                <th scope="row">{model.name}<small>{model.maker}</small></th>
+                <td class="ip-n" data-label="Active per token">{model.active}B{model.fromBase && <sup>†</sup>}</td>
+                <td data-label="Weights">{model.weights}</td>
+                <td data-label="Ships with">{model.agent}</td>
+              </tr>
             ))}
-          </div>
-          <div class="ip-dots" aria-hidden="true">
-            {models.map((model) => (
-              <span class="ip-dot" style={`left:${scale(model.size).toFixed(2)}%;--y:${model.y}px`} title={`${model.name} · ${model.maker} · ${sizeLabel(model.size)}`}></span>
-            ))}
-            <span class="ip-vring" style={`left:${velocityAt.toFixed(2)}%`} title="Vector Velocity · planned 300B+ · not built yet"></span>
-          </div>
-          <div class="ip-vline" style={`left:${velocityAt.toFixed(2)}%`} aria-hidden="true"></div>
-          <div class="ip-axis" aria-hidden="true">
-            {ticks.map((tick) => <span style={`left:${scale(tick).toFixed(2)}%`}>{sizeLabel(tick)}</span>)}
-          </div>
-          <div class="ip-vlabel" style={`left:${velocityAt.toFixed(2)}%`} aria-hidden="true">Velocity · planned 300B+</div>
-        </div>
-        <figcaption class="ip-footnote">Each dot is one open-weight, coding-specialised model released since 2024, by total parameters on a log scale; hover a dot, or open the list below, for names. Vector's count from public model cards, checked 11 and 15 October 2026; small releases may be missing. Several are mixture-of-experts models that use only about 3–8B parameters per token, such as Qwen3-Coder-Next and Laguna S 2.1; the four largest use 21–35B, and others, such as Devstral 2, are dense. Size alone does not make a model better.</figcaption>
-        <details class="ip-details">
-          <summary>The {models.length} models in this chart</summary>
-          <div class="ip-model-list">
-            {buckets.map((bucket) => (
-              <div>
-                <h4>{bucket.label} · {bucket.models.length}</h4>
-                <ul>
-                  {bucket.models.map((model) => <li><span>{model.name} <i>{model.maker}</i></span><b class="ip-num">{sizeLabel(model.size)}</b></li>)}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </details>
-      </figure>
-      <ul class="ip-gap-points">
-        <li><strong>Most open coding specialists stop around 35B parameters:</strong> 11 of the 20 counted here.</li>
-        <li><strong>Of those counted, only four pass 200B, and only two pass 300B, where Velocity's planned size starts:</strong> Qwen3-Coder-480B (July 2025), released with Qwen's own Qwen Code and also supported in agents such as Cline, and Kimi K2.7 Code (1T, a coding model built on the general Kimi K2.6), which its card says works best in Kimi Code CLI.</li>
-        <li><strong>At the frontier, coding runs on general models.</strong> All 35 entries on the Terminal-Bench 4.0 leaderboard (updated 6 October 2026) use one, and OpenAI now recommends its general GPT-6.1 Sol for Codex.</li>
-        <li><strong>Coding companies build their own models on open bases:</strong> Cursor built Composer 2 on the open Kimi K2.5, and Cognition built SWE-1.5 for Windsurf's Cascade on an open base. Each is tuned for one company's agent.</li>
-      </ul>
+            <tr class="ip-four-v">
+              <th scope="row">Vector Velocity<small>Vector · <span class="ip-stage">In development</span></small></th>
+              <td class="ip-n" data-label="Active per token">Under 20B, by design</td>
+              <td data-label="Weights">None yet</td>
+              <td data-label="Ships with">Vector, through Codium (planned)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="ip-footnote">† Cursor and Cognition publish no sizes; these are the open bases they name, Kimi K2.5 and Kimi K3. From model cards and makers' posts, 17 October 2026.</p>
     </div>
 
     <div class="ip-velocity">
       <div class="ip-vcard">
-        <span class="ip-status">Planned</span>
+        <span class="ip-stage">In development</span>
         <h3>Vector Velocity</h3>
-        <p class="ip-vsize"><b class="ip-num">300B+</b> parameters, planned</p>
-        <p>Vector's own coding model. At its planned size it would sit among the largest disclosed coding-tuned models, and, as far as public information shows, the first designed for a workspace that runs several vendors' agents on any model.</p>
+        <p class="ip-vsize"><b class="ip-num">Under 20B</b> parameters active per token, by design</p>
+        <p>Vector's own model, specialised for agentic computer use, agentic workflows and Vector's own harness, plus other coding and developer-tool tasks.</p>
         <ul class="ip-clean">
-          <li><strong>Designed for Vector's loop:</strong> planning, tool calls, edits, checks and verification, across the specialists and the review pass.</li>
-          <li><strong>Planned to sell in the open:</strong> one choice in the picker beside 219 providers, measured by the same tokenomics. Through Codium its steps would count in tokens and Codium credits, like every Codium model's, not in dollars, so it would have to win on measured results.</li>
-          <li><strong>Planned to run through Codium,</strong> so model spend that goes to other labs today could go to Vector's own model.</li>
-          <li><strong>Not trained on customers' code.</strong> There are no weights or benchmarks yet, so this page makes no performance claims for it.</li>
+          <li><strong>Work has started; there are no weights or benchmarks yet,</strong> so this page makes no performance claims for it.</li>
         </ul>
       </div>
       <div class="ip-why-us">
-        <div class="ip-eyebrow">Why Vector can build it</div>
-        <div class="ip-why-item"><h4>It controls the harness</h4><p>Vector maintains its agent, its tools and its eight specialists, so the loop the model is trained for is known, not a guess about someone else's product. Cursor and Cognition took the same route: their own models, trained inside their own agents.</p></div>
-        <div class="ip-why-item"><h4>It already measures cost per task</h4><p>Vector prices each session from provider-reported tokens wherever the model has a price, and an offline benchmark prices every request. Velocity would be measured with the same tools as every other model.</p></div>
-        <div class="ip-why-item"><h4>It has the channel</h4><p>Velocity would ship into a free workspace on desktop and in the terminal, and sell through Codium, with no new product for anyone to adopt.</p></div>
+        <h3 class="ip-eyebrow">Why Velocity is needed</h3>
+        <div class="ip-why-item"><h4>Designed to cost significantly less to run than all four</h4><p>Per-token compute grows with active parameters, and a task is many requests: 5 to 8 in the scripted tasks above. Velocity is designed for under 20B against their 32B to 104B, though it still needs memory for all its weights.</p></div>
+        <div class="ip-why-item"><h4>Built for Vector's own loop</h4><p>The open two run in Vector today, but their cards point to other agents. Velocity is being built for planning, tool calls, edits, checks and subagents, and is planned to sell through Codium. Smaller open coding models already run in Vector; Velocity's bet is training inside Vector's own harness, the way Cursor and Cognition trained their models inside theirs. The size sets the running cost; the harness training is the edge.</p></div>
       </div>
-    </div>
-  </section>
-
-  <section class="ip-section ip-bench" aria-labelledby="bench-title">
-    <div class="ip-bench-claim">
-      <div class="ip-eyebrow">Measured offline, not claimed</div>
-      <div class="ip-big ip-num">58–64%</div>
-      <h2 id="bench-title">less modelled spend on model requests for the same scripted work</h2>
-      <p class="ip-muted">Vector and Claude Code ran the same scripted coding tasks against a local test model server, and every request was priced at Claude Sonnet 4.5 list rates. Vector's main agent sends about 10,000 tokens of fixed instructions and tool definitions with each request; Claude Code sends about 28,000.</p>
-    </div>
-    <div class="ip-bars" role="img" aria-label="Cost per scripted task: fix a bug, Vector 5.9 cents versus Claude Code 15.3 cents; delegate exploration 7.6 versus 19.7 cents; delegate a general task 7.8 versus 21.9 cents; 12-step investigation 9.3 versus 22.3 cents.">
-      <div class="ip-bar-row">
-        <div class="ip-bar-label"><b>Fix a bug: test, read, edit, re-test</b><span class="ip-save">62% less</span></div>
-        <div class="ip-bar-pair">
-          <div class="ip-bar"><span>Vector</span><div class="ip-track"><div class="ip-fill ip-v" style="width:19.6%"><i>5.9¢</i></div></div></div>
-          <div class="ip-bar"><span>Claude Code</span><div class="ip-track"><div class="ip-fill ip-c" style="width:51.1%"><i>15.3¢</i></div></div></div>
-        </div>
-      </div>
-      <div class="ip-bar-row">
-        <div class="ip-bar-label"><b>Hand exploration to a subagent</b><span class="ip-save">62% less</span></div>
-        <div class="ip-bar-pair">
-          <div class="ip-bar"><span>Vector</span><div class="ip-track"><div class="ip-fill ip-v" style="width:25.2%"><i>7.6¢</i></div></div></div>
-          <div class="ip-bar"><span>Claude Code</span><div class="ip-track"><div class="ip-fill ip-c" style="width:65.6%"><i>19.7¢</i></div></div></div>
-        </div>
-      </div>
-      <div class="ip-bar-row">
-        <div class="ip-bar-label"><b>Hand a task to a general subagent</b><span class="ip-save">64% less</span></div>
-        <div class="ip-bar-pair">
-          <div class="ip-bar"><span>Vector</span><div class="ip-track"><div class="ip-fill ip-v" style="width:25.9%"><i>7.8¢</i></div></div></div>
-          <div class="ip-bar"><span>Claude Code</span><div class="ip-track"><div class="ip-fill ip-c" style="width:73.0%"><i>21.9¢</i></div></div></div>
-        </div>
-      </div>
-      <div class="ip-bar-row">
-        <div class="ip-bar-label"><b>A 12-step investigation</b><span class="ip-save">58% less</span></div>
-        <div class="ip-bar-pair">
-          <div class="ip-bar"><span>Vector</span><div class="ip-track"><div class="ip-fill ip-v" style="width:30.9%"><i>9.3¢</i></div></div></div>
-          <div class="ip-bar"><span>Claude Code</span><div class="ip-track"><div class="ip-fill ip-c" style="width:74.4%"><i>22.3¢</i></div></div></div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="ip-section" aria-labelledby="who-title">
-    <div class="ip-section-head">
-      <div class="ip-eyebrow">Who it is for</div>
-      <h2 id="who-title">Built for the people who answer for the code and the bill</h2>
-    </div>
-    <div class="ip-people">
-      <div class="ip-person"><div class="ip-fit-label">Primary</div><h3>CTOs and engineering leads, seed to Series B</h3><p class="ip-why">Lets the team use Claude Code, Codex, Cursor and any model in one place, shows what each session and model costs, and reviews every GitHub pull request without a per-seat review tool.</p></div>
-      <div class="ip-person"><div class="ip-fit-label">Primary</div><h3>Founding engineers</h3><p class="ip-why">Runs several agents at once on existing subscriptions, delegates to specialists, tests the running app in a real browser and merges only after the repository's own checks pass.</p></div>
-      <div class="ip-person"><div class="ip-fit-label">Growth</div><h3>Technical solo founders</h3><p class="ip-why">Free to start with free models, and ships from the task: environment variables, Supabase migrations and Vercel deploys.</p></div>
-      <div class="ip-person"><div class="ip-fit-label">Growth</div><h3>Agencies and dev shops</h3><p class="ip-why">Keeps each client's model bill separate with their own keys, tracks spend per session and run, keeps rules in each repo and runs scheduled agents across many repos.</p></div>
     </div>
   </section>
 
   <section class="ip-section" aria-labelledby="roadmap-title">
     <div class="ip-section-head">
-      <div class="ip-eyebrow">Roadmap · from October 2026</div>
-      <h2 id="roadmap-title">From running agents to building the model behind them</h2>
+      <div class="ip-eyebrow">Roadmap · every item labelled</div>
+      <h2 id="roadmap-title">From one workspace to the model and the cloud behind it</h2>
+      <p>Nothing below is on sale yet. <b>Built in, not on sale</b>: in the app, with sales closed. <b>In development</b>: work has started. <b>Planned</b>: decided, no release set. <b>Intent</b>: not yet designed.</p>
     </div>
     <div class="ip-road">
       <div class="ip-milestone">
-        <span class="ip-stage">Early prototype</span>
-        <h3>Computer Use</h3>
-        <p>Agents that see and operate desktop apps, not just code and the browser. Vector's own early native helper, with per-app permission grants and input controls, is not in any release yet; a community Computer Use plugin is in the plugin catalog today.</p>
-      </div>
-      <div class="ip-milestone">
-        <span class="ip-stage">Early version live</span>
-        <h3>Multiplayer</h3>
-        <p>Today a teammate can join a live workspace with one invite link. Built but not yet in a published CLI: guests stay inside the workspace, while terminals, shell commands and approvals stay with the host; vector invite runs from the CLI, so this arrives with the next CLI release. Next: Vector Teams with shared defaults, already in the code and waiting on service setup.</p>
+        <span class="ip-stage">Built in, not on sale</span>
+        <h3>Vector Codium</h3>
+        <p>Low-cost coding models on one Vector account, with no provider keys.</p>
       </div>
       <div class="ip-milestone">
         <span class="ip-stage">In development</span>
-        <h3>Vector Codium</h3>
-        <p>Managed coding models on one Vector account, with no provider keys: monthly plans or top-ups. The plans are built into desktop 1.99.108; sales open once payments are connected.</p>
+        <h3>Vector Velocity</h3>
+        <p>Under 20B parameters active per token, for computer use, agentic workflows and Vector's harness.</p>
       </div>
       <div class="ip-milestone">
         <span class="ip-stage">Planned</span>
-        <h3>Vector Velocity</h3>
-        <p>Vector's own coding model, planned at 300B+ parameters, designed for the loop Vector runs and offered beside every other provider.</p>
+        <h3>Computer Use</h3>
+        <p>Agents that operate desktop apps. A community plugin is in Vector's catalog today.</p>
       </div>
       <div class="ip-milestone ip-milestone-wide">
         <span class="ip-stage">Planned</span>
-        <h3>Vector Cloud, the software factory</h3>
-        <p>Teams are not leaving Vercel and Supabase, so Vector Cloud works inside the accounts they already have instead of replacing them. Today Vector's agents publish to Vercel and run Supabase migrations there. Next, Vector Cloud is planned to run the whole line in the cloud, with no laptop open:</p>
+        <h3>The software factory, in Vector Cloud</h3>
+        <p>Issue to reviewed pull request in the cloud, inside the team's own Vercel and Supabase accounts:</p>
         <ol class="ip-line">
-          <li><b>Intake</b><span>A GitHub issue, a ticket or a schedule starts the work.</span></li>
-          <li><b>Build</b><span>Agents from any vendor, on any model, each in its own cloud copy of the repository.</span></li>
-          <li><b>Check</b><span>The repository's tests, the repair loop, a secret scan, Vectorscope review and a spend cap on every change.</span></li>
-          <li><b>Preview</b><span>A pull request with a Vercel preview and its own Supabase branch database.</span></li>
-          <li><b>Approve</b><span>A person merges and ships to production. The line never does that on its own.</span></li>
+          <li><b>Intake</b><span>An issue, ticket or schedule</span></li>
+          <li><b>Build</b><span>Agents in cloud copies of the repository</span></li>
+          <li><b>Check</b><span>Tests, a secret scan, Vectorscope</span></li>
+          <li><b>Preview</b><span>Vercel preview, branch database</span></li>
+          <li><b>Approve</b><span>A person merges and ships</span></li>
         </ol>
-        <p>The line itself would live in the repository, so a team reviews and versions it like code and sees what each run cost. Several stations already run on the desktop: scheduled agents with spend caps, issue comments that become pull requests, Vectorscope review, and Vercel and Supabase controls.</p>
+        <p>Scheduled agents, Vectorscope and the Vercel and Supabase controls already run on the desktop, and issue-to-PR in the repository's GitHub Actions.</p>
+      </div>
+      <div class="ip-milestone ip-milestone-wide">
+        <span class="ip-stage ip-intent">Intent</span>
+        <h3>Many more cloud services</h3>
+        <p>Vector intends to build many more cloud services of its own, sold to the teams already shipping from it. None is designed yet.</p>
       </div>
     </div>
-    <p class="ip-footnote"><strong>Also on the way:</strong> the Run Guard in the terminal, with the next CLI release (desktop 1.99.108 already holds interactive runs to a live spend cap once you set one, and scheduled agents already stop at $5 a run and $25 a day by default), signed installers, and one-click sign-in for Vercel and Supabase (waiting on app registration).</p>
   </section>
 
-  <section class="ip-split" aria-label="Business model and limitations">
+  <section class="ip-split" aria-label="Business model and stage">
     <div class="ip-panel">
       <div class="ip-eyebrow">Business model</div>
-      <h2>Free workspace, paid model credits</h2>
-      <p class="ip-muted">The workspace stays free, which puts the agents, review and testing in front of every developer. Revenue is planned to come from <strong class="ip-ink">Vector Codium</strong>, a managed service for coding models: one account, no provider keys, the same curated models at every price. <span class="ip-status">In development</span></p>
+      <h2>Free workspace, paid model credits, then Vector's own model and cloud services</h2>
+      <p class="ip-muted">The free workspace brings developers in; Vector plans to earn where the spend is, starting with <strong class="ip-ink">Vector Codium</strong>. <span class="ip-stage">Built in, not on sale</span></p>
       <div class="ip-tiers ip-num" aria-label="Plans">
         <span class="ip-tier"><b>$10</b> <span>/ mo</span></span>
         <span class="ip-tier"><b>$50</b> <span>/ mo</span></span>
         <span class="ip-tier"><b>$100</b> <span>/ mo</span></span>
         <span class="ip-tier"><b>$200</b> <span>/ mo</span></span>
       </div>
-      <p class="ip-muted ip-small">Monthly plans or one-time top-ups of model credits, with no automatic overages. Teams that bring their own keys keep paying their provider directly.</p>
+      <p class="ip-muted ip-small">Monthly plans or top-ups, with no automatic overages.</p>
       <ol class="ip-flywheel">
-        <li><b>Free workspace</b><span>Agents, review, testing and cost tracking bring developers in.</span></li>
-        <li><b>Codium</b><span>Teams that want one bill and no keys buy model credits.</span></li>
-        <li><b>Velocity</b><span>Once built, Codium would serve Vector's own model beside other labs', so more of that spend stays with Vector.</span></li>
+        <li><b>Free workspace · Today</b><span>Agents, review, testing and cost tracking.</span></li>
+        <li><b>Codium credits · Built in, not on sale</b><span>One bill, no keys.</span></li>
+        <li><b>Vector Velocity · In development</b><span>More of the model spend stays with Vector.</span></li>
+        <li><b>Cloud software factory · Planned</b><span>Then many more cloud services of Vector's own (intent).</span></li>
       </ol>
     </div>
     <div class="ip-panel">
-      <div class="ip-eyebrow">Limitations today</div>
-      <h2>What is not there yet</h2>
+      <div class="ip-eyebrow">Stage today</div>
+      <h2>Early, and clear about it</h2>
       <ul class="ip-clean ip-limits">
-        <li><strong>Very early.</strong> The first desktop previews shipped in July 2026, the app became free on 4 October 2026, and daily usage counts started on 10 October 2026, so there is no retention data yet.</li>
-        <li><strong>Codex still wins on cost, speed and memory.</strong> In Vector's own matched live test (October 2026), Codex used less time, cost and memory per task. Desktop 1.99.108 cuts what Vector sends per request; the terminal's vector run, which the matched test used, gets the cuts with the next CLI release, and no matched live re-run has been done yet.</li>
-        <li><strong>Claude Code is faster and lighter offline.</strong> In the archived later runs of the offline harness, on the integrated code they measured, Claude Code finished each scripted task in 0.4–1.0 seconds against Vector's 3.0–3.8, with about half the peak memory (326–350 MiB against 656–804); Vector's baseline there was slower still. Vector ran from source there, the others as installed builds.</li>
-        <li><strong>Velocity is a plan, not a model yet:</strong> no weights and no benchmarks.</li>
-        <li><strong>Vectorscope reviews GitHub only,</strong> with no GitLab or Bitbucket review yet.</li>
-        <li><strong>Unsigned installers.</strong> macOS and Windows show a warning on first launch until code signing is set up.</li>
-        <li><strong>Windows and Linux trail macOS</strong> in testing and maturity.</li>
-        <li><strong>No SOC 2, SSO or admin console</strong> for larger companies yet.</li>
-        <li><strong>Interactive spend caps are opt-in.</strong> Desktop 1.99.108 holds interactive sessions and parallel agents to a live spend cap only once you set one, in Settings, Spend limits or a repository's budget.run; none is set by default, and only scheduled agents stop at a default cap. In the terminal, the vector run --max-cost and --max-steps flags arrive with the next CLI release, and Windows WSL servers keep the 1.99.99 engine, without the cap, until a later desktop release requires the new CLI. Vercel and Supabase connect with pasted tokens until hosted sign-in is approved.</li>
-        <li><strong>Built on open source.</strong> The agent core is adapted from an MIT-licensed open-source coding agent; the workspace, orchestration, cost and review layers are Vector's own.</li>
+        <li><strong>Very early.</strong> Desktop previews since July 2026, free since 4 October 2026; no retention data yet.</li>
+        <li><strong>Spend caps are opt-in.</strong> Desktop 1.99.108 holds interactive runs to a live cap only once you set one; scheduled agents stop at $5 a run and $25 a day by default.</li>
+        <li><strong>Unsigned installers;</strong> no SOC 2, SSO or admin console yet.</li>
+        <li><strong>Built on open source.</strong> The agent core is adapted from an MIT-licensed agent; orchestration, cost and review are Vector's own.</li>
       </ul>
     </div>
   </section>
 
+  <section class="ip-section" aria-labelledby="invest-title">
+    <div class="ip-section-head">
+      <div class="ip-eyebrow">Why invest</div>
+      <h2 id="invest-title">Why invest in Vector now</h2>
+    </div>
+    <div class="ip-reasons">
+      <div class="ip-reason">
+        <span class="ip-reason-n ip-num">01</span>
+        <h3>It owns the layer that lasts</h3>
+        <p>Whichever model wins, the neutral workspace developers run it in keeps the customer.</p>
+      </div>
+      <div class="ip-reason">
+        <span class="ip-reason-n ip-num">02</span>
+        <h3>One free workspace, with leaner requests</h3>
+        <p>It does the core of several paid tools, and its requests were leaner than Claude Code's in the offline run above.*</p>
+      </div>
+      <div class="ip-reason">
+        <span class="ip-reason-n ip-num">03</span>
+        <h3>The edge, in one line</h3>
+        <p>Neutral by design, one free workspace in place of several paid tools, leaner requests than Claude Code offline, and a model being built for its own harness.</p>
+      </div>
+    </div>
+  </section>
+
   <footer class="ip-foot">
-    <p class="ip-footnote"><strong>* Benchmark method.</strong> Vector's offline footprint benchmark (script/agent-eval/footprint.ts), run 9–10 October 2026 against Claude Code 2.1.215. Both agents perform identical scripted tool steps against a local fake model server; each request is priced at Claude Sonnet 4.5 list prices with Anthropic prompt-caching rules, and tokens are estimated as characters ÷ 4. It measures what each agent sends, not the quality of answers, live cache behaviour or speed. Later runs of the same harness, archived in Vector's repository, found request-cost gaps at least this large; this page quotes the smaller figures. Those runs also show Claude Code and Codex faster and lighter than Vector; see Limitations. Codex was not part of this run; Vector's live comparison with Codex is under Limitations.</p>
+    <p class="ip-footnote"><strong>* Benchmark method.</strong> Vector's offline efficiency benchmark (script/agent-eval/footprint.ts), archived in Vector's repository under docs/benchmarks/vector-efficiency-2026-10. Vector's runtime at an 11 October 2026 revision (commit 6f7f3c2ea), run from source on the Messages API, and Claude Code 2.1.215 performed identical scripted tool steps against a local fake model server, with the same number of model requests in each of the three tasks shown. Desktop 1.99.108 includes this revision plus later changes; this archive does not measure the release itself. The archive's fourth task, a 12-request investigation, is left out because its script reads a file that does not exist. Figures are medians of three repetitions, priced at the same list rates ($3 per million input tokens, $3.75 cache write, $0.30 cache read, $15 output) with prompt caching modelled and tokens estimated as characters ÷ 4. Each runtime's simulated cache is fresh at the start of a repetition and carries across the three tasks, so only the bug-fix task's first session starts with an empty cache; the second session is a new process. No paid model calls were made. It measures what each agent sends, not the quality of answers, live cache behaviour or a provider's real bill, and it does not show that Vector is cheaper than other agents in general.</p>
     <p class="ip-footnote"><strong>1.</strong> Stack Overflow 2026 Developer Survey, published 6 October 2026.</p>
-    <p class="ip-footnote"><strong>2.</strong> OpenAI's help center and enterprise privacy page; Anthropic's consumer-terms update, Claude Code data-usage docs and privacy center. All checked 17 October 2026.</p>
+    <p class="ip-footnote"><strong>2.</strong> Epoch AI, LLM inference price trends, published 12 March 2025: the fall ranges from 9x to 900x a year, depending on the performance level.</p>
     <details class="ip-details ip-sources">
       <summary>Sources, checked 11–17 October 2026</summary>
       <div class="ip-source-groups">
@@ -670,24 +582,18 @@ const stack = [
           <h4>Tools and market</h4>
           <ul>
             <li>Pricing: <a href="https://www.coderabbit.ai/pricing" rel="noopener">CodeRabbit</a>, <a href="https://www.greptile.com/pricing" rel="noopener">Greptile</a>, <a href="https://graphite.com/pricing" rel="noopener">Graphite</a>, <a href="https://www.conductor.build/pricing" rel="noopener">Conductor</a> (<a href="https://www.conductor.build/" rel="noopener">product</a>), <a href="https://superset.sh/pricing" rel="noopener">Superset</a> (<a href="https://superset.sh/" rel="noopener">product</a>), <a href="https://www.helicone.ai/pricing" rel="noopener">Helicone</a>, <a href="https://langfuse.com/pricing" rel="noopener">Langfuse</a>, <a href="https://momentic.ai/pricing" rel="noopener">Momentic</a>, <a href="https://www.qawolf.com/pricing" rel="noopener">QA Wolf</a></li>
-            <li><a href="https://www.coderabbit.ai/newsroom/coderabbit-series-c-agentic-change-management" rel="noopener">CodeRabbit Series C</a>, <a href="https://cursor.com/blog/graphite" rel="noopener">Cursor and Graphite</a>, <a href="https://vibekanban.com/blog/shutdown" rel="noopener">Vibe Kanban shutdown</a></li>
-            <li><a href="https://stackoverflow.blog/2026/10/06/the-results-of-the-2026-developer-survey-are-here/" rel="noopener">Stack Overflow 2026 Developer Survey</a></li>
+            <li><a href="https://www.coderabbit.ai/newsroom/coderabbit-series-c-agentic-change-management" rel="noopener">CodeRabbit Series C</a></li>
+            <li><a href="https://epoch.ai/data-insights/llm-inference-price-trends" rel="noopener">Epoch AI on inference price trends</a>, <a href="https://stackoverflow.blog/2026/10/06/the-results-of-the-2026-developer-survey-are-here/" rel="noopener">Stack Overflow 2026 Developer Survey</a></li>
             <li><a href="https://techcrunch.com/2026/04/17/sources-cursor-in-talks-to-raise-2b-at-50b-valuation-as-enterprise-growth-surges/" rel="noopener">TechCrunch on Cursor's margins</a>, <a href="https://www.anthropic.com/news/anthropic-raises-30-billion-series-g-funding-380-billion-post-money-valuation" rel="noopener">Anthropic Series G</a>, <a href="https://techcrunch.com/2025/06/03/windsurf-says-anthropic-is-limiting-its-direct-access-to-claude-ai-models" rel="noopener">TechCrunch on Windsurf</a>, <a href="https://venturebeat.com/ai/anthropic-cracks-down-on-unauthorized-claude-usage-by-third-party-harnesses/" rel="noopener">VentureBeat, January 2026</a>, <a href="https://www.channelinsider.com/ai/news-openai-cursor-model-access-spacex-acquisition/" rel="noopener">Channel Insider on OpenAI and Cursor</a></li>
+            <li>Vector: <a href="/docs/external-agents">outside agents</a>, <a href="/legal/privacy#training">privacy policy on training</a>, <a href="/legal/terms">terms</a></li>
           </ul>
         </div>
         <div>
-          <h4>Privacy</h4>
+          <h4>Large coding models</h4>
           <ul>
-            <li>OpenAI: <a href="https://help.openai.com/en/articles/5722486-how-your-data-is-used-to-improve-model-performance" rel="noopener">how your data is used</a>, <a href="https://help.openai.com/en/articles/7730893-data-controls-in-chatgpt" rel="noopener">data controls and Codex</a>, <a href="https://openai.com/enterprise-privacy/" rel="noopener">enterprise privacy</a></li>
-            <li>Anthropic: <a href="https://www.anthropic.com/news/updates-to-our-consumer-terms" rel="noopener">consumer terms update</a>, <a href="https://code.claude.com/docs/en/data-usage" rel="noopener">Claude Code data usage</a>, <a href="https://privacy.claude.com/en/articles/10023548-how-long-do-you-store-my-data" rel="noopener">data retention</a></li>
-            <li>Vector: <a href="/legal/privacy">privacy policy</a> (<a href="/legal/privacy#codium">Codium</a>, <a href="/legal/privacy#included-models">included models</a>, <a href="/legal/privacy#training">training</a>), <a href="/legal/terms">terms</a></li>
-          </ul>
-        </div>
-        <div>
-          <h4>Models</h4>
-          <ul>
-            <li>Model cards: <a href="https://huggingface.co/Qwen/Qwen3-Coder-480B-A35B-Instruct" rel="noopener">Qwen3-Coder-480B</a>, <a href="https://huggingface.co/moonshotai/Kimi-K2.7-Code" rel="noopener">Kimi K2.7 Code</a>, <a href="https://huggingface.co/poolside/Laguna-S-2.1" rel="noopener">Poolside Laguna</a>, <a href="https://huggingface.co/deepseek-ai/DeepSeek-Coder-V2-Instruct" rel="noopener">DeepSeek-Coder-V2</a>, <a href="https://mistral.ai/news/devstral-2-vibe-cli/" rel="noopener">Devstral 2</a>, <a href="https://huggingface.co/Qwen/Qwen3-Coder-Next" rel="noopener">Qwen3-Coder-Next</a>, <a href="https://huggingface.co/CohereLabs/North-Mini-Code-1.0" rel="noopener">North Mini Code</a>, <a href="https://huggingface.co/Kwaipilot" rel="noopener">Kwaipilot</a>, <a href="https://huggingface.co/JetBrains" rel="noopener">JetBrains</a></li>
-            <li><a href="https://www.tbench.ai/leaderboard" rel="noopener">Terminal-Bench leaderboard</a>, <a href="https://github.com/openai/openai-cookbook/blob/main/examples/gpt-5/codex_prompting_guide.ipynb" rel="noopener">OpenAI Codex prompting guide</a>, <a href="https://cursor.com/blog/composer" rel="noopener">Cursor Composer</a>, <a href="https://cursor.com/blog/composer-2-technical-report" rel="noopener">Composer 2 report</a>, <a href="https://cognition.com/blog/swe-1-5" rel="noopener">Cognition SWE-1.5</a></li>
+            <li><a href="https://huggingface.co/Qwen/Qwen3-Coder-480B-A35B-Instruct" rel="noopener">Qwen3-Coder-480B-A35B</a>, <a href="https://cursor.com/blog/composer-2-5" rel="noopener">Composer 2.5</a> (<a href="https://cursor.com/docs/models" rel="noopener">Cursor models</a>), <a href="https://cognition.com/blog/swe-2" rel="noopener">SWE-2</a>, <a href="https://huggingface.co/moonshotai/Kimi-K2.7-Code" rel="noopener">Kimi K2.7 Code</a></li>
+            <li>Their bases: <a href="https://huggingface.co/moonshotai/Kimi-K2.5" rel="noopener">Kimi K2.5</a>, <a href="https://huggingface.co/moonshotai/Kimi-K3" rel="noopener">Kimi K3</a></li>
+            <li>Harness-trained models: <a href="https://cursor.com/blog/composer" rel="noopener">Cursor Composer</a>, <a href="https://cognition.com/blog/swe-1-5" rel="noopener">Cognition SWE-1.5</a></li>
           </ul>
         </div>
       </div>
@@ -700,7 +606,7 @@ const stack = [
 
 <style is:global>
 
-  /* Layout: one centred reading column; a thesis header, then the comparison grid as the page's single bold object, framed by short evidence sections. */
+  /* Layout: one centred reading column; a thesis header, then short evidence sections, with the benchmark bars and the model table as the page's bold objects. */
   .ip-root {
     --bg: #0e0c12;
     --surface: #16131c;
@@ -763,7 +669,7 @@ const stack = [
 
   /* Thesis */
   .ip-thesis { display: grid; gap: 18px; }
-  .ip-thesis h1 { font-size: clamp(32px, 5.2vw, 54px); font-weight: 800; line-height: 1.04; max-width: 17ch; }
+  .ip-thesis h1 { font-size: clamp(32px, 5.2vw, 54px); font-weight: 800; line-height: 1.04; max-width: 21ch; }
   .ip-thesis h1 em { font-style: normal; background: linear-gradient(100deg, #7659d0 0%, #8b6ce3 40%, #b39cf4 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
   .ip-thesis .ip-lede { font-size: 17px; color: var(--muted); max-width: 66ch; }
   .ip-thesis .ip-lede strong { color: var(--ink); font-weight: 600; }
@@ -779,24 +685,13 @@ const stack = [
   .ip-section-head { display: grid; gap: 6px; }
   .ip-section-head h2 { font-size: clamp(22px, 3vw, 28px); font-weight: 700; }
   .ip-section-head p { color: var(--muted); max-width: 72ch; }
+  .ip-section-head p b { color: var(--ink); font-weight: 600; }
 
   /* Lists */
   ul.ip-clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
   ul.ip-clean li { padding-left: 16px; position: relative; }
   ul.ip-clean li::before { content: ""; position: absolute; left: 0; top: 0.62em; width: 6px; height: 6px; border-radius: 2px; background: var(--accent); }
 
-  /* Problem / product */
-  .ip-two { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 28px; }
-  @media (max-width: 860px) { .ip-two { grid-template-columns: minmax(0, 1fr); } }
-  .ip-today { gap: 14px; align-content: start; }
-  .ip-problem { display: grid; gap: 12px; align-content: start; }
-  .ip-problem li { color: var(--muted); }
-  .ip-problem li strong { color: var(--ink); font-weight: 600; }
-  .ip-caps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-  @media (max-width: 560px) { .ip-caps { grid-template-columns: minmax(0, 1fr); } }
-  .ip-cap { background: var(--surface); padding: 14px 16px; display: grid; gap: 4px; min-width: 0; align-content: start; }
-  .ip-cap h3 { font-size: 15px; font-weight: 700; letter-spacing: -0.005em; }
-  .ip-cap p { font-size: 13.5px; color: var(--muted); }
 
   /* Comparison grid */
   .ip-grid-wrap { overflow-x: auto; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); }
@@ -876,12 +771,11 @@ const stack = [
     .ip-stack-head + .ip-stack-row { border-top: 0; }
     .ip-stack-tag { display: block; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); margin-bottom: 2px; }
   }
-  .ip-callouts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  @media (max-width: 760px) { .ip-callouts { grid-template-columns: minmax(0, 1fr); } }
   .ip-callout { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 12px; padding: 16px 18px; background: var(--surface); display: grid; gap: 6px; align-content: start; min-width: 0; }
   .ip-callout strong { font-family: var(--font-display); font-size: 30px; font-weight: 800; letter-spacing: -0.02em; color: var(--accent); line-height: 1.1; }
   .ip-callout strong small { font-size: 15px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
-  .ip-callout p { font-size: 13.5px; color: var(--muted); }
+  .ip-callout p { font-size: 13.5px; color: var(--muted); max-width: 88ch; }
+  .ip-answer h3 { font-size: 16.5px; font-weight: 700; }
 
   /* Model layer */
   .ip-reasons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -892,48 +786,48 @@ const stack = [
   .ip-reason p { font-size: 13.5px; color: var(--muted); }
 
   .ip-gap { display: grid; gap: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); padding: 20px; min-width: 0; }
+  .ip-gap-head { display: grid; gap: 6px; }
   .ip-gap-head h3 { font-size: clamp(18px, 2.4vw, 21px); font-weight: 700; max-width: 40ch; }
-  .ip-chart { margin: 0; display: grid; gap: 10px; min-width: 0; }
-  .ip-plot { position: relative; height: 196px; margin-inline: 6px; }
-  .ip-clusters { position: absolute; left: 0; right: 0; top: 0; height: 40px; }
-  .ip-clusters span { position: absolute; top: 0; transform: translateX(-50%); font-size: 11.5px; line-height: 1.25; color: var(--muted); text-align: center; white-space: nowrap; }
-  .ip-clusters b { font-family: var(--font-display); font-size: 15px; font-weight: 800; color: var(--ink); }
-  .ip-dots { position: absolute; left: 0; right: 0; top: 44px; height: 92px; }
-  .ip-dot, .ip-vring { position: absolute; top: calc(50% + var(--y, 0px)); width: 11px; height: 11px; border-radius: 50%; transform: translate(-50%, -50%); }
-  .ip-dot { background: var(--dot); box-shadow: 0 0 0 2px var(--surface); transition: transform 120ms ease; }
-  .ip-dot:hover { transform: translate(-50%, -50%) scale(1.35); background: var(--ink); }
-  .ip-vring { --y: -24px; width: 15px; height: 15px; border: 2.5px solid var(--accent); background: var(--surface); z-index: 1; }
-  .ip-vline { position: absolute; top: 44px; height: 102px; width: 0; border-left: 2px dashed var(--accent); transform: translateX(-1px); pointer-events: none; }
-  .ip-axis { position: absolute; left: 0; right: 0; top: 146px; height: 24px; border-top: 1px solid var(--line-strong); }
-  .ip-axis span { position: absolute; top: 5px; transform: translateX(-50%); font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
-  .ip-axis span::before { content: ""; position: absolute; left: 50%; top: -9px; height: 4px; border-left: 1px solid var(--line-strong); }
-  .ip-vlabel { position: absolute; top: 174px; transform: translateX(-50%); font-family: var(--font-mono); font-size: 11.5px; color: var(--accent); white-space: nowrap; }
-  @media (max-width: 520px) {
-    .ip-dot { width: 8px; height: 8px; box-shadow: 0 0 0 1.5px var(--surface); }
-    .ip-vring { width: 12px; height: 12px; }
-    .ip-gap { padding: 16px; }
-    .ip-vlabel { transform: translateX(-78%); }
-  }
-  .ip-gap-points { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; }
-  @media (max-width: 760px) { .ip-gap-points { grid-template-columns: minmax(0, 1fr); } }
-  .ip-gap-points li { font-size: 13.5px; color: var(--muted); padding-left: 14px; border-left: 2px solid var(--line-strong); }
-  .ip-gap-points strong { color: var(--ink); font-weight: 600; }
+  .ip-gap-head p { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+  @media (max-width: 520px) { .ip-gap { padding: 16px; } }
 
   .ip-details { font-size: 12.5px; color: var(--muted); }
+  .ip-grid-details > summary { font-size: 12px; }
+  .ip-grid-body { display: grid; gap: 14px; padding-top: 14px; min-width: 0; }
   .ip-details summary { cursor: pointer; font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); width: fit-content; }
-  .ip-model-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 24px; padding-top: 12px; }
-  @media (max-width: 760px) { .ip-model-list { grid-template-columns: minmax(0, 1fr); } }
-  .ip-model-list h4, .ip-source-groups h4 { font-size: 12.5px; font-weight: 700; color: var(--ink); margin-bottom: 6px; }
-  .ip-model-list ul, .ip-source-groups ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-  .ip-model-list li { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); padding-bottom: 3px; }
-  .ip-model-list li i { font-style: normal; color: var(--faint); margin-left: 6px; }
-  .ip-model-list li b { font-weight: 500; color: var(--ink); font-family: var(--font-mono); font-size: 12px; }
+  .ip-source-groups h4 { font-size: 12.5px; font-weight: 700; color: var(--ink); margin-bottom: 6px; }
+  .ip-source-groups ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+
+  /* Large coding models: a table on wide screens, one card per model on phones. Velocity's row is tinted. */
+  .ip-four-wrap { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); min-width: 0; }
+  table.ip-four { width: 100%; border-collapse: separate; border-spacing: 0; }
+  .ip-four th, .ip-four td { padding: 10px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .ip-four thead th { font-family: var(--font-mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); background: var(--raised); }
+  .ip-four tbody th { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--ink); }
+  .ip-four tbody th small { display: block; margin-top: 2px; font-family: var(--font-body); font-size: 12px; font-weight: 400; color: var(--muted); }
+  .ip-four td.ip-n { font-family: var(--font-mono); color: var(--ink); white-space: nowrap; }
+  .ip-four tbody tr:last-child > * { border-bottom: 0; }
+  .ip-four tr.ip-four-v > * { background: var(--accent-soft); }
+  .ip-four tr.ip-four-v th { box-shadow: inset 3px 0 0 var(--accent); }
+  .ip-four tr.ip-four-v td.ip-n { color: var(--accent); font-weight: 500; }
+  @media (max-width: 760px) {
+    table.ip-four, .ip-four tbody, .ip-four tr, .ip-four th, .ip-four td { display: block; }
+    .ip-four thead { display: none; }
+    .ip-four tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+    .ip-four tbody tr:last-child { border-bottom: 0; }
+    .ip-four tbody th { grid-column: 1 / -1; border-bottom: 0; padding-bottom: 2px; }
+    .ip-four td { border-bottom: 0; padding-block: 4px; }
+    .ip-four td:last-child { grid-column: 1 / -1; }
+    .ip-four td::before { content: attr(data-label); display: block; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+    .ip-four tr.ip-four-v th { box-shadow: none; }
+    .ip-four tr.ip-four-v { box-shadow: inset 3px 0 0 var(--accent); background: var(--accent-soft); }
+    .ip-four td.ip-n { white-space: normal; }
+  }
 
   .ip-velocity { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr); gap: 24px; align-items: start; }
   @media (max-width: 860px) { .ip-velocity { grid-template-columns: minmax(0, 1fr); } }
   .ip-vcard { position: relative; overflow: hidden; border: 1px solid var(--accent); border-radius: 14px; padding: 22px; display: grid; gap: 12px; background: linear-gradient(160deg, var(--accent-soft), transparent 70%), var(--surface); min-width: 0; }
   .ip-vcard::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: linear-gradient(90deg, #7659d0, #a287ef, #c0acf9); }
-  .ip-vcard .ip-status { justify-self: start; }
   .ip-vcard h3 { font-size: clamp(24px, 3.2vw, 30px); font-weight: 800; letter-spacing: -0.02em; }
   .ip-vsize { font-size: 14px; color: var(--muted); }
   .ip-vsize b { font-family: var(--font-display); font-size: 34px; font-weight: 800; letter-spacing: -0.03em; color: var(--accent); margin-right: 6px; }
@@ -941,49 +835,46 @@ const stack = [
   .ip-vcard li { font-size: 13.5px; color: var(--muted); }
   .ip-vcard li strong { color: var(--ink); font-weight: 600; }
   .ip-why-us { display: grid; gap: 14px; padding-top: 4px; min-width: 0; }
+  .ip-root .ip-why-us h3.ip-eyebrow { font-family: var(--font-mono); font-size: 11.5px; font-weight: 400; letter-spacing: 0.12em; }
   .ip-why-item { display: grid; gap: 3px; padding-left: 14px; border-left: 2px solid var(--accent); }
   .ip-why-item h4 { font-size: 15px; font-weight: 700; }
   .ip-why-item p { font-size: 13.5px; color: var(--muted); }
 
-  /* Benchmark */
+  /* Benchmark: per task, a first-session and a second-session pair of bars, Vector above Claude Code. */
   .ip-bench { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 28px; align-items: start; }
   @media (max-width: 860px) { .ip-bench { grid-template-columns: minmax(0, 1fr); } }
   .ip-bench-claim { display: grid; gap: 10px; }
-  .ip-big { font-family: var(--font-display); font-weight: 800; font-size: clamp(40px, 6vw, 60px); letter-spacing: -0.03em; line-height: 1; color: var(--accent); }
-  .ip-bars { display: grid; gap: 14px; }
-  .ip-bar-row { display: grid; gap: 5px; }
-  .ip-bar-label { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
-  .ip-bar-label b { font-weight: 600; }
-  .ip-save { font-family: var(--font-mono); font-size: 12px; color: var(--good); white-space: nowrap; }
-  .ip-bar-pair { display: grid; gap: 4px; }
-  .ip-bar { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
-  .ip-track { height: 14px; border-radius: 4px; background: var(--raised); position: relative; }
-  .ip-fill { position: relative; height: 100%; border-radius: 4px; display: flex; align-items: center; justify-content: flex-end; }
+  .ip-bench-claim h2 { font-size: clamp(19px, 2.4vw, 22px); font-weight: 700; line-height: 1.25; }
+  .ip-big { display: block; margin-bottom: 8px; font-family: var(--font-display); font-weight: 800; font-size: clamp(40px, 6vw, 60px); letter-spacing: -0.03em; line-height: 1; color: var(--accent); }
+  .ip-bench-second { font-size: 15px; color: var(--muted); }
+  .ip-bench-second b { font-family: var(--font-display); font-size: 22px; font-weight: 800; color: var(--ink); margin-right: 4px; }
+  .ip-bars { display: grid; gap: 16px; }
+  .ip-bar-key { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); }
+  .ip-bar-key span { display: inline-flex; align-items: center; gap: 6px; }
+  .ip-bar-key .ip-fill { display: inline-block; width: 14px; height: 10px; }
+  .ip-bar-row { display: grid; gap: 6px; }
+  .ip-bar-task { font-size: 13px; font-weight: 600; }
+  .ip-bar-session { display: grid; grid-template-columns: 52px minmax(0, 1fr) 64px; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .ip-bar-pair { display: grid; gap: 3px; min-width: 0; }
+  .ip-save { font-family: var(--font-mono); font-size: 12px; color: var(--good); white-space: nowrap; text-align: right; }
+  .ip-track { height: 11px; border-radius: 3px; background: var(--raised); position: relative; }
+  .ip-fill { position: relative; height: 100%; border-radius: 3px; }
   .ip-fill.ip-v { background: linear-gradient(90deg, #7659d0, #a287ef); }
   .ip-fill.ip-c { background: var(--compare); }
-  .ip-fill i { font-style: normal; font-family: var(--font-mono); font-size: 11px; position: absolute; left: 100%; margin-left: 6px; color: var(--muted); white-space: nowrap; }
+  .ip-fill i { font-style: normal; font-family: var(--font-mono); font-size: 11px; line-height: 11px; position: absolute; top: 0; left: 100%; margin-left: 6px; color: var(--muted); white-space: nowrap; }
 
-  /* Personas */
-  .ip-people { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-  @media (max-width: 900px) { .ip-people { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 520px) { .ip-people { grid-template-columns: minmax(0, 1fr); } }
-  .ip-person { border-top: 2px solid var(--accent); padding-top: 12px; display: grid; gap: 6px; align-content: start; min-width: 0; }
-  .ip-person h3 { font-size: 15.5px; font-weight: 700; }
-  .ip-person .ip-why { font-size: 13.5px; color: var(--muted); }
-  .ip-fit-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
 
   /* Roadmap */
-  .ip-road { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); }
-  @media (max-width: 900px) { .ip-road { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 560px) { .ip-road { grid-template-columns: minmax(0, 1fr); } }
+  .ip-road { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); }
+  @media (max-width: 760px) { .ip-road { grid-template-columns: minmax(0, 1fr); } }
   .ip-milestone { padding: 18px; display: grid; gap: 8px; align-content: start; border-left: 1px solid var(--line); min-width: 0; position: relative; }
   .ip-milestone:first-child { border-left: 0; }
-  @media (max-width: 900px) { .ip-milestone:nth-child(3) { border-left: 0; } .ip-milestone:nth-child(n+3) { border-top: 1px solid var(--line); } }
-  @media (max-width: 560px) { .ip-milestone { border-left: 0; } .ip-milestone:nth-child(n+2) { border-top: 1px solid var(--line); } }
+  @media (max-width: 760px) { .ip-milestone { border-left: 0; } .ip-milestone:nth-child(n+2) { border-top: 1px solid var(--line); } }
   .ip-milestone::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: linear-gradient(90deg, #7659d0, #a287ef); opacity: 0.85; }
   .ip-milestone h3 { font-size: 18px; font-weight: 700; }
   .ip-milestone p { font-size: 13.5px; color: var(--muted); }
-  .ip-stage { justify-self: start; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 1px 8px; }
+  .ip-stage { display: inline-block; justify-self: start; vertical-align: middle; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 1px 8px; }
+  .ip-stage.ip-intent { border-style: dashed; }
   .ip-milestone.ip-milestone-wide { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); }
   .ip-line { list-style: none; margin: 4px 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); counter-reset: station; }
   @media (max-width: 760px) { .ip-line { grid-template-columns: minmax(0, 1fr); } }
@@ -994,7 +885,7 @@ const stack = [
   .ip-line b::before { content: counter(station, decimal-leading-zero); margin-right: 8px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--accent); }
   .ip-line span { color: var(--muted); }
 
-  /* Business + limits */
+  /* Business + stage */
   .ip-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; }
   @media (max-width: 860px) { .ip-split { grid-template-columns: minmax(0, 1fr); } }
   .ip-panel { border: 1px solid var(--line); border-radius: 12px; padding: 18px; background: var(--surface); display: grid; gap: 12px; align-content: start; min-width: 0; }
@@ -1003,7 +894,6 @@ const stack = [
   .ip-tier { font-family: var(--font-mono); font-size: 12.5px; padding: 6px 10px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line); }
   .ip-tier b { color: var(--ink); font-weight: 500; }
   .ip-tier span { color: var(--muted); }
-  .ip-status { display: inline-block; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--part); border: 1px solid var(--part); border-radius: 999px; padding: 1px 8px; vertical-align: middle; }
   .ip-flywheel { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 0; counter-reset: fly; border-top: 1px solid var(--line); }
   .ip-flywheel li { counter-increment: fly; display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
   .ip-flywheel li::before { content: counter(fly, decimal-leading-zero); grid-row: span 2; font-family: var(--font-mono); font-size: 12px; color: var(--accent); padding-top: 1px; }
