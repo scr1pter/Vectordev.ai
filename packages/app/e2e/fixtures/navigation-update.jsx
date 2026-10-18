@@ -2,15 +2,17 @@ import { createSignal } from "solid-js"
 import { render } from "solid-js/web"
 import { PlatformProvider } from "../../src/context/platform"
 import { WorkspaceNavigation } from "../../src/components/workspace-navigation"
-import { installUpdate, navigationUpdate } from "../../src/components/updater-action"
+import { installUpdate, navigationUpdate, runningAgentCount } from "../../src/components/updater-action"
 import { yieldLaunchScreen } from "../../src/features/launch/launch-bridge"
 import "../../src/index.css"
 import "../../src/vector-premium.css"
 
 // The sidebar against stand-ins for the desktop's updater and account bridges. The query picks ?updater= ready,
 // installing, downloading, checking, error, disabled, idle, up-to-date, or none (the web build, with no updater);
-// ?account= signed-in, signed-out, pending or none (no account bridge); ?agents= how many agents in the workspace are
-// running; and ?fail=1 makes the install fail. What the sidebar asks for is kept on window.navigationFixture.calls.
+// ?account= signed-in, signed-out, pending or none (no account bridge); ?agents= how many parallel agents are running
+// and ?busy= how many sessions are busy, counted the way the app counts them when Update is clicked (both can change
+// through window.navigationFixture.setRunning); and ?fail=1 makes the install fail. What the sidebar asks for is kept
+// on window.navigationFixture.calls.
 const query = new URLSearchParams(location.search)
 const version = "1.99.110"
 const states = {
@@ -25,8 +27,19 @@ const states = {
 }
 const kind = query.get("updater") ?? "ready"
 const [updaterState, setUpdaterState] = createSignal(states[kind] ?? states.idle)
-const fixture = { calls: [], set: (name) => setUpdaterState(states[name]) }
+const running = { agents: Number(query.get("agents") ?? 0), busy: Number(query.get("busy") ?? 0) }
+const fixture = {
+  calls: [],
+  set: (name) => setUpdaterState(states[name]),
+  setRunning: (next) => Object.assign(running, next),
+}
 window.navigationFixture = fixture
+// Busy sessions as the engine reports them, with an idle one that must not count.
+const sessions = () =>
+  Object.fromEntries([
+    ["ses_idle", { type: "idle" }],
+    ...Array.from({ length: running.busy }, (_, index) => [`ses_busy_${index}`, { type: "busy" }]),
+  ])
 
 const accounts = {
   "signed-in": { authenticated: true, pending: false, name: "Ana Diaz", email: "ana@example.com" },
@@ -93,7 +106,7 @@ render(
         settingsKeybind="⌘,"
         update={navigationUpdate(platform.updater?.state())}
         onUpdate={() => void installUpdate(platform.updater, (message) => fixture.calls.push(`failed: ${message}`))}
-        runningAgents={Number(query.get("agents") ?? 0)}
+        runningAgents={async () => runningAgentCount(sessions(), running.agents)}
         onSettings={() => fixture.calls.push("settings")}
         onAccount={() => fixture.calls.push("account")}
         onResizeStart={noop}

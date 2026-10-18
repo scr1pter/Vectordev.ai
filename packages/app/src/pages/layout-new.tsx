@@ -18,7 +18,12 @@ import { useCommand } from "@/context/command"
 import { useLayout } from "@/context/layout"
 import { usePlanMode } from "@/context/plan-mode"
 import { usePlatform } from "@/context/platform"
-import { installUpdate, navigationUpdate, navigationUpdateFailure } from "@/components/updater-action"
+import {
+  installUpdate,
+  navigationUpdate,
+  navigationUpdateFailure,
+  runningAgentCount,
+} from "@/components/updater-action"
 import { pathKey } from "@/utils/path-key"
 import { listSwarmWorkers } from "@/utils/swarm-workers"
 import { samePolledRecords, sameWorkspaceRevisions } from "@/utils/workspace-revisions"
@@ -3407,6 +3412,17 @@ export default function NewLayout(props: ParentProps) {
 
   // The sidebar's Update button. A failed install already puts the gear back; the toast says why and opens Updates &
   // about, which shows the error with Try again.
+  // Counted when Update is clicked. The lists on screen cover only the open task, and a restart stops every agent, so
+  // the parallel agents are read again from every repository; without the desktop bridge the on-screen list stands in.
+  const countRunningAgents = async () => {
+    const workspaces = await parallelApi()
+      ?.list()
+      .catch(() => undefined)
+    return runningAgentCount(
+      serverSync().session.data.session_status,
+      (workspaces ?? parallelRecords()).filter(isParallelWorkspaceRunning).length,
+    )
+  }
   const installUpdateFromNavigation = () =>
     void installUpdate(platform.updater, (message) =>
       showToast(navigationUpdateFailure(message, () => openSettingsAt("about"))),
@@ -6493,7 +6509,7 @@ export default function NewLayout(props: ParentProps) {
         onAccount={openAccountSettings}
         update={navigationUpdate(platform.updater?.state())}
         onUpdate={installUpdateFromNavigation}
-        runningAgents={activeParallelCount() + activeBackgroundTasks().length}
+        runningAgents={countRunningAgents}
       />
 
       <DialogReportBug open={reportBugOpen()} onClose={() => setReportBugOpen(false)} />

@@ -3,6 +3,7 @@ import {
   installUpdate,
   navigationUpdate,
   navigationUpdateFailure,
+  runningAgentCount,
   updaterAction,
   updaterFailure,
   updateVectorToLatest,
@@ -211,5 +212,23 @@ describe("navigationUpdateFailure", () => {
     const open = toast.actions[0].onClick
     if (typeof open === "function") open()
     expect(opened).toEqual(["updates"])
+  })
+})
+
+describe("runningAgentCount", () => {
+  test("your own busy task counts, with no parallel or background agents running", () => {
+    expect(runningAgentCount({ ses_main: { type: "busy" } }, 0)).toBe(1)
+  })
+
+  test("busy and retrying sessions anywhere count, idle ones do not, and running parallel agents add to them", () => {
+    const sessions = {
+      ses_main: { type: "busy" },
+      ses_subagent: { type: "busy" },
+      ses_other_repository: { type: "retry" },
+      ses_done: { type: "idle" },
+    }
+    expect(runningAgentCount(sessions, 0)).toBe(3)
+    expect(runningAgentCount(sessions, 2)).toBe(5)
+    expect(runningAgentCount({ ses_done: { type: "idle" } }, 0)).toBe(0)
   })
 })
