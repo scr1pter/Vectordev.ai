@@ -25,8 +25,8 @@ export function CloudHome() {
   const requestedProject = () => new URLSearchParams(location.search).get("project") ?? ""
   const requestedSection = () => parseCloudSection(new URLSearchParams(location.search).get("section"))
   // A plain Vector Cloud entry starts at the repository chooser; a link with
-  // ?project= (Home with a project selected, the session's Cloud card, the
-  // database banner) opens that project, even when Cloud is already open.
+  // ?project= (Home with a project selected) opens that project, even when
+  // Cloud is already open.
   const [selectedPath, setSelectedPath] = createSignal(requestedProject())
   createEffect(on(requestedProject, (path) => setSelectedPath(path), { defer: true }))
 

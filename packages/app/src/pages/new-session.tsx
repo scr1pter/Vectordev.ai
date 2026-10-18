@@ -19,7 +19,7 @@ import { useSessionKey } from "@/pages/session/session-layout"
 import { useComposerCommands } from "@/pages/session/use-composer-commands"
 import { NEW_SESSION_CONTENT_WIDTH } from "@/pages/session/new-session-layout"
 import { PromptWorkspaceSelector } from "@/components/prompt-workspace-selector"
-import { composerTakes, onComposerPrompt } from "@/features/cloud/cloud-handoff"
+import { composerTakes, onComposerPrompt } from "@/utils/composer-handoff"
 
 const showWorkspaceBar = import.meta.env.VITE_VECTOR_CHANNEL !== "prod"
 

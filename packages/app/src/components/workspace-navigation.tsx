@@ -94,6 +94,8 @@ export function WorkspaceNavigation(props: {
   onReportBug: () => void
   onGettingStarted: () => void
   onSettings: () => void
+  /** Settings at its Account page, for the signed-in account chip. */
+  onAccount: () => void
 }) {
   const platform = usePlatform()
   const [localMode, setLocalMode] = createSignal<"agent" | "editor">(props.mode ?? "agent")
@@ -763,8 +765,8 @@ export function WorkspaceNavigation(props: {
               data-vector-account-chip
               class="flex min-w-0 items-center gap-2 rounded-[6px] px-1 py-1 text-left transition hover:bg-white/[0.05]"
               title={account().email}
-              aria-label={`Account: ${chip().label}. Open settings`}
-              onClick={props.onSettings}
+              aria-label={`Account: ${chip().label}. Open account settings`}
+              onClick={props.onAccount}
             >
               <Show
                 when={chip().photo}

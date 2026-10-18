@@ -23,7 +23,6 @@ import { useSync, type DirectorySync } from "@/context/sync"
 import { Identifier } from "@/utils/id"
 import { Worktree as WorktreeState } from "@/utils/worktree"
 import { buildRequestParts, withSyntheticText } from "./build-request-parts"
-import { emitDatabaseIntent } from "@/features/cloud/db-intent"
 import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
 import { ScopedKey } from "@/utils/server-scope"
@@ -520,12 +519,6 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     const projectDirectory = sdk().directory
 
-    // Connected loop: if this task is really about auth / accounts / data, let
-    // the shell offer a one-click "Set up database" (Supabase) for the project.
-    // Proposal only — nothing is provisioned until the user confirms in Cloud.
-    if (mode === "normal" && !text.trim().startsWith("/")) {
-      emitDatabaseIntent(text, projectDirectory)
-    }
     const isNewSession = !params.id
     const shouldAutoAccept = !isPlanMode && isNewSession && input.autoAccept()
     const worktreeSelection = input.newSessionWorktree?.() || "main"

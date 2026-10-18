@@ -3,6 +3,7 @@ import type { SettingsSection } from "./general"
 
 export type SettingsTab =
   | SettingsSection
+  | "account"
   | "providers"
   | "models"
   | "servers"
@@ -30,6 +31,12 @@ export const settingsGroups: readonly SettingsGroup[] = [
   {
     title: "Personal",
     items: [
+      {
+        value: "account",
+        label: "Account",
+        icon: "user",
+        keywords: ["sign in", "sign out", "email", "codium", "plan", "credits", "billing", "subscription", "delete"],
+      },
       {
         value: "general",
         label: "General",

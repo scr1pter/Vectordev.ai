@@ -1,0 +1,222 @@
+/* Settings > Account. It sits in the Settings workspace shell and takes its
+   charcoal tokens; Vector violet is kept for the avatar, the one primary
+   action and the credits meter. */
+.settings-account-page {
+  --settings-account-radius: 12px;
+}
+
+.settings-account-profile {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--settings-line, var(--vx-line));
+}
+
+.settings-account-avatar {
+  display: grid;
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--vx-gradient, linear-gradient(135deg, #7659d0 0%, #a287ef 100%));
+  color: #fff;
+  font-size: 22px;
+  font-weight: 560;
+  line-height: 1;
+  text-transform: uppercase;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px rgba(182, 159, 247, 0.28);
+}
+
+.settings-account-avatar[data-empty] {
+  background: var(--settings-control, var(--vx-control));
+  color: var(--settings-muted, var(--vx-text-subtle));
+  box-shadow: inset 0 0 0 1px var(--settings-line-strong, var(--vx-line));
+}
+
+.settings-account-avatar[data-empty] svg {
+  width: 26px;
+  height: 26px;
+}
+
+.settings-account-identity {
+  min-width: 220px;
+  flex: 1;
+}
+
+.settings-account-identity h3 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--settings-text);
+  font-size: 15px;
+  font-weight: 580;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-account-identity p {
+  margin: 4px 0 0;
+  color: var(--settings-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.settings-account-actions,
+.settings-account-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-account-section {
+  display: grid;
+  gap: 14px;
+  padding: 22px 0;
+  border-bottom: 1px solid var(--settings-line, var(--vx-line));
+}
+
+.settings-account-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-account-section-head h3 {
+  margin: 0;
+  color: var(--settings-text);
+  font-size: 13.5px;
+  font-weight: 560;
+}
+
+.settings-account-section-head p,
+.settings-account-muted,
+.settings-account-confirm p {
+  max-width: 640px;
+  margin: 4px 0 0;
+  color: var(--settings-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.settings-account-confirm {
+  display: grid;
+  gap: 10px;
+  max-width: 680px;
+  padding: 14px 16px;
+  border: 1px solid rgba(230, 120, 125, 0.28);
+  border-radius: var(--settings-account-radius);
+  background: rgba(230, 120, 125, 0.06);
+}
+
+.settings-account-confirm p {
+  margin: 0;
+  color: var(--settings-text);
+}
+
+.settings-account-badge {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: 1px solid rgba(182, 159, 247, 0.32);
+  border-radius: 999px;
+  background: var(--vx-purple-soft);
+  color: var(--vx-purple-bright);
+  font-size: 11px;
+  font-weight: 560;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.settings-account-balance {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  max-width: 860px;
+  margin: 0;
+}
+
+.settings-account-balance > div {
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--settings-line-strong, var(--vx-line));
+  border-radius: 10px;
+  background: var(--settings-control, var(--vx-control));
+}
+
+.settings-account-balance dt {
+  color: var(--settings-muted);
+  font-size: 11px;
+}
+
+.settings-account-balance dd {
+  margin: 3px 0 0;
+  color: var(--settings-text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-account-meter {
+  display: block;
+  height: 5px;
+  margin-top: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(226, 213, 237, 0.08);
+}
+
+.settings-account-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--vx-gradient, linear-gradient(135deg, #7659d0 0%, #a287ef 100%));
+}
+
+.settings-account-meter[data-tone="low"] > span {
+  background: var(--vx-amber);
+}
+
+.settings-account-meter[data-tone="empty"] > span {
+  background: var(--vx-red);
+}
+
+.settings-account-notice {
+  margin: 0;
+  color: var(--settings-muted);
+  font-size: 12px;
+}
+
+.settings-account-notice[data-kind="low"] {
+  color: var(--vx-amber);
+}
+
+.settings-account-notice[data-kind="empty"],
+.settings-account-error {
+  color: #fda4af;
+}
+
+.settings-account-pending {
+  color: var(--vx-purple-bright) !important;
+}
+
+/* The page's one primary action reads as Vector's, not the library's grey. */
+.settings-account-page [data-component="button-v2"].settings-account-primary {
+  border-color: transparent;
+  background: var(--vx-gradient);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 0 0 1px rgba(118, 89, 208, 0.55),
+    0 6px 18px -8px rgba(118, 89, 208, 0.9);
+}
+
+.settings-account-page [data-component="button-v2"].settings-account-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.settings-account-danger [data-component="button-v2"][data-variant="ghost"] {
+  color: #fda4af;
+}

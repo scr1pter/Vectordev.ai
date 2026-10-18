@@ -16,8 +16,6 @@ import { SettingsListV2 } from "./parts/list"
 import { brandProviderName } from "@/utils/provider-brand"
 import { SettingsSearch } from "../settings-search"
 import { SettingsVectorTeams } from "../settings-vector-teams"
-import { SettingsVectorAccount } from "../settings-vector-account"
-import { SettingsVectorCodium } from "../settings-vector-codium"
 import "./settings-v2.css"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
@@ -154,8 +152,6 @@ export const SettingsProvidersV2: Component = () => {
       </div>
 
       <div class="settings-v2-tab-body settings-v2-providers">
-        <SettingsVectorAccount />
-        <SettingsVectorCodium />
         <SettingsVectorTeams />
         <div class="settings-v2-section" data-component="connected-providers-section">
           <h3 class="settings-v2-section-title">{language.t("settings.providers.section.connected")}</h3>

@@ -1,0 +1,127 @@
+import { render } from "solid-js/web"
+import { PlatformProvider } from "../../src/context/platform"
+import { SettingsWorkspace } from "../../src/components/settings-v2"
+import { yieldLaunchScreen } from "../../src/features/launch/launch-bridge"
+import "../../src/index.css"
+import "../../src/vector-premium.css"
+
+// Settings > Account against a stand-in for the desktop's account bridge. The query picks the account: ?account=
+// signed-out, signed-in (no photo) or photo, and ?codium= coming-soon, plan, low, ended or error. Links the page opens
+// and account actions it takes are kept on window.accountFixture for the spec to read.
+const query = new URLSearchParams(location.search)
+const renewsAt = Date.UTC(2026, 10, 1, 12)
+const codium = {
+  "coming-soon": {
+    signedIn: true,
+    enabled: false,
+    access: false,
+    purchased: { bought: false },
+    empty: false,
+    low: false,
+  },
+  plan: {
+    signedIn: true,
+    enabled: true,
+    access: true,
+    plan: { id: "vector-50", name: "Codium 50", left: 0.64, renewsAt, cancelAtPeriodEnd: false },
+    purchased: { bought: true, state: "available" },
+    empty: false,
+    low: false,
+  },
+  low: {
+    signedIn: true,
+    enabled: true,
+    access: true,
+    plan: { id: "vector-10", name: "Codium 10", left: 0.06, renewsAt, cancelAtPeriodEnd: false },
+    purchased: { bought: false },
+    empty: false,
+    low: true,
+  },
+  ended: {
+    signedIn: true,
+    enabled: true,
+    access: true,
+    plan: { id: "vector-100", name: "Codium 100", renewsAt, cancelAtPeriodEnd: true },
+    purchased: { bought: false },
+    empty: false,
+    low: false,
+  },
+  error: {
+    signedIn: true,
+    enabled: false,
+    access: false,
+    purchased: { bought: false },
+    empty: false,
+    low: false,
+    error: "Vector could not load your Codium balance. Try again shortly.",
+  },
+}[query.get("codium") ?? "coming-soon"]
+
+// A small generated PNG, standing in for the Google photo the desktop downloads.
+const photo =
+  "data:image/png;base64,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"
+const signedIn = {
+  authenticated: true,
+  pending: false,
+  name: "Ana Diaz",
+  email: "ana@example.com",
+  expiresAt: Date.now() + 86_400_000,
+}
+const initial =
+  query.get("account") === "signed-out"
+    ? { authenticated: false, pending: false }
+    : query.get("account") === "photo"
+      ? { ...signedIn, avatar: photo }
+      : signedIn
+
+const state = { account: initial, opened: [], actions: [] }
+const listeners = new Set()
+const change = (next) => {
+  state.account = next
+  listeners.forEach((listener) => listener(next))
+  return next
+}
+window.accountFixture = state
+
+const platform = {
+  platform: "desktop",
+  version: "1.99.109",
+  openLink: (url) => state.opened.push(url),
+  restart: async () => undefined,
+  back: () => undefined,
+  forward: () => undefined,
+  notify: async () => undefined,
+  vectorAccount: {
+    status: async () => state.account,
+    start: async () => {
+      state.actions.push("start")
+      return change({ authenticated: false, pending: true })
+    },
+    cancel: async () => {
+      state.actions.push("cancel")
+      return change({ authenticated: false, pending: false })
+    },
+    logout: async () => {
+      state.actions.push("logout")
+      return change({ authenticated: false, pending: false })
+    },
+    codium: async () =>
+      state.account.authenticated
+        ? codium
+        : { signedIn: false, enabled: false, access: false, purchased: { bought: false }, empty: false, low: false },
+    onChange: (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+  },
+}
+
+yieldLaunchScreen("app")
+render(
+  () => (
+    <PlatformProvider value={platform}>
+      <SettingsWorkspace section="account" />
+    </PlatformProvider>
+  ),
+  document.querySelector("#root"),
+)

@@ -74,8 +74,6 @@ import {
 } from "@/context/server"
 import { useTabs } from "@/context/tabs"
 import { sessionHref } from "@/utils/session-route"
-import { DB_INTENT_EVENT } from "@/features/cloud/db-intent"
-import { cloudHref, DATABASE_SETUP_PROMPT, requestComposerPrompt } from "@/features/cloud/cloud-handoff"
 import { OnboardingProgress } from "@/features/onboarding/onboarding"
 import { SpotlightTour } from "@/features/onboarding/spotlight-tour"
 import { createSpotlightSteps } from "@/features/onboarding/spotlight-steps"
@@ -3157,68 +3155,6 @@ export default function NewLayout(props: ParentProps) {
     setOnboardingFlag("dismissed")
   }
 
-  // ---- Vector Cloud: "set up a database" proposal ---------------------------
-  // When the agent is asked to do auth / accounts / data, submit.ts emits
-  // DB_INTENT_EVENT. The proposal either asks the agent to set the database up
-  // (it checks database_status, then links or creates one; creating asks the
-  // user first) or opens the project's Database screen in Vector Cloud.
-  const [dbProposal, setDbProposal] = createSignal<({ reason: string } & TaskScope) | undefined>()
-  const [dbProposalSuppressed, setDbProposalSuppressed] = createSignal<TaskScope | undefined>()
-  const scopeMatches = (candidate: TaskScope | undefined, active = activeTaskScope()) => {
-    if (!candidate) return false
-    if (candidate.projectPath !== active.projectPath) return false
-    // The first prompt emits before the router has assigned its durable task
-    // ID. Let that one project-scoped proposal follow the prompt into the new
-    // session, but never let a known task ID cross into another task.
-    return !candidate.taskId || candidate.taskId === active.taskId
-  }
-  const activeDbProposal = () => {
-    const proposal = dbProposal()
-    return scopeMatches(proposal) ? proposal : undefined
-  }
-
-  createEffect(() => {
-    const onIntent = (event: Event) => {
-      // No taskRoute() gate: the FIRST prompt of a new session emits before the
-      // router lands on /session/:id, so a route check here would swallow the
-      // most common case (fresh task: "add auth"). The banner itself renders on
-      // whatever surface the user ends up on and stays dismissible.
-      if (scopeMatches(dbProposalSuppressed()) || activeDbProposal()) return
-      const detail = (event as CustomEvent<{ reason?: string }>).detail
-      setDbProposal({ reason: detail?.reason ?? "database", ...activeTaskScope() })
-    }
-    globalThis.window?.addEventListener(DB_INTENT_EVENT, onIntent)
-    onCleanup(() => globalThis.window?.removeEventListener(DB_INTENT_EVENT, onIntent))
-  })
-
-  const askVectorForDatabase = () => {
-    const scope = activeTaskScope()
-    setDbProposal(undefined)
-    setDbProposalSuppressed(scope)
-    // The session on screen takes it as its next message (queued behind a
-    // running turn). With no composer on screen, a new session on the project
-    // starts with it.
-    if (requestComposerPrompt({ text: DATABASE_SETUP_PROMPT, send: true })) return
-    if (!scope.projectPath) return
-    tabs.newDraft({ server: server.key, directory: scope.projectPath }, DATABASE_SETUP_PROMPT, { send: true })
-  }
-
-  const openCloudDatabase = () => {
-    const scope = activeTaskScope()
-    setDbProposal(undefined)
-    setDbProposalSuppressed(scope)
-    setToolsOpen(false)
-    setSidePanelOpen(false)
-    setBrowserAgentOpen(false)
-    setParallelOpen(false)
-    navigate(cloudHref(scope.projectPath, "database"))
-  }
-
-  const dismissDbProposal = () => {
-    setDbProposal(undefined)
-    setDbProposalSuppressed(activeTaskScope())
-  }
-
   const openProviderSettings = () => {
     closeWorkspacePanel()
     void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
@@ -3230,6 +3166,13 @@ export default function NewLayout(props: ParentProps) {
     closeWorkspacePanel()
     void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
       dialog.show(() => <x.DialogSettings repositoryPath={activeWorkspaceScope().sourcePath} />)
+    })
+  }
+
+  const openAccountSettings = () => {
+    closeWorkspacePanel()
+    void import("@/components/settings-v2/dialog-settings-v2").then((x) => {
+      dialog.show(() => <x.DialogSettings section="account" repositoryPath={activeWorkspaceScope().sourcePath} />)
     })
   }
 
@@ -3764,60 +3707,6 @@ export default function NewLayout(props: ParentProps) {
           </Show>
         </div>
       </main>
-
-      <Show when={activeDbProposal() && !cloudRoute()}>
-        <div class="fixed bottom-5 left-1/2 z-[120] flex max-w-[560px] -translate-x-1/2 items-center gap-3 rounded-2xl border border-[color:var(--vx-line)] bg-[color-mix(in_srgb,var(--vx-sidebar)_92%,transparent)] px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,0.5)] backdrop-blur-2xl">
-          <span
-            class="grid size-9 shrink-0 place-items-center rounded-xl"
-            style={{ background: "var(--vx-gradient, #9374ec)" }}
-          >
-            <svg viewBox="0 0 16 16" class="size-4 text-white" aria-hidden="true">
-              <ellipse cx="8" cy="4.2" rx="4.15" ry="1.45" fill="none" stroke="currentColor" stroke-width="1.15" />
-              <path
-                d="M3.85 4.2v7.1c0 .8 1.85 1.45 4.15 1.45s4.15-.65 4.15-1.45V4.2"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.15"
-                stroke-linecap="round"
-              />
-              <path
-                d="M3.85 7.75c0 .8 1.85 1.45 4.15 1.45s4.15-.65 4.15-1.45"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.05"
-                stroke-linecap="round"
-              />
-            </svg>
-          </span>
-          <div class="min-w-0 flex-1">
-            <div class="text-[13px] font-semibold text-white">This looks like it needs a database</div>
-            <p class="text-[11.5px] text-white/55">
-              Vector can link or create a Supabase database for {projectDisplayName()} and wire auth and data into it.
-            </p>
-          </div>
-          <button
-            type="button"
-            class="shrink-0 rounded-lg bg-[var(--vx-purple)] px-3 py-1.5 text-[12px] font-semibold text-white transition hover:brightness-110"
-            onClick={askVectorForDatabase}
-          >
-            Ask Vector to set it up
-          </button>
-          <button
-            type="button"
-            class="shrink-0 rounded-lg bg-white/10 px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-white/15"
-            onClick={openCloudDatabase}
-          >
-            Open Database
-          </button>
-          <button
-            type="button"
-            class="shrink-0 rounded-lg px-2 py-1.5 text-[12px] text-white/45 transition hover:text-white/80"
-            onClick={dismissDbProposal}
-          >
-            Dismiss
-          </button>
-        </div>
-      </Show>
 
       <SpotlightTour
         open={tourOpen()}
@@ -6558,6 +6447,7 @@ export default function NewLayout(props: ParentProps) {
         onReportBug={() => setReportBugOpen(true)}
         onGettingStarted={() => setHelpPanelOpen(true)}
         onSettings={openSettings}
+        onAccount={openAccountSettings}
       />
 
       <DialogReportBug open={reportBugOpen()} onClose={() => setReportBugOpen(false)} />

@@ -101,7 +101,7 @@ import { isInternalSession } from "@/utils/internal-sessions"
 import { createSessionOwnership } from "./session/session-ownership"
 import { createSessionLineage } from "./session/session-lineage"
 import { enqueueSessionFollowup, SESSION_FOLLOWUP_LIMIT } from "./session/followup-queue"
-import { composerTakes, onComposerPrompt } from "@/features/cloud/cloud-handoff"
+import { composerTakes, onComposerPrompt } from "@/utils/composer-handoff"
 
 type FollowupItem = FollowupDraft & { id: string }
 const emptyFollowups: FollowupItem[] = []
@@ -553,12 +553,12 @@ export default function Page() {
   const info = createMemo(() => (params.id ? sync().session.get(params.id) : undefined))
   const isChildSession = createMemo(() => !!info()?.parentID)
 
-  // Surfaces around the session (the Cloud card, the preview's publish sheet,
-  // the database banner) hand their prompts to this composer. One sent with
-  // `send` goes through the composer's own submission, and queues behind a
-  // running turn the way a typed follow-up does. The composer declines when it
-  // holds an unsent draft or shows no message box (a subagent session, or a
-  // permission or question waiting), and the surface starts a new session.
+  // Surfaces outside the session hand their prompts to this composer through
+  // requestComposerPrompt. One sent with `send` goes through the composer's
+  // own submission, and queues behind a running turn the way a typed follow-up
+  // does. The composer declines when it holds an unsent draft or shows no
+  // message box (a subagent session, or a permission or question waiting), and
+  // the surface starts a new session.
   // This page stays mounted across sessions, so a pending send belongs to the
   // session that took it and is dropped on leaving it.
   const [handoff, setHandoff] = createSignal<{ session?: string; text: string }>()

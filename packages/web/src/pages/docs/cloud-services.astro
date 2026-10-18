@@ -24,7 +24,8 @@ export const prerender = true
 
   <h2 id="connect-accounts">Connect an account and select a project</h2>
   <p>
-    Open Vector Cloud from Home, or from the Cloud button in a session, then Connections. Choose Connect to sign in with
+    Open Vector Cloud from Home, pick the repository, then open Connections. Desktop 1.99.108 and earlier also open it
+    from the Cloud button in a session; from 1.99.109 a task's view has no Cloud controls. Choose Connect to sign in with
     the provider in your browser and return to Vector, or Use access token to paste a token you create on the
     provider's token page. Either way the credential is validated and encrypted on this device. A Vercel sign-in is
     installed on one personal account or team, the one you choose on Vercel's screen; a token reaches every team it
@@ -92,11 +93,12 @@ export const prerender = true
 
   <h2 id="publishing">Publish a preview, then go to production</h2>
   <p>
-    Publish in a session's preview, or in Vector Cloud → Deployments, makes a preview release by default. Before it
-    runs, Vector names the Vercel project and the environment, and warns when the folder has uncommitted changes.
-    Production changes only when you ask for it and the release checks pass. When a release fails, Fix this deploy
-    starts the agent on it, with the failed checks and the end of the log as its first message. The Cloud button in a
-    session shows the project's hosting, database and latest release, and updates as they change.
+    Publish in Vector Cloud → Deployments makes a preview release by default. Before it runs, Vector names the Vercel
+    project and the environment, and warns when the folder has uncommitted changes. Production changes only when you
+    ask for it and the release checks pass. When a release fails, Fix this deploy starts the agent on it, with the
+    failed checks and the end of the log as its first message. The agent can also publish from chat with its cloud
+    tool, and asks first. Desktop 1.99.108 and earlier also offer Publish in a session's preview and a Cloud button in
+    each session that shows the repository's hosting, database and latest release.
   </p>
 
   <h2 id="supabase">Run Supabase from Vector</h2>
