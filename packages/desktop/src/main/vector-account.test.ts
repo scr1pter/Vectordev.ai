@@ -627,6 +627,23 @@ test("a request while a billing window is open brings it forward and never takes
   expect(await app.controller.billing({ kind: "portal" })).toEqual({ outcome: "completed" })
 })
 
+test("the billing portal for a sign-in from before 1.99.109 opens on the website", async () => {
+  const app = await signedIn()
+  app.state.billing = () =>
+    Response.json(
+      {
+        error: {
+          code: "DESKTOP_SIGN_IN_REQUIRED",
+          message: "Sign in to Vector again to manage billing in the app.",
+        },
+      },
+      { status: 403 },
+    )
+  expect(await app.controller.billing({ kind: "portal", flow: "change" })).toEqual({ outcome: "website" })
+  expect(app.urls.at(-1)).toBe("https://vectordev.ai/account")
+  expect(app.windows).toEqual([])
+})
+
 test("offers are read from the public configuration without the account token", async () => {
   const app = await signedIn()
   app.state.config = {

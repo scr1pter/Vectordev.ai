@@ -24,13 +24,14 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     })
     const exchanged = await consumeDesktopCode(body)
     await requireUnrevokedAccount(exchanged.user.id)
-    // A code made for deleting the account buys a ten-minute deletion grant and never a CLI token.
+    // A code made for deleting the account buys a ten-minute deletion grant and never a CLI token. Only the desktop
+    // app exchanges codes, so its token is marked as the desktop's own (see mintCliToken).
     json(
       response,
       200,
       exchanged.purpose === "delete"
         ? { ...mintDeletionGrant(exchanged.user), user: { email: exchanged.user.email } }
-        : { ...mintCliToken(exchanged.user), user: exchanged.user },
+        : { ...mintCliToken(exchanged.user, Date.now(), "desktop"), user: exchanged.user },
     )
   } catch (error) {
     handleApiError(response, error)

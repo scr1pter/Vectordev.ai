@@ -204,11 +204,14 @@ export function createVectorAccount(deps: Dependencies) {
     const payload: unknown = await response.json().catch(() => undefined)
     const error = apiError(payload)
     // A vectordev.ai from before 1.99.109 takes only a website session on these routes, and hands the account token
-    // to Supabase, which refuses it. That answer is not a sign-out: the website still does all of this.
+    // to Supabase, which refuses it. And the billing portal, which can charge the saved card, opens only for a sign-in
+    // made in Vector 1.99.109 or later (DESKTOP_SIGN_IN_REQUIRED). Neither answer is a sign-out: the website still
+    // does all of this.
     if (
       !response.ok &&
       (error?.code === "SESSION_INVALID" ||
         error?.code === "SIGN_IN_REQUIRED" ||
+        error?.code === "DESKTOP_SIGN_IN_REQUIRED" ||
         (!error && (response.status === 404 || response.status === 405)))
     ) {
       await deps

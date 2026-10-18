@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, test } from "bun:test"
-import { mintCliToken, mintDeletionGrant, verifyCliToken, verifyDeletionGrant } from "../api/_lib/cli-token.js"
+import {
+  mintCliToken,
+  mintDeletionGrant,
+  verifyCliToken,
+  verifyDeletionGrant,
+  verifyDesktopToken,
+} from "../api/_lib/cli-token.js"
 import { ApiError } from "../api/_lib/http.js"
 
 describe("cli tokens", () => {
@@ -40,6 +46,24 @@ describe("cli tokens", () => {
     for (const bad of ["", "vct_", "vct_x", "nope", "vct_a.b.c"]) {
       expect(() => verifyCliToken(bad)).toThrow(ApiError)
     }
+  })
+
+  test("only a token marked as the desktop app's own passes for it, and the mark changes nothing else", () => {
+    const user = { id: "u1", email: "k@vectordev.ai" }
+    const desktop = mintCliToken(user, Date.now(), "desktop").token
+    expect(verifyDesktopToken(desktop)).toEqual(user)
+    expect(verifyCliToken(desktop)).toEqual(user)
+    const pasted = mintCliToken(user).token
+    expect(verifyCliToken(pasted)).toEqual(user)
+    expect(() => verifyDesktopToken(pasted)).toThrow(
+      expect.objectContaining({ statusCode: 403, code: "DESKTOP_SIGN_IN_REQUIRED" }),
+    )
+    // An expired or forged desktop token is refused as any CLI token is.
+    expect(() => verifyDesktopToken(mintCliToken(user, Date.now() - 91 * 86_400_000, "desktop").token)).toThrow(
+      expect.objectContaining({ code: "CLI_TOKEN_EXPIRED" }),
+    )
+    expect(() => verifyDesktopToken(`${desktop}x`)).toThrow(expect.objectContaining({ code: "CLI_TOKEN_INVALID" }))
+    expect(() => verifyDesktopToken(mintDeletionGrant(user).grant)).toThrow(ApiError)
   })
 
   test("refuses to mint without a configured secret", () => {

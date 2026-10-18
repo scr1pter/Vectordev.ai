@@ -1,5 +1,6 @@
 import { requireAccountUser } from "./account.js"
 import { enforceRateLimit, requireTrustedJsonRequest } from "./abuse.js"
+import { verifyDesktopToken } from "./cli-token.js"
 import { modelPlanCheckout, modelPlanPortal, modelTopupCheckout } from "./model-plan-account.js"
 import { requireModelPlanUser } from "./model-plan-chat.js"
 import { modelPlansEnabled, requireModelPlans, requireModelTopups } from "./model-plan-config.js"
@@ -8,13 +9,20 @@ import { ApiError, handleApiError, json, readJson, requireMethod, type ApiReques
 /**
  * The account a Codium status or billing request acts for. The website signs in with a browser session. The desktop
  * app's main process holds the signed Vector account token instead, verified and checked against revocation exactly
- * as model requests are, so it can open checkout and the billing portal in its own window. Deleting the account never
- * accepts that token (see api/account/delete.ts).
+ * as model requests are, so it can open checkout and the billing portal in its own window. The portal takes only the
+ * desktop's own token (`desktop`), never one pasted into a terminal, since it can charge the saved card and change
+ * the billing email. Deleting the account never accepts any of these tokens (see api/account/delete.ts).
  */
-export async function requireBillingUser(request: ApiRequest, fetcher: typeof fetch = fetch) {
-  return /^Bearer vct_/.test(String(request.headers.authorization ?? ""))
-    ? requireModelPlanUser(request, fetcher)
-    : requireAccountUser(request, fetcher)
+export async function requireBillingUser(
+  request: ApiRequest,
+  fetcher: typeof fetch = fetch,
+  options: { desktop?: boolean } = {},
+) {
+  const authorization = String(request.headers.authorization ?? "")
+  if (!/^Bearer vct_/.test(authorization)) return requireAccountUser(request, fetcher)
+  const account = await requireModelPlanUser(request, fetcher)
+  if (options.desktop) verifyDesktopToken(authorization.slice("Bearer ".length))
+  return account
 }
 
 export async function handleModelPlanCheckout(
@@ -76,7 +84,7 @@ export async function handleModelPlanPortal(request: ApiRequest, response: ApiRe
     // Keep cancellation reachable even when new model requests are disabled.
     if (!modelPlansEnabled() && !process.env.STRIPE_SECRET_KEY)
       throw new ApiError(503, "BILLING_UNAVAILABLE", "Billing is temporarily unavailable.")
-    const account = await requireBillingUser(request, fetcher)
+    const account = await requireBillingUser(request, fetcher, { desktop: true })
     await enforceRateLimit(request, response, {
       scope: "model-plan-portal",
       identifier: account.id,

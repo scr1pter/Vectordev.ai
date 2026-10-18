@@ -535,8 +535,13 @@ describe("subscription checkout with real billing leases", () => {
   })
 })
 
-// What the desktop app's main process sends: its Vector account token and a JSON body, with no Origin header.
-async function billing(path: "checkout" | "topup" | "portal", body: unknown, token = mintCliToken(user).token) {
+// What the desktop app's main process sends: the Vector account token from its own sign-in and a JSON body, with no
+// Origin header.
+async function billing(
+  path: "checkout" | "topup" | "portal",
+  body: unknown,
+  token = mintCliToken(user, Date.now(), "desktop").token,
+) {
   const response = await fetch(`${state.origin}/api/model-plans/${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
@@ -562,6 +567,33 @@ describe("billing from the desktop app's Vector sign-in", () => {
     })
     // Verified locally and against revocation: Supabase never sees the desktop's token.
     expect(calls.some((call) => call.path === "/auth/v1/user")).toBe(false)
+  })
+
+  test("a token pasted into a terminal, or from a desktop sign-in before 1.99.109, never opens the portal", async () => {
+    // Before 1.99.109 the desktop's token carried no mark, the same as the one /auth/cli hands out to paste.
+    const pasted = mintCliToken(user).token
+    for (const body of [{}, { flow: "change" }, { flow: "cancel" }])
+      expect(await billing("portal", body, pasted)).toEqual({
+        status: 403,
+        body: {
+          error: {
+            code: "DESKTOP_SIGN_IN_REQUIRED",
+            message: "Sign in to Vector again to manage billing in the app.",
+          },
+        },
+      })
+    expect(calls.some((call) => call.path === "/v1/billing_portal/sessions")).toBe(false)
+    // Buying needs a card typed into Stripe's own page, so a pasted token still opens checkout.
+    expect(await billing("checkout", { plan: "vector-10" }, pasted)).toMatchObject({ status: 200 })
+    // A forged mark fails the signature.
+    const [payload] = pasted.slice(4).split(".")
+    const marked = Buffer.from(
+      JSON.stringify({ ...JSON.parse(Buffer.from(payload!, "base64url").toString()), client: "desktop" }),
+    ).toString("base64url")
+    expect(await billing("portal", {}, `vct_${marked}.${pasted.split(".")[1]}`)).toMatchObject({
+      status: 401,
+      body: { error: { code: "CLI_TOKEN_INVALID" } },
+    })
   })
 
   test("top-ups take the same token", async () => {

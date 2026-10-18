@@ -30,13 +30,38 @@ function sign(payload: string, domain = "vector-cli-v1") {
   return createHmac("sha256", secret()).update(`${domain}.${payload}`).digest("base64url")
 }
 
-export function mintCliToken(user: CliTokenUser, now = Date.now()) {
+/**
+ * `client` "desktop" marks a token the desktop app's main process got from its own sign-in (api/account/cli-exchange),
+ * which it keeps encrypted. A token handed out to paste into a terminal has no mark: it can end up in shell history,
+ * a dotfile or a screenshot, so it never opens the billing portal (see verifyDesktopToken). Verifiers from before the
+ * mark ignore it, so a marked token works everywhere an unmarked one does.
+ */
+export function mintCliToken(user: CliTokenUser, now = Date.now(), client?: "desktop") {
   const expiresAt = now + CLI_TOKEN_TTL_MS
-  const payload = encode(JSON.stringify({ v: 1, sub: user.id, email: user.email, exp: expiresAt }))
+  const payload = encode(
+    JSON.stringify({ v: 1, sub: user.id, email: user.email, exp: expiresAt, ...(client ? { client } : {}) }),
+  )
   return { token: `vct_${payload}.${sign(payload)}`, expiresAt }
 }
 
 export function verifyCliToken(token: string, now = Date.now()): CliTokenUser {
+  const parsed = cliPayload(token, now)
+  return { id: parsed.sub, email: parsed.email }
+}
+
+/**
+ * A CLI token from the desktop app's own sign-in, for Stripe's billing portal, which can charge the saved card for a
+ * bigger plan at once and change the billing email. A pasted token, or a desktop sign-in from before Vector 1.99.109,
+ * gets DESKTOP_SIGN_IN_REQUIRED, and the desktop then opens the account page on the website.
+ */
+export function verifyDesktopToken(token: string, now = Date.now()): CliTokenUser {
+  const parsed = cliPayload(token, now)
+  if (parsed.client !== "desktop")
+    throw new ApiError(403, "DESKTOP_SIGN_IN_REQUIRED", "Sign in to Vector again to manage billing in the app.")
+  return { id: parsed.sub, email: parsed.email }
+}
+
+function cliPayload(token: string, now: number) {
   const parsed = signedPayload(
     token,
     "vct_",
@@ -45,7 +70,7 @@ export function verifyCliToken(token: string, now = Date.now()): CliTokenUser {
   )
   if (typeof parsed.exp !== "number" || parsed.exp <= now)
     throw new ApiError(401, "CLI_TOKEN_EXPIRED", "That CLI token has expired. Generate a new one.")
-  return { id: parsed.sub, email: parsed.email }
+  return parsed
 }
 
 /**
@@ -85,6 +110,7 @@ const Signed = Schema.Struct({
   email: Schema.String,
   exp: Schema.optional(Schema.Unknown),
   jti: Schema.optional(Schema.Unknown),
+  client: Schema.optional(Schema.Unknown),
 })
 
 function signedPayload(token: string, prefix: string, domain: string, invalid: ApiError) {

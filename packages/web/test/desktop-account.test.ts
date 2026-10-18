@@ -4,7 +4,7 @@ import { createServer } from "node:http"
 import codeHandler from "../../../api/account/cli-code"
 import exchangeHandler from "../../../api/account/cli-exchange"
 import deleteHandler from "../../../api/account/delete"
-import { verifyCliToken, verifyDeletionGrant } from "../../../api/_lib/cli-token"
+import { verifyCliToken, verifyDeletionGrant, verifyDesktopToken } from "../../../api/_lib/cli-token"
 import {
   deletionConfirmation,
   desktopSignInCallback,
@@ -295,10 +295,10 @@ test("a code for deleting the account needs a sign-in from the last ten minutes 
   // A sign-in code made without a purpose still buys a CLI token, as before.
   const normal = binding()
   const signIn = await (await request("/code", normal)).json()
-  expect(verifyCliToken((await (await request("/exchange", { ...normal, code: signIn.code })).json()).token)).toEqual({
-    id: user.id,
-    email: user.email,
-  })
+  const token = (await (await request("/exchange", { ...normal, code: signIn.code })).json()).token
+  expect(verifyCliToken(token)).toEqual({ id: user.id, email: user.email })
+  // The desktop's own sign-in is marked as such, so it alone opens the billing portal.
+  expect(verifyDesktopToken(token)).toEqual({ id: user.id, email: user.email })
 })
 
 test("the deletion confirmation keeps its purpose through sign-in and asks again after five minutes", () => {
