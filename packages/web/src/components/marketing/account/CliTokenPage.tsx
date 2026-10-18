@@ -2,12 +2,14 @@
 import { Check, Copy, LoaderCircle, RefreshCw, TerminalSquare } from "lucide-react"
 import { useEffect, useState } from "react"
 import { readAccountApiResponse, vectorAccountClient } from "../../../lib/account-client"
-import { desktopSignInCallback, desktopSignInRequest } from "../../../lib/desktop-sign-in"
+import { desktopSignInCallback, desktopSignInRequest, signedInRecently } from "../../../lib/desktop-sign-in"
 import "./account.css"
 
 /**
  * /auth/cli — pairs the Vector CLI with a Vector account. Signed-in users get
  * a vct_ token to paste into `vector login`; everyone else bounces to /login.
+ * With purpose=delete, the desktop app is confirming that the person deleting
+ * the account is signed in here, so an older sign-in has to be made again.
  */
 export function CliTokenPage() {
   const [token, setToken] = useState("")
@@ -16,7 +18,9 @@ export function CliTokenPage() {
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
   const [callback, setCallback] = useState("")
-  const desktop = typeof location !== "undefined" && new URLSearchParams(location.search).get("desktop") === "1"
+  const query = typeof location !== "undefined" ? new URLSearchParams(location.search) : undefined
+  const desktop = query?.get("desktop") === "1"
+  const deleting = desktop && query?.get("purpose") === "delete"
 
   // Always read the live session: Supabase rotates access tokens, so a token
   // captured at mount goes stale and would 401 on "New token".
@@ -30,6 +34,12 @@ export function CliTokenPage() {
       location.replace(`/login?returnTo=${encodeURIComponent(desktopRequest?.returnPath ?? "/auth/cli")}`)
       return
     }
+    if (desktopRequest?.purpose === "delete" && !signedInRecently(session.data.session.access_token)) {
+      // Only this browser's session is signed out; the person signs in again and comes straight back here.
+      await client.auth.signOut({ scope: "local" })
+      location.replace(`/login?${new URLSearchParams({ returnTo: desktopRequest.returnPath, reauth: "1" })}`)
+      return
+    }
     setEmail(session.data.session.user.email ?? "")
     if (desktopRequest) {
       const response = await fetch("/api/account/cli-code", {
@@ -39,7 +49,11 @@ export function CliTokenPage() {
           "content-type": "application/json",
           authorization: `Bearer ${session.data.session.access_token}`,
         },
-        body: JSON.stringify({ state: desktopRequest.state, challenge: desktopRequest.challenge }),
+        body: JSON.stringify({
+          state: desktopRequest.state,
+          challenge: desktopRequest.challenge,
+          ...(desktopRequest.purpose ? { purpose: desktopRequest.purpose } : {}),
+        }),
       })
       const payload = await readAccountApiResponse(response, "Vector could not connect this desktop.")
       const link = desktopSignInCallback(payload, desktopRequest.state)
@@ -79,7 +93,7 @@ export function CliTokenPage() {
     return (
       <main className="account-loading">
         <LoaderCircle size={28} />
-        <p>{desktop ? "Connecting your desktop…" : "Preparing your CLI token…"}</p>
+        <p>{deleting ? "Confirming it is you…" : desktop ? "Connecting your desktop…" : "Preparing your CLI token…"}</p>
       </main>
     )
   }
@@ -91,16 +105,18 @@ export function CliTokenPage() {
           <TerminalSquare size={20} />
         </span>
         <p className="account-kicker">{desktop ? "Vector desktop" : "Vector CLI"}</p>
-        <h1>{desktop ? "Continue in Vector." : "Connect your terminal."}</h1>
+        <h1>{deleting ? "Confirm in Vector." : desktop ? "Continue in Vector." : "Connect your terminal."}</h1>
         <p className="cli-pair-copy">
           {email ? (
             <>
               Signed in as <strong>{email}</strong>.{" "}
             </>
           ) : null}
-          {desktop
-            ? "Open Vector to finish signing in. This link works once and expires in five minutes."
-            : "Run this command in your terminal. It links the Vector CLI to your free account and expires in 90 days."}
+          {deleting
+            ? "Open Vector to finish deleting your account there. This link works once and expires in five minutes."
+            : desktop
+              ? "Open Vector to finish signing in. This link works once and expires in five minutes."
+              : "Run this command in your terminal. It links the Vector CLI to your free account and expires in 90 days."}
         </p>
 
         {error && <p className="account-error">{error}</p>}

@@ -1,5 +1,5 @@
 import { requireUnrevokedAccount } from "../_lib/revocation.js"
-import { requireAccountUser } from "../_lib/account.js"
+import { requireAccountUser, requireRecentSignIn } from "../_lib/account.js"
 import { enforceRateLimit, requireTrustedJsonRequest } from "../_lib/abuse.js"
 import { mintDesktopCode } from "../_lib/desktop-account.js"
 import { handleApiError, json, readJson, requireMethod, type ApiRequest, type ApiResponse } from "../_lib/http.js"
@@ -23,7 +23,10 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       windowSeconds: 300,
       requirePersistent: true,
     })
-    json(response, 200, await mintDesktopCode(user, await readJson(request, 2_000)))
+    const body = await readJson<{ purpose?: unknown } | null>(request, 2_000)
+    // Deleting the account from the desktop app needs a sign-in from the last few minutes, not just a valid session.
+    if (body?.purpose === "delete") requireRecentSignIn(request)
+    json(response, 200, await mintDesktopCode(user, body))
   } catch (error) {
     handleApiError(response, error)
   }

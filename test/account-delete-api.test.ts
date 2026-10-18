@@ -3,6 +3,7 @@ import { createServer } from "node:http"
 import { once } from "node:events"
 import handler from "../api/account/delete"
 import { accountTokensRevoked } from "../api/_lib/revocation"
+import { mintCliToken, mintDeletionGrant } from "../api/_lib/cli-token"
 
 const keys = [
   "SUPABASE_URL",
@@ -16,6 +17,7 @@ const keys = [
   "VERCEL_ENV",
   "STRIPE_SECRET_KEY",
   "VECTOR_ACCESS_MODE",
+  "VECTOR_CLI_TOKEN_SECRET",
 ] as const
 const original = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
 const servers: ReturnType<typeof createServer>[] = []
@@ -24,6 +26,8 @@ let accountID = ""
 let identityDeletions = 0
 let revocationWrites = 0
 let revocationAvailable = false
+// The persistent store's JSON commands, as the deletion grant's single use reads and writes them.
+const store = new Map<string, string>()
 
 beforeEach(async () => {
   keys.forEach((key) => delete process.env[key])
@@ -32,9 +36,22 @@ beforeEach(async () => {
   identityDeletions = 0
   revocationWrites = 0
   revocationAvailable = false
-  const auth = createServer((request, response) => {
+  store.clear()
+  const auth = createServer(async (request, response) => {
     response.setHeader("content-type", "application/json")
     if (request.url === "/" && request.method === "POST") {
+      const chunks: Buffer[] = []
+      for await (const chunk of request) chunks.push(chunk as Buffer)
+      const command = JSON.parse(Buffer.concat(chunks).toString("utf8")) as string[]
+      if (command[0] === "GET") {
+        response.end(JSON.stringify({ result: store.get(command[1]!) ?? null }))
+        return
+      }
+      if (command[0] === "SET") {
+        if (!command.includes("NX") || !store.has(command[1]!)) store.set(command[1]!, command[2]!)
+        response.end(JSON.stringify({ result: "OK" }))
+        return
+      }
       response.end(JSON.stringify({ result: [1, 60] }))
       return
     }
@@ -91,12 +108,21 @@ afterEach(async () => {
   })
 })
 
-function attempt(confirm: string) {
+function attempt(confirm: string, authorization = "Bearer test-session") {
   return fetch(endpoint, {
     method: "POST",
-    headers: { authorization: "Bearer test-session", "content-type": "application/json" },
+    headers: { authorization, "content-type": "application/json" },
     body: JSON.stringify({ confirm }),
   })
+}
+
+// Everything a full deletion needs, with the store and Supabase's admin API as local fakes.
+function configureDeletion() {
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role"
+  process.env.KV_REST_API_URL = process.env.SUPABASE_URL
+  process.env.KV_REST_API_TOKEN = "test-redis-token"
+  process.env.VECTOR_CLI_TOKEN_SECRET = "test-cli-token-secret".repeat(3)
+  revocationAvailable = true
 }
 
 describe("account deletion request boundary", () => {
@@ -137,10 +163,67 @@ describe("account deletion request boundary", () => {
     process.env.KV_REST_API_TOKEN = "test-redis-token"
     process.env.VECTOR_ACCESS_MODE = "paid"
     revocationAvailable = true
+    // The account has a Codium billing record, and Stripe is not configured to close it.
+    store.set(`vector:model-plans:account:${accountID}`, JSON.stringify({ customer: "cus_fixture" }))
     const response = await attempt("owner@example.com")
     expect(response.status).toBe(503)
     expect(await response.json()).toMatchObject({ error: { code: "BILLING_DELETION_FAILED" } })
     expect(revocationWrites).toBe(1)
+    expect(identityDeletions).toBe(0)
+  })
+})
+
+describe("deleting from the desktop app", () => {
+  test("the app's long-lived account token cannot delete the account", async () => {
+    configureDeletion()
+    const response = await attempt(
+      "owner@example.com",
+      `Bearer ${mintCliToken({ id: accountID, email: "owner@example.com" }).token}`,
+    )
+    expect(response.status).toBe(401)
+    expect(identityDeletions).toBe(0)
+    expect(revocationWrites).toBe(0)
+  })
+
+  test("a deletion grant deletes the account once, after the typed email matches", async () => {
+    configureDeletion()
+    const { grant } = mintDeletionGrant({ id: accountID, email: "owner@example.com" })
+    const mismatch = await attempt("someone@example.com", `Bearer ${grant}`)
+    expect(mismatch.status).toBe(400)
+    expect(await mismatch.json()).toMatchObject({ error: { code: "CONFIRMATION_MISMATCH" } })
+    const response = await attempt("Owner@Example.com", `Bearer ${grant}`)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ deleted: true, email: "owner@example.com", cliTokens: "revoked" })
+    expect(identityDeletions).toBe(1)
+    const replay = await attempt("owner@example.com", `Bearer ${grant}`)
+    expect(replay.status).toBe(401)
+    expect(await replay.json()).toMatchObject({ error: { code: "DELETION_GRANT_USED" } })
+    expect(identityDeletions).toBe(1)
+  })
+
+  test("a step that fails leaves the grant usable for a retry", async () => {
+    configureDeletion()
+    revocationAvailable = false
+    const { grant } = mintDeletionGrant({ id: accountID, email: "owner@example.com" })
+    const failed = await attempt("owner@example.com", `Bearer ${grant}`)
+    expect(failed.status).toBe(503)
+    expect(await failed.json()).toMatchObject({ error: { code: "REVOCATION_FAILED" } })
+    revocationAvailable = true
+    expect((await attempt("owner@example.com", `Bearer ${grant}`)).status).toBe(200)
+    expect(identityDeletions).toBe(1)
+  })
+
+  test("an expired or forged grant is refused before anything changes", async () => {
+    configureDeletion()
+    const user = { id: accountID, email: "owner@example.com" }
+    const expired = mintDeletionGrant(user, Date.now() - 11 * 60 * 1000).grant
+    const forged = `vdg_${mintCliToken(user).token.slice(4)}`
+    for (const grant of [expired, forged, `${mintDeletionGrant(user).grant}x`]) {
+      const response = await attempt("owner@example.com", `Bearer ${grant}`)
+      expect(response.status).toBe(401)
+      expect(await response.json()).toMatchObject({ error: { code: "DELETION_GRANT_INVALID" } })
+    }
+    expect(revocationWrites).toBe(0)
     expect(identityDeletions).toBe(0)
   })
 })

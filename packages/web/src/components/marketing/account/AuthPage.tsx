@@ -47,6 +47,8 @@ export function AuthPage() {
     () => safeReturnPath(new URLSearchParams(globalThis.location?.search ?? "").get("returnTo")),
     [],
   )
+  // Vector sent the person here to sign in again before it deletes their account.
+  const reauth = useMemo(() => new URLSearchParams(globalThis.location?.search ?? "").get("reauth") === "1", [])
 
   useEffect(() => {
     void vectorAccountClient()
@@ -67,6 +69,8 @@ export function AuthPage() {
           provider: "google",
           options: {
             redirectTo: `${location.origin}/account`,
+            // Choosing the account again makes this a deliberate step rather than a silent pass-through.
+            ...(reauth ? { queryParams: { prompt: "select_account" } } : {}),
           },
         }),
       )
@@ -124,11 +128,19 @@ export function AuthPage() {
 
   return (
     <section className="auth-card" aria-labelledby="auth-title">
-      <h1 id="auth-title">{mode === "signin" ? "Sign in to Vector" : "Create your Vector account"}</h1>
+      <h1 id="auth-title">
+        {reauth
+          ? "Sign in again to confirm it is you"
+          : mode === "signin"
+            ? "Sign in to Vector"
+            : "Create your Vector account"}
+      </h1>
       <p className="auth-sub">
-        {mode === "signin"
-          ? "One account for the desktop app and the CLI."
-          : "Free. One account for the desktop app and the CLI."}
+        {reauth
+          ? "Vector asks for a fresh sign-in before it deletes your account."
+          : mode === "signin"
+            ? "One account for the desktop app and the CLI."
+            : "Free. One account for the desktop app and the CLI."}
       </p>
 
       <button className="google-button" type="button" onClick={google} disabled={loading}>
