@@ -63,8 +63,14 @@ export function createClient(
   const state: { value?: FreeModelCatalog; expires: number; pending?: Promise<FreeModelCatalog> } = { expires: 0 }
   const users = new Map<string, { expires: number; models: FreeModelInfo[] }>()
   const listeners = new Set<(catalog: FreeModelCatalog) => void>()
+  // The last answer any caller received, which provider state may have been built from.
+  const served: { value?: FreeModelCatalog } = {}
+  const serve = (value: FreeModelCatalog) => {
+    served.value = value
+    return value
+  }
   const catalog = async (force = false): Promise<FreeModelCatalog> => {
-    if (!force && state.value && state.expires > now()) return state.value
+    if (!force && state.value && state.expires > now()) return serve(state.value)
     const saved =
       state.value ??
       (input.file
@@ -75,16 +81,18 @@ export function createClient(
             .catch(() => undefined)
         : undefined)
     const refresh = state.pending ?? load(saved)
-    if (force) return refresh
+    if (force) return refresh.then(serve)
     // Provider loading and every free-model chat wait here, so they must never stall on vectordev.ai.
     // A known OFF answer is served at once while the refresh lands for the next caller. Otherwise the
-    // wait is short and then serves the last catalog seen, stale, or OFF on a first run; only a request
-    // that actually fails falls back to the reviewed list, inside load().
-    if (saved && !saved.enabled) return OFF
+    // wait is short and then serves the last catalog seen, stale, or OFF on a first run. Subscribers
+    // hear when the refresh differs from what was served.
+    if (saved && !saved.enabled) return serve(OFF)
     const fallback = Promise.withResolvers<FreeModelCatalog>()
     // This deadline settles an awaited operation; keep it alive until the race finishes.
     const timer = setTimeout(() => fallback.resolve(saved ?? OFF), input.wait ?? 1_500)
-    return Promise.race([refresh, fallback.promise]).finally(() => clearTimeout(timer))
+    return Promise.race([refresh, fallback.promise])
+      .then(serve)
+      .finally(() => clearTimeout(timer))
   }
   const load = (saved: FreeModelCatalog | undefined) => {
     const pending = (async () => {
@@ -114,12 +122,12 @@ export function createClient(
               model.providers.every((provider) => !!provider.id.trim()),
           ))
       const value = valid ? (parsed.enabled ? parsed : OFF) : unreachable(saved, !!response)
-      const previous = state.value ?? saved
       state.value = value
       state.expires = now() + TTL
       // Provider state built from an earlier answer, such as a cached OFF served at startup, must rebuild when the
-      // catalog turns on, off or changes models; otherwise it stays stale for the rest of the app session.
-      if (!previous || signature(previous) !== signature(value)) listeners.forEach((listener) => listener(value))
+      // catalog turns on, off or changes models; otherwise it stays stale for the rest of the app session. A first
+      // answer that callers are still waiting for needs no rebuild.
+      if (served.value && signature(served.value) !== signature(value)) listeners.forEach((listener) => listener(value))
       if (input.file && valid) {
         const file = input.file
         const temporary = `${file}.${randomUUID()}.tmp`

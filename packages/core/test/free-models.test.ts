@@ -382,3 +382,21 @@ test("token precedence honors environment, stored Vector credentials, then CLI f
     "vault unavailable",
   )
 })
+
+test("a first run that answered OFF before a slow catalog arrived notifies once the catalog is on", async () => {
+  // The first read gives up after the short wait and answers OFF; provider state is built from that answer.
+  const reply = Promise.withResolvers<void>()
+  const client = FreeModels.createClient({ wait: 20, request: () => reply.promise.then(() => Response.json(enabled)) })
+  const seen: boolean[] = []
+  client.subscribe((catalog) => seen.push(catalog.enabled))
+  expect(await client.catalog()).toEqual(off)
+  reply.resolve()
+  expect(await client.catalog(true)).toEqual(enabled)
+  expect(seen).toEqual([true])
+  // A first answer that its caller waited for is not a change.
+  const fresh = FreeModels.createClient({ request: async () => Response.json(enabled) })
+  const quiet: boolean[] = []
+  fresh.subscribe((catalog) => quiet.push(catalog.enabled))
+  expect(await fresh.catalog()).toEqual(enabled)
+  expect(quiet).toEqual([])
+})
