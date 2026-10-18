@@ -730,10 +730,12 @@ describe("free models that may train on prompts", () => {
   test("after acceptance, may-train requests allow data collection while no-training ones keep deny", async () => {
     await store([...catalogModels, laguna])
     expect((await chat(prompt(laguna.id), account(), consented)).status).toBe(200)
+    // A may-train choice never falls back to a no-training model, which would then receive "allow".
+    expect(chats[0].body.models).toEqual([laguna.id])
     expect(chats[0].body.provider).toEqual({
       data_collection: "allow",
       require_parameters: true,
-      only: ["poolside/fp4", "cohere", "atlas-cloud/fp8"],
+      only: ["poolside/fp4"],
       max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
     })
     expect((await chat(prompt(catalogModels[0].id), account(), consented)).status).toBe(200)

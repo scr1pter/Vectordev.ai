@@ -124,6 +124,12 @@ const mayTrain = {
   maxOutputTokens: 32768,
   providers: [{ id: "poolside/fp4", name: "Poolside", retention: "", dataPolicy: "may-train" as const }],
 }
+const lagunaXS = {
+  ...mayTrain,
+  id: "poolside/laguna-xs-2.1:free",
+  name: "Poolside: Laguna XS 2.1",
+  providers: [{ id: "poolside/fp8", name: "Poolside", retention: "", dataPolicy: "may-train" as const }],
+}
 const inkling = {
   id: "thinkingmachines/inkling:free",
   name: "Thinking Machines: Inkling",
@@ -141,7 +147,7 @@ const unreviewed = {
   maxOutputTokens: 4096,
   providers: [{ id: "maker", name: "Maker", retention: "", dataPolicy: "unreviewed" as const }],
 }
-const all = [mayTrain, inkling, unreviewed, ...FREE_MODEL_FALLBACKS]
+const all = [mayTrain, inkling, unreviewed, ...FREE_MODEL_FALLBACKS, lagunaXS]
 const hello = (model: string) => ({ model, messages: [{ role: "user", content: "hello" }] })
 
 test("nothing is built for a may-train or unreviewed model until the user accepted, and no-training never asks", () => {
@@ -161,7 +167,7 @@ test("data collection is allowed only for an accepted, reviewed may-train model;
   expect(freeModelRequest(hello(mayTrain.id), all, accepted).provider).toEqual({
     data_collection: "allow",
     require_parameters: true,
-    only: ["poolside/fp4", "thinkingmachines/nvfp4", "cohere"],
+    only: ["poolside/fp4", "poolside/fp8"],
     max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
   })
   expect(freeModelRequest(hello(unreviewed.id), all, accepted).provider.data_collection).toBe("deny")
@@ -182,12 +188,24 @@ test("a fallback never weakens the chosen model's data policy", () => {
         .filter((id, index, ids) => ids.indexOf(id) === index)
         .slice(0, 3),
     )
-  // An accepted may-train choice may also fall back to other may-train models, never to an unreviewed one.
-  expect(freeModelRequest(hello(mayTrain.id), all, { trainingConsent: true }).models).toEqual([
-    mayTrain.id,
-    inkling.id,
-    FREE_MODEL_FALLBACKS[0].id,
-  ])
+  // An accepted may-train choice falls back only to may-train models of the same provider: never to another
+  // provider whose terms the user was not shown (Poolside's Laguna answered by Thinking Machines, whose free tier takes a
+  // perpetual training licence), and never to a no-training model, which would then be sent data_collection "allow".
+  expect(freeModelRequest(hello(mayTrain.id), all, { trainingConsent: true })).toMatchObject({
+    models: [mayTrain.id, lagunaXS.id],
+    provider: { data_collection: "allow", only: ["poolside/fp4", "poolside/fp8"] },
+  })
+  expect(freeModelRequest(hello(inkling.id), all, { trainingConsent: true })).toMatchObject({
+    models: [inkling.id],
+    provider: { data_collection: "allow", only: ["thinkingmachines/nvfp4"] },
+  })
+  // So "allow" reaches no request that could be served by a no-training model.
+  for (const model of all) {
+    const request = freeModelRequest(hello(model.id), all, { trainingConsent: true })
+    if (request.provider.data_collection !== "allow") continue
+    expect(request.models.filter((id) => all.find((item) => item.id === id)?.providers[0].dataPolicy !== "may-train")).toEqual([])
+    expect(request.provider.only.filter((id) => !id.startsWith(model.providers[0].id.split("/")[0]))).toEqual([])
+  }
 })
 
 test("an endpoint without tool_choice gets the same automatic request without it", () => {

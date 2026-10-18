@@ -91,16 +91,21 @@ export function freeModelRequest(
       body.tools.some((tool) => !isRecord(tool) || tool.type !== "function" || !isRecord(tool.function)))
   )
     throw new Error(`Only local function tools are supported by ${FREE_MODELS_TITLE}.`)
-  // A fallback never weakens the chosen model's policy: a no-training or unreviewed choice falls back only to
-  // no-training models, and an accepted may-train choice also to other may-train models.
+  // A fallback never weakens the chosen model's policy, and data_collection below is set once for the whole list. A
+  // no-training or unreviewed choice falls back only to no-training models, all sent "deny". An accepted may-train
+  // choice falls back only to may-train models served by the same provider: a different provider has its own terms,
+  // and a no-training model must never receive "allow".
+  const providerSlugs = (model: FreeModelInfo) => model.providers.map((provider) => provider.id.split("/")[0] ?? "")
   const fallbacks = [
     selected,
-    ...models.filter(
-      (model) =>
-        model.id !== selected.id &&
-        isFreeModelID(model.id) &&
-        [policy === "may-train" ? "may-train" : "no-training", "no-training"].includes(freeModelDataPolicy(model)),
-    ),
+    ...models.filter((model) => {
+      if (model.id === selected.id || !isFreeModelID(model.id)) return false
+      if (policy !== "may-train") return freeModelDataPolicy(model) === "no-training"
+      return (
+        freeModelDataPolicy(model) === "may-train" &&
+        providerSlugs(model).every((slug) => providerSlugs(selected).includes(slug))
+      )
+    }),
   ].slice(0, 3)
   const ceiling = Math.min(...fallbacks.map((model) => model.maxOutputTokens))
   const requested = body.max_tokens ?? body.max_completion_tokens ?? Math.min(8192, ceiling)
