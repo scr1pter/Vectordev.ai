@@ -11,6 +11,16 @@ describe("trust wording", () => {
     expect(strings.filter(([, text]) => /project/i.test(text)).map(([key]) => key)).toEqual([])
     expect(dict["project.trust.dialog.title"]).toBe("Trust this repository?")
   })
+
+  // "Not now" leaves the repository untrusted, and the engine keeps the user's own language servers and formatters
+  // off in an untrusted repository and starts their MCP servers outside it. On the desktop the app's question is the
+  // only place that says so, so it must say what "Not now" keeps off besides the repository's settings.
+  test("the trust question says what Not now keeps off, including the user's own tools", () => {
+    const later = dict["project.trust.dialog.later"]
+    expect(later).toContain("Vector ignores these settings")
+    expect(later).toContain("your language servers and formatters stay off in it")
+    expect(later).toContain("your MCP servers start outside it")
+  })
 })
 
 describe("who may trust a repository", () => {

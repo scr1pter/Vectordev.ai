@@ -49,6 +49,8 @@ export function SettingsProjectTrustV2(props: { repositoryPath?: string; session
           <p class="settings-v2-page-subtitle">
             A repository can bring its own Vector settings in vector.json and .vector, like agents, commands, plugins
             and MCP servers. They can run code on this computer, so Vector ignores them until you trust the repository.
+            Until then your own language servers and formatters stay off in it too, and your MCP servers start outside
+            it, because the repository's files could take them over.
           </p>
         </div>
       </div>

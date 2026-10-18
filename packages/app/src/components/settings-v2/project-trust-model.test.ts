@@ -11,7 +11,15 @@ describe("projectTrustSummary", () => {
     const summary = projectTrustSummary(status({ trusted: false, ignored: true, settings: true }), "app")
     expect(summary.state).toBe("untrusted")
     expect(summary.canTrust).toBe(true)
-    expect(summary.description).toContain("Vector ignores them until you trust the repository")
+    expect(summary.description).toContain("Vector ignores them")
+  })
+
+  test("says that the user's own tools stay held back in a repository that is not trusted yet", () => {
+    // "Not now" leaves the repository untrusted, and the engine keeps the user's own language servers and formatters
+    // off in every untrusted repository and starts their MCP servers outside it, so Settings must say so as well.
+    const summary = projectTrustSummary(status({ trusted: false, ignored: true, settings: true }), "app")
+    expect(summary.description).toContain("your language servers and formatters stay off in it")
+    expect(summary.description).toContain("your MCP servers start outside it")
   })
 
   test("offers trust when only the user's own language servers, formatters and MCP servers are held back", () => {

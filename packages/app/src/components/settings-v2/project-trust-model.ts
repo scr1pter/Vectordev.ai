@@ -30,7 +30,7 @@ export function projectTrustSummary(status: ProjectTrustStatus | undefined, name
       state: "untrusted",
       title: "Not trusted",
       description: status.settings
-        ? `${name} has its own Vector settings, like agents, commands, plugins or MCP servers, which can run code on this computer. Vector ignores them until you trust the repository.`
+        ? `${name} has its own Vector settings, like agents, commands, plugins or MCP servers, which can run code on this computer. Until you trust the repository, Vector ignores them, your language servers and formatters stay off in it and your MCP servers start outside it.`
         : `${name} has no Vector settings of its own, but until you trust it your language servers and formatters stay off in it and your MCP servers start outside it.`,
       canTrust: true,
     }

@@ -754,7 +754,7 @@ export const dict = {
   "project.trust.dialog.changed.description":
     "{{name}}'s Vector settings changed after you trusted it, so trusting it again lets Vector load the new settings, which can run code on this computer.",
   "project.trust.dialog.later":
-    "Until you trust it, Vector ignores these settings. You can trust it later from the repository's menu on Home or in Settings, under Repository trust.",
+    "Until you trust it, Vector ignores these settings, your language servers and formatters stay off in it and your MCP servers start outside it. You can trust it later from the repository's menu on Home or in Settings, under Repository trust.",
   "project.trust.dialog.trust": "Trust this repository",
   "project.trust.dialog.notNow": "Not now",
   "project.trust.menu": "Trust this repository…",
