@@ -51,14 +51,14 @@ describe("who may trust a repository", () => {
   test("only the trust dialog and Settings approve trust, never a clone or any other flow", async () => {
     const root = path.join(import.meta.dir, "..")
     const files = await Array.fromAsync(new Bun.Glob("**/*.{ts,tsx}").scan({ cwd: root }))
-    const callers = await Promise.all(
+    const sources = await Promise.all(
       files
         .filter((file) => !file.includes(".test."))
         .map(async (file) => ({ file, text: await Bun.file(path.join(root, file)).text() })),
     )
     expect(
-      callers
-        .filter((item) => /\btrust\s*\.\s*approve\s*\(/.test(item.text))
+      sources
+        .filter((item) => approvesTrust(item.text))
         .map((item) => item.file)
         .toSorted(),
     ).toEqual([
@@ -66,8 +66,50 @@ describe("who may trust a repository", () => {
       "components/settings-v2/project-trust.tsx",
       "context/project-trust.tsx",
     ])
+    // The engine's approval itself is called in one place, which the dialog and Settings go through.
+    expect(sources.filter((item) => callsEngineApproval(item.text)).map((item) => item.file)).toEqual([
+      "context/project-trust.tsx",
+    ])
+  })
+
+  // The guard above reads source text, so it has to see an approval however it is written, not only as
+  // `trust.approve(`: under another name for the context, through the SDK in any spelling, or by the route itself.
+  test("the guard sees an approval however it is spelled", () => {
+    const approvals = [
+      "const t = useProjectTrust()\nawait t.approve(client, scope)",
+      "const { approve } = useProjectTrust()\nawait approve(client, scope)",
+      "useProjectTrust()['approve'](client, scope)",
+      'await client.config["trust"].approve()',
+      'await client.config.trust["approve"]()',
+      "await client.config?.trust?.approve()",
+      "const api = client.config.trust\nawait api.approve()",
+      'await fetch(`${url}/config/trust`, { method: "POST" })',
+      "const reply: ConfigTrustApproveResponses = await post()",
+    ]
+    expect(approvals.filter((text) => !approvesTrust(text))).toEqual([])
+    expect(
+      [
+        "await client.config.trust.get()",
+        "const trust = useProjectTrust()\ntrust.remember(scope, workspace, 'dismissed')",
+        "await permission.approve(request)",
+      ].filter(approvesTrust),
+    ).toEqual([])
   })
 })
+
+// Any way source text can reach the engine's trust approval: the trust context's approve under any binding, the SDK's
+// config.trust in any spelling next to an approve, the generated approval types, or the route's path.
+function approvesTrust(text: string) {
+  const approve = /\bapprove\b/.test(text)
+  if (approve && /\buseProjectTrust\b/.test(text)) return true
+  if (approve && /\bconfig\s*(?:\?\.|\.|\[\s*["'`])\s*trust\b/.test(text)) return true
+  return /\/config\/trust\b|\bConfigTrustApprove/.test(text)
+}
+
+// A direct call of the SDK's approval, in any spelling of config.trust.approve.
+function callsEngineApproval(text: string) {
+  return /\bconfig\s*(?:\?\.|\.|\[\s*["'`])\s*trust\b["'`]?\s*\]?\s*(?:\?\.|\.|\[\s*["'`])\s*approve\b/.test(text)
+}
 
 const ignored = { ignored: true, settings: true }
 
