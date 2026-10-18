@@ -494,7 +494,7 @@ function requestSize(context: readonly SessionMessage.Message[]) {
   const users = context.flatMap((message, index) => (message.type === "user" ? [{ message, index }] : []))
   // A compaction summarised what came before, so a "continue" after it has work of unknown size to go on with.
   const compacted = context.some((message) => message.type === "compaction")
-  return users.reduce<{ result?: TaskSize.Result; work?: TaskSize.Tier }>(
+  return users.reduce<{ result?: TaskSize.Result; work?: TaskSize.Tier; changed: boolean }>(
     (state, user, position) => {
       const reply =
         position === 0
@@ -506,6 +506,8 @@ function requestSize(context: readonly SessionMessage.Message[]) {
         .flatMap((message) => message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])))
         .join("\n")
       const last = reply.at(-1)
+      // Whether the work this message would continue changed files, counting the requests that work continues.
+      const changed = state.changed || reply.some(edits)
       const result = TaskSize.classify({
         text: user.message.text,
         files: user.message.files?.filter((file) => !file.mime.startsWith("image/")).length,
@@ -513,19 +515,36 @@ function requestSize(context: readonly SessionMessage.Message[]) {
         agents: user.message.agents?.map((agent) => agent.name),
         previous: state.work,
         // The work before is still open when its reply asked or offered something, or its run did not finish (a
-        // message that joined a running drain has no reply of its own yet).
+        // message that joined a running drain has no reply of its own yet). A greeting's reply is never open.
         open:
           position > 0 &&
+          state.result?.tier !== "chat" &&
           (TaskSize.asks(text) || !last || last.error !== undefined || UNFINISHED.has(last.finish ?? "")),
+        changed,
       })
-      return { result, work: result.tier === "chat" ? state.work : result.tier }
+      return {
+        result,
+        work: result.tier === "chat" ? state.work : result.tier,
+        // A request of its own starts new work; a greeting or a continuation keeps the work before it.
+        changed: result.tier === "chat" || result.source === "inherited" ? changed : false,
+      }
     },
-    { work: compacted ? "standard" : undefined },
+    { work: compacted ? "standard" : undefined, changed: false },
   ).result
 }
 
 // Finish reasons of a step that stopped before its answer was done.
 const UNFINISHED = new Set(["length", "tool-calls", "unknown", "error", "content-filter"])
+
+// A step that changed files: its snapshot recorded them, or it completed an edit or a write.
+function edits(message: SessionMessage.Assistant) {
+  if ((message.snapshot?.files?.length ?? 0) > 0) return true
+  return message.content.some(
+    (part) => part.type === "tool" && part.state.status === "completed" && FILE_TOOLS.has(part.name),
+  )
+}
+
+const FILE_TOOLS = new Set(["edit", "write", "apply_patch"])
 
 export const node = makeLocationNode({
   service: Service,

@@ -35,9 +35,16 @@ export type Input = {
   /**
    * Whether the request right before this message is still open: its reply asked or offered something, or its run did
    * not finish (it was interrupted, failed or stopped). Then the message answers or follows up that work, so it is
-   * never a bare reply, and it continues that work at its size.
+   * never a bare reply, and it continues that work at its size. A Chat reply is never open: its small talk ("How about
+   * you?") waits on nothing.
    */
   readonly open?: boolean
+  /**
+   * Whether the work before this message changed files: the request before and the requests it continues. Finished work
+   * that changed files is done, so a new short request after it ("ship to vercel") is Work of its own; work that changed
+   * nothing yet (a plan, a proposal, an analysis) is carried out by a short follow-up ("build it").
+   */
+  readonly changed?: boolean
   /** The request asks for structured output, which needs a tool call. */
   readonly structured?: boolean
   /** false turns automatic sizing off: every request gets the full harness unless the sender picks a size. */
@@ -47,7 +54,10 @@ export type Input = {
 export type Result = {
   readonly tier: Tier
   readonly source: Source
-  /** Stable reason codes, such as "greeting", "work" or "explicit:thorough"; clients turn them into copy. */
+  /**
+   * Stable reason codes, such as "greeting", "work" or "explicit:thorough"; clients turn them into copy. "capped" means
+   * the user said "no subagents" or "don't be thorough": nothing, escalate included, takes the request past Work.
+   */
   readonly reasons: readonly string[]
   /** false when the user said to skip the judge for this request. */
   readonly judge: boolean
@@ -130,10 +140,11 @@ export function classify(input: Input): Result {
   // ask itself. "No subagents" and "don't be thorough" keep the request at Work, Thorough work it continues included.
   const noJudge = NO_JUDGE.test(lower)
   const capped = NO_SUBAGENTS.test(lower) || NOT_THOROUGH.test(lower)
+  const cap = capped ? ["capped"] : []
   // A force word counts only as the user's instruction about this request: a clause that asks for it ("be thorough",
   // "use subagents", "run the judge"), never a mention ("fix the bug with subagents not starting").
   const forced = instructions([NO_SUBAGENTS, NO_JUDGE, NOT_THOROUGH].reduce(strip, lower))
-  if (forced.length > 0) return result(capped ? "standard" : "thorough", "user", forced, !noJudge)
+  if (forced.length > 0) return result(capped ? "standard" : "thorough", "user", [...forced, ...cap], !noJudge)
 
   // A greeting, thanks, a farewell, emoji, small talk or a question about Vector is a direct reply, unless work is
   // waiting on the user: then it answers or follows up that work.
@@ -141,16 +152,25 @@ export function classify(input: Input): Result {
   if (kind && !input.open) return result("chat", "auto", [kind])
 
   // Everything else is Work. A message continues the work before it when that work is still open, or when it reads as
-  // a follow-up: a short message, or one that starts by answering ("yes, ...", "no, use postgres instead ...", "looks
-  // good, ..."). Continuing Thorough work keeps it Thorough, so a reply, an approval or "build the app" after a large
-  // plan still has subagents and the judge. Nothing in a message lowers Work: "keep it simple" or "quick question"
-  // shapes the answer, not the tools.
-  const follows =
-    input.open === true ||
-    (previous !== undefined && (text.split(/\s+/).filter(Boolean).length <= FOLLOW_UP_WORDS || REPLY.test(lower)))
-  const reasons = [follows ? (input.open ? "answer" : "continue") : "work", ...(kind ? [kind] : [])]
+  // a follow-up to it (see `continues`). Continuing Thorough work keeps it Thorough, so a reply, an approval or "build
+  // the app" after a large plan still has subagents and the judge. Nothing in a message lowers Work: "keep it simple"
+  // or "quick question" shapes the answer, not the tools.
+  const follows = input.open === true || (previous !== undefined && continues(lower, text, input.changed === true))
+  const reasons = [follows ? (input.open ? "answer" : "continue") : "work", ...(kind ? [kind] : []), ...cap]
   const tier = previous === "thorough" && follows && !capped ? "thorough" : "standard"
   return result(tier, follows && previous ? "inherited" : "auto", reasons, !noJudge)
+}
+
+// Whether a message continues the finished work before it. Work that changed nothing yet (a plan, a proposal, an
+// analysis) is carried out by a short follow-up, a reply or an approval ("build it", "looks good", "great plan, go
+// ahead with phases 1 and 2 but skip billing"). Work that changed files and finished is done: only a correction or a
+// "carry on" continues it ("no, keep the old routes", "continue with phase 2"), and a new request, however short ("ship
+// to vercel", "fix the typo in README"), is Work of its own that the agent can still escalate.
+function continues(lower: string, text: string, changed: boolean) {
+  const openings = [lower, lower.replace(POLITE_START, "")]
+  if (changed) return openings.some((opening) => RESUME.test(opening))
+  if (text.split(/\s+/).filter(Boolean).length <= FOLLOW_UP_WORDS) return true
+  return openings.some((opening) => REPLY.test(opening) || APPROVAL.test(opening))
 }
 
 /** Whether an assistant's closing text asks the user for a decision or offers more work, so the next message answers it. */
@@ -162,13 +182,25 @@ export function asks(text: string) {
 
 /**
  * Whether a reply ends on a question the work waits on, such as "Should I also migrate the tests?". A closing
- * pleasantry ("Anything else?") is not one. Vector does not judge work while it waits on the user.
+ * pleasantry ("Anything else?") is not one. Courtesy after the question does not hide it: "Should I also migrate the
+ * tests? Let me know!", "Want me to go on with phase 2? 🙂" and a question followed by an aside in parentheses still
+ * wait. Vector does not judge work while it waits on the user.
  */
 export function waits(text: string) {
-  const tail = text.trim().replace(/[\s*_`)\]]+$/, "")
-  if (!tail.endsWith("?")) return false
-  const start = Math.max(...[".", "!", "?", "\n"].map((mark) => tail.lastIndexOf(mark, tail.length - 2))) + 1
-  return !pleasantry(tail.slice(start))
+  // An aside in parentheses that asks nothing ("(I'd lean toward removing it.)") is not where the reply ends.
+  const last = sentences(text.trim().replace(/\([^()?]*\)/g, " "))
+    .map((sentence) => sentence.replace(EDGES_START, "").replace(EDGES_END, "").trim())
+    .findLast((sentence) => sentence !== "" && !courtesy(sentence))
+  return last?.endsWith("?") === true
+}
+
+// A closing line that only nudges the user to answer, or a pleasantry that offers nothing: neither is what a reply asks.
+function courtesy(sentence: string) {
+  const plain = sentence
+    .toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/[\s!.]+$/, "")
+  return COURTESY.test(plain) || pleasantry(sentence)
 }
 
 /** The sentences a reply closes with, lowercased, without the closing pleasantries that offer nothing to answer. */
@@ -191,7 +223,9 @@ function pleasantry(sentence: string) {
   )
 }
 
-type Kind = "greeting" | "thanks" | "farewell" | "reaction" | "success" | "about-vector" | "emoji"
+// "ack" ("got it", "sounds great") is social only beside another social kind: "got it, thanks" is a thanks, while a
+// bare "sounds good" after a plan may mean "go ahead".
+type Kind = "greeting" | "thanks" | "farewell" | "reaction" | "success" | "about-vector" | "emoji" | "ack"
 
 // A short message of prose, every clause of it social: "thanks, that works", "hey, how are you doing today?", "ok
 // thanks bye". Any clause that is something else ("thanks, now fix the other one", "thanks but it's still broken")
@@ -199,28 +233,37 @@ type Kind = "greeting" | "thanks" | "farewell" | "reaction" | "success" | "about
 function socialKind(input: Input, text: string, lower: string): Kind | undefined {
   if (input.files || input.images || (input.agents?.length ?? 0) > 0) return
   if (PATH.test(input.text) || URL_PATTERN.test(input.text) || input.text.includes("`") || text.length > 80) return
+  // A log pasted under a greeting ("hi" and an npm error) is work: prose() dropped its lines, the user did not.
+  if (lines(input.text) > lines(text)) return
   if (EMOJI_ONLY.test(lower)) return "emoji"
   const all = words(lower)
   // A question about Vector is read whole first, so the "vector" in "what is vector?" is not dropped as a name.
   if (VECTOR_QUESTIONS.has(all.join(" "))) return "about-vector"
   // Only a name or two ("vector?", "hey there" without the hey): someone checking that Vector is there.
   if (all.length > 0 && dropVocatives(all).length === 0) return "greeting"
-  const kinds = clauses(lower).map(clauseKinds)
+  const kinds = sentences(lower).flatMap((sentence) =>
+    clauses(sentence).map((clause) => clauseKinds(clause, sentence.trim().endsWith("?"))),
+  )
   if (kinds.length === 0 || kinds.some((kind) => kind === undefined)) return
   const found = new Set(kinds.flatMap((kind) => [...(kind ?? [])]))
   return SOCIAL_ORDER.find((kind) => found.has(kind))
 }
 
-function clauseKinds(clause: string): ReadonlySet<Kind> | undefined {
+function clauseKinds(clause: string, question: boolean): ReadonlySet<Kind> | undefined {
   const typed = plainWords(clause)
   const all = typed.map(collapse)
   if (all.length === 0) return new Set()
   if (VECTOR_QUESTIONS.has(all.join(" "))) return new Set(["about-vector"])
   const trimmed = dropVocatives(typed).join(" ")
-  // "it works now", "that fixed it": the user reporting back.
-  if (SUCCESS.test(trimmed)) return new Set(["success"])
+  // "it works now", "that fixed it": the user reporting back. Asked ("fixed?", "the tests passed?"), it asks the agent
+  // to check the work, which needs the history and tools.
+  if (SUCCESS.test(trimmed)) return question ? undefined : new Set(["success"])
   if (thanked(trimmed)) return new Set(["thanks"])
   return sequence(all)
+}
+
+function lines(text: string) {
+  return text.split("\n").filter((line) => line.trim()).length
 }
 
 // A thanks with what it thanks for ("thanks for the fix", "thank you for fixing that"), but never a new ask hidden in
@@ -283,9 +326,12 @@ function polite(clause: string) {
     .trim()
 }
 
-// An imperative clause starts with its verb, not with a subject, a determiner or a question word.
+// An imperative clause starts with its verb, not with a subject, a determiner or a question word. "do" starts both:
+// "do it properly with subagents" is an instruction, "do you use subagents?" a question.
 function imperative(clause: string) {
-  return !NOT_IMPERATIVE.has(clause.split(/\s+/)[0] ?? "")
+  const [first = "", second = ""] = clause.split(/\s+/)
+  if (first === "do") return !SUBJECTS.has(second)
+  return !NOT_IMPERATIVE.has(first)
 }
 
 function words(text: string) {
@@ -335,13 +381,32 @@ function prose(text: string) {
     .trim()
 }
 
-// A follow-up to the work before it is at most this many words of prose, unless it starts by answering.
+// A follow-up to work that changed nothing yet is at most this many words of prose, unless it starts by answering.
 const FOLLOW_UP_WORDS = 12
 // A message that starts by answering the work before it: "yes, ...", "no, use postgres instead ...", "looks good, ...".
 const REPLY =
   /^(?:yes|yeah|yep|yup|sure|ok|okay|no|nope|nah|not|go ahead|continue|proceed|keep going|looks good|sounds good|lgtm|approved|also|now|then|actually|instead|but)\b/
+// How an approval of a plan or a proposal starts: "great plan! ...", "let's do it, but ...", "the plan looks good, ...",
+// "go with option b, ...".
+const APPROVAL = /^(?:great|perfect|awesome|excellent|nice|let'?s|the plan|i like|option|go with|please go ahead)\b/
+// How a message that corrects or carries on finished work starts: "no, keep the old routes", "actually use postgres",
+// "but the tests fail", "continue with phase 2", "do the rest of the files".
+const RESUME =
+  /^(?:no|nope|not|actually|instead|but|wait|continue|proceed|keep going|carry on|go on|resume|finish|(?:do |finish |complete )?the (?:rest|remaining)|(?:the )?(?:next|remaining) (?:phase|step|part|stage)|(?:phase|step|part|stage) \w+)\b/
 
-const VOCATIVES = set(["vector", "there", "team", "everyone", "all", "buddy", "friend", "mate", "guys", "folks"])
+const VOCATIVES = set([
+  "vector",
+  "claude",
+  "there",
+  "team",
+  "everyone",
+  "all",
+  "buddy",
+  "friend",
+  "mate",
+  "guys",
+  "folks",
+])
 const GREETINGS = set([
   "hi",
   "hey",
@@ -385,17 +450,46 @@ const SMALL_TALK = set([
   "can you help",
   "could you help me",
   "nice to meet you",
+  // Answers to the agent's own small talk ("How about you?").
+  "im good",
+  "im fine",
+  "im great",
+  "im well",
+  "im doing well",
+  "im doing good",
+  "im doing great",
+  "doing well",
+  "doing good",
+  "doing great",
+  "not bad",
+  "pretty good",
+  "you",
+  "and you",
+  "how about you",
+  "what about you",
+  "hows your day",
+  "hows your day going",
 ])
 const THANKS = set([
   "thanks",
   "thank you",
+  "thank u",
+  "thankyou",
+  "thanku",
   "thx",
+  "thnx",
+  "thanx",
+  "thnks",
+  "tnx",
   "ty",
   "tysm",
   "cheers",
   "appreciate it",
   "much appreciated",
   "many thanks",
+  "gracias",
+  "merci",
+  "danke",
 ])
 const FAREWELLS = set([
   "bye",
@@ -405,6 +499,7 @@ const FAREWELLS = set([
   "see ya",
   "cya",
   "later",
+  "bye for now",
   "good night",
   "gn",
   "ttyl",
@@ -435,6 +530,31 @@ const REACTIONS = set([
   "great work",
   "good work",
   "excellent",
+  "brilliant",
+  "fantastic",
+  "wonderful",
+  "thats great",
+  "thats awesome",
+  "youre the best",
+  "you rock",
+  // Answers to the agent's own courtesy: "No problem!", "You too!".
+  "np",
+  "no problem",
+  "no worries",
+  "you too",
+  "same to you",
+])
+// Acknowledgements, social only beside another social phrase: "got it, thanks", "sounds great, thanks", "good, thanks".
+const ACKS = set([
+  "got it",
+  "gotcha",
+  "understood",
+  "noted",
+  "sounds great",
+  "sounds good",
+  "good",
+  "fine",
+  "fair enough",
 ])
 // Words that may sit inside a social message without being one: "ok thanks", "thanks a lot", "hello again", "how are
 // you doing today", a name.
@@ -499,6 +619,7 @@ const PHRASES = [
   ["thanks", THANKS],
   ["farewell", FAREWELLS],
   ["reaction", REACTIONS],
+  ["ack", ACKS],
   ["filler", FILLERS],
 ] as const
 // The kind that names a social message: a thanks or a report that it works settles the work before it, a greeting
@@ -535,25 +656,33 @@ const NOT_THOROUGH =
   /\b(?:no|don'?t|do not|no need to|needn'?t|without|stop)\s+(?:be(?:ing)?\s+|get(?:ting)?\s+|too\s+|so\s+|very\s+|overly\s+|super\s+|extra\s+|that\s+|a\s+)*(?:thorough(?:ly)?|exhaustive(?:ly)?|deep[- ]dive|go(?:ing)? (?:too )?deep|think (?:too )?hard(?:er)?|take your time)\b/
 const SUBAGENTS = "(?:some |a few |multiple |several |parallel |many |the |\\d+ )?(?:sub-?agents?|parallel agents)"
 const JUDGE = "(?:the |an? )?(?:llm[- ]as[- ]an?[- ])?judge"
+// What may follow an ask for subagents or the judge so it is about this request: nothing, what to use them on or for
+// ("on this", "for the migration", "to port each package"), or when ("at the end", "when you're done"). Anything else
+// is a request about the feature itself: "run the judge tests", "use the judge agent's prompt", "use the judge only for
+// large tasks", "use subagents in background mode by default", "start the subagents service", "run subagents.test.ts".
+const FOR_THIS =
+  "(?=$|\\s+(?:on|for|over|across|against|to|in parallel|here|again|too|as well|now|first|afterwards|at the end|as needed|if (?:needed|useful|it helps)|where (?:possible|useful|it helps|it makes sense)|when (?:you(?:'re| are) )?(?:done|finished)|after (?:this|that|it|you(?:'re| are)? (?:done|finished)|the (?:work|change|changes|fix|migration)))(?:\\s|$))"
+// A check the user asks the judge to make: "have the judge check it", "get the judge to review the diff".
+const CHECK = "(?=\\s+(?:check|verify|review|look at|inspect|grade|confirm|validate)(?:\\s|$))"
 // Each force word as an instruction: how a clause that asks for it starts, and what an imperative clause may say inside.
 const FORCE: ReadonlyArray<readonly [code: string, start: RegExp, inside?: RegExp]> = [
   [
     "explicit:thorough",
-    /^(?:be (?:very |extra |really |super |more |as |fully )?(?:thorough|exhaustive)|(?:do|give me|make it|run) (?:a |an )?(?:thorough|exhaustive|deep|in-depth|full) (?:job|pass|dive|review|audit|analysis|investigation|look)|(?:do a )?deep[- ]dive|go deep|dig deep|take your time)\b/,
+    /^(?:be (?:very |extra |really |super |more |as |fully )?(?:thorough|exhaustive)|be (?:very|extra|really|super) careful|(?:do|give me|make it|run) (?:a |an )?(?:thorough|exhaustive|deep|in-depth|full) (?:job|pass|dive|review|audit|analysis|investigation|look)|(?:an? )?(?:thorough|exhaustive|in-depth) (?:job|pass|review|audit|analysis|investigation|look|check)|(?:do a )?deep[- ]dive|(?:go deep|dig deep|take your time)(?=$|\s+(?:on|into|with|here|for|and|to)\b))\b/,
     /\b(?:thoroughly|exhaustively)\b/,
   ],
   ["explicit:think", /^(?:ultrathink|think (?:hard|harder|deeply|very carefully|really hard))\b/],
   [
     "explicit:subagents",
     new RegExp(
-      `^(?:use|using|launch|spin up|spawn|start|bring in|run|delegate to) ${SUBAGENTS}\\b|^split (?:it|this|the work) (?:across|between|among) ${SUBAGENTS}\\b`,
+      `^(?:use|using|launch|spin up|spawn|start|bring in|run|delegate to) ${SUBAGENTS}${FOR_THIS}|^split (?:it|this|the work) (?:across|between|among) ${SUBAGENTS}${FOR_THIS}`,
     ),
     new RegExp(`\\b(?:with|using|via|across) ${SUBAGENTS}$`),
   ],
   [
     "explicit:judge",
     new RegExp(
-      `^(?:use|run|launch|bring in|have|get|call|start|ask|invoke|enable) ${JUDGE}\\b|^judge (?:it|this|that|the (?:work|result|results|change|changes|diff))$`,
+      `^(?:use|run|launch|bring in|have|get|call|start|ask|invoke|enable) ${JUDGE}(?:${FOR_THIS}|${CHECK})|^judge (?:it|this|that|the (?:work|result|results|change|changes|diff))$`,
     ),
     new RegExp(`\\b(?:with|using|via) ${JUDGE}$`),
   ],
@@ -561,6 +690,8 @@ const FORCE: ReadonlyArray<readonly [code: string, start: RegExp, inside?: RegEx
 // The words around an ask that are not the ask: "please", "can you", "just", "go ahead and".
 const POLITE_START =
   /^(?:(?:please|pls|plz|kindly|now|then|also|just|ok|okay|so|alright|actually|quickly|go ahead and|can you|could you|would you|will you|can u|could u|i want you to|i'd like you to|id like you to|i need you to|make sure (?:to|you))\s+)+/
+// Subjects that make a clause starting with "do" a question: "do you", "do we".
+const SUBJECTS = new Set(["i", "you", "u", "we", "they", "he", "she"])
 // Words a statement or a question starts with; an imperative clause starts with its verb instead.
 const NOT_IMPERATIVE = new Set([
   "i",
@@ -638,4 +769,11 @@ const ASKS =
 // Closing courtesies that offer no particular work, a greeting reply's "How can I help?" included. Each is a whole
 // sentence: one that names work ("What would you like me to do first?") asks something.
 const PLEASANTRY =
-  /^(?:(?:is there )?(?:anything|something) else(?: (?:i can (?:help(?: you)? with|do(?: for you)?)|you(?:'d| would)? like(?: me to (?:do|help with|look at))?|you need(?: help with)?|on your mind))?|(?:do you have )?any (?:other |more |further )?questions|(?:let me know|feel free to (?:ask|reach out|let me know)|just let me know) if (?:you (?:need|have|want) )?(?:anything else|any (?:other |more |further )?(?:questions|changes|help))(?: (?:i can help with|you need))?|if you need anything else(?:, (?:just )?let me know)?|(?:how can i|how may i) help(?: you)?(?: today| further)?|what can i (?:help(?: you)? with|do for you)(?: today)?|what (?:would you like|do you want)(?: me)? to (?:work on|do)(?: today)?|what are we working on(?: today)?|happy to help(?: further| with anything else)?|hope (?:this|that) helps)$/
+  /^(?:(?:is there )?(?:anything|something) else(?: (?:i can (?:help(?: you)? with|do(?: for you)?)|you(?:'d| would)? like(?: me to (?:do|help with|look at))?|you need(?: help with)?|on your mind))?|(?:do you have )?any (?:other |more |further )?questions|(?:let me know|feel free to (?:ask|reach out|let me know)|just let me know) if (?:you(?:'d| would)? (?:need|have|want|like) )?(?:anything else|any (?:other |more |further )?(?:questions|changes|tweaks|adjustments|help))(?: (?:i can help with|you need))?|(?:let me know|feel free to reach out|just let me know) if (?:anything (?:else )?comes up|something (?:else )?comes up|you run into (?:any )?(?:issues|problems|trouble))|if you need anything else(?:, (?:just )?let me know)?|(?:how can i|how may i) help(?: you)?(?: today| further)?|what can i (?:help(?: you)? with|do for you)(?: today)?|what (?:would you like|do you want)(?: me)? to (?:work on|do)(?: today)?|what are we working on(?: today)?|happy to help(?: further| with anything else)?|hope (?:this|that) helps)$/
+// A closing line that only nudges the user to answer the question before it: "Let me know!", "Just say the word.",
+// "Either way works."
+const COURTESY =
+  /^(?:(?:just )?(?:let me know|say the word|tell me)(?: what you think| which you prefer| either way| how you'd like to proceed)?|either way(?: works| is fine)?|whatever you prefer|(?:it's |its )?(?:your call|up to you)|no rush|no pressure|happy to help|thanks|thank you|cheers)$/
+// Markdown, emoji and smileys around a sentence, which say nothing about whether it asks.
+const EDGES_START = /^[\s*_`>#-]+/
+const EDGES_END = /(?:[\s*_`)\]:;]|\p{Extended_Pictographic}|[\u{1F3FB}-\u{1F3FF}]|\u200d|\ufe0f)+$/u

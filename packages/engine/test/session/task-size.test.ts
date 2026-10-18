@@ -19,7 +19,7 @@ import { Session } from "@/session/session"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SessionSummary } from "../../src/session/summary"
 import { MessageV2 } from "../../src/session/message-v2"
-import type { SessionID } from "../../src/session/schema"
+import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
@@ -407,11 +407,19 @@ describe("task sizing", () => {
   )
 
   it.instance(
-    "a mention of subagents or the judge is not an ask for them",
+    "a mention of subagents or the judge is not an ask for them, so the judge stays off with its setting",
     () =>
       Effect.gen(function* () {
-        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
-        for (const text of ["fix the bug with subagents not starting", "llm as a judge launches on hi, fix it"]) {
+        // The judge setting is off: only an ask in the message ("run the judge") would turn it on.
+        const { llm, prompt, sessions, directory } = yield* setup()
+        for (const text of [
+          "fix the bug with subagents not starting",
+          "llm as a judge launches on hi, fix it",
+          // Requests about the judge and subagents themselves, which this repository builds.
+          "use the judge only for large tasks",
+          "run the judge tests",
+          "use subagents in background mode by default",
+        ]) {
           const chat = yield* sessions.create({ title: "Pinned" })
           yield* llm.tool("write", { filePath: path.join(directory, "fix.ts"), content: "export {}\n" })
           yield* llm.text("Fixed.")
@@ -463,6 +471,9 @@ describe("task sizing", () => {
           ["thanks", "Going on with the input layer.", true, "thorough"],
           ["continue", "Ported every screen.", true, "thorough"],
           ["thanks!", "Anytime!", false, "chat"],
+          // A greeting's reply that asks back waits on nothing, so the small talk that answers it stays bare.
+          ["hey, how are you?", "I'm doing great, thanks for asking! How about you?", false, "chat"],
+          ["great, thanks!", "Glad to hear it!", false, "chat"],
         ] as const
         for (const [text, answer, tools, size] of conversation) {
           const before = (yield* llm.inputs).length
@@ -1046,6 +1057,240 @@ describe("task sizing", () => {
         expect(toolNames(small)).not.toContain("todowrite")
         expect(small?.reasoning_effort).toBeUndefined()
         expect(systemText(small)).toContain("<completion_policy>")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "after a finished, judged Thorough migration, ship to vercel and fix the typo in README are Work with no judge",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        const chat = yield* sessions.create({ title: "Pinned" })
+        yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export {}\n" })
+        yield* llm.text("Migrated all 40 files.")
+        yield* llm.text("VERDICT: PASS")
+        yield* send(prompt, chat.id, LARGE)
+        expect((yield* sessions.children(chat.id)).length).toBe(1)
+        yield* llm.text("You're welcome!")
+        yield* send(prompt, chat.id, "thanks")
+        for (const [text, file] of [
+          ["ship to vercel", "vercel.json"],
+          ["fix the typo in README", "README.md"],
+        ] as const) {
+          const before = (yield* llm.inputs).length
+          yield* llm.tool("write", { filePath: path.join(directory, file), content: "{}\n" })
+          yield* llm.text("Done.")
+          const result = yield* send(prompt, chat.id, text)
+          const bodies = (yield* llm.inputs).slice(before).filter((body) => !isTitle(body))
+          expect(bodies, text).toHaveLength(2)
+          for (const body of bodies) {
+            expect(toolNames(body), text).toEqual(expect.arrayContaining(WORK))
+            expect(toolNames(body), text).not.toContain("task")
+            expect(body?.reasoning_effort, text).toBeUndefined()
+          }
+          expect(result.info.role === "assistant" && result.info.size, text).toBe("standard")
+        }
+        // The migration keeps its one verdict, and Work is not judged in "Large tasks" mode.
+        expect((yield* llm.inputs).filter(isJudge)).toHaveLength(1)
+        expect((yield* sessions.children(chat.id)).length).toBe(1)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a run that ends on a question and a courtesy line is not judged until the user answers",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        const closings = [
+          "Migrated the router. Should I also remove the old API? Let me know!",
+          "Migrated the router. Want me to proceed with phase 2? 🙂",
+          "Migrated the router. Shall I continue with the input layer? Just say the word.",
+          "Migrated the router. Should I keep the old API, or remove it? (I'd lean toward removing it.)",
+        ]
+        for (const closing of closings) {
+          const chat = yield* sessions.create({ title: "Pinned" })
+          yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export {}\n" })
+          yield* llm.text(closing)
+          yield* send(prompt, chat.id, "be thorough: migrate the app to the new router and remove the old API if safe")
+          // No judge yet, so no FAIL that would have the agent act before the user answers.
+          expect((yield* sessions.children(chat.id)).length, closing).toBe(0)
+          yield* llm.text("Understood: I left the rest as it is.")
+          yield* llm.text("VERDICT: PASS")
+          yield* send(prompt, chat.id, "no")
+          expect((yield* sessions.children(chat.id)).length, closing).toBe(1)
+        }
+        const judged = (yield* llm.inputs).filter(isJudge)
+        expect(judged).toHaveLength(closings.length)
+        // The judge is told what the agent asked and what the user answered.
+        expect(JSON.stringify(judged[0]?.messages)).toContain("Should I also remove the old API?")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "asking whether the fix worked gets the history and the tools, not the quick lane",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup()
+        const chat = yield* sessions.create({ title: "Pinned" })
+        yield* llm.tool("write", { filePath: path.join(directory, "login.ts"), content: "export {}\n" })
+        yield* llm.text("Fixed the login redirect loop.")
+        yield* send(prompt, chat.id, "fix the login redirect loop")
+        for (const text of ["the tests passed?", "fixed?"]) {
+          const before = (yield* llm.inputs).length
+          yield* llm.text("Yes: the login tests pass.")
+          const result = yield* send(prompt, chat.id, text)
+          const [body] = (yield* llm.inputs).slice(before).filter((item) => !isTitle(item))
+          expect(toolNames(body), text).toEqual(expect.arrayContaining(WORK))
+          expect(body?.reasoning_effort, text).toBeUndefined()
+          expect(JSON.stringify(body?.messages), text).toContain("redirect loop")
+          expect(result.info.role === "assistant" && result.info.size, text).toBe("standard")
+        }
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a greeting or a help with a pasted log gets the tools at the provider's effort",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions } = yield* setup()
+        for (const text of [
+          "hi\nnpm ERR! code ERESOLVE\nnpm ERR! ERESOLVE unable to resolve dependency tree",
+          "help\n2026-10-18T10:00:00Z ERROR db connection refused",
+        ]) {
+          const chat = yield* sessions.create({ title: "Pinned" })
+          yield* llm.text("Two packages want different versions of react.")
+          const result = yield* send(prompt, chat.id, text)
+          expect(result.info.role === "assistant" && result.info.size, text).toBe("standard")
+        }
+        const bodies = (yield* llm.inputs).filter((item) => !isTitle(item))
+        expect(bodies).toHaveLength(2)
+        for (const body of bodies) {
+          expect(toolNames(body)).toEqual(expect.arrayContaining(WORK))
+          expect(body?.reasoning_effort).toBeUndefined()
+        }
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "common thanks wordings after finished Thorough work, and a thanks after an any-changes closing, cost one bare request",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup()
+        for (const [closing, thanks] of [
+          ["Migrated all 40 files.", "got it, thanks"],
+          ["Migrated all 40 files.", "thank u"],
+          ["Migrated all 40 files.", "sounds great, thanks"],
+          ["Migrated all 40 files. Let me know if you'd like any changes.", "thanks"],
+          ["Migrated all 40 files. Let me know if anything else comes up.", "thanks"],
+        ] as const) {
+          const chat = yield* sessions.create({ title: "Pinned" })
+          yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export {}\n" })
+          yield* llm.text(closing)
+          yield* send(prompt, chat.id, LARGE)
+          const before = (yield* llm.inputs).length
+          yield* llm.text("You're welcome!")
+          const result = yield* send(prompt, chat.id, thanks)
+          const bodies = (yield* llm.inputs).slice(before).filter((item) => !isTitle(item))
+          expect(bodies, thanks).toHaveLength(1)
+          expect(toolNames(bodies[0]), thanks).toEqual([])
+          expect(bodies[0]?.reasoning_effort, thanks).toBe("none")
+          expect(conversation(bodies[0]), thanks).toHaveLength(1)
+          expect(result.info.role === "assistant" && result.info.size, thanks).toBe("chat")
+        }
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "the user's no subagents holds: escalate cannot bring in subagents or the judge",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        for (const text of [
+          "migrate the app to the new router across 40 files, no subagents",
+          "don't be thorough, just migrate the app to the new router across 40 files",
+        ]) {
+          const chat = yield* sessions.create({ title: "Pinned" })
+          const before = (yield* llm.inputs).length
+          yield* llm.tool("escalate", { reason: "every route changes" })
+          yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export {}\n" })
+          yield* llm.text("Migrated the router.")
+          const result = yield* send(prompt, chat.id, text)
+          const bodies = (yield* llm.inputs).slice(before).filter((item) => !isTitle(item))
+          expect(bodies, text).toHaveLength(3)
+          // Escalate is not offered on a capped request, and a call to it raises nothing.
+          expect(toolNames(bodies[0]), text).not.toContain("escalate")
+          for (const body of bodies) {
+            expect(toolNames(body), text).not.toContain("task")
+            expect(toolNames(body), text).not.toContain("task_manage")
+            expect(body?.reasoning_effort, text).toBeUndefined()
+          }
+          expect(result.info.role === "assistant" && result.info.size, text).toBe("standard")
+          expect((yield* sessions.children(chat.id)).length, text).toBe(0)
+        }
+        // On a caching provider escalate keeps its place in the tool list, and refuses.
+        const chat = yield* sessions.create({ title: "Pinned" })
+        const before = (yield* llm.inputs).length
+        yield* llm.tool("escalate", { reason: "every route changes" })
+        yield* llm.text("Migrated the router.")
+        yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: cached,
+          parts: [{ type: "text", text: "migrate the app to the new router across 40 files, no subagents" }],
+        })
+        const bodies = (yield* llm.inputs).slice(before).filter((item) => !isTitle(item))
+        expect(toolNames(bodies[0])).toContain("escalate")
+        expect(JSON.stringify(bodies[1]?.messages)).toContain("The user asked not to use subagents")
+        expect(toolNames(bodies[1])).not.toContain("task")
+        expect((yield* sessions.children(chat.id)).length).toBe(0)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a Thorough plan approved through plan_exit is judged once the build that carries it out changes files",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        const chat = yield* sessions.create({ title: "Pinned" })
+        yield* llm.text("Here is the plan in three phases.")
+        yield* send(prompt, chat.id, "be thorough and plan how to port the TUI to Rust", { agent: "plan" })
+        // What plan_exit writes when the user approves the plan: a synthetic message on the build agent.
+        const approval: SessionV1.User = {
+          id: MessageID.ascending(),
+          sessionID: chat.id,
+          role: "user",
+          time: { created: Date.now() },
+          agent: "build",
+          model: ref,
+        }
+        yield* sessions.updateMessage(approval)
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          messageID: approval.id,
+          sessionID: chat.id,
+          type: "text",
+          text: "The plan at plan.md has been approved, you can now edit files. Execute the plan",
+          synthetic: true,
+        } satisfies SessionV1.TextPart)
+        const before = (yield* llm.inputs).length
+        yield* llm.tool("write", { filePath: path.join(directory, "tui.rs"), content: "fn main() {}\n" })
+        yield* llm.text("Ported the TUI.")
+        yield* llm.text("VERDICT: PASS")
+        const result = yield* prompt.loop({ sessionID: chat.id })
+        const bodies = (yield* llm.inputs).slice(before).filter((body) => !isTitle(body))
+        expect(result.info.role === "assistant" && result.info.size).toBe("thorough")
+        expect(toolNames(bodies[0])).toEqual(expect.arrayContaining(["task", "task_manage", "todowrite"]))
+        const judged = bodies.filter(isJudge)
+        expect(judged).toHaveLength(1)
+        expect(JSON.stringify(judged[0]?.messages)).toContain("port the TUI to Rust")
+        expect((yield* sessions.children(chat.id)).length).toBe(1)
       }),
     { git: true },
   )

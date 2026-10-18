@@ -837,6 +837,9 @@ describe("SessionRunnerLLM", () => {
         ["thanks", "Going on with the input layer.", true],
         ["continue", "Ported every screen.", true],
         ["thanks!", "Anytime!", false],
+        // A greeting's reply that asks back waits on nothing, so the small talk that answers it stays bare.
+        ["hey, how are you?", "I'm doing great, thanks for asking! How about you?", false],
+        ["great, thanks!", "Glad to hear it!", false],
       ] as const
       for (const [text, answer, tools] of conversation) expect(yield* turn(text, answer), text).toBe(tools)
     }),

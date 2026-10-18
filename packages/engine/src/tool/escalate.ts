@@ -12,8 +12,11 @@ type Metadata = {
   to?: TaskSize.Tier
 }
 
-/** The request's size as the session runtime sized it this step; the model cannot supply it. */
-export type TaskSizeContext = { readonly tier: TaskSize.Tier }
+/**
+ * The request's size as the session runtime sized it this step, and whether the user capped it at Work ("no
+ * subagents", "don't be thorough"); the model cannot supply either.
+ */
+export type TaskSizeContext = { readonly tier: TaskSize.Tier; readonly capped?: boolean }
 
 export const EscalateTool = Tool.define<typeof Parameters, Metadata, never>(
   "escalate",
@@ -25,6 +28,13 @@ export const EscalateTool = Tool.define<typeof Parameters, Metadata, never>(
         const current = ctx.extra?.taskSize as TaskSizeContext | undefined
         if (!current)
           return { title: "Not raised", output: "Task sizing does not apply to this session.", metadata: {} }
+        if (current.capped)
+          return {
+            title: "Not raised",
+            output:
+              "The user asked not to use subagents or go thorough for this request. Do the work yourself with the tools you have.",
+            metadata: {},
+          }
         if (current.tier === "thorough")
           return {
             title: "Not raised",

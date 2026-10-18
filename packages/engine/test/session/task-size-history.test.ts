@@ -167,6 +167,85 @@ describe("SessionTaskSize.size", () => {
     expect(requests[0]?.escalated).toBe(true)
   })
 
+  test("the user's no subagents or don't be thorough holds against escalate", () => {
+    for (const text of [
+      "migrate the app to the new router across 40 files, no subagents",
+      "don't be thorough, just migrate the app to the new router across 40 files",
+    ]) {
+      const requests = size([
+        user(text),
+        assistant("This touches every route.", "tool-calls", [
+          { tool: "escalate", metadata: { from: "standard", to: "thorough" } },
+        ]),
+        assistant("Migrated the routes."),
+      ])
+      expect(requests[0]?.tier, text).toBe("standard")
+      expect(requests[0]?.escalated, text).toBe(false)
+      expect(SessionTaskSize.capped(requests[0]!.result), text).toBe(true)
+    }
+  })
+
+  test("after Thorough work that changed files and finished, a new short request is Work of its own", () => {
+    const migrated = [
+      user(LARGE, { judge: "thorough" }),
+      wrote("/r/router.ts"),
+      assistant("Migrated all 40 files."),
+      judgedBy("PASS", "thorough"),
+      user("thanks", { judge: "thorough" }),
+      assistant("You're welcome!"),
+    ]
+    for (const text of ["ship to vercel", "fix the typo in README", "ok", "quick question: what does parseArgs do?"]) {
+      const after = MessageID.ascending()
+      const requests = size([
+        ...migrated,
+        user(text, { judge: "thorough" }),
+        wrote("/r/vercel.json"),
+        assistant("Done."),
+      ])
+      expect(requests.at(-1)?.result, text).toMatchObject({ tier: "standard", source: "auto" })
+      // Work in "Large tasks" mode is not judged, and the migration already has its verdict.
+      expect(SessionTaskSize.judgeable(requests, after), text).toBeUndefined()
+    }
+    // The chain ends there: the next short request after it is Work too.
+    const chained = size([
+      ...migrated,
+      user("ship to vercel"),
+      wrote("/r/vercel.json"),
+      assistant("Deployed."),
+      user("fix the typo in README"),
+    ])
+    expect(chained.slice(-2).map((request) => request.tier)).toEqual(["standard", "standard"])
+    // A correction or a carry-on still continues the migration at its size.
+    for (const text of ["continue with phase 2", "no, keep the old routes working", "do the rest of the files"])
+      expect(size([...migrated, user(text)]).at(-1)?.result, text).toMatchObject({
+        tier: "thorough",
+        source: "inherited",
+      })
+    // The work counts as changed through the answers that continue it: a "no" that changed nothing does not reopen it.
+    const answered = size([
+      user(LARGE),
+      wrote("/r/router.ts"),
+      assistant("Migrated the router. Should I also remove the old API?"),
+      user("no"),
+      assistant("Kept the old API."),
+      user("ship to vercel"),
+    ])
+    expect(answered.map((request) => request.tier)).toEqual(["thorough", "thorough", "standard"])
+  })
+
+  test("a greeting's reply waits on nothing, so the small talk that answers it stays a direct reply", () => {
+    const requests = size([
+      user("hey, how are you?"),
+      assistant("I'm doing great, thanks for asking! How about you?"),
+      user("great, thanks!"),
+      assistant("Glad to hear it!"),
+    ])
+    expect(requests.map((request) => request.tier)).toEqual(["chat", "chat"])
+    // A yes to a greeting reply that offered work is still Work with the history.
+    const offered = size([user("hi"), assistant("Hi! Want me to look at the failing test?"), user("yes")])
+    expect(offered.map((request) => request.tier)).toEqual(["chat", "standard"])
+  })
+
   test("a continue after a thanks exchange continues the work, not the thanks", () => {
     const requests = size([
       user("be thorough and add OAuth login with tests"),
@@ -271,15 +350,17 @@ describe("SessionTaskSize.size", () => {
 
   test("the judge checks every request the run answered, and the work a reply continues", () => {
     const since = MessageID.ascending()
-    // A message sent during the final step opens its own request after the large one, and continues it.
+    // A message sent during the final step opens its own request after the large one, and continues it: the run had
+    // not finished when the user wrote it.
+    const large = [user(LARGE, { judge: "thorough" }), wrote("/r/router.ts"), assistant("Migrated the router.")]
     const joined = size([
-      user(LARGE, { judge: "thorough" }),
-      wrote("/r/router.ts"),
-      assistant("Migrated the router."),
-      user("also fix the typo in README", { judge: "thorough" }),
+      ...large,
+      user("also fix the typo in README", { judge: "thorough", at: clock - 500 }),
       assistant("Fixed the typo."),
     ])
     expect(joined.map((request) => request.tier)).toEqual(["thorough", "thorough"])
+    // Sent after the run finished, the same words are a request of their own.
+    expect(size([...large, user("also fix the typo in README")]).at(-1)?.tier).toBe("standard")
     const work = SessionTaskSize.judgeable(joined, since)
     expect(work?.requests).toHaveLength(2)
     expect(work?.files).toEqual(["/r/router.ts"])

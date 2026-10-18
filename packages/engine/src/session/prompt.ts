@@ -651,11 +651,12 @@ const layer = Layer.effect(
         return "done" as const
       // Only work that changed files since the last verdict is judged.
       const work = SessionTaskSize.judgeable(requests, input.since)
-      // A quick-lane reply settles only the build agent's work; it never judges another agent's.
+      // A quick-lane reply settles only the build agent's work; it never judges another agent's. A plan the user
+      // approved through plan_exit is built on the build agent from its synthetic message, inside the plan's request.
       const built = work?.requests.some(
         (request) =>
           request.carried !== undefined ||
-          request.users.some((user) => user.info.role === "user" && user.info.agent === "build"),
+          request.messages.some((message) => message.info.role === "user" && message.info.agent === "build"),
       )
       if (!work || !built) return "done" as const
       const judge = yield* agents.get("judge")
@@ -1892,7 +1893,7 @@ const layer = Layer.effect(
             invokedAgents,
             messages: msgs,
             promptOps,
-            ...(build ? { taskSize: { tier: build.tier } } : {}),
+            ...(build ? { taskSize: { tier: build.tier, capped: SessionTaskSize.capped(build.result) } } : {}),
           }).pipe(
             Effect.provideService(Session.Service, sessions),
             Effect.provideService(Plugin.Service, plugin),
@@ -1907,9 +1908,11 @@ const layer = Layer.effect(
           // subagents the user named, and escalate is how the agent asks for more.
           if (build) {
             for (const id of TaskSize.withheld(build.offered, build.result.agents.length)) delete tools[id]
-            // A thorough request has nothing to raise to, but on a caching provider the tool keeps its place so a
-            // smaller follow-up sends the same definitions and reads the cached prefix.
-            if (build.tier === "thorough" && !caches(model)) delete tools.escalate
+            // A thorough request has nothing to raise to, and the user kept a capped one at Work. On a caching provider
+            // the tool keeps its place so a smaller follow-up sends the same definitions and reads the cached prefix;
+            // it refuses to raise a capped request.
+            if ((build.tier === "thorough" || SessionTaskSize.capped(build.result)) && !caches(model))
+              delete tools.escalate
             const delegate = tools.task?.execute
             if (delegate && build.tier !== "thorough")
               tools.task = { ...tools.task, execute: namedOnly(delegate, build.result.agents) }
@@ -2352,7 +2355,10 @@ function sizeNotes(messages: SessionV1.WithParts[], requests: readonly SessionTa
       // A request whose opening message a compaction summarised carries its note on the compaction marker.
       const user = request.users.at(-1) ?? request.messages.find((message) => message.info.role === "user")
       if (!user || user.info.role !== "user" || user.info.agent !== "build") return []
-      const text = TaskSize.note(request.result.tier, { escalate: true, judge: request.judge !== "off" })
+      const text = TaskSize.note(request.result.tier, {
+        escalate: !SessionTaskSize.capped(request.result),
+        judge: request.judge !== "off",
+      })
       return text ? [[user.info.id, text] as const] : []
     }),
   )

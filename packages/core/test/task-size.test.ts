@@ -42,6 +42,23 @@ describe("TaskSize.classify", () => {
       "what is vector?",
       "who made vector?",
       "how do I use vector?",
+      // Common wordings of a thanks, an acknowledgement with one, and answers to the agent's own courtesy.
+      "got it, thanks",
+      "sounds great, thanks",
+      "brilliant, thanks",
+      "good, thanks",
+      "thanks, you're the best",
+      "thank u",
+      "thankyou",
+      "thnx",
+      "np",
+      "no problem",
+      "you too",
+      "that's great",
+      "bye for now",
+      "hi claude",
+      "great, thanks!",
+      "i'm good, you?",
     ]) {
       const result = TaskSize.classify({ text })
       expect(result.tier, text).toBe("chat")
@@ -65,9 +82,46 @@ describe("TaskSize.classify", () => {
       "no thanks",
       "continue",
       "looks good",
+      // An acknowledgement alone may mean "go ahead".
+      "got it",
+      "sounds good",
     ])
       expect(tier(text), text).toBe("standard")
     expect(tier("hi", { files: 1 })).toBe("standard")
+    expect(tier("hi", { images: 1 })).toBe("standard")
+  })
+
+  test("asking whether it works asks the agent to check, so it is work, not a report that it works", () => {
+    for (const text of [
+      "fixed?",
+      "working?",
+      "works?",
+      "it works now?",
+      "it's fixed?",
+      "it worked?",
+      "the tests passed?",
+      "the build passes?",
+      "everything works?",
+      "that fixed it?",
+    ])
+      expect(TaskSize.classify({ text }), text).toMatchObject({ tier: "standard", reasons: ["work"] })
+    // Told, not asked, it is still a report.
+    expect(tier("it works now")).toBe("chat")
+    expect(tier("thanks, the tests passed")).toBe("chat")
+  })
+
+  test("a log pasted under a greeting or a help is work", () => {
+    for (const text of [
+      "hi\nnpm ERR! code ERESOLVE\nnpm ERR! ERESOLVE unable to resolve dependency tree",
+      "help\nnpm ERR! code ERESOLVE\nnpm ERR! ERESOLVE unable to resolve dependency tree",
+      "help\nCaused by: java.lang.NullPointerException",
+      "hey\n[2026-10-18 10:00:00] ERROR worker crashed: connection refused",
+      "hi\n2026-10-18T10:00:00Z ERROR db connection refused\n2026-10-18T10:00:01Z ERROR retrying",
+      "thanks\n    at processTicksAndRejections (node:internal/process/task_queues:95:5)",
+    ])
+      expect(tier(text), text).toBe("standard")
+    // A greeting on two lines of its own is still a greeting.
+    expect(tier("hi\nhow are you?")).toBe("chat")
   })
 
   test("a message that answers or follows up open work is never a direct reply", () => {
@@ -125,6 +179,13 @@ describe("TaskSize.classify", () => {
       "use llm-as-a-judge",
       "fix it, ultrathink",
       "do a deep dive into the session runner",
+      "use subagents",
+      "run the judge",
+      "use subagents for this",
+      "use subagents to port each package",
+      "do this properly with subagents",
+      "thorough review of the auth module please",
+      "be very careful",
     ]) {
       const result = TaskSize.classify({ text })
       expect(result, text).toMatchObject({ tier: "thorough", source: "user" })
@@ -138,8 +199,20 @@ describe("TaskSize.classify", () => {
       "why are the subagents so slow?",
       "I tested it thoroughly but it still fails",
       "should I use subagents for this?",
+      "do you use subagents for this?",
+      // Requests about the judge and subagents themselves, which this repository builds.
+      "use the judge only for large tasks",
+      "have the judge skip greetings",
+      "run the judge only after thorough runs",
+      "run the judge tests",
+      "run the judge test suite in packages/engine",
+      "use the judge agent's prompt from the docs",
+      "run subagents.test.ts",
+      "use subagents in background mode by default",
+      "start the subagents service on boot",
+      "take your time parameter is wrong in the scheduler",
     ])
-      expect(tier(text), text).toBe("standard")
+      expect(TaskSize.classify({ text }), text).toMatchObject({ tier: "standard", reasons: ["work"] })
   })
 
   test("the user's own negations: no subagents and don't be thorough keep Work, skip the judge turns it off", () => {
@@ -154,6 +227,14 @@ describe("TaskSize.classify", () => {
     // Inside Thorough work they take the subagents away, never the tools.
     expect(tier("no subagents please", { previous: "thorough" })).toBe("standard")
     expect(tier("no subagents, finish the migration", { previous: "thorough", open: true })).toBe("standard")
+    // The cap is recorded, so nothing (escalate included) takes the request past Work.
+    for (const text of [
+      "migrate the app to the new router across 40 files, no subagents",
+      "don't be thorough, just migrate the app to the new router across 40 files",
+      "don't use subagents, be thorough",
+    ])
+      expect(TaskSize.classify({ text }).reasons, text).toContain("capped")
+    expect(TaskSize.classify({ text: "migrate the app to the new router across 40 files" }).reasons).toEqual(["work"])
   })
 
   test("a reply, an approval or a short follow-up continues Thorough work at its size", () => {
@@ -198,6 +279,54 @@ describe("TaskSize.classify", () => {
     expect(tier("yes", { previous: "light", open: true })).toBe("standard")
     // A greeting before a message is not work it could continue.
     expect(TaskSize.classify({ text: "yes", previous: "chat" }).source).toBe("auto")
+    // A long approval of a plan with instructions still carries it out.
+    for (const text of [
+      "Great plan! Please go ahead and implement phases 1 and 2, but skip the billing part for now.",
+      "Please go ahead with the plan, but use postgres instead of sqlite and keep the migrations in packages/db",
+      "Let's do it, but keep the old routes working until the end of the migration please",
+      "The plan looks good to me, go ahead with all three phases and keep the old api for now",
+      "Perfect, implement it exactly like that but put the new files under packages/tui-rs instead",
+      "go with option b, and keep the old routes working until the end of the migration please",
+    ])
+      expect(TaskSize.classify({ text, previous: "thorough" }), text).toMatchObject({
+        tier: "thorough",
+        source: "inherited",
+      })
+  })
+
+  test("after Thorough work that changed files and finished, only a correction or a carry-on continues it", () => {
+    // New requests, however short, are Work of their own: the owner's "ship to vercel" never brings in subagents.
+    for (const text of [
+      "ship to vercel",
+      "fix the typo in README",
+      "ok",
+      "quick question: what does parseArgs do?",
+      "great, now add tests for the parser",
+      "build the docs site",
+    ])
+      expect(TaskSize.classify({ text, previous: "thorough", changed: true }), text).toMatchObject({
+        tier: "standard",
+        source: "auto",
+        reasons: ["work"],
+      })
+    for (const text of [
+      "continue",
+      "continue with phase 2",
+      "do the rest of the files",
+      "no, keep the old routes working",
+      "actually, use postgres instead",
+      "but the tests fail now",
+      "phase 2",
+      "please continue",
+    ])
+      expect(TaskSize.classify({ text, previous: "thorough", changed: true }), text).toMatchObject({
+        tier: "thorough",
+        source: "inherited",
+      })
+    // Work that still waits on the user is answered at its size, whatever it changed.
+    expect(tier("ship to vercel", { previous: "thorough", changed: true, open: true })).toBe("thorough")
+    // A plan or an analysis changed nothing yet, so a short follow-up carries it out.
+    expect(tier("build the app", { previous: "thorough", changed: false })).toBe("thorough")
   })
 
   test("the sender's choice and the off switch win", () => {
@@ -246,6 +375,10 @@ describe("TaskSize helpers", () => {
     expect(TaskSize.asks("Hi! How can I help you today?")).toBe(false)
     // A question that names work is not a pleasantry.
     expect(TaskSize.asks("Here is the plan in three phases. What would you like me to do first?")).toBe(true)
+    // Common closings that offer nothing in particular.
+    expect(TaskSize.asks("Migrated all 40 files. Let me know if you'd like any changes.")).toBe(false)
+    expect(TaskSize.asks("Done. Let me know if you'd like any other changes!")).toBe(false)
+    expect(TaskSize.asks("Migrated all 40 files. Let me know if anything else comes up.")).toBe(false)
   })
 
   test("waits tells a question the work waits on from an offer without one or a pleasantry", () => {
@@ -253,6 +386,24 @@ describe("TaskSize helpers", () => {
     expect(TaskSize.waits("Migrated all 40 routes and the tests pass. Want me to also update the docs?")).toBe(true)
     expect(TaskSize.waits("Migrated all 40 routes. I can also update the docs if you want.")).toBe(false)
     expect(TaskSize.waits("Done. Anything else?")).toBe(false)
+    // Courtesy after the question does not hide it.
+    for (const text of [
+      "Migrated the router. Should I also remove the old API? Let me know!",
+      "Should I also migrate the tests? Let me know!",
+      "Want me to proceed with phase 2? 🙂",
+      "Shall I continue with the input layer? Just say the word.",
+      "Should I keep the old API, or remove it? (I'd lean toward removing it.)",
+      "**Should I also migrate the tests?**",
+      "Should I also migrate the tests? Anything else?",
+    ])
+      expect(TaskSize.waits(text), text).toBe(true)
+    for (const text of [
+      "Migrated the router. Let me know!",
+      "Migrated the router (and its tests).",
+      "Done! Anything else I can help with? 🙂",
+      "Migrated all 40 files. Let me know if you'd like any changes.",
+    ])
+      expect(TaskSize.waits(text), text).toBe(false)
   })
 
   test("notes stay short, and only Light leaves out the to-do list", () => {

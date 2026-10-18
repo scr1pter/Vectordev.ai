@@ -78,16 +78,27 @@ export function size(input: Input): Request[] {
     const previous = sized.at(-1)
     // What a "continue" or a "yes" continues: the last request that was more than a greeting, since a "thanks" and its
     // reply in between are not the work.
-    const prior = sized.findLast((request) => request.tier !== "chat")
-    // The request before is still open when its reply asked or offered something, or its run did not finish: then the
-    // user's next message, a social one included, answers or follows up that work.
-    const open = previous ? waiting(previous) : false
+    const index = sized.findLastIndex((request) => request.tier !== "chat")
+    const prior = sized[index]
+    // The request before is still open when its reply asked or offered something, or its run did not finish, or had not
+    // when the user wrote (a message sent during its final step opens a request of its own): then the user's next
+    // message, a social one included, answers or follows up that work. A greeting's reply is never open: its "How about
+    // you?" waits on nothing.
+    const sent = group.users[0]?.info.time.created ?? Infinity
+    const open =
+      previous && previous.tier !== "chat"
+        ? sent < Math.max(...previous.messages.map(finishedAt)) || waiting(previous)
+        : false
+    // Whether that work changed files, counting the requests it continues: finished work that did is done, so a new
+    // short request after it is Work of its own.
+    const changed = index !== -1 && sized.slice(origin(sized, index)).some(changes)
     const result = group.users.reduce<TaskSize.Result | undefined>(
       (current, user) => {
         const next = TaskSize.classify({
           ...describe(user),
           previous: current?.tier ?? prior?.tier ?? (compacted ? "standard" : undefined),
           open: current ? false : open,
+          changed: current ? false : changed,
           auto: input.auto,
         })
         if (!current) return next
@@ -104,7 +115,8 @@ export function size(input: Input): Request[] {
         agents: group.carried.agents,
       },
     )!
-    const raised = escalation(group.messages)
+    // The user's "no subagents" or "don't be thorough" holds against escalate and a judge FAIL alike.
+    const raised = capped(result) ? undefined : escalation(group.messages)
     const tier = raised ? TaskSize.max(result.tier, raised) : result.tier
     const start = (group.users[0] ?? group.messages[0]).info.time.created
     const offered =
@@ -233,6 +245,17 @@ export function waiting(request: Pick<Request, "messages">) {
   if (last.parts.some((part) => part.type === "tool" && part.tool === "question" && part.state.status !== "completed"))
     return true
   return last.info.error !== undefined || UNFINISHED.has(last.info.finish ?? "")
+}
+
+/** The user said "no subagents" or "don't be thorough": the request stays Work, and escalate may not raise it. */
+export function capped(result: TaskSize.Result) {
+  return result.reasons.includes("capped")
+}
+
+// Whether a request changed files: a recorded change, a judge run (the judge only checks changed files), or files a
+// compaction recorded for it.
+function changes(request: Request) {
+  return changedFiles(request).length > 0 || judgeRuns(request).length > 0 || (request.carried?.files.length ?? 0) > 0
 }
 
 // A greeting, emoji or a question about Vector answers nothing the agent asked.
