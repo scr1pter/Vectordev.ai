@@ -31,6 +31,7 @@ import {
   type ReviewSpend,
   runReview,
   trackReviewSpend,
+  verificationChip,
   workflowModel,
   workingTreeChanges,
   type ReviewClient,
@@ -590,6 +591,10 @@ describe("runReview", () => {
     expect(outcome.selection.inline).toHaveLength(0)
     expect(outcome.selection.dropped).toContainEqual({ reason: "rejected-by-verify", count: 1 })
     expect(outcome.verification).toEqual({ checked: 1, rejected: 1, status: "ok" })
+    expect(verificationChip(outcome.verification!)).toEqual({
+      label: "Double-checked 1 · 1 dropped",
+      title: "A second pass re-read the code behind each finding and dropped the ones that were not real.",
+    })
   })
 
   test("a double-check that cannot answer keeps the findings and says they were not re-checked", async () => {
@@ -602,6 +607,10 @@ describe("runReview", () => {
     expect(outcome.selection.inline[0]?.verified).toBeUndefined()
     expect(outcome.verification?.status).toBe("failed")
     expect(outcome.notes.join(" ")).toContain("not re-checked")
+    expect(verificationChip(outcome.verification!)).toEqual({
+      label: "Not double-checked",
+      title: "The double-check did not finish, so these findings were not re-checked.",
+    })
   })
 
   test("nits are not double-checked", async () => {
@@ -1324,7 +1333,13 @@ describe("cheaper first pass", () => {
       [offByOne.title, true],
     ])
     expect(confirmed.selection.dropped).toContainEqual({ reason: "unconfirmed", count: 1 })
-    expect(confirmed.verification).toEqual({ checked: 2, rejected: 1, status: "ok" })
+    expect(confirmed.verification).toEqual({ checked: 2, rejected: 0, unconfirmed: 1, status: "ok" })
+    // The chip never calls a finding the review model did not confirm "not real".
+    expect(verificationChip(confirmed.verification!)).toEqual({
+      label: "Double-checked 2 · 1 dropped",
+      title:
+        "A second pass re-read the code behind each finding and dropped 1: 1 was not confirmed. With a triage model, only findings the review model confirmed are shown.",
+    })
 
     const off = fakeClient({
       files: { ...triageFiles, ".vector/review.json": '{"triageModel":"openrouter/cheap-coder","verify":"off"}' },
@@ -1340,6 +1355,11 @@ describe("cheaper first pass", () => {
     })
     const unchecked = (await run(failed.client, { catalog: [sonnet, cheap] }))!
     expect(unchecked.selection.inline).toEqual([])
+    expect(verificationChip(unchecked.verification!)).toEqual({
+      label: "Not double-checked",
+      title:
+        "The double-check did not finish, so the first pass's 2 findings were left out: with a triage model, only findings the review model confirmed are shown.",
+    })
     expect(unchecked.selection.dropped).toContainEqual({ reason: "unconfirmed", count: 2 })
     expect(unchecked.notes).toContain(
       noteTriageUnchecked(2, "openrouter/cheap-coder", "anthropic/claude-sonnet-4-5"),

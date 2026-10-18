@@ -217,9 +217,9 @@ export type ReviewOutcomeLite = {
   notes: string[]
   // What the reviewers were given beyond the diff, so the panel can say what the review was grounded in.
   context?: { callers: number; checks: number; failing: number; instructions: boolean }
-  // The double-check pass: how many findings it re-read, and how many it dropped as not real (or, after a triage
-  // pass, not confirmed).
-  verification?: { checked: number; rejected: number; status: "ok" | "skipped" | "failed" }
+  // The double-check pass: how many findings it re-read, how many it dropped as not real, and, after a triage pass,
+  // how many it dropped because it did not confirm them.
+  verification?: { checked: number; rejected: number; unconfirmed?: number; status: "ok" | "skipped" | "failed" }
   // Each reviewed file's path → a hash of its diff, so the next review can leave out files that did not change.
   fileKeys?: Record<string, string>
   // A hash of the settings, rules, instructions and model choice the review ran under; a change means a full review.
@@ -1020,7 +1020,8 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
           // What the double-check dropped: the findings it rejected, and after a triage pass those it did not confirm.
           verification: {
             checked: candidates.length,
-            rejected: rejected + unconfirmed,
+            rejected,
+            ...(unconfirmed ? { unconfirmed } : {}),
             status: verify.status === "ok" ? "ok" : verify.status,
           },
         }
@@ -1625,6 +1626,31 @@ const PASS_LABEL: Record<ReviewPass["name"], string> = {
 
 // What each pass of a finished review spent, one line each. Dollars show only when the review as a whole has a price;
 // otherwise, as for a subscription or Vector Codium, only tokens.
+// The double-check chip, and its tooltip, which says why findings were dropped: a finding the review model did not
+// confirm after a triage pass was left out, not found to be false.
+export function verificationChip(verification: NonNullable<ReviewOutcomeLite["verification"]>) {
+  const unconfirmed = verification.unconfirmed ?? 0
+  const triaged = "only findings the review model confirmed are shown"
+  if (verification.status !== "ok")
+    return {
+      label: "Not double-checked",
+      title: unconfirmed
+        ? `The double-check did not finish, so the first pass's ${unconfirmed === 1 ? "finding was" : `${unconfirmed} findings were`} left out: with a triage model, ${triaged}.`
+        : "The double-check did not finish, so these findings were not re-checked.",
+    }
+  const dropped = verification.rejected + unconfirmed
+  const reasons = [
+    verification.rejected ? `${verification.rejected} ${verification.rejected === 1 ? "was" : "were"} not real` : "",
+    unconfirmed ? `${unconfirmed} ${unconfirmed === 1 ? "was" : "were"} not confirmed` : "",
+  ].filter(Boolean)
+  return {
+    label: `Double-checked ${verification.checked} · ${dropped} dropped`,
+    title: unconfirmed
+      ? `A second pass re-read the code behind each finding and dropped ${dropped}: ${reasons.join(" and ")}. With a triage model, ${triaged}.`
+      : "A second pass re-read the code behind each finding and dropped the ones that were not real.",
+  }
+}
+
 export function passLines(outcome: Pick<ReviewOutcomeLite, "passes" | "cost">) {
   const priced = outcome.cost?.kind === "priced"
   return (outcome.passes ?? []).map((pass) =>

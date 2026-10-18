@@ -21,6 +21,7 @@ import {
   reviewSpendText,
   type ReviewSpend,
   skippedText,
+  verificationChip,
   type ReviewCheckout,
   type ReviewEstimate,
   type ReviewEvent,
@@ -380,12 +381,10 @@ function Grounding(props: { outcome: ReviewOutcomeLite }) {
                   ? "bg-[color:color-mix(in_srgb,var(--vx-green)_12%,transparent)] text-[color:var(--vx-green)]"
                   : "bg-[color:color-mix(in_srgb,var(--vx-amber)_12%,transparent)] text-[color:var(--vx-amber)]"
               }`}
-              title="A second pass re-read the code behind each finding and dropped the ones that were not real."
+              title={verificationChip(checked()).title}
             >
               <Icon name="check" class="size-3" />
-              {checked().status === "ok"
-                ? `Double-checked ${checked().checked} · ${checked().rejected} dropped`
-                : "Not double-checked"}
+              {verificationChip(checked()).label}
             </span>
           )}
         </Show>
