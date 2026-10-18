@@ -123,14 +123,12 @@ const models = [
   },
   {
     title: "Free models inside of Vector",
+    // Not "Today": desktop 1.99.108 shows a connected OpenRouter account's free models only while vectordev.ai's
+    // free-model catalog answers, and on 17 October 2026 it returned 503. The next release keeps them without it.
     rows: [
       {
-        status: { kind: "today", text: "Today" },
-        text: "Connect your own free OpenRouter account for the free models on Vector's no-training list.",
-      },
-      {
         status: { kind: "next", text: "Next release" },
-        text: "Every free OpenRouter model Vector is allowed to offer. One whose provider may train on your prompts is labelled “May train on your prompts”, and Vector asks you once before you first use one.",
+        text: "Connect your own free OpenRouter account and Vector offers every free OpenRouter model it is allowed to offer. One whose provider may train on your prompts is labelled “May train on your prompts”, and Vector asks you once before you first use one.",
       },
     ],
   },
