@@ -31,7 +31,7 @@ const MAX_OUTPUT_TOKENS = 1_024
 // help index. Treat that text only as a selection hint: copying it into a
 // system message would let any caller turn this funded endpoint into an
 // arbitrary system-prompt proxy. The actual text below is server-owned.
-const PRODUCT_DOCUMENTATION = [
+export const PRODUCT_DOCUMENTATION = [
   {
     section: "Start here",
     title: "New project session",
@@ -173,8 +173,8 @@ const PRODUCT_DOCUMENTATION = [
   {
     section: "Everyday flow",
     title: "Settings",
-    where: "The gear at the bottom of the sidebar.",
-    body: "Configure model providers, visible models, keybindings, and appearance. Provider credentials belong in the provider setup rather than chat messages.",
+    where: "Your name or the gear at the bottom of the sidebar, or Cmd+, (Ctrl+, on Windows and Linux).",
+    body: "Connect model providers, choose which models appear in your pickers, and manage your Vector account, spend limits and notifications. Provider credentials belong in the provider setup rather than chat messages.",
   },
 ] as const
 
