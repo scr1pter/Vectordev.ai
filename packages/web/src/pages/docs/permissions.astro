@@ -30,11 +30,12 @@ export const prerender = true
             settings as they are now, or <strong>Not now</strong> to leave them off, and the app does not ask about it
             again. Every such repository asks, including one you clone with <strong>Open from GitHub</strong>, because
             a clone can come from anyone's link. To trust one later, choose <strong>Trust this repository…</strong> in
-            its menu on Home, or open Settings, <strong>Repository trust</strong>. In desktop 1.99.108 the same
-            approval is the button in the session header. The TUI's <code>/trust</code> and the terminal's
-            <code>vector trust status</code> and <code>vector trust approve</code> arrive with the next CLI release; the
-            CLI that npm and <code>vectordev.ai/install</code> serve today has neither, and Windows WSL servers keep the
-            1.99.99 engine, without repository trust, until a later desktop release requires that CLI.
+            its menu on Home, or open Settings, <strong>Repository trust</strong>. Only you can trust a repository on
+            your computer, so a guest you invite is never asked; the app tells the guest that you decide. In desktop
+            1.99.108 the same approval is the button in the session header. The TUI's <code>/trust</code> and the
+            terminal's <code>vector trust status</code> and <code>vector trust approve</code> arrive with the next CLI
+            release; the CLI that npm and <code>vectordev.ai/install</code> serve today has neither, and Windows WSL
+            servers keep the 1.99.99 engine, without repository trust, until a later desktop release requires that CLI.
           </p>
           <p>
             The language servers and formatters you turn on in your own settings also stay off in a repository you have
@@ -43,8 +44,8 @@ export const prerender = true
             This holds in a repository with no settings of its own too. The app does not ask about such a repository;
             while your tools are held back there it shows a <strong>Repository not trusted</strong> notice, and you
             trust it in Settings, <strong>Repository trust</strong>. Agent and parallel workspaces are folders of their
-            own with their own trust, so from one of their sessions Settings shows that folder beside the repository it
-            came from.
+            own with their own trust: the question about one reads <strong>Trust this workspace?</strong>, and from one
+            of their sessions Settings shows that folder beside the repository it came from.
           </p>
           <p>
             Trust covers the repository as it was when you approved it. A later change to anything that can run, from a

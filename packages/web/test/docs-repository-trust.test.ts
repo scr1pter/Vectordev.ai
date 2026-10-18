@@ -20,6 +20,12 @@ test("the Permissions docs describe the one-time repository trust question, not 
   // Clones ask like any other repository, so they still cannot raise a spend cap on their own.
   expect(text).toContain("including one you clone")
   expect(text).toContain("a cloned repository cannot raise your spend cap")
+  // Only the owner can approve, so an invited guest is told who decides instead of being asked.
+  expect(text).toContain("a guest you invite is never asked")
+  // An agent or parallel workspace has its own trust, and its question says workspace.
+  expect(text).toContain("Trust this workspace?")
+  // Not now leaves the user's own language servers and formatters off there too, and the docs say so.
+  expect(text).toContain("also stay off in a repository you have not trusted")
   expect(text).not.toContain("Project settings ignored")
   expect(text).not.toContain("Project not trusted")
   // Vector has repositories, not projects (owner rule).
