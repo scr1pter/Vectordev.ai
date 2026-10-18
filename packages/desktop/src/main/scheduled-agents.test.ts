@@ -243,7 +243,7 @@ function harness(options: {
   const promptedAt = new Map<string, number>()
   const created: string[] = []
   const createdModels: unknown[] = []
-  const spendChecks: Array<{ projectPath: string; runId: string; source: string; reserve?: boolean }> = []
+  const spendChecks: Array<{ runId: string; source: string; reserve?: boolean }> = []
   const reserved = new Map<string, number>()
   const released: string[] = []
   const prompts: unknown[] = []

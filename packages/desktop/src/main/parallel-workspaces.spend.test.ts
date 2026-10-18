@@ -177,11 +177,7 @@ async function ledgerEventsFor(id: string) {
 
 async function headroomSeenByAnotherRun() {
   const ledger = await spendLedger()
-  const allowance = await ledger.checkAllowance({
-    projectPath: userDataPath,
-    runId: "someone-else",
-    source: "parallel",
-  })
+  const allowance = await ledger.checkAllowance({ runId: "someone-else", source: "parallel" })
   return allowance.remainingUsd ?? 0
 }
 

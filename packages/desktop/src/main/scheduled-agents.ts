@@ -572,7 +572,6 @@ export function createScheduledAgents(
     const runId = `${id}:${record?.startedAt ?? nowIso()}:${index}`
     const execution = spend().then(async (ledger) => {
       const allowance = await ledger.checkAllowance({
-        projectPath: target.directory,
         runId,
         source: "scheduled",
         // Every target of this launch is checked at once, so the hold has to

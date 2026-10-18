@@ -53,7 +53,7 @@ describe("accumulating spend", () => {
     await ledger.setPolicy({ unattended: { perDay: { usd: 10 } } })
     const at = new Date(2026, 7, 19, 10, 0)
     const spend = spender(ledger)
-    const check = () => ledger.checkAllowance({ projectPath: PROJECT, runId: "next", source: "scheduled", at })
+    const check = () => ledger.checkAllowance({ runId: "next", source: "scheduled", at })
 
     await spend({ runId: "run-1", costUsd: 4, at })
     const ok = await check()
@@ -83,9 +83,7 @@ describe("accumulating spend", () => {
     await ledger.setPolicy({ unattended: { perDay: { usd: 10, warnAt: 0.5 } } })
     const at = new Date(2026, 7, 19, 10, 0)
     await spender(ledger)({ runId: "run-1", costUsd: 5, at })
-    expect((await ledger.checkAllowance({ projectPath: PROJECT, runId: "next", source: "scheduled", at })).state).toBe(
-      "warn",
-    )
+    expect((await ledger.checkAllowance({ runId: "next", source: "scheduled", at })).state).toBe("warn")
   })
 
   test("a per-run cap stops one run without touching the next", async () => {
@@ -94,11 +92,11 @@ describe("accumulating spend", () => {
     const at = new Date(2026, 7, 19, 10, 0)
     await spender(ledger)({ runId: "long-run", costUsd: 6, at })
 
-    const running = await ledger.checkAllowance({ projectPath: PROJECT, runId: "long-run", source: "scheduled", at })
+    const running = await ledger.checkAllowance({ runId: "long-run", source: "scheduled", at })
     expect(running.allowed).toBe(false)
     expect(running.reason).toContain("on this run")
 
-    const fresh = await ledger.checkAllowance({ projectPath: PROJECT, runId: "new-run", source: "scheduled", at })
+    const fresh = await ledger.checkAllowance({ runId: "new-run", source: "scheduled", at })
     expect(fresh.allowed).toBe(true)
     expect(fresh.state).toBe("ok")
   })
@@ -109,13 +107,13 @@ describe("reservations", () => {
     const { ledger } = await newLedger()
     await ledger.setPolicy({ unattended: { perDay: { usd: 25 } } })
     const at = new Date(2026, 7, 19, 10, 0)
-    ledger.reserve("run-1", 5, PROJECT)
+    ledger.reserve("run-1", 5)
 
-    const other = await ledger.checkAllowance({ projectPath: PROJECT, runId: "run-2", source: "scheduled", at })
+    const other = await ledger.checkAllowance({ runId: "run-2", source: "scheduled", at })
     expect(other.allowed).toBe(true)
     expect(other.remainingUsd).toBe(20)
     // A run re-checking itself is not held against its own reservation.
-    const self = await ledger.checkAllowance({ projectPath: PROJECT, runId: "run-1", source: "scheduled", at })
+    const self = await ledger.checkAllowance({ runId: "run-1", source: "scheduled", at })
     expect(self.remainingUsd).toBe(25)
   })
 
@@ -123,14 +121,14 @@ describe("reservations", () => {
     const { ledger } = await newLedger()
     await ledger.setPolicy({ unattended: { perRun: { usd: 5 }, perDay: { usd: 8 } } })
     const at = new Date(2026, 7, 19, 10, 0)
-    const check = (runId: string) => ledger.checkAllowance({ projectPath: PROJECT, runId, source: "scheduled", at })
+    const check = (runId: string) => ledger.checkAllowance({ runId, source: "scheduled", at })
 
     const first = await check("run-1")
     expect(first.remainingUsd).toBe(5)
-    ledger.reserve("run-1", first.remainingUsd ?? 0, PROJECT)
+    ledger.reserve("run-1", first.remainingUsd ?? 0)
     const second = await check("run-2")
     expect(second.remainingUsd).toBe(3)
-    ledger.reserve("run-2", second.remainingUsd ?? 0, OTHER_PROJECT)
+    ledger.reserve("run-2", second.remainingUsd ?? 0)
 
     const third = await check("run-3")
     expect(third.allowed).toBe(false)
@@ -143,10 +141,8 @@ describe("reservations", () => {
     const { ledger } = await newLedger()
     await ledger.setPolicy({ unattended: { perDay: { usd: 10 } } })
     const at = new Date(2026, 7, 19, 10, 0)
-    ledger.reserve("run-1", 10, PROJECT)
-    expect(
-      (await ledger.checkAllowance({ projectPath: PROJECT, runId: "run-2", source: "scheduled", at })).allowed,
-    ).toBe(false)
+    ledger.reserve("run-1", 10)
+    expect((await ledger.checkAllowance({ runId: "run-2", source: "scheduled", at })).allowed).toBe(false)
 
     await ledger.recordRunCost({
       projectPath: PROJECT,
@@ -157,7 +153,7 @@ describe("reservations", () => {
       totalCostUsd: 2,
       at,
     })
-    const after = await ledger.checkAllowance({ projectPath: PROJECT, runId: "run-2", source: "scheduled", at })
+    const after = await ledger.checkAllowance({ runId: "run-2", source: "scheduled", at })
     expect(after.allowed).toBe(true)
     expect(after.remainingUsd).toBe(8)
   })
@@ -169,15 +165,15 @@ describe("reservations", () => {
 
     const allowances = await Promise.all(
       ["run-1", "run-2", "run-3"].map((runId) =>
-        ledger.checkAllowance({ projectPath: PROJECT, runId, source: "scheduled", at, reserve: true }),
+        ledger.checkAllowance({ runId, source: "scheduled", at, reserve: true }),
       ),
     )
 
     expect(allowances.map((allowance) => allowance.budgetUsd)).toEqual([5, 3, 0])
     expect(allowances[2]?.state).toBe("blocked")
-    expect(
-      (await ledger.checkAllowance({ projectPath: PROJECT, runId: "run-4", source: "scheduled", at })).reason,
-    ).toContain("$8.00 of it held by runs still going")
+    expect((await ledger.checkAllowance({ runId: "run-4", source: "scheduled", at })).reason).toContain(
+      "$8.00 of it held by runs still going",
+    )
   })
 
   test("the default policy holds at most $5 per automation and $25 across concurrent ones", async () => {
@@ -186,7 +182,7 @@ describe("reservations", () => {
 
     const allowances = await Promise.all(
       Array.from({ length: 8 }, (_, index) =>
-        ledger.checkAllowance({ projectPath: PROJECT, runId: `run-${index}`, source: "scheduled", at, reserve: true }),
+        ledger.checkAllowance({ runId: `run-${index}`, source: "scheduled", at, reserve: true }),
       ),
     )
 
@@ -200,7 +196,7 @@ describe("reservations", () => {
     const { ledger } = await newLedger()
     await ledger.setPolicy({ unattended: { perDay: { usd: 10 } } })
     const at = new Date(2026, 7, 19, 10, 0)
-    await ledger.checkAllowance({ projectPath: PROJECT, runId: "run-1", source: "scheduled", at, reserve: true })
+    await ledger.checkAllowance({ runId: "run-1", source: "scheduled", at, reserve: true })
 
     const recorded = ledger.recordRunCost({
       projectPath: PROJECT,
@@ -211,7 +207,7 @@ describe("reservations", () => {
       totalCostUsd: 6,
       at,
     })
-    const check = ledger.checkAllowance({ projectPath: PROJECT, runId: "run-2", source: "scheduled", at })
+    const check = ledger.checkAllowance({ runId: "run-2", source: "scheduled", at })
     await recorded
 
     expect((await check).remainingUsd).toBe(4)
@@ -221,8 +217,7 @@ describe("reservations", () => {
     const { ledger } = await newLedger()
     await ledger.setPolicy({ interactive: { perDay: { usd: 20 } } })
     const at = new Date(2026, 7, 19, 10, 0)
-    const check = (runId: string) =>
-      ledger.checkAllowance({ projectPath: PROJECT, runId, source: "parallel", at, reserve: true })
+    const check = (runId: string) => ledger.checkAllowance({ runId, source: "parallel", at, reserve: true })
 
     const first = await check("agent-1")
     expect(first.remainingUsd).toBe(20)
@@ -233,17 +228,17 @@ describe("reservations", () => {
     expect(second.budgetUsd).toBe(5)
   })
 
-  test("a project's monthly cap counts only that project's holds", async () => {
+  test("holds from every repository lower the monthly headroom", async () => {
     const { ledger } = await newLedger()
-    await ledger.setPolicy({ unattended: { perProjectMonth: { usd: 10 } } })
+    await ledger.setPolicy({ unattended: { perMonth: { usd: 10 } } })
     const at = new Date(2026, 7, 19, 10, 0)
-    const remaining = async () =>
-      (await ledger.checkAllowance({ projectPath: PROJECT, runId: "next", source: "scheduled", at })).remainingUsd
+    const remaining = async () => (await ledger.checkAllowance({ runId: "next", source: "scheduled", at })).remainingUsd
 
-    ledger.reserve("elsewhere", 4, OTHER_PROJECT)
     expect(await remaining()).toBe(10)
-    ledger.reserve("here", 3, PROJECT)
-    expect(await remaining()).toBe(7)
+    ledger.reserve("elsewhere", 4)
+    expect(await remaining()).toBe(6)
+    ledger.reserve("here", 3)
+    expect(await remaining()).toBe(3)
   })
 
   test("the warning says how much of the spend is only held", async () => {
@@ -251,9 +246,9 @@ describe("reservations", () => {
     await ledger.setPolicy({ unattended: { perDay: { usd: 10 } } })
     const at = new Date(2026, 7, 19, 10, 0)
     await spender(ledger)({ runId: "run-1", costUsd: 2, at })
-    ledger.reserve("run-2", 6, PROJECT)
+    ledger.reserve("run-2", 6)
 
-    const warned = await ledger.checkAllowance({ projectPath: PROJECT, runId: "next", source: "scheduled", at })
+    const warned = await ledger.checkAllowance({ runId: "next", source: "scheduled", at })
 
     expect(warned.state).toBe("warn")
     expect(warned.reason).toBe(
@@ -265,11 +260,9 @@ describe("reservations", () => {
     const { ledger } = await newLedger()
     await ledger.setPolicy({ unattended: { perDay: { usd: 10 } } })
     const at = new Date(2026, 7, 19, 10, 0)
-    ledger.reserve("run-1", 4, PROJECT)
+    ledger.reserve("run-1", 4)
     ledger.release("run-1")
-    expect(
-      (await ledger.checkAllowance({ projectPath: PROJECT, runId: "run-2", source: "scheduled", at })).remainingUsd,
-    ).toBe(10)
+    expect((await ledger.checkAllowance({ runId: "run-2", source: "scheduled", at })).remainingUsd).toBe(10)
   })
 
   test("the block message says where to change the limit", async () => {
@@ -277,7 +270,7 @@ describe("reservations", () => {
     await ledger.setPolicy({ unattended: { perDay: { usd: 1 } } })
     const at = new Date(2026, 7, 19, 10, 0)
     await spender(ledger)({ runId: "run-1", costUsd: 1, at })
-    const blocked = await ledger.checkAllowance({ projectPath: PROJECT, runId: "next", source: "scheduled", at })
+    const blocked = await ledger.checkAllowance({ runId: "next", source: "scheduled", at })
     expect(blocked.reason).toBe(
       "Spend limit reached: $1.00 spent today against a $1.00 cap. Raise or clear the limit in Settings → Spend limits to continue.",
     )
@@ -292,7 +285,7 @@ describe("unmeasured runs", () => {
     const spend = spender(ledger)
     for (const index of [1, 2, 3, 4, 5]) await spend({ runId: `zen-${index}`, at })
 
-    const allowance = await ledger.checkAllowance({ projectPath: PROJECT, runId: "zen-6", source: "scheduled", at })
+    const allowance = await ledger.checkAllowance({ runId: "zen-6", source: "scheduled", at })
     expect(allowance.allowed).toBe(true)
     expect(allowance.state).toBe("ok")
     expect(allowance.unmeasuredRuns).toBe(5)
@@ -306,7 +299,7 @@ describe("unmeasured runs", () => {
     // Real spend still blocks, and the unmeasured runs stay visible beside it
     // rather than being quietly folded into the total that did the blocking.
     await spend({ runId: "paid", costUsd: 1.25, at })
-    const blocked = await ledger.checkAllowance({ projectPath: PROJECT, runId: "zen-7", source: "scheduled", at })
+    const blocked = await ledger.checkAllowance({ runId: "zen-7", source: "scheduled", at })
     expect(blocked.allowed).toBe(false)
     expect(blocked.unmeasuredRuns).toBe(5)
     expect(blocked.unmeasuredNote).toContain("never blocks a run")
@@ -346,12 +339,9 @@ describe("calendar windows", () => {
     const tuesday = new Date(2026, 7, 18, 9, 0)
     await spender(ledger)({ runId: "run-1", costUsd: 12, at: monday })
 
-    expect(
-      (await ledger.checkAllowance({ projectPath: PROJECT, runId: "next", source: "scheduled", at: monday })).allowed,
-    ).toBe(false)
+    expect((await ledger.checkAllowance({ runId: "next", source: "scheduled", at: monday })).allowed).toBe(false)
 
     const nextDay = await ledger.checkAllowance({
-      projectPath: PROJECT,
       runId: "next",
       source: "scheduled",
       at: tuesday,
@@ -400,7 +390,6 @@ describe("calendar windows", () => {
       await spend({ runId: "july-2", costUsd: 5, at: lastNightOfJuly })
 
       const july = await ledger.checkAllowance({
-        projectPath: PROJECT,
         runId: "next",
         source: "scheduled",
         at: lastNightOfJuly,
@@ -411,7 +400,6 @@ describe("calendar windows", () => {
       // One hour later on the wall clock, and the cap is clear again: these two
       // events are 60 minutes apart but land in different calendar months.
       const august = await ledger.checkAllowance({
-        projectPath: PROJECT,
         runId: "next",
         source: "scheduled",
         at: firstMinutesOfAugust,
@@ -425,33 +413,8 @@ describe("calendar windows", () => {
   })
 })
 
-describe("per-project scope", () => {
-  test("one project's budget cannot be spent by another", async () => {
-    const { ledger } = await newLedger()
-    await ledger.setPolicy({ unattended: { perProjectMonth: { usd: 5 } } })
-    const at = new Date(2026, 7, 19, 10, 0)
-    const spend = spender(ledger)
-    await spend({ runId: "a-1", costUsd: 6, at })
-    await spend({ runId: "b-1", costUsd: 1, at, projectPath: OTHER_PROJECT })
-
-    expect((await ledger.checkAllowance({ projectPath: PROJECT, runId: "a-2", source: "scheduled", at })).allowed).toBe(
-      false,
-    )
-    const other = await ledger.checkAllowance({
-      projectPath: OTHER_PROJECT,
-      runId: "b-2",
-      source: "scheduled",
-      at,
-    })
-    expect(other.allowed).toBe(true)
-    expect(other.remainingUsd).toBe(4)
-
-    const summary = await ledger.summary({ at, projectPath: OTHER_PROJECT })
-    expect(summary.all.month.costUsd).toBe(7)
-    expect(summary.project?.month.costUsd).toBe(1)
-  })
-
-  test("an account-wide daily cap still counts every project", async () => {
+describe("one overall limit", () => {
+  test("a daily cap counts every repository", async () => {
     const { ledger } = await newLedger()
     await ledger.setPolicy({ unattended: { perDay: { usd: 5 } } })
     const at = new Date(2026, 7, 19, 10, 0)
@@ -459,9 +422,86 @@ describe("per-project scope", () => {
     await spend({ runId: "a-1", costUsd: 3, at })
     await spend({ runId: "b-1", costUsd: 3, at, projectPath: OTHER_PROJECT })
 
-    expect(
-      (await ledger.checkAllowance({ projectPath: OTHER_PROJECT, runId: "b-2", source: "scheduled", at })).allowed,
-    ).toBe(false)
+    const blocked = await ledger.checkAllowance({ runId: "b-2", source: "scheduled", at })
+    expect(blocked.allowed).toBe(false)
+    expect(blocked.reason).toBe(
+      "Spend limit reached: $6.00 spent today against a $5.00 cap. Raise or clear the limit in Settings → Spend limits to continue.",
+    )
+  })
+
+  test("a monthly cap counts every repository", async () => {
+    const { ledger } = await newLedger()
+    await ledger.setPolicy({ unattended: { perMonth: { usd: 10 } } })
+    const spend = spender(ledger)
+    await spend({ runId: "a-1", costUsd: 6, at: new Date(2026, 7, 3, 10, 0) })
+    await spend({ runId: "b-1", costUsd: 3, at: new Date(2026, 7, 12, 10, 0), projectPath: OTHER_PROJECT })
+    const at = new Date(2026, 7, 19, 10, 0)
+
+    const warned = await ledger.checkAllowance({ runId: "a-2", source: "scheduled", at })
+    expect(warned.state).toBe("warn")
+    expect(warned.remainingUsd).toBe(1)
+    await spend({ runId: "b-2", costUsd: 1, at, projectPath: OTHER_PROJECT })
+    expect((await ledger.checkAllowance({ runId: "a-3", source: "scheduled", at })).allowed).toBe(false)
+  })
+
+  test("the summary has one total across every repository", async () => {
+    const { ledger } = await newLedger()
+    const at = new Date(2026, 7, 19, 10, 0)
+    const spend = spender(ledger)
+    await spend({ runId: "a-1", costUsd: 2, at })
+    await spend({ runId: "b-1", costUsd: 1.5, at, projectPath: OTHER_PROJECT })
+
+    const summary = await ledger.summary({ at })
+    expect(summary.all.day.costUsd).toBe(3.5)
+    expect(summary.all.month.costUsd).toBe(3.5)
+    expect(Object.keys(summary).sort()).toEqual(["all", "at", "day", "month", "policy"])
+  })
+
+  // 1.99.108 could store a monthly limit for one repository. It is dropped, not
+  // folded into the overall monthly cap, and every overall cap carries over.
+  test("a stored per-repository monthly limit is dropped on load and the overall caps are kept", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "vector-spend-"))
+    directories.push(directory)
+    const at = new Date(2026, 7, 19, 10, 0)
+    await writeFile(
+      join(directory, SPEND_LEDGER_FILE),
+      JSON.stringify({
+        version: 1,
+        events: [],
+        days: [],
+        policy: {
+          interactive: { perRun: { usd: 3, warnAt: 0.5 }, perProjectMonth: { usd: 1 } },
+          unattended: { perRun: { usd: 5 }, perDay: { usd: 25 }, perMonth: { usd: 200 }, perProjectMonth: { usd: 1 } },
+        },
+      }),
+    )
+
+    const ledger = createSpendLedger({ userDataPath: directory })
+    const policy = await ledger.policy()
+    expect(JSON.parse(JSON.stringify(policy))).toEqual({
+      interactive: { perRun: { usd: 3, warnAt: 0.5 } },
+      unattended: { perRun: { usd: 5 }, perDay: { usd: 25 }, perMonth: { usd: 200 } },
+    })
+
+    // $2 in each repository this month would have crossed the old $1 limit in both.
+    const spend = spender(ledger)
+    await spend({ runId: "a-1", costUsd: 2, at })
+    await spend({ runId: "b-1", costUsd: 2, at, projectPath: OTHER_PROJECT })
+    const allowance = await ledger.checkAllowance({ runId: "next", source: "scheduled", at })
+    expect(allowance.allowed).toBe(true)
+    expect(allowance.remainingUsd).toBe(5)
+
+    await ledger.setPolicy({ interactive: { perDay: { usd: 10 } } })
+    const persisted = JSON.parse(await readFile(join(directory, SPEND_LEDGER_FILE), "utf8"))
+    expect(JSON.stringify(persisted.policy)).not.toContain("perProjectMonth")
+    expect(persisted.policy.unattended).toEqual({ perRun: { usd: 5 }, perDay: { usd: 25 }, perMonth: { usd: 200 } })
+  })
+
+  test("a per-repository monthly limit sent by an older window is not saved", async () => {
+    const { ledger } = await newLedger()
+    const stale = { perMonth: { usd: 50 }, perProjectMonth: { usd: 1 } }
+    const policy = await ledger.setPolicy({ unattended: stale })
+    expect(JSON.parse(JSON.stringify(policy.unattended))).toEqual({ perMonth: { usd: 50 } })
   })
 })
 
@@ -476,7 +516,7 @@ describe("retention", () => {
     await spend({ runId: "a-3", at: april10 })
     await spend({ runId: "b-1", costUsd: 0.75, tokens: 4_000, at: april10, projectPath: OTHER_PROJECT })
 
-    const beforeDay = await ledger.summary({ at: april10, projectPath: PROJECT })
+    const beforeDay = await ledger.summary({ at: april10 })
     const beforeMonth = await ledger.summary({ at: april9 })
     expect((await persistedState(directory)).events).toHaveLength(4)
 
@@ -491,7 +531,7 @@ describe("retention", () => {
       `2026-04-10 ${OTHER_PROJECT}`,
     ])
 
-    expect(await ledger.summary({ at: april10, projectPath: PROJECT })).toEqual(beforeDay)
+    expect(await ledger.summary({ at: april10 })).toEqual(beforeDay)
     expect(await ledger.summary({ at: april9 })).toEqual(beforeMonth)
     expect(beforeMonth.all.month.costUsd).toBe(4.5)
     expect(beforeMonth.all.month.tokens).toBe(46_000)
@@ -543,18 +583,17 @@ describe("retention", () => {
 
     // 4001 seeds: 21 events on run-0 unmeasured, the other 3980 at $0.01, plus
     // the $1 just recorded. Every total has to come out unchanged.
-    const summary = await ledger.summary({ at, projectPath: PROJECT })
+    const summary = await ledger.summary({ at })
     expect(summary.all.day.costUsd).toBeCloseTo(3_980 * 0.01 + 1, 6)
     expect(summary.all.day.tokens).toBe(4_001 * 10)
     expect(summary.all.day.runs).toBe(200)
     // run-0 reported real cost at the end, so nothing is left unmeasured.
     expect(summary.all.day.unmeasuredRuns).toBe(0)
-    expect(summary.project?.day).toEqual(summary.all.day)
 
     // The per-run window still reads exactly, which is what the collapse must
     // not cost: run-1 holds 20 events of $0.01.
     await ledger.setPolicy({ interactive: { perRun: { usd: 0.15 } } })
-    const spent = await ledger.checkAllowance({ projectPath: PROJECT, runId: "run-1", source: "parallel", at })
+    const spent = await ledger.checkAllowance({ runId: "run-1", source: "parallel", at })
     expect(spent.allowed).toBe(false)
     expect(spent.reason).toContain("on this run")
   })
@@ -569,7 +608,7 @@ describe("retention", () => {
 
     expect((await persistedState(directory)).events).toHaveLength(2)
     await ledger.setPolicy({ unattended: { perRun: { usd: 5 } } })
-    const allowance = await ledger.checkAllowance({ projectPath: PROJECT, runId: "live", source: "scheduled", at })
+    const allowance = await ledger.checkAllowance({ runId: "live", source: "scheduled", at })
     expect(allowance.allowed).toBe(false)
     expect(allowance.reason).toContain("$5.00")
   })
@@ -587,14 +626,14 @@ describe("policy", () => {
     const at = new Date(2026, 7, 19, 10, 0)
     await spender(ledger, "session")({ runId: "session-run", costUsd: 5_000, at })
 
-    const interactive = await ledger.checkAllowance({ projectPath: PROJECT, runId: "next", source: "session", at })
+    const interactive = await ledger.checkAllowance({ runId: "next", source: "session", at })
     expect(interactive.allowed).toBe(true)
     expect(interactive.state).toBe("ok")
     expect(interactive.remainingUsd).toBeUndefined()
 
     // The same ledger, the same spend: the run nobody is watching is the one
     // that gets stopped.
-    const unattended = await ledger.checkAllowance({ projectPath: PROJECT, runId: "next", source: "scheduled", at })
+    const unattended = await ledger.checkAllowance({ runId: "next", source: "scheduled", at })
     expect(unattended.allowed).toBe(false)
   })
 
@@ -603,12 +642,10 @@ describe("policy", () => {
     const at = new Date(2026, 7, 19, 10, 0)
     await ledger.setPolicy({ unattended: { perDay: { usd: 1 } } })
     await spender(ledger)({ runId: "run-1", costUsd: 4, at })
-    expect(
-      (await ledger.checkAllowance({ projectPath: PROJECT, runId: "next", source: "scheduled", at })).allowed,
-    ).toBe(false)
+    expect((await ledger.checkAllowance({ runId: "next", source: "scheduled", at })).allowed).toBe(false)
 
     await ledger.setPolicy({ unattended: {} })
-    const cleared = await ledger.checkAllowance({ projectPath: PROJECT, runId: "next", source: "scheduled", at })
+    const cleared = await ledger.checkAllowance({ runId: "next", source: "scheduled", at })
     expect(cleared.allowed).toBe(true)
     expect(cleared.state).toBe("ok")
     expect(cleared.remainingUsd).toBeUndefined()
@@ -685,7 +722,7 @@ describe("durability", () => {
     expect((await ledger.summary({ at })).all.day.costUsd).toBe(0)
 
     await spender(ledger)({ runId: "real", costUsd: 30, at })
-    const allowance = await ledger.checkAllowance({ projectPath: PROJECT, runId: "next", source: "scheduled", at })
+    const allowance = await ledger.checkAllowance({ runId: "next", source: "scheduled", at })
     expect(allowance.allowed).toBe(false)
     expect(allowance.reason).toContain("$30.00")
   })
@@ -698,7 +735,7 @@ describe("durability", () => {
 
     const restarted = createSpendLedger({ userDataPath: directory })
     expect((await restarted.policy()).unattended.perDay?.usd).toBe(10)
-    const allowance = await restarted.checkAllowance({ projectPath: PROJECT, runId: "next", source: "scheduled", at })
+    const allowance = await restarted.checkAllowance({ runId: "next", source: "scheduled", at })
     expect(allowance.state).toBe("warn")
     expect(allowance.remainingUsd).toBe(0.5)
   })
@@ -706,7 +743,7 @@ describe("durability", () => {
   test("a ledger that has never been written allows and reports nothing", async () => {
     const { ledger } = await newLedger()
     const at = new Date(2026, 7, 19, 10, 0)
-    const allowance = await ledger.checkAllowance({ projectPath: PROJECT, runId: "first", source: "scheduled", at })
+    const allowance = await ledger.checkAllowance({ runId: "first", source: "scheduled", at })
     expect(allowance.allowed).toBe(true)
     expect(allowance.state).toBe("ok")
     expect(allowance.unmeasuredRuns).toBe(0)

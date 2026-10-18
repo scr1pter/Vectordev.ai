@@ -115,7 +115,7 @@ const api: ElectronAPI = {
   spendLimits: {
     limits: () => ipcRenderer.invoke("spend-limits-get"),
     setLimits: (next) => ipcRenderer.invoke("spend-limits-set", next),
-    status: (projectPath) => ipcRenderer.invoke("spend-limits-status", projectPath),
+    status: () => ipcRenderer.invoke("spend-limits-status"),
     recent: (limit) => ipcRenderer.invoke("spend-limits-recent", limit),
   },
   failureMemory: {
