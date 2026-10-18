@@ -20,7 +20,8 @@ import { ModelV2 } from "../src/model"
 import { ProviderV2 } from "../src/provider"
 import { SessionMessage } from "../src/session/message"
 import { SessionSchema } from "../src/session/schema"
-import { SessionTable, SessionInputTable, SessionMessageTable, MessageTable } from "../src/session/sql"
+import { SessionTable, SessionInputTable, SessionMessageTable, MessageTable, PartTable } from "../src/session/sql"
+import { BrainSchema } from "../src/brain/schema"
 import { AbsolutePath } from "../src/schema"
 import { testEffect } from "./lib/effect"
 import { adjust } from "effect/testing/TestClock"
@@ -213,6 +214,11 @@ it.effect("native import is passive, remapped, complete, and notifications see t
         .all()
         .pipe(Effect.orDie),
     ).toHaveLength(2)
+    // The transcript's "user" is whoever published it, so its text is marked as outside content: memory never takes
+    // it as the words of the user who continues the session.
+    const parts = yield* db.select().from(PartTable).where(eq(PartTable.session_id, converted.sessionID)).all().pipe(Effect.orDie)
+    expect(parts.length).toBeGreaterThan(0)
+    expect(parts.every((part) => part.data.type === "text" && part.data.metadata?.[BrainSchema.OUTSIDE] === "import")).toBe(true)
   }),
 )
 
@@ -328,6 +334,10 @@ it.effect("local V1 archives retain completed attachments while public previews 
     expect(tool.state.attachments?.[0]?.messageID).toBe(roundtrip.messages[1]!.info.id)
     expect(tool.state.attachments?.[0]?.url).toBe("data:text/plain,content")
     expect(tool.callID).not.toBe("original-call")
+    // A local archive may come from anyone too: its text is the archive's, not words typed in this session.
+    const texts = roundtrip.messages.flatMap((message) => message.parts.filter((part) => part.type === "text"))
+    expect(texts.length).toBeGreaterThan(0)
+    expect(texts.every((part) => part.type === "text" && part.metadata?.[BrainSchema.OUTSIDE] === "import")).toBe(true)
   }),
 )
 

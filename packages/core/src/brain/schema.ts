@@ -21,6 +21,14 @@ export type Scope = typeof Scope.Type
 export const Kind = Schema.Literals(["rule", "preference", "decision", "lesson", "fact", "failure", "review"])
 export type Kind = typeof Kind.Type
 
+/**
+ * Metadata key of a message part whose text came from outside this conversation: a transcript imported as passive
+ * history, or the issue and pull request text the GitHub agent is given. A role "user" message carrying it was not
+ * typed by the user, so its words vouch for no memory, and memory written in a session that has one waits for review,
+ * as it does after reading the web. The value says where the text came from.
+ */
+export const OUTSIDE = "vector.outside"
+
 /** What the agent and the user may write themselves. */
 export const LearnedKind = Schema.Literals(["preference", "decision", "lesson", "fact"])
 export type LearnedKind = typeof LearnedKind.Type

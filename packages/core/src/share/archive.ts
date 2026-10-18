@@ -23,6 +23,7 @@ import { Slug } from "../util/slug"
 import { InstallationVersion } from "../installation/version"
 import { ModelV2 } from "../model"
 import { encodedBody } from "./transport"
+import { BrainSchema } from "../brain/schema"
 
 const AncillaryUsage = Schema.Array(SessionEvent.AncillaryUsage.data).pipe(optional)
 export const Legacy = Schema.Struct({
@@ -437,7 +438,8 @@ const layer = Layer.effect(
           append(SessionV1.Event.MessageUpdated, { sessionID, info: value })
           for (const part of message.parts) {
             const base = { id: SessionV1.PartID.ascending(), sessionID, messageID: id }
-            // Pending work is transcript data after import, never a task to replay.
+            // Pending work is transcript data after import, never a task to replay. Imported text is the archive's, not
+            // words the user typed in this session, so it vouches for no memory.
             const value = Schema.decodeUnknownSync(SessionV1.Part)(
               part.type === "subtask" || part.type === "compaction"
                 ? {
@@ -445,6 +447,7 @@ const layer = Layer.effect(
                     type: "text",
                     text:
                       part.type === "subtask" ? `${part.description}\n${part.prompt}` : "[Imported compaction marker]",
+                    metadata: { [BrainSchema.OUTSIDE]: "import" },
                   }
                 : part.type === "tool"
                   ? {
@@ -471,7 +474,9 @@ const layer = Layer.effect(
                               }
                             : part.state,
                     }
-                  : { ...part, ...base },
+                  : part.type === "text"
+                    ? { ...part, ...base, metadata: { ...part.metadata, [BrainSchema.OUTSIDE]: "import" } }
+                    : { ...part, ...base },
             )
             append(SessionV1.Event.PartUpdated, { sessionID, time: message.info.time.created, part: value })
           }
@@ -536,6 +541,8 @@ const layer = Layer.effect(
                 sessionID,
                 type: "text",
                 text: partText(part),
+                // A public transcript's "user" is whoever published it, never the user continuing it here.
+                metadata: { [BrainSchema.OUTSIDE]: "import" },
               }),
             })
         }
