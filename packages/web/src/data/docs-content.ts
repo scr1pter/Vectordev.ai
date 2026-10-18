@@ -27,7 +27,7 @@ export const spendRows = [
 export const runGuardRows = [
   [
     "Where caps come from",
-    "Settings → Spend limits in the desktop app for chats and the parallel agents you start, budget.run in your user config (~/.config/vector/vector.json) for chats, the terminal UI and vector run, or vector run --max-cost and --max-steps for one run. Automations use the Left alone limits: $5 a run and $25 a day unless you change them.",
+    "Settings → Spend limits in the desktop app, for its chats and the parallel agents you start; budget.run in the terminal's user config (~/.config/vector/vector.json, or %USERPROFILE%\\.config\\vector\\vector.json on Windows) for the terminal UI and vector run, which the desktop app does not read; or vector run --max-cost and --max-steps for one run. Automations use the Left alone limits: $5 a run and $25 a day unless you change them.",
   ],
   [
     "One set of limits for every repository",

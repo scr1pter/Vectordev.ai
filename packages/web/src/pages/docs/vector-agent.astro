@@ -55,7 +55,13 @@ export const prerender = true
             A rule is a standard written the way you would say it to a new teammate — "we don't put database query
             logic in the controller". Repository rules live in <code>.vector/RULES.md</code>, a plain Markdown file in
             the repository: write a rule there, commit the file, and your whole team gets the same rules. Rules for
-            every repository go in <code>~/.config/vector/AGENTS.md</code>, which every Vector session reads.
+            every repository go in the <code>AGENTS.md</code> in Vector's own config folder, which every session reads.
+            The desktop app keeps that folder with its app data:
+            <code>~/Library/Application Support/ai.vector.app/config/vector/AGENTS.md</code> on macOS,
+            <code>%APPDATA%\ai.vector.app\config\vector\AGENTS.md</code> on Windows and
+            <code>~/.config/ai.vector.app/config/vector/AGENTS.md</code> on Linux. The terminal reads
+            <code>~/.config/vector/AGENTS.md</code> (<code>%USERPROFILE%\.config\vector\AGENTS.md</code> on Windows)
+            instead, so each has its own file.
           </p>
           <ol class="steps">
             <li><span>1</span><div><strong>Write it in plain English</strong><p>No rule language, no schema. One sentence describing the standard.</p></div></li>
