@@ -67,8 +67,9 @@ export function resolveExecutionAgent(input: {
   if (input.quickRequested) return "quick"
   // A greeting, thanks or a farewell takes the quick lane from here on every agent, with or without the judge, so an
   // engine that does not size requests itself (an older Vector, a remote server) also answers it with one small
-  // request. "ok", "yes" or "continue", and anything sent while work waits on the user, are not trivial: they continue
-  // the work before them, which the engine sizes.
+  // request. A current engine sizes it as a build request and offers escalate there, so a message misread as social
+  // still goes on as Work. "ok", "yes" or "continue", and anything sent while work waits on the user, are not trivial:
+  // they continue the work before them, which the engine sizes.
   if (input.difficulty === "trivial") return "quick"
   return input.current === "quick" ? "build" : input.current
 }
@@ -86,6 +87,8 @@ export type FollowupDraft = {
   // When LLM-as-a-judge is on: which runs Vector judges. A draft queued before this field existed carries llmJudge.
   judge?: "thorough" | "changes"
   llmJudge?: boolean
+  // The composer's Quick mode: the person picked the quick lane, so the engine answers there and never escalates it.
+  size?: "chat"
 }
 
 type FollowupSendInput = {
@@ -272,6 +275,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       executionMode: input.draft.executionMode,
       ...(budget ? { budget } : {}),
       ...(judge ? { judge } : {}),
+      ...(input.draft.size && agent === "quick" ? { size: input.draft.size } : {}),
     })
     return true
   } catch (err) {
@@ -651,6 +655,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       difficulty,
       executionMode,
       ...(judge ? { judge } : {}),
+      ...(requestedExecutionMode === "quick" && agent === "quick" ? { size: "chat" as const } : {}),
     }
 
     const clearInput = () => {

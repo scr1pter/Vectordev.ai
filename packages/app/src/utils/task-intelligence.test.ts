@@ -114,6 +114,9 @@ describe("task intelligence", () => {
       "ship to vercel",
       "switch the codebase to Go",
       "keep it simple",
+      // A thanks with a request after it, with no comma between them.
+      "thanks for the update ship it to vercel",
+      "thanks for the fix what about tests?",
     ]) {
       const difficulty = classifyTaskDifficulty(text)
       expect(difficulty, text).toBe("standard")
@@ -134,6 +137,11 @@ describe("task intelligence", () => {
     expect(reply("Fixed the typo.")).toBe(false)
     expect(reply("Fixed the typo. Anything else?")).toBe(false)
     expect(reply("Deployed. Do you want me to keep the preview URL?")).toBe(true)
+    // An offer or a closing line without a question mark waits on nothing, as the engine reads it.
+    expect(reply("Deployed. Let me know if this works for you.")).toBe(false)
+    expect(reply("Deployed. I can also add a preview alias if you want.")).toBe(false)
+    // A question before a summary list still waits.
+    expect(reply("Should I keep the preview URL?\n\n**Summary:**\n- vercel.json")).toBe(true)
     expect(reply("Migrating the routes", { error: { name: "MessageAbortedError" } })).toBe(true)
     expect(reply("Migrated 12 of", { finish: "length" })).toBe(true)
     expect(reply("Still going", { time: { created: 1 } })).toBe(true)

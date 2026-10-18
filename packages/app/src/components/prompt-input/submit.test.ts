@@ -477,9 +477,10 @@ describe("prompt submit worktree selection", () => {
     await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
     await new Promise((resolve) => setTimeout(resolve, 0))
 
+    // The person picked the quick lane, so the engine answers there and never escalates it to Work.
     expect(sentPrompts.at(-1)).toEqual({
       directory: "/repo/main",
-      input: expect.objectContaining({ agent: "quick", executionMode: "normal" }),
+      input: expect.objectContaining({ agent: "quick", executionMode: "normal", size: "chat" }),
     })
   })
 
@@ -516,7 +517,14 @@ describe("prompt submit worktree selection", () => {
 describe("follow-up optimistic echo", () => {
   type SendInput = Parameters<typeof import("./submit").sendFollowupDraft>[0]
   type SentPart = { id: string; type: string; synthetic?: boolean; text?: string }
-  type Step = { kind: "echo" | "request"; parts: SentPart[]; budget?: unknown; judge?: unknown; agent?: string }
+  type Step = {
+    kind: "echo" | "request"
+    parts: SentPart[]
+    budget?: unknown
+    judge?: unknown
+    agent?: string
+    size?: unknown
+  }
 
   // Real work, so the desktop's file map applies; a greeting gets none.
   const text = "add a caption under this picture that names its colors and what the square could represent"
@@ -551,13 +559,20 @@ describe("follow-up optimistic echo", () => {
     await sendFollowupDraft({
       client: {
         session: {
-          promptAsync: async (input: { parts: SentPart[]; budget?: unknown; judge?: unknown; agent?: string }) => {
+          promptAsync: async (input: {
+            parts: SentPart[]
+            budget?: unknown
+            judge?: unknown
+            agent?: string
+            size?: unknown
+          }) => {
             steps.push({
               kind: "request",
               parts: input.parts,
               budget: input.budget,
               judge: input.judge,
               agent: input.agent,
+              size: input.size,
             })
             return { data: undefined }
           },
@@ -650,6 +665,19 @@ describe("follow-up optimistic echo", () => {
     })
     const done = reply("done", "Fixed the typo in README.md.")
     expect(await thanks(done.history, done.parts)).toBe("quick")
+    // The automatic quick lane is not a pick: a current engine sizes it and can escalate it to Work.
+    const automatic = await send({ prompt: [{ type: "text", content: "thanks", start: 0, end: 6 }] }, done.history)
+    expect(automatic.at(-1)?.size).toBeUndefined()
+    // A thanks with a request after it is work, for the picked agent with the history.
+    for (const content of ["thanks for the update ship it to vercel", "thanks for that run the tests"])
+      expect(
+        (await send({ prompt: [{ type: "text", content, start: 0, end: content.length }] }, done.history)).at(-1)
+          ?.agent,
+        content,
+      ).toBe("build")
+    // An offer or a closing line without a question mark waits on nothing.
+    const offered = reply("offered", "Fixed the typo. Let me know if this works for you.")
+    expect(await thanks(offered.history, offered.parts)).toBe("quick")
     // The agent asked something: the thanks answers that work, which the engine sizes with the history.
     const asked = reply("asked", "Deployed. Do you want me to keep the preview URL?")
     expect(await thanks(asked.history, asked.parts)).toBe("build")
