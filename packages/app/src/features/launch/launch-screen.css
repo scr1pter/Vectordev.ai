@@ -642,9 +642,10 @@ html[data-color-scheme="light"] .vector-launch[data-state="failed"] .vector-laun
   transition: opacity 200ms ease-out;
 }
 
-/* Light theme. data-color-scheme is stamped before first paint by
-   vector-theme-preload.js from the saved scheme, which the Vector theme setting
-   writes (VectorThemeSync), and settings keep it current afterwards. */
+/* Light theme, from when Settings could choose one. vector-theme-preload.js
+   now stamps data-color-scheme="dark" before first paint whatever was saved,
+   and VectorThemeSync keeps Vector dark afterwards, so these light rules no
+   longer apply; they are left for a dead-code sweep. */
 html[data-color-scheme="light"] .vector-launch {
   --vector-launch-ground: #f3f2f6;
   --vector-launch-ghost-nav: #dcdae4;

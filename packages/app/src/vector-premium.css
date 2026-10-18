@@ -51,11 +51,11 @@
   --vx-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* Settings > Appearance > Theme ("Light" or "Follow system" resolved to light
- * by context/settings.tsx, which stamps the resolved value onto
- * documentElement as data-vector-theme). Overrides the token ramp above so
- * chrome built from --vx-* tokens (cards, controls, dialogs, borders, focus
- * rings) actually flips — the product otherwise ships dark-only. */
+/* The light ramp, from when Settings > Appearance could choose a light theme.
+ * Settings has no Appearance page any more: Vector always uses its dark look
+ * and context/settings.tsx stamps data-vector-theme="dark", so this block and
+ * the other [data-vector-theme="light"] rules below no longer match. They are
+ * left for a dead-code sweep rather than removed one by one. */
 :root[data-vector-theme="light"] {
   color-scheme: light;
   --vx-canvas: #f3f2f6;
