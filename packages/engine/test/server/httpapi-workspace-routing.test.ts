@@ -19,7 +19,7 @@ import { registerAdapter } from "../../src/control-plane/adapters"
 import { WorkspaceV2 } from "@vectordevai/core/workspace"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { PtyTicket } from "@vectordevai/core/pty/ticket"
-import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { FreeModelGuests, GUEST_REQUEST_HEADER } from "@vectordevai/core/free-model-guests"
 import type { WorkspaceAdapter } from "../../src/control-plane/types"
 import { Workspace } from "../../src/control-plane/workspace"
 import { WorkspaceTable } from "@vectordevai/core/control-plane/workspace.sql"
@@ -267,6 +267,72 @@ const serveProbe = HttpApiBuilder.layer(ProbeApi).pipe(
 )
 
 describe("HttpApi workspace routing middleware", () => {
+  it.live("a guest's request forwarded to a remote workspace says it is a guest's", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const project = yield* Project.use.fromDirectory(dir)
+      const forwarded: (string | undefined)[] = []
+      const remoteUrl = yield* startRemoteWorkspaceHttpServer((request) => {
+        forwarded.push(request.headers[GUEST_REQUEST_HEADER])
+        return HttpServerResponse.json(true)
+      })
+      const workspace = yield* createRemoteWorkspace({
+        dir,
+        projectID: project.project.id,
+        type: "remote-guest-marker",
+        url: `${remoteUrl}/base`,
+        headers: { authorization: "Basic remote-owner-placeholder" },
+      })
+      // The remote engine authenticates the request as its owner, so only this header tells it a guest sent it, and
+      // it keeps that session off free models that may train (FreeModelGuests).
+      const api = HttpApi.make("guest-marker-probe").add(
+        HttpApiGroup.make("session")
+          .add(
+            HttpApiEndpoint.post("prompt", "/session/:sessionID/message", {
+              params: Schema.Struct({ sessionID: SessionID }),
+              query: WorkspaceRoutingQuery,
+              success: Schema.Boolean,
+            }),
+          )
+          .middleware(WorkspaceRoutingMiddleware),
+      )
+      yield* HttpApiBuilder.layer(api).pipe(
+        Layer.provide(
+          HttpApiBuilder.group(api, "session", (handlers) => handlers.handle("prompt", () => Effect.succeed(false))),
+        ),
+        Layer.provide(workspaceRoutingTestLayer),
+        Layer.provide(
+          Layer.mock(Session.Service)({
+            get: (id) =>
+              Effect.succeed({
+                id,
+                slug: "fixture",
+                title: "Fixture session",
+                version: "test",
+                projectID: project.project.id,
+                directory: workspace.directory!,
+                workspaceID: workspace.id,
+                time: { created: 1, updated: 1 },
+              }),
+          }),
+        ),
+        HttpRouter.provideRequest(
+          Layer.succeed(RequestPrincipal, {
+            kind: "guest",
+            username: "guest",
+            workspaceIDs: new Set([workspace.id]),
+            workspaceDirectories: new Map([[workspace.id, workspace.directory!]]),
+            sessionIDs: new Set(["ses_shared"]),
+          }),
+        ),
+        HttpRouter.serve,
+        Layer.build,
+      )
+      expect((yield* HttpClientRequest.post("/session/ses_shared/message").pipe(HttpClient.execute)).status).toBe(200)
+      expect(forwarded).toEqual(["1"])
+    }),
+  )
+
   it.live("checks task-control ownership before forwarding with remote owner credentials", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })
@@ -457,6 +523,8 @@ describe("HttpApi workspace routing middleware", () => {
       expect(forwarded?.headers["x-target-auth"]).toBe("secret")
       expect(forwarded?.headers["x-vector-directory"]).toBeUndefined()
       expect(forwarded?.headers["x-vector-workspace"]).toBeUndefined()
+      // The owner's own request is not marked as a guest's.
+      expect(forwarded?.headers[GUEST_REQUEST_HEADER]).toBeUndefined()
     }),
   )
 

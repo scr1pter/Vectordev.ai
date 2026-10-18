@@ -14,7 +14,7 @@ import {
 } from "@/server/shared/workspace-routing"
 import { NotFoundError } from "@/storage/storage"
 import { Flag } from "@vectordevai/core/flag/flag"
-import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { FreeModelGuests, GUEST_REQUEST_HEADER } from "@vectordevai/core/free-model-guests"
 import { SessionID } from "@vectordevai/schema/session-id"
 import { Context, Data, Effect, Layer, Option, Schema } from "effect"
 import { HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -310,7 +310,18 @@ function routeWorkspace<E>(
           ),
         ),
       MissingWorkspace: ({ workspaceID }) => Effect.succeed(missingWorkspaceResponse(workspaceID)),
-      Remote: ({ request, workspace, target, url, path }) => proxyRemote(client, request, workspace, target, url, path),
+      // The remote engine sees the owner's credentials, so a guest's request says it is a guest's.
+      Remote: ({ request, workspace, target, url, path }) =>
+        proxyRemote(
+          client,
+          request,
+          workspace,
+          principal.kind === "guest"
+            ? { ...target, headers: [...new Headers(target.headers).entries(), [GUEST_REQUEST_HEADER, "1"]] }
+            : target,
+          url,
+          path,
+        ),
       Local: ({ directory, workspaceID, sessionID }) =>
         guestInput.pipe(
           Effect.andThen(
@@ -395,7 +406,7 @@ function routeHttpApiWorkspace<E>(
     // only once the guest is allowed in the session.
     const guestSession = Schema.decodeUnknownOption(SessionID)(sessionID)
     const guestInput =
-      principal.kind === "guest" &&
+      (principal.kind === "guest" || request.headers[GUEST_REQUEST_HEADER] === "1") &&
       request.method !== "GET" &&
       request.method !== "HEAD" &&
       Option.isSome(guestSession)

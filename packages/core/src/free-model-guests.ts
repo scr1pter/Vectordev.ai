@@ -25,6 +25,13 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@vector/FreeModelGuests") {}
 
+/**
+ * Sent with a guest's request that an engine forwards to a remote workspace, which it authenticates with the owner's
+ * credentials there. The remote engine marks the session as it would for the guest. Anyone may send it, since it can
+ * only take models away from a session.
+ */
+export const GUEST_REQUEST_HEADER = "x-vector-guest-request"
+
 const Marks = Schema.fromJsonString(Schema.Struct({ version: Schema.Literal(1), sessions: Schema.Array(SessionID) }))
 
 // Deeper than any subagent chain the engine starts; a longer one is treated as ending there.
