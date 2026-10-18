@@ -10,7 +10,7 @@ export type FreeModelChoice = {
 export const FREE_MODELS_TITLE = "Free models inside of Vector"
 /** How the no-training providers behind Free models inside of Vector treat request content. */
 export const FREE_MODELS_DATA_POLICY =
-  "Not zero data retention: no-training providers may keep prompts and outputs under their own policies. Every request to them asks that they are not used for training."
+  "Vector doesn't request zero data retention for these models, so their providers may keep prompts and outputs under their own policies. Every request to a no-training model asks that they are not used for training."
 /** The short label on every free model whose provider may train on prompts, or whose policy Vector has not reviewed. */
 export const FREE_MODEL_TRAINING_LABEL = "May train on your prompts"
 export const FREE_MODEL_TRAINING_DISCLAIMER =

@@ -50,7 +50,7 @@ test("quota notices accept only typed limits and never repeat upstream text", ()
 test("the section is branded Free models inside of Vector", () => {
   expect(FREE_MODELS_TITLE).toBe("Free models inside of Vector")
   // Owner rule: the no-training copy never claims zero data retention or absolute privacy.
-  expect(FREE_MODELS_DATA_POLICY).toContain("Not zero data retention")
+  expect(FREE_MODELS_DATA_POLICY).toContain("Vector doesn't request zero data retention for these models")
   expect(`${FREE_MODELS_DATA_POLICY} ${FREE_MODEL_TRAINING_DISCLAIMER}`).not.toMatch(
     /absolute privacy|exactly|never exceeds/i,
   )

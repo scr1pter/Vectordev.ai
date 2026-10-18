@@ -28,9 +28,9 @@ describe("free model policy notice", () => {
     expect(firstFreeModelPolicyNotice(() => undefined)).toBe(true)
   })
 
-  test("says the providers are not zero data retention and that may-train models ask first", () => {
+  test("says Vector does not request zero data retention and that may-train models ask first", () => {
     expect(FREE_MODEL_POLICY_NOTICE.title).toBe("How Free models inside of Vector handle your data")
-    expect(FREE_MODEL_POLICY_NOTICE.description).toContain("Not zero data retention")
+    expect(FREE_MODEL_POLICY_NOTICE.description).toContain("Vector doesn't request zero data retention")
     expect(FREE_MODEL_POLICY_NOTICE.description).toContain('"May train on your prompts" ask before your first prompt')
   })
 })

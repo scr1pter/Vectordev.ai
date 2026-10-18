@@ -76,8 +76,9 @@ export const prerender = true
             a paid model or provider. <a href="https://openrouter.ai/docs/api_reference/limits">Check OpenRouter's current limits.</a>
           </p>
           <p>
-            Prompts are processed by OpenRouter and the selected model provider. None of these models is zero data
-            retention: providers may keep prompts and outputs under their own policies. Your OpenRouter account's
+            Prompts are processed by OpenRouter and the selected model provider. Vector does not request zero data
+            retention for these models: most of their providers keep prompts and outputs under their own policies,
+            and OpenRouter records Phala, which serves Xing4.0, as keeping none. Your OpenRouter account's
             privacy settings decide whether models that may train are listed for you at all; if they are hidden,
             allow free models from providers that may train on your data in OpenRouter's privacy settings, or choose
             a no-training model. The policies rely on the providers' published terms and OpenRouter's records, not an

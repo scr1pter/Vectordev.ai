@@ -1003,7 +1003,7 @@ describe("included model data notice", () => {
 
     await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
     expect(notices()).toHaveLength(1)
-    expect(notices()[0]?.description).toContain("Not zero data retention")
+    expect(notices()[0]?.description).toContain("Vector doesn't request zero data retention")
     await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
     expect(notices()).toHaveLength(1)
   })

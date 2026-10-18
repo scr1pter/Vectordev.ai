@@ -80,4 +80,4 @@ For hosted activation, set the Vector account/token and persistent Redis configu
 
 A client caches the catalog in `free-models-v2.json`. When vectordev.ai answers with a refusal such as 503, the client treats the shared catalog as off instead of listing models whose prompts would fail. A network failure keeps the last catalog it served. When the catalog later turns on, the engine rebuilds its provider list without a restart.
 
-Prompts pass through OpenRouter and the selected provider. None of these endpoints is zero data retention. The routing rules cover the model requests only, not Vector's local history, OpenRouter account logging or other connected services.
+Prompts pass through OpenRouter and the selected provider. Vector does not request zero data retention for these endpoints. Most keep prompts under their own policy; OpenRouter records Phala's Xing4.0 endpoint as keeping none. The routing rules cover the model requests only, not Vector's local history, OpenRouter account logging or other connected services.

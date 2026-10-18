@@ -7,7 +7,7 @@ The privacy policy (`packages/web/src/pages/legal/privacy.astro`, section `#incl
 ## Claims the copy makes, and must keep making
 
 - Vector itself never trains on prompts, code or outputs (privacy `#training`). Never write that prompts stay private "no matter which model", or promise complete privacy.
-- None of these models is zero data retention. Each provider keeps prompts and outputs under its own policy.
+- Vector does not request zero data retention for these models. Most of their providers keep prompts and outputs under their own policies; OpenRouter records Phala's Xing4.0 endpoint as keeping none, so the copy must not claim that no provider here offers zero data retention.
 - No-training models: their providers do not train on prompts according to OpenRouter's records, and each request asks OpenRouter to deny data collection. This relies on published policies and OpenRouter's records, not an independent audit.
 - Models labelled "May train on your prompts" may have prompts, code and outputs logged and used for training by their providers, or have not been reviewed yet. Vector asks once before the first prompt and sends nothing until the user accepts. Earlier versions are offered no-training models only.
 - Vector leaves out free models whose terms bar this use (NVIDIA's trial endpoints).
