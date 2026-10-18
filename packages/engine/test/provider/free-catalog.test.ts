@@ -114,12 +114,17 @@ it.instance(
       const provider = yield* Provider.Service
       served.catalog = { enabled: true, updatedAt: 1, models: [laguna, ...FREE_MODEL_FALLBACKS] }
       yield* Effect.promise(() => client.catalog(true))
-      const vector = yield* pollWithTimeout(
-        provider.list().pipe(Effect.map((providers) => providers[ProviderV2.ID.vector])),
-        "the free catalog was never listed",
+      // Waits for state built from this catalog, not an earlier one with another order.
+      yield* pollWithTimeout(
+        provider.list().pipe(
+          Effect.map((providers) => {
+            const vector = providers[ProviderV2.ID.vector]
+            return vector && Object.keys(vector.models)[0] === laguna.id ? vector : undefined
+          }),
+        ),
+        "the free catalog was never listed with the may-train model first",
         "3 seconds",
       )
-      expect(Object.keys(vector.models)[0]).toBe(laguna.id)
       expect((yield* provider.getSmallModel(ProviderV2.ID.vector))?.id).toBe(
         ModelV2.ID.make(FREE_MODEL_FALLBACKS[0].id),
       )
