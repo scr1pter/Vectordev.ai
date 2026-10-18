@@ -4,7 +4,7 @@ import {
   FREE_MODELS_CATALOG_KEY,
   refreshFreeModelCatalog,
 } from "../../../api/_lib/free-models-catalog"
-import { freeModelInfo } from "../../core/src/free-model-catalog"
+import { freeModelDataPolicy, freeModelInfo } from "../../core/src/free-model-catalog"
 
 // Runs without Redis or Valkey, unlike free-models-api.test.ts: an in-memory stand-in for the Upstash REST store
 // answers GET and SET, and OpenRouter answers from its public data captured on 17 October 2026.
@@ -88,4 +88,14 @@ test("a stored catalog that lists Gemma or Xing4.0 is served without them", asyn
     updatedAt: fixture.capturedAt,
     models: [],
   })
+})
+
+test("the owner's refresh instructions expect the counts the refresh gives", async () => {
+  // docs/vector/owner-actions/openrouter.md, step 8: an owner reads a correct answer as a failure otherwise.
+  const steps = await Bun.file(new URL("../../../docs/vector/owner-actions/openrouter.md", import.meta.url)).text()
+  const refreshed = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
+  const noTraining = refreshed.models.filter((model) => freeModelDataPolicy(model) === "no-training")
+  expect(steps).toContain(`{"enabled":true,"count":${refreshed.models.length}}`)
+  // With may-train endpoints blocked on the account, its own model list leaves only the no-training ones.
+  expect(steps).toContain(`With step 1 off, expect \`count: ${noTraining.length}\``)
 })

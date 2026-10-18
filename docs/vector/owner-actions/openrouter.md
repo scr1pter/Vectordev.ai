@@ -18,14 +18,14 @@ In the OpenRouter account behind `OPENROUTER_FREE_API_KEY`, at [openrouter.ai/se
 2. **Paid models: allow providers that may train — keep OFF.** Codium is paid and must not change.
 3. **Providers that may publish prompts — keep OFF.** No free endpoint publishes prompts today, and the consent covers training, not publication.
 4. **"ZDR endpoints only" — keep OFF.** With it on, every free model is refused (`{"enabled":false,"count":0}`). Codium already sends `zdr: true` on each request, so it does not need the account-wide setting.
-5. **Ignored and allowed providers.** Do not ignore `cohere`, `atlas-cloud`, `google-ai-studio`, `phala`, `poolside`, `liquid` or `thinkingmachines`. If the account has an allowed-providers list, it must include all of them; OpenRouter answers 404 when the account list and a request's `only` list do not overlap.
+5. **Ignored and allowed providers.** Do not ignore `cohere`, `atlas-cloud`, `poolside`, `liquid` or `thinkingmachines`. If the account has an allowed-providers list, it must include all of them; OpenRouter answers 404 when the account list and a request's `only` list do not overlap. `google-ai-studio` (Gemma) and `phala` (Xing4.0) serve only users' own accounts, so this account does not need them.
 6. **Prompt logging and OpenRouter's own use of inputs — keep OFF.**
 7. Keep the account free of paid upstream BYOK keys and paid plugins. Whether to buy $10 of credits (1,000 free requests a day instead of 50) is your decision; Vector's guards still send `max_price: 0` either way.
 
 Then, after this branch deploys:
 
 8. **Run the refresh.** In Vercel open the project → Settings → Cron Jobs → **Run** on `/api/free-models/refresh`, or send `GET https://vectordev.ai/api/free-models/refresh` with `Authorization: Bearer <CRON_SECRET>`. The answer says which case you are in:
-   - `{"enabled":true,"count":10}` (or fewer as models come and go): working. With step 1 off, expect `count: 5`, the no-training models only.
+   - `{"enabled":true,"count":7}` (or fewer as models come and go): working. On the 17 October 2026 snapshot those are North Mini Code and Dots3-Note Preview (no training) and Laguna S 2.1, Laguna XS 2.1, LFM2.5-2.6B, Inkling and Inkling Small (may train). Gemma 4 and Xing4.0 are never counted: they are offered only through users' own OpenRouter accounts (`PERSONAL_ONLY_FREE_MODELS`). With step 1 off, expect `count: 2`, the two no-training models only.
    - `{"enabled":false,"count":0}`: OpenRouter's account list allows nothing; recheck steps 1, 4 and 5.
    - 503 `FREE_MODELS_CATALOG_UNAVAILABLE`: an OpenRouter read failed, probably a bad or revoked `OPENROUTER_FREE_API_KEY`.
    - 503 `PERSISTENT_STORE_UNAVAILABLE`: the key-value store is unavailable.
