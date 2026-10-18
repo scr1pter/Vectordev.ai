@@ -32,9 +32,12 @@ test("a personal account gets every free model its settings allow, each with its
     ["poolside/laguna-xs-2.1:free", ["poolside/fp8:may-train"]],
     ["xingchen-agi/xing4.0-29b-a4b:free", ["phala:no-training"]],
     ["cohere/north-mini-code:free", ["cohere:no-training"]],
+    // OpenRouter's Free Models Router, which picks a free model at random, so it is labelled as one that may train.
+    ["openrouter/free", ["openrouter:may-train"]],
     ["liquid/lfm-2.5-2.6b:free", ["liquid/fp8:may-train"]],
   ])
-  // NVIDIA's trial endpoints are barred and never looked up; neither are router aliases or per-item priced models.
+  // NVIDIA's trial endpoints are barred and never looked up; neither are per-item priced models, nor the free router,
+  // which has no endpoint list of its own.
   expect(
     requests
       .slice(1)

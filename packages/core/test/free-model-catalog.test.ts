@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { MAY_TRAIN_RETENTION, UNREVIEWED_RETENTION } from "@vectordevai/schema/free-model"
+import { FREE_ROUTER_RETENTION, MAY_TRAIN_RETENTION, UNREVIEWED_RETENTION } from "@vectordevai/schema/free-model"
 import {
   FREE_MODEL_POLICY_REVIEWED,
   REVIEWED_FREE_ENDPOINTS,
@@ -8,10 +8,12 @@ import {
   freeEndpointPolicy,
   freeModelDataPolicy,
   freeModelInfo,
+  isFreeModelID,
   isOpenRouterURL,
   offeredFreeModel,
   personalOnlyFreeModel,
   sendsToOpenRouterFree,
+  zeroFreeModelPricing,
 } from "../src/free-model-catalog"
 
 // Every free OpenRouter model and endpoint, captured from the public API on 17 October 2026.
@@ -33,11 +35,28 @@ test("every free model of 17 October 2026 is offered except NVIDIA's trial endpo
     "google/gemma-4-26b-a4b-it:free",
     "google/gemma-4-31b-it:free",
     "liquid/lfm-2.5-2.6b:free",
+    "openrouter/free",
     "poolside/laguna-s-2.1:free",
     "poolside/laguna-xs-2.1:free",
     "thinkingmachines/inkling-small:free",
     "thinkingmachines/inkling:free",
     "xingchen-agi/xing4.0-29b-a4b:free",
+  ])
+  // The owner's count of 17 October 2026: 19 zero-price IDs, the router included. Each one not offered is NVIDIA's,
+  // barred by its terms, or a Google Lyria model, which charges per song or clip and has no tools.
+  const zeroPrice = fixture.models
+    .filter((item: typeof cohere) => zeroFreeModelPricing(item.pricing))
+    .map((item: { id: string }) => item.id)
+  expect(zeroPrice).toHaveLength(19)
+  expect(zeroPrice.filter((id: string) => !offered.includes(id)).sort()).toEqual([
+    "google/lyria-3-clip-preview",
+    "google/lyria-3-pro-preview",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "nvidia/nemotron-3.5-content-safety:free",
+    "nvidia/nemotron-3.5-lightning:free",
+    "nvidia/nemotron-3.5-super-vl:free",
   ])
   // Each offered model is in the reviewed record, so none of today's models is unreviewed.
   expect(offered.every((id: string) => REVIEWED_FREE_ENDPOINTS.has(id))).toBe(true)
@@ -45,9 +64,45 @@ test("every free model of 17 October 2026 is offered except NVIDIA's trial endpo
   for (const item of fixture.models.filter((model: { id: string }) => model.id.startsWith("nvidia/")))
     expect(barredFreeModel(item.id)).toContain("NVIDIA's API Trial Terms")
   expect(offered.some((id: string) => barredFreeModel(id))).toBe(false)
-  // Router aliases and items priced per song or clip never qualify.
-  for (const id of ["openrouter/free", "google/lyria-3-pro-preview", "google/lyria-3-clip-preview"])
+  // Items priced per song or clip never qualify, nor does any router but the free one.
+  for (const id of ["google/lyria-3-pro-preview", "google/lyria-3-clip-preview"])
     expect(eligibleFreeModel(metadata(id), fixture.capturedAt)).toBe(false)
+  for (const id of ["openrouter/auto", "openrouter/free:nitro", "OpenRouter/free", " openrouter/free"])
+    expect(isFreeModelID(id)).toBe(false)
+  expect(isFreeModelID("openrouter/free")).toBe(true)
+})
+
+test("OpenRouter's Free Models Router is offered as one that may train, with no providers to name", () => {
+  // It lists no endpoints: it picks a free model at random for each request.
+  expect(fixture.endpoints["openrouter/free"]).toEqual([])
+  const router = info("openrouter/free", true)
+  expect(router).toEqual({
+    id: "openrouter/free",
+    name: "Free Models Router",
+    contextLength: 200000,
+    // No output limit is published; 8,192 fits every tool-capable free model of 17 October 2026.
+    maxOutputTokens: 8192,
+    providers: [{ id: "openrouter", name: "OpenRouter", retention: FREE_ROUTER_RETENTION, dataPolicy: "may-train" }],
+  })
+  expect(freeModelDataPolicy(router!)).toBe("may-train")
+  expect(personalOnlyFreeModel("openrouter/free")).toBeUndefined()
+  expect(barredFreeModel("openrouter/free")).toBeUndefined()
+  // A priced or tool-less listing would not qualify.
+  const listing = metadata("openrouter/free")
+  expect(
+    freeModelInfo({ ...listing, pricing: { prompt: "0.000001", completion: "0" } }, [], { reviewedOnly: true }),
+  ).toBeUndefined()
+  expect(
+    freeModelInfo({ ...listing, supported_parameters: ["tool_choice"] }, [], { reviewedOnly: true }),
+  ).toBeUndefined()
+  // Every tool-capable free endpoint of that day accepts a reply of the router's length.
+  const limits = Object.values(
+    fixture.endpoints as Record<string, { max_completion_tokens: number | null; supported_parameters: string[] }[]>,
+  )
+    .flat()
+    .filter((item) => item.supported_parameters.includes("tools"))
+    .map((item) => item.max_completion_tokens ?? Infinity)
+  expect(Math.min(...limits)).toBe(router!.maxOutputTokens)
 })
 
 test("each endpoint carries its reviewed policy, and today's may-train providers are labelled as such", () => {
@@ -65,6 +120,7 @@ test("each endpoint carries its reviewed policy, and today's may-train providers
     "liquid/lfm-2.5-2.6b:free": ["may-train"],
     "thinkingmachines/inkling:free": ["may-train"],
     "thinkingmachines/inkling-small:free": ["may-train"],
+    "openrouter/free": ["may-train"],
   })
   expect(info("poolside/laguna-s-2.1:free")?.providers).toEqual([
     { id: "poolside/fp4", name: "Poolside", retention: MAY_TRAIN_RETENTION, dataPolicy: "may-train" },
@@ -87,17 +143,16 @@ test("each endpoint carries its reviewed policy, and today's may-train providers
   expect(JSON.stringify(info("cohere/north-mini-code:free"))).not.toMatch(/zero data retention|\bZDR\b/i)
 })
 
-test("Gemma and Xing4.0 are offered through the user's own account only, with the reason, and no other model is", () => {
+test("only Gemma is offered through the user's own account alone, with the reason", () => {
   // The shared allowance cannot apply the EEA, Swiss and UK limit in Google's Gemini API terms.
   for (const id of ["google/gemma-4-26b-a4b-it:free", "google/gemma-4-31b-it:free"]) {
     expect(personalOnlyFreeModel(id)).toContain("Paid Services")
     expect(offeredFreeModel(metadata(id), fixture.capturedAt)).toBe(true)
   }
-  // RedPill's terms, under which Phala serves Xing4.0, do not say whether its free use may be shared.
-  expect(personalOnlyFreeModel("xingchen-agi/xing4.0-29b-a4b:free")).toContain("RedPill")
-  expect(offeredFreeModel(metadata("xingchen-agi/xing4.0-29b-a4b:free"), fixture.capturedAt)).toBe(true)
+  // The owner's decision of 17 October 2026: every free model belongs on the shared allowance unless its terms bar
+  // it. RedPill's terms, under which Phala serves Xing4.0, do not address free use, which is not a bar.
+  expect(personalOnlyFreeModel("xingchen-agi/xing4.0-29b-a4b:free")).toBeUndefined()
   expect([...REVIEWED_FREE_ENDPOINTS.keys()].filter((id) => personalOnlyFreeModel(id))).toEqual([
-    "xingchen-agi/xing4.0-29b-a4b:free",
     "google/gemma-4-26b-a4b-it:free",
     "google/gemma-4-31b-it:free",
   ])

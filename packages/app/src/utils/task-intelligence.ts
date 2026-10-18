@@ -1,5 +1,6 @@
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { freeModelMayTrain, type FreeModelChoice } from "@vectordevai/core/free-model-choice"
+import { isFreeModelRef } from "@vectordevai/schema/free-model"
 
 export type TaskDifficulty = "trivial" | "simple" | "standard" | "complex"
 
@@ -37,7 +38,7 @@ export function isFreeModelSelection(model: RoutableModel) {
   return (
     model.provider.id === "vector" ||
     !!model.freeModel ||
-    (model.provider.id === "openrouter" && model.id.toLowerCase().endsWith(":free"))
+    isFreeModelRef({ providerID: model.provider.id, modelID: model.id })
   )
 }
 

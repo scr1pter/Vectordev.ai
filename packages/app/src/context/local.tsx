@@ -1,6 +1,6 @@
 import { unavailableModel } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
-import { retainFreeModelSelection } from "@vectordevai/schema/free-model"
+import { isFreeModelRef, retainFreeModelSelection } from "@vectordevai/schema/free-model"
 import { useLanguage } from "./language"
 import { showToast } from "@/utils/toast"
 import { takeProviderNotice } from "@/utils/provider-notices"
@@ -122,8 +122,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         : model
     }
 
-    const freeSelection = (model: ModelKey) =>
-      ["vector", "openrouter"].includes(model.providerID) && model.modelID.toLowerCase().endsWith(":free")
+    const freeSelection = (model: ModelKey) => isFreeModelRef(model)
 
     // Saved choices follow a provider rename, so they keep working with their carried-over credential.
     const firstModel = (...items: Array<() => ModelKey | undefined>) => {

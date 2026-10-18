@@ -26,6 +26,7 @@ import {
   freeModelDataPolicy,
   freeModelInfo,
   isFreeModelID,
+  isFreeRouter,
   offeredFreeModel,
 } from "./free-model-catalog"
 import { FREE_MODEL_TRAINING_BLOCKED, FREE_MODEL_UNLISTED, FREE_MODEL_UNREVIEWED_BLOCKED } from "./free-model-choice"
@@ -175,8 +176,11 @@ export function createClient(
     // The user's own account lists every free model it can route under its privacy settings, including ones Vector
     // has not reviewed yet. Each endpoint carries its reviewed policy, or "unreviewed", which is disclosed as one
     // that may train; the account's own settings decide whether may-train endpoints are listed at all.
+    // The free router has no endpoint list of its own.
     const endpoints = await Promise.all(
-      candidates.map((model) => read(`${OPENROUTER_ROOT}/models/${model.id}/endpoints`, EndpointList)),
+      candidates.map((model) =>
+        isFreeRouter(model.id) ? undefined : read(`${OPENROUTER_ROOT}/models/${model.id}/endpoints`, EndpointList),
+      ),
     )
     // A rejected key must never revive stale models.
     if (!available) {

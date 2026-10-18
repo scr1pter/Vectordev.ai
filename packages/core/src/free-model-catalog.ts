@@ -2,11 +2,16 @@ import { Option, Schema } from "effect"
 // A relative path, not the package name: vectordev.ai's API functions load this file on Vercel's Node runtime, where the
 // package name resolves to Schema's TypeScript source inside node_modules, which Node will not load.
 import {
+  FREE_ROUTER_ID,
+  FREE_ROUTER_RETENTION,
   MAY_TRAIN_RETENTION,
   UNREVIEWED_RETENTION,
   type FreeDataPolicy,
   type FreeModelInfo,
 } from "../../schema/src/free-model.js"
+
+// Server code reaches Schema through Core.
+export { isFreeModelRef } from "../../schema/src/free-model.js"
 
 export const FreeModelMetadata = Schema.Struct({
   id: Schema.String,
@@ -79,6 +84,9 @@ export const REVIEWED_FREE_ENDPOINTS: ReadonlyMap<
     "thinkingmachines/inkling-small:free",
     { thinkingmachines: { policy: "may-train", retention: MAY_TRAIN_RETENTION } },
   ],
+  // OpenRouter's Free Models Router lists no endpoints of its own: it picks a free model at random for each request,
+  // so it is as private as the least private free model, and is labelled as one that may train.
+  [FREE_ROUTER_ID, { openrouter: { policy: "may-train", retention: FREE_ROUTER_RETENTION } }],
 ])
 
 // The only free models Vector leaves out are those whose terms bar Vector's use. NVIDIA's free endpoints run under the
@@ -88,22 +96,29 @@ export const REVIEWED_FREE_ENDPOINTS: ReadonlyMap<
 const BARRED_FREE_AUTHORS = [
   {
     author: /^nvidia\//i,
+    provider: "nvidia",
     reason: "NVIDIA's API Trial Terms limit its free endpoints to evaluation and bar production use.",
   },
 ]
 
+/**
+ * The provider slugs of barred free endpoints. A request to the free router asks OpenRouter to skip them, since the
+ * router may pick any free model; OpenRouter does not document whether a router honours that, so the router is
+ * offered only behind the "May train on your prompts" notice.
+ */
+export const BARRED_FREE_PROVIDERS = BARRED_FREE_AUTHORS.map((item) => item.provider)
+
 // Free models offered only through the user's own OpenRouter account, never on Vector's shared allowance, because a
-// term applies that the shared allowance cannot meet, or the terms do not say whether Vector may share it. Clients
-// before 1.99.109 see only the shared catalog, so they never receive these either. Whether to serve either on the
-// shared allowance is an open owner decision; see docs/vector/owner-actions/free-models-legal.md.
+// term applies that the shared allowance cannot meet. Clients before 1.99.109 see only the shared catalog, so they
+// never receive these either. Serving Gemma there needs the region limit in Google's terms applied, or a finding that
+// it does not apply; see docs/vector/owner-actions/free-models-legal.md.
 const GEMMA_SHARED =
   "Google's Gemini API terms (28 April 2026) let EEA, Swiss and UK users use it only through Paid Services, and the shared allowance does not check where its users are."
-const XING_SHARED =
-  "Phala serves it under RedPill's terms (7 April 2025), which do not address free use, so whether Vector may share it with its users is not settled."
+// Xing4.0 was here until 17 October 2026, when the owner decided every free model belongs on the shared allowance
+// unless its terms bar it: RedPill's terms, under which Phala serves it, do not address free use, which is not a bar.
 const PERSONAL_ONLY_FREE_MODELS: ReadonlyMap<string, string> = new Map([
   ["google/gemma-4-26b-a4b-it:free", GEMMA_SHARED],
   ["google/gemma-4-31b-it:free", GEMMA_SHARED],
-  ["xingchen-agi/xing4.0-29b-a4b:free", XING_SHARED],
 ])
 
 /** Why a free model is kept off Vector's shared allowance, when it is offered through the user's own account only. */
@@ -111,9 +126,18 @@ export function personalOnlyFreeModel(id: string) {
   return PERSONAL_ONLY_FREE_MODELS.get(id)
 }
 
-// Router aliases and stacked variants can introduce paid routing or services.
+// Router aliases and stacked variants can introduce paid routing or services. The one router allowed is OpenRouter's
+// Free Models Router, which picks only free models and is held to a zero max_price like every other free request.
 export function isFreeModelID(id: string) {
-  return id.trim() === id && /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*:free$/i.test(id) && !/^openrouter\//i.test(id)
+  return (
+    isFreeRouter(id) ||
+    (id.trim() === id && /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*:free$/i.test(id) && !/^openrouter\//i.test(id))
+  )
+}
+
+/** OpenRouter's Free Models Router, exactly as OpenRouter lists it. */
+export function isFreeRouter(id: string) {
+  return id === FREE_ROUTER_ID
 }
 
 /**
@@ -224,6 +248,7 @@ export function freeModelInfo(
   endpoints: readonly unknown[],
   selection: { reviewedOnly: boolean },
 ): FreeModelInfo | undefined {
+  if (isFreeRouter(model.id)) return freeRouterInfo(model)
   const eligible = endpoints.flatMap((item) => {
     const parsed = Schema.decodeUnknownOption(FreeEndpointMetadata)(item)
     if (Option.isNone(parsed)) return []
@@ -269,5 +294,35 @@ export function freeModelInfo(
         REVIEWED_FREE_ENDPOINTS.get(model.id)?.[endpoint.tag.split("/")[0] ?? ""]?.retention ?? UNREVIEWED_RETENTION,
       dataPolicy,
     })),
+  }
+}
+
+// OpenRouter publishes no output limit for the router. 8,192 tokens is the smallest limit of any tool-capable free
+// model on 17 October 2026 (Liquid's LFM2.5-2.6B), so a reply this long fits whichever model the router picks.
+const FREE_ROUTER_MAX_OUTPUT_TOKENS = 8192
+
+/** The Free Models Router has no endpoint list; its price and parameters come from its own listing. */
+function freeRouterInfo(model: typeof FreeModelMetadata.Type): FreeModelInfo | undefined {
+  if (
+    !zeroFreeModelPricing(model.pricing) ||
+    !model.supported_parameters.includes("tools") ||
+    !Number.isSafeInteger(model.context_length) ||
+    model.context_length < 1
+  )
+    return
+  return {
+    id: model.id,
+    name: model.name,
+    contextLength: model.context_length,
+    maxOutputTokens: Math.min(model.context_length, FREE_ROUTER_MAX_OUTPUT_TOKENS),
+    ...(model.supported_parameters.includes("tool_choice") ? {} : { toolChoice: false }),
+    providers: [
+      {
+        id: "openrouter",
+        name: "OpenRouter",
+        retention: FREE_ROUTER_RETENTION,
+        dataPolicy: "may-train",
+      },
+    ],
   }
 }

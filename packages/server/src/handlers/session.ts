@@ -3,7 +3,7 @@ import { Catalog } from "@vectordevai/core/catalog"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { FREE_MODEL_TRAINING_OWNER_ONLY } from "@vectordevai/core/free-model-choice"
-import { freeModelDataPolicy } from "@vectordevai/core/free-model-catalog"
+import { freeModelDataPolicy, isFreeModelRef } from "@vectordevai/core/free-model-catalog"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { Location } from "@vectordevai/core/location"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
@@ -568,8 +568,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
 const refuseTrainingFreeModel = Effect.fn("SessionHandler.refuseTrainingFreeModel")(function* (
   model: { readonly providerID: string; readonly id: string } | undefined,
 ) {
-  if (!model || !["vector", "openrouter"].includes(model.providerID) || !model.id.toLowerCase().endsWith(":free"))
-    return
+  if (!model || !isFreeModelRef({ providerID: model.providerID, modelID: model.id })) return
   const freeModels = yield* FreeModels.Service
   const catalog = yield* Catalog.Service
   const shared = yield* freeModels.catalog()

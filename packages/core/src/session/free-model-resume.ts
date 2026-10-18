@@ -13,6 +13,7 @@ import { SessionInput } from "./input"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
 import { SessionStore } from "./store"
+import { isFreeModelRef } from "@vectordevai/schema/free-model"
 
 export const Input = Schema.Struct({ sessionID: SessionSchema.ID, messageID: SessionMessage.ID, modelID: ModelV2.ID })
 export type Input = typeof Input.Type
@@ -50,8 +51,7 @@ export const node = makeLocationNode({
               latest.id !== input.messageID ||
               latest.error?.type !== "free_models_limit" ||
               latest.model.id !== input.modelID ||
-              !["vector", "openrouter"].includes(latest.model.providerID) ||
-              !input.modelID.endsWith(":free") ||
+              !isFreeModelRef({ providerID: latest.model.providerID, modelID: input.modelID }) ||
               (session.model &&
                 (session.model.id !== input.modelID || !["vector", "openrouter"].includes(session.model.providerID))) ||
               history.some(

@@ -74,6 +74,8 @@ export const NO_TRAINING_RETENTION =
   "May keep prompts and outputs under its own policy. Vector requests that they are not used for training."
 export const MAY_TRAIN_RETENTION =
   "This provider may log your prompts, code and outputs and use them to train its models."
+export const FREE_ROUTER_RETENTION =
+  "OpenRouter sends each request to a free model it picks at random, and that model's provider may log your prompts, code and outputs and use them to train its models."
 export const UNREVIEWED_RETENTION =
   "Vector has not reviewed this provider's data policy yet, so it is treated as one that may train on your prompts."
 
@@ -98,11 +100,19 @@ export const FREE_MODEL_FALLBACKS: readonly FreeModelInfo[] = [
   },
 ]
 
+/** OpenRouter's Free Models Router: zero price, and it sends each request to a free model it picks at random. */
+export const FREE_ROUTER_ID = "openrouter/free"
+
+/** Whether a Vector or OpenRouter model ID names free endpoints: a `:free` variant or OpenRouter's free router. */
+export function isFreeModelRef(model: { providerID: string; modelID: string }) {
+  const id = model.modelID.toLowerCase()
+  return ["vector", "openrouter"].includes(model.providerID) && (id.endsWith(":free") || id === FREE_ROUTER_ID)
+}
+
 // Price metadata and the explicit free variant must agree; an unpriced model is not free.
 export function isFreeModel(model: { providerID: string; id: string; cost?: { input: number; output: number } }) {
   return (
-    (model.providerID === "vector" || model.providerID === "openrouter") &&
-    model.id.toLowerCase().endsWith(":free") &&
+    isFreeModelRef({ providerID: model.providerID, modelID: model.id }) &&
     model.cost?.input === 0 &&
     model.cost.output === 0
   )
@@ -111,9 +121,7 @@ export function isFreeModel(model: { providerID: string; id: string; cost?: { in
 // Changing agents is not consent to change a free model into a paid one. Retain
 // the selection even if discovery no longer offers it; the transport will refuse it.
 export function retainFreeModelSelection<T extends { providerID: string; modelID: string }>(model: T | undefined) {
-  return model && ["vector", "openrouter"].includes(model.providerID) && model.modelID.toLowerCase().endsWith(":free")
-    ? model
-    : undefined
+  return model && isFreeModelRef(model) ? model : undefined
 }
 
 /**

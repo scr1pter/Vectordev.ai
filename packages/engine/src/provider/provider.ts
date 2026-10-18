@@ -9,7 +9,13 @@ import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { SessionID } from "@vectordevai/schema/session-id"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
-import { FreeDataPolicy, isFreeModel, type FreeModelCatalog, type FreeModelInfo } from "@vectordevai/schema/free-model"
+import {
+  FreeDataPolicy,
+  isFreeModel,
+  isFreeModelRef,
+  type FreeModelCatalog,
+  type FreeModelInfo,
+} from "@vectordevai/schema/free-model"
 import { freeModelDataPolicy, sendsToOpenRouterFree } from "@vectordevai/core/free-model-catalog"
 import { FREE_MODEL_UNLISTED, freeModelMayTrain } from "@vectordevai/core/free-model-choice"
 import { ProviderUnavailable, providerRetired, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
@@ -2517,8 +2523,7 @@ const layer = Layer.effect(
           return { providerID: ProviderV2.ID.openrouter, modelID: owned.id }
         const provider = s.providers[entry.providerID]
         // A vanished free choice must fail as unavailable, never quietly select a paid model.
-        if (["vector", "openrouter"].includes(entry.providerID) && entry.modelID.toLowerCase().endsWith(":free"))
-          return entry
+        if (isFreeModelRef(entry)) return entry
         if (!provider) continue
         if (!provider.models[entry.modelID]) continue
         return { providerID: entry.providerID, modelID: entry.modelID }

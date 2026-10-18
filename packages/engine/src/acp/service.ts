@@ -46,6 +46,7 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { Provider } from "@/provider/provider"
 import type { Command } from "@/command"
+import { isFreeModelRef } from "@vectordevai/schema/free-model"
 
 export const AuthMethodID = "vector-login"
 
@@ -791,12 +792,7 @@ function defaultModelFromConfig(
     if (own?.freeModel?.source === "openrouter") return { providerID: ProviderV2.ID.openrouter, modelID: own.id }
   }
   if (configured && providers[configured.providerID]?.models[configured.modelID]) return configured
-  if (
-    configured &&
-    ["vector", "openrouter"].includes(configured.providerID) &&
-    configured.modelID.toLowerCase().endsWith(":free")
-  )
-    return configured
+  if (configured && isFreeModelRef(configured)) return configured
 
   // First-session startup resolves configured or sorted available models without reading historical sessions.
   // Vector Codium spends the account's credits, so it is never chosen automatically.

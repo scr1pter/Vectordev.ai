@@ -6,7 +6,7 @@ import {
   FREE_MODEL_TRAINING_OWNER_ONLY,
   freeModelMayTrain,
 } from "@vectordevai/core/free-model-choice"
-import { isFreeModel } from "@vectordevai/schema/free-model"
+import { isFreeModel, isFreeModelRef } from "@vectordevai/schema/free-model"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import path from "path"
@@ -1789,8 +1789,7 @@ const layer = Layer.effect(
           failed.id !== input.messageID ||
           failed.error?.name !== "FreeModelsLimitError" ||
           failed.modelID !== input.modelID ||
-          !["vector", "openrouter"].includes(failed.providerID) ||
-          !input.modelID.endsWith(":free") ||
+          !isFreeModelRef({ providerID: failed.providerID, modelID: input.modelID }) ||
           !user ||
           user.info.id !== failed.parentID ||
           history.some((message) =>
@@ -2023,7 +2022,7 @@ const layer = Layer.effect(
 )
 
 function isFreeSelection(model: { providerID: string; modelID: string }) {
-  return ["vector", "openrouter"].includes(model.providerID) && model.modelID.toLowerCase().endsWith(":free")
+  return isFreeModelRef(model)
 }
 
 const ModelRef = Schema.Struct({

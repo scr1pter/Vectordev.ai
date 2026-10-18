@@ -11,6 +11,7 @@ import { EventV2 } from "./event"
 import { Policy } from "./policy"
 import { State } from "./state"
 import { Integration } from "./integration"
+import { isFreeModelRef } from "@vectordevai/schema/free-model"
 
 export type ProviderRecord = {
   provider: ProviderV2.MutableInfo
@@ -264,11 +265,7 @@ const layer = Layer.effect(
               const model = yield* result.model.get(defaultModel.providerID, defaultModel.modelID)
               if (model?.enabled) return model
             }
-            if (
-              ["vector", "openrouter"].includes(defaultModel.providerID) &&
-              defaultModel.modelID.toLowerCase().endsWith(":free")
-            )
-              return yield* new DefaultModelUnavailableError(defaultModel)
+            if (isFreeModelRef(defaultModel)) return yield* new DefaultModelUnavailableError(defaultModel)
           }
 
           const models = yield* result.model.available()

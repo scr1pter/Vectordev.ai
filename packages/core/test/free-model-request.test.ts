@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
+import { FREE_MODEL_FALLBACKS, FREE_ROUTER_ID } from "@vectordevai/schema/free-model"
 import {
   FreeModelGuestSessionError,
   FreeModelTrainingConsentError,
@@ -226,7 +226,9 @@ test("a fallback never weakens the chosen model's data policy", () => {
     expect(
       request.models.filter((id) => all.find((item) => item.id === id)?.providers[0].dataPolicy !== "may-train"),
     ).toEqual([])
-    expect(request.provider.only.filter((id) => !id.startsWith(model.providers[0].id.split("/")[0]))).toEqual([])
+    expect((request.provider.only ?? []).filter((id) => !id.startsWith(model.providers[0].id.split("/")[0]))).toEqual(
+      [],
+    )
   }
 })
 
@@ -244,4 +246,32 @@ test("an endpoint without tool_choice gets the same automatic request without it
   expect(freeModelRequest({ ...hello(mayTrain.id), tools, tool_choice: "auto" }, all, consent)).toMatchObject({
     tool_choice: "auto",
   })
+})
+
+test("OpenRouter's free router goes out only after the notice, at zero price, asking OpenRouter to skip barred providers", () => {
+  const router = {
+    id: FREE_ROUTER_ID,
+    name: "Free Models Router",
+    contextLength: 200000,
+    maxOutputTokens: 8192,
+    providers: [{ id: "openrouter", name: "OpenRouter", retention: "", dataPolicy: "may-train" as const }],
+  }
+  const models = [...all, router]
+  // It is labelled "May train on your prompts": nothing goes out before the acceptance, nor for a guest's session.
+  expect(() => freeModelRequest(hello(router.id), models)).toThrow(FreeModelTrainingConsentError)
+  expect(() => freeModelRequest(hello(router.id), models, { trainingConsent: true, guest: true })).toThrow(
+    FreeModelGuestSessionError,
+  )
+  const request = freeModelRequest({ ...hello(router.id), max_tokens: 32000 }, models, { trainingConsent: true })
+  // It picks its own model, so it names no providers and has no fallbacks, and never a paid one.
+  expect(request).toMatchObject({ model: router.id, models: [router.id], max_tokens: 8192 })
+  expect(request.provider).toEqual({
+    data_collection: "allow",
+    require_parameters: true,
+    ignore: ["nvidia"],
+    max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
+  })
+  // It is never a fallback for another model, whatever that model's policy.
+  for (const model of all)
+    expect(freeModelRequest(hello(model.id), models, { trainingConsent: true }).models).not.toContain(router.id)
 })

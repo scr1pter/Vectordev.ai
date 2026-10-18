@@ -49,6 +49,8 @@ async function serve(
     answer?: (request: Request) => Response | undefined | Promise<Response | undefined>
     /** Extra configuration, or a function of the test provider's base URL that returns it. */
     config?: Record<string, unknown> | ((base: string) => Record<string, unknown>)
+    /** The shared catalog the engine serves; Cohere and Laguna unless a test names others. */
+    models?: readonly unknown[]
   } = {},
 ) {
   // The configured test provider refuses every request at once unless `answer` replies, so a turn on it ends without
@@ -69,7 +71,10 @@ async function serve(
   })
   const cache = path.join(Global.Path.cache, "free-models-v2.json")
   await mkdir(path.dirname(cache), { recursive: true })
-  await writeFile(cache, JSON.stringify({ enabled: true, updatedAt: Date.now(), models: [cohere, laguna] }))
+  await writeFile(
+    cache,
+    JSON.stringify({ enabled: true, updatedAt: Date.now(), models: options.models ?? [cohere, laguna] }),
+  )
   const consent = FreeModels.createClient({ consentFile: FreeModels.trainingConsentFile() })
   await consent.setTrainingConsent(true)
   const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
@@ -203,6 +208,57 @@ test("an invited guest is neither offered nor sent to a free model that may trai
     expect(switched.status).toBe(403)
     expect(h.toLaguna()).toEqual([])
   })
+}, 60_000)
+
+test("OpenRouter's free router is offered to the owner with the label, never to a guest, and asks to skip NVIDIA", async () => {
+  const router = {
+    id: "openrouter/free",
+    name: "Free Models Router",
+    contextLength: 200000,
+    maxOutputTokens: 8192,
+    providers: [{ id: "openrouter", name: "OpenRouter", retention: "", dataPolicy: "may-train" as const }],
+  }
+  await serve(
+    async (h) => {
+      const vector = async (headers: Record<string, string>) => {
+        const body = (await (await h.get("/provider", headers)).json()) as {
+          all: { id: string; models: Record<string, { freeModel?: { source: string; dataPolicy?: string } }> }[]
+        }
+        return body.all.find((provider) => provider.id === "vector")?.models ?? {}
+      }
+      expect((await vector(h.owner))[router.id]?.freeModel).toEqual({ source: "shared", dataPolicy: "may-train" })
+      expect(Object.keys(await vector(h.guest))).toEqual([cohere.id])
+      // A guest's prompt naming it is refused before anything is saved.
+      const guest = await newSession(h, h.guest)
+      const refused = await h.send(`/session/${guest}/message`, h.guest, {
+        model: { providerID: "vector", modelID: router.id },
+        parts: [{ type: "text", text: "guest secret via the router" }],
+      })
+      expect(refused.ok).toBe(false)
+      expect(await messages(h, guest)).toEqual([])
+      // The owner, who accepted, reaches the shared allowance with the router: zero price, no providers named, NVIDIA
+      // asked to be skipped, and the acceptance sent.
+      const own = await newSession(h, h.owner)
+      await h.send(`/session/${own}/message`, h.owner, {
+        model: { providerID: "vector", modelID: router.id },
+        parts: [{ type: "text", text: "owner prompt via the router" }],
+      })
+      const sent = h.outbound.filter((item) => item.model === router.id)
+      expect(sent.length).toBeGreaterThan(0)
+      expect(sent.every((item) => item.url === FreeModels.SHARED_CHAT_URL && item.consent === "accepted")).toBe(true)
+      for (const item of sent)
+        expect(JSON.parse(item.text)).toMatchObject({
+          models: [router.id],
+          provider: {
+            data_collection: "allow",
+            ignore: ["nvidia"],
+            max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
+          },
+        })
+      expect(h.outbound.filter((item) => item.text.includes("guest secret"))).toEqual([])
+    },
+    { models: [cohere, router] },
+  )
 }, 60_000)
 
 test("a guest's compaction on a may-train model is refused before a compaction is recorded", async () => {

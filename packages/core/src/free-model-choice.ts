@@ -1,4 +1,4 @@
-import type { FreeDataPolicy } from "@vectordevai/schema/free-model"
+import { FREE_ROUTER_ID, type FreeDataPolicy } from "@vectordevai/schema/free-model"
 
 /** Presentation uses server-approved metadata, never price or an ID suffix as enablement. */
 export type FreeModelChoice = {
@@ -15,6 +15,9 @@ export const FREE_MODELS_DATA_POLICY =
 export const FREE_MODEL_TRAINING_LABEL = "May train on your prompts"
 export const FREE_MODEL_TRAINING_DISCLAIMER =
   "This free model's provider may log your prompts, code and outputs and use them to train its models. Vector itself never trains on your prompts. Don't use it with private repositories, secrets or personal data."
+/** OpenRouter's Free Models Router may pick any free model, so its notice says so and names the one gap Vector knows. */
+export const FREE_ROUTER_DISCLAIMER =
+  "OpenRouter's Free Models Router sends each request to a free model it picks at random, and that model's provider may log your prompts, code and outputs and use them to train its models. Vector asks OpenRouter to skip NVIDIA's trial endpoints, but OpenRouter doesn't say whether the router honours that. Vector itself never trains on your prompts. Don't use it with private repositories, secrets or personal data."
 export const FREE_MODEL_UNREVIEWED_DISCLAIMER =
   "Vector has not reviewed this free model's data policy yet, so treat it as one whose provider may train on your prompts and code. Vector itself never trains on your prompts."
 /**
@@ -83,7 +86,8 @@ export function freeModelTrainingRefusal(status: number | undefined) {
 }
 
 /** The longer disclaimer that goes with the label. */
-export function freeModelTrainingDisclaimer(model: Pick<FreeModelChoice, "freeModel">) {
+export function freeModelTrainingDisclaimer(model: Pick<FreeModelChoice, "freeModel"> & { id?: string }) {
+  if (model.freeModel?.dataPolicy === "may-train" && model.id === FREE_ROUTER_ID) return FREE_ROUTER_DISCLAIMER
   if (model.freeModel?.dataPolicy === "unreviewed") return FREE_MODEL_UNREVIEWED_DISCLAIMER
   if (model.freeModel?.dataPolicy === "may-train") return FREE_MODEL_TRAINING_DISCLAIMER
   return undefined

@@ -7,6 +7,7 @@ import {
   freeModelDataPolicy,
   freeModelInfo,
   isFreeModelID,
+  isFreeRouter,
   offeredFreeModel,
   personalOnlyFreeModel,
   reviewedFreeModel,
@@ -84,16 +85,19 @@ export async function refreshFreeModelCatalog(
   })
   const checked = await Promise.all(
     candidates.map(async (model) => {
+      // The free router has no endpoint list of its own; its price and parameters come from its listing.
+      if (isFreeRouter(model.id)) return freeModelInfo(model, [], { reviewedOnly: true })
       // The cron runs once a day, so one unreadable endpoint list drops only its own model, not the whole refresh.
       const endpoints = await read(`${ROOT}/models/${model.id}/endpoints`, EndpointList, request).catch(() => undefined)
       return endpoints && freeModelInfo(model, endpoints.data.endpoints, { reviewedOnly: true })
     }),
   )
   const models = checked.filter((model): model is FreeModelInfo => model !== undefined)
-  // No-training models first, the long-standing ones in their reviewed order, then by ID.
+  // No-training models first, the long-standing ones in their reviewed order, then by ID, and the free router last.
   const order = new Map(FREE_MODEL_FALLBACKS.map((item, index) => [item.id, index]))
   models.sort(
     (a, b) =>
+      Number(isFreeRouter(a.id)) - Number(isFreeRouter(b.id)) ||
       Number(freeModelDataPolicy(a) !== "no-training") - Number(freeModelDataPolicy(b) !== "no-training") ||
       (order.get(a.id) ?? 100) - (order.get(b.id) ?? 100) ||
       a.id.localeCompare(b.id),
