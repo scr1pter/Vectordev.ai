@@ -1,4 +1,5 @@
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
+import { TaskSize } from "@vectordevai/core/task-size"
 
 export type TaskDifficulty = "trivial" | "simple" | "standard" | "complex"
 
@@ -40,33 +41,18 @@ export function isFreeModelSelection(model: RoutableModel) {
   )
 }
 
-const TRIVIAL_TASK =
-  /^(?:hi|hey|hello|yo|sup|thanks|thank you|ok|okay|cool|nice|good morning|good afternoon|good evening)[!.?\s]*$/i
-const ACTION_TERMS =
-  /\b(?:add|build|change|debug|delete|edit|fix|implement|improve|investigate|refactor|remove|rename|repair|test|update)\b/i
-const COMPLEX_TERMS = [
-  /\barchitecture\b/i,
-  /\bmigrat(?:e|ion)\b/i,
-  /\brefactor\b/i,
-  /\bmulti[- ]?file\b/i,
-  /\bcodebase\b/i,
-  /\bend[- ]?to[- ]?end\b/i,
-  /\bproduction[- ]?ready\b/i,
-  /\bparallel\b/i,
-  /\bperformance\b/i,
-  /\bsecurity\b/i,
-  /\b(?:build|implement|fix|test) (?:everything|all|the entire|the whole)\b/i,
-]
+// One classifier for the engine, the app and desktop: TaskSize sizes a request from what it says. The app's names for the
+// sizes predate it.
+const DIFFICULTY = {
+  chat: "trivial",
+  light: "simple",
+  standard: "standard",
+  thorough: "complex",
+} as const satisfies Record<TaskSize.Tier, TaskDifficulty>
 
 export function classifyTaskDifficulty(task: string): TaskDifficulty {
-  const text = task.trim()
-  if (!text || TRIVIAL_TASK.test(text)) return "trivial"
-  const paths = new Set(text.match(/[A-Za-z0-9_@./-]+\.[A-Za-z0-9]{1,8}/g) ?? [])
-  const complexSignals = COMPLEX_TERMS.filter((pattern) => pattern.test(text)).length
-  if (text.length >= 900 || paths.size >= 4 || complexSignals >= 2) return "complex"
-  if (complexSignals === 1 && (text.length >= 260 || ACTION_TERMS.test(text))) return "complex"
-  if (ACTION_TERMS.test(text) || text.length >= 180 || paths.size >= 2) return "standard"
-  return "simple"
+  if (!task.trim()) return "trivial"
+  return DIFFICULTY[TaskSize.classify({ text: task }).tier]
 }
 
 function qualityScore(model: RoutableModel) {

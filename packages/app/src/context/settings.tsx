@@ -47,6 +47,8 @@ export interface Settings {
     showTerminal: boolean
     showReasoningSummaries: boolean
     llmJudge: boolean
+    // Which runs the judge checks while llmJudge is on: large (Thorough) tasks that changed files, or every task that did.
+    judgeScope: "thorough" | "changes"
     autoModelRouting: boolean
     shellToolPartsExpanded: boolean
     editToolPartsExpanded: boolean
@@ -174,6 +176,7 @@ const defaultSettings: Settings = {
     showTerminal: false,
     showReasoningSummaries: false,
     llmJudge: false,
+    judgeScope: "thorough",
     // Off by default: this spends the user's own BYOK budget on a model they
     // did not choose, so it has to be something they opt into.
     autoModelRouting: false,
@@ -433,12 +436,13 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
           setStore("general", "showReasoningSummaries", value)
         },
         llmJudge: withFallback(() => store.general?.llmJudge, defaultSettings.general.llmJudge),
-        autoModelRouting: withFallback(
-          () => store.general?.autoModelRouting,
-          defaultSettings.general.autoModelRouting,
-        ),
+        autoModelRouting: withFallback(() => store.general?.autoModelRouting, defaultSettings.general.autoModelRouting),
         setLlmJudge(value: boolean) {
           setStore("general", "llmJudge", value)
+        },
+        judgeScope: withFallback(() => store.general?.judgeScope, defaultSettings.general.judgeScope),
+        setJudgeScope(value: "thorough" | "changes") {
+          setStore("general", "judgeScope", value)
         },
         setAutoModelRouting(value: boolean) {
           setStore("general", "autoModelRouting", value)

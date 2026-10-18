@@ -322,10 +322,22 @@ export const SettingsGeneralV2: Component<{
           />
           <ToggleRow
             title="LLM-as-a-judge"
-            description="When Vector finishes, a separate judge compares the result against your request and the checks it ran. On a failed verdict it names the specific repair and Vector fixes it, up to three rounds. Applies to every prompt and every agent workspace, and costs extra model calls."
+            description="When Vector finishes a large task that changed files, a separate judge compares the result against your request. On a failed verdict Vector repairs it and the judge looks again, up to three rounds. Greetings, questions and light tasks are never judged. Costs extra model calls."
             checked={settings.general.llmJudge()}
             onChange={settings.general.setLlmJudge}
           />
+          <Show when={settings.general.llmJudge()}>
+            <SelectRow
+              title="Tasks the judge checks"
+              description="Large tasks are the ones Vector runs with subagents: big changes, migrations, or when you ask it to be thorough."
+              options={[
+                { value: "thorough", label: "Large tasks" },
+                { value: "changes", label: "Every task that changes files" },
+              ]}
+              value={settings.general.judgeScope()}
+              onChange={(value) => settings.general.setJudgeScope(value === "changes" ? "changes" : "thorough")}
+            />
+          </Show>
         </Card>
       </div>
     </Page>

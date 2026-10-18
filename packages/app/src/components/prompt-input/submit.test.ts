@@ -4,7 +4,6 @@ import type { Prompt } from "@/context/prompt"
 let createPromptSubmit: typeof import("./submit").createPromptSubmit
 let resolveExecutionAgent: typeof import("./submit").resolveExecutionAgent
 let resolveSubmissionAgent: typeof import("./submit").resolveSubmissionAgent
-let shouldUseCompletionJudge: typeof import("./submit").shouldUseCompletionJudge
 
 const createdClients: string[] = []
 const createdSessions: string[] = []
@@ -269,7 +268,6 @@ beforeAll(async () => {
   createPromptSubmit = mod.createPromptSubmit
   resolveExecutionAgent = mod.resolveExecutionAgent
   resolveSubmissionAgent = mod.resolveSubmissionAgent
-  shouldUseCompletionJudge = mod.shouldUseCompletionJudge
 })
 
 beforeEach(() => {
@@ -518,9 +516,10 @@ describe("prompt submit worktree selection", () => {
 describe("follow-up optimistic echo", () => {
   type SendInput = Parameters<typeof import("./submit").sendFollowupDraft>[0]
   type SentPart = { id: string; type: string; synthetic?: boolean }
-  type Step = { kind: "echo" | "request"; parts: SentPart[]; budget?: unknown }
+  type Step = { kind: "echo" | "request"; parts: SentPart[]; budget?: unknown; judge?: unknown }
 
-  const text = "describe the colors in this picture and explain what the square could represent"
+  // Real work, so the desktop's file map applies; a question or a light job gets none.
+  const text = "add a caption under this picture that names its colors and what the square could represent"
   const pasted = {
     type: "image" as const,
     id: "pasted-image",
@@ -551,8 +550,8 @@ describe("follow-up optimistic echo", () => {
     await sendFollowupDraft({
       client: {
         session: {
-          promptAsync: async (input: { parts: SentPart[]; budget?: unknown }) => {
-            steps.push({ kind: "request", parts: input.parts, budget: input.budget })
+          promptAsync: async (input: { parts: SentPart[]; budget?: unknown; judge?: unknown }) => {
+            steps.push({ kind: "request", parts: input.parts, budget: input.budget, judge: input.judge })
             return { data: undefined }
           },
         },
@@ -602,12 +601,26 @@ describe("follow-up optimistic echo", () => {
     expectOneEchoBeforeRequest(await withDesktopContext(() => send()), 1)
   })
 
-  test("keeps the echoed ids when verified completion adds its policy", async () => {
-    expectOneEchoBeforeRequest(await send({ llmJudge: true }), 1)
+  test("sends the judge setting to the engine instead of a hidden policy", async () => {
+    const steps = await send({ judge: "changes" })
+    expectOneEchoBeforeRequest(steps, 0)
+    expect(steps.at(-1)?.judge).toBe("changes")
+    // A draft queued before the scope existed still turns the judge on for large tasks.
+    expect((await send({ llmJudge: true })).at(-1)?.judge).toBe("thorough")
+    expect((await send()).at(-1)?.judge).toBeUndefined()
   })
 
-  test("keeps the echoed ids when both instructions are added", async () => {
-    expectOneEchoBeforeRequest(await withDesktopContext(() => send({ llmJudge: true })), 2)
+  test("keeps the echoed ids when the judge is on and the desktop adds task context", async () => {
+    expectOneEchoBeforeRequest(await withDesktopContext(() => send({ judge: "thorough" })), 1)
+  })
+
+  test("adds no file map for a greeting, a question or a light job", async () => {
+    for (const content of ["hi", "what does this function do?", "fix the typo in README.md"]) {
+      const steps = await withDesktopContext(() =>
+        send({ prompt: [{ type: "text", content, start: 0, end: content.length }] }),
+      )
+      expect(steps.at(-1)?.parts.filter((part) => part.synthetic)).toHaveLength(0)
+    }
   })
 
   test("sends exactly the echoed parts when nothing is added", async () => {
@@ -698,67 +711,31 @@ describe("submission agent selection", () => {
     ).toBe("review")
   })
 
-  test("judges every prompt that produces work once enabled", () => {
-    // Testing and automation is the point of the setting, so it must not skip
-    // requests it privately judges small — a gate like that hides regressions.
-    expect(shouldUseCompletionJudge({ enabled: true, agent: "build" })).toBe(true)
-    expect(shouldUseCompletionJudge({ enabled: true, agent: "review" })).toBe(true)
-  })
-
-  test("does not silently route a judged trivial prompt into the tool-less quick agent", () => {
+  test("leaves greetings on the build and plan agents to the engine, which sizes them itself", () => {
+    // The engine sends a greeting to its quick lane with or without the judge, so the app no longer routes it.
+    for (const current of ["build", "plan"])
+      expect(resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "trivial", current })).toBe(
+        current,
+      )
+    // A custom agent is not sized by the engine, so its greeting still takes the quick lane.
     expect(
-      resolveExecutionAgent({
-        planMode: false,
-        quickRequested: false,
-        difficulty: "trivial",
-        current: "build",
-        judgeEnabled: true,
-      }),
-    ).toBe("build")
-    expect(
-      resolveExecutionAgent({
-        planMode: false,
-        quickRequested: false,
-        difficulty: "trivial",
-        current: "build",
-        judgeEnabled: false,
-      }),
+      resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "trivial", current: "reviewer" }),
     ).toBe("quick")
   })
 
-  test("promotes explicit quick mode when verified completion is enabled", () => {
+  test("explicit Quick mode takes the quick lane, and Plan mode keeps its agent", () => {
     expect(
-      resolveExecutionAgent({
-        planMode: false,
-        quickRequested: true,
-        difficulty: "standard",
-        current: "build",
-        judgeEnabled: true,
-      }),
-    ).toBe("build")
-  })
-
-  test("repairs a stale quick agent before applying verified completion", () => {
+      resolveExecutionAgent({ planMode: false, quickRequested: true, difficulty: "standard", current: "build" }),
+    ).toBe("quick")
     expect(
-      resolveExecutionAgent({
-        planMode: false,
-        quickRequested: false,
-        difficulty: "standard",
-        current: "quick",
-        judgeEnabled: true,
-      }),
+      resolveExecutionAgent({ planMode: true, quickRequested: true, difficulty: "trivial", current: "plan" }),
+    ).toBe("plan")
+  })
+
+  test("repairs a stale quick agent for ordinary work", () => {
+    expect(
+      resolveExecutionAgent({ planMode: false, quickRequested: false, difficulty: "standard", current: "quick" }),
     ).toBe("build")
-  })
-
-  test("skips the lanes that cannot satisfy the policy", () => {
-    // plan produces no implementation to verify; quick is denied every tool in
-    // agent.ts, so it cannot spawn the judge subagent at all.
-    expect(shouldUseCompletionJudge({ enabled: true, agent: "plan" })).toBe(false)
-    expect(shouldUseCompletionJudge({ enabled: true, agent: "quick" })).toBe(false)
-  })
-
-  test("stays off when the setting is off", () => {
-    expect(shouldUseCompletionJudge({ enabled: false, agent: "build" })).toBe(false)
   })
 })
 
@@ -934,7 +911,13 @@ describe("image attachments", () => {
       prompt,
       info: () => undefined,
       imageAttachments: () => [
-        { type: "image", id: "image", filename: "image.png", mime: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgo=" },
+        {
+          type: "image",
+          id: "image",
+          filename: "image.png",
+          mime: "image/png",
+          dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+        },
       ],
       commentCount: () => 0,
       autoAccept: () => false,
@@ -968,7 +951,11 @@ describe("image attachments", () => {
 describe("included model data notice", () => {
   test("tells the person once how included models handle their data", async () => {
     globalThis.localStorage?.removeItem("vector.notice.free-model-policy.v1")
-    currentModel = { id: "maker/coder:free", provider: { id: "vector" }, freeModel: { source: "shared" } } as typeof currentModel
+    currentModel = {
+      id: "maker/coder:free",
+      provider: { id: "vector" },
+      freeModel: { source: "shared" },
+    } as typeof currentModel
     availableModels = [currentModel!]
     const submit = createPromptSubmit({
       prompt,

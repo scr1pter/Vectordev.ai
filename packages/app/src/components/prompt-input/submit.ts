@@ -1,8 +1,3 @@
-import {
-  completionPolicy,
-  shouldUseCompletionJudge,
-  VERIFIED_COMPLETION_POLICY,
-} from "@/features/judge/verified-completion"
 import type { Message, Session } from "@vectordevai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@vectordevai/core/util/encode"
@@ -65,22 +60,14 @@ export function resolveExecutionAgent(input: {
   quickRequested: boolean
   difficulty: TaskDifficulty
   current: string
-  judgeEnabled: boolean
 }) {
   if (input.planMode) return input.current
-  if (!input.quickRequested && input.difficulty !== "trivial") {
-    return input.judgeEnabled && input.current === "quick" ? "build" : input.current
-  }
-  if (!input.judgeEnabled) return "quick"
-
-  // The quick agent has no tools, so it cannot launch the independent judge.
-  // An enabled verification contract takes precedence over either automatic
-  // trivial routing or the quick-mode shortcut instead of silently disabling
-  // the feature the user explicitly turned on.
+  if (input.quickRequested) return "quick"
+  // The engine sizes the build and plan agents' requests itself: a greeting goes to its quick lane whether or not the
+  // judge is on, and the judge runs only after large tasks. A custom agent's greeting still takes the quick lane here.
+  if (input.difficulty === "trivial" && input.current !== "build" && input.current !== "plan") return "quick"
   return input.current === "quick" ? "build" : input.current
 }
-
-export { shouldUseCompletionJudge, VERIFIED_COMPLETION_POLICY }
 
 export type FollowupDraft = {
   sessionID: string
@@ -92,6 +79,8 @@ export type FollowupDraft = {
   variant?: string
   difficulty?: TaskDifficulty
   executionMode?: "normal" | "fast"
+  // When LLM-as-a-judge is on: which runs Vector judges. A draft queued before this field existed carries llmJudge.
+  judge?: "thorough" | "changes"
   llmJudge?: boolean
 }
 
@@ -109,8 +98,9 @@ const draftText = (prompt: Prompt) => prompt.map((part) => ("content" in part ? 
 
 const draftImages = (prompt: Prompt) => prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
 
-// Task preparation and verified completion can each add one hidden instruction after the typed text.
-const SYNTHETIC_SLOTS = 2
+// Task preparation can add one hidden instruction after the typed text. The judge no longer rides on the prompt as an
+// instruction: the engine runs it after the run, so a held slot for it would go unused.
+const SYNTHETIC_SLOTS = 1
 
 export async function sendFollowupDraft(input: FollowupSendInput) {
   const text = draftText(input.draft.prompt)
@@ -121,9 +111,9 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     quickRequested: input.draft.agent === "quick",
     difficulty,
     current: input.draft.agent,
-    judgeEnabled: input.draft.llmJudge === true,
   })
-  const llmJudge = shouldUseCompletionJudge({ enabled: input.draft.llmJudge === true, agent })
+  // The engine decides whether a run is judged, from the request's size and this setting.
+  const judge = input.draft.judge ?? (input.draft.llmJudge ? ("thorough" as const) : undefined)
   const setBusy = () => {
     if (!input.optimisticBusy) return
     input.serverSync.session.set("session_status", input.draft.sessionID, { type: "busy" })
@@ -164,6 +154,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
         variant: input.draft.variant,
         executionMode: input.draft.executionMode,
         ...(budget ? { budget } : {}),
+        ...(judge ? { judge } : {}),
         parts: images.map((attachment) => ({
           id: Identifier.ascending("part"),
           type: "file" as const,
@@ -230,18 +221,16 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       return false
     }
 
-    // The file map is a starting point for a session. On a later message it would stay in the history and be sent
-    // again on every request, while the agent already knows the code it has read.
+    // The file map is a starting point for a session's real work. On a later message it would stay in the history and
+    // be sent again on every request, while the agent already knows the code it has read; a greeting, a question or a
+    // light job finds its own way faster than a list of twelve files.
     const history = input.sync.data.message?.[input.draft.sessionID] ?? []
     const replied = history.some((message) => message.role === "assistant")
     const preparation =
-      difficulty === "trivial" || replied
+      difficulty === "trivial" || difficulty === "simple" || replied
         ? undefined
         : await globalThis.window?.api?.prepareAgentTask?.(input.draft.sessionDirectory, text).catch(() => undefined)
-    const syntheticText = [
-      ...(preparation?.instruction ? [preparation.instruction] : []),
-      ...(llmJudge ? [completionPolicy(history, (id) => input.sync.data.part?.[id])] : []),
-    ]
+    const syntheticText = preparation?.instruction ? [preparation.instruction] : []
     const budget = promptRunBudget({
       configured: input.sync.data.config.budget?.run,
       policy: await cachedSpendPolicy(),
@@ -257,6 +246,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       variant: input.draft.variant,
       executionMode: input.draft.executionMode,
       ...(budget ? { budget } : {}),
+      ...(judge ? { judge } : {}),
     })
     return true
   } catch (err) {
@@ -291,6 +281,7 @@ type PromptSubmitInput = {
   onSubmit?: () => void
   executionMode?: Accessor<"normal" | "quick" | "fast">
   llmJudge?: Accessor<boolean>
+  judgeScope?: Accessor<"thorough" | "changes">
   autoModelRouting?: Accessor<boolean>
   connectProvider?: () => void
 }
@@ -503,13 +494,12 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       current: currentAgent.name,
       available: local.agent.list(),
     })
-    const judgeEnabled = input.llmJudge?.() ?? false
+    const judge = input.llmJudge?.() ? (input.judgeScope?.() ?? "thorough") : undefined
     const agent = resolveExecutionAgent({
       planMode: isPlanMode,
       quickRequested: requestedExecutionMode === "quick",
       difficulty,
       current: resolvedAgent,
-      judgeEnabled,
     })
 
     if (!(await workspaceAvailable())) return
@@ -628,7 +618,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       variant,
       difficulty,
       executionMode,
-      llmJudge: judgeEnabled,
+      ...(judge ? { judge } : {}),
     }
 
     const clearInput = () => {
@@ -697,6 +687,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             model: `${model.providerID}/${model.modelID}`,
             variant,
             executionMode,
+            ...(judge ? { judge } : {}),
             parts: images.map((attachment) => ({
               id: Identifier.ascending("part"),
               type: "file" as const,
