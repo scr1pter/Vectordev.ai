@@ -8,20 +8,20 @@ describe("context budgeting", () => {
     expect(classifyTaskDifficulty("Good morning!")).toBe("trivial")
     expect(contextBudgetForDifficulty("trivial")).toEqual({ tokenBudget: 0, fileLimit: 0 })
     // A reply to the work before it is not a greeting.
-    expect(classifyTaskDifficulty("continue")).toBe("simple")
-    expect(classifyTaskDifficulty("yes")).toBe("simple")
+    expect(classifyTaskDifficulty("continue")).toBe("standard")
+    expect(classifyTaskDifficulty("yes")).toBe("standard")
   })
 
-  test("distinguishes targeted work from broad engineering tasks", () => {
-    // A question about the code is Standard work; only a short, clearly small action is simple.
-    expect(classifyTaskDifficulty("Explain this function")).toBe("standard")
-    expect(classifyTaskDifficulty("run the tests")).toBe("simple")
-    expect(classifyTaskDifficulty("Fix the import in src/app.tsx")).toBe("standard")
+  test("gives every request but a greeting the Work budget, and the complex one only when the user asks", () => {
+    for (const text of ["Explain this function", "run the tests", "Fix the import in src/app.tsx"])
+      expect(classifyTaskDifficulty(text), text).toBe("standard")
+    // Words about scope never make it complex; the user's own ask does.
     expect(
       classifyTaskDifficulty(
         "Refactor the authentication architecture across the codebase, migrate the persistence layer, and test everything end to end.",
       ),
-    ).toBe("complex")
+    ).toBe("standard")
+    expect(classifyTaskDifficulty("be thorough: refactor the authentication architecture")).toBe("complex")
   })
 
   test("spends substantially more context on complex work", () => {

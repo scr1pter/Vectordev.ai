@@ -1903,15 +1903,10 @@ const layer = Layer.effect(
           )
 
           // A request is offered what its size needs. On a caching provider the size here is the session's highest
-          // while the cache is warm, so the task tool may stay defined on a Light request; it still runs only the
+          // while the cache is warm, so the task tool may stay defined on a Work request; it still runs only the
           // subagents the user named, and escalate is how the agent asks for more.
           if (build) {
-            for (const id of TaskSize.withheld(build.offered.tier, {
-              cloud: build.offered.cloud,
-              browser: build.offered.browser,
-              agents: build.result.agents.length,
-            }))
-              delete tools[id]
+            for (const id of TaskSize.withheld(build.offered, build.result.agents.length)) delete tools[id]
             // A thorough request has nothing to raise to, but on a caching provider the tool keeps its place so a
             // smaller follow-up sends the same definitions and reads the cached prefix.
             if (build.tier === "thorough" && !caches(model)) delete tools.escalate
@@ -1970,7 +1965,6 @@ const layer = Layer.effect(
                       nested: session.parentID !== undefined,
                       // The day the history starts on; a later day is noted on the user message that starts it.
                       date: msgs.find((message) => message.info.role === "user")?.info.time.created,
-                      completion: build?.offered.tier !== "light",
                     }),
                   ),
                 ),
@@ -2006,7 +2000,7 @@ const layer = Layer.effect(
             effort: quick
               ? "off"
               : build
-                ? TaskSize.effort(ProviderTransform.usesCacheBreakpoints(model) ? build.offered.tier : build.tier)
+                ? TaskSize.effort(ProviderTransform.usesCacheBreakpoints(model) ? build.offered : build.tier)
                 : undefined,
             permission: session.permission,
             sessionID,
@@ -2290,15 +2284,15 @@ const layer = Layer.effect(
           variant: input.variant,
           executionMode: input.executionMode,
           budget: input.budget,
-          // The sender's size, then the command's own, then what the template asks for. With sizing off, the run gets
-          // the full harness like any other request.
+          // The sender's size, then the command's own, then what the user's arguments ask for. With sizing off, the run
+          // gets the full harness like any other request.
           ...(input.size && input.size !== "auto"
             ? { size: input.size }
             : cmd.size
               ? { size: cmd.size }
               : (yield* config.get()).sizing?.auto === false
                 ? {}
-                : { size: commandSize(template, input.arguments) }),
+                : { size: commandSize(input.arguments) }),
           ...(input.judge ? { judge: input.judge } : {}),
         },
         // @file references in an MCP prompt or a skill are not the user's choice; the user's own attachments are.
@@ -2336,21 +2330,13 @@ function sizable(session: Session.Info, user: SessionV1.User) {
   return !session.parentID && !session.internal && (user.agent === "build" || user.agent === "plan")
 }
 
-// A command's template is a workflow someone wrote, not the user's words about this run. A short one is read like a
-// message, except that its force words are not instructions; a long one is guidance on how to work, so its words say
-// nothing about the size of the job and it runs Standard. The user's own arguments can still ask for more ("/review be
-// thorough") or name large work, and a command is never a bare reply.
-function commandSize(template: string, args: string): TaskSize.Tier {
-  const typed = args.trim() ? TaskSize.classify({ text: args }) : undefined
-  if (typed?.source === "user") return typed.tier
-  const own = template.length > COMMAND_WORKFLOW ? "standard" : TaskSize.classify({ text: template, template: true }).tier
-  // Arguments that only name a target ("src/auth.ts") say nothing about the size.
-  const asked = typed && !typed.reasons.includes("default") ? typed.tier : "light"
-  return TaskSize.max(TaskSize.max(own, "light"), asked)
+// A command is Work, never a bare reply. Its template is a workflow someone wrote, not the user's words about this run,
+// so its force words ("be thorough", "exhaustive file trees") are not instructions; only the user's own arguments can
+// ask for Thorough ("/review be thorough").
+function commandSize(args: string): TaskSize.Tier {
+  const typed = TaskSize.classify({ text: args })
+  return typed.source === "user" ? typed.tier : "standard"
 }
-
-// A template longer than this is a written workflow (/init is about 4,000 characters) rather than a one-line ask.
-const COMMAND_WORKFLOW = 600
 
 // Whether the provider caches the prompt prefix, so a smaller tool set on the next request would write it again.
 function caches(model: Provider.Model) {

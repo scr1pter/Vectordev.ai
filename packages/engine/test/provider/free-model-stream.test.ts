@@ -107,7 +107,7 @@ test("a greeting on a free model whose reasoning is optional reaches the free pr
       { preconnect: fetch.preconnect },
     ),
   }).languageModel(free.api.id)
-  for (const effort of ["off", "low", "default"] as const) {
+  for (const effort of ["off", "default"] as const) {
     const result = streamText({
       model,
       prompt: "hi",
@@ -116,12 +116,12 @@ test("a greeting on a free model whose reasoning is optional reaches the free pr
     })
     await result.consumeStream()
   }
-  expect(bodies).toHaveLength(3)
+  expect(bodies).toHaveLength(2)
   // What the shared proxy forwards to OpenRouter keeps the reasoning object; it would drop reasoning_effort.
   const forwarded: Record<string, unknown>[] = bodies.map((body) => freeModelRequest(body, FREE_MODEL_FALLBACKS))
   expect(forwarded[0]?.reasoning).toEqual({ effort: "none" })
-  expect(forwarded[1]?.reasoning).toEqual({ effort: "none" })
-  expect(forwarded[2]?.reasoning).toBeUndefined()
+  // Work keeps the model's own reasoning.
+  expect(forwarded[1]?.reasoning).toBeUndefined()
   expect(forwarded.some((body) => "reasoning_effort" in body)).toBe(false)
 })
 

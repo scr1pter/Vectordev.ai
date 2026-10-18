@@ -71,35 +71,47 @@ describe("task intelligence", () => {
       expect(routeModelForImages({ current, available: [current, paid] })).toEqual({ model: undefined, routed: false })
     })
 
-  test("keeps conversational messages in the quick lane", () => {
+  test("keeps social messages in the quick lane", () => {
     expect(classifyTaskDifficulty("hello!")).toBe("trivial")
     expect(classifyTaskDifficulty("fix login.ts")).toBe("standard")
-    for (const text of ["thanks!", "bye", "what can you do?", "thanks for the help", "what is vector?", "hello again"])
+    for (const text of [
+      "thanks!",
+      "thanks, that works",
+      "bye",
+      "great",
+      "what can you do?",
+      "thanks for the help",
+      "what is vector?",
+      "hello again",
+    ])
       expect(classifyTaskDifficulty(text), text).toBe("trivial")
   })
 
-  test("a reply that continues the work is never trivial and never routes a variant", () => {
+  test("a reply that continues the work, or anything that is not social, is never trivial and routes no variant", () => {
     // "continue" or "yes" goes to the agent the user picked, which sizes it against the work it continues; the quick
     // lane would answer it with no tools and no history.
-    // A decline or an approval closes or carries out the work before it, which only the engine can read it against.
     for (const text of [
       "continue",
       "yes",
       "go ahead",
       "try again",
       "do it",
-      "next",
       "sure",
       "ok",
-      "great",
       "no thanks",
       "sounds good",
       "lgtm",
+      "ship to vercel",
+      "switch the codebase to Go",
+      "keep it simple",
     ]) {
       const difficulty = classifyTaskDifficulty(text)
-      expect(difficulty, text).toBe("simple")
+      expect(difficulty, text).toBe("standard")
       expect(routeVariantForTask({ difficulty, variants: ["low", "high"] }), text).toBeUndefined()
     }
+    // Only the user's own ask makes work complex.
+    expect(classifyTaskDifficulty("be thorough: migrate the app to the new router")).toBe("complex")
+    expect(classifyTaskDifficulty("migrate the app to the new router across 40 files")).toBe("standard")
   })
 
   test("routes complex work to a meaningfully stronger model in the same provider", () => {

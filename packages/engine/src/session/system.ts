@@ -229,11 +229,6 @@ export type EnvironmentOptions = {
   /** This is a subagent's own session: it reports to its parent, never to the user. */
   nested?: boolean
   /**
-   * Whether the implementation-and-verification loop policy is sent when edit tools are offered (default: true). A
-   * Light request leaves it out: a one-line fix needs one focused check, not the full loop.
-   */
-  completion?: boolean
-  /**
    * When the history the model is shown starts (its first user message), in epoch milliseconds. Its day is the date
    * the environment states, so the prompt does not change from step to step or at midnight; a later day reaches the
    * model as a note on the user message that starts it (SessionReminders.dates). Defaults to now.
@@ -321,7 +316,7 @@ const layer = Layer.effect(
             .filter((line) => line !== undefined)
             .join("\n"),
           subagentPolicy(options?.subagents ?? ALL_SUBAGENTS),
-          changes && options?.completion !== false && COMPLETION_POLICY,
+          changes && COMPLETION_POLICY,
           offered("browser") &&
             [
               "<browser_engineering_policy>",

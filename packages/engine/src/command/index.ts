@@ -29,7 +29,7 @@ export const Info = Schema.Struct({
   // Some command templates are lazy promises from MCP prompt resolution.
   template: Schema.Unknown,
   subtask: Schema.optional(Schema.Boolean),
-  // How much harness the command's run gets; when unset, Vector sizes it from what the template asks for.
+  // How much harness the command's run gets; when unset, it is Standard unless the user's arguments ask for Thorough.
   size: Schema.optional(TaskSize.Tier),
   hints: Schema.Array(Schema.String),
 }).annotate({ identifier: "Command" })

@@ -766,7 +766,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("offers a greeting no tools and a light job none of the planning tools", () =>
+  it.effect("offers a social message no tools and any other request every tool", () =>
     Effect.gen(function* () {
       yield* setup
       const registry = yield* ToolRegistry.Service
@@ -787,20 +787,18 @@ describe("SessionRunnerLLM", () => {
       const turn = Effect.fnUntraced(function* (text: string) {
         yield* session.prompt({ sessionID, prompt: Prompt.make({ text }), resume: false })
         requests.length = 0
-        response = []
+        response = fragmentFixture("text", `text-${text}`, ["Done."]).completeEvents
         yield* session.resume(sessionID)
         return requests[0]?.tools.map((tool) => tool.name) ?? []
       })
       expect(yield* turn("hi")).toEqual([])
-      const light = yield* turn("fix the typo in README.md")
-      expect(light).toEqual(expect.arrayContaining(["read", "edit"]))
-      expect(light).not.toContain("todowrite")
-      expect(light).not.toContain("question")
-      expect(yield* turn("add OAuth login with tests")).toEqual(expect.arrayContaining(["todowrite", "question"]))
+      // A small action, a large one and a style word all get the same tools: no word list lowers Work.
+      for (const text of ["ship to vercel", "switch the codebase to Go", "keep it simple, fix the typo in README.md"])
+        expect(yield* turn(text), text).toEqual(expect.arrayContaining(["read", "edit", "todowrite", "question"]))
     }),
   )
 
-  it.effect("reads every reply against the work before it, so a second continue in a row keeps its tools", () =>
+  it.effect("sizes the same conversation as the V1 runner: social messages bare, everything else with tools", () =>
     Effect.gen(function* () {
       yield* setup
       const registry = yield* ToolRegistry.Service
@@ -818,22 +816,29 @@ describe("SessionRunnerLLM", () => {
         ),
       )
       const session = yield* SessionV2.Service
-      // Every reply finishes and asks nothing, so only the work before each message can keep it at that work's size.
-      const turn = Effect.fnUntraced(function* (text: string, answer = "Ported the next part.") {
+      const turn = Effect.fnUntraced(function* (text: string, answer: string) {
         yield* session.prompt({ sessionID, prompt: Prompt.make({ text }), resume: false })
         requests.length = 0
-        response = fragmentFixture("text", `text-${requests.length}-${text}`, [answer]).completeEvents
+        response = fragmentFixture("text", `text-${text}`, [answer]).completeEvents
         yield* session.resume(sessionID)
-        return requests[0]?.tools.map((tool) => tool.name) ?? []
+        return (requests[0]?.tools.length ?? 0) > 0
       })
-      for (const text of ["port the TUI to Rust", "continue", "continue", "keep going", "yes", "try again"])
-        expect(yield* turn(text), text).toEqual(expect.arrayContaining(["read", "edit", "todowrite", "question"]))
-      // A thanks is a direct reply, and a continue after it still continues the work, not the thanks.
-      expect(yield* turn("thanks", "You're welcome!")).toEqual([])
-      expect(yield* turn("continue")).toEqual(expect.arrayContaining(["todowrite", "question"]))
-      // A plain no to an offer of more work leaves nothing to do.
-      yield* turn("keep going", "Ported every screen. Want me to also update the docs?")
-      expect(yield* turn("no thanks", "Okay.")).toEqual([])
+      // The same conversation, with the same replies, as "the V1 runner sizes a conversation the way V2 does" in the
+      // engine's task-size test: true where the turn is offered tools.
+      const conversation = [
+        ["hi", "Hi! How can I help you today?", false],
+        ["ship to vercel", "Deployed. Do you want me to keep the preview URL?", true],
+        // A "no" answers the agent's question, so it is never a bare reply.
+        ["no", "Removed the preview URL.", true],
+        ["thanks, that works", "You're welcome!", false],
+        ["be thorough: port the TUI to Rust", "Here is the plan in three phases.", true],
+        ["build the app", "Ported the renderer. Should I go on with the input layer?", true],
+        // A thanks while the agent waits on an answer follows up that work.
+        ["thanks", "Going on with the input layer.", true],
+        ["continue", "Ported every screen.", true],
+        ["thanks!", "Anytime!", false],
+      ] as const
+      for (const [text, answer, tools] of conversation) expect(yield* turn(text, answer), text).toBe(tools)
     }),
   )
 

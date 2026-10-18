@@ -1273,7 +1273,7 @@ describe("session.llm.stream", () => {
     },
   )
 
-  for (const effort of ["off", "low", "default", "high"] as const)
+  for (const effort of ["off", "default", "high"] as const)
     it.instance(
       `the openai-compatible SDK puts a reasoning object from the request's effort in the body at ${effort} effort`,
       () =>
@@ -1318,11 +1318,7 @@ describe("session.llm.stream", () => {
           })
           const body = (yield* Effect.promise(() => request)).body
           expect(body.reasoning).toEqual(
-            effort === "off" || effort === "low"
-              ? { effort: "none" }
-              : effort === "high"
-                ? { effort: "high" }
-                : undefined,
+            effort === "off" ? { effort: "none" } : effort === "high" ? { effort: "high" } : undefined,
           )
           expect(body.reasoning_effort).toBeUndefined()
         }),

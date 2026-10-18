@@ -5044,24 +5044,22 @@ describe("ProviderTransform.effortOptions", () => {
     api: { id: "claude-haiku-4-5", url: "https://api.anthropic.com", npm: "@ai-sdk/anthropic" },
   })
 
-  test("a greeting gets the weakest setting, a light job low, a thorough one high, and default sets nothing", () => {
+  test("a greeting gets the weakest setting, a thorough job high, and default sets nothing", () => {
     expect(ProviderTransform.effortOptions(gpt, "off")).toEqual(ProviderTransform.smallOptions(gpt))
-    expect(ProviderTransform.effortOptions(gpt, "low")).toEqual(gpt.variants.low)
     expect(ProviderTransform.effortOptions(gpt, "high")).toEqual(gpt.variants.high)
     expect(ProviderTransform.effortOptions(gpt, "default")).toEqual({})
   })
 
   test("never picks xhigh or max on its own", () => {
-    for (const effort of ["off", "low", "default", "high"] as const) {
+    for (const effort of ["off", "default", "high"] as const) {
       const options = JSON.stringify(ProviderTransform.effortOptions(gpt, effort))
       expect(options).not.toContain("xhigh")
       expect(options).not.toContain("max")
     }
   })
 
-  test("budget-style thinking runs without thinking below Thorough", () => {
+  test("budget-style thinking runs a greeting without thinking", () => {
     expect(Object.keys(haiku.variants)[0]).toBe("high")
-    expect(ProviderTransform.effortOptions(haiku, "low")).toEqual({})
     expect(ProviderTransform.effortOptions(haiku, "off")).toEqual({})
   })
 
@@ -5075,10 +5073,10 @@ describe("ProviderTransform.effortOptions", () => {
         freeModel: { source: "shared", ...(reasoning ? { reasoning } : {}) },
       }) as any
     expect(ProviderTransform.effortOptions(free("optional"), "off")).toEqual({ reasoning: { effort: "none" } })
-    expect(ProviderTransform.effortOptions(free("optional"), "low")).toEqual({ reasoning: { effort: "none" } })
+    // Work and Thorough keep the model's own reasoning.
+    expect(ProviderTransform.effortOptions(free("optional"), "default")).toEqual({})
     expect(ProviderTransform.effortOptions(free("optional"), "high")).toEqual({})
     expect(ProviderTransform.effortOptions(free("mandatory"), "off")).toEqual({})
-    expect(ProviderTransform.effortOptions(free(), "low")).toEqual({})
     // Titles and summaries on such a model run without reasoning too.
     expect(ProviderTransform.smallOptions(free("optional"))).toEqual({ reasoning: { effort: "none" } })
   })

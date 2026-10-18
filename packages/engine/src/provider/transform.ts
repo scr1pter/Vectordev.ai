@@ -1337,18 +1337,13 @@ export function smallOptions(model: Provider.Model) {
 
 /**
  * Provider options for a request's reasoning effort, by its task size, when the user left effort on its default. "off"
- * is the weakest setting the model has, since a greeting needs no thinking; "low" suits a light job; "default" keeps
- * the provider's own default; "high" is for a thorough job. Never xhigh or max: only the user picks those.
+ * is the weakest setting the model has, since a greeting needs no thinking; "default" keeps the provider's own default
+ * for work; "high" is for a thorough job. Never xhigh or max: only the user picks those.
  */
 export function effortOptions(model: Provider.Model, effort: TaskSize.Effort): Record<string, any> {
   if (effort === "default") return {}
   if (effort === "off") return smallOptions(model)
-  const variants = model.variants ?? {}
-  if (effort === "high") return variants.high ?? {}
-  if (model.freeModel?.reasoning === "optional") return { reasoning: { effort: "none" } }
-  const name = ["low", "minimal", "none"].find((item) => item in variants)
-  // Budget-style variants start at "high"; below that the model runs without extended thinking, as small calls do.
-  return name ? variants[name] : smallOptions(model)
+  return model.variants?.high ?? {}
 }
 
 // Maps model ID prefix to provider slug used in providerOptions.

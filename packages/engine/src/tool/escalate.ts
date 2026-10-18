@@ -1,24 +1,15 @@
 import { Effect, Schema } from "effect"
-import { TaskSize } from "@vectordevai/core/task-size"
+import type { TaskSize } from "@vectordevai/core/task-size"
 import { Tool } from "./tool"
 import DESCRIPTION from "./escalate.txt"
 
 export const Parameters = Schema.Struct({
-  reason: Schema.String.annotate({ description: "One line on why the work needs a larger size" }),
-  to: Schema.optional(Schema.Literals(["standard", "thorough"])).annotate({
-    description: 'Leave it out to go one step up; "thorough" when the work spans the whole system',
-  }),
+  reason: Schema.String.annotate({ description: "One line on why the work is large" }),
 })
 
 type Metadata = {
   from?: TaskSize.Tier
   to?: TaskSize.Tier
-}
-
-// What a request gains at each size, as the model reads it in the result.
-const GAINS: Partial<Record<TaskSize.Tier, string>> = {
-  standard: "the to-do list (todowrite) and questions to the user",
-  thorough: "the to-do list, questions and subagents (task and task_manage)",
 }
 
 /** The request's size as the session runtime sized it this step; the model cannot supply it. */
@@ -34,22 +25,21 @@ export const EscalateTool = Tool.define<typeof Parameters, Metadata, never>(
         const current = ctx.extra?.taskSize as TaskSizeContext | undefined
         if (!current)
           return { title: "Not raised", output: "Task sizing does not apply to this session.", metadata: {} }
-        // A raise only ever goes up, and a request sized too small can reach Thorough: in one call with to, or in two
-        // steps. The completed call is the durable record: every later step recomputes the size from the history, so
-        // the raise survives a restart.
-        const to = params.to ?? TaskSize.raise(current.tier)
-        if (TaskSize.rank(to) <= TaskSize.rank(current.tier))
+        if (current.tier === "thorough")
           return {
             title: "Not raised",
-            output: `This request is already ${TaskSize.label(current.tier)}. Carry on with the tools you have.`,
+            output: "This request is already Thorough. Carry on with the tools you have.",
             metadata: {},
           }
+        // Work and Thorough are the only sizes the agent works at, so a raise always goes to Thorough. The completed
+        // call is the durable record: every later step recomputes the size from the history, so the raise survives a
+        // restart, and a reply that continues the work keeps it Thorough.
         return {
-          title: `${TaskSize.label(to)} task`,
+          title: "Thorough task",
           // The request's size note was written for its old size and stays as it was, so the prompt cache keeps it; this
           // result is what tells the model the size changed.
-          output: `This request is now ${TaskSize.label(to)}${GAINS[to] ? `: ${GAINS[to]} are offered from your next step` : ""}. This replaces the size note on the request. Reason noted: ${params.reason.slice(0, 200)}`,
-          metadata: { from: current.tier, to },
+          output: `This request is now Thorough: subagents (task and task_manage) and the to-do list are offered from your next step, at high reasoning effort. This replaces the size note on the request. Reason noted: ${params.reason.slice(0, 200)}`,
+          metadata: { from: current.tier, to: "thorough" },
         }
       }),
   } satisfies Tool.DefWithoutID<typeof Parameters, Metadata>),

@@ -2,8 +2,9 @@ export * as TaskSize from "./task-size"
 
 import { Schema } from "effect"
 
-// How much harness a request gets. Chat is a direct reply with no tools; Light does a small job with the basic tools;
-// Standard adds the to-do list and questions; Thorough adds subagents and, when the user's setting asks for it, the judge.
+// How much harness a request gets. Chat is a direct reply with no tools. Standard is Work: every tool but subagents, at
+// the provider's default effort; Light is the same without the to-do list, and only a sender picks it. Thorough adds
+// subagents, high effort and, when the user's setting asks for it, the judge.
 export const Tier = Schema.Literals(["chat", "light", "standard", "thorough"]).annotate({ identifier: "TaskSizeTier" })
 export type Tier = typeof Tier.Type
 

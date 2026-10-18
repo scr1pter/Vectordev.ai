@@ -28,8 +28,6 @@ export type Carried = {
   readonly text: string
   /** Files the summarised part of the request changed since its last verdict. */
   readonly files: readonly string[]
-  readonly cloud: boolean
-  readonly browser: boolean
   readonly agents: readonly string[]
 }
 
@@ -43,8 +41,8 @@ export type Request = {
   /** The request's size: the rules' size, raised once if the agent called escalate. */
   readonly tier: TaskSize.Tier
   readonly escalated: boolean
-  /** The size, and cues, whose tools and policies the request is sent with; see `offered` in `size`. */
-  readonly offered: { readonly tier: TaskSize.Tier; readonly cloud: boolean; readonly browser: boolean }
+  /** The size whose tools and policies the request is sent with; see `offered` in `size`. */
+  readonly offered: TaskSize.Tier
   readonly judge: TaskSize.JudgeMode
   /** What a compaction recorded of this request, when the summary replaced the message that opened it. */
   readonly carried?: Carried
@@ -54,7 +52,7 @@ export type Input = {
   readonly messages: readonly SessionV1.WithParts[]
   /**
    * Whether the provider caches prompt prefixes. Then the tools and policies keep the highest size the session has
-   * used while its cache is warm, so a light follow-up reuses the cached prefix instead of writing a new one. A model
+   * used while its cache is warm, so a smaller follow-up reuses the cached prefix instead of writing a new one. A model
    * without caching (the shared free models) follows each request's own size at once.
    */
   readonly caching: boolean
@@ -68,14 +66,10 @@ export type Input = {
 
 /** Every request in the history, oldest first; the last is the one being answered. Empty when no user has spoken. */
 export function size(input: Input): Request[] {
-  const used = {
-    cloud: input.messages.some((message) => usedTool(message, "vector_cloud")),
-    browser: input.messages.some((message) => usedTool(message, "browser")),
-  }
   const sized: Request[] = []
   // On a caching provider the tools offered only grow while the cache is warm; a cold cache or a compaction (which
   // starts the visible history again) resets them to the request's own size.
-  let sticky: Request["offered"] | undefined
+  let sticky: TaskSize.Tier | undefined
   let end = 0
   // A compaction that recorded nothing (one from before Vector recorded requests) still leaves work to continue: a
   // "continue" or a "yes" after it is work of unknown size, so Standard with tools and history, never a bare reply.
@@ -86,17 +80,14 @@ export function size(input: Input): Request[] {
     // reply in between are not the work.
     const prior = sized.findLast((request) => request.tier !== "chat")
     // The request before is still open when its reply asked or offered something, or its run did not finish: then the
-    // user's next message, short of a social one, is a reply inside that work.
+    // user's next message, a social one included, answers or follows up that work.
     const open = previous ? waiting(previous) : false
-    // A reply that closed on an offer of more work ("Want me to also update the docs?"): a plain "no thanks" closes it.
-    const offer = previous ? TaskSize.offers(closingText(previous.messages)) : false
     const result = group.users.reduce<TaskSize.Result | undefined>(
       (current, user) => {
         const next = TaskSize.classify({
           ...describe(user),
           previous: current?.tier ?? prior?.tier ?? (compacted ? "standard" : undefined),
           open: current ? false : open,
-          offer: current ? false : offer,
           auto: input.auto,
         })
         if (!current) return next
@@ -109,25 +100,17 @@ export function size(input: Input): Request[] {
         tier: group.carried.tier,
         source: "auto",
         reasons: ["compacted"],
-        cloud: group.carried.cloud,
-        browser: group.carried.browser,
         judge: group.carried.judge !== "off",
         agents: group.carried.agents,
       },
     )!
     const raised = escalation(group.messages)
     const tier = raised ? TaskSize.max(result.tier, raised) : result.tier
-    const inherited = result.source === "inherited" && prior !== undefined
-    const cloud = result.cloud || used.cloud || (inherited && prior.offered.cloud)
-    const browser = result.browser || used.browser || (inherited && prior.offered.browser)
     const start = (group.users[0] ?? group.messages[0]).info.time.created
-    const cold = !input.caching || sticky === undefined || start - end > input.lifetime
     const offered =
-      tier === "chat"
-        ? { tier, cloud, browser }
-        : cold || sticky === undefined
-          ? { tier, cloud, browser }
-          : { tier: TaskSize.max(sticky.tier, tier), cloud: sticky.cloud || cloud, browser: sticky.browser || browser }
+      tier === "chat" || !input.caching || sticky === undefined || start - end > input.lifetime
+        ? tier
+        : TaskSize.max(sticky, tier)
     // A greeting goes out on its own small request shape, so it neither reads nor refreshes the main cached prefix.
     if (tier !== "chat") {
       sticky = offered
@@ -175,8 +158,6 @@ export function carry(request: Request, hidden: (message: SessionV1.WithParts) =
     judge: request.judge,
     text: requestText(request).slice(0, 8000),
     files: [...new Set([...(verdict ? [] : (request.carried?.files ?? [])), ...changedFiles({ messages }, verdict)])],
-    cloud: request.offered.cloud,
-    browser: request.offered.browser,
     agents: request.result.agents,
   }
 }
@@ -193,7 +174,11 @@ export function judgeable(requests: readonly Request[], since: string) {
   )
   const last = requests.at(-1)
   if (touched === -1 || !last || !last.result.judge) return
-  const unit = requests.slice(settled(requests, origin(requests, touched)))
+  // A greeting or a question about Vector answers nothing, so a "hi" never brings in the judge for the work before it,
+  // even when it is sent while that work waits on the user and so runs at its size.
+  const unit = requests.slice(
+    answersNothing(requests[touched]!) ? touched : settled(requests, origin(requests, touched)),
+  )
   // "thorough" judges Thorough work; "changes" judges any work.
   const qualifies = unit.some(
     (request) =>
@@ -212,14 +197,15 @@ export function judgeable(requests: readonly Request[], since: string) {
   ]
   if (files.length === 0) return
   // The judge reads everything the user asked for in that work, not only the request that qualified it. A thanks that a
-  // FAIL raised to the work's size is still not something the user asked for.
-  const work = unit.filter((request) => request.result.tier !== "chat")
+  // FAIL raised to the work's size, or a "hi" sent while the work waited on the user, is still not something they asked
+  // for.
+  const work = unit.filter((request) => request.result.tier !== "chat" && !answersNothing(request))
   return {
     requests: work,
     files,
     tier: unit.reduce<TaskSize.Tier>(
       (top, request) => (request.tier === "chat" ? top : TaskSize.max(top, request.tier)),
-      "light",
+      "standard",
     ),
     // What the work's own last change reported, not a later "You're welcome!".
     report: closingText(
@@ -229,7 +215,7 @@ export function judgeable(requests: readonly Request[], since: string) {
     // A greeting in between answers nothing.
     exchanges: unit.flatMap((request, index) => {
       const asked = closingText(request.messages)
-      const answer = unit.slice(index + 1).find((next) => !UNANSWERING.has(next.result.reasons[0] ?? ""))
+      const answer = unit.slice(index + 1).find((next) => !answersNothing(next))
       const reply = answer ? requestText(answer) : ""
       return TaskSize.asks(asked) && reply ? [{ asked: asked.slice(-600), reply: reply.slice(0, 2000) }] : []
     }),
@@ -249,6 +235,11 @@ export function waiting(request: Pick<Request, "messages">) {
   return last.info.error !== undefined || UNFINISHED.has(last.info.finish ?? "")
 }
 
+// A greeting, emoji or a question about Vector answers nothing the agent asked.
+function answersNothing(request: Request) {
+  return request.result.reasons.some((reason) => UNANSWERING.has(reason))
+}
+
 const UNANSWERING = new Set(["greeting", "emoji", "about-vector"])
 
 // Finish reasons of a run that stopped before its answer was done.
@@ -258,11 +249,9 @@ const UNFINISHED = new Set(["length", "tool-calls", "unknown", "error", "content
 // it, it is judged with the run that answered them, so a finished large task that closed with an offer still gets its
 // verdict.
 function settled(requests: readonly Request[], index: number): number {
-  // A greeting or a question about Vector answers nothing, so a "hi" never brings in the judge.
-  if (UNANSWERING.has(requests[index]?.result.reasons[0] ?? "")) return index
-  const before = requests.slice(0, index).findLastIndex((request) => request.tier !== "chat")
-  const request = requests[before]
-  if (!request || !TaskSize.waits(closingText(request.messages)) || judgeRuns(request).length > 0) return index
+  const before = requests.slice(0, index).findLastIndex((item) => item.tier !== "chat")
+  const work = requests[before]
+  if (!work || !TaskSize.waits(closingText(work.messages)) || judgeRuns(work).length > 0) return index
   return settled(requests, origin(requests, before))
 }
 
@@ -435,8 +424,6 @@ function carriedOf(message: SessionV1.WithParts): Carried | undefined {
     judge: value.judge === "thorough" || value.judge === "changes" ? value.judge : "off",
     text: typeof value.text === "string" ? value.text : "",
     files: Array.isArray(value.files) ? value.files.filter((file): file is string => typeof file === "string") : [],
-    cloud: value.cloud === true,
-    browser: value.browser === true,
     agents: Array.isArray(value.agents)
       ? value.agents.filter((agent): agent is string => typeof agent === "string")
       : [],
@@ -469,8 +456,4 @@ function chosenMode(users: readonly SessionV1.WithParts[]): TaskSize.JudgeMode |
     user.parts.some((part) => part.type === "text" && part.synthetic && part.text.startsWith(LEGACY_JUDGE_POLICY)),
   )
   return legacy ? "thorough" : undefined
-}
-
-function usedTool(message: SessionV1.WithParts, tool: string) {
-  return message.info.role === "assistant" && message.parts.some((part) => part.type === "tool" && part.tool === tool)
 }

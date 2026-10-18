@@ -1028,7 +1028,7 @@ export const Model = Schema.Struct({
   freeModel: optional(
     Schema.Struct({
       source: Schema.Literals(["shared", "openrouter"]),
-      // "optional" when Vector may switch the model's reasoning off for a greeting or a light job.
+      // "optional" when Vector may switch the model's reasoning off for a greeting.
       reasoning: optional(Schema.Literals(["optional", "mandatory"])),
     }),
   ),

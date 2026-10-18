@@ -41,8 +41,9 @@ export function isFreeModelSelection(model: RoutableModel) {
   )
 }
 
-// One classifier for the engine, the app and desktop: TaskSize sizes a request from what it says. The app's names for the
-// sizes predate it.
+// One classifier for the engine, the app and desktop: TaskSize. The app's names for the sizes predate it. Only a sender
+// picks Light, so a message the app classifies is trivial (a social message), standard or, when the user asks for it,
+// complex.
 const DIFFICULTY = {
   chat: "trivial",
   light: "simple",
@@ -52,11 +53,7 @@ const DIFFICULTY = {
 
 export function classifyTaskDifficulty(task: string): TaskDifficulty {
   if (!task.trim()) return "trivial"
-  const result = TaskSize.classify({ text: task })
-  // "ok", "yes", "continue" or "great" reply to the work before them, which only the engine can read them against.
-  // Here they are never trivial (no quick lane) and never pick a model or a reasoning variant of their own.
-  if (result.tier === "chat" && !TaskSize.social(result)) return "simple"
-  return DIFFICULTY[result.tier]
+  return DIFFICULTY[TaskSize.classify({ text: task }).tier]
 }
 
 function qualityScore(model: RoutableModel) {

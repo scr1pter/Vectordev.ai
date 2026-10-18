@@ -129,6 +129,11 @@ function summary(parent: SessionV1.WithParts) {
   return message
 }
 
+// Large work, as the user asks for it: Thorough comes only from the user's ask, escalate or a continuation of it.
+const LARGE = "be thorough: migrate the app to the new router across 40 files"
+// A request of its own after finished work: too long to read as a follow-up.
+const UNRELATED = "add a settings page with a dark mode toggle, tests for the parser and a new billing flow"
+
 describe("SessionTaskSize.size", () => {
   test("a message sent while the run is going joins its request and can only raise it", () => {
     const requests = size([
@@ -142,50 +147,40 @@ describe("SessionTaskSize.size", () => {
     expect(requests[0]?.tier).toBe("thorough")
   })
 
-  test("a completed escalate call raises its request one step, and the next request starts fresh", () => {
+  test("a completed escalate call raises Work to Thorough, and a reply to it stays there", () => {
     const requests = size([
-      user("rename getUser to fetchUser"),
-      assistant("This touches every route.", "tool-calls", [
-        { tool: "escalate", metadata: { from: "light", to: "standard" } },
+      user("switch the codebase to Go"),
+      assistant("This touches every package.", "tool-calls", [
+        { tool: "escalate", metadata: { from: "standard", to: "thorough" } },
       ]),
-      assistant("Renamed."),
+      assistant("Ported the first package. Should I go on with the rest?"),
+      user("yes"),
+      assistant("Ported every package."),
       user("thanks"),
       assistant("You're welcome!"),
     ])
-    expect(requests.map((request) => request.tier)).toEqual(["standard", "chat"])
-    expect(requests[0]?.escalated).toBe(true)
-  })
-
-  test("two raises take a light request to thorough; the highest raise counts", () => {
-    const requests = size([
-      user("rename getUser to fetchUser"),
-      assistant("More than a rename.", "tool-calls", [
-        { tool: "escalate", metadata: { from: "light", to: "standard" } },
-      ]),
-      assistant("It spans every package.", "tool-calls", [
-        { tool: "escalate", metadata: { from: "standard", to: "thorough" } },
-      ]),
-      assistant("Renamed."),
+    expect(requests.map((request) => [request.result.tier, request.tier])).toEqual([
+      ["standard", "thorough"],
+      ["thorough", "thorough"],
+      ["chat", "chat"],
     ])
-    expect(requests[0]?.tier).toBe("thorough")
+    expect(requests[0]?.escalated).toBe(true)
   })
 
   test("a continue after a thanks exchange continues the work, not the thanks", () => {
     const requests = size([
-      user("add OAuth login with tests"),
+      user("be thorough and add OAuth login with tests"),
       assistant("Added login."),
       user("thanks"),
       assistant("Anytime!"),
       user("continue"),
     ])
-    expect(requests.map((request) => request.tier)).toEqual(["standard", "chat", "standard"])
-    // The cloud cue ("login") comes along with the size.
-    expect(requests[2]?.offered.cloud).toBe(true)
+    expect(requests.map((request) => request.tier)).toEqual(["thorough", "chat", "thorough"])
   })
 
   test("Vector's own follow-ups continue the request they belong to", () => {
     const requests = size([
-      user("migrate the app to the new router across 40 files"),
+      user(LARGE),
       assistant("Migrated."),
       user("<vector_judge_verdict>FAIL</vector_judge_verdict>", { synthetic: true }),
       assistant("Repaired."),
@@ -195,35 +190,17 @@ describe("SessionTaskSize.size", () => {
   })
 
   test("on a caching provider the offered size stays the highest while the cache is warm, and resets once cold", () => {
-    const warm = size(
-      [
-        user("migrate the app to the new router across 40 files"),
-        assistant("Done."),
-        user("fix the typo in README.md"),
-      ],
-      true,
-    )
-    expect(warm.map((request) => [request.tier, request.offered.tier])).toEqual([
+    const warm = size([user(LARGE), assistant("Done."), user(UNRELATED)], true)
+    expect(warm.map((request) => [request.tier, request.offered])).toEqual([
       ["thorough", "thorough"],
-      ["light", "thorough"],
+      ["standard", "thorough"],
     ])
     const later = clock + 10 * 60_000
-    const cold = size(
-      [
-        user("migrate the app to the new router across 40 files"),
-        assistant("Done."),
-        user("fix the typo in README.md", { at: later }),
-      ],
-      true,
-    )
-    expect(cold[1]?.offered.tier).toBe("light")
+    const cold = size([user(LARGE), assistant("Done."), user(UNRELATED, { at: later })], true)
+    expect(cold[1]?.offered).toBe("standard")
     // A model without caching always follows the request's own size.
-    const free = size([
-      user("migrate the app to the new router across 40 files"),
-      assistant("Done."),
-      user("fix the typo"),
-    ])
-    expect(free[1]?.offered.tier).toBe("light")
+    const free = size([user(LARGE), assistant("Done."), user(UNRELATED)])
+    expect(free[1]?.offered).toBe("standard")
   })
 
   test("the judge setting comes from the prompt, else an older client's policy, else the config", () => {
@@ -254,10 +231,8 @@ describe("SessionTaskSize.size", () => {
       opened: opening,
       tier: "thorough",
       judge: "thorough",
-      text: "migrate the app to the new router across 40 files",
+      text: LARGE,
       files: ["/r/router.ts"],
-      cloud: false,
-      browser: false,
       agents: [],
     })
     const messages = [
@@ -294,55 +269,54 @@ describe("SessionTaskSize.size", () => {
     expect(size([compaction, summary(compaction), user("hi")]).at(-1)?.tier).toBe("chat")
   })
 
-  test("the judge checks every request the run answered, and the work a yes continues", () => {
+  test("the judge checks every request the run answered, and the work a reply continues", () => {
     const since = MessageID.ascending()
-    // A message sent during the final step opens its own request after the large one.
+    // A message sent during the final step opens its own request after the large one, and continues it.
     const joined = size([
-      user("migrate the app to the new router across 40 files", { judge: "thorough" }),
+      user(LARGE, { judge: "thorough" }),
       wrote("/r/router.ts"),
       assistant("Migrated the router."),
       user("also fix the typo in README", { judge: "thorough" }),
       assistant("Fixed the typo."),
     ])
-    expect(joined.map((request) => request.tier)).toEqual(["thorough", "light"])
+    expect(joined.map((request) => request.tier)).toEqual(["thorough", "thorough"])
     const work = SessionTaskSize.judgeable(joined, since)
-    // The judge reads both requests: the large one qualifies the work, and the joined one is part of it.
     expect(work?.requests).toHaveLength(2)
     expect(work?.files).toEqual(["/r/router.ts"])
 
     // A yes to the agent's question, in a later run, takes the work it answers to the judge.
-    const ask = user("migrate the app to the new router across 40 files", { judge: "thorough" })
+    const ask = user(LARGE, { judge: "thorough" })
     const before = [ask, wrote("/r/router.ts"), assistant("Migrated 30 routes. Should I also migrate the tests?")]
     const later = MessageID.ascending()
     const answered = size([...before, user("yes", { judge: "thorough" }), assistant("Migrated the tests.")])
     expect(answered.map((request) => request.tier)).toEqual(["thorough", "thorough"])
     expect(SessionTaskSize.judgeable(answered, later)?.files).toEqual(["/r/router.ts"])
-    // A short instruction after the agent asked is part of the same work, so it is judged with it too.
-    const instead = size([...before, user("fix the typo in README first", { judge: "thorough" }), assistant("Fixed.")])
-    expect(instead.map((request) => request.tier)).toEqual(["thorough", "thorough"])
-    expect(SessionTaskSize.judgeable(instead, later)?.requests).toHaveLength(2)
-    // A light request after finished work is judged on its own, and in "thorough" mode it is not.
+    // A request of its own after finished work is Work, so "thorough" mode does not judge it.
     const done = [ask, wrote("/r/router.ts"), assistant("Migrated all 40 routes.")]
     const next = MessageID.ascending()
-    const unrelated = size([...done, user("fix the typo in README", { judge: "thorough" }), assistant("Fixed.")])
-    expect(unrelated.map((request) => request.tier)).toEqual(["thorough", "light"])
+    const unrelated = size([...done, user(UNRELATED, { judge: "thorough" }), assistant("Added.")])
+    expect(unrelated.map((request) => request.tier)).toEqual(["thorough", "standard"])
     expect(SessionTaskSize.judgeable(unrelated, next)).toBeUndefined()
   })
 
-  test("large work that ended on an offer is judged once the user declines it or says thanks", () => {
-    const ask = user("migrate the app to the new router across 40 files", { judge: "thorough" })
+  test("large work that ended on an offer is judged once the user answers it, and a greeting answers nothing", () => {
     const offer = [
-      ask,
+      user(LARGE, { judge: "thorough" }),
       wrote("/r/router.ts"),
       assistant("Migrated all 40 routes and the tests pass. Want me to also update the docs?"),
     ]
     for (const text of ["thanks", "no thanks", "no", "ok thanks"]) {
       const after = MessageID.ascending()
       const requests = size([...offer, user(text, { judge: "thorough" }), assistant("You're welcome!")])
+      // Sent while the work waits on the user, it answers that work: never a bare reply.
+      expect(requests.at(-1)?.result, text).toMatchObject({ tier: "thorough", source: "inherited" })
       const work = SessionTaskSize.judgeable(requests, after)
       expect(work?.files, text).toEqual(["/r/router.ts"])
       expect(work?.tier, text).toBe("thorough")
       expect(SessionTaskSize.requestText(work!.requests[0]!), text).toContain("new router")
+      // The judge sees the offer and the answer, and the work's own report rather than "You're welcome!".
+      expect(work?.exchanges, text).toEqual([{ asked: expect.stringContaining("update the docs?"), reply: text }])
+      expect(work?.report, text).toContain("Migrated all 40 routes")
     }
     // A greeting answers nothing, so it never brings in the judge; the work waits for the reply that does.
     const greeted = MessageID.ascending()
@@ -356,41 +330,39 @@ describe("SessionTaskSize.size", () => {
     expect(SessionTaskSize.judgeable(done, after)).toBeUndefined()
   })
 
-  test("a plain no to an offer settles the work; a no to a real question is an answer inside it", () => {
-    const ask = user("migrate the app to the new router across 40 files", { judge: "thorough" })
-    const offered = [
-      ask,
-      wrote("/r/router.ts"),
-      assistant("Migrated all 40 routes and the tests pass. Want me to also update the docs?"),
-    ]
-    for (const text of ["no thanks", "no", "not now", "stop here for now"]) {
-      const after = MessageID.ascending()
-      const requests = size([...offered, user(text, { judge: "thorough" }), assistant("Okay.")])
-      // Nothing is left to do, so the decline is a direct reply, not a full Thorough request.
-      expect(requests.at(-1)?.result, text).toMatchObject({ tier: "chat", reasons: ["decline"] })
-      const work = SessionTaskSize.judgeable(requests, after)
-      expect(work?.tier, text).toBe("thorough")
-      // The judge sees the offer and the decline, and the work's own report rather than "Okay.".
-      expect(work?.exchanges, text).toEqual([{ asked: expect.stringContaining("update the docs?"), reply: text }])
-      expect(work?.report, text).toContain("Migrated all 40 routes")
+  test("a no to the agent's question continues the work at its size, and the judge is told the answer", () => {
+    for (const question of [
+      "Migrated 20 of 40 routes. Should I convert them to the new loader API?",
+      // A yes/no question about the work that reads like an offer is still a question the work turns on.
+      "Migrated the router and left the old API in place. Do you want me to keep the old API for compatibility?",
+    ]) {
+      const later = MessageID.ascending()
+      const answered = size([
+        user(LARGE, { judge: "thorough" }),
+        wrote("/r/router.ts"),
+        assistant(question),
+        user("no", { judge: "thorough" }),
+        wrote("/r/rest.ts"),
+        assistant("Done."),
+      ])
+      expect(answered.at(-1)?.result, question).toMatchObject({ tier: "thorough", source: "inherited" })
+      const work = SessionTaskSize.judgeable(answered, later)
+      expect(work?.exchanges, question).toEqual([{ asked: question, reply: "no" }])
+      expect(work?.files, question).toEqual(["/r/router.ts", "/r/rest.ts"])
     }
-    // A real question: "no" is the user's answer, so the work goes on at its size, and the judge is told the answer.
-    const questioned = [
-      ask,
-      wrote("/r/router.ts"),
-      assistant("Migrated 20 of 40 routes. Should I convert them to the new loader API?"),
-    ]
-    const later = MessageID.ascending()
-    const answered = size([...questioned, user("no", { judge: "thorough" }), wrote("/r/rest.ts"), assistant("Done.")])
-    expect(answered.at(-1)?.result).toMatchObject({ tier: "thorough", source: "inherited" })
-    const work = SessionTaskSize.judgeable(answered, later)
-    expect(work?.exchanges).toEqual([{ asked: expect.stringContaining("new loader API?"), reply: "no" }])
-    expect(work?.files).toEqual(["/r/router.ts", "/r/rest.ts"])
   })
 
-  test("a plan that asked nothing is carried out by a build it or the user's own approval, and judged with it", () => {
-    for (const text of ["build it", "implement the plan", "looks good, build it", "go with option b", "approved"]) {
-      const plan = user("plan how to port the TUI to Rust", { judge: "thorough" })
+  test("a short follow-up after a Thorough plan carries it out at its size, Plan mode then Build included", () => {
+    for (const [text, agent] of [
+      ["build it", "build"],
+      ["build the app", "build"],
+      ["implement the migration", "build"],
+      ["looks good, build it", "build"],
+      ["approved", "build"],
+      ["build the app", "plan"],
+      ["implement the migration", "plan"],
+    ] as const) {
+      const plan = user("be thorough and plan how to port the TUI to Rust", { judge: "thorough", agent })
       const requests = size([
         plan,
         assistant("Here is the plan in three phases: the renderer, the input layer, then the views."),
@@ -399,12 +371,12 @@ describe("SessionTaskSize.size", () => {
         assistant("Ported the renderer."),
       ])
       expect(requests.map((request) => [request.tier, request.result.source]), text).toEqual([
-        ["thorough", "auto"],
+        ["thorough", "user"],
         ["thorough", "inherited"],
       ])
       const work = SessionTaskSize.judgeable(requests, plan.info.id)
       expect(work?.requests.map((request) => SessionTaskSize.requestText(request)), text).toEqual([
-        "plan how to port the TUI to Rust",
+        "be thorough and plan how to port the TUI to Rust",
         text,
       ])
     }
@@ -413,7 +385,7 @@ describe("SessionTaskSize.size", () => {
   test("a quick-lane thanks after build work settles it like a thanks on the build agent", () => {
     const after = MessageID.ascending()
     const requests = size([
-      user("migrate the app to the new router across 40 files", { judge: "thorough" }),
+      user(LARGE, { judge: "thorough" }),
       wrote("/r/router.ts"),
       assistant("Migrated all 40 routes. Want me to also update the docs?"),
       user("thanks", { judge: "thorough", agent: "quick" }),
@@ -424,14 +396,14 @@ describe("SessionTaskSize.size", () => {
     expect(work?.report).toContain("Migrated all 40 routes")
   })
 
-  test("the judge pairs a question with the user's answer, not a greeting, and a thanks is not part of the request", () => {
-    const ask = user("migrate the app to the new router across 40 files", { judge: "thorough" })
+  test("the judge pairs a question with the user's answer, and a greeting is neither an answer nor part of the ask", () => {
+    const ask = user(LARGE, { judge: "thorough" })
     const messages = [
       ask,
       wrote("/r/router.ts"),
       assistant("Migrated 20 of 40 routes. Should I convert the rest to the new loader API?"),
       user("hi", { judge: "thorough" }),
-      assistant("Hi!"),
+      assistant("Hi! Should I convert the rest to the new loader API?"),
       user("thanks", { judge: "thorough" }),
       assistant("You're welcome!"),
       judgedBy("FAIL", "thorough"),
@@ -440,20 +412,21 @@ describe("SessionTaskSize.size", () => {
       assistant("Repaired the router."),
     ]
     const work = SessionTaskSize.judgeable(size(messages), ask.info.id)
-    expect(work?.exchanges).toEqual([{ asked: expect.stringContaining("new loader API?"), reply: "thanks" }])
-    // The repair raised the thanks to the work's size, but the user asked only for the migration.
-    expect(work?.requests.map((request) => SessionTaskSize.requestText(request))).toEqual([
-      "migrate the app to the new router across 40 files",
+    expect(work?.exchanges).toEqual([
+      { asked: expect.stringContaining("new loader API?"), reply: "thanks" },
+      { asked: expect.stringContaining("new loader API?"), reply: "thanks" },
     ])
+    // The thanks answers the agent's question, so it is part of what the user said about the work; the greeting is not.
+    expect(work?.requests.map((request) => SessionTaskSize.requestText(request))).toEqual([LARGE, "thanks"])
     expect(work?.tier).toBe("thorough")
     expect(work?.report).toBe("Repaired the router.")
   })
 
   test("a judge FAIL raises the request it repairs to the size of the work it judged", () => {
     const requests = size([
-      user("migrate the app to the new router across 40 files", { judge: "thorough" }),
+      user(LARGE, { judge: "thorough" }),
       wrote("/r/router.ts"),
-      assistant("Migrated all 40 routes. Want me to also update the docs?"),
+      assistant("Migrated all 40 routes."),
       user("thanks", { judge: "thorough" }),
       assistant("You're welcome!"),
       judgedBy("FAIL", "thorough"),
@@ -464,18 +437,19 @@ describe("SessionTaskSize.size", () => {
   })
 
   test("a run that did not finish, or a dismissed question, leaves the work open for the next message", () => {
-    const ask = user("migrate the app to the new router across 40 files")
+    // Message IDs are ordered, so each message is made in the order it was sent.
+    const ask = user(LARGE)
     const interrupted = assistant("Migrating the routes", "tool-calls")
     if (interrupted.info.role === "assistant")
       interrupted.info.error = { name: "MessageAbortedError", data: { message: "Aborted" } }
     const stopped = size([ask, interrupted, user("use the v6 api instead")])
     expect(stopped.map((request) => [request.tier, request.result.source])).toEqual([
-      ["thorough", "auto"],
+      ["thorough", "user"],
       ["thorough", "inherited"],
     ])
-    const cut = size([user("migrate the app to the new router across 40 files"), assistant("Migrated 12 of", "length"), user("ok")])
-    expect(cut.at(-1)?.tier).toBe("thorough")
-    const asking = user("migrate the app to the new router across 40 files")
+    // Even a greeting after unfinished work follows up that work.
+    expect(size([user(LARGE), assistant("Migrated 12 of", "length"), user("hi")]).at(-1)?.tier).toBe("thorough")
+    const asking = user(LARGE)
     const dismissed = assistant("Which router?", "stop")
     dismissed.parts.push({
       id: PartID.ascending(),
@@ -486,11 +460,9 @@ describe("SessionTaskSize.size", () => {
       tool: "question",
       state: { status: "error", input: {}, error: "dismissed", time: { start: 1, end: 2 } },
     } as SessionV1.Part)
-    const answered = size([asking, dismissed, user("the new one")])
-    expect(answered.at(-1)?.tier).toBe("thorough")
-    // A finished run leaves nothing open: a plain "ok" afterwards is just a reply.
-    const finished = size([user("migrate the app to the new router across 40 files"), assistant("Migrated all 40."), user("ok")])
-    expect(finished.at(-1)?.tier).toBe("chat")
+    expect(size([asking, dismissed, user("the new one")]).at(-1)?.tier).toBe("thorough")
+    // A finished run that asked nothing leaves nothing open: a thanks afterwards is a direct reply.
+    expect(size([user(LARGE), assistant("Migrated all 40."), user("thanks")]).at(-1)?.tier).toBe("chat")
   })
 
   test("a yes to a greeting reply's offer gets the work harness, not the quick lane", () => {
@@ -501,7 +473,7 @@ describe("SessionTaskSize.size", () => {
     ])
     expect(requests.map((request) => request.tier)).toEqual(["chat", "standard"])
     // A greeting reply's pleasantry offers nothing.
-    expect(size([user("hi"), assistant("Hi! How can I help you today?"), user("ok")]).at(-1)?.tier).toBe("chat")
+    expect(size([user("hi"), assistant("Hi! How can I help you today?"), user("thanks")]).at(-1)?.tier).toBe("chat")
   })
 
   test("asking for the judge in the message turns it on for that request; a mention does not", () => {

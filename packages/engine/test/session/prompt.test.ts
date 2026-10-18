@@ -4353,6 +4353,8 @@ const guardedChat = Effect.fn("test.guardedChat")(function* (budget?: { usd?: nu
     sessionID: chat.id,
     agent: "build",
     noReply: true,
+    // The full build harness: a generic prompt is Work, which offers no subagents.
+    size: "thorough",
     parts: [{ type: "text", text: "go" }],
     ...(budget ? { budget } : {}),
   })

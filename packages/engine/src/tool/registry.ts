@@ -290,7 +290,7 @@ const layer = Layer.effect(
             tool.search,
             tool.skill,
             tool.patch,
-            // Offered only to a sized Light or Standard request; the session runtime removes it everywhere else.
+            // Offered only to a sized request below Thorough; the session runtime removes it everywhere else.
             tool.escalate,
             ...(process.env.VECTOR_BROWSER_BRIDGE_URL && process.env.VECTOR_BROWSER_BRIDGE_TOKEN ? [tool.browser] : []),
             ...(process.env.VECTOR_CLOUD_BRIDGE_URL && process.env.VECTOR_CLOUD_BRIDGE_TOKEN ? [tool.vectorcloud] : []),

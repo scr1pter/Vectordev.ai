@@ -227,12 +227,11 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     }
 
     // The file map is a starting point for a session's real work. On a later message it would stay in the history and
-    // be sent again on every request, while the agent already knows the code it has read; a greeting, a question or a
-    // light job finds its own way faster than a list of twelve files.
+    // be sent again on every request, while the agent already knows the code it has read; a greeting needs none.
     const history = input.sync.data.message?.[input.draft.sessionID] ?? []
     const replied = history.some((message) => message.role === "assistant")
     const preparation =
-      difficulty === "trivial" || difficulty === "simple" || replied
+      difficulty === "trivial" || replied
         ? undefined
         : await globalThis.window?.api?.prepareAgentTask?.(input.draft.sessionDirectory, text).catch(() => undefined)
     const syntheticText = [

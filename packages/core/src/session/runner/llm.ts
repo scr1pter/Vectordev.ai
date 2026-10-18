@@ -211,12 +211,10 @@ const layer = Layer.effect(
         ? undefined
         : yield* tools.materialize(agent.info?.permissions ?? [], internalSessionPermissions(session.internal))
       // Each turn sizes the request it answers from the projected history, as the V1 runner does: a greeting is offered
-      // no tools and a light job none of the planning tools. V2 has no subagents or judge, so no size brings them in.
-      // Vector's own helper sessions keep every tool they were given.
+      // no tools and any other request every tool. V2 has no subagents or judge, so no size brings them in. Vector's
+      // own helper sessions keep every tool they were given.
       const size = session.internal ? undefined : requestSize(context)
-      const withheld = size
-        ? TaskSize.withheld(size.tier, { cloud: size.cloud, browser: size.browser, agents: size.agents.length })
-        : new Set<string>()
+      const withheld = size ? TaskSize.withheld(size.tier, size.agents.length) : new Set<string>()
       const definitions =
         size?.tier === "chat"
           ? []
@@ -489,9 +487,9 @@ const layer = Layer.effect(
 )
 
 // The size of the request a turn answers, folded over the user's messages oldest first as the V1 history fold does.
-// Each message is read against the work before it (the last message that was more than a greeting or a thanks) and
-// the reply that answered the message before it, so a "yes" to the agent's question, or a second "continue" in a row,
-// still continues that work instead of becoming a bare reply.
+// Each message is read against the work before it (the last message that was not Chat) and the reply that answered the
+// message before it, so a "thanks" while the agent waits on an answer, or a "build it" after a large plan, continues that
+// work instead of becoming a bare reply.
 function requestSize(context: readonly SessionMessage.Message[]) {
   const users = context.flatMap((message, index) => (message.type === "user" ? [{ message, index }] : []))
   // A compaction summarised what came before, so a "continue" after it has work of unknown size to go on with.
@@ -519,7 +517,6 @@ function requestSize(context: readonly SessionMessage.Message[]) {
         open:
           position > 0 &&
           (TaskSize.asks(text) || !last || last.error !== undefined || UNFINISHED.has(last.finish ?? "")),
-        offer: TaskSize.offers(text),
       })
       return { result, work: result.tier === "chat" ? state.work : result.tier }
     },

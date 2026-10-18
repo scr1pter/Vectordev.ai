@@ -840,7 +840,7 @@
               },
               "size": {
                 "$ref": "#/$defs/TaskSizeTier",
-                "description": "How much harness the command's run gets: chat, light, standard or thorough. When unset, Vector sizes the run from what the template asks for. Only thorough offers subagents."
+                "description": "How much harness the command's run gets: chat, light, standard or thorough. When unset, the run is standard unless the user's arguments ask for thorough. Only thorough offers subagents."
               }
             },
             "required": [
@@ -1310,7 +1310,7 @@
           "properties": {
             "auto": {
               "type": "boolean",
-              "description": "Size each request from what it says, so a greeting gets a direct reply and only large work gets subagents (default: true). false gives every request the full harness."
+              "description": "Size each request, so a greeting gets a direct reply and only work you ask to be thorough, or that the agent finds large, gets subagents (default: true). false gives every request the full harness."
             },
             "judge": {
               "$ref": "#/$defs/TaskJudgeMode",

@@ -518,7 +518,7 @@ describe("follow-up optimistic echo", () => {
   type SentPart = { id: string; type: string; synthetic?: boolean; text?: string }
   type Step = { kind: "echo" | "request"; parts: SentPart[]; budget?: unknown; judge?: unknown }
 
-  // Real work, so the desktop's file map applies; a question or a light job gets none.
+  // Real work, so the desktop's file map applies; a greeting gets none.
   const text = "add a caption under this picture that names its colors and what the square could represent"
   const pasted = {
     type: "image" as const,
@@ -622,19 +622,14 @@ describe("follow-up optimistic echo", () => {
     expectOneEchoBeforeRequest(await withDesktopContext(() => send({ judge: "thorough" })), 2)
   })
 
-  test("adds no file map for a greeting or a light job, and adds it for a question about the code", async () => {
-    for (const content of ["hi", "fix the typo in README.md", "ship to vercel"]) {
-      const steps = await withDesktopContext(() =>
-        send({ prompt: [{ type: "text", content, start: 0, end: content.length }] }),
-      )
-      expect(steps.at(-1)?.parts.filter((part) => part.synthetic), content).toHaveLength(0)
-    }
-    // A question about the code is Standard work, and the map helps answer it.
-    const content = "what does this function do?"
-    const steps = await withDesktopContext(() =>
-      send({ prompt: [{ type: "text", content, start: 0, end: content.length }] }),
-    )
-    expect(steps.at(-1)?.parts.filter((part) => part.synthetic)).toHaveLength(1)
+  test("adds no file map for a greeting, and adds it for any work, small actions included", async () => {
+    const map = async (content: string) =>
+      (
+        await withDesktopContext(() => send({ prompt: [{ type: "text", content, start: 0, end: content.length }] }))
+      ).at(-1)?.parts.filter((part) => part.synthetic).length
+    expect(await map("hi")).toBe(0)
+    for (const content of ["ship to vercel", "fix the typo in README.md", "what does this function do?"])
+      expect(await map(content), content).toBe(1)
   })
 
   test("sends exactly the echoed parts when nothing is added", async () => {

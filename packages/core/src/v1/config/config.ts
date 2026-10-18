@@ -191,7 +191,7 @@ export const Info = Schema.Struct({
     Schema.Struct({
       auto: Schema.optional(Schema.Boolean).annotate({
         description:
-          "Size each request from what it says, so a greeting gets a direct reply and only large work gets subagents (default: true). false gives every request the full harness.",
+          "Size each request, so a greeting gets a direct reply and only work you ask to be thorough, or that the agent finds large, gets subagents (default: true). false gives every request the full harness.",
       }),
       judge: Schema.optional(TaskSize.JudgeMode).annotate({
         description:
