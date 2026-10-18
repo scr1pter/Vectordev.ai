@@ -97,8 +97,11 @@ export async function refreshFreeModelCatalog(
       (order.get(a.id) ?? 100) - (order.get(b.id) ?? 100) ||
       a.id.localeCompare(b.id),
   )
-  // With nothing that qualifies, publish OFF so clients hide the section instead of showing it empty.
-  const catalog = { enabled: models.length > 0, updatedAt: now, models }
+  // With nothing that qualifies, publish OFF so clients hide the section instead of showing it empty. The free router
+  // lists no endpoints and picks a model at random, so it alone never keeps the section on.
+  const catalog = models.some((model) => !isFreeRouter(model.id))
+    ? { enabled: true, updatedAt: now, models }
+    : { enabled: false, updatedAt: now, models: [] }
   await persistentStore(["SET", FREE_MODELS_CATALOG_KEY, JSON.stringify(catalog), "EX", MAX_AGE / 1000], request)
   return catalog
 }
@@ -145,8 +148,9 @@ export async function currentFreeModelCatalog(
   // A catalog stored before a model became personal-only must not keep serving it.
   const shared = decoded.value.models.filter((model) => !personalOnlyFreeModel(model.id))
   const models = options.disclosure ? shared : shared.filter((model) => freeModelDataPolicy(model) === "no-training")
-  // A fresh refresh that found no qualifying model is a deliberate OFF answer, not an outage.
-  if (!decoded.value.enabled || !models.length)
+  // A fresh refresh that found no qualifying model is a deliberate OFF answer, not an outage. The free router alone, as
+  // an earlier refresh could have stored it, does not count as a qualifying model either.
+  if (!decoded.value.enabled || !models.some((model) => !isFreeRouter(model.id)))
     return { enabled: false, updatedAt: decoded.value.updatedAt, models: [] }
   return { ...decoded.value, models }
 }

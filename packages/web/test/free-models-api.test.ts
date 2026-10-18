@@ -15,7 +15,7 @@ import {
 import { handleFreeModelsChat } from "../../../api/_lib/free-models-chat"
 import modelsHandler from "../../../api/free-models/models"
 import refreshHandler from "../../../api/free-models/refresh"
-import { MAY_TRAIN_RETENTION, type FreeModelInfo } from "../../schema/src/free-model"
+import { FREE_ROUTER_RETENTION, MAY_TRAIN_RETENTION, type FreeModelInfo } from "../../schema/src/free-model"
 
 // This integration suite executes the production Lua against real Redis/Valkey.
 // CI may supply VECTOR_TEST_REDIS_URL; local runs supply the two executable paths.
@@ -98,6 +98,14 @@ const laguna: FreeModelInfo = {
   contextLength: 262144,
   maxOutputTokens: 32768,
   providers: [{ id: "poolside/fp4", name: "Poolside", retention: MAY_TRAIN_RETENTION, dataPolicy: "may-train" }],
+}
+// OpenRouter's Free Models Router, as the refresh stores it.
+const router: FreeModelInfo = {
+  id: "openrouter/free",
+  name: "Free Models Router",
+  contextLength: 200000,
+  maxOutputTokens: 8192,
+  providers: [{ id: "openrouter", name: "OpenRouter", retention: FREE_ROUTER_RETENTION, dataPolicy: "may-train" }],
 }
 const disclosure = { "x-vector-free-model-disclosure": "may-train-v1" }
 const consented = { ...disclosure, "x-vector-free-model-training-consent": "accepted" }
@@ -304,33 +312,38 @@ describe("curated free catalog", () => {
   })
   test("curates every reviewed free model of 17 October 2026, each with its data policy, into real KV", async () => {
     const catalog = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
-    // No-training models first, then the ones whose providers may train; NVIDIA's trial endpoints never appear, and
-    // Gemma and Xing4.0 are offered through the user's own account only.
+    // No-training models first, then the ones whose providers may train, and OpenRouter's Free Models Router last.
+    // NVIDIA's trial endpoints never appear, and Gemma is offered through the user's own account only. Xing4.0 moved
+    // to the shared allowance on 17 October 2026, when the owner decided every free model belongs there unless its
+    // terms bar it.
     expect(
       catalog.models.map((model) => `${model.id}:${model.providers.map((provider) => provider.dataPolicy).join()}`),
     ).toEqual([
       "cohere/north-mini-code:free:no-training",
       "dots-studio/dots-3-note-preview:free:no-training",
+      "xingchen-agi/xing4.0-29b-a4b:free:no-training",
       "liquid/lfm-2.5-2.6b:free:may-train",
       "poolside/laguna-s-2.1:free:may-train",
       "poolside/laguna-xs-2.1:free:may-train",
       "thinkingmachines/inkling-small:free:may-train",
       "thinkingmachines/inkling:free:may-train",
+      "openrouter/free:may-train",
     ])
     expect(catalog.models.slice(0, 2)).toEqual(catalogModels)
     expect(catalog.models.find((model) => model.id === laguna.id)).toEqual(laguna)
     // A client that discloses may-train models gets them all; any other client gets the no-training ones only.
     expect(await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000, { disclosure: true })).toEqual(catalog)
     expect((await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000)).models.map((model) => model.id)).toEqual(
-      catalog.models.slice(0, 2).map((model) => model.id),
+      catalog.models.slice(0, 3).map((model) => model.id),
     )
     expect(Number(await redis(["TTL", FREE_MODELS_CATALOG_KEY]))).toBeGreaterThan(54 * 3600 - 60)
     expect(FREE_MODELS_CATALOG_KEY).toBe("vector:free-models:catalog:v4:policy")
-    // Only reviewed, offered candidates get an endpoint lookup; barred, personal-only and per-item priced models never do.
-    expect(state.catalogReads.slice(2).filter((path) => /nvidia|lyria|gemma|xing|openrouter\/free/.test(path))).toEqual(
-      [],
-    )
-    expect(state.catalogReads.slice(2)).toHaveLength(7)
+    // Only reviewed, offered candidates get an endpoint lookup; barred, personal-only and per-item priced models never
+    // do, and the Free Models Router, which lists no endpoints of its own, is judged by its listing.
+    const lookups = state.catalogReads.slice(2)
+    expect(lookups.filter((path) => /nvidia|lyria|gemma|openrouter\/free/.test(path))).toEqual([])
+    expect(lookups).toContain("/api/v1/models/xingchen-agi/xing4.0-29b-a4b:free/endpoints")
+    expect(lookups).toHaveLength(8)
     expect(JSON.stringify(catalog)).not.toMatch(/zero data retention|ZDR/i)
   })
   test("an account whose privacy settings hide may-train models publishes a no-training catalog", async () => {
@@ -365,6 +378,14 @@ describe("curated free catalog", () => {
       JSON.stringify({ enabled: true, updatedAt: Date.now(), models: [laguna] }),
     ])
     expect(await (await fetch(state.origin + "/models")).json()).toMatchObject({ enabled: false, models: [] })
+    // The Free Models Router alone, as an earlier refresh could have stored it, keeps the section off for every client.
+    await redis([
+      "SET",
+      FREE_MODELS_CATALOG_KEY,
+      JSON.stringify({ enabled: true, updatedAt: Date.now(), models: [router] }),
+    ])
+    for (const query of ["", "?disclosure=may-train-v1"])
+      expect(await (await fetch(state.origin + "/models" + query)).json()).toMatchObject({ enabled: false, models: [] })
   })
   test("curates live prices, tools, expiry, author exclusions, providers and account availability", async () => {
     const cohere = "cohere/north-mini-code:free"
@@ -440,11 +461,15 @@ describe("curated free catalog", () => {
     }
   })
   test("publishes OFF when nothing qualifies and serves it as a clean empty catalog", async () => {
-    for (const scenario of ["no free models listed", "every endpoint list empty"]) {
+    // The Free Models Router lists no endpoints and picks a model at random, so on its own it never keeps the section
+    // on: with every endpoint list empty, or with the router the only free model listed, the catalog is OFF.
+    for (const scenario of ["no free models listed", "every endpoint list empty", "only the free router listed"]) {
       Object.assign(state, initial())
       if (scenario === "no free models listed") state.models = []
       if (scenario === "every endpoint list empty")
         state.endpoints = Object.fromEntries(fixture.models.map((item) => [item.id, []]))
+      if (scenario === "only the free router listed")
+        state.models = fixture.models.filter((item) => item.id === "openrouter/free")
       const catalog = await refreshFreeModelCatalog(fetcher)
       expect(catalog).toMatchObject({ enabled: false, models: [] })
       const response = await fetch(state.origin + "/models")
@@ -744,13 +769,6 @@ describe("free models that may train on prompts", () => {
   })
 
   test("OpenRouter's free router goes out only after acceptance, naming no providers and asking to skip NVIDIA", async () => {
-    const router: FreeModelInfo = {
-      id: "openrouter/free",
-      name: "Free Models Router",
-      contextLength: 200000,
-      maxOutputTokens: 8192,
-      providers: [{ id: "openrouter", name: "OpenRouter", retention: "", dataPolicy: "may-train" }],
-    }
     await store([...catalogModels, router])
     // 1.99.108 never sees it, and is refused it; a current client is refused it until the user accepts.
     expect((await chat(prompt(router.id))).status).toBe(403)
