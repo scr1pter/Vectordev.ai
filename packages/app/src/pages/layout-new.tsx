@@ -2765,7 +2765,7 @@ export default function NewLayout(props: ParentProps) {
       setWorkspaceMode("agent")
       showToast({
         title: "Open a repository first",
-        description: "Vector needs a project-backed task before its editor can open.",
+        description: "Vector needs a task in a repository before its editor can open.",
       })
       return
     }
@@ -2879,7 +2879,7 @@ export default function NewLayout(props: ParentProps) {
     if (!directory) {
       showToast({
         title: "Open a repository first",
-        description: "Plugins install as project-scoped MCP servers so their tools cannot access unrelated files.",
+        description: "Plugins install as repository-scoped MCP servers so their tools cannot access unrelated files.",
       })
       return
     }

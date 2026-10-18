@@ -3471,7 +3471,7 @@ async function mergeSelectedCopyChanges(
     if (sourceHash !== baselineHash) conflicts.push(file)
   }
   if (conflicts.length && !force) {
-    throw new Error(`Selected files conflict with newer main-project edits: ${conflicts.slice(0, 8).join(", ")}.`)
+    throw new Error(`Selected files conflict with newer edits in the repository: ${conflicts.slice(0, 8).join(", ")}.`)
   }
 
   const nextBaseline = { ...(record.baselineHashes ?? {}) }

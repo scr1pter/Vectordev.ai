@@ -763,7 +763,7 @@ export const dict = {
   "dialog.server.add.passwordPlaceholder": "hasło",
   "server.row.noUsername": "brak nazwy użytkownika",
   "session.review.noVcs.createGit.title": "Utwórz repozytorium Git",
-  "session.review.noVcs.createGit.description": "Śledź, przeglądaj i cofaj zmiany w tym projekcie",
+  "session.review.noVcs.createGit.description": "Śledź, przeglądaj i cofaj zmiany w tym folderze",
   "session.review.noVcs.createGit.actionLoading": "Tworzenie repozytorium Git...",
   "session.review.noVcs.createGit.action": "Utwórz repozytorium Git",
   "session.todo.progress": "Ukończono {{done}} z {{total}} zadań",
