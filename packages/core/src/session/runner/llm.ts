@@ -27,6 +27,8 @@ import { SessionContextEpoch } from "../context-epoch"
 import { SessionCompaction } from "../compaction"
 import { SessionEvent } from "../event"
 import { SessionHistory } from "../history"
+import { SessionMessage } from "../message"
+import { TaskSize } from "../../task-size"
 import { SessionInput } from "../input"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
@@ -208,6 +210,17 @@ const layer = Layer.effect(
       const toolMaterialization = isLastStep
         ? undefined
         : yield* tools.materialize(agent.info?.permissions ?? [], internalSessionPermissions(session.internal))
+      // Each turn sizes the request it answers from the projected history, as the V1 runner does: a greeting is offered
+      // no tools and a light job none of the planning tools. V2 has no subagents or judge, so no size brings them in.
+      // Vector's own helper sessions keep every tool they were given.
+      const size = session.internal ? undefined : requestSize(context)
+      const withheld = size
+        ? TaskSize.withheld(size.tier, { cloud: size.cloud, browser: size.browser, agents: size.agents.length })
+        : new Set<string>()
+      const definitions =
+        size?.tier === "chat"
+          ? []
+          : (toolMaterialization?.definitions ?? []).filter((definition) => !withheld.has(definition.name))
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const output = model.route.defaults.limits?.output
       const request = LLM.request({
@@ -224,7 +237,7 @@ const layer = Layer.effect(
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [...toLLMMessages(context, model), ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : [])],
-        tools: toolMaterialization?.definitions ?? [],
+        tools: definitions,
         toolChoice: isLastStep ? "none" : undefined,
       })
       if (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request }))
@@ -474,6 +487,29 @@ const layer = Layer.effect(
     })
   }),
 )
+
+// The size of the request a turn answers: the user's newest message, read against the one before it and the reply
+// that came between, so a "yes" to the agent's question continues that request instead of becoming a bare reply.
+function requestSize(context: readonly SessionMessage.Message[]) {
+  const users = context.flatMap((message) => (message.type === "user" ? [message] : []))
+  const latest = users.at(-1)
+  if (!latest) return undefined
+  const before = users.at(-2)
+  const between = context.slice(before ? context.indexOf(before) + 1 : 0, context.indexOf(latest))
+  const reply = between
+    .flatMap((message) =>
+      message.type === "assistant" ? message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])) : [],
+    )
+    .join("\n")
+  const describe = (message: SessionMessage.User) => ({
+    text: message.text,
+    files: message.files?.filter((file) => !file.mime.startsWith("image/")).length,
+    images: message.files?.filter((file) => file.mime.startsWith("image/")).length,
+    agents: message.agents?.map((agent) => agent.name),
+  })
+  const previous = before ? TaskSize.classify(describe(before)).tier : undefined
+  return TaskSize.classify({ ...describe(latest), previous, asked: TaskSize.asks(reply) })
+}
 
 export const node = makeLocationNode({
   service: Service,

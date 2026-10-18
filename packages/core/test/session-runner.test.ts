@@ -766,6 +766,40 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("offers a greeting no tools and a light job none of the planning tools", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register(
+        Object.fromEntries(
+          ["read", "edit", "todowrite", "question"].map((name) => [
+            name,
+            Tool.make({
+              description: name,
+              input: Schema.Struct({}),
+              output: Schema.String,
+              execute: () => Effect.succeed(name),
+            }),
+          ]),
+        ),
+      )
+      const session = yield* SessionV2.Service
+      const turn = Effect.fnUntraced(function* (text: string) {
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text }), resume: false })
+        requests.length = 0
+        response = []
+        yield* session.resume(sessionID)
+        return requests[0]?.tools.map((tool) => tool.name) ?? []
+      })
+      expect(yield* turn("hi")).toEqual([])
+      const light = yield* turn("fix the typo in README.md")
+      expect(light).toEqual(expect.arrayContaining(["read", "edit"]))
+      expect(light).not.toContain("todowrite")
+      expect(light).not.toContain("question")
+      expect(yield* turn("add OAuth login with tests")).toEqual(expect.arrayContaining(["todowrite", "question"]))
+    }),
+  )
+
   it.effect("only advertises read-only tools in hidden swarm planning sessions", () =>
     Effect.gen(function* () {
       yield* setup
