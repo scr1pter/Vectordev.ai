@@ -25,6 +25,8 @@ No free endpoint was marked as publishing prompts on 17 October 2026. OpenRouter
 
 Still excluded, as before: router aliases (`openrouter/*`), models priced per item although their token prices are zero (Google Lyria), models without tools, and anything expiring within 7 days. Endpoints that accept tools but not `tool_choice` (Thinking Machines) are kept; an automatic tool choice is sent without the parameter.
 
+The user's own OpenRouter key is held to the same list. Every model in OpenRouter's regular list that runs on free endpoints (`:free` variants, the free router `openrouter/free`, stealth models and any model listed at a zero price) is removed from it, on the legacy and V2 routes, and one that reaches the engine anyway is sent only through the free-model checks, which refuse a model they have not reviewed. Sent as a regular OpenRouter model, it would skip the guest rule, the training notice and `data_collection: "deny"`. A router with no listed price, such as `openrouter/auto`, is not treated as free.
+
 **Answers-only models.** No free model without tools is offered. On 17 October 2026 the only ones were NVIDIA's, which are barred anyway. Whether the agent loop should offer a model that cannot edit files or run commands is an open owner question.
 
 ### The label, the disclaimer and the one-time consent
