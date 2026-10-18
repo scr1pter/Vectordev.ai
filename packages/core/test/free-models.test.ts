@@ -104,6 +104,59 @@ test("the one-time training acceptance is remembered in a file every reader shar
   }
 })
 
+test.skipIf(process.platform === "win32")(
+  "the desktop engine and the terminal read one acceptance, so withdrawing in the terminal stops the desktop app",
+  async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), "vector-free-models-home-"))
+    try {
+      // The desktop engine's environment, as prepareSidecarEnv in packages/desktop/src/main/sidecar.ts sets it: every
+      // XDG directory inside the app's own data folder. The terminal runs with none of them set.
+      const userData = path.join(home, "Library", "Application Support", "ai.vector.app")
+      const desktop = {
+        XDG_DATA_HOME: path.join(userData, "xdg-data"),
+        XDG_CONFIG_HOME: path.join(userData, "xdg-config"),
+        XDG_CACHE_HOME: path.join(userData, "xdg-cache"),
+        XDG_STATE_HOME: path.join(userData, "xdg-state"),
+        VECTOR_AGENT_CONFIG_DIR: path.join(userData, "config", "vector"),
+        VECTOR_APP_NAMESPACE: "vector",
+      }
+      const module = path.join(import.meta.dir, "..", "src", "free-models.ts")
+      const run = async (env: Record<string, string>, action: "accept" | "decline" | "read") => {
+        const child = Bun.spawn(
+          [
+            process.execPath,
+            "-e",
+            `const { FreeModels } = await import(${JSON.stringify(module)})
+const client = FreeModels.createClient({ consentFile: FreeModels.trainingConsentFile() })
+if (process.argv[1] !== "read") await client.setTrainingConsent(process.argv[1] === "accept")
+console.log(JSON.stringify({ file: FreeModels.trainingConsentFile(), consent: await client.trainingConsent() }))`,
+            action,
+          ],
+          { env: { PATH: process.env.PATH ?? "", HOME: home, ...env }, stdout: "pipe", stderr: "pipe" },
+        )
+        const [stdout, stderr, code] = await Promise.all([
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+          child.exited,
+        ])
+        expect({ code, stderr }).toEqual({ code: 0, stderr: "" })
+        return JSON.parse(stdout) as { file: string; consent: boolean }
+      }
+      const accepted = await run({}, "accept")
+      expect(await run(desktop, "read")).toEqual(accepted)
+      expect(accepted.consent).toBe(true)
+      // "vector models --decline-training" in the terminal reaches the desktop app's next request.
+      expect((await run({}, "decline")).consent).toBe(false)
+      expect(await run(desktop, "read")).toEqual({ file: accepted.file, consent: false })
+      // And an acceptance in the desktop app is the terminal's too.
+      await run(desktop, "accept")
+      expect((await run({}, "read")).consent).toBe(true)
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  },
+)
+
 test("a known OFF catalog answers at once and refreshes in the background", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "vector-free-models-off-"))
   try {

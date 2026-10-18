@@ -253,9 +253,14 @@ export function fromClient(client: ReturnType<typeof createClient>) {
   })
 }
 
-/** Where the one-time "may train on your prompts" acceptance lives for this user. */
+/**
+ * Where the one-time "may train on your prompts" acceptance lives for this user: a fixed path under the home
+ * directory, not Global.Path.state. The desktop engine runs with XDG_STATE_HOME inside the app's own data folder
+ * (prepareSidecarEnv in packages/desktop/src/main/sidecar.ts), so a state-directory file would be a different one for
+ * the terminal, and "vector models --decline-training" would not stop the desktop app.
+ */
 export function trainingConsentFile() {
-  return path.join(Global.Path.state, "free-model-training-consent.json")
+  return path.join(Global.Path.home, ".local", "state", "vector", "free-model-training-consent.json")
 }
 
 export const node = makeGlobalNode({
