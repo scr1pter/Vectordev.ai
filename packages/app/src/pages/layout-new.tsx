@@ -2999,33 +2999,47 @@ export default function NewLayout(props: ParentProps) {
         ? "Vector completed a real model response with your selected provider."
         : onboardingProviderConnected()
           ? "Connected. Run the safe first task below to see the model answer end to end."
-          : "Sign in to Vector to use free models, with no payment or credits needed. Or use an API key you already have.",
+          : platform.vectorAccount
+            ? "Sign in to Vector to use free models, with no payment or credits needed. Or use an API key you already have."
+            : language.t("freeModels.start.signInEngine"),
       done: onboardingProviderDone(),
-      cta: "Start free",
       // Free models run on Vector's shared allowance for every signed-in account, so starting free is signing in to
-      // Vector. Signed in with no free model listed, the shared allowance serves nothing right now: offer a key.
-      onGo: async () => {
-        const account = platform.vectorAccount
-        const status = await account?.status().catch(() => undefined)
-        if (!account || status?.authenticated) {
-          setOnboardingOpen(false)
-          openProviderSettings()
-          return
-        }
-        await account.start().catch(() =>
-          showToast({
-            title: "Couldn't start signing in",
-            description: "Try again in Settings → Providers.",
+      // Vector. Signed in with no free model listed, the shared allowance serves nothing right now: offer a key. Only
+      // the desktop app can sign in from here; elsewhere, such as the web build, the detail says how, and the step
+      // offers the key alone.
+      ...(platform.vectorAccount
+        ? {
+            cta: "Start free",
+            onGo: async () => {
+              const account = platform.vectorAccount
+              const status = await account?.status().catch(() => undefined)
+              if (!account || status?.authenticated) {
+                setOnboardingOpen(false)
+                openProviderSettings()
+                return
+              }
+              await account.start().catch(() =>
+                showToast({
+                  title: "Couldn't start signing in",
+                  description: "Try again in Settings → Providers.",
+                }),
+              )
+            },
+            secondary: {
+              label: "Use my own API key",
+              onGo: () => {
+                setOnboardingOpen(false)
+                openProviderSettings()
+              },
+            },
+          }
+        : {
+            cta: "Use my own API key",
+            onGo: () => {
+              setOnboardingOpen(false)
+              openProviderSettings()
+            },
           }),
-        )
-      },
-      secondary: {
-        label: "Use my own API key",
-        onGo: () => {
-          setOnboardingOpen(false)
-          openProviderSettings()
-        },
-      },
     },
     {
       id: "project",

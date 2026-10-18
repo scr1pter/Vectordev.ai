@@ -39,6 +39,8 @@ let currentModel: { id: string; provider: { id: string } } | undefined
 let availableModels: Array<{ id: string; provider: { id: string } }> = []
 let providerReady = true
 let providerLoaded = true
+// The desktop app's Vector account bridge; the web build has none.
+let vectorAccount: object | undefined = {}
 const toasts: Array<{ title?: string; description?: string }> = []
 
 const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
@@ -256,6 +258,7 @@ beforeAll(async () => {
   mock.module("@/context/platform", () => ({
     usePlatform: () => ({
       fetch: fetch,
+      vectorAccount,
     }),
   }))
 
@@ -293,6 +296,7 @@ beforeEach(() => {
   availableModels = [currentModel]
   providerReady = true
   providerLoaded = true
+  vectorAccount = {}
   toasts.length = 0
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
@@ -863,6 +867,24 @@ describe("missing model", () => {
     ])
     expect(promptResetCount).toBe(0)
     expect(createdSessions).toHaveLength(0)
+  })
+
+  test("in a build that cannot sign in to Vector itself, says to sign in on the engine's computer", async () => {
+    currentModel = undefined
+    availableModels = []
+    vectorAccount = undefined
+    const opened: boolean[] = []
+
+    await submitWith(() => opened.push(true)).handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(opened).toEqual([true])
+    expect(toasts).toEqual([
+      {
+        title: "prompt.toast.providerRequired.title",
+        description: "prompt.toast.providerRequired.descriptionEngine",
+      },
+    ])
+    expect(promptResetCount).toBe(0)
   })
 
   test("keeps the select-model toast while the provider catalog is still loading", async () => {

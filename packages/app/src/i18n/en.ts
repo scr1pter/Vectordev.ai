@@ -316,6 +316,8 @@ export const dict = {
   "prompt.toast.providerRequired.title": "Connect a model to send this prompt",
   "prompt.toast.providerRequired.description":
     "Your prompt is kept. Sign in to Vector to use free models, or use an API key you already have.",
+  "prompt.toast.providerRequired.descriptionEngine":
+    "Your prompt is kept. To use free models, run vector login on the computer this page connects to, then restart Vector. Or use an API key you already have.",
   "prompt.toast.worktreeCreateFailed.title": "Failed to create worktree",
   "prompt.toast.sessionCreateFailed.title": "Failed to create session",
   "prompt.toast.shellSendFailed.title": "Failed to send shell command",

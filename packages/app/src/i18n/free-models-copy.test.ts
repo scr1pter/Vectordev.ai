@@ -22,6 +22,10 @@ test("every free-model string is shown somewhere in the app", async () => {
 })
 
 test("a build that cannot sign in to Vector itself says where to sign in, without offering a sign-in", () => {
-  expect(en["freeModels.start.signInEngine"]).toContain("run vector login")
-  expect(en["freeModels.start.signInEngine"]).not.toMatch(/openrouter/i)
+  // The composer card, and the Getting Started step and the send-without-model toast beside it.
+  for (const key of ["freeModels.start.signInEngine", "prompt.toast.providerRequired.descriptionEngine"] as const) {
+    expect(en[key]).toContain("run vector login")
+    expect(en[key]).toContain("on the computer this page connects to")
+    expect(en[key]).not.toMatch(/openrouter/i)
+  }
 })

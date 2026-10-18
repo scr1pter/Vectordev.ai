@@ -18,8 +18,10 @@ test("first run shows the activation checklist and dismissing persists", async (
   const checklist = page.getByRole("heading", { name: /first steps/i })
   await expect(checklist).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText("Connect a model", { exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Start free →" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Use my own API key" })).toBeVisible()
+  // This web build cannot sign in to Vector itself, so the step says how to and offers a key the user has.
+  await expect(page.getByText("run vector login there", { exact: false })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Use my own API key →" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Start free →" })).toHaveCount(0)
   await expect(page.getByText("Create or open a project")).toBeVisible()
   await page.getByRole("button", { name: "Keep building" }).click()
   await expect(checklist).not.toBeVisible()

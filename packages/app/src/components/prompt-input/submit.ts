@@ -17,6 +17,7 @@ import { useLayout } from "@/context/layout"
 import { useLocal } from "@/context/local"
 import { usePermission } from "@/context/permission"
 import { usePlanMode } from "@/context/plan-mode"
+import { usePlatform } from "@/context/platform"
 import { type ContextItem, type ImageAttachmentPart, type Prompt, type usePrompt } from "@/context/prompt"
 import { useSDK, type DirectorySDK } from "@/context/sdk"
 import { useSync, type DirectorySync } from "@/context/sync"
@@ -313,6 +314,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const [search] = useSearchParams<{ draftId?: string }>()
   const tabs = useTabs()
   const planMode = usePlanMode()
+  const platform = usePlatform()
   const pendingKey = (sessionID: string) => ScopedKey.from(sdk().scope, sessionID)
 
   const errorMessage = (err: unknown) => {
@@ -435,7 +437,12 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     if (!currentModel && sync().data.provider_loaded && local.model.list().length === 0) {
       showToast({
         title: language.t("prompt.toast.providerRequired.title"),
-        description: language.t("prompt.toast.providerRequired.description"),
+        // Only the desktop app can sign in to Vector from here; elsewhere the engine signs in with `vector login`.
+        description: language.t(
+          platform.vectorAccount
+            ? "prompt.toast.providerRequired.description"
+            : "prompt.toast.providerRequired.descriptionEngine",
+        ),
       })
       input.connectProvider?.()
       return
