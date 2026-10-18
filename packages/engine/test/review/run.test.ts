@@ -12,7 +12,7 @@ import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { parseUnifiedDiff } from "@vectordevai/core/review/diff"
-import { noteTriageUnchecked, noteVerifySkipped } from "@vectordevai/core/review/format"
+import { noteTriageFixedUnchecked, noteTriageUnchecked, noteVerifySkipped } from "@vectordevai/core/review/format"
 import {
   DEFAULT_REVIEW_CONFIG,
   type ModelFinding,
@@ -1306,6 +1306,91 @@ describe("Review.run", () => {
         expect(skipped.selection.dropped).toEqual([{ reason: "unconfirmed", count: 2 }])
         expect(skipped.notes).toContain(noteTriageUnchecked(2, "lmstudio/cheap-model", "lmstudio/test-model"))
         expect(skipped.notes).not.toContain(noteVerifySkipped())
+      }),
+    TIMEOUT,
+  )
+
+  it.instance(
+    "after a triage pass an earlier finding counts as fixed only once the review model confirmed it",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const llm = yield* TestLLMServer
+        const fs = yield* FSUtil.Service
+        const provider = testProviderConfig(llm.url)
+        Object.assign(provider.provider.lmstudio.models, {
+          "cheap-model": { ...provider.provider.lmstudio.models["test-model"], id: "cheap-model", name: "Cheap" },
+        })
+        yield* fs.writeWithDirs(
+          path.join(test.directory, "vector.json"),
+          JSON.stringify({ $schema: "https://vectordev.ai/config.json", ...provider }),
+        )
+        yield* fs.writeWithDirs(path.join(test.directory, "src/list.ts"), LIST_SOURCE)
+        yield* Effect.promise(() => trustWorkspace(test.directory))
+        const cheap = { ...ref, modelID: ModelV2.ID.make("cheap-model"), context: 100_000, costKind: "free" as const }
+        const open = {
+          id: "abcdef012345",
+          where: "inline" as const,
+          path: "src/list.ts",
+          line: 3,
+          side: "RIGHT" as const,
+          severity: "blocking" as const,
+          category: "security" as const,
+          title: "Token is never verified",
+          sha: "1111111",
+          status: "open" as const,
+          commentId: 9,
+        }
+        const claimed = { ...report([]), priorStatus: [{ id: open.id, status: "fixed", reason: "looks fine" }] }
+        const triaged = input(test.directory, { triage: cheap, prior: [open], config: config({ verify: "all" }) })
+
+        // The review model gives no verdict on the claim: the finding stays open.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", claimed))
+        yield* llm.pushMatch(VERIFY, reply().tool("StructuredOutput", { results: [] }))
+        const unconfirmed = yield* Review.run(triaged)
+        const checks = (yield* llm.hits).filter(VERIFY)
+        expect(checks.map((hit) => hit.body.model)).toEqual(["test-model"])
+        expect(lastUserText(checks[0]!.body)).toContain(`<untrusted_fixed_claim id="${open.id}"`)
+        expect(unconfirmed.report.priorStatus ?? []).toEqual([])
+
+        // It rejects the claim: still open.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", claimed))
+        yield* llm.pushMatch(
+          VERIFY,
+          reply().tool("StructuredOutput", {
+            results: [{ id: open.id, verdict: "rejected", reason: "verify() is still skipped." }],
+          }),
+        )
+        expect((yield* Review.run(triaged)).report.priorStatus ?? []).toEqual([])
+
+        // It confirms the fix: now it counts.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", claimed))
+        yield* llm.pushMatch(
+          VERIFY,
+          reply().tool("StructuredOutput", {
+            results: [{ id: open.id, verdict: "confirmed", reason: "verify() runs first now." }],
+          }),
+        )
+        expect((yield* Review.run(triaged)).report.priorStatus).toEqual([
+          { id: open.id, status: "fixed", reason: "looks fine" },
+        ])
+
+        // With too little budget left for the check, the claim is not taken, and the summary says so.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", claimed))
+        const skipped = yield* Review.run({
+          ...triaged,
+          model: priced,
+          config: config({ verify: "all", maxCostUsd: 0.000_001 }),
+        })
+        expect(skipped.specialists.at(-1)).toMatchObject({ name: "verify", status: "skipped" })
+        expect(skipped.report.priorStatus ?? []).toEqual([])
+        expect(skipped.notes).toEqual([noteTriageFixedUnchecked(1, "lmstudio/cheap-model", "lmstudio/test-model")])
+
+        // Without a triage model the review model's own word stands, as before.
+        yield* llm.pushMatch(REVIEW, reply().tool("StructuredOutput", claimed))
+        const plain = yield* Review.run(input(test.directory, { prior: [open] }))
+        expect(plain.report.priorStatus).toEqual([{ id: open.id, status: "fixed", reason: "looks fine" }])
+        expect((yield* llm.hits).filter(VERIFY)).toHaveLength(3)
       }),
     TIMEOUT,
   )

@@ -547,6 +547,12 @@ export function noteTriageUnchecked(count: number, triage: string, model: string
   return `The double-check on ${model} did not finish, so ${formatCount(count)} ${count === 1 ? "finding" : "findings"} from the cheaper first pass on ${triage} ${count === 1 ? "was" : "were"} left out: with a triage model, only findings the review model confirmed are reported.`
 }
 
+// With a triage model only the review model can close an earlier finding, so when its check did not finish the
+// cheaper pass's word that some are fixed is not taken.
+export function noteTriageFixedUnchecked(count: number, triage: string, model: string): string {
+  return `The double-check on ${model} did not finish, so ${formatCount(count)} earlier ${count === 1 ? "finding" : "findings"} that the cheaper first pass on ${triage} called fixed ${count === 1 ? "stays" : "stay"} open.`
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // The sticky summary
 

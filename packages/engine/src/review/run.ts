@@ -18,7 +18,7 @@ import {
   type DiffFile,
 } from "@vectordevai/core/review/diff"
 import { fingerprint, normalizeCode, normalizeTitle } from "@vectordevai/core/review/fingerprint"
-import { noteTriageUnchecked, noteVerifySkipped } from "@vectordevai/core/review/format"
+import { noteTriageFixedUnchecked, noteTriageUnchecked, noteVerifySkipped } from "@vectordevai/core/review/format"
 import { classifyPath, isSensitivePath } from "@vectordevai/core/review/ignore"
 import { reviewPermissionRules } from "@vectordevai/core/review/permission"
 import { packChanges, verifyHeadFiles } from "@vectordevai/core/review/pack"
@@ -568,14 +568,27 @@ export const run: (
           .map((finding) => [finding.id, finding]),
       ).values(),
     ]
-    const verifyText = candidates.length
-      ? buildVerifyPrompt({
-          trust: input.trust,
-          head: input.head,
-          candidates,
-          headFiles: verifyHeadFiles(input.files, input.headFiles, candidates),
+    // After a triage pass the cheaper model's word that an earlier finding is fixed goes to the double-check too, so
+    // only the review model closes a finding and resolves its thread. A claim about a finding the first pass reported
+    // again contradicts itself and is dropped.
+    const reported = new Set(normalized.map((finding) => finding.id))
+    const open = new Map(input.prior.filter((prior) => prior.status === "open").map((prior) => [prior.id, prior]))
+    const claims = triaged
+      ? (report.priorStatus ?? []).flatMap((entry) => {
+          const prior = open.get(entry.id)
+          return entry.status === "fixed" && prior && !reported.has(prior.id) ? [{ ...prior, reason: entry.reason }] : []
         })
-      : ""
+      : []
+    const verifyText =
+      candidates.length || claims.length
+        ? buildVerifyPrompt({
+            trust: input.trust,
+            head: input.head,
+            candidates,
+            ...(claims.length ? { fixed: claims } : {}),
+            headFiles: verifyHeadFiles(input.files, input.headFiles, [...candidates, ...claims]),
+          })
+        : ""
     const verifyPrice = priceOf(input.model)
     const estimate = verifyPrice
       ? estimateCostUsd({
@@ -586,7 +599,7 @@ export const run: (
       : 0
     const unaffordable = capped && state.spent + state.uncertain + estimate > config.maxCostUsd
     const late = deadline - Date.now() < VERIFY_MIN_MS
-    const verify: Asked<ReturnType<typeof decodeVerify>> | undefined = !candidates.length
+    const verify: Asked<ReturnType<typeof decodeVerify>> | undefined = !verifyText
       ? undefined
       : unaffordable || late
         ? { name: "verify", status: "skipped", steps: 0, detail: unaffordable ? "budget" : "time" }
@@ -610,6 +623,13 @@ export const run: (
       .map((finding) => (verdicts.get(finding.id) === "confirmed" ? { ...finding, verified: true } : finding))
     const rejected = normalized.length - kept.length
     const unconfirmed = kept.length - findings.length
+    const fixed = new Set(claims.filter((claim) => verdicts.get(claim.id) === "confirmed").map((claim) => claim.id))
+    const checked: ModelReport = triaged
+      ? {
+          ...report,
+          priorStatus: (report.priorStatus ?? []).filter((entry) => entry.status !== "fixed" || fixed.has(entry.id)),
+        }
+      : report
 
     // 8. Select. Paths outside the diff are checked against the repository first; selection is synchronous.
     const index = buildAnchorIndex(input.anchors)
@@ -678,7 +698,7 @@ export const run: (
 
     const spentByPass = yield* passes()
     return {
-      report,
+      report: checked,
       selection,
       skipped: input.skipped,
       cost: yield* measure(),
@@ -703,8 +723,11 @@ export const run: (
         deletions: input.files.reduce((sum, file) => sum + file.deletions, 0),
       },
       notes: [
-        ...(triaged && verify && verify.status !== "ok" && unconfirmed
-          ? [noteTriageUnchecked(unconfirmed, nameOf(triage), nameOf(input.model))]
+        ...(triaged && verify && verify.status !== "ok"
+          ? [
+              ...(unconfirmed ? [noteTriageUnchecked(unconfirmed, nameOf(triage), nameOf(input.model))] : []),
+              ...(claims.length ? [noteTriageFixedUnchecked(claims.length, nameOf(triage), nameOf(input.model))] : []),
+            ]
           : verify?.status === "skipped"
             ? [noteVerifySkipped()]
             : []),
