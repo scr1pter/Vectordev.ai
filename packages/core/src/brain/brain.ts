@@ -49,8 +49,11 @@ export const LIMIT = {
   /** Active learned entries per repository and for the personal scope; tidying archives the least used past this. */
   repository: 300,
   personal: 120,
-  /** Entries the agent may make active per request message; the rest wait as proposals. */
+  /** Entries the agent may write per request message, whatever becomes of them; past it, writes are refused. */
   perMessage: 3,
+  /** Entries waiting for review (proposed or held) that one session may leave, and that one scope may hold. */
+  pendingPerSession: 50,
+  pending: 200,
   /** Bytes read from one mirrored file. */
   file: 256 * 1024,
 } as const
@@ -65,6 +68,17 @@ export const BUDGET = {
   /** Characters of one search result set. */
   search: 1_200,
 } as const
+
+/** Recalled memory as a request carries it; nothing at all for no lines. */
+export function recallText(lines: readonly string[]) {
+  if (lines.length === 0) return ""
+  return [
+    "<vector_memory_recall>",
+    "Memory that may bear on this request. Rules bind; the rest is advisory, so check it against the code:",
+    ...lines,
+    "</vector_memory_recall>",
+  ].join("\n")
+}
 
 /** Tokens recalled for a request of each size. A greeting recalls nothing. */
 export function recallBudget(tier: "chat" | "light" | "standard" | "thorough") {
@@ -113,7 +127,16 @@ export type Proposal = {
   readonly hold?: BrainSchema.Hold
 }
 
-export type Refusal = "secret" | "forgotten" | "empty" | "too-long" | "learning-off" | "file-entry" | "not-found"
+export type Refusal =
+  | "secret"
+  | "forgotten"
+  | "empty"
+  | "too-long"
+  | "learning-off"
+  | "file-entry"
+  | "user-entry"
+  | "not-found"
+  | "limit"
 
 export type WriteResult =
   | { readonly type: "added" | "merged" | "promoted" | "proposed" | "held"; readonly entry: BrainSchema.Entry }
@@ -134,7 +157,15 @@ export type Detail = {
   readonly related: readonly BrainSchema.Entry[]
 }
 
-export type Injection = { readonly text?: string; readonly ids: readonly string[]; readonly tokens: number }
+export type Injection = {
+  readonly text?: string
+  readonly ids: readonly string[]
+  readonly tokens: number
+  /** Recall only: which of `ids` are the user's personal memory. */
+  readonly personal?: readonly string[]
+  /** Recall only: the text without personal memory, which is all a session's saved transcript may keep. */
+  readonly shared?: string
+}
 
 export type Stats = {
   readonly active: number
@@ -183,6 +214,12 @@ export interface Interface {
     input: { readonly query: string; readonly personal: boolean; readonly limit?: number; readonly sessionID?: string },
   ) => Effect.Effect<BrainSchema.Entry[]>
   readonly get: (place: Place, id: string, options: { readonly personal: boolean }) => Effect.Effect<Detail | undefined>
+  /** Active entries as recall shows them, by id, for a request that fills recalled memory back in. */
+  readonly lines: (
+    place: Place,
+    ids: readonly string[],
+    options: { readonly personal: boolean },
+  ) => Effect.Effect<ReadonlyMap<string, string>>
   readonly list: (
     place: Place,
     input: { readonly filter?: Filter; readonly query?: string; readonly scope?: BrainSchema.Scope },
@@ -200,7 +237,7 @@ export interface Interface {
   readonly stats: (place: Place) => Effect.Effect<Stats>
   readonly learning: () => Effect.Effect<boolean>
   readonly setLearning: (enabled: boolean) => Effect.Effect<void>
-  /** How many active entries this session made since `since`, for the per-message write cap. */
+  /** How many entries this session's agent wrote since `since`, whatever their status, for the per-message write cap. */
   readonly written: (sessionID: string, since: number) => Effect.Effect<number>
   /** The user's own memory and rules files, which the brain reads and never writes. */
   readonly files: () => { readonly memory: string; readonly rules: string }
@@ -314,6 +351,8 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
     readonly scope: BrainSchema.Scope
     readonly type: "rules" | "memory" | "brain" | "failures"
     readonly held: boolean
+    /** A repository's own file: a link is followed only where it lands inside this working tree. */
+    readonly root?: string
   }
 
   const mirrors = (place: Place): Mirror[] => [
@@ -326,12 +365,13 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       type: source.type,
       // A repository's own rules load as its instructions do. Memory it ships is held until the repository is trusted.
       held: source.type === "brain" && place.held,
+      root: place.root,
     })),
     { path: failureFile(place), repository: place.repository, scope: "repository", type: "failures", held: false },
   ]
 
   const mirror = Effect.fnUntraced(function* (source: Mirror) {
-    const stat = yield* Effect.promise(() => fs.lstat(source.path).catch(() => undefined))
+    const stat = yield* Effect.promise(() => statFollowing(source))
     const known = yield* db
       .select()
       .from(BrainSourceTable)
@@ -595,12 +635,7 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
         [],
       )
     if (picked.length === 0) return { ids: [], tokens: 0 }
-    const text = [
-      "<vector_memory_recall>",
-      "Memory that may bear on this request. Rules bind; the rest is advisory, so check it against the code:",
-      ...picked.map(line),
-      "</vector_memory_recall>",
-    ].join("\n")
+    const text = recallText(picked.map(line))
     const tokens = Token.estimate(text)
     yield* used(
       picked.map((row) => row.id),
@@ -608,7 +643,25 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       "recall",
       tokens,
     )
-    return { text, ids: picked.map((row) => row.id), tokens }
+    const personal = picked.filter((row) => row.repository_id === PERSONAL)
+    return {
+      text,
+      ids: picked.map((row) => row.id),
+      tokens,
+      personal: personal.map((row) => row.id),
+      shared: recallText(picked.filter((row) => row.repository_id !== PERSONAL).map(line)),
+    }
+  })
+
+  const lines = Effect.fn("Brain.lines")(function* (place: Place, ids: readonly string[], options: { personal: boolean }) {
+    if (ids.length === 0) return new Map<string, string>()
+    const rows = yield* db
+      .select()
+      .from(BrainEntryTable)
+      .where(and(inArray(BrainEntryTable.id, [...ids]), visible(place, options.personal), eq(BrainEntryTable.status, "active")))
+      .all()
+      .pipe(Effect.orDie)
+    return new Map(rows.map((row) => [row.id, line(row)]))
   })
 
   const attach = Effect.fn("Brain.attach")(function* (
@@ -761,7 +814,7 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       .where(
         and(
           eq(BrainEntryTable.origin_session_id, sessionID),
-          eq(BrainEntryTable.status, "active"),
+          eq(BrainEntryTable.origin, "agent"),
           sql`${BrainEntryTable.created_at} >= ${since}`,
         ),
       )
@@ -770,22 +823,38 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
     return rows.length
   })
 
-  const evidenceRow = (entry: string, evidence: Evidence | undefined, sessionID: string | undefined) => {
-    const now = Date.now()
-    if (!evidence || evidence.type === "user") return { entry_id: entry, type: "user" as const, session_id: sessionID ?? null, created_at: now }
-    if (evidence.type === "message")
-      return { entry_id: entry, type: "message" as const, quote: evidence.quote.slice(0, 240), session_id: sessionID ?? null, created_at: now }
+  // What waits for review in one scope, and how much of it one session left there.
+  const waiting = Effect.fnUntraced(function* (repository: string, sessionID: string | undefined) {
+    const rows = yield* db
+      .select({ session: BrainEntryTable.origin_session_id })
+      .from(BrainEntryTable)
+      .where(
+        and(
+          eq(BrainEntryTable.repository_id, repository),
+          inArray(BrainEntryTable.origin, [...LEARNED]),
+          inArray(BrainEntryTable.status, ["proposed", "quarantined"]),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    return { all: rows.length, session: sessionID ? rows.filter((row) => row.session === sessionID).length : 0 }
+  })
+
+  // Evidence is kept only as far as it was checked, and never with a secret or a hidden character in it: get and export
+  // show it, and get sends it to the provider.
+  const evidenceRow = (entry: string, evidence: Evidence | undefined, sessionID: string | undefined, checked: boolean) => {
+    const base = { entry_id: entry, session_id: sessionID ?? null, created_at: Date.now() }
+    if (!evidence || evidence.type === "user") return { ...base, type: "user" as const }
+    if (evidence.type === "message") return { ...base, type: "message" as const, quote: checked ? scrub(evidence.quote) : null }
     if (evidence.type === "file")
       return {
-        entry_id: entry,
+        ...base,
         type: "file" as const,
-        path: evidence.path,
-        quote: evidence.quote.slice(0, 240),
-        file_hash: evidence.hash ?? null,
-        session_id: sessionID ?? null,
-        created_at: now,
+        path: scrub(evidence.path),
+        quote: checked ? scrub(evidence.quote) : null,
+        file_hash: checked ? (evidence.hash ?? null) : null,
       }
-    return { entry_id: entry, type: "check" as const, command: evidence.command.slice(0, 240), session_id: sessionID ?? null, created_at: now }
+    return { ...base, type: "check" as const, command: checked ? scrub(evidence.command) : null }
   }
 
   const tombstoned = Effect.fnUntraced(function* (repository: string, hash: string) {
@@ -798,13 +867,38 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
     return row !== undefined && row.until > Date.now()
   })
 
+  // A replacement that waited (for review, or for a second session) replaces its entry once it is in use. Only the
+  // user's approval replaces what the user wrote.
+  const settle = Effect.fnUntraced(function* (id: string, actor: "user" | "agent" | "vector") {
+    const targets = (yield* db
+      .select()
+      .from(BrainEventTable)
+      .where(and(eq(BrainEventTable.entry_id, id), eq(BrainEventTable.action, "added")))
+      .all()
+      .pipe(Effect.orDie)).flatMap((item) => (typeof item.detail?.pending === "string" ? [item.detail.pending] : []))
+    if (targets.length === 0) return
+    yield* db
+      .update(BrainEntryTable)
+      .set({ status: "superseded", superseded_by: id, updated_at: Date.now() })
+      .where(
+        and(
+          inArray(BrainEntryTable.id, targets),
+          inArray(BrainEntryTable.status, ["active", "proposed"]),
+          actor === "user" ? undefined : ne(BrainEntryTable.origin, "user"),
+        ),
+      )
+      .run()
+      .pipe(Effect.orDie)
+  })
+
   const propose = Effect.fn("Brain.propose")(function* (place: Place, proposal: Proposal) {
-    if (proposal.origin === "agent" && !(yield* learning()))
+    const agent = proposal.origin === "agent"
+    if (agent && !(yield* learning()))
       return refuse("learning-off", "Learning is turned off in Settings > Memory, so nothing was saved.")
     const hiddenText = BrainScan.hidden(proposal.text)
     const cleaned = BrainScan.stripHidden(proposal.text).replace(/\s+/g, " ").trim()
     if (!cleaned) return refuse("empty", "Nothing to save.")
-    const limit = proposal.origin === "agent" ? LIMIT.agent : LIMIT.user
+    const limit = agent ? LIMIT.agent : LIMIT.user
     if (cleaned.length > limit)
       return refuse("too-long", `Keep one memory to ${limit} characters: one fact, lesson or decision per entry.`)
     const redacted = BrainScan.redact(cleaned)
@@ -812,8 +906,13 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       return refuse("secret", "That is a secret. Memory never stores secrets, keys, tokens or passwords.")
     const text = redacted.text
     const evidence = proposal.evidence
-    const verified = proposal.origin === "user" || (evidence !== undefined && evidence.type !== "user" && evidence.verified)
-    const said = proposal.origin === "user" || (evidence?.type === "message" && evidence.verified)
+    // Evidence counts only for what it says: a quote has to state the memory, and a check has to be the one it names.
+    const verified =
+      !agent || (evidence !== undefined && evidence.type !== "user" && evidence.verified && supports(text, evidence))
+    // The user's own words: what they wrote in Settings, or a checked quote of what they said in this conversation.
+    const said = !agent || (verified && evidence?.type === "message")
+    // Personal memory follows the user into every repository, so it takes what they said about themselves.
+    const own = !agent || (said && evidence?.type === "message" && FIRST_PERSON.test(evidence.quote))
     const previous = proposal.supersedes ? yield* find(place, proposal.supersedes, true) : undefined
     if (proposal.supersedes && !previous) return refuse("not-found", `No memory ${proposal.supersedes} here.`)
     if (previous && !LEARNED.includes(previous.origin))
@@ -821,19 +920,22 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
         "file-entry",
         `${previous.id} comes from ${previous.source_file ? path.basename(previous.source_file) : "a file"}; ask the user to edit that file.`,
       )
-    // A replacement keeps the scope of what it replaces. Personal memory follows the user into every repository, so
-    // only what the user said about themselves goes there, and only their words change it.
-    if (previous?.scope === "personal" && !said)
-      return refuse("not-found", `${previous.id} is the user's own memory; quote what they said to change it.`)
-    const scope: BrainSchema.Scope = (previous?.scope ?? proposal.scope) === "personal" && said ? "personal" : "repository"
+    // A replacement keeps the scope of what it replaces, and only the user's words change what the user wrote.
+    if (previous?.scope === "personal" && !own)
+      return refuse("not-found", `${previous.id} is the user's own memory; quote what they said about themselves to change it.`)
+    if (previous?.origin === "user" && !said)
+      return refuse(
+        "user-entry",
+        `${previous.id} is the user's own entry; quote what they said to change it, or ask them to edit it in Settings > Memory.`,
+      )
+    const scope: BrainSchema.Scope = (previous?.scope ?? proposal.scope) === "personal" && own ? "personal" : "repository"
     const repository = scope === "personal" ? PERSONAL : place.repository
     const hash = normHash(text)
-    if (proposal.origin === "agent" && (yield* tombstoned(repository, hash)))
+    if (agent && (yield* tombstoned(repository, hash)))
       return refuse("forgotten", "The user asked Vector to forget this, so it was not saved again.")
-    const hold =
-      proposal.origin === "user"
-        ? undefined
-        : (proposal.hold ?? (hiddenText ? "hidden-unicode" : BrainScan.instructionLike(text) ? "instruction-like" : undefined))
+    const hold = !agent
+      ? undefined
+      : (proposal.hold ?? (hiddenText ? "hidden-unicode" : BrainScan.instructionLike(text) ? "instruction-like" : undefined))
 
     const peers = yield* db
       .select()
@@ -847,55 +949,125 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       )
       .all()
       .pipe(Effect.orDie)
-    const own = BrainLexical.terms([text, ...(proposal.paths ?? [])].join(" "))
-    const same =
-      peers.find((row) => row.norm_hash === hash) ??
-      (previous
-        ? undefined
-        : peers.find(
-            (row) =>
-              row.kind === proposal.kind && row.status !== "archived" && BrainLexical.similarity(decode(row.terms), own) >= 0.72,
-          ))
+    const words = BrainLexical.terms([text, ...(proposal.paths ?? [])].join(" "))
     const now = Date.now()
-    if (same && same.id !== previous?.id) {
-      // Writing what is already known adds its evidence, and a second session that learns a proposal confirms it.
+
+    // The same words again: the entry gains this evidence, a proposal a second session wrote too is confirmed, and the
+    // user writing what waits for review approves it.
+    const exact = peers.find((row) => row.norm_hash === hash && row.id !== previous?.id)
+    if (exact) {
+      // A held write never adds to an entry outside the review queue, so outside content cannot vouch for memory.
+      if (hold && exact.status !== "quarantined") return { type: "merged" as const, entry: toEntry(exact) }
       const confirms =
-        same.status === "proposed" &&
-        !hold &&
-        (verified || (proposal.sessionID !== undefined && same.origin_session_id !== proposal.sessionID))
-      const restores = same.status === "archived" && !hold && verified
-      const status = confirms || restores ? "active" : same.status
-      yield* db.transaction((tx) =>
-        Effect.gen(function* () {
-          yield* tx
-            .update(BrainEntryTable)
-            .set({
-              status,
-              confidence: Math.max(same.confidence, confidence(proposal)),
-              updated_at: now,
-              paths: [...new Set([...same.paths, ...(proposal.paths ?? [])])],
-            })
-            .where(eq(BrainEntryTable.id, same.id))
-            .run()
-          yield* tx.insert(BrainEvidenceTable).values(evidenceRow(same.id, evidence, proposal.sessionID)).run()
-        }),
-      ).pipe(Effect.orDie)
-      yield* event(same, confirms ? "promoted" : "merged", proposal.origin)
+        exact.status === "proposed" &&
+        (verified || (proposal.sessionID !== undefined && exact.origin_session_id !== proposal.sessionID))
+      const restores = exact.status === "archived" && verified
+      const approves = !agent && exact.status === "quarantined"
+      const status: BrainSchema.Status = confirms || restores || approves ? "active" : exact.status
+      // What the user wrote themselves is theirs, so the agent cannot put it away later.
+      const origin = agent ? exact.origin : "user"
+      const next = {
+        status,
+        origin,
+        hold_reason: approves ? null : exact.hold_reason,
+        confidence: Math.max(exact.confidence, confidence(proposal, verified)),
+        updated_at: now,
+        paths: [...new Set([...exact.paths, ...(proposal.paths ?? [])])],
+      }
+      yield* db
+        .transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx.update(BrainEntryTable).set(next).where(eq(BrainEntryTable.id, exact.id)).run()
+            yield* tx.insert(BrainEvidenceTable).values(evidenceRow(exact.id, evidence, proposal.sessionID, verified)).run()
+          }),
+        )
+        .pipe(Effect.orDie)
+      if (status === "active" && exact.status !== "active") yield* settle(exact.id, proposal.origin)
+      yield* event(exact, confirms ? "promoted" : approves ? "approved" : "merged", proposal.origin)
       yield* bump(repository)
-      const entry = toEntry({ ...same, status, updated_at: now })
+      const entry = toEntry({ ...exact, ...next })
       if (status === "quarantined") return { type: "held" as const, entry }
       if (status === "proposed") return { type: "proposed" as const, entry }
-      return { type: confirms ? ("promoted" as const) : ("merged" as const), entry }
+      return { type: confirms || approves ? ("promoted" as const) : ("merged" as const), entry }
     }
 
-    const cap = proposal.origin === "agent" && proposal.sessionID !== undefined && proposal.since !== undefined
-      ? (yield* written(proposal.sessionID, proposal.since)) >= LIMIT.perMessage
-      : false
-    const status: BrainSchema.Status = hold ? "quarantined" : verified && !cap ? "active" : "proposed"
+    // A different wording of a known entry. Nothing is folded into the old words: a correction and the old text can
+    // share every term ("Use npm, not pnpm" and "Use pnpm, not npm"), so only a wording that adds nothing to it merges.
+    const similar = previous || hold
+      ? undefined
+      : peers
+          .filter((row) => row.kind === proposal.kind && (row.status === "active" || row.status === "proposed"))
+          .map((row) => ({ row, score: BrainLexical.similarity(decode(row.terms), words) }))
+          .filter((item) => item.score >= SIMILAR)
+          .toSorted((a, b) => b.score - a.score)[0]?.row
+    const fresh = { body: text, terms: words }
+    if (similar && agent && similar.status === "active" && within(fresh, { body: similar.body, terms: decode(similar.terms) })) {
+      if (verified)
+        yield* db
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              yield* tx
+                .update(BrainEntryTable)
+                .set({ confidence: Math.max(similar.confidence, confidence(proposal, verified)), updated_at: now })
+                .where(eq(BrainEntryTable.id, similar.id))
+                .run()
+              yield* tx.insert(BrainEvidenceTable).values(evidenceRow(similar.id, evidence, proposal.sessionID, true)).run()
+            }),
+          )
+          .pipe(Effect.orDie)
+      yield* event(similar, "merged", proposal.origin)
+      if (verified) yield* bump(repository)
+      return { type: "merged" as const, entry: toEntry(similar) }
+    }
+    // A second session that writes every word of an unchecked proposal again confirms it; only words both wrote go live.
+    if (
+      similar &&
+      agent &&
+      !verified &&
+      similar.status === "proposed" &&
+      proposal.sessionID !== undefined &&
+      similar.origin_session_id !== proposal.sessionID &&
+      within({ body: similar.body, terms: decode(similar.terms) }, fresh)
+    ) {
+      yield* db
+        .transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx.update(BrainEntryTable).set({ status: "active", updated_at: now }).where(eq(BrainEntryTable.id, similar.id)).run()
+            yield* tx.insert(BrainEvidenceTable).values(evidenceRow(similar.id, evidence, proposal.sessionID, false)).run()
+          }),
+        )
+        .pipe(Effect.orDie)
+      yield* settle(similar.id, "agent")
+      yield* event(similar, "promoted", proposal.origin)
+      yield* bump(repository)
+      return { type: "promoted" as const, entry: toEntry({ ...similar, status: "active", updated_at: now }) }
+    }
+    // Otherwise the newer words replace it when the user wrote them, or when the agent checked them (and the old entry
+    // is not the user's, or the user said so here); an unchecked or contested wording waits for review beside it.
+    const replaces = previous ?? (similar && (!agent || (verified && (similar.origin !== "user" || said))) ? similar : undefined)
+    const contested = similar !== undefined && replaces === undefined
+
+    if (agent && proposal.sessionID !== undefined && proposal.since !== undefined) {
+      if ((yield* written(proposal.sessionID, proposal.since)) >= LIMIT.perMessage)
+        return refuse(
+          "limit",
+          `Vector already saved ${LIMIT.perMessage} memories for this message. Keep only the ones that matter most.`,
+        )
+    }
+    const status: BrainSchema.Status = hold ? "quarantined" : verified && !contested ? "active" : "proposed"
+    if (status !== "active") {
+      const queue = yield* waiting(repository, proposal.sessionID)
+      if (queue.session >= LIMIT.pendingPerSession || queue.all >= LIMIT.pending)
+        return refuse(
+          "limit",
+          "Enough memory already waits for the user's review. Ask them to go through Settings > Memory before saving more.",
+        )
+    }
+    const pending = replaces ?? (contested ? similar : undefined)
     const id = yield* freshId()
     const related = peers
       .filter((row) => row.status === "active")
-      .map((row) => ({ id: row.id, score: BrainLexical.similarity(decode(row.terms), own) }))
+      .map((row) => ({ id: row.id, score: BrainLexical.similarity(decode(row.terms), words) }))
       .filter((item) => item.score >= 0.2)
       .toSorted((a, b) => b.score - a.score)
       .slice(0, 3)
@@ -910,9 +1082,9 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       pinned: false,
       body: text,
       paths: [...(proposal.paths ?? [])],
-      terms: encode(own),
+      terms: encode(words),
       norm_hash: hash,
-      confidence: confidence(proposal),
+      confidence: confidence(proposal, verified),
       uses: 0,
       helpful: 0,
       harmful: 0,
@@ -933,15 +1105,15 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       .transaction((tx) =>
         Effect.gen(function* () {
           yield* tx.insert(BrainEntryTable).values(row).run()
-          yield* tx.insert(BrainEvidenceTable).values(evidenceRow(id, evidence, proposal.sessionID)).run()
-          // A replacement held for review leaves the entry it replaces in use until the user approves it.
-          if (previous && status !== "quarantined")
+          yield* tx.insert(BrainEvidenceTable).values(evidenceRow(id, evidence, proposal.sessionID, verified)).run()
+          // A replacement that waits leaves the entry it replaces in use until it is approved or confirmed.
+          if (replaces && status === "active")
             yield* tx
               .update(BrainEntryTable)
               .set({ status: "superseded", superseded_by: id, updated_at: now })
-              .where(eq(BrainEntryTable.id, previous.id))
+              .where(eq(BrainEntryTable.id, replaces.id))
               .run()
-          if (proposal.origin === "user")
+          if (!agent)
             yield* tx
               .delete(BrainTombstoneTable)
               .where(and(eq(BrainTombstoneTable.repository_id, repository), eq(BrainTombstoneTable.norm_hash, hash)))
@@ -951,16 +1123,16 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       .pipe(Effect.orDie)
     yield* event(
       row,
-      previous && status !== "quarantined" ? "superseded" : "added",
+      replaces && status === "active" ? "superseded" : "added",
       proposal.origin,
-      previous ? (status === "quarantined" ? { pending: previous.id } : { previous: previous.id }) : undefined,
+      replaces && status === "active" ? { previous: replaces.id } : pending ? { pending: pending.id } : undefined,
     )
     if (status === "active") yield* capacity(repository)
     yield* bump(repository)
     const entry = toEntry(row)
     if (status === "quarantined") return { type: "held" as const, entry }
     if (status === "proposed") return { type: "proposed" as const, entry }
-    if (previous) return { type: "superseded" as const, entry, previous: previous.id }
+    if (replaces) return { type: "superseded" as const, entry, previous: replaces.id }
     return { type: "added" as const, entry }
   })
 
@@ -1011,6 +1183,9 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
     const row = yield* find(place, id, true)
     if (!row) return undefined
     const learned = LEARNED.includes(row.origin)
+    // The agent changes only what it learned itself; what the user wrote or a file says is theirs to change.
+    if (actor === "agent" && row.origin !== "agent")
+      return refuse("user-entry", `${row.id} is the user's own; ask them to change it in Settings > Memory.`)
     const now = Date.now()
     if (change.text !== undefined) {
       if (!learned) return refuse("file-entry", `${row.id} comes from ${row.source_file ? path.basename(row.source_file) : "a file"}; edit that file.`)
@@ -1054,20 +1229,7 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
         .where(eq(BrainEntryTable.id, id))
         .run()
         .pipe(Effect.orDie)
-      // A replacement that waited for review replaces its entry now.
-      const pending = (yield* db
-        .select()
-        .from(BrainEventTable)
-        .where(and(eq(BrainEventTable.entry_id, id), eq(BrainEventTable.action, "added")))
-        .all()
-        .pipe(Effect.orDie)).flatMap((item) => (typeof item.detail?.pending === "string" ? [item.detail.pending] : []))
-      if (pending.length)
-        yield* db
-          .update(BrainEntryTable)
-          .set({ status: "superseded", superseded_by: id, updated_at: now })
-          .where(and(inArray(BrainEntryTable.id, pending), eq(BrainEntryTable.status, "active")))
-          .run()
-          .pipe(Effect.orDie)
+      yield* settle(id, actor)
       yield* event(row, "approved", actor)
     }
     if (change.action === "reject" && (row.status === "proposed" || row.status === "quarantined")) {
@@ -1204,62 +1366,107 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
           and(
             eq(BrainEntryTable.repository_id, repository),
             inArray(BrainEntryTable.origin, [...LEARNED]),
-            inArray(BrainEntryTable.status, ["active", "proposed"]),
+            inArray(BrainEntryTable.status, ["active", "proposed", "quarantined"]),
           ),
         )
         .all()
         .pipe(Effect.orDie)
-      // 1. Near-duplicates merge into the older entry, which keeps its words; the newer one is linked, not deleted.
+      // 1. Near-duplicates of an entry in use merge into one: the user's wording first, then a checked one, then the
+      //    newest. Two proposals never merge, so tidying cannot confirm words no session checked, and a correction
+      //    (a different turn of the same words) stays apart. Entries are bucketed by term, so a pass compares only
+      //    entries that share words, and each one's terms are decoded once.
+      const live = rows.filter((row) => row.status !== "quarantined").toSorted((a, b) => a.created_at - b.created_at)
+      const decoded = new Map(live.map((row) => [row.id, decode(row.terms)]))
+      const turns = new Map(live.map((row) => [row.id, BrainLexical.polarity(row.body)]))
+      const order = new Map(live.map((row, index) => [row.id, index]))
+      const buckets = new Map<string, Row[]>()
+      for (const row of live)
+        for (const term of decoded.get(row.id)!.keys()) {
+          const bucket = buckets.get(term)
+          if (bucket) bucket.push(row)
+          else buckets.set(term, [row])
+        }
       const gone = new Set<string>()
-      for (const [index, row] of rows.toSorted((a, b) => a.created_at - b.created_at).entries()) {
+      for (const row of live.filter((item) => item.status === "active")) {
         if (gone.has(row.id)) continue
-        for (const other of rows.toSorted((a, b) => a.created_at - b.created_at).slice(index + 1)) {
-          if (gone.has(other.id) || other.kind !== row.kind || other.pinned) continue
-          if (BrainLexical.similarity(decode(row.terms), decode(other.terms)) < 0.72) continue
-          gone.add(other.id)
+        const terms = decoded.get(row.id)!
+        const shared = new Map<string, { other: Row; count: number }>()
+        for (const term of terms.keys())
+          for (const other of buckets.get(term) ?? []) {
+            if (other.id === row.id || gone.has(other.id)) continue
+            // A pair of entries in use is looked at once, from the older one.
+            if (other.status === "active" && order.get(other.id)! < order.get(row.id)!) continue
+            shared.set(other.id, { other, count: (shared.get(other.id)?.count ?? 0) + 1 })
+          }
+        const matches = [...shared.values()]
+          .filter(({ other, count }) => {
+            if (other.kind !== row.kind || turns.get(other.id) !== turns.get(row.id)) return false
+            return count / (terms.size + decoded.get(other.id)!.size - count) >= SIMILAR
+          })
+          .map((item) => item.other)
+          .toSorted((a, b) => order.get(a.id)! - order.get(b.id)!)
+        for (const other of matches) {
+          if (gone.has(row.id)) break
+          const keeper = rank(other) > rank(row) || (rank(other) === rank(row) && other.status === "active") ? other : row
+          const loser = keeper === row ? other : row
+          if (loser.pinned) continue
+          gone.add(loser.id)
           counts.merged++
           yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
                 yield* tx
                   .update(BrainEvidenceTable)
-                  .set({ entry_id: row.id })
-                  .where(eq(BrainEvidenceTable.entry_id, other.id))
+                  .set({ entry_id: keeper.id })
+                  .where(eq(BrainEvidenceTable.entry_id, loser.id))
                   .run()
                 yield* tx
                   .update(BrainEntryTable)
-                  .set({ status: "superseded", superseded_by: row.id, updated_at: now })
-                  .where(eq(BrainEntryTable.id, other.id))
+                  .set({ status: "superseded", superseded_by: keeper.id, updated_at: now })
+                  .where(eq(BrainEntryTable.id, loser.id))
                   .run()
                 yield* tx
                   .update(BrainEntryTable)
                   .set({
-                    uses: row.uses + other.uses,
-                    status: row.status === "active" || other.status === "active" ? "active" : "proposed",
-                    paths: [...new Set([...row.paths, ...other.paths])],
+                    uses: keeper.uses + loser.uses,
+                    paths: [...new Set([...keeper.paths, ...loser.paths])],
                     updated_at: now,
                   })
-                  .where(eq(BrainEntryTable.id, row.id))
+                  .where(eq(BrainEntryTable.id, keeper.id))
                   .run()
               }),
             )
             .pipe(Effect.orDie)
-          yield* event(other, "merged", "vector", { into: row.id })
+          // Later merges into the same keeper add to what it has now.
+          keeper.uses += loser.uses
+          keeper.paths = [...new Set([...keeper.paths, ...loser.paths])]
+          yield* event(loser, "merged", "vector", { into: keeper.id })
         }
       }
       const kept = rows.filter((row) => !gone.has(row.id))
-      for (const row of kept) {
-        // 2. A proposal two sessions arrived at is confirmed; one nobody confirmed in 30 days is dropped.
-        if (row.status === "proposed") {
-          const sessions = yield* db
-            .selectDistinct({ session: BrainEvidenceTable.session_id })
+      // 2. A proposal two sessions arrived at is confirmed; one nobody confirmed in 30 days is dropped, and so is an
+      //    entry held for review that the user has not looked at in 30 days.
+      const proposals = kept.filter((row) => row.status === "proposed")
+      const sessions = proposals.length
+        ? yield* db
+            .selectDistinct({ entry: BrainEvidenceTable.entry_id, session: BrainEvidenceTable.session_id })
             .from(BrainEvidenceTable)
-            .where(eq(BrainEvidenceTable.entry_id, row.id))
+            .where(inArray(BrainEvidenceTable.entry_id, proposals.map((row) => row.id)))
             .all()
             .pipe(Effect.orDie)
-          if (sessions.filter((item) => item.session).length >= 2) {
+        : []
+      for (const row of kept) {
+        if (row.status === "quarantined") {
+          if (now - row.created_at <= 30 * DAY) continue
+          counts.dropped++
+          yield* db.delete(BrainEntryTable).where(eq(BrainEntryTable.id, row.id)).run().pipe(Effect.orDie)
+          continue
+        }
+        if (row.status === "proposed") {
+          if (sessions.filter((item) => item.entry === row.id && item.session).length >= 2) {
             counts.promoted++
             yield* db.update(BrainEntryTable).set({ status: "active", updated_at: now }).where(eq(BrainEntryTable.id, row.id)).run().pipe(Effect.orDie)
+            yield* settle(row.id, "vector")
             yield* event(row, "promoted", "vector")
             continue
           }
@@ -1355,6 +1562,7 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
     attach,
     search,
     get,
+    lines,
     list,
     propose,
     update,
@@ -1370,6 +1578,22 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
 }
 
 // --- Helpers --------------------------------------------------------------------------------------------------------
+
+// A mirrored file, following a link: people keep MEMORY.md and RULES.md in a dotfiles folder and link them in. A
+// repository's own link counts only where it lands inside the working tree, as its instruction files do, so a clone
+// cannot feed ~/.ssh/id_rsa into a prompt as "rules".
+async function statFollowing(source: { readonly path: string; readonly root?: string }) {
+  const link = await fs.lstat(source.path).catch(() => undefined)
+  if (!link?.isSymbolicLink()) return link
+  const target = await fs.realpath(source.path).catch(() => undefined)
+  if (!target) return undefined
+  if (source.root) {
+    const root = await fs.realpath(source.root).catch(() => path.resolve(source.root!))
+    const inside = path.relative(root, target)
+    if (inside.startsWith("..") || path.isAbsolute(inside)) return undefined
+  }
+  return fs.stat(target).catch(() => undefined)
+}
 
 function parse(source: { readonly type: "rules" | "memory" | "brain" | "failures" }, content: string) {
   if (source.type === "rules") return BrainParse.rules(content)
@@ -1404,14 +1628,16 @@ function render(
 ): { text?: string; ids: string[] } | undefined {
   const byLine = new Map(rows.map((row) => [row.source_line, row]))
   if (source.type === "rules") {
+    // A scoped rule binds as much as any other and is a line long, so it goes in whole too: attached only when a file
+    // is read, it never reached a file the agent wrote, patched or changed through bash.
     const omit = (item: BrainParse.Item) => {
       const row = byLine.get(item.line)
-      return item.kind === "review" || item.paths.length > 0 || row?.status !== "active"
+      return item.kind === "review" || row?.status !== "active"
     }
     const text = BrainParse.rulesText(BrainScan.stripHidden(content), omit)
     return {
       ...(text ? { text } : {}),
-      ids: rows.filter((row) => row.status === "active" && row.kind === "rule" && row.paths.length === 0).map((row) => row.id),
+      ids: rows.filter((row) => row.status === "active" && row.kind === "rule").map((row) => row.id),
     }
   }
   if (source.type !== "memory") return undefined
@@ -1513,11 +1739,45 @@ function decode(terms: string): ReadonlyMap<string, number> {
   }
 }
 
-function confidence(proposal: Proposal) {
+// Which wording of a duplicate tidying keeps: the user's own, then one in use (checked), then a proposal.
+function rank(row: Pick<Row, "origin" | "status">) {
+  if (row.origin === "user") return 2
+  return row.status === "active" ? 1 : 0
+}
+
+function confidence(proposal: Proposal, verified: boolean) {
   if (proposal.origin === "user") return 1
-  const evidence = proposal.evidence
-  if (!evidence || evidence.type === "user" || !evidence.verified) return 0.5
-  return evidence.type === "message" ? 0.9 : 0.8
+  if (!verified) return 0.5
+  return proposal.evidence?.type === "message" ? 0.9 : 0.8
+}
+
+/** Texts this alike are one entry's wordings: a duplicate, or a correction of it. */
+const SIMILAR = 0.72
+
+// A quote has to state at least half of a memory's terms to count as evidence for it.
+const SUPPORT = 0.5
+
+// Personal memory is what the user said about themselves.
+const FIRST_PERSON = /\b(?:i|me|my|mine|myself)\b/i
+
+function supports(text: string, evidence: Exclude<Evidence, { readonly type: "user" }>) {
+  if (evidence.type === "check") return BrainLexical.named(text, evidence.command)
+  return BrainLexical.coverage(text, evidence.quote) >= SUPPORT
+}
+
+/** Whether one wording says nothing the other does not: every term of it, turned the same way. */
+function within(
+  inner: { readonly body: string; readonly terms: ReadonlyMap<string, number> },
+  outer: { readonly body: string; readonly terms: ReadonlyMap<string, number> },
+) {
+  return (
+    BrainLexical.polarity(inner.body) === BrainLexical.polarity(outer.body) &&
+    [...inner.terms.keys()].every((term) => outer.terms.has(term))
+  )
+}
+
+function scrub(value: string) {
+  return BrainScan.redact(BrainScan.stripHidden(value)).text.slice(0, 240)
 }
 
 function refuse(reason: Refusal, message: string): WriteResult {

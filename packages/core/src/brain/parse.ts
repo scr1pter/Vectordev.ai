@@ -100,8 +100,8 @@ export function rules(content: string): Item[] {
 }
 
 /**
- * The rules file as the agent reads it: as written, without comments, scoped rules (attached when a matching file is
- * read), review-only lines, or lines held for review.
+ * The rules file as the agent reads it: as written, without comments or the lines `omit` picks (review-only lines and
+ * lines held for review).
  */
 export function rulesText(content: string, omit: (item: Item) => boolean) {
   const lines = uncomment(content).split("\n")

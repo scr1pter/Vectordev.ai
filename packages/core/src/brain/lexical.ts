@@ -237,6 +237,67 @@ export function similarity(left: ReadonlyMap<string, number>, right: ReadonlyMap
   return shared / (left.size + right.size - shared)
 }
 
+/**
+ * How much of a memory's text its evidence states: the share of the text's terms the quote has too. Evidence is only
+ * evidence for what it says, so a quote of "fix the failing login tests" proves nothing about a hook script.
+ */
+export function coverage(text: string, evidence: string) {
+  const own = terms(text)
+  if (own.size === 0) return 0
+  const cited = terms(evidence)
+  return [...own.keys()].filter((term) => cited.has(term)).length / own.size
+}
+
+// Words that say how a check runs rather than which check it is.
+const RUNNERS: ReadonlySet<string> = new Set(["bun", "bunx", "npm", "npx", "pnpm", "yarn", "deno", "node", "exec", "dlx"])
+
+/** Whether a memory's text names the check a command ran, so a passing `bun test` vouches only for a lesson about it. */
+export function named(text: string, command: string) {
+  const own = terms(text)
+  return [...terms(command).keys()].some((term) => !RUNNERS.has(term) && own.has(term))
+}
+
+// Words that turn a sentence around. The term tables drop them as filler, so "Use npm, not pnpm" and "Use pnpm, not
+// npm" have the same terms; what each one applies to tells the two apart.
+const POLARITY: ReadonlySet<string> = new Set([
+  "not",
+  "never",
+  "no",
+  "don",
+  "dont",
+  "doesn",
+  "isn",
+  "aren",
+  "won",
+  "shouldn",
+  "mustn",
+  "cannot",
+  "without",
+  "avoid",
+  "instead",
+  "only",
+  "always",
+  "stop",
+])
+
+/**
+ * Each turning word with the word it applies to, as one string: equal for two wordings that say the same thing, and
+ * different for a correction, which merging would otherwise lose.
+ */
+export function polarity(text: string) {
+  const words = text.toLowerCase().match(/[a-z0-9_]+/g) ?? []
+  return words
+    .flatMap((word, index) => {
+      if (!POLARITY.has(word)) return []
+      const next = words
+        .slice(index + 1)
+        .find((later) => later.length >= 3 && !POLARITY.has(later) && !STOP_TERMS.has(later) && !PROSE_TERMS.has(later))
+      return [`${word}:${next ? stem(next) : ""}`]
+    })
+    .toSorted()
+    .join(" ")
+}
+
 export type Document = {
   readonly id: string
   readonly terms: ReadonlyMap<string, number>
