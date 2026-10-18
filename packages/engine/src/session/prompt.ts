@@ -53,6 +53,7 @@ import { Cause, Deferred, Effect, Exit, Fiber, Latch, Layer, Option, Scope, Cont
 
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
+import { QUICK_DESCRIPTION } from "@/tool/escalate"
 import { SessionRunState } from "./run-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -639,14 +640,13 @@ const layer = Layer.effect(
         judge: sizing?.judge,
       })
       const last = requests.at(-1)
-      // Work that stopped to ask the user something is not finished. A "yes" to it continues the request, and the
-      // judge looks at both once that run ends.
-      if (!last || TaskSize.waits(SessionTaskSize.closingText(last.messages))) return "done" as const
-      const lastMessage = input.msgs.find((message) => message.info.id === input.lastAssistant.id)
+      // Work that stopped to ask the user something is not finished: its reply asked a question (the same reading that
+      // keeps the work open for the answer), or the user dismissed the question tool. The answer continues the request,
+      // and the judge looks at both once that run ends.
       if (
-        lastMessage?.parts.some(
-          (part) => part.type === "tool" && part.tool === "question" && part.state.status !== "completed",
-        )
+        !last ||
+        TaskSize.asks(SessionTaskSize.closingText(last.messages)) ||
+        SessionTaskSize.dismissed(last.messages)
       )
         return "done" as const
       // Only work that changed files since the last verdict is judged.
@@ -656,7 +656,7 @@ const layer = Layer.effect(
       const built = work?.requests.some(
         (request) =>
           request.carried !== undefined ||
-          request.messages.some((message) => message.info.role === "user" && message.info.agent === "build"),
+          request.messages.some((message) => message.info.role === "user" && onBuild(message.info)),
       )
       if (!work || !built) return "done" as const
       const judge = yield* agents.get("judge")
@@ -1819,7 +1819,8 @@ const layer = Layer.effect(
             Effect.provideService(Database.Service, database),
           )
 
-        const agent = yield* agents.get(lastUser.agent)
+        // An app's own quick-lane message is sized as a build request, so it runs on the build agent once it is work.
+        const agent = yield* agents.get(onBuild(lastUser) ? "build" : lastUser.agent)
         if (!agent) {
           const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
           const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
@@ -1827,14 +1828,28 @@ const layer = Layer.effect(
           yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
           throw error
         }
-        // A greeting, thanks or a question about Vector goes out on the quick lane: no tools, no repository context,
-        // only the newest message, and no extended reasoning. Plan mode keeps its own setup for everything else.
+        // A greeting, thanks or a question about Vector goes out on the quick lane: no repository context, only the
+        // agent's previous reply and this request, and no extended reasoning. Plan mode keeps its own setup for
+        // everything else. The lane offers escalate alone, so a message the rules misread as social goes on as Work;
+        // a sender's own pick of Chat stays Chat.
         const chat = sized?.tier === "chat"
-        const stepAgent = chat ? ((yield* agents.get("quick")) ?? agent) : agent
+        const recoverable = chat && sized.result.source !== "user"
+        const quickAgent = chat ? yield* agents.get("quick") : undefined
+        const stepAgent = quickAgent
+          ? recoverable
+            ? { ...quickAgent, permission: Permission.merge(quickAgent.permission, QUICK_LANE_TOOLS) }
+            : quickAgent
+          : agent
         const build = sized && !chat && agent.name === "build" ? sized : undefined
         const maxSteps = agent.steps ?? Infinity
         const isLastStep = step >= maxSteps
         const quick = stepAgent.name === "quick" || stepAgent.name === "autocomplete"
+        // The quick lane sees this request's own messages and the end of the agent's reply before it.
+        const opened = sized?.messages[0]?.info.id ?? lastUser.id
+        const previousReply =
+          stepAgent.name === "quick"
+            ? SessionTaskSize.closingText(msgs.filter((message) => message.info.id < opened)).slice(-PREVIOUS_REPLY)
+            : ""
         msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
           Effect.provideService(RuntimeFlags.Service, flags),
           Effect.provideService(FSUtil.Service, fsys),
@@ -1893,7 +1908,11 @@ const layer = Layer.effect(
             invokedAgents,
             messages: msgs,
             promptOps,
-            ...(build ? { taskSize: { tier: build.tier, capped: SessionTaskSize.capped(build.result) } } : {}),
+            ...(build
+              ? { taskSize: { tier: build.tier, capped: SessionTaskSize.capped(build.result) } }
+              : recoverable
+                ? { taskSize: { tier: "chat" as const } }
+                : {}),
           }).pipe(
             Effect.provideService(Session.Service, sessions),
             Effect.provideService(Plugin.Service, plugin),
@@ -1906,7 +1925,13 @@ const layer = Layer.effect(
           // A request is offered what its size needs. On a caching provider the size here is the session's highest
           // while the cache is warm, so the task tool may stay defined on a Work request; it still runs only the
           // subagents the user named, and escalate is how the agent asks for more.
-          if (build) {
+          if (quick) {
+            // The quick lane's one tool: escalate, which hands the message to the full agent. `invalid` only answers a
+            // call to a tool that is not offered, and is never sent to the model.
+            for (const id of Object.keys(tools))
+              if (!(recoverable && QUICK_LANE_TOOLS.some((rule) => rule.permission === id))) delete tools[id]
+            if (tools.escalate) tools.escalate = { ...tools.escalate, description: QUICK_DESCRIPTION }
+          } else if (build) {
             for (const id of TaskSize.withheld(build.offered, build.result.agents.length)) delete tools[id]
             // A thorough request has nothing to raise to, and the user kept a capped one at Work. On a caching provider
             // the tool keeps its place so a smaller follow-up sends the same definitions and reads the cached prefix;
@@ -1980,12 +2005,22 @@ const layer = Layer.effect(
                   Date.now() - (lastFinished?.time.completed ?? 0) > ProviderTransform.cacheLifetime(model),
                 ).pipe(Effect.orDie),
             quick ? Effect.succeed(undefined) : sys.mcp(agent, session.permission),
-            MessageV2.toModelMessagesEffect(msgs, model),
+            // The quick lane sends this request's own messages; autocomplete only the newest one, below.
+            MessageV2.toModelMessagesEffect(
+              stepAgent.name === "quick" ? msgs.filter((message) => message.info.id >= opened) : msgs,
+              model,
+            ),
           ])
           const system = [
             // The quick lane carries no environment, so this is how it can say which model answers.
             ...(stepAgent.name === "quick"
-              ? [`You are Vector, powered by the model named ${model.api.id} (${model.providerID}/${model.api.id}).`]
+              ? [
+                  `You are Vector, powered by the model named ${model.api.id} (${model.providerID}/${model.api.id}).`,
+                  ...(tools.escalate ? ["Call escalate instead of answering when the message asks for work."] : []),
+                  ...(previousReply
+                    ? [`Your previous reply in this conversation:\n<reply>\n${previousReply}\n</reply>`]
+                    : []),
+                ]
               : []),
             ...env.session,
             ...instructions,
@@ -2011,7 +2046,9 @@ const layer = Layer.effect(
             stableSystem: env.stable,
             system,
             messages: [
-              ...(quick ? modelMsgs.filter((message) => message.role === "user").slice(-1) : modelMsgs),
+              ...(stepAgent.name === "autocomplete"
+                ? modelMsgs.filter((message) => message.role === "user").slice(-1)
+                : modelMsgs),
               ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),
             ],
             tools,
@@ -2330,8 +2367,23 @@ function isFreeSelection(model: { providerID: string; modelID: string }) {
 // Sizing applies to the user's own requests to the build agent, and Plan mode's greetings. Subagents, Vector's hidden
 // helpers and custom agents keep their own setup.
 function sizable(session: Session.Info, user: SessionV1.User) {
-  return !session.parentID && !session.internal && (user.agent === "build" || user.agent === "plan")
+  return !session.parentID && !session.internal && (onBuild(user) || user.agent === "plan")
 }
+
+// A message for the build agent. An app sends a social message on the quick lane itself, so an engine that does not
+// size requests also answers it with one small request; this engine sizes it as a build request, so a message the app
+// took for social can still escalate to Work. A Quick mode pick carries `size: "chat"` and stays on the quick lane.
+function onBuild(user: SessionV1.User) {
+  return user.agent === "build" || (user.agent === "quick" && user.size === undefined)
+}
+
+// What the quick lane may run when it can hand a message on: escalate, and `invalid`, which answers a call to any tool
+// it does not offer.
+const QUICK_LANE_TOOLS = Permission.fromConfig({ escalate: "allow", invalid: "allow" })
+
+// The quick lane sees the end of the agent's previous reply, so a short answer to it ("perfect" after "Ready to deploy
+// when you are.") reads right and can be handed on.
+const PREVIOUS_REPLY = 1_500
 
 // A command is Work, never a bare reply. Its template is a workflow someone wrote, not the user's words about this run,
 // so its force words ("be thorough", "exhaustive file trees") are not instructions; only the user's own arguments can
@@ -2354,7 +2406,7 @@ function sizeNotes(messages: SessionV1.WithParts[], requests: readonly SessionTa
     requests.flatMap((request) => {
       // A request whose opening message a compaction summarised carries its note on the compaction marker.
       const user = request.users.at(-1) ?? request.messages.find((message) => message.info.role === "user")
-      if (!user || user.info.role !== "user" || user.info.agent !== "build") return []
+      if (!user || user.info.role !== "user" || !onBuild(user.info)) return []
       const text = TaskSize.note(request.result.tier, {
         escalate: !SessionTaskSize.capped(request.result),
         judge: request.judge !== "off",

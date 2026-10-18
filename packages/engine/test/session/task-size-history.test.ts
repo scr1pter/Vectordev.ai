@@ -31,7 +31,12 @@ function user(
   } as SessionV1.WithParts
 }
 
-function assistant(text: string, finish = "stop", tools: { tool: string; metadata?: Record<string, unknown> }[] = []) {
+function assistant(
+  text: string,
+  finish = "stop",
+  tools: { tool: string; metadata?: Record<string, unknown> }[] = [],
+  agent = "build",
+) {
   const id = MessageID.ascending()
   clock += 1_000
   return {
@@ -40,8 +45,8 @@ function assistant(text: string, finish = "stop", tools: { tool: string; metadat
       sessionID,
       role: "assistant",
       parentID: id,
-      mode: "build",
-      agent: "build",
+      mode: agent,
+      agent,
       path: { cwd: "/", root: "/" },
       cost: 0,
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -185,7 +190,7 @@ describe("SessionTaskSize.size", () => {
     }
   })
 
-  test("after Thorough work that changed files and finished, a new short request is Work of its own", () => {
+  test("Thorough ends with its run: a new request after finished Thorough work is Work of its own", () => {
     const migrated = [
       user(LARGE, { judge: "thorough" }),
       wrote("/r/router.ts"),
@@ -194,7 +199,13 @@ describe("SessionTaskSize.size", () => {
       user("thanks", { judge: "thorough" }),
       assistant("You're welcome!"),
     ]
-    for (const text of ["ship to vercel", "fix the typo in README", "ok", "quick question: what does parseArgs do?"]) {
+    for (const text of [
+      "ship to vercel",
+      "fix the typo in README",
+      "ok",
+      "quick question: what does parseArgs do?",
+      "no, keep the old routes working",
+    ]) {
       const after = MessageID.ascending()
       const requests = size([
         ...migrated,
@@ -215,13 +226,13 @@ describe("SessionTaskSize.size", () => {
       user("fix the typo in README"),
     ])
     expect(chained.slice(-2).map((request) => request.tier)).toEqual(["standard", "standard"])
-    // A correction or a carry-on still continues the migration at its size.
-    for (const text of ["continue with phase 2", "no, keep the old routes working", "do the rest of the files"])
+    // Only an explicit carry-on continues the migration at its size.
+    for (const text of ["continue with phase 2", "keep going", "do the rest of the files"])
       expect(size([...migrated, user(text)]).at(-1)?.result, text).toMatchObject({
         tier: "thorough",
         source: "inherited",
       })
-    // The work counts as changed through the answers that continue it: a "no" that changed nothing does not reopen it.
+    // An answer to the agent's question continues the work; the request after the answer is sized fresh.
     const answered = size([
       user(LARGE),
       wrote("/r/router.ts"),
@@ -231,6 +242,54 @@ describe("SessionTaskSize.size", () => {
       user("ship to vercel"),
     ])
     expect(answered.map((request) => request.tier)).toEqual(["thorough", "thorough", "standard"])
+  })
+
+  test("a closing line or an offer without a question mark leaves nothing open after Thorough work", () => {
+    for (const closing of [
+      "Migrated the router. Let me know if this works for you.",
+      "Migrated the router. Let me know if you'd like me to make any other changes.",
+      "Migrated the router. I recommend running the e2e suite before you merge.",
+      "Migrated the router. You can confirm by running `bun dev`.",
+      "Migrated the router. I can also add tests if you want.",
+    ]) {
+      const migrated = [user(LARGE, { judge: "thorough" }), wrote("/r/router.ts"), assistant(closing)]
+      // The run is judged when it ends: it asked nothing.
+      expect(SessionTaskSize.judgeable(size(migrated), migrated[0]!.info.id)?.files, closing).toEqual(["/r/router.ts"])
+      const judged = [...migrated, judgedBy("PASS", "thorough")]
+      for (const text of ["fix the typo in README", UNRELATED]) {
+        const after = MessageID.ascending()
+        const requests = size([...judged, user(text, { judge: "thorough" }), wrote("/r/README.md"), assistant("Done.")])
+        expect(requests.at(-1)?.result, `${closing} ${text}`).toMatchObject({ tier: "standard", source: "auto" })
+        expect(SessionTaskSize.judgeable(requests, after), `${closing} ${text}`).toBeUndefined()
+      }
+      // A thanks or a greeting after it is a direct reply.
+      for (const text of ["thanks", "hi"])
+        expect(size([...judged, user(text)]).at(-1)?.tier, `${closing} ${text}`).toBe("chat")
+    }
+    // An offer with a question mark still waits on the answer.
+    const offered = [user(LARGE), wrote("/r/router.ts"), assistant("Migrated the router. Want me to also update the docs?")]
+    expect(size([...offered, user("yes, also update the docs")]).at(-1)?.tier).toBe("thorough")
+    expect(size([...offered, user("thanks")]).at(-1)?.tier).toBe("thorough")
+  })
+
+  test("after a Thorough review that changed nothing, new requests are Work and the chain ends", () => {
+    const reviewed = [
+      user("be thorough: review the auth module for security issues", { judge: "thorough" }),
+      assistant("Found three issues in the auth module: weak hashing, no rate limit, and a token leak in logs."),
+    ]
+    const requests = size([
+      ...reviewed,
+      user("what does parseArgs do?", { judge: "thorough" }),
+      assistant("It parses the flags."),
+      user("run the tests", { judge: "thorough" }),
+      assistant("All tests pass."),
+      user("fix the typo in README", { judge: "thorough" }),
+      wrote("/r/README.md"),
+      assistant("Fixed the typo."),
+    ])
+    expect(requests.map((request) => request.tier)).toEqual(["thorough", "standard", "standard", "standard"])
+    // The typo fix is Work, so "Large tasks" mode does not judge it.
+    expect(SessionTaskSize.judgeable(requests, requests.at(-1)!.users[0]!.info.id)).toBeUndefined()
   })
 
   test("a greeting's reply waits on nothing, so the small talk that answers it stays a direct reply", () => {
@@ -433,20 +492,12 @@ describe("SessionTaskSize.size", () => {
     }
   })
 
-  test("a short follow-up after a Thorough plan carries it out at its size, Plan mode then Build included", () => {
-    for (const [text, agent] of [
-      ["build it", "build"],
-      ["build the app", "build"],
-      ["implement the migration", "build"],
-      ["looks good, build it", "build"],
-      ["approved", "build"],
-      ["build the app", "plan"],
-      ["implement the migration", "plan"],
-    ] as const) {
-      const plan = user("be thorough and plan how to port the TUI to Rust", { judge: "thorough", agent })
+  test("an approval or build it after a Thorough plan from Plan mode carries it out at its size", () => {
+    for (const text of ["build it", "build the app", "implement the migration", "looks good, build it", "approved", "yes"]) {
+      const plan = user("be thorough and plan how to port the TUI to Rust", { judge: "thorough", agent: "plan" })
       const requests = size([
         plan,
-        assistant("Here is the plan in three phases: the renderer, the input layer, then the views."),
+        assistant("Here is the plan in three phases: the renderer, the input layer, then the views.", "stop", [], "plan"),
         user(text, { judge: "thorough" }),
         wrote("/r/tui.rs"),
         assistant("Ported the renderer."),
@@ -461,6 +512,49 @@ describe("SessionTaskSize.size", () => {
         text,
       ])
     }
+    // On the build agent, a plan that asked nothing has ended: "build it" is Work, and the agent can escalate.
+    const built = size([
+      user("be thorough and plan how to port the TUI to Rust"),
+      assistant("Here is the plan in three phases: the renderer, the input layer, then the views."),
+      user("build it"),
+    ])
+    expect(built.at(-1)?.result).toMatchObject({ tier: "standard", source: "auto" })
+    // A plan that asked carries on with the answer.
+    const asked = size([
+      user("be thorough and plan how to port the TUI to Rust"),
+      assistant("Here is the plan in three phases. Shall I start with the renderer?"),
+      user("build it"),
+    ])
+    expect(asked.at(-1)?.result).toMatchObject({ tier: "thorough", source: "inherited" })
+    // Once Plan mode's plan is carried out, the next request is sized fresh.
+    const done = size([
+      user("be thorough and plan how to port the TUI to Rust", { agent: "plan" }),
+      assistant("Here is the plan.", "stop", [], "plan"),
+      user("build it"),
+      wrote("/r/tui.rs"),
+      assistant("Ported the TUI."),
+      user("yes"),
+    ])
+    expect(done.map((request) => request.tier)).toEqual(["thorough", "thorough", "standard"])
+  })
+
+  test("a Chat request the agent escalated is Work: part of what the user asked, and work a reply can continue", () => {
+    const requests = size([
+      user("thanks for the update"),
+      assistant("", "tool-calls", [{ tool: "escalate", metadata: { from: "chat", to: "standard" } }], "quick"),
+      wrote("/r/vercel.json"),
+      assistant("Deployed. Should I also add a preview alias?"),
+      user("thanks"),
+    ])
+    expect(requests[0]?.result).toMatchObject({ tier: "standard", reasons: ["escalated"] })
+    expect(requests[0]?.tier).toBe("standard")
+    expect(requests[0]?.escalated).toBe(true)
+    // The work asked a question, so the thanks answers it at the work's size.
+    expect(requests[1]?.result).toMatchObject({ tier: "standard", source: "inherited" })
+    // Without an escalate call a social message stays Chat.
+    expect(size([user("thanks for the update"), assistant("You're welcome!", "stop", [], "quick")])[0]?.tier).toBe(
+      "chat",
+    )
   })
 
   test("a quick-lane thanks after build work settles it like a thanks on the build agent", () => {
@@ -542,6 +636,11 @@ describe("SessionTaskSize.size", () => {
       state: { status: "error", input: {}, error: "dismissed", time: { start: 1, end: 2 } },
     } as SessionV1.Part)
     expect(size([asking, dismissed, user("the new one")]).at(-1)?.tier).toBe("thorough")
+    // A question the user dismissed earlier in the run still leaves the work open.
+    const before = user(LARGE)
+    const asked = assistant("Asking which router.", "tool-calls")
+    asked.parts.push({ ...dismissed.parts.at(-1)!, messageID: asked.info.id } as SessionV1.Part)
+    expect(size([before, asked, assistant("Paused."), user("thanks")]).at(-1)?.tier).toBe("thorough")
     // A finished run that asked nothing leaves nothing open: a thanks afterwards is a direct reply.
     expect(size([user(LARGE), assistant("Migrated all 40."), user("thanks")]).at(-1)?.tier).toBe("chat")
   })

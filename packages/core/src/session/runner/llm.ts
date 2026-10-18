@@ -488,13 +488,13 @@ const layer = Layer.effect(
 
 // The size of the request a turn answers, folded over the user's messages oldest first as the V1 history fold does.
 // Each message is read against the work before it (the last message that was not Chat) and the reply that answered the
-// message before it, so a "thanks" while the agent waits on an answer, or a "build it" after a large plan, continues that
-// work instead of becoming a bare reply.
+// message before it, so a "thanks" while the agent waits on an answer, or a "build it" after a plan from Plan mode,
+// continues that work instead of becoming a bare reply.
 function requestSize(context: readonly SessionMessage.Message[]) {
   const users = context.flatMap((message, index) => (message.type === "user" ? [{ message, index }] : []))
   // A compaction summarised what came before, so a "continue" after it has work of unknown size to go on with.
   const compacted = context.some((message) => message.type === "compaction")
-  return users.reduce<{ result?: TaskSize.Result; work?: TaskSize.Tier; changed: boolean }>(
+  return users.reduce<{ result?: TaskSize.Result; work?: TaskSize.Tier; plan: boolean }>(
     (state, user, position) => {
       const reply =
         position === 0
@@ -506,45 +506,42 @@ function requestSize(context: readonly SessionMessage.Message[]) {
         .flatMap((message) => message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])))
         .join("\n")
       const last = reply.at(-1)
-      // Whether the work this message would continue changed files, counting the requests that work continues.
-      const changed = state.changed || reply.some(edits)
+      // The reply to a message that was more than a greeting is the work's: a plan when it came from Plan mode.
+      const plan = state.result && state.result.tier !== "chat" ? last?.agent === "plan" : state.plan
       const result = TaskSize.classify({
         text: user.message.text,
         files: user.message.files?.filter((file) => !file.mime.startsWith("image/")).length,
         images: user.message.files?.filter((file) => file.mime.startsWith("image/")).length,
         agents: user.message.agents?.map((agent) => agent.name),
         previous: state.work,
-        // The work before is still open when its reply asked or offered something, or its run did not finish (a
-        // message that joined a running drain has no reply of its own yet). A greeting's reply is never open.
+        // The work before is still open when its reply asked the user a question, the user dismissed the question
+        // tool, or its run did not finish (a message that joined a running drain has no reply of its own yet). A
+        // greeting's reply is never open.
         open:
           position > 0 &&
           state.result?.tier !== "chat" &&
-          (TaskSize.asks(text) || !last || last.error !== undefined || UNFINISHED.has(last.finish ?? "")),
-        changed,
+          (TaskSize.asks(text) ||
+            !last ||
+            last.error !== undefined ||
+            UNFINISHED.has(last.finish ?? "") ||
+            reply.some(dismissed)),
+        plan,
       })
-      return {
-        result,
-        work: result.tier === "chat" ? state.work : result.tier,
-        // A request of its own starts new work; a greeting or a continuation keeps the work before it.
-        changed: result.tier === "chat" || result.source === "inherited" ? changed : false,
-      }
+      return { result, work: result.tier === "chat" ? state.work : result.tier, plan }
     },
-    { work: compacted ? "standard" : undefined, changed: false },
+    { work: compacted ? "standard" : undefined, plan: false },
   ).result
 }
 
 // Finish reasons of a step that stopped before its answer was done.
 const UNFINISHED = new Set(["length", "tool-calls", "unknown", "error", "content-filter"])
 
-// A step that changed files: its snapshot recorded them, or it completed an edit or a write.
-function edits(message: SessionMessage.Assistant) {
-  if ((message.snapshot?.files?.length ?? 0) > 0) return true
+// A step that asked through the question tool and got no answer: the user dismissed it, or has not answered yet.
+function dismissed(message: SessionMessage.Assistant) {
   return message.content.some(
-    (part) => part.type === "tool" && part.state.status === "completed" && FILE_TOOLS.has(part.name),
+    (part) => part.type === "tool" && part.name === "question" && part.state.status !== "completed",
   )
 }
-
-const FILE_TOOLS = new Set(["edit", "write", "apply_patch"])
 
 export const node = makeLocationNode({
   service: Service,

@@ -4,8 +4,15 @@ import { Tool } from "./tool"
 import DESCRIPTION from "./escalate.txt"
 
 export const Parameters = Schema.Struct({
-  reason: Schema.String.annotate({ description: "One line on why the work is large" }),
+  reason: Schema.String.annotate({ description: "One line on what the request needs" }),
 })
+
+/**
+ * What escalate says on the quick lane, where it is the only tool: it hands a message that asks for work to the full
+ * agent. Short, because a greeting sends it too.
+ */
+export const QUICK_DESCRIPTION =
+  "Hand this message to the full agent, with tools and the conversation, when it asks you to do, check or change anything."
 
 type Metadata = {
   from?: TaskSize.Tier
@@ -28,6 +35,14 @@ export const EscalateTool = Tool.define<typeof Parameters, Metadata, never>(
         const current = ctx.extra?.taskSize as TaskSizeContext | undefined
         if (!current)
           return { title: "Not raised", output: "Task sizing does not apply to this session.", metadata: {} }
+        // On the quick lane a message the rules took for social asks for work: it goes on as Work, never further.
+        if (current.tier === "chat")
+          return {
+            title: "Work task",
+            output:
+              "This request is now Work: the repository's tools and the whole conversation are offered from your next step. Do what the user asked.",
+            metadata: { from: "chat", to: "standard" },
+          }
         if (current.capped)
           return {
             title: "Not raised",
@@ -41,7 +56,7 @@ export const EscalateTool = Tool.define<typeof Parameters, Metadata, never>(
             output: "This request is already Thorough. Carry on with the tools you have.",
             metadata: {},
           }
-        // Work and Thorough are the only sizes the agent works at, so a raise always goes to Thorough. The completed
+        // Work and Thorough are the only sizes the agent works at, so a raise from Work goes to Thorough. The completed
         // call is the durable record: every later step recomputes the size from the history, so the raise survives a
         // restart, and a reply that continues the work keeps it Thorough.
         return {

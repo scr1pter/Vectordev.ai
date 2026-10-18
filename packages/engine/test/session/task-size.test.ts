@@ -15,6 +15,7 @@ import path from "path"
 import { LSP } from "@/lsp/lsp"
 import { MCP } from "../../src/mcp"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { Question } from "@/question"
 import { Session } from "@/session/session"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SessionSummary } from "../../src/session/summary"
@@ -88,6 +89,7 @@ const it = testEffect(
     LayerNode.group([
       SessionPrompt.node,
       Session.node,
+      Question.node,
       Ripgrep.node,
       FSUtil.node,
       Database.node,
@@ -220,6 +222,17 @@ const UNRELATED = "add a settings page with a dark mode toggle, tests for the pa
 // The tools every Work request is offered: the normal set without subagents.
 const WORK = ["bash", "edit", "escalate", "glob", "grep", "question", "read", "todowrite", "write"]
 
+// The quick lane's one tool: escalate, which hands a message it misread as social to the full agent.
+const QUICK = ["escalate"]
+
+// Whether a request is offered the Work tools rather than the quick lane's escalate alone.
+const working = (body: Record<string, unknown> | undefined) => toolNames(body).includes("read")
+
+const judgeRequests = (bodies: Record<string, unknown>[]) => bodies.filter(isJudge).length
+
+// A turn of the shared conversation where the agent asks through the question tool and the user dismisses it.
+const DISMISSED = "(dismissed question)"
+
 const judgeVerdicts = (messages: SessionV1.WithParts[]) =>
   messages.flatMap((message) =>
     message.parts.flatMap((part) => (part.type === "tool" && part.metadata?.judge ? [part.metadata.judge] : [])),
@@ -241,10 +254,13 @@ describe("task sizing", () => {
         const bodies = yield* llm.inputs
         expect(bodies).toHaveLength(1)
         const [body] = bodies
-        expect(toolNames(body)).toEqual([])
+        // One small tool, escalate, so a message misread as social can still go on as Work.
+        expect(toolNames(body)).toEqual(QUICK)
         expect(body?.reasoning_effort).toBe("none")
         // The quick lane: the newest message only, no repository context.
         expect(conversation(body)).toHaveLength(1)
+        // 515 characters before the lane offered escalate; about 1,000 with it.
+        expect(JSON.stringify(body).length).toBeLessThan(1_100)
         expect(systemText(body)).not.toContain("<env>")
         expect(systemText(body)).not.toContain("subagent")
         expect(result.info.role === "assistant" && result.info.size).toBe("chat")
@@ -277,9 +293,104 @@ describe("task sizing", () => {
         const bodies = yield* llm.inputs
         expect(bodies).toHaveLength(texts.length)
         for (const [index, body] of bodies.entries()) {
-          expect(toolNames(body), texts[index]).toEqual([])
+          expect(toolNames(body), texts[index]).toEqual(QUICK)
           expect(body?.reasoning_effort, texts[index]).toBe("none")
           expect(conversation(body), texts[index]).toHaveLength(1)
+        }
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "the quick lane offers escalate alone, and a message it misread goes on as Work with the tools and history",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        const chat = yield* sessions.create({ title: "Pinned" })
+        yield* llm.text("The preview is up at https://preview.vercel.app. Ready for production when you are.")
+        yield* send(prompt, chat.id, "deploy a preview to vercel")
+        const before = (yield* llm.inputs).length
+        // "perfect" reads as social, but here it means "go ahead": the quick lane hands it on.
+        yield* llm.tool("escalate", { reason: "the user wants the production deploy" })
+        yield* llm.tool("write", { filePath: path.join(directory, "vercel.json"), content: "{}\n" })
+        yield* llm.text("Deployed to production.")
+        const result = yield* send(prompt, chat.id, "perfect")
+        const bodies = (yield* llm.inputs).slice(before).filter((body) => !isTitle(body))
+        expect(bodies).toHaveLength(3)
+        // The quick lane: escalate alone, reasoning off, this message and the agent's previous reply only.
+        expect(toolNames(bodies[0])).toEqual(QUICK)
+        expect(bodies[0]?.reasoning_effort).toBe("none")
+        expect(conversation(bodies[0])).toHaveLength(1)
+        expect(systemText(bodies[0])).toContain("Ready for production when you are.")
+        expect(JSON.stringify(bodies[0]?.messages)).not.toContain("deploy a preview to vercel")
+        // The same request goes on as Work: every Work tool, the provider's effort and the whole conversation.
+        for (const body of bodies.slice(1)) {
+          expect(toolNames(body)).toEqual(expect.arrayContaining(WORK))
+          expect(toolNames(body)).not.toContain("task")
+          expect(body?.reasoning_effort).toBeUndefined()
+          expect(JSON.stringify(body?.messages)).toContain("deploy a preview to vercel")
+        }
+        expect(result.info.role === "assistant" && result.info).toMatchObject({ size: "standard", agent: "build" })
+        // Work is not judged in "Large tasks" mode.
+        expect((yield* sessions.children(chat.id)).length).toBe(0)
+        const output = (yield* MessageV2.filterCompactedEffect(chat.id)).flatMap((message) =>
+          message.parts.flatMap((part) =>
+            part.type === "tool" && part.tool === "escalate" && part.state.status === "completed"
+              ? [part.state.output]
+              : [],
+          ),
+        )
+        expect(output[0]).toContain("now Work")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "an app's own quick-lane message can escalate too, while a Quick mode pick stays on the quick lane",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions } = yield* setup()
+        const lane = yield* sessions.create({ title: "Pinned" })
+        yield* llm.tool("escalate", { reason: "the user asked for a deploy" })
+        yield* llm.text("Deployed.")
+        const result = yield* send(prompt, lane.id, "thanks", { agent: "quick" })
+        const picked = yield* sessions.create({ title: "Pinned" })
+        yield* llm.text("parseArgs reads the flags.")
+        yield* send(prompt, picked.id, "what does parseArgs do?", { agent: "quick", size: "chat" })
+        const [quick, work, chosen] = (yield* llm.inputs).filter((body) => !isTitle(body))
+        expect(toolNames(quick)).toEqual(QUICK)
+        expect(toolNames(work)).toEqual(expect.arrayContaining(WORK))
+        expect(result.info.role === "assistant" && result.info).toMatchObject({ size: "standard", agent: "build" })
+        // The person picked Quick mode: no tools, nothing to escalate.
+        expect(toolNames(chosen)).toEqual([])
+        expect(chosen?.reasoning_effort).toBe("none")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a thanks with a request after it and no comma is Work with the history, never the quick lane",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        for (const text of [
+          "thanks for the update ship it to vercel",
+          "thanks for the fix ship it",
+          "thanks for that run the tests",
+          "thanks for the fix what about tests?",
+        ]) {
+          const chat = yield* sessions.create({ title: "Pinned" })
+          yield* llm.tool("write", { filePath: path.join(directory, "README.md"), content: "# fixed\n" })
+          yield* llm.text("Fixed the typo in README.md.")
+          yield* send(prompt, chat.id, "fix the typo in README.md")
+          const before = (yield* llm.inputs).length
+          yield* llm.text("On it.")
+          const result = yield* send(prompt, chat.id, text)
+          const [body] = (yield* llm.inputs).slice(before).filter((item) => !isTitle(item))
+          expect(toolNames(body), text).toEqual(expect.arrayContaining(WORK))
+          expect(body?.reasoning_effort, text).toBeUndefined()
+          expect(JSON.stringify(body?.messages), text).toContain("fix the typo in README.md")
+          expect(result.info.role === "assistant" && result.info, text).toMatchObject({ size: "standard", agent: "build" })
         }
       }),
     { git: true },
@@ -465,22 +576,43 @@ describe("task sizing", () => {
           // A "no" answers the agent's question, so it is never a bare reply.
           ["no", "Removed the preview URL.", true, "standard"],
           ["thanks, that works", "You're welcome!", false, "chat"],
-          ["be thorough: port the TUI to Rust", "Here is the plan in three phases.", true, "thorough"],
+          ["be thorough: port the TUI to Rust", "Here is the plan in three phases. Shall I start?", true, "thorough"],
           ["build the app", "Ported the renderer. Should I go on with the input layer?", true, "thorough"],
           // A thanks while the agent waits on an answer follows up that work.
           ["thanks", "Going on with the input layer.", true, "thorough"],
-          ["continue", "Ported every screen.", true, "thorough"],
+          ["continue", "Ported every screen. Let me know if this works for you.", true, "thorough"],
+          // Thorough ends with its run: a closing line asks nothing, so a thanks is bare and a new request is Work.
           ["thanks!", "Anytime!", false, "chat"],
+          ["fix the typo in README", "Fixed the typo.", true, "standard"],
           // A greeting's reply that asks back waits on nothing, so the small talk that answers it stays bare.
           ["hey, how are you?", "I'm doing great, thanks for asking! How about you?", false, "chat"],
           ["great, thanks!", "Glad to hear it!", false, "chat"],
+          // The agent asks through the question tool and the user dismisses it: the thanks after it follows up.
+          ["which router should I use?", DISMISSED, true, "standard"],
+          ["thanks", "Going with the new router.", true, "standard"],
         ] as const
+        const question = yield* Question.Service
         for (const [text, answer, tools, size] of conversation) {
           const before = (yield* llm.inputs).length
-          yield* llm.text(answer)
-          const result = yield* send(prompt, chat.id, text)
+          if (answer !== DISMISSED) yield* llm.text(answer)
+          if (answer === DISMISSED)
+            yield* llm.tool("question", {
+              questions: [{ question: "Which router?", header: "Router", options: [{ label: "v6", description: "New" }] }],
+            })
+          const running = yield* send(prompt, chat.id, text).pipe(Effect.forkChild)
+          if (answer === DISMISSED) {
+            let pending = yield* question.list()
+            while (pending.length === 0) {
+              yield* Effect.sleep("10 millis")
+              pending = yield* question.list()
+            }
+            yield* question.reject(pending[0]!.id)
+          }
+          const result = yield* Fiber.join(running)
           const [body] = (yield* llm.inputs).slice(before)
-          expect(toolNames(body).length > 0, text).toBe(tools)
+          expect(working(body), text).toBe(tools)
+          // Chat is the quick lane with escalate alone.
+          if (!tools) expect(toolNames(body), text).toEqual(QUICK)
           expect(result.info.role === "assistant" && result.info.size, text).toBe(size)
           expect(toolNames(body).includes("task"), text).toBe(size === "thorough")
         }
@@ -508,7 +640,7 @@ describe("task sizing", () => {
   )
 
   it.instance(
-    "a sure to an offer without a question mark continues Thorough work with its tools and history",
+    "a sure to an offer without a question mark is Work with the history: the Thorough run ended",
     () =>
       Effect.gen(function* () {
         const { llm, prompt, sessions } = yield* setup()
@@ -516,11 +648,13 @@ describe("task sizing", () => {
         yield* llm.text("Migrated the router. I can also add tests for this if you want.")
         yield* send(prompt, chat.id, LARGE)
         yield* llm.text("Added the tests.")
-        yield* send(prompt, chat.id, "sure")
+        const result = yield* send(prompt, chat.id, "sure")
         const bodies = (yield* llm.inputs).filter((body) => !isTitle(body))
         expect(bodies).toHaveLength(2)
-        expect(toolNames(bodies[1])).toEqual(expect.arrayContaining(["read", "todowrite", "task"]))
-        expect(JSON.stringify(bodies[1]?.messages)).toContain("new router across 40 files")
+        expect(toolNames(bodies[1])).toEqual(expect.arrayContaining(WORK))
+        expect(toolNames(bodies[1])).not.toContain("task")
+        expect(JSON.stringify(bodies[1]?.messages)).toContain("I can also add tests for this if you want.")
+        expect(result.info.role === "assistant" && result.info.size).toBe("standard")
       }),
     { git: true },
   )
@@ -614,7 +748,7 @@ describe("task sizing", () => {
         yield* llm.text("Hello!")
         yield* prompt.prompt({ sessionID: greeting.id, agent: "build", model: ref, parts: legacy("hi") })
         const [hello] = yield* llm.inputs
-        expect(toolNames(hello)).toEqual([])
+        expect(toolNames(hello)).toEqual(QUICK)
         expect(JSON.stringify(hello)).not.toContain("vector_verified_completion")
 
         const work = yield* sessions.create({ title: "Pinned" })
@@ -847,7 +981,7 @@ describe("task sizing", () => {
   )
 
   it.instance(
-    "a thanks an older app sends on the quick lane after a judged large task's offer still brings in the judge",
+    "a thanks the app sends on its quick lane after a large task's question answers it, and the judge follows",
     () =>
       Effect.gen(function* () {
         const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
@@ -864,9 +998,10 @@ describe("task sizing", () => {
         yield* llm.text("VERDICT: PASS")
         yield* send(prompt, chat.id, "thanks", { agent: "quick" })
         const bodies = (yield* llm.inputs).slice(before).filter((body) => !isTitle(body))
-        expect(toolNames(bodies[0])).toEqual([])
+        // This engine sizes the app's quick-lane message: the work waits on the answer, so it runs at the work's size.
+        expect(toolNames(bodies[0])).toEqual(expect.arrayContaining(["task", "todowrite"]))
         expect(isJudge(bodies[1]!)).toBe(true)
-        // The judge checks the work's own report, not the quick lane's "You're welcome!".
+        // The judge checks the work's own report, not the reply's "You're welcome!".
         expect(JSON.stringify(bodies[1]?.messages)).toContain("Migrated all 40 routes")
         expect(JSON.stringify(bodies[1]?.messages)).not.toContain("You're welcome!")
         // A FAIL is repaired on the build agent with the work's tools, then judged again.
@@ -919,18 +1054,12 @@ describe("task sizing", () => {
   )
 
   it.instance(
-    "a short follow-up after a thorough plan that asked nothing carries it out at its size, Plan then Build included",
+    "an approval or build it after a Thorough plan from Plan mode carries it out at its size, and the judge checks it",
     () =>
       Effect.gen(function* () {
         const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
-        for (const [answer, planner] of [
-          ["build it", "build"],
-          ["implement the plan", "build"],
-          ["looks good, build it", "build"],
-          ["go with option b", "build"],
-          ["build the app", "plan"],
-          ["implement the migration", "plan"],
-        ] as const) {
+        for (const answer of ["build it", "build the app", "implement the migration", "looks good, build it", "yes"]) {
+          const planner = "plan"
           const chat = yield* sessions.create({ title: "Pinned" })
           yield* llm.text("Here is the plan in three phases: the renderer, the input layer, then the views.")
           yield* send(prompt, chat.id, "be thorough and plan how to port the TUI to Rust", { agent: planner })
@@ -948,6 +1077,20 @@ describe("task sizing", () => {
           expect(JSON.stringify(judged[0]?.messages), answer).toContain("port the TUI to Rust")
           expect((yield* sessions.children(chat.id)).length, answer).toBe(1)
         }
+        // On the build agent a plan that asked nothing has ended with its run: "build it" is Work, not judged, and the
+        // agent can escalate it.
+        const chat = yield* sessions.create({ title: "Pinned" })
+        yield* llm.text("Here is the plan in three phases: the renderer, the input layer, then the views.")
+        yield* send(prompt, chat.id, "be thorough and plan how to port the TUI to Rust")
+        const before = (yield* llm.inputs).length
+        yield* llm.tool("write", { filePath: path.join(directory, "tui.rs"), content: "fn main() {}\n" })
+        yield* llm.text("Ported the renderer.")
+        const result = yield* send(prompt, chat.id, "build it")
+        const bodies = (yield* llm.inputs).slice(before).filter((body) => !isTitle(body))
+        expect(toolNames(bodies[0])).toEqual(expect.arrayContaining(WORK))
+        expect(toolNames(bodies[0])).not.toContain("task")
+        expect(result.info.role === "assistant" && result.info.size).toBe("standard")
+        expect(judgeRequests(bodies)).toBe(0)
       }),
     { git: true },
   )
@@ -964,7 +1107,7 @@ describe("task sizing", () => {
         yield* send(prompt, chat.id, "yes")
         const bodies = (yield* llm.inputs).filter((body) => !isTitle(body))
         expect(bodies).toHaveLength(2)
-        expect(toolNames(bodies[0])).toEqual([])
+        expect(toolNames(bodies[0])).toEqual(QUICK)
         expect(toolNames(bodies[1])).toEqual(expect.arrayContaining(WORK))
         expect(conversation(bodies[1]).length).toBeGreaterThan(1)
         expect(JSON.stringify(bodies[1]?.messages)).toContain("failing tests in this repository")
@@ -1108,6 +1251,11 @@ describe("task sizing", () => {
           "Migrated the router. Want me to proceed with phase 2? 🙂",
           "Migrated the router. Shall I continue with the input layer? Just say the word.",
           "Migrated the router. Should I keep the old API, or remove it? (I'd lean toward removing it.)",
+          // A question that is not the reply's last sentence still asks (the verifier's probes).
+          "Migrated the router. Should I also remove the old API? I'll wait for your answer.",
+          "Migrated the router. Should I also remove the old API? Once you confirm, I'll proceed.",
+          "Migrated the router. Which do you prefer for the old API: remove it or keep a shim? I'd go with the shim.",
+          "Should I also remove the old API?\n\n**Summary of changes:**\n- router.ts migrated",
         ]
         for (const closing of closings) {
           const chat = yield* sessions.create({ title: "Pinned" })
@@ -1197,7 +1345,7 @@ describe("task sizing", () => {
           const result = yield* send(prompt, chat.id, thanks)
           const bodies = (yield* llm.inputs).slice(before).filter((item) => !isTitle(item))
           expect(bodies, thanks).toHaveLength(1)
-          expect(toolNames(bodies[0]), thanks).toEqual([])
+          expect(toolNames(bodies[0]), thanks).toEqual(QUICK)
           expect(bodies[0]?.reasoning_effort, thanks).toBe("none")
           expect(conversation(bodies[0]), thanks).toHaveLength(1)
           expect(result.info.role === "assistant" && result.info.size, thanks).toBe("chat")
@@ -1291,6 +1439,124 @@ describe("task sizing", () => {
         expect(judged).toHaveLength(1)
         expect(JSON.stringify(judged[0]?.messages)).toContain("port the TUI to Rust")
         expect((yield* sessions.children(chat.id)).length).toBe(1)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "after a judged Thorough migration whose report ends on a closing line, a new request is Work and not judged again",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        for (const closing of [
+          "Migrated the router. Let me know if this works for you.",
+          "Migrated the router. I recommend running the e2e suite before you merge.",
+          "Migrated the router. Let me know if you'd like me to make any other changes.",
+        ]) {
+          for (const text of ["fix the typo in README", UNRELATED]) {
+            const chat = yield* sessions.create({ title: "Pinned" })
+            yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export {}\n" })
+            yield* llm.text(closing)
+            yield* llm.text("VERDICT: PASS")
+            yield* send(prompt, chat.id, LARGE)
+            const before = (yield* llm.inputs).length
+            yield* llm.tool("write", { filePath: path.join(directory, "README.md"), content: "# fixed\n" })
+            yield* llm.text("Done.")
+            const result = yield* send(prompt, chat.id, text)
+            const all = (yield* llm.inputs).slice(before)
+            const [body] = all.filter((item) => !isTitle(item))
+            expect(toolNames(body), `${closing} ${text}`).toEqual(expect.arrayContaining(WORK))
+            expect(toolNames(body), `${closing} ${text}`).not.toContain("task")
+            expect(body?.reasoning_effort, `${closing} ${text}`).toBeUndefined()
+            expect(result.info.role === "assistant" && result.info.size, `${closing} ${text}`).toBe("standard")
+            expect(judgeRequests(all), `${closing} ${text}`).toBe(0)
+            expect((yield* sessions.children(chat.id)).length, `${closing} ${text}`).toBe(1)
+          }
+        }
+        // An offer with a question mark still waits: the answer stays Thorough and is judged.
+        const chat = yield* sessions.create({ title: "Pinned" })
+        yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export {}\n" })
+        yield* llm.text("Migrated the router. Want me to also update the docs?")
+        yield* send(prompt, chat.id, LARGE)
+        expect((yield* sessions.children(chat.id)).length).toBe(0)
+        const before = (yield* llm.inputs).length
+        yield* llm.tool("write", { filePath: path.join(directory, "docs.md"), content: "# docs\n" })
+        yield* llm.text("Updated the docs.")
+        yield* llm.text("VERDICT: PASS")
+        const result = yield* send(prompt, chat.id, "yes, also update the docs")
+        const bodies = (yield* llm.inputs).slice(before).filter((item) => !isTitle(item))
+        expect(toolNames(bodies[0])).toEqual(expect.arrayContaining(["task", "task_manage"]))
+        expect(result.info.role === "assistant" && result.info.size).toBe("thorough")
+        expect(judgeRequests(bodies)).toBe(1)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "thanks or hi after a Thorough report that ends on a closing line is one quick-lane request",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        for (const closing of [
+          "Migrated the router. Let me know if this works for you.",
+          "Migrated the router. Let me know if you'd like me to make any other changes.",
+          "Migrated the router. You can confirm by running `bun dev`.",
+          "Migrated the router. Let me know how it goes.",
+        ]) {
+          for (const text of ["thanks", "hi"]) {
+            const chat = yield* sessions.create({ title: "Pinned" })
+            yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export {}\n" })
+            yield* llm.text(closing)
+            yield* llm.text("VERDICT: PASS")
+            yield* send(prompt, chat.id, LARGE)
+            const before = (yield* llm.inputs).length
+            yield* llm.text("You're welcome!")
+            const result = yield* send(prompt, chat.id, text)
+            const bodies = (yield* llm.inputs).slice(before).filter((item) => !isTitle(item))
+            expect(bodies, `${closing} ${text}`).toHaveLength(1)
+            expect(toolNames(bodies[0]), `${closing} ${text}`).toEqual(QUICK)
+            expect(bodies[0]?.reasoning_effort, `${closing} ${text}`).toBe("none")
+            expect(result.info.role === "assistant" && result.info.size, `${closing} ${text}`).toBe("chat")
+          }
+        }
+        // A thanks to an offer with a question mark answers it, at the work's size.
+        const chat = yield* sessions.create({ title: "Pinned" })
+        yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export {}\n" })
+        yield* llm.text("Migrated the router. Want me to also add tests?")
+        yield* send(prompt, chat.id, LARGE)
+        const before = (yield* llm.inputs).length
+        yield* llm.text("You're welcome! I'll leave the tests.")
+        yield* llm.text("VERDICT: PASS")
+        yield* send(prompt, chat.id, "thanks")
+        const [body] = (yield* llm.inputs).slice(before).filter((item) => !isTitle(item))
+        expect(toolNames(body)).toEqual(expect.arrayContaining(["task", "todowrite"]))
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "after a Thorough review that changed nothing, new requests are Work and a typo fix is not judged",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        const chat = yield* sessions.create({ title: "Pinned" })
+        yield* llm.text("Found three issues in the auth module: weak hashing, no rate limit, and a token leak in logs.")
+        yield* send(prompt, chat.id, "be thorough: review the auth module for security issues")
+        for (const text of ["what does parseArgs do?", "run the tests", "fix the typo in README"]) {
+          const before = (yield* llm.inputs).length
+          if (text.startsWith("fix"))
+            yield* llm.tool("write", { filePath: path.join(directory, "README.md"), content: "# fixed\n" })
+          yield* llm.text("Done.")
+          const result = yield* send(prompt, chat.id, text)
+          const all = (yield* llm.inputs).slice(before)
+          const [body] = all.filter((item) => !isTitle(item))
+          expect(toolNames(body), text).toEqual(expect.arrayContaining(WORK))
+          expect(toolNames(body), text).not.toContain("task")
+          expect(body?.reasoning_effort, text).toBeUndefined()
+          expect(result.info.role === "assistant" && result.info.size, text).toBe("standard")
+          expect(judgeRequests(all), text).toBe(0)
+        }
+        expect((yield* sessions.children(chat.id)).length).toBe(0)
       }),
     { git: true },
   )

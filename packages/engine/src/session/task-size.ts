@@ -36,7 +36,10 @@ export type Request = {
   readonly users: readonly SessionV1.WithParts[]
   /** Every message of the request from the one that opened it, oldest first. */
   readonly messages: readonly SessionV1.WithParts[]
-  /** What the rules said. */
+  /**
+   * What the rules said. A Chat request the agent escalated is Work here, reason "escalated": the agent read it as a
+   * request for work, so it is something the user asked for and work a reply can continue.
+   */
   readonly result: TaskSize.Result
   /** The request's size: the rules' size, raised once if the agent called escalate. */
   readonly tier: TaskSize.Tier
@@ -80,7 +83,7 @@ export function size(input: Input): Request[] {
     // reply in between are not the work.
     const index = sized.findLastIndex((request) => request.tier !== "chat")
     const prior = sized[index]
-    // The request before is still open when its reply asked or offered something, or its run did not finish, or had not
+    // The request before is still open when its reply asked the user a question, or its run did not finish, or had not
     // when the user wrote (a message sent during its final step opens a request of its own): then the user's next
     // message, a social one included, answers or follows up that work. A greeting's reply is never open: its "How about
     // you?" waits on nothing.
@@ -89,16 +92,15 @@ export function size(input: Input): Request[] {
       previous && previous.tier !== "chat"
         ? sent < Math.max(...previous.messages.map(finishedAt)) || waiting(previous)
         : false
-    // Whether that work changed files, counting the requests it continues: finished work that did is done, so a new
-    // short request after it is Work of its own.
-    const changed = index !== -1 && sized.slice(origin(sized, index)).some(changes)
-    const result = group.users.reduce<TaskSize.Result | undefined>(
+    // Whether that work is a plan from Plan mode that nobody has carried out yet, so "yes" or "build it" carries it out.
+    const plan = prior?.messages.findLast((message) => message.info.role === "assistant")?.info.agent === "plan"
+    const rules = group.users.reduce<TaskSize.Result | undefined>(
       (current, user) => {
         const next = TaskSize.classify({
           ...describe(user),
           previous: current?.tier ?? prior?.tier ?? (compacted ? "standard" : undefined),
           open: current ? false : open,
-          changed: current ? false : changed,
+          plan: current ? false : plan,
           auto: input.auto,
         })
         if (!current) return next
@@ -115,6 +117,11 @@ export function size(input: Input): Request[] {
         agents: group.carried.agents,
       },
     )!
+    // The quick lane offers escalate, so a message the rules took for social can still go on as Work.
+    const result: TaskSize.Result =
+      rules.tier === "chat" && escalatedChat(group.messages)
+        ? { ...rules, tier: "standard", reasons: ["escalated"] }
+        : rules
     // The user's "no subagents" or "don't be thorough" holds against escalate and a judge FAIL alike.
     const raised = capped(result) ? undefined : escalation(group.messages)
     const tier = raised ? TaskSize.max(result.tier, raised) : result.tier
@@ -235,16 +242,29 @@ export function judgeable(requests: readonly Request[], since: string) {
 }
 
 /**
- * Whether a request ended with its work still open: the agent's reply asked or offered something, it asked through the
+ * Whether a request ended with its work still open: the agent's reply asked the user a question, it asked through the
  * question tool and the user dismissed it, or the run did not finish (interrupted, failed, stopped or cut off).
  */
 export function waiting(request: Pick<Request, "messages">) {
   if (TaskSize.asks(closingText(request.messages))) return true
   const last = request.messages.findLast((message) => message.info.role === "assistant")
   if (!last || last.info.role !== "assistant") return true
-  if (last.parts.some((part) => part.type === "tool" && part.tool === "question" && part.state.status !== "completed"))
-    return true
+  if (dismissed(request.messages)) return true
   return last.info.error !== undefined || UNFINISHED.has(last.info.finish ?? "")
+}
+
+/**
+ * Whether the agent asked through the question tool in these messages and the user dismissed the question (or has not
+ * answered it): the work waits on the user, and Vector does not judge it yet.
+ */
+export function dismissed(messages: readonly SessionV1.WithParts[]) {
+  return messages.some(
+    (message) =>
+      message.info.role === "assistant" &&
+      message.parts.some(
+        (part) => part.type === "tool" && part.tool === "question" && part.state.status !== "completed",
+      ),
+  )
 }
 
 /** The user said "no subagents" or "don't be thorough": the request stays Work, and escalate may not raise it. */
@@ -252,10 +272,19 @@ export function capped(result: TaskSize.Result) {
   return result.reasons.includes("capped")
 }
 
-// Whether a request changed files: a recorded change, a judge run (the judge only checks changed files), or files a
-// compaction recorded for it.
-function changes(request: Request) {
-  return changedFiles(request).length > 0 || judgeRuns(request).length > 0 || (request.carried?.files.length ?? 0) > 0
+// Whether the agent escalated a Chat request: the quick lane's escalate raised it from Chat to Work.
+function escalatedChat(messages: readonly SessionV1.WithParts[]) {
+  return messages.some(
+    (message) =>
+      message.info.role === "assistant" &&
+      message.parts.some(
+        (part) =>
+          part.type === "tool" &&
+          part.tool === "escalate" &&
+          part.state.status === "completed" &&
+          part.state.metadata?.from === "chat",
+      ),
+  )
 }
 
 // A greeting, emoji or a question about Vector answers nothing the agent asked.
@@ -269,12 +298,13 @@ const UNANSWERING = new Set(["greeting", "emoji", "about-vector"])
 const UNFINISHED = new Set(["length", "tool-calls", "unknown", "error", "content-filter"])
 
 // Work that stopped on a question was not judged then. When the user declines, thanks or moves on instead of continuing
-// it, it is judged with the run that answered them, so a finished large task that closed with an offer still gets its
-// verdict.
+// it, it is judged with the run that answered them, so a finished large task that closed with a question still gets
+// its verdict.
 function settled(requests: readonly Request[], index: number): number {
   const before = requests.slice(0, index).findLastIndex((item) => item.tier !== "chat")
   const work = requests[before]
-  if (!work || !TaskSize.waits(closingText(work.messages)) || judgeRuns(work).length > 0) return index
+  if (!work || !(TaskSize.asks(closingText(work.messages)) || dismissed(work.messages)) || judgeRuns(work).length > 0)
+    return index
   return settled(requests, origin(requests, before))
 }
 
