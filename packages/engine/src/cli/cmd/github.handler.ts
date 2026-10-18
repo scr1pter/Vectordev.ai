@@ -33,6 +33,7 @@ import { Process } from "@/util/process"
 import { parseGitHubRemote } from "@/util/repository"
 import { Effect } from "effect"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
+import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { formatUsd } from "@vectordevai/core/review/format"
 import { escapeVectorMarkers, inlineTitle, parseFindingMarker } from "@vectordevai/core/review/state"
 import { wrapUntrusted } from "@vectordevai/core/review/prompt"
@@ -1012,11 +1013,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
               },
               // agent is omitted - server will use default_agent from config or fall back to "build"
               parts: [
-                {
-                  id: PartID.ascending(),
-                  type: "text",
-                  text: message,
-                },
+                taskPart(message),
                 ...files.flatMap((f) => [
                   {
                     id: PartID.ascending(),
@@ -1715,6 +1712,15 @@ query($owner: String!, $repo: String!, $number: Int!) {
 export const REVIEW_NEEDS_WORKFLOW = "Reviews need the updated workflow. Run `vector github install` again to add them."
 
 // The event the task job runs for: a mock one passed with --event, or the Actions event.
+/**
+ * The task as the GitHub agent sends it: the trigger comment with the issue or pull request text and its comments,
+ * written by whoever opened or commented on it. None of it is the user's own words, so it vouches for no memory, and
+ * memory the agent writes in this session waits for review.
+ */
+export function taskPart(text: string) {
+  return { id: PartID.ascending(), type: "text" as const, text, metadata: { [BrainSchema.OUTSIDE]: "github" } }
+}
+
 export function githubEventContext(args: { event?: string; token?: string }): Context {
   return args.token || args.event ? (JSON.parse(args.event!) as Context) : github.context
 }

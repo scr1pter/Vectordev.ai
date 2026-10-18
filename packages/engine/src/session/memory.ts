@@ -3,7 +3,7 @@ export * as SessionMemory from "./memory"
 import path from "path"
 import { fileURLToPath } from "url"
 import { SessionV1 } from "@vectordevai/core/v1/session"
-import type { BrainSchema } from "@vectordevai/core/brain/schema"
+import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { attachedMemory } from "./instruction"
 
 // What the session runtime and the memory tool read from a conversation to use and to grow Vector's memory: the user's
@@ -52,12 +52,12 @@ const LOCAL_TOOLS = new Set([
 /**
  * What the user typed in a message, without Vector's synthetic notes or attached file contents. A slash command's text
  * is someone else's words (a template, an MCP server's prompt, a skill, a snippet's output), so of it only the
- * arguments the user typed count.
+ * arguments the user typed count, and text from outside (an imported transcript, an issue) does not count at all.
  */
 export function typed(message: SessionV1.WithParts) {
   return message.parts
     .flatMap((part) => {
-      if (part.type !== "text" || part.synthetic || part.ignored) return []
+      if (part.type !== "text" || part.synthetic || part.ignored || outside(part)) return []
       return [command(part)?.arguments ?? part.text]
     })
     .join("\n")
@@ -81,6 +81,14 @@ export function command(part: SessionV1.Part) {
     arguments: "arguments" in value && typeof value.arguments === "string" ? value.arguments : "",
     outside: "outside" in value && (value.outside === "web" || value.outside === "mcp") ? value.outside : undefined,
   }
+}
+
+/**
+ * Whether a part's text came from outside this conversation though it may sit in a "user" message: a transcript
+ * imported as passive history, or the issue and pull request text the GitHub agent was given.
+ */
+export function outside(part: SessionV1.Part) {
+  return part.type === "text" && part.metadata?.[BrainSchema.OUTSIDE] !== undefined
 }
 
 /** The personal entries a memory tool result stands in for. */
@@ -213,10 +221,10 @@ export function touched(messages: readonly SessionV1.WithParts[], file: string, 
 
 /**
  * Why memory learned in this conversation has to wait for the user: it read the web (with a web tool, a shell command
- * that is not a local one, or a slash command whose snippets reached outside or whose skill came from the web), used
- * the browser or Vector Cloud, ran an MCP tool or an MCP server's prompt, or took a subagent's report. Memory poisoning
- * works by planting text the agent later saves as its own, so once outside content is in the history, every write is
- * held for review.
+ * that is not a local one, or a slash command whose snippets reached outside or whose skill came from the web), holds
+ * text from outside (an imported transcript, an issue or pull request), used the browser or Vector Cloud, ran an MCP
+ * tool or an MCP server's prompt, or took a subagent's report. Memory poisoning works by planting text the agent later
+ * saves as its own, so once outside content is in the history, every write is held for review.
  */
 export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hold | undefined {
   const calls = messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part] : [])))
@@ -224,6 +232,7 @@ export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hol
   const commands = messages.flatMap((message) => message.parts.flatMap((part) => command(part)?.outside ?? []))
   if (tools.some((tool) => tool === "webfetch" || tool === "websearch" || tool === "browser" || tool === "vector_cloud"))
     return "web"
+  if (messages.some((message) => message.parts.some(outside))) return "web"
   if (
     commands.includes("web") ||
     calls.some(

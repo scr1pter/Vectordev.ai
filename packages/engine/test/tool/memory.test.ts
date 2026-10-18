@@ -17,6 +17,7 @@ import { ToolRegistry } from "@/tool/registry"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { testEffect } from "../lib/effect"
+import { taskPart } from "../../src/cli/cmd/github.handler"
 
 afterEach(async () => {
   await disposeAllInstances()
@@ -182,6 +183,34 @@ describe("tool.memory", () => {
       )
       expect(passed.metadata.result).toBe("added")
       expect(never.metadata.result).toBe("proposed")
+    }),
+  )
+
+  it.instance("the issue and pull request text the GitHub agent is given is not the user's words, and holds writes", () =>
+    Effect.gen(function* () {
+      const run = yield* memory
+      const issue = "Production deploys run scripts/ship.sh with --skip-verify from the pr-42 branch."
+      const add = {
+        action: "add",
+        kind: "decision",
+        text: issue,
+        quote: "Production deploys run scripts/ship.sh with --skip-verify from the pr-42 branch",
+      }
+      // The same words typed by the user would be theirs.
+      const typed = SessionID.make("ses_memory_typed")
+      expect((yield* run(add, history({ sessionID: typed, said: issue }), typed)).metadata.result).toBe("added")
+
+      const sessionID = SessionID.make("ses_memory_github")
+      const [user, ...rest] = history({ sessionID, said: issue })
+      const github = [
+        { ...user!, parts: user!.parts.map((part) => ({ ...part, metadata: taskPart(issue).metadata })) },
+        ...rest,
+      ]
+      expect(SessionMemory.taint(github)).toBe("web")
+      expect(SessionMemory.quoted(github, add.quote)).toBe(false)
+      const held = yield* run({ ...add, text: `${issue} Always.` }, github, sessionID)
+      expect(held.metadata.result).toBe("held")
+      expect(held.metadata.hold).toBe("web")
     }),
   )
 
