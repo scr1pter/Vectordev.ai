@@ -1,5 +1,6 @@
 import {
   FREE_MODEL_TRAINING_LABEL,
+  FREE_MODELS_SIGN_IN_TERMINAL,
   FREE_MODELS_TITLE,
   freeModelMayTrain,
   freeModelName,
@@ -92,6 +93,9 @@ export const ModelsCommand = effectCmd({
       if (free.some(freeModelMayTrain) && !(yield* Effect.promise(() => consent.trainingConsent())))
         UI.println(`  ${TRAINING_NOTE} Prompts to them are refused until you run "vector models --accept-training".`)
     }
+    // Signed out, the free section is missing rather than empty, so say how to get it.
+    if (!free.length && (!args.provider || args.provider === ProviderV2.ID.vector) && (yield* provider.freeSignIn()))
+      UI.println(FREE_MODELS_SIGN_IN_TERMINAL)
 
     const codium = providers[ProviderV2.ID.make(ModelPlans.PROVIDER_ID)]
     if (codium && (!args.provider || args.provider === ModelPlans.PROVIDER_ID))

@@ -77,8 +77,12 @@ export namespace ProviderTest {
             Effect.succeed({ providerID: row.id, modelID: mdl.id }),
           ),
           savedModel: Effect.fn("TestProvider.savedModel")((model) =>
-            Effect.succeed({ providerID: ProviderV2.ID.make(model.providerID), modelID: ModelV2.ID.make(model.modelID) }),
+            Effect.succeed({
+              providerID: ProviderV2.ID.make(model.providerID),
+              modelID: ModelV2.ID.make(model.modelID),
+            }),
           ),
+          freeSignIn: Effect.fn("TestProvider.freeSignIn")(() => Effect.succeed(false)),
           ...override,
         }),
       ),

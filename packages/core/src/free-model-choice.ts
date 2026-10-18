@@ -64,6 +64,8 @@ export const FREE_MODEL_UNREVIEWED_BLOCKED =
  * there only.
  */
 export const FREE_MODELS_SIGN_IN = "Sign in to Vector to use free models."
+/** The same, where the way to sign in is the terminal: the TUI, the CLI and an engine without the desktop app. */
+export const FREE_MODELS_SIGN_IN_TERMINAL = "Sign in to Vector to use free models: run vector login."
 export const FREE_MODELS_SHARED_COPY =
   "Free models run on Vector's shared allowance at no cost to you, within a daily limit for each account. Requests pass through vectordev.ai to OpenRouter, and OpenRouter and the model's provider process your prompts."
 /** What to do when the shared allowance is used up or unavailable: the user's own provider keys, not one provider. */

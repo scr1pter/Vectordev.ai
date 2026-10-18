@@ -2,6 +2,7 @@ import {
   FREE_MODEL_TRAINING_LABEL,
   FREE_MODELS_DATA_POLICY,
   FREE_MODELS_SHARED_COPY,
+  FREE_MODELS_SIGN_IN_TERMINAL,
   FREE_MODELS_TITLE,
 } from "@vectordevai/core/free-model-choice"
 import { DialogProvider } from "../component/dialog-provider"
@@ -136,6 +137,6 @@ export function freeModelsStartHint(data: {
   return data.provider_next.all.some((provider) =>
     Object.values(provider.models).some((model) => model.freeModel?.source === "shared"),
   )
-    ? "Sign in to Vector to use free models: run vector login. Or use /connect to connect a provider with your own key."
+    ? `${FREE_MODELS_SIGN_IN_TERMINAL} Or use /connect to connect a provider with your own key.`
     : `${FREE_MODELS_TITLE} are unavailable right now. Use /connect to connect a provider with your own key.`
 }

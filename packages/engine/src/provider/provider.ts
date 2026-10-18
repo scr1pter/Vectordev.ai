@@ -24,7 +24,12 @@ import {
   openRouterModelRouting,
   sendsToOpenRouterFree,
 } from "@vectordevai/core/free-model-catalog"
-import { FREE_MODEL_UNLISTED, freeModelMayTrain, openRouterRoutingRefused } from "@vectordevai/core/free-model-choice"
+import {
+  FREE_MODEL_UNLISTED,
+  FREE_MODELS_SIGN_IN_TERMINAL,
+  freeModelMayTrain,
+  openRouterRoutingRefused,
+} from "@vectordevai/core/free-model-choice"
 import { ProviderUnavailable, providerRetired, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
 import {
@@ -1179,10 +1184,14 @@ export class InitError extends Schema.TaggedErrorClass<InitError>()("ProviderIni
 export class NoProvidersError extends Schema.TaggedErrorClass<NoProvidersError>()("ProviderNoProvidersError", {
   /** Vector Codium is listed, but it is only used when the person chooses one of its models. */
   codium: Schema.optional(Schema.Boolean),
+  /** Free models inside of Vector are on, and signing in to Vector would list them (Provider.freeSignIn). */
+  signIn: Schema.optional(Schema.Boolean),
 }) {
   override get message() {
     if (this.codium)
       return "Vector Codium is available, but Vector never chooses it for you. Choose a Codium model, for example with --model vector-plan/<model>."
+    if (this.signIn)
+      return `No providers are available. ${FREE_MODELS_SIGN_IN_TERMINAL} Or connect your own provider key with vector providers login.`
     return "No providers are available"
   }
 
@@ -1225,6 +1234,11 @@ export interface Interface {
     providerID: string
     modelID: string
   }) => Effect.Effect<{ providerID: ProviderV2.ID; modelID: ModelV2.ID } | undefined>
+  /**
+   * Whether Free models inside of Vector are on but this engine has neither a Vector sign-in nor an OpenRouter key to
+   * list them, so signing in to Vector would.
+   */
+  readonly freeSignIn: () => Effect.Effect<boolean>
 }
 
 interface State {
@@ -2519,6 +2533,18 @@ const layer = Layer.effect(
       return { providerID: ProviderV2.ID.make(current.providerID), modelID: ModelV2.ID.make(current.modelID) }
     })
 
+    const freeSignIn = Effect.fn("Provider.freeSignIn")(function* () {
+      const cfg = yield* config.get()
+      if (
+        cfg.disabled_providers?.includes("vector") ||
+        (cfg.enabled_providers && !cfg.enabled_providers.includes("vector"))
+      )
+        return false
+      const catalog = yield* freeModels.catalog()
+      if (!catalog.enabled || !catalog.models.length) return false
+      return !(yield* freeCredentials.get("vector")) && !(yield* freeCredentials.get("openrouter"))
+    })
+
     const defaultModel = Effect.fn("Provider.defaultModel")(function* () {
       const cfg = yield* config.get()
       const saved = cfg.model ? yield* savedModel(parseModel(cfg.model)) : undefined
@@ -2561,7 +2587,8 @@ const layer = Layer.effect(
       // Codium spends the account's credits, so it is never chosen automatically; the person picks it.
       const automatic = providers.filter((p) => p.id !== planID)
       const provider = automatic.find((p) => p.id !== "vector") ?? automatic[0]
-      if (!provider) return yield* new NoProvidersError({ codium: s.providers[planID] !== undefined })
+      if (!provider)
+        return yield* new NoProvidersError({ codium: s.providers[planID] !== undefined, signIn: yield* freeSignIn() })
       const [model] = automaticModels(Object.values(provider.models))
       if (!model) return yield* new NoModelsError({ providerID: provider.id })
       return {
@@ -2581,6 +2608,7 @@ const layer = Layer.effect(
       getSmallModel,
       defaultModel,
       savedModel,
+      freeSignIn,
     })
   }),
 )

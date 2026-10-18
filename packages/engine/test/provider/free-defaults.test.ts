@@ -188,3 +188,48 @@ testEffect(layer([router])).instance(
     }),
   { trusted: true, config: { provider: { openrouter: { options: { apiKey: "synthetic-key" } } } } },
 )
+
+// The verifier's low of 18 October 2026: signed out, the CLI said only that no providers were available.
+const signedOut = (enabled: boolean) =>
+  testEffect(
+    LayerNode.compile(Provider.node, [
+      [
+        FreeModels.node,
+        Layer.succeed(FreeModels.Service, {
+          catalog: () => Effect.succeed({ enabled, updatedAt: 1, models: enabled ? [FREE_MODEL_FALLBACKS[0]] : [] }),
+          forKey: () => Effect.succeed([]),
+          trainingConsent: () => Effect.succeed(false),
+          setTrainingConsent: (accepted) => Effect.succeed(accepted),
+          changes: Stream.empty,
+        }),
+      ],
+      [
+        FreeModels.credentialsNode,
+        Layer.succeed(FreeModels.CredentialsService, { get: () => Effect.succeed(undefined) }),
+      ],
+    ]),
+  )
+for (const enabled of [true, false])
+  signedOut(enabled).instance(
+    `signed out with Free models inside of Vector ${enabled ? "on" : "off"}, the missing-provider error ${enabled ? "says to sign in" : "says nothing of free models"}`,
+    () =>
+      Effect.gen(function* () {
+        const provider = yield* Provider.Service
+        expect(yield* provider.freeSignIn()).toBe(enabled)
+        const failure = yield* provider.defaultModel().pipe(Effect.flip)
+        expect(failure).toBeInstanceOf(Provider.NoProvidersError)
+        if (enabled)
+          expect(failure.message).toBe(
+            "No providers are available. Sign in to Vector to use free models: run vector login. Or connect your own provider key with vector providers login.",
+          )
+        if (!enabled) expect(failure.message).toBe("No providers are available")
+      }),
+    { trusted: true, config: {} },
+  )
+
+test("the missing-provider error says to sign in only when that would list free models", () => {
+  expect(new Provider.NoProvidersError({ signIn: true }).message).toContain(
+    "Sign in to Vector to use free models: run vector login.",
+  )
+  expect(new Provider.NoProvidersError({}).message).not.toMatch(/sign in|openrouter/i)
+})
