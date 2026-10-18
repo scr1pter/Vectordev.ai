@@ -1,0 +1,1109 @@
+{
+ "capturedAt": 1792280381835,
+ "sources": [
+  "https://openrouter.ai/api/v1/models",
+  "https://openrouter.ai/api/v1/models/<id>/endpoints for each listed model"
+ ],
+ "models": [
+  {
+   "id": "xingchen-agi/xing4.0-29b-a4b:free",
+   "name": "XingChen: Xing4.0 29B A4B (free)",
+   "context_length": 262144,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "frequency_penalty",
+    "include_reasoning",
+    "max_tokens",
+    "min_p",
+    "presence_penalty",
+    "reasoning",
+    "repetition_penalty",
+    "response_format",
+    "seed",
+    "stop",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_k",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 235929
+   }
+  },
+  {
+   "id": "nvidia/nemotron-3.5-super-vl:free",
+   "name": "NVIDIA: Nemotron 3.5 Super VL (free)",
+   "context_length": 1000000,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "response_format",
+    "seed",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 131072
+   }
+  },
+  {
+   "id": "dots-studio/dots-3-note-preview:free",
+   "name": "Dots Studio: Dots3-Note Preview (free)",
+   "context_length": 512000,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "response_format",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_p"
+   ],
+   "expiration_date": "2026-12-31",
+   "top_provider": {
+    "max_completion_tokens": 460800
+   }
+  },
+  {
+   "id": "liquid/lfm-2.5-2.6b:free",
+   "name": "LiquidAI: LFM2.5-2.6B (free)",
+   "context_length": 65536,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "frequency_penalty",
+    "include_reasoning",
+    "logprobs",
+    "max_completion_tokens",
+    "max_tokens",
+    "min_p",
+    "presence_penalty",
+    "reasoning",
+    "repetition_penalty",
+    "response_format",
+    "seed",
+    "stop",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_k",
+    "top_logprobs"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 8192
+   }
+  },
+  {
+   "id": "nvidia/nemotron-3.5-lightning:free",
+   "name": "NVIDIA: Nemotron 3.5 Lightning (free)",
+   "context_length": 1000000,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "seed",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 65536
+   }
+  },
+  {
+   "id": "thinkingmachines/inkling-small:free",
+   "name": "Thinking Machines: Inkling Small (free)",
+   "context_length": 1048576,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "frequency_penalty",
+    "include_reasoning",
+    "max_tokens",
+    "presence_penalty",
+    "reasoning",
+    "reasoning_effort",
+    "seed",
+    "stop",
+    "temperature",
+    "tools",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 262144
+   }
+  },
+  {
+   "id": "poolside/laguna-s-2.1",
+   "name": "Poolside: Laguna S 2.1",
+   "context_length": 1048576,
+   "pricing": {
+    "prompt": "0.00000009",
+    "completion": "0.00000018",
+    "input_cache_read": "0.000000009"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ],
+   "expiration_date": "2026-10-31",
+   "top_provider": {
+    "max_completion_tokens": 131072
+   }
+  },
+  {
+   "id": "poolside/laguna-s-2.1:free",
+   "name": "Poolside: Laguna S 2.1 (free)",
+   "context_length": 262144,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ],
+   "expiration_date": "2026-10-31",
+   "top_provider": {
+    "max_completion_tokens": 32768
+   }
+  },
+  {
+   "id": "thinkingmachines/inkling:free",
+   "name": "Thinking Machines: Inkling (free)",
+   "context_length": 1048576,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "frequency_penalty",
+    "include_reasoning",
+    "max_tokens",
+    "presence_penalty",
+    "reasoning",
+    "reasoning_effort",
+    "seed",
+    "stop",
+    "temperature",
+    "tools",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 262144
+   }
+  },
+  {
+   "id": "poolside/laguna-xs-2.1:free",
+   "name": "Poolside: Laguna XS 2.1 (free)",
+   "context_length": 262144,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "temperature",
+    "tool_choice",
+    "tools"
+   ],
+   "expiration_date": "2026-10-31",
+   "top_provider": {
+    "max_completion_tokens": 32768
+   }
+  },
+  {
+   "id": "cohere/north-mini-code:free",
+   "name": "Cohere: North Mini Code (free)",
+   "context_length": 256000,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "frequency_penalty",
+    "include_reasoning",
+    "max_tokens",
+    "presence_penalty",
+    "reasoning",
+    "seed",
+    "stop",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_k",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 64000
+   }
+  },
+  {
+   "id": "nvidia/nemotron-3.5-content-safety:free",
+   "name": "NVIDIA: Nemotron 3.5 Content Safety (free)",
+   "context_length": 128000,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "seed",
+    "temperature",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 8192
+   }
+  },
+  {
+   "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+   "name": "NVIDIA: Nemotron 3 Ultra (free)",
+   "context_length": 1000000,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "reasoning_effort",
+    "seed",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 65536
+   }
+  },
+  {
+   "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+   "name": "NVIDIA: Nemotron 3 Nano Omni (free)",
+   "context_length": 256000,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "seed",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 65536
+   }
+  },
+  {
+   "id": "google/gemma-4-26b-a4b-it:free",
+   "name": "Google: Gemma 4 26B A4B  (free)",
+   "context_length": 262144,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "response_format",
+    "seed",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 32768
+   }
+  },
+  {
+   "id": "google/gemma-4-31b-it:free",
+   "name": "Google: Gemma 4 31B (free)",
+   "context_length": 262144,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "response_format",
+    "seed",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 32768
+   }
+  },
+  {
+   "id": "google/lyria-3-pro-preview",
+   "name": "Google: Lyria 3 Pro Preview",
+   "context_length": 1048576,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "response_format",
+    "seed",
+    "temperature",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 65536
+   }
+  },
+  {
+   "id": "google/lyria-3-clip-preview",
+   "name": "Google: Lyria 3 Clip Preview",
+   "context_length": 1048576,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "max_tokens",
+    "response_format",
+    "seed",
+    "temperature",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 65536
+   }
+  },
+  {
+   "id": "nvidia/nemotron-3-super-120b-a12b:free",
+   "name": "NVIDIA: Nemotron 3 Super (free)",
+   "context_length": 262144,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "reasoning_effort",
+    "response_format",
+    "seed",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": 235929
+   }
+  },
+  {
+   "id": "openrouter/free",
+   "name": "Free Models Router",
+   "context_length": 200000,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "supported_parameters": [
+    "frequency_penalty",
+    "include_reasoning",
+    "logprobs",
+    "max_completion_tokens",
+    "max_tokens",
+    "min_p",
+    "presence_penalty",
+    "reasoning",
+    "reasoning_effort",
+    "repetition_penalty",
+    "response_format",
+    "seed",
+    "stop",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_k",
+    "top_logprobs",
+    "top_p"
+   ],
+   "expiration_date": null,
+   "top_provider": {
+    "max_completion_tokens": null
+   }
+  }
+ ],
+ "endpoints": {
+  "cohere/north-mini-code:free": [
+   {
+    "model_id": "cohere/north-mini-code:free",
+    "provider_name": "Cohere",
+    "tag": "cohere",
+    "context_length": 256000,
+    "max_completion_tokens": 64000,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "max_tokens",
+     "temperature",
+     "top_p",
+     "stop",
+     "frequency_penalty",
+     "presence_penalty",
+     "top_k",
+     "seed",
+     "tools",
+     "tool_choice"
+    ],
+    "supports_tool_choice": {
+     "none": true,
+     "auto": true,
+     "required": true,
+     "function": true
+    },
+    "status": 0,
+    "uptime_last_1d": 100
+   }
+  ],
+  "dots-studio/dots-3-note-preview:free": [
+   {
+    "model_id": "dots-studio/dots-3-note-preview:free",
+    "provider_name": "AtlasCloud",
+    "tag": "atlas-cloud/fp8",
+    "context_length": 512000,
+    "max_completion_tokens": 460800,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "max_tokens",
+     "temperature",
+     "top_p",
+     "response_format",
+     "structured_outputs",
+     "tools",
+     "tool_choice"
+    ],
+    "supports_tool_choice": {
+     "none": true,
+     "auto": true,
+     "required": false,
+     "function": false
+    },
+    "status": 0,
+    "uptime_last_1d": 99.93055555555556
+   }
+  ],
+  "google/gemma-4-26b-a4b-it:free": [
+   {
+    "model_id": "google/gemma-4-26b-a4b-it:free",
+    "provider_name": "Google AI Studio",
+    "tag": "google-ai-studio",
+    "context_length": 262144,
+    "max_completion_tokens": 32768,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "max_tokens",
+     "temperature",
+     "top_p",
+     "seed",
+     "response_format",
+     "tools",
+     "tool_choice"
+    ],
+    "supports_tool_choice": {
+     "none": true,
+     "auto": true,
+     "required": true,
+     "function": true
+    },
+    "status": 0,
+    "uptime_last_1d": 99.45454545454545
+   }
+  ],
+  "google/gemma-4-31b-it:free": [
+   {
+    "model_id": "google/gemma-4-31b-it:free",
+    "provider_name": "Google AI Studio",
+    "tag": "google-ai-studio",
+    "context_length": 262144,
+    "max_completion_tokens": 32768,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "max_tokens",
+     "temperature",
+     "top_p",
+     "seed",
+     "response_format",
+     "tools",
+     "tool_choice"
+    ],
+    "supports_tool_choice": {
+     "none": true,
+     "auto": true,
+     "required": true,
+     "function": true
+    },
+    "status": 0,
+    "uptime_last_1d": 99.25233644859813
+   }
+  ],
+  "google/lyria-3-clip-preview": [
+   {
+    "model_id": "google/lyria-3-clip-preview",
+    "provider_name": "Google AI Studio",
+    "tag": "google-ai-studio",
+    "context_length": 1048576,
+    "max_completion_tokens": 65536,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "max_tokens",
+     "temperature",
+     "top_p",
+     "seed",
+     "response_format"
+    ],
+    "supports_tool_choice": {
+     "none": true,
+     "auto": true,
+     "required": true,
+     "function": true
+    },
+    "status": 0,
+    "uptime_last_1d": 92.85714285714286
+   }
+  ],
+  "google/lyria-3-pro-preview": [
+   {
+    "model_id": "google/lyria-3-pro-preview",
+    "provider_name": "Google AI Studio",
+    "tag": "google-ai-studio",
+    "context_length": 1048576,
+    "max_completion_tokens": 65536,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "max_tokens",
+     "temperature",
+     "top_p",
+     "seed",
+     "response_format"
+    ],
+    "supports_tool_choice": {
+     "none": true,
+     "auto": true,
+     "required": true,
+     "function": true
+    },
+    "status": 0,
+    "uptime_last_1d": 79.1044776119403
+   }
+  ],
+  "liquid/lfm-2.5-2.6b:free": [
+   {
+    "model_id": "liquid/lfm-2.5-2.6b:free",
+    "provider_name": "Liquid",
+    "tag": "liquid/fp8",
+    "context_length": 65536,
+    "max_completion_tokens": 8192,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "max_tokens",
+     "temperature",
+     "stop",
+     "frequency_penalty",
+     "presence_penalty",
+     "seed",
+     "top_k",
+     "min_p",
+     "repetition_penalty",
+     "response_format",
+     "structured_outputs",
+     "tools",
+     "tool_choice",
+     "logprobs",
+     "top_logprobs",
+     "max_completion_tokens"
+    ],
+    "supports_tool_choice": {
+     "none": false,
+     "auto": true,
+     "required": true,
+     "function": true
+    },
+    "status": 0,
+    "uptime_last_1d": 100
+   }
+  ],
+  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": [
+   {
+    "model_id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "provider_name": "Nvidia",
+    "tag": "nvidia",
+    "context_length": 256000,
+    "max_completion_tokens": 65536,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "temperature",
+     "max_tokens",
+     "seed",
+     "top_p",
+     "tool_choice",
+     "tools"
+    ],
+    "supports_tool_choice": {
+     "none": false,
+     "auto": false,
+     "required": false,
+     "function": false
+    },
+    "status": -5,
+    "uptime_last_1d": 8.194444444444445
+   }
+  ],
+  "nvidia/nemotron-3-super-120b-a12b:free": [
+   {
+    "model_id": "nvidia/nemotron-3-super-120b-a12b:free",
+    "provider_name": "Nvidia",
+    "tag": "nvidia",
+    "context_length": 262144,
+    "max_completion_tokens": 235929,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "temperature",
+     "max_tokens",
+     "seed",
+     "top_p",
+     "tools",
+     "tool_choice",
+     "structured_outputs",
+     "response_format",
+     "reasoning_effort"
+    ],
+    "supports_tool_choice": {
+     "none": false,
+     "auto": true,
+     "required": true,
+     "function": true
+    },
+    "status": 0,
+    "uptime_last_1d": 99.93055555555556
+   }
+  ],
+  "nvidia/nemotron-3-ultra-550b-a55b:free": [
+   {
+    "model_id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "provider_name": "Nvidia",
+    "tag": "nvidia",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "temperature",
+     "max_tokens",
+     "seed",
+     "top_p",
+     "tools",
+     "tool_choice",
+     "reasoning_effort"
+    ],
+    "supports_tool_choice": {
+     "none": true,
+     "auto": true,
+     "required": true,
+     "function": true
+    },
+    "status": -5,
+    "uptime_last_1d": 0
+   }
+  ],
+  "nvidia/nemotron-3.5-content-safety:free": [
+   {
+    "model_id": "nvidia/nemotron-3.5-content-safety:free",
+    "provider_name": "Nvidia",
+    "tag": "nvidia",
+    "context_length": 128000,
+    "max_completion_tokens": 8192,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "temperature",
+     "max_tokens",
+     "seed",
+     "top_p"
+    ],
+    "supports_tool_choice": {
+     "none": true,
+     "auto": true,
+     "required": true,
+     "function": true
+    },
+    "status": 0,
+    "uptime_last_1d": 99.23611111111111
+   }
+  ],
+  "nvidia/nemotron-3.5-lightning:free": [
+   {
+    "model_id": "nvidia/nemotron-3.5-lightning:free",
+    "provider_name": "Nvidia",
+    "tag": "nvidia/nvfp4",
+    "context_length": 1000000,
+    "max_completion_tokens": 65536,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "temperature",
+     "max_tokens",
+     "seed",
+     "top_p",
+     "tools",
+     "tool_choice"
+    ],
+    "supports_tool_choice": {
+     "none": true,
+     "auto": true,
+     "required": true,
+     "function": true
+    },
+    "status": 0,
+    "uptime_last_1d": 26.041666666666668
+   }
+  ],
+  "nvidia/nemotron-3.5-super-vl:free": [
+   {
+    "model_id": "nvidia/nemotron-3.5-super-vl:free",
+    "provider_name": "Nvidia",
+    "tag": "nvidia",
+    "context_length": 1000000,
+    "max_completion_tokens": 131072,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "temperature",
+     "max_tokens",
+     "seed",
+     "top_p",
+     "tools",
+     "tool_choice",
+     "response_format",
+     "structured_outputs"
+    ],
+    "supports_tool_choice": {
+     "none": true,
+     "auto": true,
+     "required": true,
+     "function": true
+    },
+    "status": 0,
+    "uptime_last_1d": 94.44444444444444
+   }
+  ],
+  "openrouter/free": [],
+  "poolside/laguna-s-2.1:free": [
+   {
+    "model_id": "poolside/laguna-s-2.1:free",
+    "provider_name": "Poolside",
+    "tag": "poolside/fp4",
+    "context_length": 262144,
+    "max_completion_tokens": 32768,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "temperature",
+     "max_tokens",
+     "tools",
+     "tool_choice"
+    ],
+    "supports_tool_choice": {
+     "none": false,
+     "auto": true,
+     "required": false,
+     "function": false
+    },
+    "status": 0,
+    "uptime_last_1d": 100
+   }
+  ],
+  "poolside/laguna-xs-2.1:free": [
+   {
+    "model_id": "poolside/laguna-xs-2.1:free",
+    "provider_name": "Poolside",
+    "tag": "poolside/fp8",
+    "context_length": 262144,
+    "max_completion_tokens": 32768,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "temperature",
+     "max_tokens",
+     "tools",
+     "tool_choice"
+    ],
+    "supports_tool_choice": {
+     "none": false,
+     "auto": true,
+     "required": false,
+     "function": false
+    },
+    "status": 0,
+    "uptime_last_1d": 100
+   }
+  ],
+  "thinkingmachines/inkling-small:free": [
+   {
+    "model_id": "thinkingmachines/inkling-small:free",
+    "provider_name": "Thinking Machines",
+    "tag": "thinkingmachines/nvfp4",
+    "context_length": 1048576,
+    "max_completion_tokens": 262144,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "temperature",
+     "top_p",
+     "max_tokens",
+     "stop",
+     "frequency_penalty",
+     "presence_penalty",
+     "seed",
+     "tools",
+     "reasoning_effort"
+    ],
+    "supports_tool_choice": {
+     "none": false,
+     "auto": false,
+     "required": false,
+     "function": false
+    },
+    "status": 0,
+    "uptime_last_1d": 100
+   }
+  ],
+  "thinkingmachines/inkling:free": [
+   {
+    "model_id": "thinkingmachines/inkling:free",
+    "provider_name": "Thinking Machines",
+    "tag": "thinkingmachines/nvfp4",
+    "context_length": 1048576,
+    "max_completion_tokens": 262144,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "temperature",
+     "top_p",
+     "max_tokens",
+     "stop",
+     "frequency_penalty",
+     "presence_penalty",
+     "seed",
+     "tools",
+     "reasoning_effort"
+    ],
+    "supports_tool_choice": {
+     "none": false,
+     "auto": false,
+     "required": false,
+     "function": false
+    },
+    "status": 0,
+    "uptime_last_1d": 100
+   }
+  ],
+  "xingchen-agi/xing4.0-29b-a4b:free": [
+   {
+    "model_id": "xingchen-agi/xing4.0-29b-a4b:free",
+    "provider_name": "Phala",
+    "tag": "phala",
+    "context_length": 262144,
+    "max_completion_tokens": 235929,
+    "pricing": {
+     "prompt": "0",
+     "completion": "0",
+     "discount": 0
+    },
+    "supported_parameters": [
+     "reasoning",
+     "include_reasoning",
+     "max_tokens",
+     "temperature",
+     "top_p",
+     "stop",
+     "frequency_penalty",
+     "presence_penalty",
+     "seed",
+     "top_k",
+     "min_p",
+     "repetition_penalty",
+     "response_format",
+     "structured_outputs",
+     "tools",
+     "tool_choice"
+    ],
+    "supports_tool_choice": {
+     "none": true,
+     "auto": true,
+     "required": false,
+     "function": false
+    },
+    "status": 0,
+    "uptime_last_1d": 97.00557103064067
+   }
+  ]
+ }
+}

@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { DateTime, Deferred, Effect, Exit } from "effect"
+import { DateTime, Deferred, Effect, Exit, Stream } from "effect"
 import { Catalog } from "../src/catalog"
 import { FreeModels } from "../src/free-models"
 import { ModelPlans } from "../src/model-plans"
@@ -84,6 +84,9 @@ for (const shared of [true, false])
         catalog: () =>
           Effect.succeed({ enabled: shared, updatedAt: 0, models: shared ? [FREE_MODEL_FALLBACKS[0]] : [] }),
         forKey: () => Effect.succeed([]),
+        trainingConsent: () => Effect.succeed(false),
+        setTrainingConsent: (accepted) => Effect.succeed(accepted),
+        changes: Stream.empty,
       })
       yield* VectorPlugin.effect(host).pipe(
         Effect.provideService(FreeModels.Service, freeModels),

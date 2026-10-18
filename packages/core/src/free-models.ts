@@ -3,11 +3,14 @@ export * as FreeModels from "./free-models"
 import path from "node:path"
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { createHash, randomUUID } from "node:crypto"
-import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Context, Effect, Layer, Option, Queue, Schema, Stream } from "effect"
 import {
   FreeModelCatalog,
   FreeModelInfo,
-  FREE_MODEL_FALLBACKS,
+  FREE_MODELS_CONSENT_ACCEPTED,
+  FREE_MODELS_CONSENT_HEADER,
+  FREE_MODELS_DISCLOSURE,
+  FREE_MODELS_DISCLOSURE_HEADER,
   FreeModelsLimitError,
   parseFreeModelLimit,
 } from "@vectordevai/schema/free-model"
@@ -17,9 +20,17 @@ import { Flag } from "./flag/flag"
 import { Global } from "./global"
 import { VectorAccount } from "./vector-account"
 import { makeGlobalNode } from "./effect/app-node"
-import { FreeModelMetadata, freeModelInfo, includedFreeModel, isFreeModelID } from "./free-model-catalog"
+import {
+  FreeModelMetadata,
+  freeModelDataPolicy,
+  freeModelInfo,
+  isFreeModelID,
+  offeredFreeModel,
+} from "./free-model-catalog"
+import { FREE_MODEL_TRAINING_BLOCKED } from "./free-model-choice"
 
-export const CATALOG_URL = "https://vectordev.ai/api/free-models/models"
+// The disclosure parameter tells vectordev.ai this client labels free models that may train and asks first.
+export const CATALOG_URL = `https://vectordev.ai/api/free-models/models?disclosure=${FREE_MODELS_DISCLOSURE}`
 export const SHARED_CHAT_URL = "https://vectordev.ai/api/free-models/chat"
 export const OPENROUTER_ROOT = "https://openrouter.ai/api/v1"
 export const OPENROUTER_CHAT_URL = `${OPENROUTER_ROOT}/chat/completions`
@@ -28,10 +39,18 @@ const TTL = 5 * 60_000
 
 const MetadataList = Schema.Struct({ data: Schema.Array(Schema.Unknown) })
 const EndpointList = Schema.Struct({ data: Schema.Struct({ endpoints: Schema.Array(Schema.Unknown) }) })
+const Consent = Schema.Struct({ version: Schema.Literal(1), training: Schema.Literal(true), acceptedAt: Schema.Number })
+
+/** What provider state is built from: whether the catalog is on, its models and each one's data policy. */
+function signature(catalog: FreeModelCatalog) {
+  return JSON.stringify([catalog.enabled, catalog.models.map((model) => [model.id, freeModelDataPolicy(model)])])
+}
 
 export function createClient(
   input: {
     file?: string
+    /** Where the one-time "may train on your prompts" acceptance is remembered. */
+    consentFile?: string
     request?: (url: string, init: RequestInit) => Promise<Response>
     now?: () => number
     disabled?: () => boolean
@@ -43,6 +62,7 @@ export function createClient(
   const request = input.request ?? fetch
   const state: { value?: FreeModelCatalog; expires: number; pending?: Promise<FreeModelCatalog> } = { expires: 0 }
   const users = new Map<string, { expires: number; models: FreeModelInfo[] }>()
+  const listeners = new Set<(catalog: FreeModelCatalog) => void>()
   const catalog = async (force = false): Promise<FreeModelCatalog> => {
     if (!force && state.value && state.expires > now()) return state.value
     const saved =
@@ -93,9 +113,13 @@ export function createClient(
               model.providers.length > 0 &&
               model.providers.every((provider) => !!provider.id.trim()),
           ))
-      const value = valid ? (parsed.enabled ? parsed : OFF) : unreachable(saved)
+      const value = valid ? (parsed.enabled ? parsed : OFF) : unreachable(saved, !!response)
+      const previous = state.value ?? saved
       state.value = value
       state.expires = now() + TTL
+      // Provider state built from an earlier answer, such as a cached OFF served at startup, must rebuild when the
+      // catalog turns on, off or changes models; otherwise it stays stale for the rest of the app session.
+      if (!previous || signature(previous) !== signature(value)) listeners.forEach((listener) => listener(value))
       if (input.file && valid) {
         const file = input.file
         const temporary = `${file}.${randomUUID()}.tmp`
@@ -137,10 +161,11 @@ export function createClient(
     const available = await read(`${OPENROUTER_ROOT}/models/user`, MetadataList, true)
     const candidates = (available?.data ?? []).flatMap((value) => {
       const model = Schema.decodeUnknownOption(FreeModelMetadata)(value)
-      return Option.isSome(model) && includedFreeModel(model.value, now()) ? [model.value] : []
+      return Option.isSome(model) && offeredFreeModel(model.value, now()) ? [model.value] : []
     })
-    // Personal accounts follow the included-model policy: allowlisted model and provider pairs only, read from
-    // each model's public endpoint list, and every request asks OpenRouter to deny data collection.
+    // The user's own account lists every free model it can route under its privacy settings, including ones Vector
+    // has not reviewed yet. Each endpoint carries its reviewed policy, or "unreviewed", which is disclosed as one
+    // that may train; the account's own settings decide whether may-train endpoints are listed at all.
     const endpoints = await Promise.all(
       candidates.map((model) => read(`${OPENROUTER_ROOT}/models/${model.id}/endpoints`, EndpointList)),
     )
@@ -151,19 +176,45 @@ export function createClient(
     }
     // An unreadable endpoint list leaves that model without endpoints, which drops only that model.
     const models = candidates
-      .map((model, index) => freeModelInfo(model, endpoints[index]?.data.endpoints ?? [], { noTraining: true }))
+      .map((model, index) => freeModelInfo(model, endpoints[index]?.data.endpoints ?? [], { reviewedOnly: false }))
       .filter((model): model is FreeModelInfo => model !== undefined)
       .sort((a, b) => b.contextLength - a.contextLength || a.id.localeCompare(b.id))
     users.set(digest, { expires: now() + TTL, models })
     return models
   }
-  return { catalog, forKey }
+  // Read on every request, never cached: the desktop engine, the TUI and "vector models --accept-training" share the
+  // file, and a withdrawal must take effect on the next prompt. A missing or unreadable file is no consent.
+  const trainingConsent = async () => {
+    const text = input.consentFile ? await readFile(input.consentFile, "utf8").catch(() => undefined) : undefined
+    return text !== undefined && Option.isSome(Schema.decodeUnknownOption(Schema.fromJsonString(Consent))(text))
+  }
+  const setTrainingConsent = async (accepted: boolean) => {
+    if (!input.consentFile) return false
+    if (!accepted) {
+      await rm(input.consentFile, { force: true })
+      return false
+    }
+    const temporary = `${input.consentFile}.${randomUUID()}.tmp`
+    await mkdir(path.dirname(input.consentFile), { recursive: true })
+    await writeFile(temporary, JSON.stringify({ version: 1, training: true, acceptedAt: now() }), { mode: 0o600 })
+    await rename(temporary, input.consentFile)
+    return true
+  }
+  const subscribe = (listener: (catalog: FreeModelCatalog) => void) => {
+    listeners.add(listener)
+    return () => void listeners.delete(listener)
+  }
+  return { catalog, forKey, trainingConsent, setTrainingConsent, subscribe }
 }
 
-/** The catalog to use when vectordev.ai cannot answer: the reviewed fallbacks only if free models were last seen on. */
-function unreachable(saved: FreeModelCatalog | undefined): FreeModelCatalog {
-  if (!saved?.enabled) return OFF
-  return { enabled: true, updatedAt: saved.updatedAt, models: [...FREE_MODEL_FALLBACKS] }
+/**
+ * The catalog to use when vectordev.ai gives no usable answer. An answer that refuses, such as a 503 while the catalog
+ * is not refreshed, is OFF: the shared chat would refuse every prompt too. A network failure keeps the last catalog
+ * vectordev.ai served, but only one that listed models.
+ */
+function unreachable(saved: FreeModelCatalog | undefined, answered: boolean): FreeModelCatalog {
+  if (answered || !saved?.enabled || !saved.models.length) return OFF
+  return saved
 }
 
 export class Service extends Context.Service<
@@ -171,21 +222,46 @@ export class Service extends Context.Service<
   {
     readonly catalog: (force?: boolean) => Effect.Effect<FreeModelCatalog>
     readonly forKey: (key: string, force?: boolean) => Effect.Effect<FreeModelInfo[]>
+    /** Whether the user accepted, once, that free models whose providers may train on prompts may receive them. */
+    readonly trainingConsent: () => Effect.Effect<boolean>
+    readonly setTrainingConsent: (accepted: boolean) => Effect.Effect<boolean>
+    /** Each catalog that differs from the one before it in enablement, models or data policy. */
+    readonly changes: Stream.Stream<FreeModelCatalog>
   }
 >()("@vector/FreeModels") {}
 
+export function fromClient(client: ReturnType<typeof createClient>) {
+  return Service.of({
+    catalog: (force) => Effect.promise(() => client.catalog(force)),
+    forKey: (key, force) => Effect.promise(() => client.forKey(key, force)),
+    trainingConsent: () => Effect.promise(() => client.trainingConsent()),
+    setTrainingConsent: (accepted) => Effect.promise(() => client.setTrainingConsent(accepted)),
+    changes: Stream.callback<FreeModelCatalog>((queue) =>
+      Effect.acquireRelease(
+        Effect.sync(() => client.subscribe((catalog) => Queue.offerUnsafe(queue, catalog))),
+        (unsubscribe) => Effect.sync(unsubscribe),
+      ),
+    ),
+  })
+}
+
+/** Where the one-time "may train on your prompts" acceptance lives for this user. */
+export function trainingConsentFile() {
+  return path.join(Global.Path.state, "free-model-training-consent.json")
+}
+
 export const node = makeGlobalNode({
   service: Service,
-  layer: Layer.sync(Service, () => {
-    const client = createClient({
-      file: path.join(Global.Path.cache, "free-models.json"),
-      disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH,
-    })
-    return Service.of({
-      catalog: (force) => Effect.promise(() => client.catalog(force)),
-      forKey: (key, force) => Effect.promise(() => client.forKey(key, force)),
-    })
-  }),
+  layer: Layer.sync(Service, () =>
+    fromClient(
+      createClient({
+        // v2: catalogs cached before 1.99.109 carry no data policy, and an OFF cached then must not hide a live catalog.
+        file: path.join(Global.Path.cache, "free-models-v2.json"),
+        consentFile: trainingConsentFile(),
+        disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH,
+      }),
+    ),
+  ),
   deps: [],
 })
 
@@ -225,15 +301,30 @@ export async function resolveRoute(input: {
   catalog: () => Promise<FreeModelCatalog>
   forKey: (key: string) => Promise<FreeModelInfo[]>
   credential: (provider: "vector" | "openrouter") => Promise<string | undefined>
+  trainingConsent: () => Promise<boolean>
 }) {
+  const trainingConsent = await input.trainingConsent()
   const ownKey = await input.credential("openrouter")
   if (ownKey) {
     const models = await input.forKey(ownKey)
-    if (!models.some((model) => model.id === input.modelID))
+    if (!models.some((model) => model.id === input.modelID)) {
+      // A may-train model listed by the shared catalog but missing from the user's own account is one the account's
+      // privacy settings hide, so say which setting to change.
+      const shared = await input.catalog()
+      const listed = shared.enabled ? shared.models.find((model) => model.id === input.modelID) : undefined
+      if (listed && freeModelDataPolicy(listed) !== "no-training") throw new Error(FREE_MODEL_TRAINING_BLOCKED)
       throw new Error(
         "This free model is unavailable for your OpenRouter account or privacy settings. Choose another free model.",
       )
-    return { url: OPENROUTER_CHAT_URL, key: ownKey, models, source: "openrouter" as const }
+    }
+    return {
+      url: OPENROUTER_CHAT_URL,
+      key: ownKey,
+      models,
+      source: "openrouter" as const,
+      trainingConsent,
+      headers: {},
+    }
   }
   if (input.provider === "openrouter") throw new Error("Connect OpenRouter to use your own free allowance.")
   const catalog = await input.catalog()
@@ -241,7 +332,32 @@ export async function resolveRoute(input: {
     throw new Error("That free model is unavailable. Choose another model in Vector.")
   const token = await input.credential("vector")
   if (!token) throw new Error("Sign in to Vector to use the shared free allowance, or connect OpenRouter.")
-  return { url: SHARED_CHAT_URL, key: token, models: catalog.models, source: "shared" as const }
+  return {
+    url: SHARED_CHAT_URL,
+    key: token,
+    models: catalog.models,
+    source: "shared" as const,
+    trainingConsent,
+    // The shared allowance serves a may-train model only to a client that discloses it, after the user accepted.
+    headers: {
+      [FREE_MODELS_DISCLOSURE_HEADER]: FREE_MODELS_DISCLOSURE,
+      ...(trainingConsent ? { [FREE_MODELS_CONSENT_HEADER]: FREE_MODELS_CONSENT_ACCEPTED } : {}),
+    },
+  }
+}
+
+/**
+ * OpenRouter answers 404 "No endpoints found matching your data policy" when the user's own privacy settings exclude
+ * every endpoint a request may use. Replace that with what to change, keeping the status.
+ */
+export async function explainPolicyRefusal(response: Response) {
+  if (response.status !== 404) return response
+  const text = await response
+    .clone()
+    .text()
+    .catch(() => "")
+  if (!/data policy|privacy|training/i.test(text)) return response
+  return Response.json({ error: { message: FREE_MODEL_TRAINING_BLOCKED, code: 404 } }, { status: 404 })
 }
 
 /** Preserve quota metadata before compatible SDKs reduce an SSE error to its message string. */

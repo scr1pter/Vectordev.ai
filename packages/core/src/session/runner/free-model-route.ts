@@ -30,13 +30,16 @@ export function freeModelRoute(
                   catalog: () => Effect.runPromise(client.catalog()),
                   forKey: (key) => Effect.runPromise(client.forKey(key)),
                   credential: (provider) => Effect.runPromise(credentials.get(provider)),
+                  trainingConsent: () => Effect.runPromise(client.trainingConsent()),
                 }),
               catch: (cause) => invalidRequest(cause instanceof Error ? cause.message : "Free model unavailable."),
             })
             const body = yield* Effect.try({
               try: () =>
                 serializeFreeModelRequest(
-                  freeModelRequest({ ...input.request.http?.body, ...input.body, model: model.id }, route.models),
+                  freeModelRequest({ ...input.request.http?.body, ...input.body, model: model.id }, route.models, {
+                    trainingConsent: route.trainingConsent,
+                  }),
                   route.url === FreeModels.SHARED_CHAT_URL,
                 ),
               catch: (cause) =>
@@ -49,7 +52,11 @@ export function freeModelRoute(
               request: LLMRequest.update(input.request, { http: new HttpOptions({}) }),
               endpoint: { ...input.endpoint, baseURL: route.url, path: "" },
               auth: Auth.bearer(Auth.value(route.key)),
-              headers: () => ({ "HTTP-Referer": "https://vectordev.ai/", "X-OpenRouter-Title": "Vector" }),
+              headers: () => ({
+                "HTTP-Referer": "https://vectordev.ai/",
+                "X-OpenRouter-Title": "Vector",
+                ...route.headers,
+              }),
               encodeBody: () => body,
             })
           }),

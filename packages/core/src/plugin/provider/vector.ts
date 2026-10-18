@@ -2,6 +2,7 @@ import { Effect, Stream } from "effect"
 import { EventV2 } from "../../event"
 import { Integration } from "../../integration"
 import { FreeModels } from "../../free-models"
+import { freeModelDataPolicy } from "../../free-model-catalog"
 import { define } from "../internal"
 
 export const VectorPlugin = define({
@@ -46,7 +47,7 @@ export const VectorPlugin = define({
             draft.cost = [{ input: 0, output: 0, cache: { read: 0, write: 0 } }]
             draft.limit = { context: model.contextLength, output: model.maxOutputTokens }
             draft.enabled = !openrouter || owned.some((item) => item.id === model.id)
-            Object.assign(draft, { freeModel: { source: "shared" } })
+            Object.assign(draft, { freeModel: { source: "shared", dataPolicy: freeModelDataPolicy(model) } })
           })
         }
         for (const model of owned) {
@@ -62,12 +63,17 @@ export const VectorPlugin = define({
             draft.cost = [{ input: 0, output: 0, cache: { read: 0, write: 0 } }]
             draft.limit = { context: model.contextLength, output: model.maxOutputTokens }
             draft.enabled = true
-            Object.assign(draft, { freeModel: { source: "openrouter" } })
+            Object.assign(draft, { freeModel: { source: "openrouter", dataPolicy: freeModelDataPolicy(model) } })
           })
         }
       }),
     )
     yield* events.subscribe(Integration.Event.Updated).pipe(
+      Stream.runForEach(() => ctx.catalog.reload()),
+      Effect.forkScoped({ startImmediately: true }),
+    )
+    // A catalog first read as OFF (a cached answer served at startup) must not hide models that turn on later.
+    yield* freeModels.changes.pipe(
       Stream.runForEach(() => ctx.catalog.reload()),
       Effect.forkScoped({ startImmediately: true }),
     )

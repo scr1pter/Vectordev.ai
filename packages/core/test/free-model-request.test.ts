@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
-import { freeModelRequest, serializeFreeModelRequest } from "../src/free-model-request"
+import { FreeModelTrainingConsentError, freeModelRequest, serializeFreeModelRequest } from "../src/free-model-request"
+import { FREE_MODEL_TRAINING_CONSENT_REQUIRED } from "../src/free-model-choice"
 
 test("disables account-default plugins and preserves the safeguards through shared proxy normalization", () => {
   const request = freeModelRequest(
@@ -114,4 +115,93 @@ test("shared request limit counts serialized UTF-8 bytes at the boundary and lea
     "Context too large for the shared free allowance. Compact this conversation or connect OpenRouter to continue with your own account.",
   )
   expect(serializeFreeModelRequest(oversized, false)).toBe(JSON.stringify(oversized))
+})
+
+const mayTrain = {
+  id: "poolside/laguna-s-2.1:free",
+  name: "Poolside: Laguna S 2.1",
+  contextLength: 262144,
+  maxOutputTokens: 32768,
+  providers: [{ id: "poolside/fp4", name: "Poolside", retention: "", dataPolicy: "may-train" as const }],
+}
+const inkling = {
+  id: "thinkingmachines/inkling:free",
+  name: "Thinking Machines: Inkling",
+  contextLength: 1048576,
+  maxOutputTokens: 262144,
+  toolChoice: false,
+  providers: [
+    { id: "thinkingmachines/nvfp4", name: "Thinking Machines", retention: "", dataPolicy: "may-train" as const },
+  ],
+}
+const unreviewed = {
+  id: "maker/new:free",
+  name: "Maker: New",
+  contextLength: 16000,
+  maxOutputTokens: 4096,
+  providers: [{ id: "maker", name: "Maker", retention: "", dataPolicy: "unreviewed" as const }],
+}
+const all = [mayTrain, inkling, unreviewed, ...FREE_MODEL_FALLBACKS]
+const hello = (model: string) => ({ model, messages: [{ role: "user", content: "hello" }] })
+
+test("nothing is built for a may-train or unreviewed model until the user accepted, and no-training never asks", () => {
+  for (const model of [mayTrain, inkling, unreviewed]) {
+    expect(() => freeModelRequest(hello(model.id), all)).toThrow(FreeModelTrainingConsentError)
+    expect(() => freeModelRequest(hello(model.id), all, { trainingConsent: false })).toThrow(
+      FREE_MODEL_TRAINING_CONSENT_REQUIRED,
+    )
+  }
+  expect(FREE_MODEL_TRAINING_CONSENT_REQUIRED).toContain("Vector itself never trains on your prompts")
+  expect(FREE_MODEL_TRAINING_CONSENT_REQUIRED).toContain("Nothing was sent")
+  expect(freeModelRequest(hello(FREE_MODEL_FALLBACKS[0].id), all).provider.data_collection).toBe("deny")
+})
+
+test("data collection is allowed only for an accepted, reviewed may-train model; unreviewed ones keep deny", () => {
+  const accepted = { trainingConsent: true }
+  expect(freeModelRequest(hello(mayTrain.id), all, accepted).provider).toEqual({
+    data_collection: "allow",
+    require_parameters: true,
+    only: ["poolside/fp4", "thinkingmachines/nvfp4", "cohere"],
+    max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
+  })
+  expect(freeModelRequest(hello(unreviewed.id), all, accepted).provider.data_collection).toBe("deny")
+  expect(freeModelRequest(hello(FREE_MODEL_FALLBACKS[0].id), all, accepted).provider.data_collection).toBe("deny")
+  // The server rebuilds the same request from the client's, so a client cannot lift deny on its own.
+  const client = freeModelRequest(hello(FREE_MODEL_FALLBACKS[0].id), all, accepted)
+  expect(
+    freeModelRequest({ ...client, provider: { ...client.provider, data_collection: "allow" } }, all, accepted).provider
+      .data_collection,
+  ).toBe("deny")
+})
+
+test("a fallback never weakens the chosen model's data policy", () => {
+  // No-training and unreviewed choices fall back to no-training models only.
+  for (const model of [FREE_MODEL_FALLBACKS[0].id, unreviewed.id])
+    expect(freeModelRequest(hello(model), all, { trainingConsent: true }).models).toEqual(
+      [model, ...FREE_MODEL_FALLBACKS.map((item) => item.id)]
+        .filter((id, index, ids) => ids.indexOf(id) === index)
+        .slice(0, 3),
+    )
+  // An accepted may-train choice may also fall back to other may-train models, never to an unreviewed one.
+  expect(freeModelRequest(hello(mayTrain.id), all, { trainingConsent: true }).models).toEqual([
+    mayTrain.id,
+    inkling.id,
+    FREE_MODEL_FALLBACKS[0].id,
+  ])
+})
+
+test("an endpoint without tool_choice gets the same automatic request without it", () => {
+  const tools = [{ type: "function", function: { name: "read" } }]
+  const consent = { trainingConsent: true }
+  expect(freeModelRequest({ ...hello(inkling.id), tools, tool_choice: "auto" }, all, consent)).not.toHaveProperty(
+    "tool_choice",
+  )
+  expect(freeModelRequest({ ...hello(inkling.id), tools }, all, consent)).toMatchObject({ tools })
+  // A forced choice is kept, so OpenRouter refuses it rather than silently ignoring it.
+  expect(freeModelRequest({ ...hello(inkling.id), tools, tool_choice: "required" }, all, consent)).toMatchObject({
+    tool_choice: "required",
+  })
+  expect(freeModelRequest({ ...hello(mayTrain.id), tools, tool_choice: "auto" }, all, consent)).toMatchObject({
+    tool_choice: "auto",
+  })
 })

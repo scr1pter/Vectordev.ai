@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { DateTime, Effect, Layer } from "effect"
+import { DateTime, Effect, Layer, Stream } from "effect"
 import { AppNodeBuilder } from "../src/effect/app-node-builder"
 import { LayerNode } from "../src/effect/layer-node"
 import { Catalog } from "../src/catalog"
@@ -51,6 +51,9 @@ const it = testEffect(
           FreeModels.Service.of({
             catalog: () => Effect.succeed({ enabled: true, updatedAt: 1, models: [model] }),
             forKey: () => Effect.succeed([model]),
+            trainingConsent: () => Effect.succeed(false),
+            setTrainingConsent: (accepted) => Effect.succeed(accepted),
+            changes: Stream.empty,
           }),
         ),
       ],

@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { DateTime, Effect, Schema } from "effect"
+import { DateTime, Effect, Schema, Stream } from "effect"
 import { LLM } from "@vectordevai/llm"
 import { Catalog } from "@vectordevai/core/catalog"
 import { Config } from "@vectordevai/core/config"
@@ -24,6 +24,9 @@ const approved = FREE_MODEL_FALLBACKS[0]
 const freeModels = FreeModels.Service.of({
   catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
   forKey: () => Effect.succeed([approved]),
+  trainingConsent: () => Effect.succeed(false),
+  setTrainingConsent: (accepted) => Effect.succeed(accepted),
+  changes: Stream.empty,
 })
 const credentials = FreeModels.CredentialsService.of({
   get: (provider) => Effect.succeed(provider === "openrouter" ? "synthetic-owned-key" : undefined),

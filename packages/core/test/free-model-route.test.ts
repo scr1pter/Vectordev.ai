@@ -14,6 +14,9 @@ const catalog = { enabled: true, updatedAt: 1, models: [...FREE_MODEL_FALLBACKS.
 const client = FreeModels.Service.of({
   catalog: () => Effect.succeed(catalog),
   forKey: () => Effect.succeed(catalog.models),
+  trainingConsent: () => Effect.succeed(false),
+  setTrainingConsent: (accepted) => Effect.succeed(accepted),
+  changes: Stream.empty,
 })
 const info = ModelV2.Info.make({
   ...ModelV2.Info.empty(ProviderV2.ID.vector, ModelV2.ID.make(catalog.models[0].id)),
@@ -222,4 +225,42 @@ test("the run guard counts a free-route step as free, whatever the model's ID sa
     costUsd: 0,
     costKind: "free",
   })
+})
+
+test("native route sends nothing to a may-train model before acceptance, then allows data collection and says so", async () => {
+  const laguna = {
+    id: "poolside/laguna-s-2.1:free",
+    name: "Poolside: Laguna S 2.1",
+    contextLength: 262144,
+    maxOutputTokens: 32768,
+    providers: [{ id: "poolside/fp4", name: "Poolside", retention: "", dataPolicy: "may-train" as const }],
+  }
+  const consent = { value: false }
+  const shared = FreeModels.Service.of({
+    ...client,
+    catalog: () => Effect.succeed({ enabled: true, updatedAt: 1, models: [laguna, ...catalog.models] }),
+    trainingConsent: () => Effect.sync(() => consent.value),
+  })
+  const model = freeModelRoute(
+    ModelV2.Info.make({
+      ...info,
+      id: ModelV2.ID.make(laguna.id),
+      api: { ...info.api, id: ModelV2.ID.make(laguna.id) },
+    }),
+    shared,
+    FreeModels.CredentialsService.of({
+      get: (provider) => Effect.succeed(provider === "vector" ? "vct_shared" : undefined),
+    }),
+  )
+  const body = { model: model.id, messages: [{ role: "user", content: "hello" }] }
+  const request = LLM.request({ model, prompt: "hello" })
+  await expect(Effect.runPromise(model.route.prepareTransport(body, request))).rejects.toThrow(
+    "Vector itself never trains on your prompts",
+  )
+  consent.value = true
+  const prepared = await Effect.runPromise(model.route.prepareTransport(body, request))
+  expect(prepared.request.headers["x-vector-free-model-disclosure"]).toBe("may-train-v1")
+  expect(prepared.request.headers["x-vector-free-model-training-consent"]).toBe("accepted")
+  if (prepared.request.body._tag !== "Uint8Array") throw new Error("Expected JSON bytes")
+  expect(JSON.parse(new TextDecoder().decode(prepared.request.body.body)).provider.data_collection).toBe("allow")
 })

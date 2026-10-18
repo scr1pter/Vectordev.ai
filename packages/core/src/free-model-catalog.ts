@@ -1,20 +1,12 @@
 import { Option, Schema } from "effect"
 // A relative path, not the package name: vectordev.ai's API functions load this file on Vercel's Node runtime, where the
 // package name resolves to Schema's TypeScript source inside node_modules, which Node will not load.
-import { NO_TRAINING_RETENTION, type FreeModelInfo } from "../../schema/src/free-model.js"
-
-export const FreeProviderPolicy = Schema.Struct({
-  name: Schema.String,
-  displayName: Schema.String,
-  slug: Schema.String,
-  dataPolicy: Schema.Struct({
-    training: Schema.Boolean,
-    trainingOpenRouter: Schema.Boolean,
-    retainsPrompts: Schema.Boolean,
-    retentionDays: Schema.optional(Schema.Number),
-    canPublish: Schema.Boolean,
-  }),
-})
+import {
+  MAY_TRAIN_RETENTION,
+  UNREVIEWED_RETENTION,
+  type FreeDataPolicy,
+  type FreeModelInfo,
+} from "../../schema/src/free-model.js"
 
 export const FreeModelMetadata = Schema.Struct({
   id: Schema.String,
@@ -37,22 +29,77 @@ export const FreeEndpointMetadata = Schema.Struct({
   status: Schema.Number,
 })
 
-// OpenRouter's public endpoint data has no training flag, and provider-level policy records do not describe free
-// endpoints reliably: they recorded Poolside as not training while its free Laguna pages say free use may train.
-// So the no-training selection allowlists each model with the provider slugs that may serve it, and a new free
-// model is never offered until it is added here. Every request also asks OpenRouter to deny data collection.
-// The dated evidence and the owner confirmations each pair needs are in docs/vector/owner-actions/openrouter.md.
-export const NO_TRAINING_ENDPOINTS = new Map([
-  ["cohere/north-mini-code:free", ["cohere"]],
-  ["dots-studio/dots-3-note-preview:free", ["atlas-cloud"]],
+/** The date Vector last reviewed every free OpenRouter endpoint's data policy and terms. */
+export const FREE_MODEL_POLICY_REVIEWED = "2026-10-17"
+
+// OpenRouter's public API has no training flag, and its provider-level records do not describe free endpoints: they
+// record Poolside as not training while its free Laguna endpoints say free use may train. The reliable record is the
+// per-endpoint `data_policy` on each model's page at https://openrouter.ai/<model id>, checked against the terms each
+// endpoint links. This map is that review, by model and the provider slug (the endpoint tag before any "/") that may
+// serve it. A free endpoint missing here is "unreviewed": it is disclosed as one that may train, offered only through
+// the user's own OpenRouter account, and still asks OpenRouter to deny data collection. Evidence, dated per pair, is in
+// docs/vector/owner-actions/free-models-legal.md.
+export const REVIEWED_FREE_ENDPOINTS: ReadonlyMap<
+  string,
+  Readonly<Record<string, { policy: Exclude<FreeDataPolicy, "unreviewed">; retention: string }>>
+> = new Map<string, Record<string, { policy: Exclude<FreeDataPolicy, "unreviewed">; retention: string }>>([
+  [
+    "xingchen-agi/xing4.0-29b-a4b:free",
+    { phala: { policy: "no-training", retention: "No prompt retention or training on OpenRouter's endpoint record." } },
+  ],
+  [
+    "cohere/north-mini-code:free",
+    { cohere: { policy: "no-training", retention: "Kept up to 30 days; not used for training." } },
+  ],
+  [
+    "dots-studio/dots-3-note-preview:free",
+    {
+      "atlas-cloud": {
+        policy: "no-training",
+        retention: "Kept for a period AtlasCloud does not publish; not used for training.",
+      },
+    },
+  ],
+  [
+    "google/gemma-4-26b-a4b-it:free",
+    { "google-ai-studio": { policy: "no-training", retention: "Kept up to 55 days; not used for training." } },
+  ],
+  [
+    "google/gemma-4-31b-it:free",
+    { "google-ai-studio": { policy: "no-training", retention: "Kept up to 55 days; not used for training." } },
+  ],
+  // Poolside's free Laguna endpoints end on 31 October 2026.
+  ["poolside/laguna-s-2.1:free", { poolside: { policy: "may-train", retention: MAY_TRAIN_RETENTION } }],
+  ["poolside/laguna-xs-2.1:free", { poolside: { policy: "may-train", retention: MAY_TRAIN_RETENTION } }],
+  // Liquid advises against this small model for agentic coding.
+  ["liquid/lfm-2.5-2.6b:free", { liquid: { policy: "may-train", retention: MAY_TRAIN_RETENTION } }],
+  // Thinking Machines' free research tier is for agentic harnesses and adults, and takes no tool_choice.
+  ["thinkingmachines/inkling:free", { thinkingmachines: { policy: "may-train", retention: MAY_TRAIN_RETENTION } }],
+  [
+    "thinkingmachines/inkling-small:free",
+    { thinkingmachines: { policy: "may-train", retention: MAY_TRAIN_RETENTION } },
+  ],
 ])
 
-// Free variants from these authors log or may train on prompts, or their free tier is unreviewed.
-const EXCLUDED_AUTHORS = /^(?:nvidia|stealth|thinkingmachines|liquid|google)\//i
+// The only free models Vector leaves out are those whose terms bar Vector's use. NVIDIA's free endpoints run under the
+// NVIDIA API Trial Terms of Service (19 September 2025): limited trial and evaluation use only, no production use of the
+// service or its output (sections 1.2 and 1.4), and no making it or its output available to others (section 4.2).
+// Serving them to Vector users is production use that shares the output, so they are never listed.
+const BARRED_FREE_AUTHORS = [
+  {
+    author: /^nvidia\//i,
+    reason: "NVIDIA's API Trial Terms limit its free endpoints to evaluation and bar production use.",
+  },
+]
 
 // Router aliases and stacked variants can introduce paid routing or services.
 export function isFreeModelID(id: string) {
   return id.trim() === id && /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*:free$/i.test(id) && !/^openrouter\//i.test(id)
+}
+
+/** Why a free model is never offered, when its terms bar Vector's use. */
+export function barredFreeModel(id: string) {
+  return BARRED_FREE_AUTHORS.find((item) => item.author.test(id))?.reason
 }
 
 export function zeroFreeModelPricing(pricing: Readonly<Record<string, string | number>>) {
@@ -65,64 +112,62 @@ export function zeroFreeModelPricing(pricing: Readonly<Record<string, string | n
   )
 }
 
+/** Free, zero-priced, tool-capable and not expired. Models without tools cannot work as coding agents here. */
 export function eligibleFreeModel(model: typeof FreeModelMetadata.Type, now: number) {
   return (
     isFreeModelID(model.id) &&
     zeroFreeModelPricing(model.pricing) &&
     model.supported_parameters.includes("tools") &&
-    model.supported_parameters.includes("tool_choice") &&
     (!model.expiration_date || Date.parse(model.expiration_date) > now)
   )
 }
 
-/** Included and personal no-training catalogs share the allowlist, author exclusions and a 7-day expiry buffer. */
-export function includedFreeModel(model: typeof FreeModelMetadata.Type, now: number) {
-  return (
-    NO_TRAINING_ENDPOINTS.has(model.id) && !excludedFreeModel(model.id) && eligibleFreeModel(model, now + 7 * 86400000)
-  )
+/** Shared and personal catalogs offer every eligible free model except barred ones, with a 7-day expiry buffer. */
+export function offeredFreeModel(model: typeof FreeModelMetadata.Type, now: number) {
+  return !barredFreeModel(model.id) && eligibleFreeModel(model, now + 7 * 86400000)
 }
 
-export function excludedFreeModel(id: string) {
-  return EXCLUDED_AUTHORS.test(id)
+export function reviewedFreeModel(id: string) {
+  return REVIEWED_FREE_ENDPOINTS.has(id)
 }
 
-export function noTrainingEndpoint(modelID: string, tag: string) {
-  return !!NO_TRAINING_ENDPOINTS.get(modelID)?.includes(tag.split("/")[0] ?? "")
+/** The reviewed policy of one endpoint, by its tag. Anything not reviewed is "unreviewed", never no-training. */
+export function freeEndpointPolicy(modelID: string, tag: string): FreeDataPolicy {
+  return REVIEWED_FREE_ENDPOINTS.get(modelID)?.[tag.split("/")[0] ?? ""]?.policy ?? "unreviewed"
+}
+
+/**
+ * A model's policy is its least private endpoint's, since OpenRouter may route to any of them. A provider without a
+ * stated policy (a catalog from before 1.99.109) falls back to the reviewed record.
+ */
+export function freeModelDataPolicy(model: Pick<FreeModelInfo, "id" | "providers">): FreeDataPolicy {
+  const policies = model.providers.map((provider) => provider.dataPolicy ?? freeEndpointPolicy(model.id, provider.id))
+  if (!policies.length || policies.includes("unreviewed")) return "unreviewed"
+  if (policies.includes("may-train")) return "may-train"
+  return "no-training"
 }
 
 /** Shared and personal catalogs use the same price, capability and endpoint policy checks. */
 export function freeModelInfo(
   model: typeof FreeModelMetadata.Type,
   endpoints: readonly unknown[],
-  selection: { policies: readonly (typeof FreeProviderPolicy.Type)[] } | { zdr: true } | { noTraining: true },
+  selection: { reviewedOnly: boolean },
 ): FreeModelInfo | undefined {
   const eligible = endpoints.flatMap((item) => {
     const parsed = Schema.decodeUnknownOption(FreeEndpointMetadata)(item)
     if (Option.isNone(parsed)) return []
     const endpoint = parsed.value
-    const provider =
-      "policies" in selection
-        ? selection.policies.find(
-            (item) => item.name === endpoint.provider_name && endpoint.tag.split("/")[0] === item.slug,
-          )
-        : undefined
-    if (("zdr" in selection || "noTraining" in selection) && endpoint.model_id !== model.id) return []
-    if ("noTraining" in selection && !noTrainingEndpoint(model.id, endpoint.tag)) return []
+    const dataPolicy = freeEndpointPolicy(model.id, endpoint.tag)
     if (
-      ("policies" in selection &&
-        (!provider ||
-          !provider.slug.trim() ||
-          provider.dataPolicy.training ||
-          provider.dataPolicy.trainingOpenRouter ||
-          provider.dataPolicy.canPublish)) ||
+      endpoint.model_id !== model.id ||
+      (selection.reviewedOnly && dataPolicy === "unreviewed") ||
       !endpoint.tag.trim() ||
       endpoint.status !== 0 ||
       !zeroFreeModelPricing(endpoint.pricing) ||
-      !endpoint.supported_parameters.includes("tools") ||
-      !endpoint.supported_parameters.includes("tool_choice")
+      !endpoint.supported_parameters.includes("tools")
     )
       return []
-    return [{ endpoint, provider }]
+    return [{ endpoint, dataPolicy }]
   })
   if (!eligible.length) return
   const contextLength = Math.min(model.context_length, ...eligible.map((item) => item.endpoint.context_length))
@@ -142,20 +187,16 @@ export function freeModelInfo(
     name: model.name.replace(/\s*(?:\(free\)|:free)\s*$/i, ""),
     contextLength,
     maxOutputTokens,
-    providers: eligible.map(({ endpoint, provider }) => ({
+    ...(eligible.every((item) => item.endpoint.supported_parameters.includes("tool_choice"))
+      ? {}
+      : { toolChoice: false }),
+    providers: eligible.map(({ endpoint, dataPolicy }) => ({
       // Preserve the endpoint tag when supplied; a bare slug still selects that provider.
       id: endpoint.tag,
-      name: provider?.displayName ?? endpoint.provider_name,
+      name: endpoint.provider_name,
       retention:
-        "noTraining" in selection
-          ? NO_TRAINING_RETENTION
-          : !provider
-            ? "OpenRouter lists this endpoint as zero data retention; no-training routing is required."
-            : !provider.dataPolicy.retainsPrompts
-              ? "No prompt retention or training according to OpenRouter's provider policy."
-              : provider.dataPolicy.retentionDays !== undefined
-                ? `Up to ${provider.dataPolicy.retentionDays} days; no training according to OpenRouter's provider policy.`
-                : "Prompts retained; duration not specified. No training according to OpenRouter's provider policy.",
+        REVIEWED_FREE_ENDPOINTS.get(model.id)?.[endpoint.tag.split("/")[0] ?? ""]?.retention ?? UNREVIEWED_RETENTION,
+      dataPolicy,
     })),
   }
 }

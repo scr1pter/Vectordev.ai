@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
 import { Catalog } from "@vectordevai/core/catalog"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { ModelV2 } from "@vectordevai/core/model"
@@ -29,6 +29,9 @@ it.effect("owned free models stay guarded and available while the shared allowan
       Effect.provideService(FreeModels.Service, {
         catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
         forKey: () => Effect.succeed([FREE_MODEL_FALLBACKS[0]]),
+        trainingConsent: () => Effect.succeed(false),
+        setTrainingConsent: (accepted) => Effect.succeed(accepted),
+        changes: Stream.empty,
       }),
       Effect.provideService(FreeModels.CredentialsService, {
         get: (provider) => Effect.succeed(provider === "openrouter" ? "synthetic-key" : undefined),

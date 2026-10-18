@@ -1,84 +1,157 @@
 import { expect, test } from "bun:test"
-import { NO_TRAINING_RETENTION } from "@vectordevai/schema/free-model"
-import { NO_TRAINING_ENDPOINTS, eligibleFreeModel, freeModelInfo, includedFreeModel } from "../src/free-model-catalog"
+import { MAY_TRAIN_RETENTION, UNREVIEWED_RETENTION } from "@vectordevai/schema/free-model"
+import {
+  FREE_MODEL_POLICY_REVIEWED,
+  REVIEWED_FREE_ENDPOINTS,
+  barredFreeModel,
+  eligibleFreeModel,
+  freeEndpointPolicy,
+  freeModelDataPolicy,
+  freeModelInfo,
+  offeredFreeModel,
+} from "../src/free-model-catalog"
 
-const fixture = await Bun.file(new URL("./fixture/free-model-public.json", import.meta.url)).json()
+// Every free OpenRouter model and endpoint, captured from the public API on 17 October 2026.
+const fixture = await Bun.file(new URL("./fixture/free-model-public-2026-10-17.json", import.meta.url)).json()
 const metadata = (id: string) => fixture.models.find((item: { id: string }) => item.id === id)
+const info = (id: string, reviewedOnly = false) => freeModelInfo(metadata(id), fixture.endpoints[id], { reviewedOnly })
 const cohere = metadata("cohere/north-mini-code:free")
 const [endpoint] = fixture.endpoints["cohere/north-mini-code:free"]
 
-test("no-training mode accepts an allowlisted free endpoint and never claims zero data retention", () => {
-  const info = freeModelInfo(cohere, [endpoint], { noTraining: true })
-  expect(info).toEqual({
+test("every free model of 17 October 2026 is offered except NVIDIA's trial endpoints and models without tools", () => {
+  expect(FREE_MODEL_POLICY_REVIEWED).toBe("2026-10-17")
+  const offered = fixture.models
+    .filter((item: typeof cohere) => offeredFreeModel(item, fixture.capturedAt))
+    .map((item: { id: string }) => item.id)
+    .sort()
+  expect(offered).toEqual([
+    "cohere/north-mini-code:free",
+    "dots-studio/dots-3-note-preview:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "google/gemma-4-31b-it:free",
+    "liquid/lfm-2.5-2.6b:free",
+    "poolside/laguna-s-2.1:free",
+    "poolside/laguna-xs-2.1:free",
+    "thinkingmachines/inkling-small:free",
+    "thinkingmachines/inkling:free",
+    "xingchen-agi/xing4.0-29b-a4b:free",
+  ])
+  // Each offered model is in the reviewed record, so none of today's models is unreviewed.
+  expect(offered.every((id: string) => REVIEWED_FREE_ENDPOINTS.has(id))).toBe(true)
+  // The only exclusions by policy are legally barred models, each with its reason.
+  for (const item of fixture.models.filter((model: { id: string }) => model.id.startsWith("nvidia/")))
+    expect(barredFreeModel(item.id)).toContain("NVIDIA's API Trial Terms")
+  expect(offered.some((id: string) => barredFreeModel(id))).toBe(false)
+  // Router aliases and items priced per song or clip never qualify.
+  for (const id of ["openrouter/free", "google/lyria-3-pro-preview", "google/lyria-3-clip-preview"])
+    expect(eligibleFreeModel(metadata(id), fixture.capturedAt)).toBe(false)
+})
+
+test("each endpoint carries its reviewed policy, and today's may-train providers are labelled as such", () => {
+  const policies = Object.fromEntries(
+    [...REVIEWED_FREE_ENDPOINTS.keys()].map((id) => [id, info(id)?.providers.map((provider) => provider.dataPolicy)]),
+  )
+  expect(policies).toEqual({
+    "xingchen-agi/xing4.0-29b-a4b:free": ["no-training"],
+    "cohere/north-mini-code:free": ["no-training"],
+    "dots-studio/dots-3-note-preview:free": ["no-training"],
+    "google/gemma-4-26b-a4b-it:free": ["no-training"],
+    "google/gemma-4-31b-it:free": ["no-training"],
+    "poolside/laguna-s-2.1:free": ["may-train"],
+    "poolside/laguna-xs-2.1:free": ["may-train"],
+    "liquid/lfm-2.5-2.6b:free": ["may-train"],
+    "thinkingmachines/inkling:free": ["may-train"],
+    "thinkingmachines/inkling-small:free": ["may-train"],
+  })
+  expect(info("poolside/laguna-s-2.1:free")?.providers).toEqual([
+    { id: "poolside/fp4", name: "Poolside", retention: MAY_TRAIN_RETENTION, dataPolicy: "may-train" },
+  ])
+  expect(info("cohere/north-mini-code:free")).toEqual({
     id: "cohere/north-mini-code:free",
     name: "Cohere: North Mini Code",
     contextLength: 256000,
     maxOutputTokens: 64000,
-    providers: [{ id: "cohere", name: "Cohere", retention: NO_TRAINING_RETENTION }],
+    providers: [
+      {
+        id: "cohere",
+        name: "Cohere",
+        retention: "Kept up to 30 days; not used for training.",
+        dataPolicy: "no-training",
+      },
+    ],
   })
-  expect(NO_TRAINING_RETENTION).toContain("not used for training")
-  expect(JSON.stringify(info)).not.toMatch(/zero data retention|\bZDR\b|no retention|no prompt retention/i)
+  // No retention text claims zero data retention.
+  expect(JSON.stringify(info("cohere/north-mini-code:free"))).not.toMatch(/zero data retention|\bZDR\b/i)
 })
 
-test("no-training mode applies the same model ID and endpoint checks as ZDR mode", () => {
+test("an unknown policy is never presented as no-training", () => {
+  // A new free model, or a reviewed model served by a provider nobody reviewed, is "unreviewed".
+  const newModel = { ...cohere, id: "acme/new-coder:free" }
+  const unreviewed = freeModelInfo(newModel, [{ ...endpoint, model_id: newModel.id, tag: "acme" }], {
+    reviewedOnly: false,
+  })
+  expect(unreviewed?.providers).toEqual([
+    { id: "acme", name: "Cohere", retention: UNREVIEWED_RETENTION, dataPolicy: "unreviewed" },
+  ])
+  expect(freeModelDataPolicy(unreviewed!)).toBe("unreviewed")
+  expect(freeEndpointPolicy("cohere/north-mini-code:free", "atlas-cloud/fp8")).toBe("unreviewed")
+  // The shared allowance serves reviewed endpoints only.
+  expect(
+    freeModelInfo(newModel, [{ ...endpoint, model_id: newModel.id, tag: "acme" }], { reviewedOnly: true }),
+  ).toBeUndefined()
+  // A catalog from before 1.99.109 has no policy on its providers: the reviewed record decides, and anything it
+  // does not know is unreviewed.
+  expect(
+    freeModelDataPolicy({
+      id: "poolside/laguna-s-2.1:free",
+      providers: [{ id: "poolside/fp4", name: "", retention: "" }],
+    }),
+  ).toBe("may-train")
+  expect(
+    freeModelDataPolicy({ id: "cohere/north-mini-code:free", providers: [{ id: "cohere", name: "", retention: "" }] }),
+  ).toBe("no-training")
+  expect(freeModelDataPolicy({ id: "acme/x:free", providers: [{ id: "acme", name: "", retention: "" }] })).toBe(
+    "unreviewed",
+  )
+  expect(freeModelDataPolicy({ id: "acme/x:free", providers: [] })).toBe("unreviewed")
+  // One may-train or unreviewed endpoint makes the whole model one that may train.
+  expect(
+    freeModelDataPolicy({
+      id: "cohere/north-mini-code:free",
+      providers: [
+        { id: "cohere", name: "", retention: "", dataPolicy: "no-training" },
+        { id: "acme", name: "", retention: "", dataPolicy: "may-train" },
+      ],
+    }),
+  ).toBe("may-train")
+})
+
+test("an endpoint without tool_choice is kept and marked, and tools stay required", () => {
+  // Thinking Machines' free endpoints call tools but accept no tool_choice.
+  expect(info("thinkingmachines/inkling:free")?.toolChoice).toBe(false)
+  expect(info("cohere/north-mini-code:free")).not.toHaveProperty("toolChoice")
+  expect(
+    freeModelInfo(cohere, [{ ...endpoint, supported_parameters: ["tool_choice"] }], { reviewedOnly: false }),
+  ).toBeUndefined()
+  expect(eligibleFreeModel({ ...cohere, supported_parameters: ["tool_choice"] }, fixture.capturedAt)).toBe(false)
+})
+
+test("endpoint checks refuse mismatched, offline, priced or tool-less endpoints", () => {
   for (const change of [
     { model_id: "cohere/other:free" },
     { model_id: undefined },
     { status: 1 },
+    { status: -5 },
     { tag: "" },
     { pricing: { ...endpoint.pricing, completion: "0.01" } },
     { pricing: { ...endpoint.pricing, request: "" } },
-    { supported_parameters: ["tools"] },
+    { supported_parameters: [] },
     { context_length: 0 },
-  ]) {
-    const changed = { ...endpoint, ...change }
-    expect(freeModelInfo(cohere, [changed], { zdr: true })).toBeUndefined()
-    expect(freeModelInfo(cohere, [changed], { noTraining: true })).toBeUndefined()
-  }
+  ])
+    expect(freeModelInfo(cohere, [{ ...endpoint, ...change }], { reviewedOnly: false })).toBeUndefined()
 })
 
-test("no-training mode keeps only allowlisted model and provider pairs; Poolside's free endpoints may train", () => {
-  expect([...NO_TRAINING_ENDPOINTS]).toEqual([
-    ["cohere/north-mini-code:free", ["cohere"]],
-    ["dots-studio/dots-3-note-preview:free", ["atlas-cloud"]],
-  ])
-  for (const id of ["poolside/laguna-s-2.1:free", "poolside/laguna-xs-2.1:free"]) {
-    expect(freeModelInfo(metadata(id), fixture.endpoints[id], { noTraining: true })).toBeUndefined()
-    // The model itself still passes every price, tool and expiry check today.
-    expect(eligibleFreeModel(metadata(id), fixture.capturedAt)).toBe(true)
-    expect(includedFreeModel(metadata(id), fixture.capturedAt)).toBe(false)
-  }
-  const unknown = { ...endpoint, provider_name: "Unknown", tag: "unknown/fp8" }
-  expect(freeModelInfo(cohere, [unknown], { noTraining: true })).toBeUndefined()
-  // An allowlisted provider is not enough: the model must be allowlisted with that provider.
-  const dots = metadata("dots-studio/dots-3-note-preview:free")
-  const [atlasEndpoint] = fixture.endpoints["dots-studio/dots-3-note-preview:free"]
-  expect(freeModelInfo(dots, [{ ...endpoint, model_id: dots.id }], { noTraining: true })).toBeUndefined()
-  expect(freeModelInfo(cohere, [{ ...atlasEndpoint, model_id: cohere.id }], { noTraining: true })).toBeUndefined()
-  const newCohere = { ...cohere, id: "cohere/north-code-next:free" }
-  expect(eligibleFreeModel(newCohere, fixture.capturedAt)).toBe(true)
-  expect(includedFreeModel(newCohere, fixture.capturedAt)).toBe(false)
-  expect(freeModelInfo(newCohere, [{ ...endpoint, model_id: newCohere.id }], { noTraining: true })).toBeUndefined()
-  expect(freeModelInfo(dots, [atlasEndpoint], { noTraining: true })?.providers).toEqual([
-    { id: "atlas-cloud/fp8", name: "AtlasCloud", retention: NO_TRAINING_RETENTION },
-  ])
-})
-
-test("included models exclude logged or unreviewed authors and anything within a week of expiry", () => {
-  const now = fixture.capturedAt
-  const included = fixture.models.filter((item: typeof cohere) => includedFreeModel(item, now))
-  expect(included.map((item: { id: string }) => item.id).sort()).toEqual([
-    "cohere/north-mini-code:free",
-    "dots-studio/dots-3-note-preview:free",
-  ])
-  // Dots3-Note Preview is listed as free until 31 December 2026.
-  const dots = metadata("dots-studio/dots-3-note-preview:free")
-  expect(includedFreeModel(dots, Date.parse("2026-12-23T23:00:00Z"))).toBe(true)
-  expect(includedFreeModel(dots, Date.parse("2026-12-24T00:00:00Z"))).toBe(false)
-  expect(includedFreeModel({ ...cohere, id: "google/north-mini-code:free" }, now)).toBe(false)
-})
-
-test("eligible free models need an explicit free ID, zero prices, tools and an unexpired listing", () => {
+test("offered models are free, zero-priced, tool-capable and more than a week from expiry", () => {
   const now = Date.UTC(2026, 9, 2)
   const free = { ...cohere, pricing: { prompt: "0", completion: "0", request: "0", image: "0" } }
   expect(eligibleFreeModel(free, now)).toBe(true)
@@ -88,19 +161,14 @@ test("eligible free models need an explicit free ID, zero prices, tools and an u
     { expiration_date: "2026-10-01" },
     { expiration_date: "unknown" },
     { supported_parameters: [] },
-    { supported_parameters: ["tools"] },
   ])
     expect(eligibleFreeModel({ ...free, ...change }, now)).toBe(false)
-  for (const field of [
-    "prompt",
-    "completion",
-    "request",
-    "image",
-    "web_search",
-    "internal_reasoning",
-    "input_cache_read",
-  ])
+  for (const field of ["prompt", "completion", "request", "image", "web_search", "internal_reasoning"])
     expect(eligibleFreeModel({ ...free, pricing: { ...free.pricing, [field]: "0.01" } }, now)).toBe(false)
   for (const price of ["", "unknown", "NaN", "-1"])
     expect(eligibleFreeModel({ ...free, pricing: { ...free.pricing, request: price } }, now)).toBe(false)
+  // Poolside's free Laguna endpoints end on 31 October 2026: offered until a week before.
+  const laguna = metadata("poolside/laguna-s-2.1:free")
+  expect(offeredFreeModel(laguna, Date.parse("2026-10-23T23:00:00Z"))).toBe(true)
+  expect(offeredFreeModel(laguna, Date.parse("2026-10-24T00:00:00Z"))).toBe(false)
 })

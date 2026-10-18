@@ -4,13 +4,14 @@ import os from "node:os"
 import path from "node:path"
 import { FreeModels } from "../src/free-models"
 import { VectorAccount } from "../src/vector-account"
-import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
+import { FREE_MODEL_FALLBACKS, FREE_MODELS_DISCLOSURE } from "@vectordevai/schema/free-model"
+import { FREE_MODEL_TRAINING_BLOCKED } from "../src/free-model-choice"
 import { freeModelRequest } from "../src/free-model-request"
 
 const enabled = { enabled: true, updatedAt: 123, models: [...FREE_MODEL_FALLBACKS.slice(0, 2)] }
 const off = { enabled: false, updatedAt: 0, models: [] }
 
-test("first-run failure stays OFF, enabled cache allows reviewed fallback, explicit OFF clears it", async () => {
+test("first-run failure stays OFF, a network failure keeps the last catalog served, explicit OFF clears it", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "vector-free-models-"))
   try {
     const file = path.join(root, "catalog.json")
@@ -19,10 +20,85 @@ test("first-run failure stays OFF, enabled cache allows reviewed fallback, expli
     expect(await FreeModels.createClient({ file, request: async () => Response.json(enabled) }).catalog()).toEqual(
       enabled,
     )
-    expect((await FreeModels.createClient({ file, request: offline }).catalog()).models).toEqual(FREE_MODEL_FALLBACKS)
+    expect(await FreeModels.createClient({ file, request: offline }).catalog()).toEqual(enabled)
     expect(await FreeModels.createClient({ file, request: async () => Response.json(off) }).catalog()).toEqual(off)
     expect(await FreeModels.createClient({ file, request: offline }).catalog()).toEqual(off)
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual(off)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("a refusing answer, or a last catalog without models, never lists models whose prompts would fail", async () => {
+  // Root cause 6 (17 Oct 2026): a client that last saw ON fell back to a built-in list on vectordev.ai's 503, so the
+  // picker listed models while the shared chat refused every prompt. An empty ON answer (15 Oct) did the same.
+  const root = await mkdtemp(path.join(os.tmpdir(), "vector-free-models-refused-"))
+  try {
+    const file = path.join(root, "catalog.json")
+    const refused = async () => Response.json({ error: { code: "FREE_MODELS_CATALOG_MISSING" } }, { status: 503 })
+    await FreeModels.createClient({ file, request: async () => Response.json(enabled) }).catalog()
+    expect(await FreeModels.createClient({ file, request: refused }).catalog()).toEqual(off)
+    // The refusal is not saved: once vectordev.ai answers again the catalog returns.
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual(enabled)
+    await writeFile(file, JSON.stringify({ enabled: true, updatedAt: 1, models: [] }))
+    expect(
+      await FreeModels.createClient({ file, request: () => Promise.reject(new Error("offline")) }).catalog(),
+    ).toEqual(off)
+    expect(
+      FREE_MODEL_FALLBACKS.every((model) => model.providers.every((item) => item.dataPolicy === "no-training")),
+    ).toBe(true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("the catalog request declares that this client labels may-train models and asks first", () => {
+  expect(new URL(FreeModels.CATALOG_URL).searchParams.get("disclosure")).toBe(FREE_MODELS_DISCLOSURE)
+})
+
+test("a catalog that turns on after a cached OFF notifies its subscribers, and an unchanged one does not", async () => {
+  // Root cause 5 (17 Oct 2026): provider state built from a cached OFF answer was never rebuilt when the catalog
+  // turned on, so free models stayed hidden for the whole app session.
+  const root = await mkdtemp(path.join(os.tmpdir(), "vector-free-models-changes-"))
+  try {
+    const file = path.join(root, "catalog.json")
+    await writeFile(file, JSON.stringify(off))
+    const replies = [enabled, enabled, off]
+    const client = FreeModels.createClient({ file, wait: 60_000, request: async () => Response.json(replies.shift()) })
+    const seen: boolean[] = []
+    const unsubscribe = client.subscribe((catalog) => seen.push(catalog.enabled))
+    expect(await client.catalog()).toEqual(off)
+    expect(await client.catalog(true)).toEqual(enabled)
+    await client.catalog(true)
+    expect(seen).toEqual([true])
+    await client.catalog(true)
+    expect(seen).toEqual([true, false])
+    unsubscribe()
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("the one-time training acceptance is remembered in a file every reader shares, and can be withdrawn", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "vector-free-models-consent-"))
+  try {
+    const consentFile = path.join(root, "state", "consent.json")
+    const engine = FreeModels.createClient({ consentFile })
+    const cli = FreeModels.createClient({ consentFile })
+    expect(await engine.trainingConsent()).toBe(false)
+    expect(await cli.setTrainingConsent(true)).toBe(true)
+    // A running engine sees an acceptance recorded elsewhere on its next request.
+    expect(await engine.trainingConsent()).toBe(true)
+    expect(JSON.parse(await readFile(consentFile, "utf8"))).toMatchObject({ version: 1, training: true })
+    expect(await cli.setTrainingConsent(false)).toBe(false)
+    expect(await engine.trainingConsent()).toBe(false)
+    // Anything else in the file is not an acceptance.
+    await mkdir(path.dirname(consentFile), { recursive: true })
+    for (const text of ["{}", "true", '{"version":1,"training":false,"acceptedAt":1}', "not json"]) {
+      await writeFile(consentFile, text)
+      expect(await engine.trainingConsent()).toBe(false)
+    }
+    expect(await FreeModels.createClient().trainingConsent()).toBe(false)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -117,6 +193,7 @@ test("an expired catalog last seen ON is served stale while a slow refresh conti
     catalog: () => client.catalog(),
     forKey: async () => [],
     credential: async (provider) => (provider === "vector" ? "vct_placeholder" : undefined),
+    trainingConsent: async () => false,
   })
   expect(route.source).toBe("shared")
   expect(route.models.map((model) => model.id)).toEqual(["acme/real:free"])
@@ -172,6 +249,7 @@ test("saved shared selection prefers own key and never silently consumes shared 
     catalog: async () => enabled,
     forKey: async () => enabled.models,
     credential: async (provider: string) => (provider === "openrouter" ? "own-key" : "vct_shared"),
+    trainingConsent: async () => false,
   }
   expect(await FreeModels.resolveRoute(route)).toMatchObject({ url: FreeModels.OPENROUTER_CHAT_URL, key: "own-key" })
   await expect(FreeModels.resolveRoute({ ...route, forKey: async () => [] })).rejects.toThrow("privacy settings")
@@ -192,6 +270,60 @@ test("saved shared selection prefers own key and never silently consumes shared 
       credential: async (provider) => (provider === "vector" ? "vct_shared" : undefined),
     }),
   ).rejects.toThrow("unavailable")
+})
+
+test("shared requests carry the disclosure always and the acceptance only once given; personal ones carry neither", async () => {
+  const route = {
+    provider: "vector" as const,
+    modelID: enabled.models[0].id,
+    catalog: async () => enabled,
+    forKey: async () => enabled.models,
+    credential: async (provider: string) => (provider === "vector" ? "vct_shared" : undefined),
+  }
+  expect((await FreeModels.resolveRoute({ ...route, trainingConsent: async () => false })).headers).toEqual({
+    "x-vector-free-model-disclosure": FREE_MODELS_DISCLOSURE,
+  })
+  expect(await FreeModels.resolveRoute({ ...route, trainingConsent: async () => true })).toMatchObject({
+    trainingConsent: true,
+    headers: {
+      "x-vector-free-model-disclosure": FREE_MODELS_DISCLOSURE,
+      "x-vector-free-model-training-consent": "accepted",
+    },
+  })
+  const personal = await FreeModels.resolveRoute({
+    ...route,
+    credential: async () => "own-key",
+    trainingConsent: async () => true,
+  })
+  expect(personal).toMatchObject({ source: "openrouter", trainingConsent: true, headers: {} })
+})
+
+test("a may-train model hidden by the user's OpenRouter privacy settings says which setting to change", async () => {
+  const laguna = {
+    id: "poolside/laguna-s-2.1:free",
+    name: "Poolside: Laguna S 2.1",
+    contextLength: 262144,
+    maxOutputTokens: 32768,
+    providers: [{ id: "poolside/fp4", name: "Poolside", retention: "", dataPolicy: "may-train" as const }],
+  }
+  const route = {
+    provider: "vector" as const,
+    modelID: laguna.id,
+    catalog: async () => ({ enabled: true, updatedAt: 1, models: [laguna] }),
+    forKey: async () => enabled.models,
+    credential: async () => "own-key",
+    trainingConsent: async () => true,
+  }
+  await expect(FreeModels.resolveRoute(route)).rejects.toThrow(FREE_MODEL_TRAINING_BLOCKED)
+  expect(FREE_MODEL_TRAINING_BLOCKED).toContain("openrouter.ai/settings/privacy")
+  // OpenRouter's own "no endpoints match your data policy" answer becomes the same instruction.
+  const refused = await FreeModels.explainPolicyRefusal(
+    Response.json({ error: { message: "No endpoints found matching your data policy", code: 404 } }, { status: 404 }),
+  )
+  expect(refused.status).toBe(404)
+  expect((await refused.json()).error.message).toBe(FREE_MODEL_TRAINING_BLOCKED)
+  const other = Response.json({ error: { message: "Model not found" } }, { status: 404 })
+  expect(await FreeModels.explainPolicyRefusal(other)).toBe(other)
 })
 
 test("free request guard removes overrides, clamps tokens and forbids paid plugins, media and hosted tools", () => {
