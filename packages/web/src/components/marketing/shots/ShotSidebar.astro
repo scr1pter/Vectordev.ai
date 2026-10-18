@@ -7,6 +7,9 @@
 // "compact" leaves out the repositories and connections, for a window too short to
 // hold the whole sidebar. "collapsible" makes the hide button at its top work,
 // for a window whose own controls can bring the sidebar back.
+// The group labels use "Repositories" and "Repository tools": Vector's visible text never says "project", and the
+// app's own two labels (workspace-navigation.tsx) are due the same rename in the 1.99.109 sweep. Until that lands,
+// no copy on the page sends a reader to look for either label by name.
 import ShotIcon from "./ShotIcon.astro"
 
 interface Props {
