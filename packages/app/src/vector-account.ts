@@ -9,7 +9,28 @@ export type VectorAccountStatus = {
   avatar?: string
   expiresAt?: number
   error?: string
+  /**
+   * Deleting the account: Vector is waiting for the fresh sign-in in the browser (confirming), or holds the
+   * confirmation it gave and can delete (confirmed). The confirmation itself never leaves the desktop main process.
+   */
+  deletion?: "confirming" | "confirmed"
 }
+
+/** What Vector can open in its Codium billing window: a checkout, a top-up, or Stripe's customer portal. */
+export type VectorBillingRequest =
+  | { kind: "checkout"; plan: string }
+  | { kind: "topup"; pack: string }
+  | { kind: "portal"; flow?: "change" | "cancel" }
+
+/**
+ * How the billing window ended: Stripe finished (completed), the person went back from checkout (cancelled) or closed
+ * the window (closed). An older vectordev.ai makes Vector open the website instead (website).
+ */
+export type VectorBillingResult =
+  | { outcome: "completed" | "cancelled" | "closed" | "website" }
+  | { outcome: "failed"; message: string }
+
+export type VectorDeletionResult = { deleted: true } | { deleted: false; message: string }
 
 export type VectorAccountPlatform = {
   status(): Promise<VectorAccountStatus>
@@ -18,6 +39,16 @@ export type VectorAccountPlatform = {
   logout(): Promise<VectorAccountStatus>
   /** Vector Codium plan and balances, read by the desktop main process so the account token stays there. */
   codium?(): Promise<ModelPlanStatus.Status>
+  /** Codium plans and top-ups on sale, by name and price only. */
+  offers?(): Promise<ModelPlanStatus.Offers | undefined>
+  /** Opens checkout or the billing portal in a Vector window, and resolves once that window is done. */
+  billing?(request: VectorBillingRequest): Promise<VectorBillingResult>
+  /** Starts the fresh sign-in in the browser that confirms deleting this account. */
+  confirmDeletion?(): Promise<VectorAccountStatus>
+  /** Drops a deletion confirmation, whether still in the browser or already given. */
+  cancelDeletion?(): Promise<VectorAccountStatus>
+  /** Deletes the account with the confirmation the desktop holds; `email` is what the person typed. */
+  deleteAccount?(email: string): Promise<VectorDeletionResult>
   onChange(listener: (status: VectorAccountStatus) => void): () => void
 }
 

@@ -20,17 +20,29 @@ function fixture() {
     ttl: 100_000,
     profile: undefined as Record<string, unknown> | undefined,
     photo: () => new Response(png, { headers: { "content-type": "image/png" } }),
+    // vectordev.ai's billing routes, the public Codium configuration and account deletion.
+    billing: (_url: string, _init: RequestInit) =>
+      Response.json({ url: "https://checkout.stripe.com/c/pay/cs_fixture" }) as Response,
+    config: {} as unknown,
+    deletion: (_init: RequestInit) =>
+      Response.json({ deleted: true, email: "fixture@example.test", cliTokens: "revoked" }) as Response,
+    // What the exchange answers, when a test needs something other than a sign-in token.
+    exchange: undefined as ((init: RequestInit) => Response) | undefined,
+    outcome: "completed" as "completed" | "cancelled" | "closed" | "failed",
   }
   const fetched: string[] = []
   const urls: string[] = []
   const tokens: Array<string | undefined> = []
   const statuses: unknown[] = []
   const requests: RequestInit[] = []
+  const windows: string[] = []
+  const writes: unknown[] = []
   const secrets = new Map<string, string>()
   const token = `vct_${randomBytes(32).toString("base64url")}.synthetic`
   const controller = createVectorAccount({
     read: () => state.stored,
     write: (value) => {
+      writes.push(value)
       state.stored = value
     },
     clear: async () => {
@@ -57,8 +69,12 @@ function fixture() {
       if (url === "https://vectordev.ai/api/model-plans/status") return Response.json(state.codium)
       if (url === "https://vectordev.ai/api/account/profile")
         return state.profile ? Response.json(state.profile) : new Response(null, { status: 503 })
+      if (url === "https://vectordev.ai/api/model-plans/config") return Response.json(state.config)
+      if (url.startsWith("https://vectordev.ai/api/model-plans/")) return state.billing(url, init)
+      if (url === "https://vectordev.ai/api/account/delete") return state.deletion(init)
       if (url !== "https://vectordev.ai/api/account/cli-exchange") return state.photo()
       await state.fetchDelay
+      if (state.exchange) return state.exchange(init)
       return Response.json({
         token,
         expiresAt: state.now + state.ttl,
@@ -75,11 +91,24 @@ function fixture() {
       if (state.failSync) throw new Error("WSL termination not confirmed")
     },
     changed: (status) => statuses.push(status),
+    billingWindow: async (url) => {
+      windows.push(url)
+      return state.outcome
+    },
     now: () => state.now,
   })
   const callback = () =>
     `vector://auth/callback?${new URLSearchParams({ code: randomBytes(32).toString("base64url"), state: new URL(urls.at(-1)!).searchParams.get("state")! })}`
-  return { controller, state, urls, tokens, statuses, requests, fetched, token, callback }
+  return { controller, state, urls, tokens, statuses, requests, fetched, token, callback, windows, writes }
+}
+
+async function signedIn() {
+  const app = fixture()
+  await app.controller.start()
+  await app.controller.consume([app.callback()])
+  app.fetched.length = 0
+  app.requests.length = 0
+  return app
 }
 
 test("account success notifications wait for managed server synchronization", async () => {
@@ -463,4 +492,233 @@ test("signing out while the photo downloads keeps the account signed out", async
   await signingIn
   expect(app.state.stored).toBeUndefined()
   expect(app.controller.status()).toEqual({ authenticated: false, pending: false })
+})
+
+test("billing posts the account token and JSON to vectordev.ai and shows only the Stripe page it answers with", async () => {
+  const app = await signedIn()
+  expect(await app.controller.billing({ kind: "checkout", plan: "vector-10" })).toEqual({ outcome: "completed" })
+  expect(app.fetched).toEqual(["https://vectordev.ai/api/model-plans/checkout"])
+  const request = app.requests[0]!
+  expect(request.method).toBe("POST")
+  expect(request.redirect).toBe("error")
+  expect(new Headers(request.headers).get("authorization")).toBe(`Bearer ${app.token}`)
+  expect(new Headers(request.headers).get("content-type")).toBe("application/json")
+  expect(JSON.parse(String(request.body))).toEqual({ plan: "vector-10" })
+  expect(app.windows).toEqual(["https://checkout.stripe.com/c/pay/cs_fixture"])
+
+  app.state.outcome = "cancelled"
+  expect(await app.controller.billing({ kind: "topup", pack: "codium-topup-50" })).toEqual({ outcome: "cancelled" })
+  expect(JSON.parse(String(app.requests.at(-1)!.body))).toEqual({ pack: "codium-topup-50" })
+
+  // The portal answers a billing.stripe.com address, and Vector can open it at a plan change.
+  app.state.billing = () => Response.json({ url: "https://billing.stripe.com/p/session/fixture" })
+  app.state.outcome = "closed"
+  expect(await app.controller.billing({ kind: "portal", flow: "change" })).toEqual({ outcome: "closed" })
+  expect(app.fetched.at(-1)).toBe("https://vectordev.ai/api/model-plans/portal")
+  expect(JSON.parse(String(app.requests.at(-1)!.body))).toEqual({ flow: "change" })
+  expect(await app.controller.billing({ kind: "portal" })).toEqual({ outcome: "closed" })
+  expect(JSON.parse(String(app.requests.at(-1)!.body))).toEqual({})
+  expect(JSON.stringify([app.statuses, app.windows])).not.toContain(app.token)
+})
+
+test("billing never opens a page vectordev.ai did not send from Stripe, nor a request the app did not offer", async () => {
+  const app = await signedIn()
+  for (const url of [
+    "https://checkout.stripe.com.evil.example/c/pay",
+    "http://checkout.stripe.com/c/pay",
+    "https://billing.stripe.com/p/session/fixture",
+    "javascript:alert(1)",
+  ]) {
+    app.state.billing = () => Response.json({ url })
+    expect(await app.controller.billing({ kind: "checkout", plan: "vector-10" })).toMatchObject({ outcome: "failed" })
+  }
+  // A portal address is not taken from checkout, nor the other way round.
+  app.state.billing = () => Response.json({ url: "https://checkout.stripe.com/c/pay/cs_fixture" })
+  expect(await app.controller.billing({ kind: "portal" })).toMatchObject({ outcome: "failed" })
+  expect(app.windows).toEqual([])
+  const sent = app.fetched.length
+  for (const input of [
+    { kind: "refund" },
+    { kind: "checkout", plan: "../admin" },
+    { kind: "checkout" },
+    { kind: "topup", pack: "A".repeat(41) },
+    { kind: "portal", flow: "upgrade" },
+    "checkout",
+    undefined,
+  ])
+    expect(await app.controller.billing(input)).toMatchObject({ outcome: "failed" })
+  expect(app.fetched).toHaveLength(sent)
+})
+
+test("an older vectordev.ai sends billing to the website, while an expired sign-in or a refusal is said in the app", async () => {
+  const app = await signedIn()
+  // Before 1.99.109 these routes took only a website session, and Supabase refused the account token.
+  app.state.billing = () =>
+    Response.json(
+      { error: { code: "SESSION_INVALID", message: "Your session expired. Sign in again." } },
+      { status: 401 },
+    )
+  expect(await app.controller.billing({ kind: "portal" })).toEqual({ outcome: "website" })
+  expect(app.urls.at(-1)).toBe("https://vectordev.ai/account")
+  app.state.billing = () => new Response("Not found", { status: 404 })
+  expect(await app.controller.billing({ kind: "checkout", plan: "vector-10" })).toEqual({ outcome: "website" })
+  expect(app.urls.at(-1)).toBe("https://vectordev.ai/codium")
+
+  const browser = app.urls.length
+  app.state.billing = () =>
+    Response.json(
+      { error: { code: "CLI_TOKEN_EXPIRED", message: "That CLI token has expired. Generate a new one." } },
+      { status: 401 },
+    )
+  expect(await app.controller.billing({ kind: "portal" })).toEqual({
+    outcome: "failed",
+    message: "That CLI token has expired. Generate a new one.",
+  })
+  app.state.billing = () =>
+    Response.json(
+      { error: { code: "MODEL_PLANS_DISABLED", message: "Vector Codium is not available yet." } },
+      { status: 503 },
+    )
+  expect(await app.controller.billing({ kind: "checkout", plan: "vector-10" })).toEqual({
+    outcome: "failed",
+    message: "Vector Codium is not available yet.",
+  })
+  app.state.outcome = "failed"
+  app.state.billing = () => Response.json({ url: "https://checkout.stripe.com/c/pay/cs_fixture" })
+  expect(await app.controller.billing({ kind: "checkout", plan: "vector-10" })).toMatchObject({ outcome: "failed" })
+  expect(app.urls).toHaveLength(browser)
+
+  await app.controller.logout()
+  expect(await app.controller.billing({ kind: "portal" })).toEqual({
+    outcome: "failed",
+    message: "Sign in to Vector to manage billing.",
+  })
+})
+
+test("offers are read from the public configuration without the account token", async () => {
+  const app = await signedIn()
+  app.state.config = {
+    enabled: false,
+    plans: [{ id: "vector-10", name: "Codium 10", price: 10, available: false, tasks: [] }],
+    topups: [{ id: "codium-topup-10", name: "Codium 10 top-up", price: 10, available: false }],
+  }
+  expect(await app.controller.offers()).toEqual({
+    enabled: false,
+    plans: [{ id: "vector-10", name: "Codium 10", price: 10, available: false }],
+    topups: [{ id: "codium-topup-10", name: "Codium 10 top-up", price: 10, available: false }],
+  })
+  expect(app.fetched).toEqual(["https://vectordev.ai/api/model-plans/config"])
+  expect(new Headers(app.requests[0]!.headers).get("authorization")).toBeNull()
+})
+
+const grantCallback = (app: Awaited<ReturnType<typeof signedIn>>) =>
+  `vector://auth/callback?${new URLSearchParams({ code: randomBytes(32).toString("base64url"), state: new URL(app.urls.at(-1)!).searchParams.get("state")! })}`
+const grant = `vdg_${randomBytes(24).toString("base64url")}.${randomBytes(32).toString("base64url")}`
+
+test("deleting confirms with a fresh browser sign-in of its own, and the grant stays in main-process memory", async () => {
+  const app = await signedIn()
+  expect(await app.controller.confirmDeletion()).toMatchObject({ authenticated: true, deletion: "confirming" })
+  const url = new URL(app.urls.at(-1)!)
+  expect(url.origin + url.pathname).toBe("https://vectordev.ai/auth/cli")
+  expect(url.searchParams.get("purpose")).toBe("delete")
+  expect(url.searchParams.get("desktop")).toBe("1")
+  const confirming = grantCallback(app)
+  // A sign-in started meanwhile keeps its own slot and finishes without touching the confirmation.
+  await app.controller.start()
+  expect(app.controller.status()).toMatchObject({ pending: true, deletion: "confirming" })
+  await app.controller.consume([app.callback()])
+  expect(app.controller.status()).toMatchObject({ authenticated: true, pending: false, deletion: "confirming" })
+
+  app.state.exchange = () =>
+    Response.json({ grant, expiresAt: app.state.now + 600_000, user: { email: "Fixture@Example.test" } })
+  const writes = app.writes.length
+  expect(await app.controller.consume([confirming])).toEqual([])
+  expect(JSON.parse(String(app.requests.at(-1)!.body))).toMatchObject({ state: url.searchParams.get("state") })
+  expect(app.controller.status()).toMatchObject({ authenticated: true, deletion: "confirmed" })
+  expect(app.writes).toHaveLength(writes)
+  expect(JSON.stringify([app.state.stored, app.statuses, app.writes, app.tokens])).not.toContain(grant)
+
+  // A mistyped email sends nothing.
+  expect(await app.controller.deleteAccount("someone@example.test")).toEqual({
+    deleted: false,
+    message: "Type the email address on this account to confirm.",
+  })
+  expect(app.fetched.at(-1)).not.toBe("https://vectordev.ai/api/account/delete")
+  expect(await app.controller.deleteAccount(" fixture@example.test ")).toEqual({ deleted: true })
+  const request = app.requests.at(-1)!
+  expect(app.fetched.at(-1)).toBe("https://vectordev.ai/api/account/delete")
+  expect(new Headers(request.headers).get("authorization")).toBe(`Bearer ${grant}`)
+  expect(JSON.parse(String(request.body))).toEqual({ confirm: "fixture@example.test" })
+  // Deleted on vectordev.ai, so this machine forgets the account and the local server's copy of the token.
+  expect(app.state.stored).toBeUndefined()
+  expect(app.tokens.at(-1)).toBeUndefined()
+  expect(app.controller.status()).toEqual({ authenticated: false, pending: false })
+})
+
+test("a failed deletion keeps the confirmation for a retry until it is used up or expires", async () => {
+  const app = await signedIn()
+  await app.controller.confirmDeletion()
+  app.state.exchange = () =>
+    Response.json({ grant, expiresAt: app.state.now + 600_000, user: { email: "fixture@example.test" } })
+  await app.controller.consume([grantCallback(app)])
+  app.state.deletion = () =>
+    Response.json(
+      { error: { code: "REVOCATION_FAILED", message: "Account access could not be revoked. Retry account deletion." } },
+      { status: 503 },
+    )
+  expect(await app.controller.deleteAccount("fixture@example.test")).toEqual({
+    deleted: false,
+    message: "Account access could not be revoked. Retry account deletion.",
+  })
+  expect(app.controller.status()).toMatchObject({ authenticated: true, deletion: "confirmed" })
+  app.state.deletion = () =>
+    Response.json(
+      { error: { code: "DELETION_GRANT_USED", message: "This confirmation was already used." } },
+      { status: 401 },
+    )
+  await app.controller.deleteAccount("fixture@example.test")
+  expect(app.controller.status()).toMatchObject({ authenticated: true })
+  expect(app.controller.status()).not.toHaveProperty("deletion")
+
+  // Ten minutes later the confirmation is gone without asking vectordev.ai.
+  await app.controller.confirmDeletion()
+  await app.controller.consume([grantCallback(app)])
+  app.state.now += 600_001
+  const sent = app.fetched.length
+  expect(await app.controller.deleteAccount("fixture@example.test")).toMatchObject({ deleted: false })
+  expect(app.fetched).toHaveLength(sent)
+  expect(app.state.stored).toBeDefined()
+})
+
+test("a confirmation for another account, a sign-in token or a cancelled step never becomes a deletion grant", async () => {
+  const app = await signedIn()
+  await app.controller.confirmDeletion()
+  app.state.exchange = () =>
+    Response.json({ grant, expiresAt: app.state.now + 600_000, user: { email: "other@example.test" } })
+  await app.controller.consume([grantCallback(app)])
+  expect(app.controller.status()).toMatchObject({
+    error: expect.stringContaining("You confirmed as other@example.test"),
+  })
+  expect(app.controller.status()).not.toHaveProperty("deletion")
+
+  await app.controller.confirmDeletion()
+  app.state.exchange = () =>
+    Response.json({ token: app.token, expiresAt: app.state.now + 600_000, user: { email: "fixture@example.test" } })
+  await app.controller.consume([grantCallback(app)])
+  expect(app.controller.status()).not.toHaveProperty("deletion")
+
+  await app.controller.confirmDeletion()
+  const cancelled = grantCallback(app)
+  expect(app.controller.cancelDeletion()).not.toHaveProperty("deletion")
+  app.state.exchange = () =>
+    Response.json({ grant, expiresAt: app.state.now + 600_000, user: { email: "fixture@example.test" } })
+  const sent = app.fetched.length
+  await app.controller.consume([cancelled])
+  expect(app.fetched).toHaveLength(sent)
+  expect(app.controller.status()).not.toHaveProperty("deletion")
+  expect(await app.controller.deleteAccount("fixture@example.test")).toMatchObject({ deleted: false })
+
+  // Signed out, there is nothing to confirm.
+  await app.controller.logout()
+  expect(await app.controller.confirmDeletion()).toMatchObject({ authenticated: false, error: expect.any(String) })
 })

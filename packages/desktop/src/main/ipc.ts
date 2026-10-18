@@ -239,6 +239,11 @@ export function registerIpcHandlers(deps: Deps) {
   handle("vector-account-cancel", () => vectorAccount.cancel())
   handle("vector-account-logout", () => vectorAccount.logout())
   handle("vector-account-codium", () => vectorAccount.codium())
+  handle("vector-account-offers", () => vectorAccount.offers())
+  handle("vector-account-billing", (_event, input: unknown) => vectorAccount.billing(input))
+  handle("vector-account-confirm-deletion", () => vectorAccount.confirmDeletion())
+  handle("vector-account-cancel-deletion", () => vectorAccount.cancelDeletion())
+  handle("vector-account-delete", (_event, email: unknown) => vectorAccount.deleteAccount(email))
 
   const voiceOwners = new Set<number>()
   const updaterSubscriptions = createUpdaterSubscriptions()

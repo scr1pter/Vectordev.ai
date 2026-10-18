@@ -3,13 +3,14 @@ import { createHash, randomBytes } from "node:crypto"
 import { createServer } from "node:http"
 import codeHandler from "../../../api/account/cli-code"
 import exchangeHandler from "../../../api/account/cli-exchange"
+import deleteHandler from "../../../api/account/delete"
 import { verifyCliToken, verifyDeletionGrant } from "../../../api/_lib/cli-token"
 import { desktopSignInCallback, desktopSignInRequest, signedInRecently } from "../src/lib/desktop-sign-in"
 import { createVectorAccount } from "../../desktop/src/main/vector-account"
 
 const records = new Map<string, string>()
 const counts = new Map<string, number>()
-const state = { unavailable: false, revoked: false, origin: "" }
+const state = { unavailable: false, revoked: false, origin: "", identityDeletions: 0 }
 const user = {
   id: "11111111-1111-4111-8111-111111111111",
   email: "fixture@example.test",
@@ -20,17 +21,28 @@ const upstream = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
   async fetch(request) {
-    if (new URL(request.url).pathname === "/auth/v1/user")
+    const path = new URL(request.url).pathname
+    // Account deletion: revoking the account's tokens, erasing usage and deleting the identity.
+    if (path.startsWith("/set/")) return Response.json({ result: "OK" })
+    if (path.startsWith("/rest/v1/rpc/")) return Response.json(null)
+    if (path.startsWith("/auth/v1/admin/users/") && request.method === "DELETE") {
+      state.identityDeletions++
+      return Response.json({})
+    }
+    if (path === "/auth/v1/user")
       return request.headers.get("authorization") === "Bearer synthetic-session" ||
         request.headers.get("authorization")?.startsWith("Bearer synthetic.")
         ? Response.json(user)
         : new Response(null, { status: 401 })
     if (state.unavailable) return new Response(null, { status: 503 })
     const parts = (await request.json()) as string[]
-    if (parts[0] === "GET") return Response.json({ result: state.revoked ? "1" : null })
+    const grantKey = parts[1]?.startsWith("vector:deletion-grant:")
+    if (parts[0] === "GET")
+      return Response.json({ result: grantKey ? (records.get(parts[1]) ?? null) : state.revoked ? "1" : null })
     if (parts[0] === "SET") {
       records.set(parts[1], parts[2])
-      expect(parts.slice(3)).toEqual(["EX", "300", "NX"])
+      // A used deletion grant is kept a little longer than it lasts; a sign-in code for its five minutes.
+      expect(parts.slice(3)).toEqual(["EX", grantKey ? "900" : "300", "NX"])
       return Response.json({ result: "OK" })
     }
     if (parts[0] !== "EVAL") throw new Error("Unexpected fixture command")
@@ -49,6 +61,7 @@ const upstream = Bun.serve({
   },
 })
 const server = createServer((request, response) => {
+  if (request.url === "/delete") return void deleteHandler(request, response)
   void (request.url === "/code" ? codeHandler(request, response) : exchangeHandler(request, response))
 })
 
@@ -224,6 +237,7 @@ test("desktop start, signed-in website and one-time API exchange complete the sa
     changed: (value) => {
       desktop.states.push(value)
     },
+    billingWindow: async () => "closed",
   })
   await account.start()
   const login = desktopSignInRequest(new URL(desktop.url).search)!
@@ -300,4 +314,74 @@ test("the deletion confirmation keeps its purpose through sign-in and asks again
   expect(signedInRecently(session(Date.now() - 6 * 60_000))).toBe(false)
   expect(signedInRecently("not-a-token")).toBe(false)
   expect(signedInRecently("a.%%%.b")).toBe(false)
+})
+
+test("deleting from the desktop runs through the browser's fresh sign-in and ends with the account gone", async () => {
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "synthetic-service-role"
+  // Earlier tests used up the sign-in rate limits.
+  counts.clear()
+  const desktop = {
+    stored: undefined as unknown,
+    url: "",
+    token: undefined as string | undefined,
+    states: [] as unknown[],
+  }
+  const routes: Record<string, string> = {
+    "https://vectordev.ai/api/account/cli-exchange": "/exchange",
+    "https://vectordev.ai/api/account/delete": "/delete",
+  }
+  const account = createVectorAccount({
+    read: () => desktop.stored,
+    write: (value) => {
+      desktop.stored = value
+    },
+    clear: async () => {
+      desktop.stored = undefined
+    },
+    available: async () => true,
+    encrypt: async () => "synthetic-ciphertext",
+    decrypt: async () => "synthetic-token",
+    openBrowser: async (url) => {
+      desktop.url = url
+    },
+    fetch: async (url, init) => {
+      if (url === user.user_metadata.avatar_url) return new Response(null, { status: 404 })
+      expect(Object.keys(routes)).toContain(url)
+      return fetch(state.origin + routes[url], init)
+    },
+    sync: async (token) => {
+      desktop.token = token
+    },
+    changed: (value) => {
+      desktop.states.push(value)
+    },
+    billingWindow: async () => "closed",
+  })
+  // Signed in to the app as the fixture account.
+  await account.start()
+  const login = desktopSignInRequest(new URL(desktop.url).search)!
+  await account.consume([desktopSignInCallback(await (await request("/code", login)).json(), login.state)])
+  expect(account.status()).toMatchObject({ authenticated: true, email: user.email })
+
+  // The browser page confirms with a sign-in from a minute ago.
+  await account.confirmDeletion()
+  const confirm = desktopSignInRequest(new URL(desktop.url).search)!
+  expect(confirm.purpose).toBe("delete")
+  const minted = await request(
+    "/code",
+    { state: confirm.state, challenge: confirm.challenge, purpose: confirm.purpose },
+    { authorization: `Bearer ${session(Date.now() - 60_000)}` },
+  )
+  expect(minted.status).toBe(200)
+  await account.consume([desktopSignInCallback(await minted.json(), confirm.state)])
+  expect(account.status()).toMatchObject({ authenticated: true, deletion: "confirmed" })
+  expect(JSON.stringify([desktop.stored, desktop.states])).not.toContain("vdg_")
+
+  expect(await account.deleteAccount(user.email)).toEqual({ deleted: true })
+  expect(state.identityDeletions).toBe(1)
+  // vectordev.ai recorded the grant as used, so it cannot delete again.
+  expect([...records.keys()].filter((key) => key.startsWith("vector:deletion-grant:"))).toHaveLength(1)
+  expect(account.status()).toEqual({ authenticated: false, pending: false })
+  expect(desktop.stored).toBeUndefined()
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY
 })
