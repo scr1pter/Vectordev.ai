@@ -624,7 +624,10 @@ const layer = Layer.effect(
       // Judge runs this run has already made.
       rounds: number
     }) {
-      if (!sizable(input.session, input.lastUser) || input.lastUser.agent !== "build") return "done" as const
+      // The build agent's own requests, and a quick-lane reply after them: the app sends a thanks or a farewell on its
+      // own small lane, and that reply can still settle build work that ended on an offer.
+      if (input.session.parentID || input.session.internal) return "done" as const
+      if (input.lastUser.agent !== "build" && input.lastUser.agent !== "quick") return "done" as const
       if (input.lastAssistant.error || (yield* guard.stopped(input.session.id))) return "done" as const
       if (input.rounds >= MAX_JUDGE_ROUNDS) return "done" as const
       const sizing = (yield* config.get()).sizing
@@ -648,7 +651,13 @@ const layer = Layer.effect(
         return "done" as const
       // Only work that changed files since the last verdict is judged.
       const work = SessionTaskSize.judgeable(requests, input.since)
-      if (!work) return "done" as const
+      // A quick-lane reply settles only the build agent's work; it never judges another agent's.
+      const built = work?.requests.some(
+        (request) =>
+          request.carried !== undefined ||
+          request.users.some((user) => user.info.role === "user" && user.info.agent === "build"),
+      )
+      if (!work || !built) return "done" as const
       const judge = yield* agents.get("judge")
       const parent = yield* agents.get("build")
       if (!judge || judge.mode === "primary" || !parent) return "done" as const
@@ -678,7 +687,7 @@ const layer = Layer.effect(
         time: { created: Date.now() },
       })
       const args = {
-        prompt: judgeBrief(work.requests, work.files, last),
+        prompt: judgeBrief(work),
         description: round === 1 ? "Check the finished work" : `Check the repairs (round ${round})`,
         subagent_type: "judge",
         background: false,
@@ -780,7 +789,8 @@ const layer = Layer.effect(
         sessionID,
         role: "user",
         time: { created: Date.now() },
-        agent: input.lastUser.agent,
+        // A repair after a quick-lane thanks is build work: it runs on the build agent with the work's tools.
+        agent: parent.name,
         model: input.lastUser.model,
         executionMode: input.lastUser.executionMode,
       }
@@ -2423,30 +2433,40 @@ function delegation(
   }
 }
 
-function judgeBrief(
-  requests: readonly SessionTaskSize.Request[],
-  changed: readonly string[],
-  last: SessionTaskSize.Request,
-) {
-  const report = SessionTaskSize.closingText(last.messages).slice(-4000)
+function judgeBrief(work: NonNullable<ReturnType<typeof SessionTaskSize.judgeable>>) {
   return [
     "Vector asks you to judge finished work before it is reported as done.",
     "",
     "The user's request, verbatim:",
     "<request>",
-    requests
+    work.requests
       .map((request) => SessionTaskSize.requestText(request))
       .join("\n\n")
       .slice(0, 8000),
     "</request>",
+    ...(work.exchanges.length > 0
+      ? [
+          "",
+          "Where the agent stopped to ask or offer something, and the user's answer, verbatim:",
+          ...work.exchanges.flatMap((exchange) => [
+            "<agent>",
+            exchange.asked,
+            "</agent>",
+            "<user>",
+            exchange.reply,
+            "</user>",
+          ]),
+          "The user's answers set the scope. Work they declined, or that the agent only offered, is out of scope: do not fail the work for leaving it out.",
+        ]
+      : []),
     "",
     "Files changed for it:",
-    ...changed.slice(0, 50).map((file) => `- ${file}`),
-    ...(changed.length > 50 ? [`- and ${changed.length - 50} more`] : []),
+    ...work.files.slice(0, 50).map((file) => `- ${file}`),
+    ...(work.files.length > 50 ? [`- and ${work.files.length - 50} more`] : []),
     "",
     "The agent's closing report. It is a claim to check, not evidence:",
     "<report>",
-    report || "(no report)",
+    work.report.slice(-4000) || "(no report)",
     "</report>",
     "",
     "Inspect the diff and the changed files, run focused checks where it is safe, and end with your VERDICT block.",

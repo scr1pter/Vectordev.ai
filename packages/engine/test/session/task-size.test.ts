@@ -835,15 +835,28 @@ describe("task sizing", () => {
         const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
         const offer = "Migrated all 40 routes and the tests pass. Want me to also update the docs?"
 
-        // A decline answers the offer inside the work, so it runs with the work's harness and the judge follows.
+        // A plain decline leaves nothing to do, so it is a direct reply on the quick lane, and the judge follows. The
+        // judge reads the offer and the decline, and the work's own report.
         const declined = yield* sessions.create({ title: "Pinned" })
         yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export {}\n" })
         yield* llm.text(offer)
         yield* send(prompt, declined.id, "migrate the app to the new router across 40 files")
         expect((yield* sessions.children(declined.id)).length).toBe(0)
-        yield* llm.text("Understood, I will leave the docs.")
+        const start = (yield* llm.inputs).length
+        yield* llm.text("Okay, I will leave the docs.")
         yield* llm.text("VERDICT: PASS")
         yield* send(prompt, declined.id, "no thanks")
+        const replies = (yield* llm.inputs).slice(start).filter((body) => !isTitle(body))
+        expect(replies).toHaveLength(2)
+        expect(toolNames(replies[0])).toEqual([])
+        expect(replies[0]?.reasoning_effort).toBe("none")
+        expect(conversation(replies[0])).toHaveLength(1)
+        expect(isJudge(replies[1]!)).toBe(true)
+        const declinedBrief = JSON.stringify(replies[1]?.messages)
+        expect(declinedBrief).toContain("Want me to also update the docs?")
+        expect(declinedBrief).toContain("no thanks")
+        expect(declinedBrief).toContain("out of scope")
+        expect(declinedBrief).toContain("Migrated all 40 routes and the tests pass")
         expect((yield* sessions.children(declined.id)).length).toBe(1)
 
         // A thanks is a direct reply, and the judge still checks the work it thanks for. A FAIL is repaired with the
@@ -869,6 +882,144 @@ describe("task sizing", () => {
         expect(bodies[2]?.reasoning_effort).toBe("high")
         expect(bodies.filter(isJudge)).toHaveLength(2)
         expect((yield* sessions.children(thanked.id)).length).toBe(2)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a thanks the app sends on the quick lane after a judged large task's offer still brings in the judge",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        const chat = yield* sessions.create({ title: "Pinned" })
+        yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export const a = 1\n" })
+        yield* llm.text("Migrated all 40 routes and the tests pass. Want me to also update the docs?")
+        yield* send(prompt, chat.id, "migrate the app to the new router across 40 files")
+        expect((yield* sessions.children(chat.id)).length).toBe(0)
+        const before = (yield* llm.inputs).length
+        yield* llm.text("You're welcome!")
+        yield* llm.text("VERDICT: FAIL\nBLOCKERS:\n- router.ts exports a number")
+        yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export const a = () => {}\n" })
+        yield* llm.text("Repaired the export.")
+        yield* llm.text("VERDICT: PASS")
+        // The desktop app sends a thanks with the quick agent.
+        yield* send(prompt, chat.id, "thanks", { agent: "quick" })
+        const bodies = (yield* llm.inputs).slice(before).filter((body) => !isTitle(body))
+        expect(toolNames(bodies[0])).toEqual([])
+        expect(isJudge(bodies[1]!)).toBe(true)
+        // The judge checks the work's own report, not the quick lane's "You're welcome!".
+        expect(JSON.stringify(bodies[1]?.messages)).toContain("Migrated all 40 routes")
+        expect(JSON.stringify(bodies[1]?.messages)).not.toContain("You're welcome!")
+        // A FAIL is repaired on the build agent with the work's tools, then judged again.
+        expect(toolNames(bodies[2])).toEqual(expect.arrayContaining(["write", "task", "todowrite"]))
+        expect(bodies[2]?.reasoning_effort).toBe("high")
+        expect(bodies.filter(isJudge)).toHaveLength(2)
+        expect((yield* sessions.children(chat.id)).length).toBe(2)
+        // A quick-lane greeting afterwards has nothing to judge.
+        yield* llm.text("Hi!")
+        yield* send(prompt, chat.id, "hi", { agent: "quick" })
+        expect((yield* sessions.children(chat.id)).length).toBe(2)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "after a real question a no is answered inside the work, and the judge is told the user's answer",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        const chat = yield* sessions.create({ title: "Pinned" })
+        yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export {}\n" })
+        yield* llm.text("Migrated 20 of 40 routes to the new router. Should I convert them to the new loader API?")
+        yield* send(prompt, chat.id, "migrate the app to the new router across 40 files")
+        // Not judged while it waits on the answer.
+        expect((yield* sessions.children(chat.id)).length).toBe(0)
+        const before = (yield* llm.inputs).length
+        yield* llm.text("Understood: the routes keep the current loader API.")
+        yield* llm.text("VERDICT: PASS")
+        yield* send(prompt, chat.id, "no")
+        const bodies = (yield* llm.inputs).slice(before).filter((body) => !isTitle(body))
+        // The answer runs with the work's harness, since the work goes on without the loader API.
+        expect(toolNames(bodies[0])).toEqual(expect.arrayContaining(["task", "todowrite"]))
+        expect(isJudge(bodies[1]!)).toBe(true)
+        // The judge reads the question, the user's "no" and that declined work is out of scope, so it does not send
+        // the loader API back as a repair.
+        const brief = JSON.stringify(bodies[1]?.messages)
+        expect(brief).toContain("Should I convert them to the new loader API?")
+        expect(brief).toContain("<user>\\nno\\n</user>")
+        expect(brief).toContain("Work they declined, or that the agent only offered, is out of scope")
+        expect((yield* sessions.children(chat.id)).length).toBe(1)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a thorough plan that asked nothing is carried out at its size when the user says build it, and judged",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        for (const answer of ["build it", "implement the plan", "looks good, build it", "go with option b"]) {
+          const chat = yield* sessions.create({ title: "Pinned" })
+          yield* llm.text("Here is the plan in three phases: the renderer, the input layer, then the views.")
+          yield* send(prompt, chat.id, "plan how to port the TUI to Rust")
+          const before = (yield* llm.inputs).length
+          yield* llm.tool("write", { filePath: path.join(directory, "tui.rs"), content: "fn main() {}\n" })
+          yield* llm.text("Ported the renderer.")
+          yield* llm.text("VERDICT: PASS")
+          const result = yield* send(prompt, chat.id, answer)
+          const bodies = (yield* llm.inputs).slice(before).filter((body) => !isTitle(body))
+          expect(toolNames(bodies[0]), answer).toEqual(expect.arrayContaining(["task", "task_manage", "todowrite"]))
+          expect(bodies[0]?.reasoning_effort, answer).toBe("high")
+          expect(result.info.role === "assistant" && result.info.size, answer).toBe("thorough")
+          const judged = bodies.filter(isJudge)
+          expect(judged, answer).toHaveLength(1)
+          expect(JSON.stringify(judged[0]?.messages), answer).toContain("port the TUI to Rust")
+          expect((yield* sessions.children(chat.id)).length, answer).toBe(1)
+        }
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "building something new or deploying new infrastructure is standard, not light",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions } = yield* setup()
+        const asks = ["build this app with next.js", "build it in rust", "deploy a new microservice for billing"]
+        for (const text of asks) {
+          const chat = yield* sessions.create({ title: "Pinned" })
+          yield* llm.text("Done.")
+          const result = yield* send(prompt, chat.id, text)
+          expect(result.info.role === "assistant" && result.info.size, text).toBe("standard")
+        }
+        const bodies = (yield* llm.inputs).filter((body) => !isTitle(body))
+        expect(bodies).toHaveLength(asks.length)
+        for (const [index, body] of bodies.entries()) {
+          expect(toolNames(body), asks[index]).toEqual(expect.arrayContaining(["todowrite", "question", "escalate"]))
+          expect(body?.reasoning_effort, asks[index]).toBeUndefined()
+        }
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a thanks with a few more words and a question about Vector are one direct request",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions } = yield* setup()
+        const texts = ["thanks for the help", "what is vector?", "thanks, that worked!", "hello again", "who made vector?"]
+        for (const text of texts) {
+          const chat = yield* sessions.create({ title: "Pinned" })
+          yield* llm.text("Glad to help!")
+          yield* send(prompt, chat.id, text)
+        }
+        const bodies = yield* llm.inputs
+        expect(bodies).toHaveLength(texts.length)
+        for (const [index, body] of bodies.entries()) {
+          expect(toolNames(body), texts[index]).toEqual([])
+          expect(body?.reasoning_effort, texts[index]).toBe("none")
+          expect(conversation(body), texts[index]).toHaveLength(1)
+        }
       }),
     { git: true },
   )

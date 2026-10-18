@@ -88,12 +88,15 @@ export function size(input: Input): Request[] {
     // The request before is still open when its reply asked or offered something, or its run did not finish: then the
     // user's next message, short of a social one, is a reply inside that work.
     const open = previous ? waiting(previous) : false
+    // A reply that closed on an offer of more work ("Want me to also update the docs?"): a plain "no thanks" closes it.
+    const offer = previous ? TaskSize.offers(closingText(previous.messages)) : false
     const result = group.users.reduce<TaskSize.Result | undefined>(
       (current, user) => {
         const next = TaskSize.classify({
           ...describe(user),
           previous: current?.tier ?? prior?.tier ?? (compacted ? "standard" : undefined),
           open: current ? false : open,
+          offer: current ? false : offer,
           auto: input.auto,
         })
         if (!current) return next
@@ -208,9 +211,29 @@ export function judgeable(requests: readonly Request[], since: string) {
     ]),
   ]
   if (files.length === 0) return
-  // The judge reads everything the user asked for in that work, not only the request that qualified it.
-  const work = unit.filter((request) => request.tier !== "chat")
-  return { requests: work, files, tier: work.reduce<TaskSize.Tier>((top, request) => TaskSize.max(top, request.tier), "light") }
+  // The judge reads everything the user asked for in that work, not only the request that qualified it. A thanks that a
+  // FAIL raised to the work's size is still not something the user asked for.
+  const work = unit.filter((request) => request.result.tier !== "chat")
+  return {
+    requests: work,
+    files,
+    tier: unit.reduce<TaskSize.Tier>(
+      (top, request) => (request.tier === "chat" ? top : TaskSize.max(top, request.tier)),
+      "light",
+    ),
+    // What the work's own last change reported, not a later "You're welcome!".
+    report: closingText(
+      (unit.findLast((request) => changedFiles(request).length > 0) ?? work.at(-1) ?? unit.at(-1)!).messages,
+    ),
+    // Where the agent stopped to ask or offer something, and what the user answered: a "no" narrows the work's scope.
+    // A greeting in between answers nothing.
+    exchanges: unit.flatMap((request, index) => {
+      const asked = closingText(request.messages)
+      const answer = unit.slice(index + 1).find((next) => !UNANSWERING.has(next.result.reasons[0] ?? ""))
+      const reply = answer ? requestText(answer) : ""
+      return TaskSize.asks(asked) && reply ? [{ asked: asked.slice(-600), reply: reply.slice(0, 2000) }] : []
+    }),
+  }
 }
 
 /**
