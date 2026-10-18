@@ -20,6 +20,20 @@ test("no-training mode accepts an allowlisted free endpoint and never claims zer
   expect(JSON.stringify(info)).not.toMatch(/zero data retention|\bZDR\b|no retention|no prompt retention/i)
 })
 
+test("reasoning is optional only when OpenRouter says it is not mandatory and every endpoint takes the parameter", () => {
+  const info = (model: object, endpoints: object[] = [endpoint]) =>
+    freeModelInfo({ ...cohere, ...model }, endpoints, { noTraining: true })?.reasoning
+  expect(info({ reasoning: { mandatory: false } })).toBe("optional")
+  expect(info({ reasoning: { mandatory: true } })).toBe("mandatory")
+  // Unstated: the model keeps its own default.
+  expect(info({})).toBeUndefined()
+  const noReasoning = {
+    ...endpoint,
+    supported_parameters: endpoint.supported_parameters.filter((item: string) => item !== "reasoning"),
+  }
+  expect(info({ reasoning: { mandatory: false } }, [noReasoning])).toBeUndefined()
+})
+
 test("no-training mode applies the same model ID and endpoint checks as ZDR mode", () => {
   for (const change of [
     { model_id: "cohere/other:free" },

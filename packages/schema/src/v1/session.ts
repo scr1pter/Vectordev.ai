@@ -14,6 +14,7 @@ import { PermissionV1 } from "./permission"
 import { FreeModelLimitReason } from "../free-model"
 import { PublicSession } from "../public-session"
 import { RunBudget } from "../run-budget"
+import { TaskSize } from "../task-size"
 
 const Timestamp = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -372,6 +373,10 @@ export const User = Schema.Struct({
   system: Schema.optional(Schema.String),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
   executionMode: Schema.optional(Schema.Union([Schema.Literal("normal"), Schema.Literal("fast")])),
+  // What the sender asked for; Vector sizes each request itself when this is absent or "auto".
+  size: Schema.optional(TaskSize.Choice),
+  // When Vector runs LLM-as-a-judge after the run this message starts.
+  judge: Schema.optional(TaskSize.JudgeMode),
 }).annotate({ identifier: "UserMessage" })
 export type User = Types.DeepMutable<Schema.Schema.Type<typeof User>>
 
@@ -506,6 +511,8 @@ export const Assistant = Schema.Struct({
   }),
   structured: Schema.optional(Schema.Any),
   variant: Schema.optional(Schema.String),
+  // The size Vector gave the request this message answers, when it sized it.
+  size: Schema.optional(TaskSize.Tier),
   finish: Schema.optional(Schema.String),
   // Copied into this session by a fork. Its spend was counted in the original session, so it carries no cost and
   // usage totals skip it; its tokens stay so the context in use is still shown.

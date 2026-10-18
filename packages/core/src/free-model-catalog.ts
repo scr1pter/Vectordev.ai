@@ -24,6 +24,9 @@ export const FreeModelMetadata = Schema.Struct({
   supported_parameters: Schema.Array(Schema.String),
   expiration_date: Schema.optional(Schema.NullOr(Schema.String)),
   top_provider: Schema.optional(Schema.Struct({ max_completion_tokens: Schema.NullOr(Schema.Number) })),
+  reasoning: Schema.optional(
+    Schema.NullOr(Schema.Struct({ mandatory: Schema.optional(Schema.NullOr(Schema.Boolean)) })),
+  ),
 })
 
 export const FreeEndpointMetadata = Schema.Struct({
@@ -137,11 +140,22 @@ export function freeModelInfo(
     maxOutputTokens < 1
   )
     return
+  // Reasoning is switched off for a greeting only on OpenRouter's word that it may be: the model says reasoning is not
+  // mandatory, and every endpoint takes the parameter, since the request asks OpenRouter to route only to endpoints
+  // that support every parameter it sends.
+  const reasoning = !eligible.every((item) => item.endpoint.supported_parameters.includes("reasoning"))
+    ? undefined
+    : model.reasoning?.mandatory === true
+      ? ("mandatory" as const)
+      : model.reasoning?.mandatory === false
+        ? ("optional" as const)
+        : undefined
   return {
     id: model.id,
     name: model.name.replace(/\s*(?:\(free\)|:free)\s*$/i, ""),
     contextLength,
     maxOutputTokens,
+    ...(reasoning ? { reasoning } : {}),
     providers: eligible.map(({ endpoint, provider }) => ({
       // Preserve the endpoint tag when supplied; a bare slug still selects that provider.
       id: endpoint.tag,

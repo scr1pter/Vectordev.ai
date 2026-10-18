@@ -3,6 +3,7 @@ export * as ConfigV1 from "./config"
 import { Schema } from "effect"
 import { NonNegativeInt, PositiveInt, type DeepMutable } from "../../schema"
 import { RunBudget } from "@vectordevai/schema/run-budget"
+import { TaskSize } from "@vectordevai/schema/task-size"
 import { ConfigExperimental } from "../../config/experimental"
 import { ConfigReference } from "../../config/reference"
 import { ConfigAgentV1 } from "./agent"
@@ -186,6 +187,18 @@ export const Info = Schema.Struct({
   ).annotate({
     description: "Spend and runaway limits applied to every run in this project. A prompt's own budget overrides run.",
   }),
+  sizing: Schema.optional(
+    Schema.Struct({
+      auto: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Size each request from what it says, so a greeting gets a direct reply and only large work gets subagents (default: true). false gives every request the full harness.",
+      }),
+      judge: Schema.optional(TaskSize.JudgeMode).annotate({
+        description:
+          "When Vector runs LLM-as-a-judge after a run that changed files: off, thorough (large tasks only) or changes (every task that changed files). Default: off. A prompt's own judge setting overrides it.",
+      }),
+    }),
+  ).annotate({ description: "Task sizing: how much harness, reasoning and verification each request gets." }),
   experimental: Schema.optional(
     Schema.Struct({
       disable_paste_summary: Schema.optional(Schema.Boolean),

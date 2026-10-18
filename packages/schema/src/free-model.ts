@@ -6,6 +6,10 @@ export const FreeModelInfo = Schema.Struct({
   contextLength: Schema.Number,
   maxOutputTokens: Schema.Number,
   providers: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, retention: Schema.String })),
+  // Whether the model reasons, from OpenRouter's supported parameters: "optional" means Vector may switch reasoning off
+  // for a greeting or a light job. Absent when the model takes no reasoning parameter, or on a catalog published
+  // before this field existed; such a model keeps its own default.
+  reasoning: Schema.optional(Schema.Literals(["optional", "mandatory"])),
 })
 export type FreeModelInfo = typeof FreeModelInfo.Type
 
@@ -65,6 +69,7 @@ export const FREE_MODEL_FALLBACKS: readonly FreeModelInfo[] = [
     contextLength: 256000,
     maxOutputTokens: 64000,
     providers: [{ id: "cohere", name: "Cohere", retention: NO_TRAINING_RETENTION }],
+    reasoning: "optional",
   },
   {
     // OpenRouter lists this free preview until 31 December 2026.
