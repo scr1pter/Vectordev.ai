@@ -316,8 +316,12 @@ export async function resolveRoute(input: {
   forKey: (key: string) => Promise<FreeModelInfo[]>
   credential: (provider: "vector" | "openrouter") => Promise<string | undefined>
   trainingConsent: () => Promise<boolean>
+  /** Whether an invited guest has worked in the requesting session (FreeModelGuests), whoever sends this request. */
+  guest: () => Promise<boolean>
 }) {
-  const trainingConsent = await input.trainingConsent()
+  // The owner's acceptance never carries a guest's input: such a session gets no-training models only.
+  const guest = await input.guest()
+  const trainingConsent = !guest && (await input.trainingConsent())
   const ownKey = await input.credential("openrouter")
   if (ownKey) {
     const models = await input.forKey(ownKey)
@@ -337,6 +341,7 @@ export async function resolveRoute(input: {
       models,
       source: "openrouter" as const,
       trainingConsent,
+      guest,
       headers: {},
     }
   }
@@ -352,6 +357,7 @@ export async function resolveRoute(input: {
     models: catalog.models,
     source: "shared" as const,
     trainingConsent,
+    guest,
     // The shared allowance serves a may-train model only to a client that discloses it, after the user accepted.
     headers: {
       [FREE_MODELS_DISCLOSURE_HEADER]: FREE_MODELS_DISCLOSURE,

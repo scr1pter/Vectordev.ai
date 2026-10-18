@@ -1,0 +1,107 @@
+export * as FreeModelGuests from "./free-model-guests"
+
+import { randomUUID } from "node:crypto"
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
+import path from "node:path"
+import { eq } from "drizzle-orm"
+import { Context, Effect, Layer, Option, Schema, Semaphore } from "effect"
+import { SessionID } from "@vectordevai/schema/session-id"
+import { Database } from "./database/database"
+import { makeGlobalNode } from "./effect/app-node"
+import { SessionTable } from "./session/sql"
+
+/**
+ * The session trees an invited guest has acted in. Only the workspace owner can accept the "May train on your prompts"
+ * notice, and whatever a guest adds to a session is sent again with every later request in it, the owner's included.
+ * So a free-model request for any session of such a tree never uses that acceptance: FreeModels.resolveRoute reads
+ * `marked` for every free-model request, and a model that may train, or one Vector has not reviewed, is refused there
+ * before anything is sent. A mark covers the whole tree, from its root: a subagent's result flows into its parent, and
+ * a parent's history into the subagents it starts.
+ */
+export interface Interface {
+  readonly mark: (sessionID: SessionID) => Effect.Effect<void>
+  readonly marked: (sessionID: SessionID | undefined) => Effect.Effect<boolean>
+}
+
+export class Service extends Context.Service<Service, Interface>()("@vector/FreeModelGuests") {}
+
+const Marks = Schema.fromJsonString(Schema.Struct({ version: Schema.Literal(1), sessions: Schema.Array(SessionID) }))
+
+// Deeper than any subagent chain the engine starts; a longer one is treated as ending there.
+const MAX_DEPTH = 64
+
+/** Marks are kept in memory and, beside an on-disk database, in `file`, so a restart does not forget a guest. */
+export const layerFor = (file: string | undefined) =>
+  Layer.effect(
+    Service,
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const memory = new Set<SessionID>()
+      const lock = Semaphore.makeUnsafe(1)
+      // Read on every check, never cached: another engine on the same database, such as the terminal's beside the
+      // desktop app's, may have marked a session since. A missing or unreadable file marks nothing.
+      const saved = Effect.promise(async () => {
+        const text = file ? await readFile(file, "utf8").catch(() => undefined) : undefined
+        const marks = text === undefined ? Option.none() : Schema.decodeUnknownOption(Marks)(text)
+        return new Set(Option.isSome(marks) ? marks.value.sessions : [])
+      })
+      // The session and its ancestors, nearest first. A session not saved yet is its own root.
+      const lineage = Effect.fnUntraced(function* (sessionID: SessionID) {
+        const chain = [sessionID]
+        while (chain.length < MAX_DEPTH) {
+          const row = yield* db
+            .select({ parentID: SessionTable.parent_id })
+            .from(SessionTable)
+            .where(eq(SessionTable.id, chain[chain.length - 1]))
+            .get()
+            .pipe(Effect.orDie)
+          if (!row?.parentID || chain.includes(row.parentID)) return chain
+          chain.push(row.parentID)
+        }
+        return chain
+      })
+      return Service.of({
+        mark: Effect.fn("FreeModelGuests.mark")(function* (sessionID) {
+          const chain = yield* lineage(sessionID)
+          const root = chain[chain.length - 1]
+          memory.add(root)
+          if (!file) return
+          yield* lock.withPermit(
+            Effect.gen(function* () {
+              const current = yield* saved
+              if (current.has(root)) return
+              const temporary = `${file}.${randomUUID()}.tmp`
+              // A file that cannot be written leaves the mark in memory, which still holds until a restart.
+              yield* Effect.promise(() =>
+                mkdir(path.dirname(file), { recursive: true })
+                  .then(() =>
+                    writeFile(temporary, JSON.stringify({ version: 1, sessions: [...current, root] }), { mode: 0o600 }),
+                  )
+                  .then(() => rename(temporary, file))
+                  .catch(() => undefined),
+              )
+            }),
+          )
+        }),
+        marked: Effect.fn("FreeModelGuests.marked")(function* (sessionID) {
+          if (!sessionID) return false
+          const chain = yield* lineage(sessionID)
+          if (chain.some((id) => memory.has(id))) return true
+          const current = yield* saved
+          return chain.some((id) => current.has(id))
+        }),
+      })
+    }),
+  )
+
+// Beside the database that holds the sessions the marks name, so engines that share sessions share the marks too.
+function marksFile() {
+  const database = Database.path()
+  return database === ":memory:" ? undefined : path.join(path.dirname(database), "free-model-guest-sessions.json")
+}
+
+export const node = makeGlobalNode({
+  service: Service,
+  layer: Layer.suspend(() => layerFor(marksFile())),
+  deps: [Database.node],
+})

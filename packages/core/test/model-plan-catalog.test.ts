@@ -2,6 +2,7 @@ import { expect } from "bun:test"
 import { DateTime, Deferred, Effect, Exit, Stream } from "effect"
 import { Catalog } from "../src/catalog"
 import { FreeModels } from "../src/free-models"
+import { FreeModelGuests } from "../src/free-model-guests"
 import { ModelPlans } from "../src/model-plans"
 import { PluginV2 } from "../src/plugin"
 import { PluginHost } from "../src/plugin/host"
@@ -18,6 +19,8 @@ import { testEffect } from "./lib/effect"
 import { PluginTestLayer } from "./plugin/fixture"
 
 const it = testEffect(PluginTestLayer)
+// No invited guest has worked in these sessions.
+const noGuests = FreeModelGuests.Service.of({ mark: () => Effect.void, marked: () => Effect.succeed(false) })
 
 for (const enabled of [true, false])
   it.effect(`managed catalog replaces configuration overrides when enabled=${enabled}`, () =>
@@ -104,6 +107,7 @@ for (const shared of [true, false])
         return yield* resolver.resolve(session)
       }).pipe(
         Effect.provide(SessionRunnerModel.locationLayer),
+        Effect.provideService(FreeModelGuests.Service, noGuests),
         Effect.provideService(ModelPlans.Service, plans),
         Effect.provideService(FreeModels.Service, freeModels),
         Effect.provideService(FreeModels.CredentialsService, credentials),

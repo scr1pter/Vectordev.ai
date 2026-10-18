@@ -5,6 +5,8 @@ import {
 } from "@vectordevai/core/plugin/oauth-approval"
 import { ProviderSDK } from "@vectordevai/core/provider-sdk"
 import { FreeModels } from "@vectordevai/core/free-models"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { SessionID } from "@vectordevai/schema/session-id"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
 import { FreeDataPolicy, isFreeModel, type FreeModelCatalog, type FreeModelInfo } from "@vectordevai/schema/free-model"
@@ -42,7 +44,7 @@ import { iife } from "@/util/iife"
 import { Global } from "@vectordevai/core/global"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context, Schema, Stream, Types } from "effect"
+import { Effect, Layer, Context, Option, Schema, Stream, Types } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
@@ -1518,6 +1520,7 @@ const layer = Layer.effect(
     const freeModels = yield* FreeModels.Service
     const modelPlans = yield* ModelPlans.Service
     const freeCredentials = yield* FreeModels.CredentialsService
+    const guests = yield* FreeModelGuests.Service
     const events = yield* EventV2Bridge.Service
     const runtimeBridge = yield* EffectBridge.make()
     const planID = ProviderV2.ID.make(ModelPlans.PROVIDER_ID)
@@ -2052,6 +2055,10 @@ const layer = Layer.effect(
             apiKey: "vector-request-credential",
             fetch: Object.assign(
               async (_input: RequestInfo | URL, init?: RequestInit) => {
+                // Every session request names its session (LLMRequestPrep), and so does every model call a guest can
+                // cause: prompts, compaction, titles, summaries, subagents and retries all run inside one. A request
+                // with none, such as generating an agent from the terminal, is the owner's own.
+                const sessionID = Schema.decodeUnknownOption(SessionID)(new Headers(init?.headers).get("x-session-id"))
                 const route = await FreeModels.resolveRoute({
                   provider: model.providerID === "vector" ? "vector" : "openrouter",
                   modelID: model.id,
@@ -2059,12 +2066,14 @@ const layer = Layer.effect(
                   forKey: (key) => runtimeBridge.promise(freeModels.forKey(key)),
                   credential: (provider) => runtimeBridge.promise(freeCredentials.get(provider)),
                   trainingConsent: () => runtimeBridge.promise(freeModels.trainingConsent()),
+                  guest: () => runtimeBridge.promise(guests.marked(Option.getOrUndefined(sessionID))),
                 })
                 const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
                 // Built before the request: a may-train model without the user's acceptance throws, and nothing is sent.
                 const payload = serializeFreeModelRequest(
                   freeModelRequest({ ...body, model: model.id }, route.models, {
                     trainingConsent: route.trainingConsent,
+                    guest: route.guest,
                   }),
                   route.url === FreeModels.SHARED_CHAT_URL,
                 )
@@ -2557,6 +2566,7 @@ export const node = LayerNode.make({
     FreeModels.node,
     ModelPlans.node,
     FreeModels.credentialsNode,
+    FreeModelGuests.node,
     EventV2Bridge.node,
   ],
 })

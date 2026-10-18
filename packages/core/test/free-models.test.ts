@@ -247,6 +247,7 @@ test("an expired catalog last seen ON is served stale while a slow refresh conti
     forKey: async () => [],
     credential: async (provider) => (provider === "vector" ? "vct_placeholder" : undefined),
     trainingConsent: async () => false,
+    guest: async () => false,
   })
   expect(route.source).toBe("shared")
   expect(route.models.map((model) => model.id)).toEqual(["acme/real:free"])
@@ -303,6 +304,7 @@ test("saved shared selection prefers own key and never silently consumes shared 
     forKey: async () => enabled.models,
     credential: async (provider: string) => (provider === "openrouter" ? "own-key" : "vct_shared"),
     trainingConsent: async () => false,
+    guest: async () => false,
   }
   expect(await FreeModels.resolveRoute(route)).toMatchObject({ url: FreeModels.OPENROUTER_CHAT_URL, key: "own-key" })
   await expect(FreeModels.resolveRoute({ ...route, forKey: async () => [] })).rejects.toThrow("privacy settings")
@@ -332,6 +334,7 @@ test("shared requests carry the disclosure always and the acceptance only once g
     catalog: async () => enabled,
     forKey: async () => enabled.models,
     credential: async (provider: string) => (provider === "vector" ? "vct_shared" : undefined),
+    guest: async () => false,
   }
   expect((await FreeModels.resolveRoute({ ...route, trainingConsent: async () => false })).headers).toEqual({
     "x-vector-free-model-disclosure": FREE_MODELS_DISCLOSURE,
@@ -351,6 +354,28 @@ test("shared requests carry the disclosure always and the acceptance only once g
   expect(personal).toMatchObject({ source: "openrouter", trainingConsent: true, headers: {} })
 })
 
+test("a session an invited guest has worked in never carries the owner's acceptance, on either route", async () => {
+  const route = {
+    provider: "vector" as const,
+    modelID: enabled.models[0].id,
+    catalog: async () => enabled,
+    forKey: async () => enabled.models,
+    trainingConsent: async () => true,
+    guest: async () => true,
+  }
+  const shared = await FreeModels.resolveRoute({
+    ...route,
+    credential: async (provider) => (provider === "vector" ? "vct_shared" : undefined),
+  })
+  expect(shared).toMatchObject({ source: "shared", trainingConsent: false, guest: true })
+  expect(shared.headers).toEqual({ "x-vector-free-model-disclosure": FREE_MODELS_DISCLOSURE })
+  expect(await FreeModels.resolveRoute({ ...route, credential: async () => "own-key" })).toMatchObject({
+    source: "openrouter",
+    trainingConsent: false,
+    guest: true,
+  })
+})
+
 test("a may-train model hidden by the user's OpenRouter privacy settings says which setting to change", async () => {
   const laguna = {
     id: "poolside/laguna-s-2.1:free",
@@ -366,6 +391,7 @@ test("a may-train model hidden by the user's OpenRouter privacy settings says wh
     forKey: async () => enabled.models,
     credential: async () => "own-key",
     trainingConsent: async () => true,
+    guest: async () => false,
   }
   await expect(FreeModels.resolveRoute(route)).rejects.toThrow(FREE_MODEL_TRAINING_BLOCKED)
   expect(FREE_MODEL_TRAINING_BLOCKED).toContain("openrouter.ai/settings/privacy")

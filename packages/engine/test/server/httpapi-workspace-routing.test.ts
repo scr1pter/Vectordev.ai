@@ -19,6 +19,7 @@ import { registerAdapter } from "../../src/control-plane/adapters"
 import { WorkspaceV2 } from "@vectordevai/core/workspace"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { PtyTicket } from "@vectordevai/core/pty/ticket"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import type { WorkspaceAdapter } from "../../src/control-plane/types"
 import { Workspace } from "../../src/control-plane/workspace"
 import { WorkspaceTable } from "@vectordevai/core/control-plane/workspace.sql"
@@ -60,6 +61,7 @@ const it = testEffect(
     NodeServices.layer,
     workspaceLayer,
     LayerNode.compile(PtyTicket.node),
+    LayerNode.compile(FreeModelGuests.node),
     Socket.layerWebSocketConstructorGlobal,
   ),
 )

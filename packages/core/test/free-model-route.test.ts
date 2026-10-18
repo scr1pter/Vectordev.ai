@@ -11,6 +11,8 @@ import { ProviderV2 } from "../src/provider"
 import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
 
 const catalog = { enabled: true, updatedAt: 1, models: [...FREE_MODEL_FALLBACKS.slice(0, 2)] }
+// No invited guest has worked in the sessions these routes serve.
+const ownerSession = Effect.succeed(false)
 const client = FreeModels.Service.of({
   catalog: () => Effect.succeed(catalog),
   forKey: () => Effect.succeed(catalog.models),
@@ -36,7 +38,7 @@ test("native free route fixes destination and body after all caller overlays, re
   const credentials = FreeModels.CredentialsService.of({
     get: (provider) => Effect.succeed(provider === "openrouter" ? keys.shift() : "vct_shared"),
   })
-  const model = freeModelRoute(info, client, credentials)
+  const model = freeModelRoute(info, client, credentials, ownerSession)
   for (const key of ["first-owned-key", "second-owned-key"]) {
     const request = LLM.request({
       model,
@@ -73,6 +75,7 @@ test("native shared route uses Vector token only on fixed Vector endpoint and re
     FreeModels.CredentialsService.of({
       get: (provider) => Effect.succeed(provider === "vector" ? "vct_shared" : undefined),
     }),
+    ownerSession,
   )
   const request = LLM.request({ model, prompt: "hello" })
   const body = { model: model.id, messages: [{ role: "user", content: "hello" }] }
@@ -111,6 +114,7 @@ test("native free-model requests reject redirects before forwarding conversation
       FreeModels.CredentialsService.of({
         get: (provider) => Effect.succeed(provider === "vector" ? "vct_synthetic" : undefined),
       }),
+      ownerSession,
     )
     const result = await Effect.runPromise(
       LLMClient.stream(LLM.request({ model, prompt: "private conversation fixture" })).pipe(
@@ -145,6 +149,7 @@ test("native shared requests reject oversized UTF-8 context before contacting th
     FreeModels.CredentialsService.of({
       get: (provider) => Effect.succeed(provider === "vector" ? "vct_synthetic" : undefined),
     }),
+    ownerSession,
   )
   const result = await Effect.runPromise(
     LLMClient.stream(LLM.request({ model, prompt: "é".repeat(2_250_000) })).pipe(
@@ -184,6 +189,7 @@ test("a saved shared selection routed to the own key is not subject to the Vecto
     FreeModels.CredentialsService.of({
       get: (provider) => Effect.succeed(provider === "openrouter" ? "own-synthetic" : "vct_synthetic"),
     }),
+    ownerSession,
   )
   const result = await Effect.runPromise(
     LLMClient.stream(LLM.request({ model, prompt: "é".repeat(2_250_000) })).pipe(
@@ -217,6 +223,7 @@ test("the run guard counts a free-route step as free, whatever the model's ID sa
       ModelV2.Info.make({ ...info, id: ModelV2.ID.make("example/coder"), freeModel: { source: "openrouter" } }),
       client,
       credentials,
+      ownerSession,
     ),
   )
   const tokens = { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } }
@@ -251,6 +258,7 @@ test("native route sends nothing to a may-train model before acceptance, then al
     FreeModels.CredentialsService.of({
       get: (provider) => Effect.succeed(provider === "vector" ? "vct_shared" : undefined),
     }),
+    ownerSession,
   )
   const body = { model: model.id, messages: [{ role: "user", content: "hello" }] }
   const request = LLM.request({ model, prompt: "hello" })

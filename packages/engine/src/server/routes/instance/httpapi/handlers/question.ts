@@ -2,6 +2,7 @@ import { Question } from "@/question"
 import { QuestionID } from "@/question/schema"
 import { Session } from "@/session/session"
 import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
@@ -12,6 +13,7 @@ export const questionHandlers = HttpApiBuilder.group(InstanceHttpApi, "question"
   Effect.gen(function* () {
     const svc = yield* Question.Service
     const session = yield* Session.Service
+    const guests = yield* FreeModelGuests.Service
 
     const list = Effect.fn("QuestionHttpApi.list")(function* () {
       const principal = yield* RequestPrincipal
@@ -24,7 +26,10 @@ export const questionHandlers = HttpApiBuilder.group(InstanceHttpApi, "question"
       const principal = yield* RequestPrincipal
       if (principal.kind === "owner") return
       const request = (yield* svc.list()).find((item) => item.id === requestID)
-      if (request && (yield* allowsSessionID(session, principal, request.sessionID))) return
+      // A guest's answer goes to the session's model as a tool result, so it keeps that session's free-model
+      // requests off models that may train (FreeModelGuests), as a guest's prompt does.
+      if (request && (yield* allowsSessionID(session, principal, request.sessionID)))
+        return yield* guests.mark(request.sessionID)
       return yield* new QuestionNotFoundError({
         requestID: String(requestID),
         message: `Question request not found: ${requestID}`,

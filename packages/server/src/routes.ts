@@ -11,6 +11,7 @@ import { SessionExecution } from "@vectordevai/core/session/execution"
 import { LocationServiceMap } from "@vectordevai/core/location-service-map"
 import { SessionExecutionLocal } from "@vectordevai/core/session/execution/local"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { ToolOutputStore } from "@vectordevai/core/tool-output-store"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -37,6 +38,7 @@ const applicationServices = LayerNode.group([
   PtyEnvironment.node,
   LocationServiceMap.node,
   SpendGuard.node,
+  FreeModelGuests.node,
 ])
 
 export function createRoutes(password?: string, options?: { readonly guardedHostname?: string }) {

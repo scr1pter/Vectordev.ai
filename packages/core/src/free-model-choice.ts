@@ -29,6 +29,11 @@ export const FREE_MODEL_TRAINING_CONSENT_REQUIRED = `${FREE_MODEL_TRAINING_DISCL
  * models are left out of a guest's lists, and a guest's prompt to one is refused before it is saved.
  */
 export const FREE_MODEL_TRAINING_OWNER_ONLY = `Only the workspace owner can use free models labelled "${FREE_MODEL_TRAINING_LABEL}" here, since only they can accept that notice. Choose another model.`
+/**
+ * Sent as the error when a request for a session an invited guest has worked in would go to such a model, whoever sent
+ * it: the guest's input is part of what every later request in that session sends.
+ */
+export const FREE_MODEL_TRAINING_GUEST_SESSION = `An invited guest has worked in this session, and only the workspace owner can accept the "${FREE_MODEL_TRAINING_LABEL}" notice, so Vector doesn't send this session to free models with that label. Nothing was sent. Choose another model.`
 /** OpenRouter has separate privacy settings for free and paid models; the free one decides whether these route at all. */
 export const FREE_MODEL_TRAINING_BLOCKED =
   'Your OpenRouter privacy settings block free models whose providers may train on prompts. To use this one, open openrouter.ai/settings/privacy, allow free models from providers that may train on your data, then send again. Or choose a model without the "May train on your prompts" label.'

@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test"
 import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
-import { FreeModelTrainingConsentError, freeModelRequest, serializeFreeModelRequest } from "../src/free-model-request"
-import { FREE_MODEL_TRAINING_CONSENT_REQUIRED } from "../src/free-model-choice"
+import {
+  FreeModelGuestSessionError,
+  FreeModelTrainingConsentError,
+  freeModelRequest,
+  serializeFreeModelRequest,
+} from "../src/free-model-request"
+import { FREE_MODEL_TRAINING_CONSENT_REQUIRED, FREE_MODEL_TRAINING_GUEST_SESSION } from "../src/free-model-choice"
 
 test("disables account-default plugins and preserves the safeguards through shared proxy normalization", () => {
   const request = freeModelRequest(
@@ -178,6 +183,21 @@ test("data collection is allowed only for an accepted, reviewed may-train model;
     freeModelRequest({ ...client, provider: { ...client.provider, data_collection: "allow" } }, all, accepted).provider
       .data_collection,
   ).toBe("deny")
+})
+
+test("a session an invited guest worked in reaches only no-training models, even with the owner's acceptance", () => {
+  for (const model of [mayTrain, inkling, unreviewed])
+    expect(() => freeModelRequest(hello(model.id), all, { trainingConsent: true, guest: true })).toThrow(
+      FreeModelGuestSessionError,
+    )
+  expect(FREE_MODEL_TRAINING_GUEST_SESSION).toContain("Nothing was sent")
+  // A no-training choice still goes out, with "deny" and only no-training fallbacks.
+  expect(
+    freeModelRequest(hello(FREE_MODEL_FALLBACKS[0].id), all, { trainingConsent: true, guest: true }),
+  ).toMatchObject({
+    models: FREE_MODEL_FALLBACKS.slice(0, 3).map((model) => model.id),
+    provider: { data_collection: "deny" },
+  })
 })
 
 test("a fallback never weakens the chosen model's data policy", () => {

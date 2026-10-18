@@ -20,6 +20,8 @@ import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
 import { ModelV2 } from "@vectordevai/core/model"
+import { Provider } from "@/provider/provider"
+import { freeModelMayTrain, FREE_MODEL_TRAINING_OWNER_ONLY } from "@vectordevai/core/free-model-choice"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { NamedError } from "@vectordevai/core/util/error"
 import { Cause, Effect, Option, Schema, Scope } from "effect"
@@ -71,6 +73,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const todoSvc = yield* Todo.Service
     const summary = yield* SessionSummary.Service
     const events = yield* EventV2Bridge.Service
+    const provider = yield* Provider.Service
     const scope = yield* Scope.Scope
 
     const list = Effect.fn("SessionHttpApi.list")(function* (ctx: { query: typeof ListQuery.Type }) {
@@ -355,6 +358,21 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof SummarizePayload.Type
     }) {
       yield* revertSvc.cleanup(yield* requireSession(ctx.params.sessionID))
+      // Compaction sends the whole history to the model it names, so a guest may not name one that may train: the
+      // owner's acceptance is not the guest's. The request itself would be refused where it is sent (FreeModelGuests);
+      // this refuses it before a compaction is recorded.
+      if ((yield* RequestPrincipal).kind !== "owner") {
+        const chosen = yield* provider
+          .getModel(ctx.payload.providerID, ctx.payload.modelID)
+          .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
+        if (chosen && freeModelMayTrain(chosen)) {
+          yield* events.publish(Session.Event.Error, {
+            sessionID: ctx.params.sessionID,
+            error: new NamedError.Unknown({ message: FREE_MODEL_TRAINING_OWNER_ONLY }).toObject(),
+          })
+          return yield* new HttpApiError.BadRequest({})
+        }
+      }
       const messages = yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
       const defaultAgent = yield* agentSvc.defaultAgent()
       const currentAgent = messages.findLast((message) => message.info.role === "user")?.info.agent ?? defaultAgent

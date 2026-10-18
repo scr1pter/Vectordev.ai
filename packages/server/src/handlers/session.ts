@@ -7,6 +7,7 @@ import { freeModelDataPolicy } from "@vectordevai/core/free-model-catalog"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { Location } from "@vectordevai/core/location"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { SessionRunnerModel } from "@vectordevai/core/session/runner/model"
 import { DateTime, Effect, Option, Stream } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { Api } from "../api"
@@ -224,6 +225,9 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.switchModel",
         Effect.fn(function* (ctx) {
+          // Every request in a session a guest has worked in is kept off models that may train (FreeModelGuests), so a
+          // guest's switch to one is refused here, where it can be explained.
+          if ((yield* RequestPrincipal).kind !== "owner") yield* refuseTrainingFreeModel(ctx.payload.model)
           yield* session.switchModel({ sessionID: ctx.params.sessionID, model: ctx.payload.model }).pipe(
             Effect.catchTag("Session.NotFoundError", (error) =>
               Effect.fail(
@@ -272,13 +276,16 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         Effect.fn(function* (ctx) {
           // A guest never accepted the free-model training notice, so the owner's acceptance must not carry a guest's
           // prompt to a model that may train. The prompt runs on the session's model, or the default without one.
+          // The model is judged as the runner chooses it, so a session without one is judged by its automatic choice.
           if ((yield* RequestPrincipal).kind !== "owner") {
             const current = yield* session.get(ctx.params.sessionID).pipe(Effect.option)
-            yield* refuseTrainingFreeModel(
-              Option.isSome(current) && current.value.model
-                ? current.value.model
-                : yield* (yield* Catalog.Service).model.default().pipe(Effect.orElseSucceed(() => undefined)),
-            )
+            const catalog = yield* Catalog.Service
+            if (Option.isSome(current))
+              yield* refuseTrainingFreeModel(
+                yield* SessionRunnerModel.select(catalog, current.value).pipe(
+                  Effect.orElseSucceed(() => current.value.model),
+                ),
+              )
           }
           // The budget is armed in memory before admission, so the drain that promotes this input runs under it. A guest's
           // budget can only tighten the limits the owner's run has.

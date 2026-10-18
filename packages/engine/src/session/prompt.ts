@@ -793,12 +793,20 @@ const layer = Layer.effect(
 
       const model = input.model ?? (yield* currentModel(input.sessionID, ag.model))
       // Before anything is saved: a sender who cannot accept the training notice, such as an invited guest, must not
-      // reach a may-train free model through the owner's acceptance, whether chosen or kept from the session.
+      // reach a may-train free model through the owner's acceptance, whether chosen, kept from the session or named by a
+      // subtask part, which runs a subagent on its own model. Every later request in the session is refused such a
+      // model too, where it is sent (FreeModelGuests); this refuses the prompt itself before it is saved.
       if (options?.refuseTrainingFreeModels) {
-        const chosen = yield* provider
-          .getModel(model.providerID, model.modelID)
-          .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
-        if (chosen && freeModelMayTrain(chosen)) {
+        const named = [
+          model,
+          ...input.parts.flatMap((part) => (part.type === "subtask" && part.model ? [part.model] : [])),
+        ]
+        const chosen = yield* Effect.forEach(named, (item) =>
+          provider
+            .getModel(item.providerID, item.modelID)
+            .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined))),
+        )
+        if (chosen.some((item) => item && freeModelMayTrain(item))) {
           const error = new NamedError.Unknown({ message: FREE_MODEL_TRAINING_OWNER_ONLY })
           yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
           throw error

@@ -5,6 +5,7 @@ import { Catalog } from "@vectordevai/core/catalog"
 import { Config } from "@vectordevai/core/config"
 import { ConfigProviderPlugin } from "@vectordevai/core/config/plugin/provider"
 import { FreeModels } from "@vectordevai/core/free-models"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { ModelV2 } from "@vectordevai/core/model"
 import { PluginV2 } from "@vectordevai/core/plugin"
@@ -20,6 +21,8 @@ import { testEffect } from "./lib/effect"
 import { PluginTestLayer } from "./plugin/fixture"
 
 const it = testEffect(PluginTestLayer)
+// No invited guest has worked in these sessions.
+const noGuests = FreeModelGuests.Service.of({ mark: () => Effect.void, marked: () => Effect.succeed(false) })
 const approved = FREE_MODEL_FALLBACKS[0]
 const freeModels = FreeModels.Service.of({
   catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
@@ -117,6 +120,7 @@ for (const scenario of [
         return yield* resolver.resolve(session)
       }).pipe(
         Effect.provide(SessionRunnerModel.locationLayer),
+        Effect.provideService(FreeModelGuests.Service, noGuests),
         Effect.provideService(
           ModelPlans.Service,
           ModelPlans.Service.of({
@@ -161,3 +165,67 @@ for (const scenario of [
     }),
   )
 }
+
+const laguna = {
+  id: "poolside/laguna-s-2.1:free",
+  name: "Poolside: Laguna S 2.1",
+  contextLength: 262144,
+  maxOutputTokens: 32768,
+  providers: [{ id: "poolside/fp4", name: "Poolside", retention: "", dataPolicy: "may-train" as const }],
+}
+
+for (const shared of [[laguna], [laguna, approved]])
+  it.effect(
+    `a session whose default cannot run is never given a may-train free model automatically (${shared.length} listed)`,
+    () =>
+      Effect.gen(function* () {
+        const catalog = yield* Catalog.Service
+        const host = yield* PluginHost.make(yield* PluginV2.Service)
+        yield* VectorPlugin.effect(host).pipe(
+          Effect.provideService(
+            FreeModels.Service,
+            FreeModels.Service.of({
+              ...freeModels,
+              catalog: () => Effect.succeed({ enabled: true, updatedAt: 0, models: shared }),
+            }),
+          ),
+          Effect.provideService(FreeModels.CredentialsService, {
+            get: (provider) => Effect.succeed(provider === "vector" ? "vct_signed-in.token" : undefined),
+          }),
+        )
+        // The configured default uses an API the runner cannot call, so the runner chooses for the session.
+        yield* ConfigProviderPlugin.Plugin.effect(host).pipe(
+          Effect.provideService(Config.Service, {
+            entries: () =>
+              Effect.succeed([
+                new Config.Document({
+                  type: "document",
+                  info: Schema.decodeUnknownSync(Config.Info)({
+                    model: "acme/unsupported",
+                    providers: {
+                      acme: {
+                        options: { apiKey: "synthetic-key" },
+                        models: {
+                          unsupported: {
+                            api: { type: "aisdk", package: "@ai-sdk/google", url: "https://acme.invalid" },
+                          },
+                        },
+                      },
+                    },
+                  }),
+                }),
+              ]),
+          }),
+        )
+        const session = { id: SessionV2.ID.make("ses_automatic_free_choice"), model: undefined }
+        const chosen = yield* SessionRunnerModel.select(catalog, session).pipe(Effect.result)
+        if (shared.length === 1) {
+          expect(chosen).toMatchObject({
+            _tag: "Failure",
+            failure: { _tag: "SessionRunnerModel.ModelNotSelectedError" },
+          })
+          return
+        }
+        expect(chosen).toMatchObject({ _tag: "Success", success: { id: approved.id } })
+      }),
+  )

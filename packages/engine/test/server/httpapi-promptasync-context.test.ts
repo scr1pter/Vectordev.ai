@@ -23,6 +23,7 @@ import { Project } from "../../src/project/project"
 import { Session } from "../../src/session/session"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { PtyTicket } from "@vectordevai/core/pty/ticket"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import {
   InstanceContextMiddleware,
   instanceContextLayer,
@@ -58,6 +59,7 @@ const it = testEffect(
     NodeServices.layer,
     workspaceLayer,
     LayerNode.compile(PtyTicket.node),
+    LayerNode.compile(FreeModelGuests.node),
   ),
 )
 

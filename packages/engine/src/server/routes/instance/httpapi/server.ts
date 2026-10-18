@@ -59,6 +59,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { EventV2 } from "@vectordevai/core/event"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { Npm } from "@vectordevai/core/npm"
 import { PermissionSaved } from "@vectordevai/core/permission/saved"
@@ -234,6 +235,7 @@ const app = LayerNode.group([
   Plugin.node,
   ModelCatalog.node,
   FreeModels.node,
+  FreeModelGuests.node,
   Provider.node,
   ProviderAuth.node,
   Agent.node,

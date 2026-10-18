@@ -9,6 +9,8 @@ import { Auth, type AnyRoute } from "@vectordevai/llm/route"
 import { Context, Effect, Layer, Schema } from "effect"
 import { produce } from "immer"
 import { FreeModels } from "../../free-models"
+import { FreeModelGuests } from "../../free-model-guests"
+import { freeModelMayTrain } from "../../free-model-choice"
 import { ModelPlans } from "../../model-plans"
 import { freeModelRoute } from "./free-model-route"
 import { modelPlanRoute } from "./model-plan-route"
@@ -350,43 +352,16 @@ export const locationLayer = Layer.effect(
     const freeModels = yield* FreeModels.Service
     const modelPlans = yield* ModelPlans.Service
     const freeCredentials = yield* FreeModels.CredentialsService
+    const guests = yield* FreeModelGuests.Service
     return Service.of({
       resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
-        // Location plugins populate and filter the catalog asynchronously during layer startup.
-        const defaultModel = session.model
-          ? undefined
-          : yield* catalog.model
-              .default()
-              .pipe(
-                Effect.mapError((error) =>
-                  error._tag === "Catalog.DefaultModelUnavailableError"
-                    ? new ModelUnavailableError({ providerID: error.providerID, modelID: error.modelID })
-                    : new ModelNotSelectedError({ sessionID: session.id }),
-                ),
-              )
-        const selected = session.model
-          ? (yield* catalog.model.available()).find(
-              (model) =>
-                model.id === session.model?.id &&
-                (model.providerID === session.model.providerID ||
-                  (session.model.providerID === "vector" &&
-                    model.providerID === "openrouter" &&
-                    model.freeModel?.source === "openrouter")),
-            )
-          : defaultModel && supported(defaultModel)
-            ? defaultModel
-            : yield* catalog.model.available().pipe(Effect.map(automaticModel))
-        if (!selected && session.model)
-          return yield* new ModelUnavailableError({
-            providerID: session.model.providerID,
-            modelID: session.model.id,
-          })
-        if (!selected) return yield* new ModelNotSelectedError({ sessionID: session.id })
+        const selected = yield* select(catalog, session)
         if (selected.providerID === ModelPlans.PROVIDER_ID)
           return withPricing(modelPlanRoute(selected, modelPlans, freeCredentials), selected.cost)
         // Configuration can overwrite API metadata or add a free ID after catalog validation.
         // Free intent always crosses the final eligibility and zero-price request guard.
-        if (requiresFreeRoute(selected)) return withFreeRoute(freeModelRoute(selected, freeModels, freeCredentials))
+        if (requiresFreeRoute(selected))
+          return withFreeRoute(freeModelRoute(selected, freeModels, freeCredentials, guests.marked(session.id)))
         const provider = yield* catalog.provider.get(selected.providerID)
         const connection = yield* integrations.connection.active(
           provider?.integrationID ?? Integration.ID.make(selected.providerID),
@@ -404,9 +379,60 @@ export const locationLayer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer: locationLayer,
-  deps: [Catalog.node, Integration.node, FreeModels.node, FreeModels.credentialsNode, ModelPlans.node],
+  deps: [
+    Catalog.node,
+    Integration.node,
+    FreeModels.node,
+    FreeModels.credentialsNode,
+    FreeModelGuests.node,
+    ModelPlans.node,
+  ],
 })
 
-// Codium spends the account's credits, so it is never chosen automatically.
+/**
+ * The catalog model a session's next turn runs on: the session's own, else the default, else an automatic choice.
+ * Exported so a check made before a prompt is admitted, such as the server's guest check, judges the same model.
+ */
+export const select = Effect.fn("SessionRunnerModel.select")(function* (
+  catalog: Catalog.Interface,
+  session: Pick<SessionSchema.Info, "id" | "model">,
+) {
+  // Location plugins populate and filter the catalog asynchronously during layer startup.
+  const defaultModel = session.model
+    ? undefined
+    : yield* catalog.model
+        .default()
+        .pipe(
+          Effect.mapError((error) =>
+            error._tag === "Catalog.DefaultModelUnavailableError"
+              ? new ModelUnavailableError({ providerID: error.providerID, modelID: error.modelID })
+              : new ModelNotSelectedError({ sessionID: session.id }),
+          ),
+        )
+  const selected = session.model
+    ? (yield* catalog.model.available()).find(
+        (model) =>
+          model.id === session.model?.id &&
+          (model.providerID === session.model.providerID ||
+            (session.model.providerID === "vector" &&
+              model.providerID === "openrouter" &&
+              model.freeModel?.source === "openrouter")),
+      )
+    : defaultModel && supported(defaultModel)
+      ? defaultModel
+      : yield* catalog.model.available().pipe(Effect.map(automaticModel))
+  if (!selected && session.model)
+    return yield* new ModelUnavailableError({
+      providerID: session.model.providerID,
+      modelID: session.model.id,
+    })
+  if (!selected) return yield* new ModelNotSelectedError({ sessionID: session.id })
+  return selected
+})
+
+// Codium spends the account's credits, so it is never chosen automatically. Nor is a free model that may train on
+// prompts: its notice is accepted for a model someone chose, not for one picked for them.
 const automaticModel = (models: readonly ModelV2.Info[]) =>
-  models.find((model) => supported(model) && model.providerID !== ModelPlans.PROVIDER_ID)
+  models.find(
+    (model) => supported(model) && model.providerID !== ModelPlans.PROVIDER_ID && !freeModelMayTrain(model),
+  )

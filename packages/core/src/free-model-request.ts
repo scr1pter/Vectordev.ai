@@ -1,6 +1,10 @@
 import type { FreeModelInfo } from "@vectordevai/schema/free-model"
 import { freeModelDataPolicy, isFreeModelID } from "./free-model-catalog.js"
-import { FREE_MODEL_TRAINING_CONSENT_REQUIRED, FREE_MODELS_TITLE } from "./free-model-choice.js"
+import {
+  FREE_MODEL_TRAINING_CONSENT_REQUIRED,
+  FREE_MODEL_TRAINING_GUEST_SESSION,
+  FREE_MODELS_TITLE,
+} from "./free-model-choice.js"
 
 const DISABLED_PLUGINS = [
   "web",
@@ -31,10 +35,18 @@ export class FreeModelTrainingConsentError extends Error {
   }
 }
 
+/** Nothing from a session an invited guest has worked in goes to such a model, since the guest never accepted. */
+export class FreeModelGuestSessionError extends Error {
+  override readonly name = "FreeModelGuestSessionError"
+  constructor() {
+    super(FREE_MODEL_TRAINING_GUEST_SESSION)
+  }
+}
+
 export function freeModelRequest(
   body: unknown,
   models: readonly FreeModelInfo[],
-  options: { trainingConsent?: boolean } = {},
+  options: { trainingConsent?: boolean; guest?: boolean } = {},
 ) {
   if (!isRecord(body) || typeof body.model !== "string" || !Array.isArray(body.messages) || !body.messages.length)
     throw new Error("Choose a free model and include conversation messages.")
@@ -42,6 +54,7 @@ export function freeModelRequest(
   if (!selected)
     throw new Error(`That free model is no longer available. Choose another model from ${FREE_MODELS_TITLE}.`)
   const policy = freeModelDataPolicy(selected)
+  if (policy !== "no-training" && options.guest) throw new FreeModelGuestSessionError()
   if (policy !== "no-training" && !options.trainingConsent) throw new FreeModelTrainingConsentError()
   if (
     (body.plugins !== undefined &&
