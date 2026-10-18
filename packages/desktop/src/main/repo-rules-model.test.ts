@@ -135,9 +135,30 @@ describe("rendering rules for the agent", () => {
 
   test("the repository file is plain markdown a human can edit", () => {
     const file = formatRulesFile([rule({ id: "1", description: "No query logic in controllers" })])
-    expect(file).toContain("# Project rules")
+    expect(file).toContain("# Repository rules")
     expect(file).toContain("- No query logic in controllers")
     expect(file).toContain("Managed by Vector")
+    // Vector has no Rules page any more, so the file must not send anyone to one.
+    expect(file).toContain("Vectorscope's Don't flag this again adds rules here")
+    expect(file).not.toContain("under Rules")
+    expect(file).not.toMatch(/project/i)
+  })
+
+  test("a file written before the markers, titled Project rules, migrates instead of doubling", () => {
+    const rules = [rule({ id: "1", description: "No query logic in controllers" })]
+    const legacy = [
+      "# Project rules",
+      "",
+      "<!-- Managed by Vector. Edit these in Vector under Rules, or edit this file directly. -->",
+      "",
+      "- No query logic in controllers",
+      "",
+    ].join("\n")
+    const merged = mergeRulesFile(legacy, [...rules, rule({ id: "2", description: "Use repository services" })], rules)
+    expect(merged).not.toContain("# Project rules")
+    expect(merged.match(/No query logic in controllers/g)).toHaveLength(1)
+    expect(merged).toContain("# Repository rules")
+    expect(merged).toContain("- Use repository services")
   })
 
   test("managed updates preserve teammate-authored Markdown outside the block", () => {

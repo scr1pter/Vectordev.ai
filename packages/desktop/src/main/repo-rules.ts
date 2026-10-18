@@ -96,7 +96,7 @@ export async function syncRulesFile(repositoryPath: string, rules = readAll(), p
     (await readOptionalFile(target, "utf8")) ?? "",
     rules.filter(applies),
     previousRules.filter(applies),
-    repositoryPath ? "Project rules" : "Global rules",
+    repositoryPath ? "Repository rules" : "Global rules",
   )
   if (!body.trim()) {
     await rm(target, { force: true })

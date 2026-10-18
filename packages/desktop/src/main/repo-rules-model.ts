@@ -104,13 +104,13 @@ export function formatRulesForPrompt(rules: readonly RepoRule[]) {
 const MANAGED_START = "<!-- vector:managed-rules:start -->"
 const MANAGED_END = "<!-- vector:managed-rules:end -->"
 
-export function formatRulesFile(rules: readonly RepoRule[], title = "Project rules") {
+export function formatRulesFile(rules: readonly RepoRule[], title = "Repository rules") {
   if (!rules.length) return ""
   return [
     MANAGED_START,
     `# ${title}`,
     "",
-    "<!-- Managed by Vector. Edit this section in Vector under Rules; content outside the markers is preserved. -->",
+    "<!-- Managed by Vector: Vectorscope's Don't flag this again adds rules here. Vector rewrites this section, so write your own rules outside the markers, where they are kept. -->",
     "",
     ...rules.map((rule) => `- ${rule.description.trim()}${scopeSentence(rule)}`),
     "",
@@ -139,7 +139,7 @@ export function mergeRulesFile(
   existing: string,
   rules: readonly RepoRule[],
   previousRules: readonly RepoRule[] = rules,
-  title = "Project rules",
+  title = "Repository rules",
 ) {
   const managed = formatRulesFile(rules, title).trim()
   const start = existing.indexOf(MANAGED_START)
@@ -149,7 +149,9 @@ export function mergeRulesFile(
     const after = existing.slice(end + MANAGED_END.length).trimStart()
     return [before, managed, after].filter(Boolean).join("\n\n") + ([before, managed, after].some(Boolean) ? "\n" : "")
   }
-  if (existing.trim() === legacyRulesFile(previousRules, title).trim()) return managed ? `${managed}\n` : ""
+  // Files from before the markers were titled "Project rules"; match that exact text so they migrate, not duplicate.
+  const legacyTitle = title === "Repository rules" ? "Project rules" : title
+  if (existing.trim() === legacyRulesFile(previousRules, legacyTitle).trim()) return managed ? `${managed}\n` : ""
   if (!managed) return existing
   return existing.trim() ? `${existing.trimEnd()}\n\n${managed}\n` : `${managed}\n`
 }
