@@ -12,8 +12,14 @@ import {
   modelPlanCredential,
   modelPlanPortal,
   modelPlanStatus,
+  paidModelPlan,
   readModelPlanAccount,
 } from "../../../api/_lib/model-plan-account"
+import {
+  handleModelPlanCheckout,
+  handleModelPlanPortal,
+  handleModelTopupCheckout,
+} from "../../../api/_lib/model-plan-billing"
 import { handleModelPlanChat } from "../../../api/_lib/model-plan-chat"
 import { handleModelPlanModels } from "../../../api/_lib/model-plan-models"
 import { handleModelPlanStatus, modelPlanBalance } from "../../../api/_lib/model-plan-status"
@@ -76,6 +82,9 @@ const environment = [
   "STRIPE_SECRET_KEY",
   "STRIPE_MODEL_PLAN_WEBHOOK_SECRET",
   "STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID",
+  "STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID",
+  "SUPABASE_URL",
+  "SUPABASE_PUBLISHABLE_KEY",
   "OPENROUTER_MANAGEMENT_KEY",
   "VECTOR_CLI_TOKEN_SECRET",
   "VECTOR_ABUSE_SECRET",
@@ -84,7 +93,12 @@ const environment = [
   "KV_REST_API_TOKEN",
   "UPSTASH_REDIS_REST_URL",
   "UPSTASH_REDIS_REST_TOKEN",
-  ...[10, 50, 100, 200].flatMap((price) => [`MODEL_PLAN_${price}_CREDITS_USD`, `STRIPE_MODEL_PLAN_${price}_PRICE_ID`]),
+  ...[10, 50, 100, 200].flatMap((price) => [
+    `MODEL_PLAN_${price}_CREDITS_USD`,
+    `STRIPE_MODEL_PLAN_${price}_PRICE_ID`,
+    `MODEL_TOPUP_${price}_CREDITS_USD`,
+    `STRIPE_MODEL_TOPUP_${price}_PRICE_ID`,
+  ]),
 ]
 const previousEnvironment = new Map(environment.map((key) => [key, process.env[key]]))
 
@@ -173,6 +187,11 @@ const upstream = Bun.serve({
           ? ((await request.json()) as Record<string, unknown>)
           : Object.fromEntries(new URLSearchParams(await request.text()))
     calls.push({ path: url.pathname, method: request.method, headers: new Headers(request.headers), body })
+    // The website's browser session, as Supabase answers for it.
+    if (url.pathname === "/auth/v1/user") {
+      if (request.headers.get("authorization") !== "Bearer browser-session") return new Response(null, { status: 401 })
+      return Response.json({ ...user, email_confirmed_at: "2026-01-01T00:00:00Z" })
+    }
     if (url.pathname.startsWith("/v1/")) {
       expect(request.headers.get("authorization")).toBe("Bearer sk_fixture")
       if (url.pathname === "/v1/customers") return Response.json({ id: "cus_fixture" })
@@ -312,6 +331,9 @@ const server = createServer((request, response) => {
   // /chat is the gateway as the other tests call it; the /api/model-plans paths are what Vector itself requests.
   if (request.url === "/api/model-plans/models") return void handleModelPlanModels(request, response, fetcher)
   if (request.url === "/api/model-plans/status") return void handleModelPlanStatus(request, response, fetcher)
+  if (request.url === "/api/model-plans/checkout") return void handleModelPlanCheckout(request, response, fetcher)
+  if (request.url === "/api/model-plans/topup") return void handleModelTopupCheckout(request, response, fetcher)
+  if (request.url === "/api/model-plans/portal") return void handleModelPlanPortal(request, response, fetcher)
   void handleModelPlanChat(request, response, fetcher)
 })
 
@@ -354,8 +376,11 @@ beforeEach(async () => {
     VECTOR_PUBLIC_URL: "https://vectordev.ai",
     KV_REST_API_URL: new URL("/redis", upstream.url).href,
     KV_REST_API_TOKEN: "fixture-kv-token",
+    SUPABASE_URL: upstream.url.origin,
+    SUPABASE_PUBLISHABLE_KEY: "fixture-publishable",
   })
   delete process.env.VERCEL_ENV
+  delete process.env.STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID
   delete process.env.UPSTASH_REDIS_REST_URL
   delete process.env.UPSTASH_REDIS_REST_TOKEN
   for (const price of [10, 50, 100, 200]) {
@@ -507,6 +532,198 @@ describe("subscription checkout with real billing leases", () => {
       configuration: "bpc_fixture",
       return_url: "https://vectordev.ai/account",
     })
+  })
+})
+
+// What the desktop app's main process sends: its Vector account token and a JSON body, with no Origin header.
+async function billing(path: "checkout" | "topup" | "portal", body: unknown, token = mintCliToken(user).token) {
+  const response = await fetch(`${state.origin}/api/model-plans/${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  })
+  return { status: response.status, body: (await response.json()) as Record<string, any> }
+}
+
+describe("billing from the desktop app's Vector sign-in", () => {
+  test("checkout and the billing portal accept the desktop's Vector account token", async () => {
+    const checkout = await billing("checkout", { plan: "vector-10" })
+    expect(checkout).toEqual({ status: 200, body: { url: sessions.get("cs_fixture1")!.url } })
+    expect(checkout.body.url).toStartWith("https://checkout.stripe.com/")
+    // The Stripe customer is created for the token's account, with its email.
+    expect(calls.find((call) => call.path === "/v1/customers")?.body).toMatchObject({
+      email: user.email,
+      "metadata[vector_account_id]": user.id,
+    })
+    await paid()
+    expect(await billing("portal", {})).toEqual({
+      status: 200,
+      body: { url: "https://billing.stripe.com/p/session/fixture" },
+    })
+    // Verified locally and against revocation: Supabase never sees the desktop's token.
+    expect(calls.some((call) => call.path === "/auth/v1/user")).toBe(false)
+  })
+
+  test("top-ups take the same token", async () => {
+    for (const price of [10, 50, 100, 200]) {
+      process.env[`MODEL_TOPUP_${price}_CREDITS_USD`] = String(price / 2)
+      process.env[`STRIPE_MODEL_TOPUP_${price}_PRICE_ID`] = `price_topup${price}`
+    }
+    // Past sign-in, the pack itself is checked.
+    expect(await billing("topup", { pack: "codium-topup-7" })).toMatchObject({
+      status: 400,
+      body: { error: { code: "MODEL_TOPUP_INVALID" } },
+    })
+    await redis(["SET", `vector:cli-revoked:${user.id}`, "1"])
+    expect((await billing("topup", { pack: "codium-topup-10" })).status).toBe(401)
+  })
+
+  test("a revoked, expired or forged token is refused, and the website's browser session still works", async () => {
+    await paid()
+    const expired = mintCliToken(user, Date.now() - 91 * 24 * 60 * 60 * 1000).token
+    expect(await billing("portal", {}, expired)).toMatchObject({
+      status: 401,
+      body: { error: { code: "CLI_TOKEN_EXPIRED" } },
+    })
+    expect((await billing("portal", {}, `${mintCliToken(user).token}x`)).status).toBe(401)
+    await redis(["SET", `vector:cli-revoked:${user.id}`, "1"])
+    expect(await billing("checkout", { plan: "vector-10" })).toMatchObject({
+      status: 401,
+      body: { error: { code: "CLI_TOKEN_INVALID" } },
+    })
+    expect(sessions.size).toBe(0)
+    // The website is unchanged: its Supabase session opens the portal.
+    expect(await billing("portal", {}, "browser-session")).toMatchObject({ status: 200 })
+    expect((await billing("portal", {}, "not-a-session")).status).toBe(401)
+  })
+
+  test("while new purchases are off, the token still opens billing management but buys nothing", async () => {
+    await paid()
+    process.env.MODEL_PLANS_ENABLED = "false"
+    expect(await billing("checkout", { plan: "vector-10" })).toMatchObject({
+      status: 503,
+      body: { error: { code: "MODEL_PLANS_DISABLED" } },
+    })
+    expect(await billing("portal", {})).toMatchObject({ status: 200 })
+    expect(sessions.size).toBe(0)
+  })
+})
+
+describe("plan changes in Stripe's customer portal", () => {
+  const portalSession = () => calls.findLast((call) => call.path === "/v1/billing_portal/sessions")?.body
+
+  test("the portal that changes plans opens only while Codium is on sale and its credits are funded", async () => {
+    await paid()
+    process.env.STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID = "bpc_changes"
+    await modelPlanPortal(user.id, fetcher)
+    expect(portalSession()).toMatchObject({ configuration: "bpc_changes" })
+
+    process.env.MODEL_PLANS_ENABLED = "false"
+    await modelPlanPortal(user.id, fetcher)
+    expect(portalSession()).toMatchObject({ configuration: "bpc_fixture" })
+    await expect(modelPlanPortal(user.id, fetcher, { flow: "change" })).rejects.toMatchObject({
+      statusCode: 409,
+      code: "MODEL_PLAN_CHANGE_UNAVAILABLE",
+    })
+
+    // Paused sales keep plan changes closed too, though the card, invoices and cancellation stay reachable.
+    process.env.MODEL_PLANS_ENABLED = "true"
+    await redis([
+      "SET",
+      "vector:codium:funding",
+      JSON.stringify({
+        status: "paused",
+        reason: "short",
+        checkedAt: Date.now(),
+        since: Date.now(),
+        balance: 0,
+        owed: 0,
+        required: 0,
+        keys: 0,
+      }),
+    ])
+    await modelPlanPortal(user.id, fetcher)
+    expect(portalSession()).toMatchObject({ configuration: "bpc_fixture" })
+    expect(await modelPlanPortal(user.id, fetcher, { flow: "cancel" })).toEqual({
+      url: "https://billing.stripe.com/p/session/fixture",
+    })
+
+    // Without the second configuration, nothing offers plan changes.
+    delete process.env.STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID
+    await expect(modelPlanPortal(user.id, fetcher, { flow: "change" })).rejects.toMatchObject({ statusCode: 409 })
+  })
+
+  test("Vector opens the portal straight at changing or cancelling the paid plan", async () => {
+    process.env.STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID = "bpc_changes"
+    await redis(["SET", accountKey, JSON.stringify({ customer: "cus_fixture" })])
+    await expect(modelPlanPortal(user.id, fetcher, { flow: "change" })).rejects.toMatchObject({
+      statusCode: 404,
+      code: "MODEL_PLAN_MISSING",
+    })
+    await paid()
+    expect(await billing("portal", { flow: "change" })).toMatchObject({ status: 200 })
+    expect(portalSession()).toEqual({
+      customer: "cus_fixture",
+      configuration: "bpc_changes",
+      return_url: "https://vectordev.ai/account",
+      "flow_data[type]": "subscription_update",
+      "flow_data[subscription_update][subscription]": "sub_fixture",
+      "flow_data[after_completion][type]": "redirect",
+      "flow_data[after_completion][redirect][return_url]": "https://vectordev.ai/account?model_plan=updated",
+    })
+    await billing("portal", { flow: "cancel" })
+    expect(portalSession()).toMatchObject({
+      "flow_data[type]": "subscription_cancel",
+      "flow_data[subscription_cancel][subscription]": "sub_fixture",
+      "flow_data[after_completion][redirect][return_url]": "https://vectordev.ai/account?model_plan=ending",
+    })
+    state.subscriptions[0]!.cancel_at_period_end = true
+    expect(await billing("portal", { flow: "cancel" })).toMatchObject({
+      status: 409,
+      body: { error: { code: "MODEL_PLAN_ENDING" } },
+    })
+    expect(await billing("portal", { flow: "upgrade" })).toMatchObject({
+      status: 400,
+      body: { error: { code: "BILLING_FLOW_INVALID" } },
+    })
+  })
+
+  test("a plan changed in the portal grants the new plan's credits, and an unchanged one keeps what it was sold", () => {
+    const start = Math.floor(Date.now() / 1000) - 60
+    const end = start + 30 * 24 * 60 * 60
+    const sold = {
+      ...subscription(start, end),
+      metadata: { vector_account_id: user.id, vector_plan: "vector-10", vector_model_credits_usd: "4" },
+    }
+    expect(paidModelPlan(sold, user.id)?.plan).toMatchObject({ id: "vector-10", credits: 4 })
+    // An upgrade starts a new month on the bigger plan, invoiced in full; the metadata still names the old plan.
+    const upgraded = {
+      ...sold,
+      items: {
+        data: [
+          {
+            ...sold.items.data[0]!,
+            price: { ...sold.items.data[0]!.price, id: "price_fixture100", unit_amount: 10_000 },
+          },
+        ],
+      },
+      latest_invoice: {
+        ...sold.latest_invoice,
+        amount_paid: 10_000,
+        lines: { data: [{ price: { id: "price_fixture100" }, period: { start, end }, proration: false }] },
+      },
+    }
+    expect(paidModelPlan(upgraded, user.id)?.plan).toMatchObject({ id: "vector-100", credits: 50 })
+    // A prorated charge pays for part of a month, which Codium never grants.
+    const prorated = {
+      ...upgraded,
+      latest_invoice: {
+        ...upgraded.latest_invoice,
+        amount_paid: 6_000,
+        lines: { data: [{ price: { id: "price_fixture100" }, period: { start, end }, proration: true }] },
+      },
+    }
+    expect(paidModelPlan(prorated, user.id)).toBeUndefined()
   })
 })
 

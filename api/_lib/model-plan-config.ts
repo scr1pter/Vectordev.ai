@@ -57,6 +57,23 @@ export function modelPlans() {
   })
 }
 
+/**
+ * The monthly credits a subscription on `plan` grants. Checkout records the credits it sold in the subscription's
+ * metadata, beside the plan it sold them for, so a later change to a plan's allowance leaves a running subscription as
+ * sold. Stripe's customer portal changes the plan without touching that metadata, so the recorded credits count only
+ * while the subscription is still on the plan they were sold for; after a change, the new plan's own credits apply.
+ */
+export function subscriptionPlanCredits(
+  metadata: Record<string, unknown> | undefined,
+  plan: { id: string; credits: number } | undefined,
+) {
+  const sold =
+    metadata?.vector_plan === undefined || metadata.vector_plan === plan?.id
+      ? metadata?.vector_model_credits_usd
+      : undefined
+  return sold === undefined ? plan?.credits : Number(sold)
+}
+
 export function modelTopups() {
   return MODEL_PLAN_PRICES.map((price) => {
     const priceID = process.env[`STRIPE_MODEL_TOPUP_${price}_PRICE_ID`]?.trim()

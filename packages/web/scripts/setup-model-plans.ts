@@ -5,7 +5,7 @@ import {
   stripeRecord,
 } from "../../../api/_lib/model-plan-stripe"
 import { MODEL_PLAN_PRICES, modelPlanOrigin, modelPlans, modelTopups } from "../../../api/_lib/model-plan-config"
-import { modelPlanPortalConfiguration, modelPlanWebhook } from "./model-plan-setup"
+import { modelPlanChangePortalConfiguration, modelPlanPortalConfiguration, modelPlanWebhook } from "./model-plan-setup"
 
 // A protected preview deployment lets Stripe's notifications through only with Vercel's automation bypass secret.
 const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim()
@@ -25,6 +25,9 @@ if (!Bun.argv.includes("--apply")) {
   )
   console.log("Also creates a billing portal with payment-method updates, invoices and cancellation at period end.")
   console.log(
+    "And a second portal that also changes plans: a bigger plan starts a new month today, charged in full; a smaller one waits for renewal.",
+  )
+  console.log(
     `And a webhook to ${modelPlanOrigin()}/api/model-plans/webhook${bypass ? " (with the preview's protection bypass)" : ""} (API ${MODEL_PLAN_STRIPE_VERSION}) for: ${MODEL_PLAN_WEBHOOK_EVENTS.join(", ")}.`,
   )
   console.log(
@@ -33,6 +36,7 @@ if (!Bun.argv.includes("--apply")) {
   process.exit(0)
 }
 
+const monthly: { product: string; price: string }[] = []
 for (const amount of MODEL_PLAN_PRICES) {
   const lookup = `vector-models-${amount}-monthly-v1`
   const result = await modelPlanStripe(`prices?${new URLSearchParams({ "lookup_keys[]": lookup, limit: "2" })}`)
@@ -58,9 +62,11 @@ for (const amount of MODEL_PLAN_PRICES) {
     !stripeRecord(price.recurring) ||
     price.recurring.interval !== "month" ||
     price.recurring.interval_count !== 1 ||
-    typeof price.id !== "string"
+    typeof price.id !== "string" ||
+    typeof price.product !== "string"
   )
     throw new Error(`Existing Stripe price ${lookup} has unexpected billing settings.`)
+  monthly.push({ product: price.product, price: price.id })
   console.log(`STRIPE_MODEL_PLAN_${amount}_PRICE_ID=${price.id}`)
 }
 
@@ -94,6 +100,8 @@ for (const pack of modelTopups()) {
 
 const portal = await modelPlanPortalConfiguration()
 console.log(`STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID=${portal.id}`)
+const changes = await modelPlanChangePortalConfiguration(monthly)
+console.log(`STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID=${changes.id}`)
 
 const endpoint = await modelPlanWebhook(webhook)
 if (endpoint.created) console.log(`STRIPE_MODEL_PLAN_WEBHOOK_SECRET=${endpoint.secret}`)

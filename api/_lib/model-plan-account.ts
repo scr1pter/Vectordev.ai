@@ -3,7 +3,14 @@ import { Option, Schema } from "effect"
 import type { AccountUser } from "./account.js"
 import { withBillingMutation } from "./billing-lock.js"
 import { requireCodiumSales, reserveCodiumSale } from "./codium-funding.js"
-import { modelPlanOrigin, modelPlans, modelTopups, MODEL_PLAN_ROOT } from "./model-plan-config.js"
+import {
+  modelPlanOrigin,
+  modelPlans,
+  modelPlansEnabled,
+  modelTopups,
+  MODEL_PLAN_ROOT,
+  subscriptionPlanCredits,
+} from "./model-plan-config.js"
 import { modelPlanStripe, stripeRecord } from "./model-plan-stripe.js"
 import { ApiError } from "./http.js"
 import { persistentStore } from "./persistent-store.js"
@@ -484,8 +491,7 @@ export function paidModelPlan(subscription: unknown, accountID: string, now = Da
   const price = stripeRecord(item.price) ? item.price : undefined
   const recurring = price && stripeRecord(price.recurring) ? price.recurring : undefined
   const configured = modelPlans().find((plan) => plan.priceID && plan.priceID === price?.id)
-  const credits =
-    metadata?.vector_model_credits_usd === undefined ? configured?.credits : Number(metadata.vector_model_credits_usd)
+  const credits = subscriptionPlanCredits(metadata, configured)
   const plan =
     configured && credits !== undefined && Number.isFinite(credits) && credits > 0 && credits <= configured.price
       ? { ...configured, credits }
@@ -1030,12 +1036,47 @@ export async function modelPlanCheckout(
   )
 }
 
-export async function modelPlanPortal(id: string, fetcher: typeof fetch = fetch) {
+/**
+ * A Stripe customer portal session: the portal's home, or straight to changing or cancelling the subscription. Changing
+ * plans sells credits, so the portal that offers it (STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID) opens only while Codium
+ * is on sale and Vector's OpenRouter balance can pay for them, as for a checkout; otherwise the portal without plan
+ * changes keeps the card, invoices and cancellation reachable.
+ */
+export async function modelPlanPortal(
+  id: string,
+  fetcher: typeof fetch = fetch,
+  options: { flow?: "change" | "cancel"; now?: number } = {},
+) {
   const account = await readModelPlanAccount(id, fetcher)
   if (!account) throw new ApiError(404, "MODEL_PLAN_ACCOUNT_MISSING", "No Codium billing account exists yet.")
-  const configuration = process.env.STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID?.trim()
+  const changes = process.env.STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID?.trim()
+  const switching = Boolean(
+    changes &&
+      modelPlansEnabled() &&
+      (await requireCodiumSales(fetcher, options.now).then(
+        () => true,
+        () => false,
+      )),
+  )
+  const configuration = switching ? changes : process.env.STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID?.trim()
   if (!configuration)
     throw new ApiError(503, "BILLING_PORTAL_UNAVAILABLE", "Subscription management is temporarily unavailable.")
+  if (options.flow === "change" && !switching)
+    throw new ApiError(
+      409,
+      "MODEL_PLAN_CHANGE_UNAVAILABLE",
+      "Plan changes are not available right now. Your plan stays as it is.",
+    )
+  const subscription = options.flow
+    ? (await subscriptions(account.customer, fetcher))
+        .map((value) => paidModelPlan(value, id, options.now))
+        .filter((value) => value !== undefined)
+    : []
+  if (options.flow && subscription.length !== 1)
+    throw new ApiError(404, "MODEL_PLAN_MISSING", "There is no paid Codium plan to change.")
+  if (options.flow === "cancel" && subscription[0]!.cancelAtPeriodEnd)
+    throw new ApiError(409, "MODEL_PLAN_ENDING", "Your plan already ends at the close of this billing period.")
+  const flow = options.flow === "change" ? "subscription_update" : "subscription_cancel"
   const result = await modelPlanStripe(
     "billing_portal/sessions",
     {
@@ -1044,6 +1085,15 @@ export async function modelPlanPortal(id: string, fetcher: typeof fetch = fetch)
         customer: account.customer,
         configuration,
         return_url: `${modelPlanOrigin()}/account`,
+        // A finished change or cancellation returns to the account page, which Vector's billing window watches for.
+        ...(options.flow
+          ? {
+              "flow_data[type]": flow,
+              [`flow_data[${flow}][subscription]`]: subscription[0]!.id,
+              "flow_data[after_completion][type]": "redirect",
+              "flow_data[after_completion][redirect][return_url]": `${modelPlanOrigin()}/account?model_plan=${options.flow === "change" ? "updated" : "ending"}`,
+            }
+          : {}),
       }),
     },
     fetcher,

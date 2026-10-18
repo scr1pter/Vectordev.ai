@@ -502,6 +502,32 @@ describe("payment notifications grant and remove credits without anyone acting",
     })
   })
 
+  test("a bigger plan chosen in the portal starts a new month on its own credits, in the account and the ledger", async () => {
+    await redis(["SET", accountKey, JSON.stringify({ customer: "cus_buyer" })])
+    const first = subscribe(10)
+    // Checkout records the credits it sold beside the plan it sold them for.
+    const sold = { vector_account_id: user.id, vector_plan: "vector-10", vector_model_credits_usd: "4" }
+    first.subscription.metadata = sold
+    await reconcileModelPlanEvent(event("invoice.paid", first.invoice), fetcher)
+    expect(openRouter.keys.get("codium_key_1")?.data).toMatchObject({ limit: 4, disabled: false })
+    // The portal resets the billing cycle to now and invoices the bigger plan in full, leaving the metadata as it was.
+    const upgrade = subscribe(50, Math.floor(Date.now() / 1000) - 60)
+    upgrade.subscription.metadata = sold
+    await reconcileModelPlanEvent(event("customer.subscription.updated", upgrade.subscription), fetcher)
+    expect(openRouter.keys.get("codium_key_1")?.data.disabled).toBe(true)
+    expect(openRouter.keys.get("codium_key_2")?.data).toMatchObject({
+      limit: 25,
+      disabled: false,
+      expires_at: new Date(upgrade.end * 1000).toISOString(),
+    })
+    await reconcileModelPlanEvent(event("invoice.paid", upgrade.invoice), fetcher)
+    expect((await codiumLedger(fetcher)).find((value) => value.charge === upgrade.charge.id)).toMatchObject({
+      kind: "subscription",
+      product: "vector-50",
+      credits: 2500,
+    })
+  })
+
   test("a failed renewal, a cancellation and a refund each switch the month's credits off", async () => {
     await redis(["SET", accountKey, JSON.stringify({ customer: "cus_buyer" })])
     const paid = subscribe(10)
