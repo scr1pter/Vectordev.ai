@@ -4,6 +4,7 @@ import { Schema } from "effect"
 import { optional } from "./schema"
 import { Provider } from "./provider"
 import { statics } from "./schema"
+import { FreeDataPolicy } from "./free-model"
 
 export const ID = Schema.String.pipe(Schema.brand("ModelV2.ID"))
 export type ID = typeof ID.Type
@@ -62,7 +63,11 @@ export const Info = Schema.Struct({
   providerID: Provider.ID,
   family: Family.pipe(optional),
   name: Schema.String,
-  freeModel: Schema.Struct({ source: Schema.Literals(["shared", "openrouter"]) }).pipe(optional),
+  freeModel: Schema.Struct({
+    source: Schema.Literals(["shared", "openrouter"]),
+    // "may-train" and "unreviewed" models carry the "May train on your prompts" label and need one-time consent.
+    dataPolicy: FreeDataPolicy.pipe(optional),
+  }).pipe(optional),
   api: Api,
   capabilities: Capabilities,
   request: Schema.Struct({

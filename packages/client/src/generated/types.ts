@@ -2980,7 +2980,10 @@ export type ModelsListOutput = {
     readonly providerID: string
     readonly family?: string
     readonly name: string
-    readonly freeModel?: { readonly source: "shared" | "openrouter" }
+    readonly freeModel?: {
+      readonly source: "shared" | "openrouter"
+      readonly dataPolicy?: "no-training" | "may-train" | "unreviewed"
+    }
     readonly api:
       | {
           readonly id: string

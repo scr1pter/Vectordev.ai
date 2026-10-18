@@ -272,9 +272,12 @@ const layer = Layer.effect(
           }
 
           const models = yield* result.model.available()
+          // A model whose provider may train on prompts is never picked ahead of a no-training one.
+          const mayTrain = (model: ModelV2.Info) =>
+            Number(!!model.freeModel?.dataPolicy && model.freeModel.dataPolicy !== "no-training")
           const free = models
             .filter((model) => model.freeModel?.source === "openrouter")
-            .toSorted((a, b) => b.limit.context - a.limit.context)[0]
+            .toSorted((a, b) => mayTrain(a) - mayTrain(b) || b.limit.context - a.limit.context)[0]
           if (free) return free
           if ((yield* result.provider.available()).some((provider) => provider.id === "openrouter"))
             return yield* new FreeModelsUnavailableError()

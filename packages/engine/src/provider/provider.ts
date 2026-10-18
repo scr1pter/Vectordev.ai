@@ -9,6 +9,7 @@ import { ModelPlans } from "@vectordevai/core/model-plans"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
 import { FreeDataPolicy, isFreeModel, type FreeModelCatalog, type FreeModelInfo } from "@vectordevai/schema/free-model"
 import { freeModelDataPolicy } from "@vectordevai/core/free-model-catalog"
+import { freeModelMayTrain } from "@vectordevai/core/free-model-choice"
 import { ProviderUnavailable, providerRetired, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
 import {
@@ -2335,7 +2336,9 @@ const layer = Layer.effect(
       const primary = primaryID ? provider.models[primaryID] : undefined
       // Background calls must not turn a free conversation into paid inference, even with a small-model override.
       if (primary && isFreeModel(primary)) return primary
-      if (providerID === "vector") return Object.values(provider.models).find(isFreeModel)
+      // A helper call never moves a conversation onto a free model whose provider may train on prompts.
+      if (providerID === "vector")
+        return Object.values(provider.models).find((model) => isFreeModel(model) && !freeModelMayTrain(model))
       // An explicitly selected Codium conversation keeps helper calls on its credit route at the lowest ceiling.
       if (providerID === ModelPlans.PROVIDER_ID)
         return Object.values(provider.models).toSorted(

@@ -6285,6 +6285,7 @@ export type ModelV2Info = {
   name: string
   freeModel?: {
     source: "shared" | "openrouter"
+    dataPolicy?: "no-training" | "may-train" | "unreviewed"
   }
   api: ModelApi
   capabilities: ModelCapabilities

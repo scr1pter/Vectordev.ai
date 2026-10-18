@@ -47,7 +47,7 @@ export const VectorPlugin = define({
             draft.cost = [{ input: 0, output: 0, cache: { read: 0, write: 0 } }]
             draft.limit = { context: model.contextLength, output: model.maxOutputTokens }
             draft.enabled = !openrouter || owned.some((item) => item.id === model.id)
-            Object.assign(draft, { freeModel: { source: "shared", dataPolicy: freeModelDataPolicy(model) } })
+            draft.freeModel = { source: "shared", dataPolicy: freeModelDataPolicy(model) }
           })
         }
         for (const model of owned) {
@@ -63,7 +63,7 @@ export const VectorPlugin = define({
             draft.cost = [{ input: 0, output: 0, cache: { read: 0, write: 0 } }]
             draft.limit = { context: model.contextLength, output: model.maxOutputTokens }
             draft.enabled = true
-            Object.assign(draft, { freeModel: { source: "openrouter", dataPolicy: freeModelDataPolicy(model) } })
+            draft.freeModel = { source: "openrouter", dataPolicy: freeModelDataPolicy(model) }
           })
         }
       }),

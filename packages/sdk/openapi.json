@@ -39787,6 +39787,10 @@
               "source": {
                 "type": "string",
                 "enum": ["shared", "openrouter"]
+              },
+              "dataPolicy": {
+                "type": "string",
+                "enum": ["no-training", "may-train", "unreviewed"]
               }
             },
             "required": ["source"],
