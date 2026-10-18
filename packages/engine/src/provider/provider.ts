@@ -10,7 +10,7 @@ import { SessionID } from "@vectordevai/schema/session-id"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
 import { FreeDataPolicy, isFreeModel, type FreeModelCatalog, type FreeModelInfo } from "@vectordevai/schema/free-model"
-import { freeModelDataPolicy } from "@vectordevai/core/free-model-catalog"
+import { freeModelDataPolicy, isOpenRouterFreeModel } from "@vectordevai/core/free-model-catalog"
 import { freeModelMayTrain } from "@vectordevai/core/free-model-choice"
 import { ProviderUnavailable, providerRetired, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
@@ -1874,10 +1874,12 @@ const layer = Layer.effect(
         // Built-in free credentials and destinations cannot be replaced by project configuration.
         const openRouterKey = yield* freeCredentials.get("openrouter")
         const ownedFree = openRouterKey ? yield* freeModels.forKey(openRouterKey) : []
+        // OpenRouter models that run on free endpoints, zero-price ones and its free router included, return below
+        // only as reviewed free models.
         const router = providers[ProviderV2.ID.openrouter]
         if (router) {
-          for (const modelID of Object.keys(router.models)) {
-            if (modelID.toLowerCase().endsWith(":free")) delete router.models[modelID]
+          for (const [modelID, item] of Object.entries(router.models)) {
+            if (isOpenRouterFreeModel(modelID, item.cost.unpriced ? undefined : item.cost)) delete router.models[modelID]
           }
         }
         delete providers[ProviderV2.ID.vector]
@@ -2046,7 +2048,8 @@ const layer = Layer.effect(
         if (
           model.providerID === "vector" ||
           model.freeModel ||
-          (model.providerID === "openrouter" && model.id.toLowerCase().endsWith(":free"))
+          (model.providerID === "openrouter" &&
+            isOpenRouterFreeModel(model.id, model.cost.unpriced ? undefined : model.cost))
         ) {
           const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible")
           return createOpenAICompatible({

@@ -54,7 +54,22 @@ for (const scenario of [
     package: "@ai-sdk/openai-compatible",
     explicit: true,
   },
-]) {
+  // OpenRouter's free router picks any free endpoint, unreviewed and barred ones included.
+  {
+    name: "OpenRouter's free router added by late configuration cannot use the generic paid transport",
+    id: "openrouter/free",
+    package: "@ai-sdk/openai-compatible",
+    explicit: true,
+  },
+  // A stealth model runs on free endpoints that log prompts, though its ID has no free suffix.
+  {
+    name: "a zero-price model added by late configuration cannot use the generic paid transport",
+    id: "openrouter/owl-alpha",
+    package: "@ai-sdk/openai-compatible",
+    explicit: true,
+    cost: { input: 0, output: 0 },
+  },
+] as { name: string; id: string; package: string; explicit: boolean; cost?: { input: number; output: number } }[]) {
   it.effect(scenario.name, () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
@@ -76,6 +91,7 @@ for (const scenario of [
                     openrouter: {
                       models: {
                         [scenario.id]: {
+                          ...(scenario.cost ? { cost: scenario.cost } : {}),
                           api: {
                             id: "maker/paid",
                             type: "aisdk",

@@ -11,6 +11,7 @@ import { produce } from "immer"
 import { FreeModels } from "../../free-models"
 import { FreeModelGuests } from "../../free-model-guests"
 import { freeModelMayTrain } from "../../free-model-choice"
+import { isOpenRouterFreeModel } from "../../free-model-catalog"
 import { ModelPlans } from "../../model-plans"
 import { freeModelRoute } from "./free-model-route"
 import { modelPlanRoute } from "./model-plan-route"
@@ -339,7 +340,7 @@ function requiresFreeRoute(model: ModelV2.Info) {
   return (
     model.providerID === "vector" ||
     !!model.freeModel ||
-    (model.providerID === "openrouter" && model.id.toLowerCase().endsWith(":free"))
+    (model.providerID === "openrouter" && isOpenRouterFreeModel(model.id, model.cost.find((cost) => !cost.tier)))
   )
 }
 

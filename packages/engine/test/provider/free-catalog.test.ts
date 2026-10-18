@@ -1,4 +1,4 @@
-import { afterEach, expect } from "bun:test"
+import { afterAll, afterEach, expect } from "bun:test"
 import { streamText } from "ai"
 import { Effect, Layer } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -165,4 +165,60 @@ it.instance(
       served.catalog = off
     }),
   { trusted: true },
+)
+
+// The owner's own OpenRouter provider in the next test: it records every request it receives and answers none.
+const reached: string[] = []
+const openRouterStandIn = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch: async (request) => {
+    reached.push(await request.text())
+    return Response.json({ error: { message: "The stand-in answers nothing." } }, { status: 400 })
+  },
+})
+afterAll(() => openRouterStandIn.stop(true))
+
+it.instance(
+  "a zero-price OpenRouter model never goes out as a regular model, though it reaches the SDK",
+  () =>
+    Effect.gen(function* () {
+      const provider = yield* Provider.Service
+      const send = (model: Provider.Model, text: string) =>
+        provider.getLanguage(model).pipe(
+          Effect.flatMap((language) =>
+            Effect.promise(async () => {
+              const result = streamText({ model: language, messages: [{ role: "user", content: text }], maxRetries: 0 })
+              const errors: unknown[] = []
+              for await (const part of result.fullStream) if (part.type === "error") errors.push(part.error)
+              return errors
+            }),
+          ),
+        )
+      // The control: a paid model goes to the owner's OpenRouter provider.
+      const paid = yield* provider.getModel(ProviderV2.ID.openrouter, ModelV2.ID.make("deepseek/deepseek-chat-v3.1"))
+      yield* send(paid, "prompt on a paid model")
+      expect(reached.some((text) => text.includes("prompt on a paid model"))).toBe(true)
+      // A stealth model at a zero price, with the same destination and key, as a later catalog or configuration could
+      // list it, is sent only through the free-model checks, which refuse a model they have not reviewed.
+      const errors = yield* send(
+        {
+          ...paid,
+          id: ModelV2.ID.make("openrouter/owl-alpha"),
+          api: { ...paid.api, id: "openrouter/owl-alpha" },
+          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+        },
+        "prompt on a stealth model",
+      )
+      expect(reached.some((text) => text.includes("prompt on a stealth model"))).toBe(false)
+      expect(String(errors[0])).toContain("Connect OpenRouter")
+    }),
+  {
+    trusted: true,
+    config: () => ({
+      provider: {
+        openrouter: { options: { apiKey: "sk-or-synthetic-not-a-key", baseURL: `${openRouterStandIn.url.origin}/v1` } },
+      },
+    }),
+  },
 )

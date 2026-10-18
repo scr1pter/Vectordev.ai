@@ -45,20 +45,27 @@ type Outbound = { url: string; model?: string; consent?: string; text: string }
  */
 async function serve(
   run: (input: Harness) => Promise<void>,
-  options: { answer?: (request: Request) => Response | undefined; config?: Record<string, unknown> } = {},
+  options: {
+    answer?: (request: Request) => Response | undefined | Promise<Response | undefined>
+    /** Extra configuration, or a function of the test provider's base URL that returns it. */
+    config?: Record<string, unknown> | ((base: string) => Record<string, unknown>)
+  } = {},
 ) {
   // The configured test provider refuses every request at once unless `answer` replies, so a turn on it ends without
   // waiting to retry.
   await using provider = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: (request) =>
-      options.answer?.(request) ??
+    fetch: async (request) =>
+      (await options.answer?.(request)) ??
       Response.json({ error: { message: "The test provider answers nothing." } }, { status: 400 }),
   })
   await using tmp = await tmpdir({
     trusted: true,
-    config: { ...testProviderConfig(`${provider.url.origin}/v1`), ...options.config },
+    config: {
+      ...testProviderConfig(`${provider.url.origin}/v1`),
+      ...(typeof options.config === "function" ? options.config(`${provider.url.origin}/v1`) : options.config),
+    },
   })
   const cache = path.join(Global.Path.cache, "free-models-v2.json")
   await mkdir(path.dirname(cache), { recursive: true })
@@ -464,3 +471,58 @@ test("the v2 runner sends nothing to a may-train model in a session a guest has 
     expect(h.toLaguna()).toEqual([])
   })
 }, 120_000)
+
+test("no one is offered or sent OpenRouter's free router or a zero-price stealth model on the owner's OpenRouter key", async () => {
+  // The owner's own OpenRouter provider points at the test provider, which records every request it receives.
+  const reached: string[] = []
+  const paid = "deepseek/deepseek-chat-v3.1"
+  const free = ["openrouter/free", "openrouter/owl-alpha", "openrouter/elephant-alpha"]
+  await serve(
+    async (h) => {
+      const offered = async (headers: Record<string, string>) => {
+        const body = (await (await h.get("/provider", headers)).json()) as {
+          all: { id: string; models: Record<string, unknown> }[]
+        }
+        return Object.keys(body.all.find((provider) => provider.id === "openrouter")?.models ?? {})
+      }
+      for (const headers of [h.owner, h.guest]) {
+        const listed = await offered(headers)
+        expect(listed).toContain(paid)
+        for (const modelID of free) expect(listed).not.toContain(modelID)
+      }
+      // The control: the owner's prompt on a paid OpenRouter model reaches the owner's OpenRouter provider.
+      const own = await newSession(h, h.owner)
+      await h.send(`/session/${own}/message`, h.owner, {
+        model: { providerID: "openrouter", modelID: paid },
+        parts: [{ type: "text", text: "owner prompt on a paid model" }],
+      })
+      expect(reached.some((text) => text.includes("owner prompt on a paid model"))).toBe(true)
+      // Neither the guest nor the owner can send a prompt to a free router or a stealth model that way.
+      for (const [who, headers] of [
+        ["guest", h.guest],
+        ["owner", h.owner],
+      ] as const) {
+        const session = await newSession(h, headers)
+        for (const modelID of free)
+          await h.send(`/session/${session}/message`, headers, {
+            model: { providerID: "openrouter", modelID },
+            parts: [{ type: "text", text: `${who} secret via ${modelID}` }],
+          })
+      }
+      expect(reached.filter((text) => text.includes("secret via"))).toEqual([])
+      expect(h.outbound.filter((item) => item.text.includes("secret via"))).toEqual([])
+    },
+    {
+      answer: async (request) => {
+        reached.push(await request.text())
+        return undefined
+      },
+      config: (base) => ({
+        provider: {
+          ...testProviderConfig(base).provider,
+          openrouter: { options: { apiKey: "sk-or-synthetic-not-a-key", baseURL: base } },
+        },
+      }),
+    },
+  )
+}, 90_000)

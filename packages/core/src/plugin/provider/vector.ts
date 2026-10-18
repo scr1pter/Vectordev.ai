@@ -2,7 +2,7 @@ import { Effect, Stream } from "effect"
 import { EventV2 } from "../../event"
 import { Integration } from "../../integration"
 import { FreeModels } from "../../free-models"
-import { freeModelDataPolicy } from "../../free-model-catalog"
+import { freeModelDataPolicy, isOpenRouterFreeModel } from "../../free-model-catalog"
 import { define } from "../internal"
 
 export const VectorPlugin = define({
@@ -18,10 +18,13 @@ export const VectorPlugin = define({
         const openrouter = yield* credentials.get("openrouter")
         const owned = openrouter ? yield* freeModels.forKey(openrouter) : []
         if (openrouter) catalog.provider.update("openrouter", () => {})
+        // OpenRouter models that run on free endpoints, zero-price ones and its free router included, return below
+        // only as reviewed free models.
         for (const item of catalog.provider.list()) {
           if (item.provider.id !== "openrouter") continue
           for (const model of item.models.values()) {
-            if (model.id.toLowerCase().endsWith(":free")) catalog.model.remove("openrouter", model.id)
+            if (isOpenRouterFreeModel(model.id, model.cost.find((cost) => !cost.tier)))
+              catalog.model.remove("openrouter", model.id)
           }
         }
         if (current.enabled)

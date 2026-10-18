@@ -116,6 +116,27 @@ export function isFreeModelID(id: string) {
   return id.trim() === id && /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*:free$/i.test(id) && !/^openrouter\//i.test(id)
 }
 
+/**
+ * Whether a model of OpenRouter's regular catalog runs on free endpoints: a `:free` variant, OpenRouter's free router
+ * (which picks any free endpoint, barred and unreviewed ones included), a stealth model, or any model listed at a zero
+ * price. Sent with the user's own key as a regular OpenRouter model, it would skip every free-model check: the guest
+ * rule, the training notice and data_collection. So such a model is offered only as a reviewed free model, or not at
+ * all. `price` is undefined for a model with no listed price, such as OpenRouter's Auto Router, which bills the paid
+ * model it picks.
+ */
+export function isOpenRouterFreeModel(
+  id: string,
+  price: { readonly input: number; readonly output: number } | undefined,
+) {
+  const lower = id.toLowerCase()
+  return (
+    lower.endsWith(":free") ||
+    lower === "openrouter/free" ||
+    lower.startsWith("stealth/") ||
+    (price?.input === 0 && price.output === 0)
+  )
+}
+
 /** Why a free model is never offered, when its terms bar Vector's use. */
 export function barredFreeModel(id: string) {
   return BARRED_FREE_AUTHORS.find((item) => item.author.test(id))?.reason
