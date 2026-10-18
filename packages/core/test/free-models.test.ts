@@ -34,6 +34,28 @@ test("first-run failure stays OFF, a network failure keeps the last catalog serv
   }
 })
 
+test("a newer catalog another process wrote to the shared cache file replaces this client's copy", async () => {
+  // The desktop engine, the terminal and "vector models" share the cache file; one refreshing it must not leave the
+  // others serving their own older copy until it expires.
+  const root = await mkdtemp(path.join(os.tmpdir(), "vector-free-models-"))
+  try {
+    const file = path.join(root, "catalog.json")
+    const first = { enabled: true, updatedAt: 1, models: [FREE_MODEL_FALLBACKS[0]!] }
+    let online = true
+    const client = FreeModels.createClient({ file, request: async () => Response.json(first), disabled: () => !online })
+    expect(await client.catalog(true)).toEqual(first)
+    expect(await client.catalog()).toEqual(first)
+    // Offline from here on; another process writes a newer catalog and the file's modification time moves on.
+    online = false
+    const second = { enabled: true, updatedAt: 2, models: [...FREE_MODEL_FALLBACKS.slice(0, 2)] }
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    await writeFile(file, JSON.stringify(second))
+    expect(await client.catalog()).toEqual(second)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test("a refusing answer, or a last catalog without models, never lists models whose prompts would fail", async () => {
   // Root cause 6 (17 Oct 2026): a client that last saw ON fell back to a built-in list on vectordev.ai's 503, so the
   // picker listed models while the shared chat refused every prompt. An empty ON answer (15 Oct) did the same.
@@ -301,7 +323,8 @@ test("a failed optional cache rename removes the temporary file and keeps the va
   }
 })
 
-test("saved shared selection prefers own key and never silently consumes shared allowance after privacy rejection", async () => {
+test("a Vector selection stays on the shared allowance with an OpenRouter key stored; an OpenRouter one uses that key", async () => {
+  // The owner's words of 17 October 2026: Vector's account serves the free models "no matter who uses" them.
   const route = {
     provider: "vector" as const,
     modelID: enabled.models[0].id,
@@ -311,21 +334,37 @@ test("saved shared selection prefers own key and never silently consumes shared 
     trainingConsent: async () => false,
     guest: async () => false,
   }
-  expect(await FreeModels.resolveRoute(route)).toMatchObject({ url: FreeModels.OPENROUTER_CHAT_URL, key: "own-key" })
-  await expect(FreeModels.resolveRoute({ ...route, forKey: async () => [] })).rejects.toThrow("privacy settings")
+  expect(await FreeModels.resolveRoute(route)).toMatchObject({
+    url: FreeModels.SHARED_CHAT_URL,
+    key: "vct_shared",
+    source: "shared",
+  })
+  // The user's own account is never read for a shared choice, so its privacy settings cannot refuse one.
   expect(
     await FreeModels.resolveRoute({
       ...route,
-      credential: async (provider) => (provider === "vector" ? "vct_shared" : undefined),
+      forKey: async () => {
+        throw new Error("the own account was read")
+      },
     }),
   ).toMatchObject({ url: FreeModels.SHARED_CHAT_URL, key: "vct_shared" })
-  expect(await FreeModels.resolveRoute({ ...route, catalog: async () => off })).toMatchObject({
+  // Nor does a shared choice quietly move to the user's own key when the shared catalog is off.
+  await expect(FreeModels.resolveRoute({ ...route, catalog: async () => off })).rejects.toThrow("unavailable")
+
+  const own = { ...route, provider: "openrouter" as const }
+  expect(await FreeModels.resolveRoute(own)).toMatchObject({
+    url: FreeModels.OPENROUTER_CHAT_URL,
+    key: "own-key",
+    source: "openrouter",
+  })
+  await expect(FreeModels.resolveRoute({ ...own, forKey: async () => [] })).rejects.toThrow("privacy settings")
+  expect(await FreeModels.resolveRoute({ ...own, catalog: async () => off })).toMatchObject({
     url: FreeModels.OPENROUTER_CHAT_URL,
     key: "own-key",
   })
   await expect(
     FreeModels.resolveRoute({
-      ...route,
+      ...own,
       catalog: async () => off,
       credential: async (provider) => (provider === "vector" ? "vct_shared" : undefined),
     }),
@@ -377,6 +416,7 @@ test("shared requests carry the disclosure always and the acceptance only once g
   })
   const personal = await FreeModels.resolveRoute({
     ...route,
+    provider: "openrouter",
     credential: async () => "own-key",
     trainingConsent: async () => true,
   })
@@ -398,7 +438,9 @@ test("a session an invited guest has worked in never carries the owner's accepta
   })
   expect(shared).toMatchObject({ source: "shared", trainingConsent: false, guest: true })
   expect(shared.headers).toEqual({ "x-vector-free-model-disclosure": FREE_MODELS_DISCLOSURE })
-  expect(await FreeModels.resolveRoute({ ...route, credential: async () => "own-key" })).toMatchObject({
+  expect(
+    await FreeModels.resolveRoute({ ...route, provider: "openrouter", credential: async () => "own-key" }),
+  ).toMatchObject({
     source: "openrouter",
     trainingConsent: false,
     guest: true,
@@ -414,7 +456,7 @@ test("a may-train model hidden by the user's OpenRouter privacy settings says wh
     providers: [{ id: "poolside/fp4", name: "Poolside", retention: "", dataPolicy: "may-train" as const }],
   }
   const route = {
-    provider: "vector" as const,
+    provider: "openrouter" as const,
     modelID: laguna.id,
     catalog: async () => ({ enabled: true, updatedAt: 1, models: [laguna] }),
     forKey: async () => enabled.models,

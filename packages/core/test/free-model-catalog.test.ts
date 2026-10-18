@@ -75,6 +75,9 @@ test("every free model of 17 October 2026 is offered except NVIDIA's trial endpo
     const withTools = { ...metadata(id), supported_parameters: [...metadata(id).supported_parameters, "tools"] }
     expect(eligibleFreeModel(withTools, fixture.capturedAt)).toBe(false)
     expect(eligibleFreeModel({ ...withTools, id: `${id}:free` }, fixture.capturedAt)).toBe(true)
+    // And its audio output, as OpenRouter's full listing of that day gives it, keeps it out even then.
+    const audio = { input_modalities: ["text", "image"], output_modalities: ["text", "audio"] }
+    expect(eligibleFreeModel({ ...withTools, id: `${id}:free`, architecture: audio }, fixture.capturedAt)).toBe(false)
   }
   for (const id of ["openrouter/auto", "openrouter/free:nitro", "OpenRouter/free", " openrouter/free"])
     expect(isFreeModelID(id)).toBe(false)
@@ -248,6 +251,18 @@ test("offered models are free, zero-priced, tool-capable and more than a week fr
     expect(eligibleFreeModel({ ...free, ...change }, now)).toBe(false)
   for (const field of ["prompt", "completion", "request", "image", "web_search", "internal_reasoning"])
     expect(eligibleFreeModel({ ...free, pricing: { ...free.pricing, [field]: "0.01" } }, now)).toBe(false)
+  // Text among the inputs and as the only output, where OpenRouter lists modalities; image input is fine.
+  for (const [input, output, eligible] of [
+    [["text"], ["text"], true],
+    [["text", "image", "audio"], ["text"], true],
+    [["image"], ["text"], false],
+    [["text"], ["text", "audio"], false],
+    [["text"], ["image"], false],
+    [["text"], [], false],
+  ] as const)
+    expect(
+      eligibleFreeModel({ ...free, architecture: { input_modalities: input, output_modalities: output } }, now),
+    ).toBe(eligible)
   for (const price of ["", "unknown", "NaN", "-1"])
     expect(eligibleFreeModel({ ...free, pricing: { ...free.pricing, request: price } }, now)).toBe(false)
   // Poolside's free Laguna endpoints end on 31 October 2026: offered until a week before.

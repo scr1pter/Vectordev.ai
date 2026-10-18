@@ -22,10 +22,12 @@ export const VectorPlugin = define({
         // OpenRouter models that run on free endpoints, zero-price ones and its free router included, return below
         // only as reviewed free models.
         removeOpenRouterFree(catalog)
+        // Vector's provider is the shared allowance, so it needs a Vector sign-in; an OpenRouter key of the user's
+        // own lists that account's copies under OpenRouter instead.
         if (current.enabled)
           catalog.provider.update("vector", (provider) => {
             provider.name = "Vector"
-            provider.disabled = !vector && !openrouter
+            provider.disabled = !vector
             provider.api = {
               type: "aisdk",
               package: "@ai-sdk/openai-compatible",
@@ -44,7 +46,8 @@ export const VectorPlugin = define({
             draft.capabilities = { tools: true, input: ["text"], output: ["text"] }
             draft.cost = [{ input: 0, output: 0, cache: { read: 0, write: 0 } }]
             draft.limit = { context: model.contextLength, output: model.maxOutputTokens }
-            draft.enabled = !openrouter || owned.some((item) => item.id === model.id)
+            // A shared selection stays on the shared allowance whichever OpenRouter account is connected.
+            draft.enabled = true
             draft.freeModel = { source: "shared", dataPolicy: freeModelDataPolicy(model) }
           })
         }

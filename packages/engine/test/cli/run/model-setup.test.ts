@@ -83,3 +83,39 @@ cliIt.live("signed out with free models off, run says nothing of signing in for 
     expect(run.stderr).not.toContain(FREE_MODELS_SIGN_IN_TERMINAL)
   }),
 )
+
+// The owner's words of 17 October 2026: Vector's account serves the free models "no matter who uses" them.
+cliIt.live(
+  "an OpenRouter key never hides the shared models, and alone it still says to sign in to Vector",
+  ({ vector, home }) =>
+    Effect.gen(function* () {
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(home, ".cache", "vector", "free-models-v2.json"),
+          JSON.stringify({ enabled: true, updatedAt: Date.now(), models: [FREE_MODEL_FALLBACKS[0]] }),
+        ),
+      )
+      // Child processes never receive VECTOR_CLI_TOKEN, so the sign-in is the CLI's stored account token.
+      const account = path.join(home, ".local", "share", "vector", "cli-auth.json")
+      const env = {
+        VECTOR_CONFIG_CONTENT: '{"enabled_providers":["vector","openrouter"]}',
+        VECTOR_APP_NAMESPACE: "vector",
+        OPENROUTER_API_KEY: "sk-or-synthetic-not-a-key",
+      }
+      const shared = `vector/${FREE_MODEL_FALLBACKS[0].id}`
+      // Signed in, the shared model is listed beside the OpenRouter account and runs on the shared allowance.
+      yield* Effect.promise(() => Bun.write(account, JSON.stringify({ token: "vct_synthetic" })))
+      const signedIn = yield* vector.spawn(["models"], { env })
+      vector.expectExit(signedIn, 0, "models")
+      expect(signedIn.stdout.split("\n")).toContain(shared)
+      expect(signedIn.stderr).toContain("Shared Vector allowance")
+      expect(signedIn.stderr).not.toContain(FREE_MODELS_SIGN_IN_TERMINAL)
+      // With the OpenRouter key alone, the shared allowance is not listed, and the CLI says how to get it.
+      yield* Effect.promise(() => Bun.file(account).delete())
+      const keyOnly = yield* vector.spawn(["models"], { env })
+      vector.expectExit(keyOnly, 0, "models")
+      expect(keyOnly.stdout.split("\n")).not.toContain(shared)
+      expect(keyOnly.stderr).toContain(FREE_MODELS_SIGN_IN_TERMINAL)
+    }),
+  60_000,
+)

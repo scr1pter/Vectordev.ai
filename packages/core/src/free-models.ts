@@ -1,7 +1,7 @@
 export * as FreeModels from "./free-models"
 
 import path from "node:path"
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { createHash, randomUUID } from "node:crypto"
 import { Context, Effect, Layer, Option, Queue, Schema, Stream } from "effect"
 import {
@@ -67,7 +67,15 @@ export function createClient(
 ) {
   const now = input.now ?? Date.now
   const request = input.request ?? fetch
-  const state: { value?: FreeModelCatalog; expires: number; pending?: Promise<FreeModelCatalog> } = { expires: 0 }
+  // `stamp` is the cache file's modification time as this client last read or wrote it.
+  const state: { value?: FreeModelCatalog; expires: number; pending?: Promise<FreeModelCatalog>; stamp?: number } = {
+    expires: 0,
+  }
+  const modified = (file: string) =>
+    stat(file).then(
+      (info) => info.mtimeMs,
+      () => undefined,
+    )
   const users = new Map<string, { expires: number; models: FreeModelInfo[] }>()
   const listeners = new Set<(catalog: FreeModelCatalog) => void>()
   // The last answer any caller received, which provider state may have been built from.
@@ -77,7 +85,17 @@ export function createClient(
     return value
   }
   const catalog = async (force = false): Promise<FreeModelCatalog> => {
+    // The desktop engine, the terminal and "vector models" share the cache file: when another of them wrote a newer
+    // catalog, this client reads that instead of serving its own copy until it expires.
+    if (input.file && state.value && !state.pending) {
+      const stamp = await modified(input.file)
+      if (stamp !== undefined && stamp !== state.stamp) {
+        state.value = undefined
+        state.expires = 0
+      }
+    }
     if (!force && state.value && state.expires > now()) return serve(state.value)
+    if (input.file && !state.value) state.stamp = await modified(input.file)
     const saved =
       state.value ??
       (input.file
@@ -142,6 +160,9 @@ export function createClient(
         await mkdir(path.dirname(file), { recursive: true })
           .then(() => writeFile(temporary, JSON.stringify(value), { mode: 0o600 }))
           .then(() => rename(temporary, file))
+          .then(async () => {
+            state.stamp = await modified(file)
+          })
           .catch(() => rm(temporary, { force: true }).catch(() => undefined))
       }
       return value
@@ -334,7 +355,9 @@ export async function resolveRoute(input: {
   // The owner's acceptance never carries a guest's input: such a session gets no-training models only.
   const guest = await input.guest()
   const trainingConsent = !guest && (await input.trainingConsent())
-  const ownKey = await input.credential("openrouter")
+  // The selection names the account: a Vector selection always runs on the shared allowance, even with an OpenRouter
+  // key stored, and the user's own key serves only the copies listed under OpenRouter.
+  const ownKey = input.provider === "openrouter" ? await input.credential("openrouter") : undefined
   if (ownKey) {
     const models = await input.forKey(ownKey)
     if (!models.some((model) => model.id === input.modelID)) {
@@ -357,8 +380,8 @@ export async function resolveRoute(input: {
       headers: {},
     }
   }
-  // Without an OpenRouter key of the user's own, every free model runs on Vector's shared allowance, including one
-  // chosen while an OpenRouter account was connected, when the shared catalog lists it.
+  // Every other free request runs on Vector's shared allowance, including an OpenRouter selection made while an
+  // OpenRouter account was connected, once that key is gone, when the shared catalog lists the model.
   const catalog = await input.catalog()
   if (!catalog.enabled || !catalog.models.some((model) => model.id === input.modelID))
     throw new Error("That free model is unavailable. Choose another model in Vector.")

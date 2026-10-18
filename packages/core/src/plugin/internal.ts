@@ -3,7 +3,7 @@ export * as PluginInternal from "./internal"
 import { makeLocationNode } from "../effect/app-node"
 import { httpClient } from "../effect/app-node-platform"
 import type { PluginContext } from "@vectordevai/plugin/v2/effect"
-import { Effect, Layer, Scope } from "effect"
+import { Context, Deferred, Effect, Layer, Scope } from "effect"
 import { AgentV2 } from "../agent"
 import { Catalog } from "../catalog"
 import { CommandV2 } from "../command"
@@ -66,7 +66,15 @@ export function define<R>(plugin: Plugin<R>) {
   return plugin
 }
 
-const layer = Layer.effectDiscard(
+export interface Interface {
+  /** Waits until the built-in plugins have loaded, or failed to, so a reader sees the agents and models they add. */
+  readonly ready: Effect.Effect<void>
+}
+
+export class Service extends Context.Service<Service, Interface>()("@vector/v2/PluginInternal") {}
+
+const layer = Layer.effect(
+  Service,
   Effect.gen(function* () {
     const catalog = yield* Catalog.Service
     const commands = yield* CommandV2.Service
@@ -120,6 +128,7 @@ const layer = Layer.effectDiscard(
     // Every provider plugin imports define from this module, so a static import of the provider list closes a cycle:
     // a provider module loaded first, as its own tests load it, finds its siblings uninitialized.
     const { ProviderPlugins } = yield* Effect.promise(() => import("./provider"))
+    const booted = yield* Deferred.make<void>()
     yield* Effect.gen(function* () {
       // The agent waits for references before it starts, so they load in a batch of their own instead of waiting for
       // every provider plugin and the model catalog below.
@@ -143,7 +152,13 @@ const layer = Layer.effectDiscard(
           yield* add(VariantPlugin.Plugin)
         }),
       )
-    }).pipe(Effect.withSpan("PluginInternal.boot"), Effect.forkScoped({ startImmediately: true }))
+    }).pipe(
+      Effect.withSpan("PluginInternal.boot"),
+      // Released however the boot ends, so a failed plugin never leaves a reader waiting.
+      Effect.ensuring(Deferred.succeed(booted, undefined)),
+      Effect.forkScoped({ startImmediately: true }),
+    )
+    return Service.of({ ready: Deferred.await(booted) })
   }),
 )
 
@@ -153,7 +168,7 @@ export const locationLayer = layer.pipe(
 )
 
 export const node = makeLocationNode({
-  name: "plugin-internal",
+  service: Service,
   layer,
   deps: [
     Catalog.node,

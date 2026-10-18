@@ -469,13 +469,10 @@ export const select = Effect.fn("SessionRunnerModel.select")(function* (
           ),
         )
   const selected = session.model
-    ? (yield* catalog.model.available()).find(
-        (model) =>
-          model.id === session.model?.id &&
-          (model.providerID === session.model.providerID ||
-            (session.model.providerID === "vector" &&
-              model.providerID === "openrouter" &&
-              model.freeModel?.source === "openrouter")),
+    ? // A session on Vector's shared allowance stays there, even when the user's own OpenRouter account lists the
+      // same model; only a free-model resume moves it to that account, by switching the session's model.
+      (yield* catalog.model.available()).find(
+        (model) => model.id === session.model?.id && model.providerID === session.model.providerID,
       )
     : defaultModel && supported(defaultModel)
       ? defaultModel

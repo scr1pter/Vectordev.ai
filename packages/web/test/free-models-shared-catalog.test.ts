@@ -14,6 +14,8 @@ const fixture: {
   endpoints: Record<string, Record<string, unknown>[]>
 } = await Bun.file(new URL("../../core/test/fixture/free-model-public-2026-10-17.json", import.meta.url)).json()
 const store = new Map<string, string>()
+// Endpoint lists that answer as OpenRouter does when rate limited, and how many reads run at once.
+const endpointReads = { failing: new Set<string>(), delay: 0, pending: 0, peak: 0 }
 const fetcher = Object.assign(
   async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : input)
@@ -28,6 +30,14 @@ const fetcher = Object.assign(
     if (url.pathname === "/api/v1/models/user")
       return Response.json({ data: fixture.models.map((item) => ({ id: item.id })) })
     const listed = /^\/api\/v1\/models\/(.+)\/endpoints$/.exec(url.pathname)?.[1]
+    if (listed) {
+      endpointReads.pending++
+      endpointReads.peak = Math.max(endpointReads.peak, endpointReads.pending)
+      await Bun.sleep(endpointReads.delay)
+      endpointReads.pending--
+      if (endpointReads.failing.has(listed))
+        return Response.json({ error: { message: "Rate limit exceeded" } }, { status: 429 })
+    }
     const endpoints = listed ? fixture.endpoints[listed] : undefined
     if (!endpoints) return Response.json({ error: { message: "Not Found" } }, { status: 404 })
     return Response.json({ data: { id: listed, endpoints } })
@@ -45,6 +55,7 @@ const gemma = ["google/gemma-4-26b-a4b-it:free", "google/gemma-4-31b-it:free"]
 
 beforeEach(() => {
   store.clear()
+  Object.assign(endpointReads, { failing: new Set<string>(), delay: 0, pending: 0, peak: 0 })
   Object.assign(process.env, environment)
 })
 afterAll(() => {
@@ -115,4 +126,31 @@ test("the owner's refresh instructions expect the counts the refresh gives", asy
   expect(steps).toContain(`{"enabled":true,"count":${refreshed.models.length}}`)
   // With may-train endpoints blocked on the account, its own model list leaves only the no-training ones.
   expect(steps).toContain(`With step 1 off, expect \`count: ${noTraining.length}\``)
+})
+
+test("an OpenRouter outage that fails every endpoint list keeps the stored catalog instead of publishing OFF", async () => {
+  const refreshed = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
+  const stored = store.get(FREE_MODELS_CATALOG_KEY)
+  expect(refreshed.enabled).toBe(true)
+  // Rate limited during the next day's cron: every model's endpoint list fails, and only the free router, which has
+  // none, would be left.
+  endpointReads.failing = new Set(fixture.models.map((model) => model.id))
+  const outage = await refreshFreeModelCatalog(fetcher, fixture.capturedAt + 1000).then(
+    () => undefined,
+    (error: unknown) => error,
+  )
+  expect(outage).toMatchObject({ statusCode: 503, code: "FREE_MODELS_CATALOG_UNAVAILABLE" })
+  expect(store.get(FREE_MODELS_CATALOG_KEY)).toBe(stored)
+  expect(await currentFreeModelCatalog(fetcher, fixture.capturedAt + 2000, { disclosure: true })).toEqual(refreshed)
+})
+
+test("endpoint lists are read five at a time, and one that fails drops only its own model", async () => {
+  endpointReads.delay = 10
+  endpointReads.failing = new Set(["poolside/laguna-s-2.1:free"])
+  const refreshed = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
+  expect(endpointReads.peak).toBeGreaterThan(1)
+  expect(endpointReads.peak).toBeLessThanOrEqual(5)
+  expect(refreshed.enabled).toBe(true)
+  expect(refreshed.models.map((model) => model.id)).not.toContain("poolside/laguna-s-2.1:free")
+  expect(refreshed.models.map((model) => model.id)).toContain("poolside/laguna-xs-2.1:free")
 })

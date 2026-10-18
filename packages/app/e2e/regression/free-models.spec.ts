@@ -8,7 +8,9 @@ const modelID = "maker/coder:free"
 const assistantID = "msg_free_assistant"
 const title = "Free model conversation"
 
-function catalog(input: { enabled: boolean; own?: boolean }) {
+function catalog(input: { enabled: boolean; own?: boolean; mayTrain?: boolean }) {
+  // A model whose provider may train on prompts, on both routes, carries that policy in its free-model tag.
+  const policy = input.mayTrain ? { dataPolicy: "may-train" } : {}
   const model = {
     id: modelID,
     name: "Maker Coder:free",
@@ -22,7 +24,9 @@ function catalog(input: { enabled: boolean; own?: boolean }) {
         id: "vector",
         name: "Vector",
         source: "custom",
-        models: input.enabled ? { [modelID]: { ...model, providerID: "vector", freeModel: { source: "shared" } } } : {},
+        models: input.enabled
+          ? { [modelID]: { ...model, providerID: "vector", freeModel: { source: "shared", ...policy } } }
+          : {},
       },
       {
         id: "openrouter",
@@ -32,7 +36,7 @@ function catalog(input: { enabled: boolean; own?: boolean }) {
           [modelID]: {
             ...model,
             providerID: "openrouter",
-            ...(input.enabled ? { freeModel: { source: "openrouter" } } : {}),
+            ...(input.enabled ? { freeModel: { source: "openrouter", ...policy } } : {}),
           },
         },
       },
@@ -44,7 +48,14 @@ function catalog(input: { enabled: boolean; own?: boolean }) {
 
 async function setup(
   page: Page,
-  input: { enabled: boolean; limited?: boolean; own?: boolean; resumed?: () => boolean; paidAgent?: boolean },
+  input: {
+    enabled: boolean
+    limited?: boolean
+    own?: boolean
+    resumed?: () => boolean
+    paidAgent?: boolean
+    mayTrain?: boolean
+  },
 ) {
   const messages = () => ({
     items: input.limited
@@ -164,17 +175,27 @@ async function setup(
   await expect(page.locator("#vector-launch")).toHaveCount(0)
 }
 
-test("groups free models once, prefers own account, and hides the group when OFF", async ({ page }, testInfo) => {
+test("groups both copies of a free model, the shared one first, and hides the group when OFF", async ({
+  page,
+}, testInfo) => {
   await setup(page, { enabled: true })
   await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
   await expect(
     page.locator('[data-slot="model-section-name"]').filter({ hasText: "Free models inside of Vector" }),
   ).toBeVisible()
+  // A connected OpenRouter account no longer hides the shared copy, which stays on Vector's shared allowance.
+  const shared = page.locator('[data-option-key="vector:maker/coder:free"]')
+  await expect(shared).toHaveCount(1)
+  await expect(shared).toContainText("Maker Coder")
+  await expect(shared).toContainText("Shared Vector allowance")
   const free = page.locator('[data-option-key="openrouter:maker/coder:free"]')
   await expect(free).toHaveCount(1)
   await expect(free).toContainText("Maker Coder")
   await expect(free).toContainText("Your OpenRouter account")
-  await expect(page.locator('[data-option-key="vector:maker/coder:free"]')).toHaveCount(0)
+  const keys = await page
+    .locator('[data-option-key$=":maker/coder:free"]')
+    .evaluateAll((items) => items.map((item) => item.getAttribute("data-option-key")))
+  expect(keys.slice(0, 2)).toEqual(["vector:maker/coder:free", "openrouter:maker/coder:free"])
   await page.screenshot({ path: testInfo.outputPath("free-model-picker.png") })
   await page.keyboard.press("Escape")
   await page.unrouteAll({ behavior: "wait" })
@@ -184,6 +205,37 @@ test("groups free models once, prefers own account, and hides the group when OFF
     page.locator('[data-slot="model-section-name"]').filter({ hasText: "Free models inside of Vector" }),
   ).toHaveCount(0)
   await expect(page.locator('[data-option-key="openrouter:maker/coder:free"]')).toBeVisible()
+})
+
+test("a selected free model that may train keeps its disclaimer under the composer and on its picker rows", async ({
+  page,
+}, testInfo) => {
+  await setup(page, { enabled: true, mayTrain: true })
+  const notice = page.locator('[data-component="free-model-training-notice"]')
+  await expect(notice).toBeVisible()
+  await expect(notice).toContainText("Your OpenRouter account · May train on your prompts")
+  await expect(notice).toContainText("Vector itself never trains on your prompts.")
+  await page.screenshot({ path: testInfo.outputPath("free-model-composer-notice.png") })
+  await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
+  for (const key of ["vector:maker/coder:free", "openrouter:maker/coder:free"]) {
+    const row = page.locator(`[data-option-key="${key}"]`)
+    await expect(row.locator('[data-slot="model-row-training"]')).toHaveText("May train on your prompts")
+    await expect(row.locator('[data-slot="model-row-training-detail"]')).toContainText(
+      "Don't use it with private repositories, secrets or personal data.",
+    )
+  }
+  await page.screenshot({ path: testInfo.outputPath("free-model-training-notice.png") })
+})
+
+test("a no-training free model shows no training notice", async ({ page }) => {
+  await setup(page, { enabled: true })
+  await expect(page.locator('[data-action="prompt-model"]').filter({ visible: true }).first()).toContainText(
+    "Maker Coder",
+  )
+  await expect(page.locator('[data-component="free-model-training-notice"]')).toHaveCount(0)
+  await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
+  await expect(page.locator('[data-option-key="vector:maker/coder:free"]')).toBeVisible()
+  await expect(page.locator('[data-slot="model-row-training-detail"]')).toHaveCount(0)
 })
 
 test("switching agents preserves the selected free model until an explicit paid model choice", async ({ page }) => {

@@ -603,3 +603,34 @@ for (const scenario of [
     }),
   )
 }
+
+it.effect("a session on a shared model stays shared while the user's own OpenRouter account lists the same model", () =>
+  Effect.gen(function* () {
+    const catalog = yield* Catalog.Service
+    const host = yield* PluginHost.make(yield* PluginV2.Service)
+    yield* VectorPlugin.effect(host).pipe(
+      Effect.provideService(
+        FreeModels.Service,
+        FreeModels.Service.of({
+          ...freeModels,
+          catalog: () => Effect.succeed({ enabled: true, updatedAt: 0, models: [approved] }),
+        }),
+      ),
+      Effect.provideService(FreeModels.CredentialsService, {
+        get: (provider) => Effect.succeed(provider === "openrouter" ? "synthetic-owned-key" : "vct_signed-in.token"),
+      }),
+    )
+    for (const providerID of [ProviderV2.ID.vector, ProviderV2.ID.openrouter]) {
+      const session = {
+        id: SessionV2.ID.make(`ses_both_copies_${providerID}`),
+        model: { providerID, id: ModelV2.ID.make(approved.id) },
+      }
+      // Each copy runs where it was chosen: the shared one on Vector's allowance, the own one on the user's account.
+      expect(yield* SessionRunnerModel.select(catalog, session)).toMatchObject({
+        providerID,
+        id: approved.id,
+        freeModel: { source: providerID === ProviderV2.ID.vector ? "shared" : "openrouter" },
+      })
+    }
+  }),
+)

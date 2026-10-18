@@ -122,3 +122,60 @@ it.effect("OpenRouter's free router, stealth models and zero-price models never 
     for (const id of kept) expect(yield* catalog.model.get(ProviderV2.ID.openrouter, ModelV2.ID.make(id))).toBeDefined()
   }),
 )
+
+const sharedModels = { enabled: true, updatedAt: 1, models: [...FREE_MODEL_FALLBACKS] }
+
+it.effect(
+  "with an OpenRouter account connected, every shared model stays listed and enabled beside the own copies",
+  () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const plugin = yield* PluginV2.Service
+      const host = yield* PluginHost.make(plugin)
+      yield* VectorPlugin.effect(host).pipe(
+        Effect.provideService(FreeModels.Service, {
+          catalog: () => Effect.succeed(sharedModels),
+          // The user's own account lists only one of the shared models.
+          forKey: () => Effect.succeed([FREE_MODEL_FALLBACKS[0]]),
+          trainingConsent: () => Effect.succeed(false),
+          setTrainingConsent: (accepted) => Effect.succeed(accepted),
+          changes: Stream.empty,
+        }),
+        Effect.provideService(FreeModels.CredentialsService, {
+          get: (provider) => Effect.succeed(provider === "openrouter" ? "synthetic-key" : "vct_synthetic"),
+        }),
+      )
+      const available = yield* catalog.model.available()
+      const listed = (providerID: string) =>
+        available.filter((model) => model.providerID === providerID && model.freeModel).map((model) => String(model.id))
+      expect(listed("vector").toSorted()).toEqual(FREE_MODEL_FALLBACKS.map((model) => model.id).toSorted())
+      expect(listed("openrouter")).toEqual([FREE_MODEL_FALLBACKS[0].id])
+      for (const model of available.filter((item) => item.providerID === "vector"))
+        expect(model.freeModel?.source).toBe("shared")
+    }),
+)
+
+it.effect("an OpenRouter key alone lists that account's copies, never Vector's shared allowance", () =>
+  Effect.gen(function* () {
+    const catalog = yield* Catalog.Service
+    const plugin = yield* PluginV2.Service
+    const host = yield* PluginHost.make(plugin)
+    yield* VectorPlugin.effect(host).pipe(
+      Effect.provideService(FreeModels.Service, {
+        catalog: () => Effect.succeed(sharedModels),
+        forKey: () => Effect.succeed([FREE_MODEL_FALLBACKS[0]]),
+        trainingConsent: () => Effect.succeed(false),
+        setTrainingConsent: (accepted) => Effect.succeed(accepted),
+        changes: Stream.empty,
+      }),
+      Effect.provideService(FreeModels.CredentialsService, {
+        get: (provider) => Effect.succeed(provider === "openrouter" ? "synthetic-key" : undefined),
+      }),
+    )
+    // The shared allowance needs a Vector sign-in, so its provider stays unavailable.
+    expect((yield* catalog.provider.available()).map((provider) => String(provider.id))).not.toContain("vector")
+    expect(
+      (yield* catalog.model.available()).filter((model) => model.freeModel).map((model) => String(model.providerID)),
+    ).toEqual(["openrouter"])
+  }),
+)

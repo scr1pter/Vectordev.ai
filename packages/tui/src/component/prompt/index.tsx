@@ -1,3 +1,4 @@
+import { freeModelTrainingNotice } from "@vectordevai/core/free-model-choice"
 import {
   BoxRenderable,
   RGBA,
@@ -1322,6 +1323,14 @@ export function Prompt(props: PromptProps) {
   })
   const maxHeight = createMemo(() => tuiConfig.prompt?.max_height ?? Math.max(6, Math.floor(dimensions().height / 3)))
   const moveLabelWidth = createMemo(() => Math.max(12, Math.min(44, dimensions().width - 48)))
+  // While a free model labelled "May train on your prompts" is selected, its disclaimer stays under the prompt.
+  const trainingNotice = createMemo(() => {
+    const current = local.model.current()
+    const model = current
+      ? sync.data.provider.find((provider) => provider.id === current.providerID)?.models[current.modelID]
+      : undefined
+    return model ? freeModelTrainingNotice(model) : undefined
+  })
 
   return (
     <>
@@ -1656,6 +1665,16 @@ export function Prompt(props: PromptProps) {
             </box>
           </Show>
         </box>
+        <Show when={store.mode === "normal" && trainingNotice()}>
+          {(notice) => (
+            <box paddingLeft={2} paddingTop={1} width="100%" flexDirection="column">
+              <text fg={theme.textMuted}>{notice().summary}</text>
+              <text fg={theme.textMuted} wrapMode="word">
+                {notice().disclaimer}
+              </text>
+            </box>
+          )}
+        </Show>
       </box>
       <Autocomplete
         sessionID={props.sessionID}

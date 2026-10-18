@@ -8,7 +8,7 @@ import {
   freeModelTrainingDisclaimer,
   freeModelTrainingLabel,
   freeModelTrainingRefusal,
-  preferOwnFreeModels,
+  freeModelChoices,
   type FreeModelChoice,
 } from "@vectordevai/core/free-model-choice"
 import { useSDK } from "../context/sdk"
@@ -132,7 +132,8 @@ export function DialogModel(props: { providerID?: string }) {
           (options) => sortModelOptions(options, props.providerID !== undefined, provider.id),
         ),
       ),
-      preferOwnFreeModels,
+      // Both copies of a free model are listed, the shared one first; each runs where its description says.
+      freeModelChoices,
       (options) => [...options.filter((option) => option.freeModel), ...options.filter((option) => !option.freeModel)],
     )
 

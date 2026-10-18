@@ -746,6 +746,27 @@ describe("ACP service sessions", () => {
     expect(picked.configOptions?.find((option) => option.id === "model")?.currentValue).toBe("vector-plan/zz/coder")
   })
 
+  it("keeps a configured shared Vector model when the user's own OpenRouter account lists the same model", async () => {
+    const id = ModelV2.ID.make("maker/coder:free")
+    const sources = [ProviderV2.ID.openrouter, ProviderV2.ID.vector].map((source) => ({
+      ...provider,
+      id: source,
+      models: {
+        [id]: {
+          ...provider.models[modelID]!,
+          id,
+          providerID: source,
+          freeModel: { source: source === "vector" ? ("shared" as const) : ("openrouter" as const) },
+        },
+      },
+    }))
+    for (const selected of [`vector/${id}`, `openrouter/${id}`]) {
+      const setup = makeService([], { providers: sources, model: selected })
+      const created = await Effect.runPromise(setup.service.newSession({ cwd: "/workspace", mcpServers: [] }))
+      expect(created.configOptions?.find((option) => option.id === "model")?.currentValue).toBe(selected)
+    }
+  })
+
   it("does not scan last-used sessions when resolving the new session default", async () => {
     const historyCalls: string[] = []
     const sdk = {

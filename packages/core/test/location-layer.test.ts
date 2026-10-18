@@ -11,6 +11,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { LocationServiceMap } from "@vectordevai/core/location-services"
 import { Location } from "@vectordevai/core/location"
 import { PluginV2 } from "@vectordevai/core/plugin"
+import { PluginInternal } from "@vectordevai/core/plugin/internal"
 import { ModelV2 } from "@vectordevai/core/model"
 import { ProjectV2 } from "@vectordevai/core/project"
 import { ProviderV2 } from "@vectordevai/core/provider"
@@ -219,6 +220,25 @@ describe("LocationServiceMap", () => {
             modelID: "chat",
           })
         }),
+      ),
+    ),
+  )
+
+  it.live("is ready for a turn once its built-in plugins have added the agents", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) =>
+        Effect.gen(function* () {
+          // The plugins load in the background as the location's services start; a drain waits for this first.
+          const plugins = yield* PluginInternal.Service
+          yield* plugins.ready
+          const agents = yield* AgentV2.Service
+          expect(yield* agents.get(AgentV2.ID.make("build"))).toBeDefined()
+        }).pipe(
+          Effect.provide(LocationServiceMap.Service.get(Location.Ref.make({ directory: AbsolutePath.make(dir.path) }))),
+        ),
       ),
     ),
   )

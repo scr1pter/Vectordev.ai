@@ -39,6 +39,7 @@ import { FormatError, FormatUnknownError } from "../error"
 import { INTERACTIVE_INPUT_ERROR, resolveInteractiveStdin } from "./run/runtime.stdin"
 import { MODEL_SETUP_GUIDANCE } from "@/provider/setup"
 import { FREE_MODELS_SIGN_IN_TERMINAL } from "@vectordevai/core/free-model-choice"
+import { freeModelRunNotice } from "./run/free-model-notice"
 
 type ModelInput = Parameters<VectorClient["session"]["prompt"]>[0]["model"]
 
@@ -970,6 +971,19 @@ export const RunCommand = effectCmd({
               background.answered = event.properties.info.id
               settleNotes()
               if (idle && waited()) break
+            }
+
+            // The first answer names the model that runs. One labelled "May train on your prompts" says so once, on
+            // stderr whatever the output format, so a script's stdout stays as it was.
+            if (
+              event.type === "message.updated" &&
+              event.properties.sessionID === sessionID &&
+              event.properties.info.role === "assistant" &&
+              toggles.get("training") !== true
+            ) {
+              toggles.set("training", true)
+              const notice = freeModelRunNotice(available.data.providers, event.properties.info)
+              if (notice) process.stderr.write(notice + EOL)
             }
 
             if (

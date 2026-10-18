@@ -139,8 +139,10 @@ export async function setupTimeline(
     )
   }, input.settings ?? {})
   if (input.locale) {
+    // Vector follows the computer's language, so the page reports the locale as the browser's own.
     await page.addInitScript((locale) => {
-      localStorage.setItem("vector.global.dat:language", JSON.stringify({ locale }))
+      Object.defineProperty(navigator, "language", { get: () => locale })
+      Object.defineProperty(navigator, "languages", { get: () => [locale] })
     }, input.locale)
   }
   if (input.reducedMotion) await page.emulateMedia({ reducedMotion: "reduce" })

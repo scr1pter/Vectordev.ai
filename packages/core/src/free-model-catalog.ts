@@ -19,6 +19,9 @@ export const FreeModelMetadata = Schema.Struct({
   context_length: Schema.Number,
   pricing: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number])),
   supported_parameters: Schema.Array(Schema.String),
+  architecture: Schema.optional(
+    Schema.Struct({ input_modalities: Schema.Array(Schema.String), output_modalities: Schema.Array(Schema.String) }),
+  ),
   expiration_date: Schema.optional(Schema.NullOr(Schema.String)),
   top_provider: Schema.optional(Schema.Struct({ max_completion_tokens: Schema.NullOr(Schema.Number) })),
   reasoning: Schema.optional(
@@ -268,12 +271,20 @@ export function zeroFreeModelPricing(pricing: Readonly<Record<string, string | n
   )
 }
 
-/** Free, zero-priced, tool-capable and not expired. Models without tools cannot work as coding agents here. */
+/**
+ * Free, zero-priced, tool-capable, a text chat model and not expired. Models without tools cannot work as coding agents
+ * here. A media model can list zero token prices and still charge per clip, so where OpenRouter lists modalities, text
+ * must be among the inputs and the only output.
+ */
 export function eligibleFreeModel(model: typeof FreeModelMetadata.Type, now: number) {
   return (
     isFreeModelID(model.id) &&
     zeroFreeModelPricing(model.pricing) &&
     model.supported_parameters.includes("tools") &&
+    (!model.architecture ||
+      (model.architecture.input_modalities.includes("text") &&
+        model.architecture.output_modalities.length === 1 &&
+        model.architecture.output_modalities[0] === "text")) &&
     (!model.expiration_date || Date.parse(model.expiration_date) > now)
   )
 }

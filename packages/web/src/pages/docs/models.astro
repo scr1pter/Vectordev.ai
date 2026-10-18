@@ -92,9 +92,11 @@ export const prerender = true
           </p>
           <p>
             OpenRouter is also an ordinary provider in Settings → Providers. If you connect an OpenRouter account of
-            your own there, its free models are listed under Free models inside of Vector, marked Your OpenRouter
-            account, and run on that account's own limits and privacy settings instead of the shared allowance. A key
-            stored only in a repository's <code>provider.openrouter.options.apiKey</code> does not list them. From
+            your own there, its free models are listed under Free models inside of Vector beside the shared ones,
+            marked Your OpenRouter account, and run on that account's own limits and privacy settings. The shared
+            models stay listed, marked Shared Vector allowance, and keep running on the shared allowance while that
+            account is connected, so each model runs where its label says. A key stored only in a repository's
+            <code>provider.openrouter.options.apiKey</code> does not list them. From
             1.99.99 to 1.99.108, connecting OpenRouter was the way to start free; from desktop 1.99.109 it is signing
             in to Vector.
             <a href="https://openrouter.ai/docs/guides/routing/provider-selection">OpenRouter routing documentation</a>

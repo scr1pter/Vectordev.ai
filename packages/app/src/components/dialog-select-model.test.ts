@@ -568,17 +568,24 @@ describe("Free models inside of Vector", () => {
     provider: { id: "openrouter", name: "OpenRouter", source: "api" },
     freeModel: { source: "openrouter" as const },
   }
-  test("one section combines curated models and prefers the user's key even over a shared recent", () => {
-    const sections = buildModelSections({
-      models: [shared, own],
-      now: NOW,
-      currentKey: pickerModelKey(shared),
-      recentKeys: [pickerModelKey(shared)],
-    })
-    expect(sections.map((section) => section.label)).toEqual(["Free models inside of Vector"])
-    expect(pickerKeys(sections)).toEqual([pickerModelKey(own)])
+  test("one section lists both copies of a model, the shared one first, so a shared choice stays reachable", () => {
+    // With an OpenRouter account connected, the shared copy still runs on Vector's shared allowance.
+    for (const models of [
+      [shared, own],
+      [own, shared],
+    ]) {
+      const sections = buildModelSections({
+        models,
+        now: NOW,
+        currentKey: pickerModelKey(shared),
+        recentKeys: [pickerModelKey(shared)],
+      })
+      expect(sections.map((section) => section.label)).toEqual(["Free models inside of Vector"])
+      expect(pickerKeys(sections)).toEqual([pickerModelKey(shared), pickerModelKey(own)])
+    }
     expect(modelDisplayName(own)).toBe("Maker Coder")
     expect(modelTitle(own)).toContain("Your OpenRouter account")
+    expect(modelTitle(shared)).toContain("Shared Vector allowance")
   })
   test('a model whose provider may train says "May train on your prompts" on its row, tooltip and spoken label', () => {
     const laguna = {

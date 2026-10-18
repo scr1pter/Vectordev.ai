@@ -2,6 +2,7 @@ import { FreeModelsResume } from "../free-model-resume"
 import { Cause, Effect, Layer } from "effect"
 import { LocationServiceMap } from "../../location-service-map"
 import { makeGlobalNode } from "../../effect/app-node"
+import { PluginInternal } from "../../plugin/internal"
 import { SessionRunCoordinator } from "../run-coordinator"
 import { SessionRunner } from "../runner"
 import { SessionSchema } from "../schema"
@@ -21,7 +22,7 @@ const layer = Layer.effect(
       drain: Effect.fnUntraced(function* (sessionID: SessionSchema.ID, force) {
         const session = yield* store.get(sessionID)
         if (!session) return yield* Effect.die(`Session not found: ${sessionID}`)
-        return yield* SessionRunner.Service.use((runner) => runner.run({ sessionID, force })).pipe(
+        return yield* loaded(SessionRunner.Service.use((runner) => runner.run({ sessionID, force }))).pipe(
           Effect.provide(locations.get(session.location)),
           Effect.tapCause((cause) =>
             Cause.hasInterruptsOnly(cause)
@@ -42,7 +43,7 @@ const layer = Layer.effect(
           Effect.gen(function* () {
             const session = yield* store.get(input.sessionID)
             if (!session) return yield* new FreeModelsResume.Rejected({ message: "Session not found." })
-            yield* FreeModelsResume.Service.use((service) => service.prepare(input)).pipe(
+            yield* loaded(FreeModelsResume.Service.use((service) => service.prepare(input))).pipe(
               Effect.provide(locations.get(session.location)),
             )
           }),
@@ -52,6 +53,12 @@ const layer = Layer.effect(
     })
   }),
 )
+
+// A Location's built-in plugins load in the background as its services start, and they add the agents and models a turn
+// reads. Work that starts with the Location, a first prompt or one after the Location sat idle, waits for them;
+// otherwise it finds no model and the drain fails with nothing recorded in the session.
+const loaded = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  PluginInternal.Service.use((plugins) => plugins.ready).pipe(Effect.andThen(effect))
 
 export const node = makeGlobalNode({
   service: SessionExecution.Service,

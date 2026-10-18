@@ -79,6 +79,10 @@ async function serve(
   const consent = FreeModels.createClient({ consentFile: FreeModels.trainingConsentFile() })
   await consent.setTrainingConsent(true)
   const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  // Tests that turn catalog fetches back on restore what they found, which another such test may have left on. This
+  // one serves the cached catalog it wrote, so it never reaches vectordev.ai, whose own catalog changes over time.
+  const previousFetchOff = Flag.VECTOR_DISABLE_MODELS_FETCH
+  Flag.VECTOR_DISABLE_MODELS_FETCH = true
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
   Object.assign(process.env, {
     VECTOR_SERVER_USERNAME: "vector",
@@ -141,6 +145,7 @@ async function serve(
   } finally {
     globalThis.fetch = local
     Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    Flag.VECTOR_DISABLE_MODELS_FETCH = previousFetchOff
     await listener.stop(true)
     for (const key of keys) {
       const value = previous[key]
@@ -518,6 +523,8 @@ test("the v2 runner sends nothing to a may-train model in a session a guest has 
     // v2 runner's HTTP client may hold the fetch it found before this file replaced it. The guest rule is checked
     // first, so the guest's session names the guest, and the owner's own session names the missing acceptance.
     await FreeModels.createClient({ consentFile: FreeModels.trainingConsentFile() }).setTrainingConsent(false)
+    // These sessions belong to the invited workspace, a location of its own that starts with the first request naming
+    // it, so each first prompt is drained while that location's plugins may still be listing Laguna.
     const own = await newSession(h, h.owner)
     await h.send(`/api/session/${own}/model`, h.owner, { model: { providerID: "vector", id: laguna.id } })
     await h.send(`/api/session/${own}/prompt`, h.owner, { prompt: { text: "owner only" } })

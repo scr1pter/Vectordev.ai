@@ -11,7 +11,8 @@ import {
   freeModelTrainingLabel,
   freeModelName,
   freeModelSource,
-  preferOwnFreeModels,
+  freeModelChoices,
+  freeModelTrainingNotice,
   FREE_MODEL_RESUME_UNAVAILABLE,
   FREE_ROUTER_DISCLAIMER,
   FREE_MODELS_OWN_KEYS,
@@ -28,9 +29,12 @@ import {
 describe("free model presentation", () => {
   const shared = { id: "maker/coder:free", name: "Maker Coder:free", freeModel: { source: "shared" as const } }
   const own = { ...shared, freeModel: { source: "openrouter" as const } }
-  test("uses the user's account for duplicate curated models without changing routing IDs", () => {
-    expect(preferOwnFreeModels([shared, own])).toEqual([own])
-    expect(preferOwnFreeModels([own, shared])).toEqual([own])
+  test("lists both copies of a model, the shared one first, without changing routing IDs", () => {
+    // A connected OpenRouter account no longer hides the shared copy: choosing it keeps the shared allowance.
+    expect(freeModelChoices([shared, own])).toEqual([shared, own])
+    expect(freeModelChoices([own, shared])).toEqual([shared, own])
+    const paid = { id: "maker/paid", name: "Maker Paid" }
+    expect(freeModelChoices([own, paid, shared])).toEqual([paid, shared, own])
     expect(freeModelName(own)).toBe("Maker Coder")
     expect(own.id).toBe("maker/coder:free")
     expect(freeModelSource(own)).toBe("Your OpenRouter account")
@@ -39,7 +43,7 @@ describe("free model presentation", () => {
   test("price and free-looking names cannot enable the section when metadata is absent", () => {
     const ordinary = { id: shared.id, name: "Maker Coder (free)", cost: { input: 0, output: 0 } }
     expect(freeModelSource(ordinary)).toBeUndefined()
-    expect(preferOwnFreeModels([ordinary])).toEqual([ordinary])
+    expect(freeModelChoices([ordinary])).toEqual([ordinary])
     expect(freeModelName(ordinary)).toBe("Maker Coder")
   })
 })
@@ -119,4 +123,25 @@ test("OpenRouter's free router carries its own notice, which says the model is p
   expect(freeModelTrainingDisclaimer({ ...router, id: "poolside/laguna-s-2.1:free" })).toBe(
     FREE_MODEL_TRAINING_DISCLAIMER,
   )
+})
+
+test("the in-use notice names the source and label of a model that may train, and nothing for one that does not", () => {
+  const laguna = {
+    id: "poolside/laguna-s-2.1:free",
+    freeModel: { source: "shared" as const, dataPolicy: "may-train" as const },
+  }
+  expect(freeModelTrainingNotice(laguna)).toEqual({
+    summary: "Shared Vector allowance · May train on your prompts",
+    disclaimer: FREE_MODEL_TRAINING_DISCLAIMER,
+  })
+  expect(
+    freeModelTrainingNotice({ ...laguna, freeModel: { source: "openrouter", dataPolicy: "unreviewed" } })?.summary,
+  ).toBe("Your OpenRouter account · May train on your prompts")
+  expect(freeModelTrainingNotice({ id: "openrouter/free", freeModel: laguna.freeModel })?.disclaimer).toBe(
+    FREE_ROUTER_DISCLAIMER,
+  )
+  expect(freeModelTrainingNotice({ ...laguna, freeModel: { source: "shared", dataPolicy: "no-training" } })).toBe(
+    undefined,
+  )
+  expect(freeModelTrainingNotice({ id: "maker/paid" })).toBeUndefined()
 })

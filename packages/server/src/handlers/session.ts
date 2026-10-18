@@ -8,6 +8,7 @@ import { FreeModels } from "@vectordevai/core/free-models"
 import { Location } from "@vectordevai/core/location"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { SessionRunnerModel } from "@vectordevai/core/session/runner/model"
+import { PluginInternal } from "@vectordevai/core/plugin/internal"
 import { DateTime, Effect, Option, Stream } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { Api } from "../api"
@@ -279,6 +280,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
           // The model is judged as the runner chooses it, so a session without one is judged by its automatic choice.
           if ((yield* RequestPrincipal).kind !== "owner") {
             const current = yield* session.get(ctx.params.sessionID).pipe(Effect.option)
+            yield* pluginsLoaded
             const catalog = yield* Effect.serviceOption(Catalog.Service)
             if (Option.isSome(current))
               yield* refuseTrainingFreeModel(
@@ -560,17 +562,25 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
   }),
 )
 
+// A location's plugins fill its catalog in the background as it starts, and a guest's first request can be what starts
+// it, so a guest's check waits for them rather than judging an empty catalog. Read optionally, like the services below:
+// embedded callers provide no location plugins, so there is nothing to wait for.
+const pluginsLoaded = Effect.serviceOption(PluginInternal.Service).pipe(
+  Effect.flatMap((plugins) => (Option.isSome(plugins) ? plugins.value.ready : Effect.void)),
+)
+
 /**
  * Refuses an invited guest's prompt or resume that would run on a free model whose provider may train on prompts: it
  * would run under the owner's acceptance, which the guest never gave. A shared model's policy comes from the shared
- * catalog itself, since plugins may still be filling the location's model catalog when a guest's first request
- * arrives; a model on the owner's own OpenRouter account, where a shared model also runs when listed there, comes from
- * the location's catalog. A free model whose policy is found nowhere is not treated as no-training.
+ * catalog itself; a model on the owner's own OpenRouter account comes from the location's catalog, read once the
+ * location's plugins have filled it. Both are read whichever provider the prompt names, so the stricter policy wins. A
+ * free model whose policy is found nowhere is not treated as no-training.
  */
 const refuseTrainingFreeModel = Effect.fn("SessionHandler.refuseTrainingFreeModel")(function* (
   model: { readonly providerID: string; readonly id: string } | undefined,
 ) {
   if (!model || !isFreeModelRef({ providerID: model.providerID, modelID: model.id })) return
+  yield* pluginsLoaded
   // Read optionally so the routes need no services of their own beyond the location's (embedded callers pass one
   // argument to the web handler). Without them the policy cannot be read, so the guest is refused.
   const freeModelsService = yield* Effect.serviceOption(FreeModels.Service)
