@@ -89,7 +89,7 @@ export async function refreshFreeModelCatalog(
     })
     return endpoints && freeModelInfo(model, endpoints.data.endpoints, { reviewedOnly: true })
   }
-  // Five endpoint lists at a time, so a growing catalog never bursts OpenRouter's rate limit during the cron.
+  // Five endpoint lists at a time, so a growing catalog does not send OpenRouter every read at once during the cron.
   const checked: (FreeModelInfo | undefined)[] = []
   for (const batch of Array.from({ length: Math.ceil(candidates.length / 5) }, (_, index) =>
     candidates.slice(index * 5, index * 5 + 5),
