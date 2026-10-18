@@ -18,6 +18,7 @@ import {
   originLabel,
   pinnable,
   rejectable,
+  savedNotice,
   summary,
   usage,
   type MemoryEntryView,
@@ -74,17 +75,21 @@ export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirect
     setError("")
     setNotice(message)
   }
-  // Every change goes through the engine, which applies the same checks to the user's edits as to the agent's.
-  const act = async (run: (current: VectorClient) => Promise<{ error?: unknown }>, done: string) => {
+  // Every change goes through the engine, which applies the same checks to the user's edits as to the agent's. What
+  // the page says afterwards can depend on what the engine answered.
+  const act = async <T,>(
+    run: (current: VectorClient) => Promise<{ error?: unknown; data?: T }>,
+    done: string | ((data: T | undefined) => string),
+  ) => {
     const current = client()
     if (!current) return
-    const result = await run(current).catch((cause: unknown) => ({ error: cause }))
+    const result = await run(current).catch((cause: unknown) => ({ error: cause, data: undefined }))
     if (result.error) {
       setNotice("")
       setError(errorMessage(result.error))
       return
     }
-    say(done)
+    say(typeof done === "string" ? done : done(result.data))
     refresh()
   }
 
@@ -212,7 +217,7 @@ export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirect
           onAdd={(input) =>
             act(
               (current) => current.memory.create({ ...input, scope: scope() }),
-              "Saved. Vector will use it when it is relevant.",
+              (entry) => (entry ? savedNotice(entry, input.text) : "Saved. Vector will use it when it is relevant."),
             )
           }
         />

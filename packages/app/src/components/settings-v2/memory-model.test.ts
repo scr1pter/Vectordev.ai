@@ -9,6 +9,7 @@ import {
   originLabel,
   pinnable,
   rejectable,
+  savedNotice,
   summary,
   usage,
 } from "./memory-model"
@@ -105,5 +106,18 @@ describe("memory page model", () => {
       originLabel({ origin: "file", scope: "repository", source: { file: "/repo/BRAIN.md" } }),
     ]
     for (const text of strings) expect(text.toLowerCase()).not.toContain("project")
+  })
+
+  test("after adding, says what the engine kept rather than what was typed", () => {
+    const now = 1_760_000_000_000
+    expect(savedNotice({ text: "Use pnpm.", status: "active", createdAt: now, updatedAt: now }, "Use pnpm.")).toBe(
+      "Saved. Vector will use it when it is relevant.",
+    )
+    expect(
+      savedNotice({ text: "Use pnpm.", status: "active", createdAt: now - 86_400_000, updatedAt: now }, "use pnpm"),
+    ).toBe('This was already in memory, and it is in use: "Use pnpm."')
+    expect(
+      savedNotice({ text: "Deploy key is [redacted].", status: "active", createdAt: now, updatedAt: now }, "Deploy key is ghp_x"),
+    ).toBe("Saved without the secret it contained. Vector will use it when it is relevant.")
   })
 })

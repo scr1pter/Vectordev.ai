@@ -25,6 +25,7 @@ export type MemoryEntryView = {
   hold?: MemoryHold
   source?: { file: string; line?: number }
   lastUsedAt?: number
+  createdAt?: number
   updatedAt: number
 }
 
@@ -86,6 +87,20 @@ export function holdLabel(hold: MemoryHold | undefined) {
   if (hold === "instruction-like") return "It reads like an instruction to the agent, so it waits for you."
   if (hold === "hidden-unicode") return "It contains hidden characters. Fix the file to use it."
   return "Vector could not check its evidence. It is used once another session confirms it or you approve it."
+}
+
+/**
+ * What the page says once the user adds a memory: what the engine kept, not what was typed. The engine stores the
+ * user's words, replacing an older entry that said nearly the same, but it removes a secret and keeps one copy of the
+ * same words.
+ */
+export function savedNotice(entry: Pick<MemoryEntryView, "text" | "status" | "updatedAt" | "createdAt">, typed: string) {
+  if (entry.status !== "active") return "Saved for your review. Vector uses it once you approve it."
+  if (entry.createdAt !== undefined && entry.updatedAt - entry.createdAt > 1000)
+    return `This was already in memory, and it is in use: "${entry.text}"`
+  if (entry.text.includes("[redacted]") && !typed.includes("[redacted]"))
+    return "Saved without the secret it contained. Vector will use it when it is relevant."
+  return "Saved. Vector will use it when it is relevant."
 }
 
 /** Only what Vector or the user saved here can be edited here; a file someone wrote is changed in that file. */
