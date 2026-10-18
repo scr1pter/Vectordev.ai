@@ -21,6 +21,7 @@ import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
 import { ModelV2 } from "@vectordevai/core/model"
 import { Provider } from "@/provider/provider"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { freeModelMayTrain, FREE_MODEL_TRAINING_OWNER_ONLY } from "@vectordevai/core/free-model-choice"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { NamedError } from "@vectordevai/core/util/error"
@@ -74,6 +75,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const summary = yield* SessionSummary.Service
     const events = yield* EventV2Bridge.Service
     const provider = yield* Provider.Service
+    const guests = yield* FreeModelGuests.Service
     const scope = yield* Scope.Scope
 
     const list = Effect.fn("SessionHttpApi.list")(function* (ctx: { query: typeof ListQuery.Type }) {
@@ -284,12 +286,15 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload?: typeof ForkPayload.Type
     }) {
-      return yield* SessionError.mapStorageNotFound(
+      const forked = yield* SessionError.mapStorageNotFound(
         session.fork({
           sessionID: ctx.params.sessionID,
           messageID: ctx.payload?.messageID,
         }),
       )
+      // A fork copies the history, a guest's messages included, so it keeps the source's guest mark (FreeModelGuests).
+      if (yield* guests.marked(ctx.params.sessionID)) yield* guests.mark(forked.id)
+      return forked
     })
 
     const forkRaw = Effect.fn("SessionHttpApi.forkRaw")(function* (ctx: {

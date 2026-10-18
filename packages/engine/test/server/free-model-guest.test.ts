@@ -310,6 +310,25 @@ test("a guest's request forwarded from another engine keeps the session off may-
   })
 }, 60_000)
 
+test("a fork of a session a guest worked in keeps it off may-train models", async () => {
+  await serve(async (h) => {
+    const shared = await newSession(h, h.guest)
+    await h.send(`/session/${shared}/message`, h.guest, {
+      model: { providerID: "vector", modelID: cohere.id },
+      noReply: true,
+      parts: [{ type: "text", text: "guest secret prompt" }],
+    })
+    // The owner forks it; the fork carries the guest's message, so it carries the guest's mark too.
+    const fork = ((await (await h.send(`/session/${shared}/fork`, h.owner, {})).json()) as { id: string }).id
+    expect(fork).not.toBe(shared)
+    await h.send(`/session/${fork}/message`, h.owner, {
+      model: { providerID: "vector", modelID: laguna.id },
+      parts: [{ type: "text", text: "owner prompt in the fork" }],
+    })
+    expect(h.toLaguna()).toEqual([])
+  })
+}, 60_000)
+
 test("a title request for a guest's session never goes to a may-train model", async () => {
   // The test provider answers every prompt, so the session gets a title, and the title agent runs on Laguna.
   const chunk = (delta: unknown, finish: string | null) =>
