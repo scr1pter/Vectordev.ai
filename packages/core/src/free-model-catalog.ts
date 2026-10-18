@@ -93,14 +93,17 @@ const BARRED_FREE_AUTHORS = [
 ]
 
 // Free models offered only through the user's own OpenRouter account, never on Vector's shared allowance, because a
-// term applies that the shared allowance cannot meet. Clients before 1.99.109 see only the shared catalog, so they
-// never receive these either. Whether to serve Gemma on the shared allowance is an open owner decision; see
-// docs/vector/owner-actions/free-models-legal.md.
+// term applies that the shared allowance cannot meet, or the terms do not say whether Vector may share it. Clients
+// before 1.99.109 see only the shared catalog, so they never receive these either. Whether to serve either on the
+// shared allowance is an open owner decision; see docs/vector/owner-actions/free-models-legal.md.
 const GEMMA_SHARED =
   "Google's Gemini API terms (28 April 2026) let EEA, Swiss and UK users use it only through Paid Services, and the shared allowance does not check where its users are."
+const XING_SHARED =
+  "Phala serves it under RedPill's terms (7 April 2025), which do not address free use, so whether Vector may share it with its users is not settled."
 const PERSONAL_ONLY_FREE_MODELS: ReadonlyMap<string, string> = new Map([
   ["google/gemma-4-26b-a4b-it:free", GEMMA_SHARED],
   ["google/gemma-4-31b-it:free", GEMMA_SHARED],
+  ["xingchen-agi/xing4.0-29b-a4b:free", XING_SHARED],
 ])
 
 /** Why a free model is kept off Vector's shared allowance, when it is offered through the user's own account only. */

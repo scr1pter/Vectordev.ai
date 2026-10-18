@@ -18,7 +18,7 @@ Source for each policy: the per-endpoint `data_policy` embedded in the model's p
 
 | Model | Provider (tag) | OpenRouter endpoint record | Policy in code | Open confirmations |
 | --- | --- | --- | --- | --- |
-| `xingchen-agi/xing4.0-29b-a4b:free` | Phala (`phala`) | No training, no retention ("Private") | no-training | Listed 15 Oct 2026; RedPill terms (7 Apr 2025, §14) do not address free use |
+| `xingchen-agi/xing4.0-29b-a4b:free` | Phala (`phala`) | No training, no retention ("Private") | no-training, own account only (`PERSONAL_ONLY_FREE_MODELS`) | Listed 15 Oct 2026; RedPill terms (7 Apr 2025, §14) do not address free use |
 | `cohere/north-mini-code:free` | Cohere (`cohere`) | No training, kept 30 days | no-training | Cohere's linked terms (7 Sep 2022) allow use to improve the service and bar service-bureau use; confirm the endpoint record governs |
 | `dots-studio/dots-3-note-preview:free` | AtlasCloud (`atlas-cloud/fp8`) | No training, kept, period not stated; free until 31 Dec 2026 | no-training | AtlasCloud's privacy page (8 Oct 2026) states no retention period; confirm free terms |
 | `google/gemma-4-26b-a4b-it:free` | Google AI Studio (`google-ai-studio`) | No training, kept 55 days, user IDs required | no-training, own account only (`PERSONAL_ONLY_FREE_MODELS`) | Gemini API terms (28 Apr 2026): users 18+, and EEA, Swiss and UK users only through Paid Services; the tier behind OpenRouter is not stated. Student tier must not serve under-18 users |
@@ -30,7 +30,7 @@ Source for each policy: the per-endpoint `data_policy` embedded in the model's p
 | `thinkingmachines/inkling-small:free` | Thinking Machines (`thinkingmachines/nvfp4`) | Same as Inkling | may-train | Same as Inkling |
 | `nvidia/*:free` (6 models) | NVIDIA (`nvidia`) | Trains | barred, never listed | NVIDIA API Trial Terms (19 Sep 2025) §1.2, §1.4, §4.2: evaluation only, no production use, no sharing output. Whether to show them on a user's own account with an evaluation-only notice is an owner question |
 
-**Owner decisions open before the API deploys.** Gemma is kept off the shared allowance, and so off 1.99.108 and CLI 1.99.99, because nothing in Vector applies the EEA, Swiss and UK limit in Google's terms. Serving it there needs either that limit implemented or a finding that it does not apply to the tier behind OpenRouter. Vector's terms already require users to be 18 or older, which covers the age limits of Google's and Thinking Machines' terms. Xing4.0 stays on the shared allowance; RedPill's terms do not address free use, so the owner should confirm or move it to `PERSONAL_ONLY_FREE_MODELS` too.
+**Owner decisions open before the API deploys.** Gemma is kept off the shared allowance, and so off 1.99.108 and CLI 1.99.99, because nothing in Vector applies the EEA, Swiss and UK limit in Google's terms. Serving it there needs either that limit implemented or a finding that it does not apply to the tier behind OpenRouter. Vector's terms already require users to be 18 or older, which covers the age limits of Google's and Thinking Machines' terms. Xing4.0 is kept off the shared allowance as well, since RedPill's terms do not address free use; serving it there needs the owner to confirm that sharing it is allowed.
 
 No free endpoint was marked as publishing prompts. Zero-token-priced Google Lyria models charge per song or clip and `openrouter/free` routes at random, so neither is offered.
 

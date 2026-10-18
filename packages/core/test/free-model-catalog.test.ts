@@ -85,13 +85,17 @@ test("each endpoint carries its reviewed policy, and today's may-train providers
   expect(JSON.stringify(info("cohere/north-mini-code:free"))).not.toMatch(/zero data retention|\bZDR\b/i)
 })
 
-test("Gemma is offered through the user's own account only, with the reason, and every other model is not", () => {
+test("Gemma and Xing4.0 are offered through the user's own account only, with the reason, and no other model is", () => {
   // The shared allowance cannot apply the EEA, Swiss and UK limit in Google's Gemini API terms.
   for (const id of ["google/gemma-4-26b-a4b-it:free", "google/gemma-4-31b-it:free"]) {
     expect(personalOnlyFreeModel(id)).toContain("Paid Services")
     expect(offeredFreeModel(metadata(id), fixture.capturedAt)).toBe(true)
   }
+  // RedPill's terms, under which Phala serves Xing4.0, do not say whether its free use may be shared.
+  expect(personalOnlyFreeModel("xingchen-agi/xing4.0-29b-a4b:free")).toContain("RedPill")
+  expect(offeredFreeModel(metadata("xingchen-agi/xing4.0-29b-a4b:free"), fixture.capturedAt)).toBe(true)
   expect([...REVIEWED_FREE_ENDPOINTS.keys()].filter((id) => personalOnlyFreeModel(id))).toEqual([
+    "xingchen-agi/xing4.0-29b-a4b:free",
     "google/gemma-4-26b-a4b-it:free",
     "google/gemma-4-31b-it:free",
   ])

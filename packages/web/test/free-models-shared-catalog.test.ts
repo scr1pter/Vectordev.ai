@@ -41,6 +41,9 @@ const environment = {
   OPENROUTER_FREE_API_KEY: "fixture-openrouter-key",
 }
 const gemma = ["google/gemma-4-26b-a4b-it:free", "google/gemma-4-31b-it:free"]
+// Personal-route only: Gemma for Google's EEA, Swiss and UK limit, Xing4.0 because RedPill's terms do not address
+// free use.
+const personalOnly = [...gemma, "xingchen-agi/xing4.0-29b-a4b:free"]
 
 beforeEach(() => {
   store.clear()
@@ -50,14 +53,13 @@ afterAll(() => {
   for (const key of Object.keys(environment)) delete process.env[key]
 })
 
-test("Gemma stays off the shared allowance, so no client of it, old or new, is served Gemma", async () => {
+test("Gemma and Xing4.0 stay off the shared allowance, so no client of it, old or new, is served them", async () => {
   // Google's Gemini API terms (28 April 2026) let EEA, Swiss and UK users use it only through Paid Services, and the
   // shared allowance does not check where its users are. Until the owner decides, Gemma is personal-route only.
   const refreshed = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
   expect(refreshed.models.map((model) => model.id)).toEqual([
     "cohere/north-mini-code:free",
     "dots-studio/dots-3-note-preview:free",
-    "xingchen-agi/xing4.0-29b-a4b:free",
     "liquid/lfm-2.5-2.6b:free",
     "poolside/laguna-s-2.1:free",
     "poolside/laguna-xs-2.1:free",
@@ -68,18 +70,18 @@ test("Gemma stays off the shared allowance, so no client of it, old or new, is s
   // 1.99.108 and CLI 1.99.99 read without the disclosure; 1.99.109 reads with it.
   for (const disclosure of [false, true]) {
     const served = await currentFreeModelCatalog(fetcher, later, { disclosure })
-    expect(served.models.filter((model) => gemma.includes(model.id))).toEqual([])
+    expect(served.models.filter((model) => personalOnly.includes(model.id))).toEqual([])
   }
 })
 
-test("a stored catalog that lists Gemma is served without it", async () => {
-  // A catalog stored before the rule, with Gemma's correct reviewed policy, must not keep serving it.
-  const models = gemma.flatMap((id) => {
+test("a stored catalog that lists Gemma or Xing4.0 is served without them", async () => {
+  // A catalog stored before the rule, with their correct reviewed policy, must not keep serving them.
+  const models = personalOnly.flatMap((id) => {
     const model = fixture.models.find((item) => item.id === id)
     const info = model && freeModelInfo(model as never, fixture.endpoints[id] ?? [], { reviewedOnly: true })
     return info ? [info] : []
   })
-  expect(models.map((model) => model.id)).toEqual(gemma)
+  expect(models.map((model) => model.id)).toEqual(personalOnly)
   store.set(FREE_MODELS_CATALOG_KEY, JSON.stringify({ enabled: true, updatedAt: fixture.capturedAt, models }))
   expect(await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000, { disclosure: true })).toEqual({
     enabled: false,
