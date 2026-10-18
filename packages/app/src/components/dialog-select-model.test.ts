@@ -558,7 +558,7 @@ test("only the server-marked approved plugin makes a paused provider selectable"
   }
 })
 
-describe("Models included with Vector", () => {
+describe("Free models inside of Vector", () => {
   const shared = model({ id: "vector", name: "Vector", source: "custom" }, "maker/coder:free", "Maker Coder:free", {
     freeModel: { source: "shared" },
     cost: { input: 0, output: 0 },
@@ -575,10 +575,32 @@ describe("Models included with Vector", () => {
       currentKey: pickerModelKey(shared),
       recentKeys: [pickerModelKey(shared)],
     })
-    expect(sections.map((section) => section.label)).toEqual(["Models included with Vector"])
+    expect(sections.map((section) => section.label)).toEqual(["Free models inside of Vector"])
     expect(pickerKeys(sections)).toEqual([pickerModelKey(own)])
     expect(modelDisplayName(own)).toBe("Maker Coder")
     expect(modelTitle(own)).toContain("Your OpenRouter account")
+  })
+  test('a model whose provider may train says "May train on your prompts" on its row, tooltip and spoken label', () => {
+    const laguna = {
+      ...own,
+      id: "poolside/laguna-s-2.1:free",
+      name: "Poolside: Laguna S 2.1",
+      freeModel: { source: "openrouter" as const, dataPolicy: "may-train" as const },
+    }
+    const noTraining = { ...own, freeModel: { source: "openrouter" as const, dataPolicy: "no-training" as const } }
+    const [mixed] = buildModelSections({ models: [noTraining, laguna], now: NOW })
+    // The section claims one policy only when every row has it.
+    expect(mixed.policy).toBeUndefined()
+    expect(modelTitle(laguna)).toContain("May train on your prompts")
+    expect(modelTitle(laguna)).toContain("Vector itself never trains on your prompts.")
+    expect(modelAriaLabel(laguna, NOW)).toContain("May train on your prompts")
+    expect(modelTitle(noTraining)).not.toContain("May train")
+    const [clean] = buildModelSections({ models: [noTraining], now: NOW })
+    expect(clean.policy?.label).toBe("No-training policy")
+    // An unreviewed model is labelled the same way, never as no-training.
+    const unreviewed = { ...laguna, freeModel: { source: "openrouter" as const, dataPolicy: "unreviewed" as const } }
+    expect(buildModelSections({ models: [unreviewed], now: NOW })[0].policy).toBeUndefined()
+    expect(modelTitle(unreviewed)).toContain("has not reviewed")
   })
   test("OFF metadata removal hides the section; ordinary zero-price models do not recreate it", () => {
     const sections = buildModelSections({ models: [{ ...own, freeModel: undefined }], now: NOW })

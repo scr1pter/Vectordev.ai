@@ -39,6 +39,7 @@ import {
 } from "@/utils/task-intelligence"
 import { modelDisplayName } from "@/utils/provider-brand"
 import { FREE_MODEL_POLICY_NOTICE, firstFreeModelPolicyNotice } from "@/utils/free-model-policy-notice"
+import { freeModelMayTrain, type FreeModelChoice } from "@vectordevai/core/free-model-choice"
 import { cachedSpendPolicy, promptRunBudget } from "@/features/economics/spend-limits-api"
 
 type PendingPrompt = {
@@ -294,6 +295,8 @@ type PromptSubmitInput = {
   llmJudge?: Accessor<boolean>
   autoModelRouting?: Accessor<boolean>
   connectProvider?: () => void
+  /** Asks once before the first prompt to a free model whose provider may train on prompts; false keeps it unsent. */
+  confirmFreeModelTraining?: (model: FreeModelChoice) => Promise<boolean>
 }
 
 export function createPromptSubmit(input: PromptSubmitInput) {
@@ -514,6 +517,13 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     })
 
     if (!(await workspaceAvailable())) return
+    // Before anything is created or sent: the draft stays in the editor if the user does not accept.
+    if (
+      freeModelMayTrain(routed.model) &&
+      input.confirmFreeModelTraining &&
+      !(await input.confirmFreeModelTraining(routed.model))
+    )
+      return
 
     input.addToHistory(currentPrompt, mode)
     input.resetHistoryNavigation()

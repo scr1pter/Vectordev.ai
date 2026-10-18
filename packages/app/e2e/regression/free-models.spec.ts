@@ -168,7 +168,7 @@ test("groups free models once, prefers own account, and hides the group when OFF
   await setup(page, { enabled: true })
   await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
   await expect(
-    page.locator('[data-slot="model-section-name"]').filter({ hasText: "Models included with Vector" }),
+    page.locator('[data-slot="model-section-name"]').filter({ hasText: "Free models inside of Vector" }),
   ).toBeVisible()
   const free = page.locator('[data-option-key="openrouter:maker/coder:free"]')
   await expect(free).toHaveCount(1)
@@ -181,7 +181,7 @@ test("groups free models once, prefers own account, and hides the group when OFF
   await setup(page, { enabled: false })
   await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
   await expect(
-    page.locator('[data-slot="model-section-name"]').filter({ hasText: "Models included with Vector" }),
+    page.locator('[data-slot="model-section-name"]').filter({ hasText: "Free models inside of Vector" }),
   ).toHaveCount(0)
   await expect(page.locator('[data-option-key="openrouter:maker/coder:free"]')).toBeVisible()
 })
@@ -217,7 +217,7 @@ test("quota recovery resumes the same failed turn without submitting a new promp
   })
   const card = page.locator("[data-free-models-limit]")
   await expect(card).toBeVisible()
-  await expect(card).toContainText("You've used today's shared allowance for Models included with Vector")
+  await expect(card).toContainText("You've used today's shared allowance for Free models inside of Vector")
   await expect(card).toContainText("2030")
   await expect(page.getByText("RAW_UPSTREAM_QUOTA_DETAILS_MUST_NOT_RENDER")).toHaveCount(0)
   await expect(page.getByText("Build · Maker Coder:free")).toHaveCount(0)

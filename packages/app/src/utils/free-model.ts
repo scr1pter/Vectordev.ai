@@ -1,12 +1,17 @@
-type FreeCandidate = { id: string; limit: { context: number }; freeModel?: { source: string } }
+import { freeModelMayTrain, type FreeModelChoice } from "@vectordevai/core/free-model-choice"
+
+type FreeCandidate = { id: string; limit: { context: number }; freeModel?: FreeModelChoice["freeModel"] }
 
 /**
- * The largest-context model served through the user's own OpenRouter account. Price and `:free`
- * suffixes are never treated as eligibility; only server-approved metadata is, so a paid or shared
+ * The largest-context model served through the user's own OpenRouter account, preferring one whose provider does not
+ * train on prompts: Vector never picks a "May train on your prompts" model for the user ahead of a no-training one.
+ * Price and `:free` suffixes are never treated as eligibility; only server-approved metadata is, so a paid or shared
  * model can never be chosen here.
  */
 export function bestOwnFreeModel<T extends FreeCandidate>(models: readonly T[]) {
   return models
     .filter((model) => model.freeModel?.source === "openrouter")
-    .toSorted((a, b) => b.limit.context - a.limit.context)[0]
+    .toSorted(
+      (a, b) => Number(freeModelMayTrain(a)) - Number(freeModelMayTrain(b)) || b.limit.context - a.limit.context,
+    )[0]
 }

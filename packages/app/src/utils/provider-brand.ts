@@ -1,10 +1,14 @@
 import {
   FREE_MODELS_DATA_POLICY,
   FREE_MODELS_TITLE,
+  freeModelMayTrain,
   freeModelName,
   freeModelSource,
+  freeModelTrainingDisclaimer,
+  freeModelTrainingLabel,
   preferOwnFreeModels,
 } from "@vectordevai/core/free-model-choice"
+import type { FreeDataPolicy } from "@vectordevai/schema/free-model"
 import { providerAllowed, providerUsable } from "@vectordevai/schema/provider-policy"
 
 export const isHiddenProvider = (id: string, provider?: Parameters<typeof providerUsable>[1]) =>
@@ -26,7 +30,7 @@ export function brandProviderName(id: string, name?: string | null): string {
 export type PickerModel = {
   id: string
   name: string
-  freeModel?: { source: "shared" | "openrouter" }
+  freeModel?: { source: "shared" | "openrouter"; dataPolicy?: FreeDataPolicy }
   release_date?: string
   capabilities?: {
     reasoning?: boolean
@@ -222,6 +226,7 @@ export function modelAriaLabel(model: PickerModel, now: number) {
     model.capabilities?.reasoning ? "reasoning" : "",
     isNewRelease(model, now) ? "new" : "",
     freeModelSource(model) ?? access.spoken,
+    freeModelTrainingLabel(model) ?? "",
   ]
     .filter(Boolean)
     .join(", ")
@@ -244,7 +249,8 @@ export function modelTitle(model: PickerModel) {
     contextTitle(model.limit?.context),
     releaseTitle(model),
     freeModelSource(model) ?? access.title,
-    model.freeModel ? FREE_MODELS_DATA_POLICY : "",
+    freeModelTrainingLabel(model) ?? "",
+    model.freeModel ? (freeModelTrainingDisclaimer(model) ?? FREE_MODELS_DATA_POLICY) : "",
   ]
     .filter(Boolean)
     .join("\n")
@@ -315,7 +321,10 @@ export function buildModelSections<T extends PickerModel>(input: {
         id: "free",
         kind: "free",
         label: FREE_MODELS_TITLE,
-        policy: { label: "No-training policy", title: FREE_MODELS_DATA_POLICY },
+        // The section names one policy only when every row has it; otherwise each may-train row carries its label.
+        policy: free.some(freeModelMayTrain)
+          ? undefined
+          : { label: "No-training policy", title: FREE_MODELS_DATA_POLICY },
         items: free.sort(byRelease),
       }),
     )

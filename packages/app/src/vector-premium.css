@@ -2573,6 +2573,10 @@ html[data-vector-navigation-resizing] * {
   min-width: 34px;
   text-align: right;
 }
+/* "May train on your prompts": a free model whose provider may train on prompts. */
+:is(.vector-model-popover, .vector-select-model-dialog) [data-slot="model-row-training"] {
+  color: var(--vx-amber);
+}
 .vector-select-model-dialog [data-slot="model-row-check"] {
   display: inline-flex;
   flex: none;
