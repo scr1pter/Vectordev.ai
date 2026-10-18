@@ -800,6 +800,43 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("reads every reply against the work before it, so a second continue in a row keeps its tools", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register(
+        Object.fromEntries(
+          ["read", "edit", "todowrite", "question"].map((name) => [
+            name,
+            Tool.make({
+              description: name,
+              input: Schema.Struct({}),
+              output: Schema.String,
+              execute: () => Effect.succeed(name),
+            }),
+          ]),
+        ),
+      )
+      const session = yield* SessionV2.Service
+      // Every reply finishes and asks nothing, so only the work before each message can keep it at that work's size.
+      const turn = Effect.fnUntraced(function* (text: string, answer = "Ported the next part.") {
+        yield* session.prompt({ sessionID, prompt: Prompt.make({ text }), resume: false })
+        requests.length = 0
+        response = fragmentFixture("text", `text-${requests.length}-${text}`, [answer]).completeEvents
+        yield* session.resume(sessionID)
+        return requests[0]?.tools.map((tool) => tool.name) ?? []
+      })
+      for (const text of ["port the TUI to Rust", "continue", "continue", "keep going", "yes", "try again"])
+        expect(yield* turn(text), text).toEqual(expect.arrayContaining(["read", "edit", "todowrite", "question"]))
+      // A thanks is a direct reply, and a continue after it still continues the work, not the thanks.
+      expect(yield* turn("thanks", "You're welcome!")).toEqual([])
+      expect(yield* turn("continue")).toEqual(expect.arrayContaining(["todowrite", "question"]))
+      // A plain no to an offer of more work leaves nothing to do.
+      yield* turn("keep going", "Ported every screen. Want me to also update the docs?")
+      expect(yield* turn("no thanks", "Okay.")).toEqual([])
+    }),
+  )
+
   it.effect("only advertises read-only tools in hidden swarm planning sessions", () =>
     Effect.gen(function* () {
       yield* setup

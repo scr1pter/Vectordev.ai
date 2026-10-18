@@ -488,29 +488,47 @@ const layer = Layer.effect(
   }),
 )
 
-// The size of the request a turn answers: the user's newest message, read against the one before it and the reply
-// that came between, so a "yes" to the agent's question continues that request instead of becoming a bare reply.
+// The size of the request a turn answers, folded over the user's messages oldest first as the V1 history fold does.
+// Each message is read against the work before it (the last message that was more than a greeting or a thanks) and
+// the reply that answered the message before it, so a "yes" to the agent's question, or a second "continue" in a row,
+// still continues that work instead of becoming a bare reply.
 function requestSize(context: readonly SessionMessage.Message[]) {
-  const users = context.flatMap((message) => (message.type === "user" ? [message] : []))
-  const latest = users.at(-1)
-  if (!latest) return undefined
-  const before = users.at(-2)
-  const between = context.slice(before ? context.indexOf(before) + 1 : 0, context.indexOf(latest))
-  const reply = between
-    .flatMap((message) =>
-      message.type === "assistant" ? message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])) : [],
-    )
-    .join("\n")
-  const describe = (message: SessionMessage.User) => ({
-    text: message.text,
-    files: message.files?.filter((file) => !file.mime.startsWith("image/")).length,
-    images: message.files?.filter((file) => file.mime.startsWith("image/")).length,
-    agents: message.agents?.map((agent) => agent.name),
-  })
-  // The classifier reads a greeting before it as no work to continue.
-  const previous = before ? TaskSize.classify(describe(before)).tier : undefined
-  return TaskSize.classify({ ...describe(latest), previous, open: TaskSize.asks(reply) })
+  const users = context.flatMap((message, index) => (message.type === "user" ? [{ message, index }] : []))
+  // A compaction summarised what came before, so a "continue" after it has work of unknown size to go on with.
+  const compacted = context.some((message) => message.type === "compaction")
+  return users.reduce<{ result?: TaskSize.Result; work?: TaskSize.Tier }>(
+    (state, user, position) => {
+      const reply =
+        position === 0
+          ? []
+          : context
+              .slice(users[position - 1]!.index + 1, user.index)
+              .filter((message): message is SessionMessage.Assistant => message.type === "assistant")
+      const text = reply
+        .flatMap((message) => message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])))
+        .join("\n")
+      const last = reply.at(-1)
+      const result = TaskSize.classify({
+        text: user.message.text,
+        files: user.message.files?.filter((file) => !file.mime.startsWith("image/")).length,
+        images: user.message.files?.filter((file) => file.mime.startsWith("image/")).length,
+        agents: user.message.agents?.map((agent) => agent.name),
+        previous: state.work,
+        // The work before is still open when its reply asked or offered something, or its run did not finish (a
+        // message that joined a running drain has no reply of its own yet).
+        open:
+          position > 0 &&
+          (TaskSize.asks(text) || !last || last.error !== undefined || UNFINISHED.has(last.finish ?? "")),
+        offer: TaskSize.offers(text),
+      })
+      return { result, work: result.tier === "chat" ? state.work : result.tier }
+    },
+    { work: compacted ? "standard" : undefined },
+  ).result
 }
+
+// Finish reasons of a step that stopped before its answer was done.
+const UNFINISHED = new Set(["length", "tool-calls", "unknown", "error", "content-filter"])
 
 export const node = makeLocationNode({
   service: Service,
