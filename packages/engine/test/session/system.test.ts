@@ -9,7 +9,6 @@ import { Permission } from "../../src/permission"
 import {
   ALL_SUBAGENTS,
   COMPLETION_POLICY,
-  LOCAL_MEMORY_POLICY,
   SUBAGENT_POLICY,
   SystemPrompt,
   subagentAvailability,
@@ -288,31 +287,19 @@ describe("session.system", () => {
     }),
   )
 
-  it.effect("describes local memory storage and provider context honestly", () =>
-    Effect.sync(() => {
-      expect(LOCAL_MEMORY_POLICY).toContain("stored as plain Markdown only on this computer")
-      expect(LOCAL_MEMORY_POLICY).toContain("context sent to the model provider")
-      expect(LOCAL_MEMORY_POLICY).toContain("inspect, edit, or erase")
-      expect(LOCAL_MEMORY_POLICY).toContain("Do not create or update it on your own")
-      expect(LOCAL_MEMORY_POLICY).not.toContain("never leaves")
-    }),
-  )
-
-  it.instance("a subagent's environment leaves out the user-facing identity and the memory policies", () =>
+  it.instance("no request carries a memory policy: memory costs nothing until there is memory", () =>
     Effect.gen(function* () {
       const prompt = yield* SystemPrompt.Service
       const model = { api: { id: "model" }, providerID: "provider" } as unknown as Provider.Model
       const main = (yield* prompt.environment(model, { tools: ["edit"] })).stable.join("\n")
       const child = (yield* prompt.environment(model, { tools: ["edit"], nested: true })).stable.join("\n")
-      const readOnly = (yield* prompt.environment(model, { tools: ["read"] })).stable.join("\n")
       expect(main).toContain("If the user asks what you are")
-      expect(main).toContain("<vector_local_memory>")
-      expect(main).toContain("<vector_project_memory>")
       expect(child).not.toContain("If the user asks what you are")
-      expect(child).not.toContain("<vector_local_memory>")
-      expect(child).not.toContain("<vector_project_memory>")
-      // An agent that cannot edit cannot keep project memory either.
-      expect(readOnly).not.toContain("<vector_project_memory>")
+      for (const text of [main, child]) {
+        expect(text).not.toContain("<vector_local_memory>")
+        expect(text).not.toContain("<vector_project_memory>")
+        expect(text).not.toContain("MEMORY.md")
+      }
     }),
   )
 

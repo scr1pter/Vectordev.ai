@@ -20,6 +20,7 @@ import { httpClient, LayerNodePlatform } from "@vectordevai/core/effect/app-node
 import { InstanceStore } from "@/project/instance-store"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { Config } from "@/config/config"
+import { Brain } from "@vectordevai/core/brain/brain"
 
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([CrossSpawnSpawner.node, LayerNodePlatform.filesystem, InstanceStore.node]), [
@@ -33,7 +34,7 @@ const it = testEffect(
 const configLayer = Layer.succeed(Config.Service, TestConfig.make())
 
 const instructionLayer = (global: Partial<Global.Interface>, flags: Partial<RuntimeFlags.Info> = {}) =>
-  AppNodeBuilder.build(Instruction.node, [
+  AppNodeBuilder.build(LayerNode.group([Instruction.node, Brain.node]), [
     [Config.node, configLayer],
     [Global.node, Global.layerWith(global)],
     [RuntimeFlags.node, RuntimeFlags.layer(flags)],
@@ -215,7 +216,7 @@ describe("Instruction.resolve", () => {
           return HttpClientResponse.fromWeb(request, new Response("Remote rules"))
         }),
       )
-      const layer = AppNodeBuilder.build(Instruction.node, [
+      const layer = AppNodeBuilder.build(LayerNode.group([Instruction.node, Brain.node]), [
         [
           Config.node,
           Layer.succeed(
@@ -242,14 +243,15 @@ describe("Instruction.resolve", () => {
 })
 
 describe("Instruction.system", () => {
-  it.live("does not silently drop an unreadable repository rules target", () =>
+  it.live("a directory named RULES.md adds no rules and does not break the instructions", () =>
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         yield* fs.makeDirectory(path.join(dir, ".vector", "RULES.md"), { recursive: true })
-        const result = yield* (yield* Instruction.Service).system().pipe(Effect.exit)
-
-        expect(result._tag).toBe("Failure")
+        const svc = yield* Instruction.Service
+        expect(yield* svc.system()).toEqual([])
+        const digest = yield* (yield* Brain.Service).digest(yield* svc.place(), { personal: true, index: true })
+        expect(digest.text).toBeUndefined()
       }).pipe(provideInstruction({ home: dir, config: dir })),
     ),
   )
@@ -341,7 +343,7 @@ describe("Instruction.systemPaths global config", () => {
     }),
   )
 
-  it.live("loads global Vector rules additively with AGENTS.md", () =>
+  it.live("global Vector rules reach the model through the brain, beside AGENTS.md", () =>
     Effect.gen(function* () {
       const globalTmp = yield* tmpWithFiles({
         "AGENTS.md": "# Global Instructions",
@@ -353,12 +355,15 @@ describe("Instruction.systemPaths global config", () => {
         const svc = yield* Instruction.Service
         const paths = yield* svc.systemPaths()
         expect(paths.has(path.join(globalTmp, "AGENTS.md"))).toBe(true)
-        expect(paths.has(path.join(globalTmp, "RULES.md"))).toBe(true)
+        // Rules are no longer an instruction file loaded whole; the brain sends them in its digest.
+        expect(paths.has(path.join(globalTmp, "RULES.md"))).toBe(false)
+        const digest = yield* (yield* Brain.Service).digest(yield* svc.place(), { personal: true, index: true })
+        expect(digest.text).toContain("Never commit generated credentials.")
       }).pipe(provideInstance(projectTmp), provideInstruction({ home: globalTmp, config: globalTmp }))
     }),
   )
 
-  it.live("loads local memory additively with global instructions", () =>
+  it.live("local memory reaches the model through the brain, beside global instructions", () =>
     Effect.gen(function* () {
       const globalTmp = yield* tmpWithFiles({
         "AGENTS.md": "# Global Instructions",
@@ -370,9 +375,40 @@ describe("Instruction.systemPaths global config", () => {
         const svc = yield* Instruction.Service
         const paths = yield* svc.systemPaths()
         expect(paths.has(path.join(globalTmp, "AGENTS.md"))).toBe(true)
-        expect(paths.has(path.join(globalTmp, "MEMORY.md"))).toBe(true)
-        expect((yield* svc.system()).join("\n")).toContain("Use Bun for JavaScript projects.")
+        expect(paths.has(path.join(globalTmp, "MEMORY.md"))).toBe(false)
+        expect((yield* svc.system()).join("\n")).not.toContain("Use Bun for JavaScript projects.")
+        const brain = yield* Brain.Service
+        const place = yield* svc.place()
+        expect((yield* brain.digest(place, { personal: true, index: true })).text).toContain(
+          "Use Bun for JavaScript projects.",
+        )
+        // A session an invited guest drives, or one on a model that may train on prompts, does not get it.
+        expect((yield* brain.digest(place, { personal: false, index: true })).text).toBeUndefined()
       }).pipe(provideInstance(projectTmp), provideInstruction({ home: globalTmp, config: globalTmp }))
     }),
+  )
+
+  it.live("a scoped repository rule comes with a matching file when it is read, once per conversation", () =>
+    withFiles(
+      {
+        ".vector/RULES.md": "- Money is integer cents.\n- Keep handlers thin (applies to src/routes/**)\n",
+        "src/routes/user.ts": "export const user = 1",
+      },
+      (dir) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const first = yield* svc.resolve([], path.join(dir, "src", "routes", "user.ts"), MessageID.make("msg_memory-1"))
+          expect(first.map((item) => item.content).join("\n")).toContain("Keep handlers thin")
+          // The same message reading the file again gets nothing more.
+          expect(yield* svc.resolve([], path.join(dir, "src", "routes", "user.ts"), MessageID.make("msg_memory-1"))).toEqual(
+            [],
+          )
+          // A later message sees the rule already attached in its history.
+          const history = loaded(first[0]!.filepath)
+          expect(yield* svc.resolve(history, path.join(dir, "src", "routes", "user.ts"), MessageID.make("msg_memory-2"))).toEqual(
+            [],
+          )
+        }),
+    ),
   )
 })

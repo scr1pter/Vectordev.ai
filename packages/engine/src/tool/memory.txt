@@ -1,0 +1,4 @@
+Vector's memory of this repository and user, on this computer.
+search(text), get(id): past decisions, lessons, conventions and failures.
+add(kind, text of at most 300 characters) right after the user states a preference or correction, a fix turns a failing check into a passing one, or a lasting decision is made. Evidence: quote (the user's exact words), file with quote, or command (the check that now passes). No secrets, progress notes or what the code plainly says.
+update(id, text) replaces an entry; forget(id) puts one away. scope "personal" is only for what the user said about themselves.

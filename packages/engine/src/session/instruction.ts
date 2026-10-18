@@ -14,7 +14,13 @@ import { Global } from "@vectordevai/core/global"
 import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import { collectBoundedResponseBody } from "@vectordevai/core/tool/http-body"
 import { containsPath } from "@/project/instance-context"
+import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainPaths } from "@vectordevai/core/brain/paths"
+import { Project } from "@vectordevai/core/project"
 import type { MessageID } from "./schema"
+
+/** Memory entries attached to a read result are recorded in its `loaded` metadata as `memory:<id>,<id>`. */
+export const MEMORY_LOADED = "memory:"
 
 function extract(messages: SessionV1.WithParts[]) {
   const paths = new Set<string>()
@@ -25,7 +31,12 @@ function extract(messages: SessionV1.WithParts[]) {
         const loaded = part.state.metadata?.loaded
         if (!loaded || !Array.isArray(loaded)) continue
         for (const p of loaded) {
-          if (typeof p === "string") paths.add(p)
+          if (typeof p !== "string") continue
+          if (!p.startsWith(MEMORY_LOADED)) {
+            paths.add(p)
+            continue
+          }
+          for (const id of p.slice(MEMORY_LOADED.length).split(",")) paths.add(`${MEMORY_LOADED}${id}`)
         }
       }
     }
@@ -33,8 +44,17 @@ function extract(messages: SessionV1.WithParts[]) {
   return paths
 }
 
+/** The memory entries already attached to read results in this history. */
+export function attachedMemory(messages: SessionV1.WithParts[]) {
+  return new Set(
+    [...extract(messages)].flatMap((item) => (item.startsWith(MEMORY_LOADED) ? [item.slice(MEMORY_LOADED.length)] : [])),
+  )
+}
+
 export interface Interface {
   readonly clear: (messageID: MessageID) => Effect.Effect<void>
+  /** Where this instance's requests run, as the brain needs it: the repository, its rules and memory files, trust. */
+  readonly place: () => Effect.Effect<Brain.Place>
   readonly systemPaths: () => Effect.Effect<Set<string>, FSUtil.Error>
   readonly system: () => Effect.Effect<string[], FSUtil.Error>
   readonly find: (dir: string) => Effect.Effect<string | undefined, FSUtil.Error>
@@ -50,7 +70,7 @@ export class Service extends Context.Service<Service, Interface>()("@vector/Inst
 const layer: Layer.Layer<
   Service,
   never,
-  FSUtil.Service | Config.Service | Global.Service | HttpClient.HttpClient | RuntimeFlags.Service
+  FSUtil.Service | Config.Service | Global.Service | HttpClient.HttpClient | RuntimeFlags.Service | Brain.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -58,6 +78,7 @@ const layer: Layer.Layer<
     const fs = yield* FSUtil.Service
     const global = yield* Global.Service
     const flags = yield* RuntimeFlags.Service
+    const brain = yield* Brain.Service
     const http = HttpClient.filterStatusOk(withTransientReadRetry(yield* HttpClient.HttpClient))
     const globalFiles = [
       path.join(global.config, "AGENTS.md"),
@@ -68,17 +89,13 @@ const layer: Layer.Layer<
       ...(!flags.disableClaudeCodePrompt ? ["CLAUDE.md"] : []),
       "CONTEXT.md", // deprecated
     ]
-    // Loaded in addition to project instructions rather than instead of them.
-    // BRAIN.md is what Vector remembers about a project; RULES.md is what the
-    // team told Vector about it — standards written in the app and committed
-    // with the repository so a clone carries them.
-    const additiveProjectFiles = [".vector/RULES.md", ".vector/BRAIN.md", "BRAIN.md"]
-    // Local memory is a plain Markdown file stored in the user's config
-    // directory. It is loaded additively into model context rather than through
-    // globalFiles, whose first-match break would drop it whenever a global
-    // AGENTS.md exists.
-    const globalMemoryFile = path.join(global.config, "MEMORY.md")
-    const globalRulesFile = path.join(global.config, "RULES.md")
+    // RULES.md (repository and global), MEMORY.md and the legacy BRAIN.md are no longer loaded whole here: the brain
+    // mirrors them and sends rules whole, MEMORY.md to its budget, and the rest only when relevant (see Brain).
+    const memoryFiles = [
+      { file: ".vector/RULES.md", type: "rules" as const },
+      { file: ".vector/BRAIN.md", type: "brain" as const },
+      { file: "BRAIN.md", type: "brain" as const },
+    ]
 
     const state = yield* InstanceState.make(
       Effect.fn("Instruction.state")(() =>
@@ -151,6 +168,28 @@ const layer: Layer.Layer<
       )
     })
 
+    const place = Effect.fn("Instruction.place")(function* () {
+      const ctx = yield* InstanceState.context
+      // A repository's rules and memory are still its own files, so VECTOR_DISABLE_PROJECT_CONFIG skips them: a code
+      // review runs on a pull request's tree and must not take instructions from it.
+      const sources = Flag.VECTOR_DISABLE_PROJECT_CONFIG
+        ? []
+        : yield* Effect.forEach(memoryFiles, (item) =>
+            projectFiles(fs.findUp(item.file, ctx.directory, ctx.worktree)).pipe(
+              Effect.map((matches) => matches.map((match) => ({ path: path.resolve(match), type: item.type }))),
+            ),
+          ).pipe(Effect.map((found) => found.flat()))
+      const trust = yield* cfg.trust()
+      return {
+        // Every worktree and Parallel Workspace of a repository shares its memory; a folder outside git has its own.
+        repository: ctx.project.id === Project.ID.global ? BrainPaths.folderKey(ctx.directory) : ctx.project.id,
+        root: ctx.worktree === "/" ? ctx.directory : ctx.worktree,
+        sources,
+        // Memory a repository ships waits for review while its own settings are untrusted.
+        held: !trust.trusted && trust.settings,
+      } satisfies Brain.Place
+    })
+
     const clear = Effect.fn("Instruction.clear")(function* (messageID: MessageID) {
       const s = yield* InstanceState.get(state)
       s.claims.delete(messageID)
@@ -165,21 +204,6 @@ const layer: Layer.Layer<
         if (yield* fs.existsSafe(file)) {
           paths.add(path.resolve(file))
           break
-        }
-      }
-
-      if (yield* fs.existsSafe(globalMemoryFile)) paths.add(path.resolve(globalMemoryFile))
-      if (yield* fs.existsSafe(globalRulesFile)) paths.add(path.resolve(globalRulesFile))
-
-      // Vector memory and project rules are additive rather than mutually
-      // exclusive with project instructions. They must be loaded even when a
-      // global AGENTS.md or CLAUDE.md exists. They are still project files, so
-      // VECTOR_DISABLE_PROJECT_CONFIG skips them: a code review runs on a pull
-      // request's tree and must not take instructions from it.
-      if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
-        for (const file of additiveProjectFiles) {
-          const matches = yield* projectFiles(fs.findUp(file, ctx.directory, ctx.worktree))
-          matches.forEach((item) => paths.add(path.resolve(item)))
         }
       }
 
@@ -281,10 +305,28 @@ const layer: Layer.Layer<
         current = path.dirname(current)
       }
 
+      // Scoped rules and memory about this file come with it, once per session: the rule for src/routes/** when a
+      // route is read, the repair a repeated failure needed when a file it touched is read.
+      const claimed = s.claims.get(messageID) ?? new Set<string>()
+      const attached = yield* brain.attach(yield* place(), {
+        file: target,
+        personal: false,
+        exclude: new Set(
+          [...already, ...claimed].flatMap((item) =>
+            item.startsWith(MEMORY_LOADED) ? [item.slice(MEMORY_LOADED.length)] : [],
+          ),
+        ),
+      })
+      if (attached.text) {
+        attached.ids.forEach((id) => claimed.add(`${MEMORY_LOADED}${id}`))
+        s.claims.set(messageID, claimed)
+        results.push({ filepath: `${MEMORY_LOADED}${attached.ids.join(",")}`, content: attached.text })
+      }
+
       return results
     })
 
-    return Service.of({ clear, systemPaths, system, find, resolve })
+    return Service.of({ clear, place, systemPaths, system, find, resolve })
   }),
 )
 
@@ -295,7 +337,7 @@ export function loaded(messages: SessionV1.WithParts[]) {
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Config.node, FSUtil.node, Global.node, RuntimeFlags.node, httpClient],
+  deps: [Config.node, FSUtil.node, Global.node, RuntimeFlags.node, httpClient, Brain.node],
 })
 
 export * as Instruction from "./instruction"

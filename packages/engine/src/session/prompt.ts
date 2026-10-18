@@ -70,6 +70,9 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { eq } from "drizzle-orm"
 import { SessionTable } from "@vectordevai/core/session/sql"
 import { SessionReminders } from "./reminders"
+import { SessionMemory } from "./memory"
+import { Brain } from "@vectordevai/core/brain/brain"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { SessionTools } from "./tools"
 import { TitleUsage } from "./title-usage"
 import { LLMEvent } from "@vectordevai/llm"
@@ -190,6 +193,8 @@ const layer = Layer.effect(
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
     const guard = yield* SpendGuard.Service
+    const brain = yield* Brain.Service
+    const guests = yield* FreeModelGuests.Service
     const { db } = database
     const backgroundTasks = yield* InstanceState.make(
       Effect.fnUntraced(function* () {
@@ -203,20 +208,28 @@ const layer = Layer.effect(
     // the provider's cache has expired. An edit the agent makes itself is already in its context. Keyed by session, so
     // concurrent sessions keep their own snapshot.
     const instructionSnapshots = new Map<SessionID, { key: string; instructions: string[] }>()
+    // Request messages whose recall already ran in this process, so a message that recalled nothing is not scored again
+    // on every step.
+    const recallsTried = new Set<MessageID>()
+    // The brain's digest (rules, MEMORY.md, pinned memory) is part of the snapshot, so it is byte-stable for the session
+    // too; a memory saved mid-session reaches later sessions, and this one through recall and search.
     const sessionInstructions = Effect.fn("SessionPrompt.sessionInstructions")(function* (
       sessionID: SessionID,
       key: string,
       cold: boolean,
+      memory: { readonly personal: boolean; readonly index: boolean },
     ) {
       const snapshot = instructionSnapshots.get(sessionID)
+      const full = `${key}|${memory.personal ? "personal" : "shared"}|${memory.index ? "index" : "plain"}`
       // Re-inserting keeps the most recently used sessions at the end; the oldest go once there are too many.
       instructionSnapshots.delete(sessionID)
-      if (snapshot && snapshot.key === key && !cold) {
+      if (snapshot && snapshot.key === full && !cold) {
         instructionSnapshots.set(sessionID, snapshot)
         return snapshot.instructions
       }
-      const instructions = yield* instruction.system()
-      instructionSnapshots.set(sessionID, { key, instructions })
+      const digest = yield* brain.digest(yield* instruction.place(), memory)
+      const instructions = [...(yield* instruction.system()), ...(digest.text ? [digest.text] : [])]
+      instructionSnapshots.set(sessionID, { key: full, instructions })
       if (instructionSnapshots.size > MAX_INSTRUCTION_SNAPSHOTS)
         instructionSnapshots.delete(instructionSnapshots.keys().next().value!)
       return instructions
@@ -1878,6 +1891,13 @@ const layer = Layer.effect(
           stepAgent.name === "quick"
             ? SessionTaskSize.closingText(msgs.filter((message) => message.info.id < opened)).slice(-PREVIOUS_REPLY)
             : ""
+        // The owner's personal memory never goes to a session an invited guest has acted in, nor to a model that may
+        // train on prompts.
+        const personal = !(yield* guests.marked(sessionID)) && !freeModelMayTrain(model)
+        // Tier 1 recall: once per request message on the main agent, from what the user wrote and attached, within the
+        // budget its size allows. It is saved on the message, so later steps send the same bytes and the cache holds.
+        if (!quick && sized && sized.tier !== "chat" && !session.parentID && !session.internal)
+          msgs = yield* recallFor({ sessionID, msgs, user: lastUser, tier: sized.tier, personal })
         msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
           Effect.provideService(RuntimeFlags.Service, flags),
           Effect.provideService(FSUtil.Service, fsys),
@@ -1970,6 +1990,8 @@ const layer = Layer.effect(
             if (delegate && build.tier !== "thorough")
               tools.task = { ...tools.task, execute: namedOnly(delegate, build.result.agents) }
           } else delete tools.escalate
+          // Memory is the main agent's: a subagent reports to it, and Vector's hidden helpers never learn.
+          if (session.parentID || session.internal) delete tools.memory
 
           if (lastUser.format?.type === "json_schema") {
             tools["StructuredOutput"] = createStructuredOutputTool({
@@ -2031,6 +2053,7 @@ const layer = Layer.effect(
                   `${msgs[0]?.info.id}|${model.providerID}/${model.id}`,
                   // Past the provider's cache lifetime the prefix is written again regardless.
                   Date.now() - (lastFinished?.time.completed ?? 0) > ProviderTransform.cacheLifetime(model),
+                  { personal, index: offered.includes("memory") },
                 ).pipe(Effect.orDie),
             quick ? Effect.succeed(undefined) : sys.mcp(agent, session.permission),
             // The quick lane sends this request's own messages; autocomplete only the newest one, below.
@@ -2138,7 +2161,50 @@ const layer = Layer.effect(
 
       // Read after queued patches land so a successful response includes the step's final parts too.
       yield* processor.settle(sessionID)
+      // Tidying memory is plain code with no model call, and runs at most every few hours per repository.
+      if (!session.parentID && !session.internal) {
+        const background = yield* InstanceState.get(backgroundTasks)
+        yield* instruction
+          .place()
+          .pipe(Effect.flatMap((place) => brain.consolidate(place)), Effect.ignore, Effect.forkIn(background.scope))
+      }
       return yield* lastAssistant(sessionID)
+    })
+
+    // A request message's recalled memory, saved on the message as a synthetic part (nothing when nothing is relevant).
+    const recallFor = Effect.fn("SessionPrompt.recall")(function* (input: {
+      sessionID: SessionID
+      msgs: SessionV1.WithParts[]
+      user: SessionV1.User
+      tier: TaskSize.Tier
+      personal: boolean
+    }) {
+      const message = input.msgs.find((item) => item.info.id === input.user.id)
+      if (!message || SessionMemory.recalled(message) || recallsTried.has(message.info.id)) return input.msgs
+      recallsTried.add(message.info.id)
+      if (recallsTried.size > MAX_INSTRUCTION_SNAPSHOTS * 4) recallsTried.delete(recallsTried.values().next().value!)
+      const query = SessionMemory.typed(message)
+      if (!query) return input.msgs
+      const result = yield* brain.recall(yield* instruction.place(), {
+        query,
+        files: SessionMemory.files(message),
+        budget: Brain.recallBudget(input.tier),
+        personal: input.personal,
+        exclude: SessionMemory.injected(input.msgs),
+        sessionID: input.sessionID,
+      })
+      if (!result.text) return input.msgs
+      const part = yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: message.info.id,
+        sessionID: input.sessionID,
+        type: "text",
+        text: result.text,
+        synthetic: true,
+        metadata: { [SessionMemory.RECALL]: { ids: [...result.ids], tokens: result.tokens } },
+      } satisfies SessionV1.TextPart)
+      message.parts.push(part)
+      return input.msgs
     })
 
     const loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.loop")(function* (
@@ -2785,6 +2851,8 @@ export const node = LayerNode.make({
     RuntimeFlags.node,
     Database.node,
     SpendGuard.node,
+    Brain.node,
+    FreeModelGuests.node,
   ],
 })
 

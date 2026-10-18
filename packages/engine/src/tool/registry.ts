@@ -22,6 +22,9 @@ import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
 import { EscalateTool } from "./escalate"
 import { SkillTool } from "./skill"
+import { MemoryTool } from "./memory"
+import { Brain } from "@vectordevai/core/brain/brain"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
 import { ConfigDependencies } from "@/config/dependencies"
@@ -139,6 +142,7 @@ const layer = Layer.effect(
     const greptool = yield* GrepTool
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
+    const memorytool = yield* MemoryTool
     const browsertool = yield* BrowserTool
     const vectorcloudtool = yield* VectorCloudTool
     const agent = yield* Agent.Service
@@ -263,6 +267,7 @@ const layer = Layer.effect(
           teammate: Tool.init(teammate),
           search: Tool.init(websearch),
           skill: Tool.init(skilltool),
+          memory: Tool.init(memorytool),
           patch: Tool.init(patchtool),
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
@@ -289,6 +294,8 @@ const layer = Layer.effect(
             ...(team ? [tool.teammate] : []),
             tool.search,
             tool.skill,
+            // The session runtime removes it from subagents and the quick lane, which leave memory to the main agent.
+            tool.memory,
             tool.patch,
             // Offered only to a sized request below Thorough; the session runtime removes it everywhere else.
             tool.escalate,
@@ -491,6 +498,8 @@ export const node = LayerNode.make({
     Provider.node,
     LSP.node,
     Instruction.node,
+    Brain.node,
+    FreeModelGuests.node,
     FSUtil.node,
     EventV2Bridge.node,
     httpClient,
