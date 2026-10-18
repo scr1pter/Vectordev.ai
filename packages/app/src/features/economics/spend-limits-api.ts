@@ -8,11 +8,12 @@ import type { RunBudget } from "@vectordevai/sdk/v2/client"
 
 export type SpendLimit = { usd: number; warnAt?: number }
 
+// One overall set: the day and month limits count every repository, and no
+// repository has a limit of its own.
 export type SpendLimitSet = {
   perRun?: SpendLimit
   perDay?: SpendLimit
   perMonth?: SpendLimit
-  perProjectMonth?: SpendLimit
 }
 
 export type SpendPolicy = { interactive: SpendLimitSet; unattended: SpendLimitSet }
@@ -24,7 +25,6 @@ export type SpendSummary = {
   day: string
   month: string
   all: { day: SpendWindowTotal; month: SpendWindowTotal }
-  project?: { projectPath: string; day: SpendWindowTotal; month: SpendWindowTotal }
   policy: SpendPolicy
 }
 
@@ -43,7 +43,7 @@ export type SpendEvent = {
 export type SpendLimitsApi = {
   limits: () => Promise<SpendPolicy>
   setLimits: (next: Partial<SpendPolicy>) => Promise<SpendPolicy>
-  status: (projectPath?: string) => Promise<SpendSummary>
+  status: () => Promise<SpendSummary>
   recent: (limit?: number) => Promise<SpendEvent[]>
 }
 

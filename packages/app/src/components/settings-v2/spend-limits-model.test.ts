@@ -1,9 +1,29 @@
 import { describe, expect, test } from "bun:test"
-import { parseUsd, parseWarnAt, recentRunMeta, summaryLine, withLimit, withWarnAt } from "./spend-limits-model"
+import {
+  LIMIT_FIELDS,
+  SCOPE_NOTES,
+  parseUsd,
+  parseWarnAt,
+  recentRunMeta,
+  summaryLine,
+  withLimit,
+  withWarnAt,
+} from "./spend-limits-model"
 
 const window = (costUsd: number, unmeasuredRuns: number) => ({ costUsd, tokens: 0, runs: 0, unmeasuredRuns })
 
 describe("spend limit fields", () => {
+  test("one overall set: per run, per day and per month, with no limit for one repository", () => {
+    expect(LIMIT_FIELDS.map((field) => field.key)).toEqual(["perRun", "perDay", "perMonth"])
+    expect(LIMIT_FIELDS.map((field) => field.label)).toEqual(["Per run", "Per day", "Per month"])
+  })
+
+  test("the page says the limits cover every repository and never says project", () => {
+    expect(SCOPE_NOTES[0]).toContain("all your repositories together")
+    for (const text of [...SCOPE_NOTES, ...LIMIT_FIELDS.map((field) => field.label)])
+      expect(text.toLowerCase()).not.toContain("project")
+  })
+
   test("a blank field clears the limit and anything else must be a positive amount", () => {
     expect(parseUsd("")).toEqual({ ok: true, usd: undefined })
     expect(parseUsd("$5")).toEqual({ ok: true, usd: 5 })

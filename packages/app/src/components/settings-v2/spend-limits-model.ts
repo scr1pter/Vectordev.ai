@@ -7,7 +7,14 @@ export const LIMIT_FIELDS: readonly { key: LimitKey; label: string }[] = [
   { key: "perRun", label: "Per run" },
   { key: "perDay", label: "Per day" },
   { key: "perMonth", label: "Per month" },
-  { key: "perProjectMonth", label: "Per project per month" },
+]
+
+// What the limits cover, shown under the totals. The ledger keeps one overall
+// set, so nothing here may suggest a limit or total for one repository.
+export const SCOPE_NOTES = [
+  "Each limit covers all your repositories together, so the day and month totals count spend in every repository.",
+  "While you watch covers chats and parallel agents you start. Left alone covers automations.",
+  "Chats count against the per-run cap. Day and month totals include automations and parallel agents.",
 ]
 
 // A blank field clears the limit. Anything else must be a positive dollar amount.
