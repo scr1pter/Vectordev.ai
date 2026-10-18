@@ -523,6 +523,14 @@ test("the v2 runner sends nothing to a may-train model in a session a guest has 
     // v2 runner's HTTP client may hold the fetch it found before this file replaced it. The guest rule is checked
     // first, so the guest's session names the guest, and the owner's own session names the missing acceptance.
     await FreeModels.createClient({ consentFile: FreeModels.trainingConsentFile() }).setTrainingConsent(false)
+    // The location's plugins fill its catalog in the background; a prompt sent before Laguna is listed fails to drain
+    // with "model unavailable" and records no step. Wait for the listing, and say what was listed if it never comes.
+    let listed = ""
+    for (let attempt = 0; attempt < 300 && !listed.includes(laguna.id); attempt++) {
+      listed = await (await h.get("/api/model", h.owner)).text()
+      if (!listed.includes(laguna.id)) await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    if (!listed.includes(laguna.id)) throw new Error(`The location never listed ${laguna.id}: ${listed.slice(0, 2000)}`)
     const own = await newSession(h, h.owner)
     await h.send(`/api/session/${own}/model`, h.owner, { model: { providerID: "vector", id: laguna.id } })
     await h.send(`/api/session/${own}/prompt`, h.owner, { prompt: { text: "owner only" } })
