@@ -31,7 +31,7 @@ export const runGuardRows = [
   ],
   [
     "One set of limits for every repository",
-    "From desktop 1.99.109, spend limits are overall: the day and month limits count spend in all your repositories together, and the per-repository monthly limit in Settings → Spend limits is gone, so set a monthly limit instead. A repository's own budget.run in its vector.json or .vector settings is ignored too, trusted or not, and Vector says so once for each file that still sets one. Desktop 1.99.108 still reads a repository's budget.run. The terminal UI and vector run follow with the next CLI release, and Windows WSL servers once a later desktop release requires that CLI.",
+    "From desktop 1.99.109, spend limits are overall: the day and month limits count spend in all your repositories together, and the per-repository monthly limit in Settings → Spend limits is gone, so set a monthly limit instead. A repository's own budget.run in its vector.json or .vector settings is ignored too, trusted or not, and Vector says so once for each repository file that still sets one, not again for the repository's agent worktrees or copies. Desktop 1.99.108 still reads a repository's budget.run. The terminal UI and vector run follow with the next CLI release, and Windows WSL servers once a later desktop release requires that CLI.",
   ],
   [
     "A stop before the step that would cross",

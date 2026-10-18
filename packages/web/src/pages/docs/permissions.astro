@@ -24,7 +24,8 @@ export const prerender = true
             repository's deny rules, and its run limits, loop pauses and sharing settings only where they are stricter
             than yours, so a cloned repository cannot raise your spend cap or switch loop pauses off. From desktop
             1.99.109, a repository's run limits are ignored even once you trust it, because spend limits are one
-            overall set of yours, and Vector says so once for each file that still sets <code>budget.run</code>.
+            overall set of yours, and Vector says so once for each repository file that still sets <code>budget.run</code>,
+            not again for the repository's agent worktrees or copies.
           </p>
           <p>
             From desktop 1.99.109, the app asks once, the first time you open a repository that has settings of its
