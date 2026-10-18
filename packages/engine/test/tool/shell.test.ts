@@ -1,5 +1,5 @@
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Cause, Deferred, Effect, Exit, Layer, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
@@ -2323,7 +2323,11 @@ describe("tool.shell statements the scan cannot read", () => {
     'git log --stdin < "$HOME/x"',
     "git log --stdin < ~root/x",
     '< "$HOME/x"',
+    // A backslash-newline inside the opener.
+    "git log -1 $\\\n(echo hi)",
   ]
+  // Syntax only zsh runs: parameter flags and glob qualifiers that evaluate text.
+  const zshOnly = ["git log -1 ${(e)X}", 'git log -1 "${(e)X}"', "git log -1 *(e:true:)", "git log -1 .env(N)"]
 
   it.live("the read-only agents refuse what the scan cannot read, and build asks for it", () =>
     Effect.gen(function* () {
@@ -2337,7 +2341,7 @@ describe("tool.shell statements the scan cannot read", () => {
               Effect.gen(function* () {
                 const explore = (yield* Agent.Service.use((svc) => svc.get("explore")))!
                 const build = (yield* Agent.Service.use((svc) => svc.get("build")))!
-                for (const command of hidden) {
+                for (const command of item.label === "zsh" ? [...hidden, ...zshOnly] : hidden) {
                   const requests: Request[] = []
                   const denied = yield* fail({ command }, decide(requests, explore.permission, "explore"))
                   if (!(denied instanceof PermissionV1.DeniedError))
@@ -2379,6 +2383,8 @@ describe("tool.shell statements the scan cannot read", () => {
                   "find . -name '*.ts'",
                   "git log --stdin <<'EOF'\n`echo hi`\nEOF",
                   "echo \\`echo hi\\`",
+                  'git log --grep="fix(app): x"',
+                  "git log --format='%h (%s)'",
                 ]) {
                   const requests: Request[] = []
                   yield* run({ command }, record(requests))
@@ -2432,6 +2438,22 @@ describe("tool.shell statements the scan cannot read", () => {
       }
     }),
   )
+})
+
+describe("permission for statements the scan cannot read", () => {
+  test("only a rule written for them allows them; a wildcard allow asks instead", () => {
+    const rules = Permission.fromConfig({ bash: { "*": "ask", "*--version": "allow", "git log*": "allow" } })
+    expect(Permission.evaluate("bash", UNREAD + "git log -1 --version", rules).action).toBe("ask")
+    expect(Permission.evaluate("bash", "git log -1 --version", rules).action).toBe("allow")
+    expect(Permission.evaluate("bash", UNREAD + "x", Permission.fromConfig({ bash: "allow" })).action).toBe("ask")
+    expect(Permission.evaluate("bash", UNREAD + "x", Permission.fromConfig({ bash: { "*": "deny" } })).action).toBe("deny")
+    expect(
+      Permission.evaluate("bash", UNREAD + "x", Permission.fromConfig({ bash: { [UNREAD + "*"]: "allow" } })).action,
+    ).toBe("allow")
+    // An "always" approval made from a wildcard does not cover them either.
+    const approved = [{ permission: "bash", pattern: "*", action: "allow" as const }]
+    expect(Permission.evaluate("bash", UNREAD + "x", rules, approved).action).toBe("ask")
+  })
 })
 
 describe("tool.shell abort", () => {

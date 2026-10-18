@@ -8,6 +8,7 @@ import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { PermissionV2 } from "@vectordevai/core/permission"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { UNREAD } from "@/tool/shell/unread"
 
 export const Event = PermissionV1.Event
 
@@ -28,15 +29,18 @@ interface State {
 }
 
 export function evaluate(permission: string, pattern: string, ...rulesets: PermissionV1.Ruleset[]): PermissionV1.Rule {
-  return (
-    rulesets
-      .flat()
-      .findLast((rule) => Wildcard.match(permission, rule.permission) && Wildcard.match(pattern, rule.pattern)) ?? {
-      action: "ask",
-      permission,
-      pattern: "*",
-    }
-  )
+  const rule = rulesets
+    .flat()
+    .findLast((rule) => Wildcard.match(permission, rule.permission) && Wildcard.match(pattern, rule.pattern)) ?? {
+    action: "ask" as const,
+    permission,
+    pattern: "*",
+  }
+  // A shell statement the scan cannot fully read is allowed only by a rule written for it, never by a wildcard such as
+  // "*" or "*--version", whether configured or approved with "always".
+  if (rule.action === "allow" && pattern.startsWith(UNREAD) && !rule.pattern.startsWith(UNREAD.trim()))
+    return { ...rule, action: "ask" }
+  return rule
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/Permission") {}

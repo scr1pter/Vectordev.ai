@@ -6,7 +6,6 @@ import { Provider } from "@/provider/provider"
 
 import { generateObject, streamObject, type ModelMessage } from "ai"
 import { Truncate } from "@/tool/truncate"
-import { UNREAD } from "@/tool/shell/unread"
 import { Auth } from "../auth"
 import { ProviderTransform } from "@/provider/transform"
 
@@ -579,18 +578,6 @@ const layer = Layer.effect(
           agents[name].permission = Permission.merge(
             permission,
             Permission.fromConfig(Object.fromEntries(unnamed.map((key) => [key, "ask" as const]))),
-          )
-        }
-
-        // Nor may it approve a shell statement the scan cannot fully read: a rule that names the prefix is the only
-        // way to allow those.
-        for (const name in agents) {
-          const permission = agents[name].permission
-          const rule = Permission.evaluate("bash", UNREAD + "x", permission)
-          if (rule.action !== "allow" || rule.pattern.startsWith(UNREAD.trim())) continue
-          agents[name].permission = Permission.merge(
-            permission,
-            Permission.fromConfig({ bash: { [UNREAD + "*"]: "ask" } }),
           )
         }
 

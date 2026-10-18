@@ -214,8 +214,12 @@ function unread(scan: Scan, text: string) {
 // unquoted heredoc body, in a `${VAR#...}` operand or on the right of `[[ x =~ ... ]]`. Single quotes, `$'...'` and a
 // heredoc whose delimiter is quoted keep them literal, and so does a backslash, except that inside backticks an escaped
 // backtick opens a nested substitution. A position the parse cannot place counts as hidden.
-function hiddenSubstitution(root: Node) {
+function hiddenSubstitution(root: Node, zsh: boolean) {
   const text = root.text
+  // bash and zsh remove a backslash-newline before they read a word, so `$\` then a newline then `(` opens a
+  // substitution the grammar never sees.
+  const openers = (value: string) => value.match(/`|\$\(/g)?.length ?? 0
+  if (/\\\r?\n/.test(text) && openers(text.replace(/\\\r?\n/g, "")) > openers(text)) return true
   const at = (node: Node) => {
     const start = node.startIndex - root.startIndex
     return text.slice(start, start + node.text.length) === node.text ? start : undefined
@@ -248,6 +252,24 @@ function hiddenSubstitution(root: Node) {
     backticks.push([start, start + node.text.length])
   }
   const within = (ranges: [number, number][], index: number) => ranges.some(([start, end]) => index >= start && index < end)
+  // zsh runs code through syntax the bash grammar does not model: parameter flags (`${(e)X}`) and glob qualifiers
+  // (`*(e:...:)`, `*(+fn)`). Outside quotes, a parenthesised group stuck to a word is read as one; inside double
+  // quotes only the flags are live.
+  if (zsh) {
+    const quoted: [number, number][] = []
+    for (const node of root.descendantsOfType("string")) {
+      if (!node) continue
+      const start = at(node)
+      if (start === undefined) return true
+      quoted.push([start, start + node.text.length])
+    }
+    for (let index = 0; index < text.length; index++) {
+      if (text[index] !== "(" || within(literal, index)) continue
+      if (text.slice(index - 2, index) === "${") return true
+      if (within(quoted, index) || text[index + 1] === ")") continue
+      if (index > 0 && !/[\s$<>=(|&;]/.test(text[index - 1])) return true
+    }
+  }
   for (let index = 0; index < text.length; index++) {
     if (text[index] !== "`" && !(text[index] === "$" && text[index + 1] === "(")) continue
     if (opened.has(index) || within(literal, index)) continue
@@ -1155,7 +1177,7 @@ export const ShellTool = Tool.define(
       // bash and zsh: a command the grammar cannot parse, or one that hides a command substitution from it, may run
       // anything the scan did not see. A statement made only of redirects runs a program too (zsh's READNULLCMD).
       if (!ps && shellKind !== "cmd") {
-        if (root.hasError || hiddenSubstitution(root)) unread(scan, root.text)
+        if (root.hasError || hiddenSubstitution(root, Shell.name(shell) === "zsh")) unread(scan, root.text)
         for (const node of root.descendantsOfType("redirected_statement")) {
           if (!node) continue
           if (node.namedChildren.every((child) => child?.type === "file_redirect" || child?.type === "heredoc_redirect"))
