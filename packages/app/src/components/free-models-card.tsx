@@ -1,10 +1,15 @@
 import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
 import type { VectorAccountStatus } from "@/vector-account"
-import { Show, onMount, onCleanup } from "solid-js"
+import { Show, createSignal, onMount, onCleanup } from "solid-js"
 import { useDialog } from "@vectordevai/ui/context/dialog"
-import { FREE_MODELS_TITLE, OPENROUTER_ACCOUNT_COPY } from "@vectordevai/core/free-model-choice"
+import {
+  FREE_MODEL_TRAINING_LABEL,
+  FREE_MODELS_TITLE,
+  OPENROUTER_ACCOUNT_COPY,
+} from "@vectordevai/core/free-model-choice"
 import { useProviders } from "@/hooks/use-providers"
+import { useServerSDK } from "@/context/server-sdk"
 import { DialogConnectProvider } from "./dialog-connect-provider"
 
 /** Shared sign-in is offered only while the server advertises its allowance. */
@@ -28,6 +33,21 @@ export function FreeModelsCard() {
   }
   const providers = useProviders()
   const dialog = useDialog()
+  const serverSDK = useServerSDK()
+  // The one-time acceptance for models that may train on prompts, which the person can withdraw here.
+  const [training, setTraining] = createSignal(false)
+  onMount(() => {
+    void serverSDK()
+      .client.provider.freeModels.consent()
+      .then((result) => setTraining(result.data?.training === true))
+      .catch(() => {})
+  })
+  const withdraw = () => {
+    void serverSDK()
+      .client.provider.freeModels.setConsent({ freeModelConsent: { training: false } })
+      .then((result) => setTraining(result.data?.training === true))
+      .catch(() => {})
+  }
   const shared = () =>
     [...providers.all().values()].some((provider) =>
       Object.values(provider.models).some((model) => model.freeModel?.source === "shared"),
@@ -42,6 +62,15 @@ export function FreeModelsCard() {
         <p class="mt-2 text-12-regular">A shared allowance is also available by signing in to Vector.</p>
       </Show>
       <p class="mt-2 text-12-regular">{OPENROUTER_ACCOUNT_COPY}</p>
+      <Show when={training()}>
+        <p class="mt-2 text-12-regular" data-slot="free-models-training-consent">
+          You accepted that free models labelled "{FREE_MODEL_TRAINING_LABEL}" may receive your prompts. Vector asks
+          again after you withdraw.{" "}
+          <button type="button" class="underline" onClick={withdraw}>
+            Withdraw
+          </button>
+        </p>
+      </Show>
       <Show when={status.error}>
         <p role="alert">{status.error}</p>
       </Show>

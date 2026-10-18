@@ -98,8 +98,9 @@ export const prerender = true
         <strong>Models labelled “May train on your prompts”.</strong> Their providers may log your prompts, code
         and outputs and use them to train their models, or Vector has not yet reviewed their policy and treats
         them that way. From desktop 1.99.109 and the next CLI release, Vector labels these models and asks you once
-        before sending your first prompt to one; nothing is sent to them until you accept. In the terminal,
-        <code>vector models --decline-training</code> withdraws that choice. Earlier versions of Vector are offered
+        before sending your first prompt to one; nothing is sent to them until you accept. You can withdraw that
+        choice with Withdraw on the Free models inside of Vector card in the desktop app's Help panel, or with
+        <code>vector models --decline-training</code> in the terminal. Earlier versions of Vector are offered
         no-training models only. Don't use these models with private repositories, secrets or personal data.
       </li>
     </ul>
