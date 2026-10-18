@@ -718,7 +718,9 @@ function parallelAgentPrompt(record: ParallelWorkspaceRecord) {
     "Do not expose credentials or copy secrets into source files.",
     "Finish with a concise summary of changed files, validation performed, and any remaining risk.",
     EXTERNAL_RUNTIME_RULES_POLICY,
-    "Read .vector/BRAIN.md when present and update it only with durable decisions or recurring failure lessons; never store secrets or routine narration.",
+    // Memory no longer lives in the repository: two workspaces editing it conflicted on merge, and a commit took it off
+    // the computer. Vector's own agents save what they learn with the memory tool, on this computer.
+    "Do not add to .vector/BRAIN.md or BRAIN.md on your own; Vector keeps what it learns on this computer, outside the repository.",
     // Rules are keyed on the MAIN project path, not the isolated checkout: a
     // worktree lives under Vector's own directory and would match nothing. The
     // engine also loads .vector/RULES.md for Vector-runtime agents, but an

@@ -1,20 +1,21 @@
 import { createHash, randomUUID } from "node:crypto"
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { dirname, join } from "node:path"
+import { BrainPaths } from "@vectordevai/core/brain/paths"
+import { BrainScan } from "@vectordevai/core/brain/scan"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { vectorDataDir } from "./config-path"
 
 import type { GuardrailCheckResult, WorkspaceValidationReport } from "./workspace-guardrails"
 
 // Failure memory is durable, per-repository knowledge: which checks fail here,
 // which repair actually worked, which checks flip without anyone editing code.
-// It lives in the project's own .vector directory next to team.json and
-// BRAIN.md rather than in electron-store because the data is only meaningful
-// relative to one working tree: an electron-store blob keyed by absolute path
-// silently orphans itself the moment the user moves or renames the project, is
-// buried in an app-private file the user cannot read, and cannot travel with a
-// clone. A plain JSON file next to the code it describes stays inspectable with
-// `cat`, erasable with `rm`, and matches the file-on-disk posture local-memory
-// already sets for the user's own memory.
+// It is part of Vector's brain and lives on this computer, in Vector's data
+// directory, keyed by the repository's path. It used to sit in the
+// repository's own .vector folder, where a commit could push it off the
+// computer and a clone could plant one whose "repairs" reached Vector's repair
+// prompts. The engine mirrors this file into memory (Settings > Memory lists
+// it, the agent can search it), and the user can still read it as plain JSON.
 
 const MEMORY_VERSION = 1
 const MAX_RECORDS = 200
@@ -142,6 +143,11 @@ export function changeKeyFor(changedFiles: string[], diff: string) {
 }
 
 export function failureMemoryPath(projectPath: string) {
+  return BrainPaths.failureFile(vectorDataDir(), projectPath)
+}
+
+// Where 1.99.109 and earlier kept it. Read once, to move what it holds into the private file, and otherwise left alone.
+export function legacyFailureMemoryPath(projectPath: string) {
   return join(projectPath, ".vector", "failure-memory.json")
 }
 
@@ -150,7 +156,12 @@ export function isFlakySignature(record: FailureSignatureRecord) {
 }
 
 export async function readFailureMemory(projectPath: string): Promise<FailureMemory> {
-  const raw = await readFile(failureMemoryPath(projectPath), "utf8").catch(() => "")
+  const raw = await readFile(failureMemoryPath(projectPath), "utf8").catch(() => undefined)
+  if (raw === undefined) return migrateLegacy(projectPath)
+  return parseMemory(raw)
+}
+
+function parseMemory(raw: string): FailureMemory {
   const parsed = ((): { updatedAt?: unknown; records?: unknown } | undefined => {
     if (!raw.trim()) return undefined
     try {
@@ -165,6 +176,48 @@ export async function readFailureMemory(projectPath: string): Promise<FailureMem
     updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : "",
     records: parsed.records.flatMap((item) => reviveRecord(item)),
   }
+}
+
+// The first read after upgrading moves the repository's old file into the private one, so nothing Vector learned is
+// lost. A repair description from that file may have come with a clone, so one that hides characters or reads like an
+// instruction to the agent is dropped (its files and counts stay). The old file is never deleted here: it is the
+// user's, and Clear history removes it.
+async function migrateLegacy(projectPath: string): Promise<FailureMemory> {
+  const legacy = legacyFailureMemoryPath(projectPath)
+  if (!FSUtil.writableInside(projectPath, legacy)) return { version: MEMORY_VERSION, updatedAt: "", records: [] }
+  const raw = await readFile(legacy, "utf8").catch(() => "")
+  const memory = parseMemory(raw)
+  if (!memory.records.length) return memory
+  const records = memory.records.map((record) => {
+    const description = record.repair?.description ?? ""
+    if (!record.repair || (!BrainScan.hidden(description) && !BrainScan.instructionLike(description))) return record
+    return { ...record, repair: { ...record.repair, description: "" } }
+  })
+  const migrated = { ...memory, records }
+  // A run recorded meanwhile wins: the move only lands where no private file exists yet.
+  const moved = await writePrivate(projectPath, migrated, { exclusive: true })
+  if (!moved) return parseMemory(await readFile(failureMemoryPath(projectPath), "utf8").catch(() => ""))
+  return migrated
+}
+
+async function writePrivate(projectPath: string, memory: FailureMemory, options: { exclusive?: boolean } = {}) {
+  const target = failureMemoryPath(projectPath)
+  await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+  // Rename is atomic within a filesystem, so a crash mid-write leaves the previous memory readable instead of a
+  // truncated file nothing can parse. A fresh name that must not exist yet, so a planted link at it is never followed.
+  const staged = `${target}.${randomUUID()}.tmp`
+  await writeFile(staged, `${JSON.stringify(memory, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 })
+  if (!options.exclusive) {
+    await rename(staged, target)
+    return true
+  }
+  // A hard link fails when the target exists, which makes "write only if absent" atomic too.
+  const linked = await link(staged, target).then(
+    () => true,
+    () => false,
+  )
+  await rm(staged, { force: true })
+  return linked
 }
 
 // This store is a plain file inside the user's repository, which is the point
@@ -218,29 +271,23 @@ export async function recordValidationRun(projectPath: string, input: Validation
       records: evictExcess(applyRun(previous, input)),
     }
     // A repository whose checks have never failed has nothing to remember, so
-    // do not leave an empty file in every project the user ever opens.
+    // do not leave an empty file for every repository the user ever opens.
     if (!memory.records.length && !previous.updatedAt) return memory
-    const target = failureMemoryPath(projectPath)
-    // A repository can carry its .vector, or this file, as a link to any file of the user's, and writing follows it.
-    if (!FSUtil.writableInside(projectPath, target)) return memory
-    await mkdir(join(projectPath, ".vector"), { recursive: true })
-    // Rename is atomic within a filesystem, so a crash mid-write leaves the
-    // previous memory readable instead of a truncated file nothing can parse.
-    // A fresh name that must not exist yet, so a planted link at it is never followed.
-    const staged = `${target}.${randomUUID()}.tmp`
-    await writeFile(staged, `${JSON.stringify(memory, null, 2)}\n`, { encoding: "utf8", flag: "wx" })
-    await rename(staged, target)
+    await writePrivate(projectPath, memory)
     return memory
   })
 }
 
 // Deletes the file rather than writing an empty one, so a user who cleared this
 // repository's failure history is left with nothing to recover, exactly as
-// clearing local memory behaves.
+// clearing local memory behaves. The repository's old file goes too, or the next
+// read would move it back in.
 export async function clearFailureMemory(projectPath: string): Promise<FailureMemory> {
   return serialiseWrites(projectPath, async () => {
-    if (FSUtil.writableInside(projectPath, failureMemoryPath(projectPath)))
-      await rm(failureMemoryPath(projectPath), { force: true })
+    await rm(failureMemoryPath(projectPath), { force: true })
+    // A repository can carry its .vector, or this file, as a link to any file of the user's, and deleting follows it.
+    if (FSUtil.writableInside(projectPath, legacyFailureMemoryPath(projectPath)))
+      await rm(legacyFailureMemoryPath(projectPath), { force: true })
     return readFailureMemory(projectPath)
   })
 }

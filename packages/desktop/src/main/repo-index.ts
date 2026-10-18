@@ -3,6 +3,7 @@ import { createHash } from "node:crypto"
 import { mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises"
 import { dirname, extname, join, normalize, relative, resolve } from "node:path"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
+import { BrainLexical } from "@vectordevai/core/brain/lexical"
 
 // A lexical + structural index: BM25 over identifiers and path segments, an
 // import graph, a symbol table, and git co-change counts. There are no
@@ -25,6 +26,9 @@ const CO_CHANGE_COMMITS = 400
 // together, so wide commits are dropped rather than diluting every pair.
 const CO_CHANGE_MAX_COMMIT_FILES = 32
 const CO_CHANGE_MAX_NEIGHBOURS = 16
+
+// The tokenizer (BrainLexical) is shared with Vector's brain, so a request reads the same way when it ranks files and
+// when it ranks memory.
 
 const BM25_K1 = 1.2
 const BM25_B = 0.75
@@ -248,108 +252,6 @@ const INDEX_FILENAMES = [
   "index.php",
 ]
 
-// Keywords and prose filler are dropped before they reach the term table. BM25
-// would already discount them through idf, but keeping them out saves a large
-// slice of the persisted cache.
-const STOP_TERMS = new Set([
-  "abstract",
-  "about",
-  "after",
-  "again",
-  "also",
-  "and",
-  "args",
-  "async",
-  "await",
-  "before",
-  "bool",
-  "boolean",
-  "break",
-  "case",
-  "catch",
-  "char",
-  "class",
-  "code",
-  "const",
-  "continue",
-  "declare",
-  "def",
-  "default",
-  "defer",
-  "delete",
-  "each",
-  "else",
-  "elif",
-  "end",
-  "enum",
-  "error",
-  "err",
-  "export",
-  "extends",
-  "false",
-  "file",
-  "final",
-  "float",
-  "for",
-  "from",
-  "func",
-  "function",
-  "have",
-  "impl",
-  "implements",
-  "import",
-  "int",
-  "interface",
-  "into",
-  "let",
-  "make",
-  "match",
-  "mod",
-  "module",
-  "namespace",
-  "new",
-  "nil",
-  "none",
-  "not",
-  "null",
-  "number",
-  "package",
-  "please",
-  "print",
-  "private",
-  "protected",
-  "public",
-  "pub",
-  "require",
-  "return",
-  "self",
-  "should",
-  "static",
-  "str",
-  "string",
-  "struct",
-  "super",
-  "switch",
-  "that",
-  "the",
-  "this",
-  "throw",
-  "trait",
-  "true",
-  "try",
-  "type",
-  "typeof",
-  "undefined",
-  "use",
-  "using",
-  "val",
-  "var",
-  "void",
-  "want",
-  "while",
-  "with",
-  "yield",
-])
 
 const RESERVED_SYMBOL_NAMES = new Set([
   "case",
@@ -521,7 +423,6 @@ const IMPORT_PATTERNS: Record<Language, RegExp[]> = {
   text: [],
 }
 
-const IDENTIFIER_PATTERN = /[A-Za-z_][A-Za-z0-9_]{1,63}/g
 const EXPLICIT_PATH_PATTERN = /[A-Za-z0-9_@./-]+\.[A-Za-z0-9]{1,8}/g
 
 type PathLookup = {
@@ -721,14 +622,6 @@ function extractImports(text: string, language: Language) {
   return [...imports].slice(0, MAX_IMPORTS_PER_FILE)
 }
 
-function splitIdentifier(identifier: string) {
-  return identifier
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
-    .split(/[^A-Za-z0-9]+/)
-    .filter(Boolean)
-}
-
 function extractTerms(text: string, path: string, symbols: IndexedSymbol[]) {
   const tokens = new Map<string, number>()
   const protectedTerms = new Set<string>()
@@ -739,19 +632,19 @@ function extractTerms(text: string, path: string, symbols: IndexedSymbol[]) {
     // decode and overwrite an unrelated term with NaN. Markdown headings and
     // paths with spaces both reach here, and their sub-words are added
     // separately, so dropping the joined form costs no retrieval.
-    if (term.length < 3 || term.length > 40 || STOP_TERMS.has(term) || /\s/.test(term)) return
+    if (term.length < 3 || term.length > 40 || BrainLexical.STOP_TERMS.has(term) || /\s/.test(term)) return
     tokens.set(term, (tokens.get(term) ?? 0) + weight)
     tokenCount += weight
   }
 
   let scanned = 0
-  for (const match of text.matchAll(IDENTIFIER_PATTERN)) {
+  for (const match of text.matchAll(BrainLexical.IDENTIFIER_PATTERN)) {
     if (scanned >= MAX_IDENTIFIERS_SCANNED) break
     scanned += 1
     const identifier = match[0]
     const lower = identifier.toLowerCase()
     add(lower, 1)
-    for (const part of splitIdentifier(identifier)) {
+    for (const part of BrainLexical.splitIdentifier(identifier)) {
       const partial = part.toLowerCase()
       if (partial !== lower) add(partial, 1)
     }
@@ -772,7 +665,7 @@ function extractTerms(text: string, path: string, symbols: IndexedSymbol[]) {
     const lower = symbol.name.toLowerCase()
     add(lower, symbol.exported ? 3 : 2)
     protectedTerms.add(lower)
-    for (const part of splitIdentifier(symbol.name)) {
+    for (const part of BrainLexical.splitIdentifier(symbol.name)) {
       const partial = part.toLowerCase()
       if (partial === lower) continue
       add(partial, 1)
@@ -1022,23 +915,6 @@ function decodeTerms(encoded: string) {
   return tokens
 }
 
-export function queryTerms(query: string) {
-  const terms = new Set<string>()
-  for (const match of query.toLowerCase().matchAll(IDENTIFIER_PATTERN)) {
-    const identifier = match[0]
-    if (identifier.length >= 3 && !STOP_TERMS.has(identifier)) terms.add(identifier)
-    for (const part of splitIdentifier(identifier)) {
-      if (part.length >= 3 && !STOP_TERMS.has(part)) terms.add(part)
-    }
-  }
-  for (const match of query.matchAll(/[A-Za-z_$][\w$]*/g)) {
-    for (const part of splitIdentifier(match[0])) {
-      const partial = part.toLowerCase()
-      if (partial.length >= 3 && !STOP_TERMS.has(partial)) terms.add(partial)
-    }
-  }
-  return [...terms]
-}
 
 function explicitPaths(query: string) {
   return new Set((query.match(EXPLICIT_PATH_PATTERN) ?? []).map((path) => slash(path).replace(/^\.\//, "")))
@@ -1052,7 +928,7 @@ type Rank = { score: number; hops: number; reasons: Array<{ weight: number; text
  * and git co-change — all lexical and structural, never an embedding.
  */
 export function rankFiles(index: RepoIndex, query: string, options: RankOptions = {}): RankedFile[] {
-  const terms = queryTerms(query)
+  const terms = BrainLexical.queryTerms(query)
   const mentioned = explicitPaths(query)
   if (!terms.length && !mentioned.size) return []
 
@@ -1170,7 +1046,7 @@ function matchSymbols(file: IndexedFile, terms: string[]) {
       hits.push({ term: exact, symbol, weight: symbol.exported ? SYMBOL_DEFINITION_WEIGHT : SYMBOL_DEFINITION_WEIGHT * 0.6 })
       continue
     }
-    const parts = splitIdentifier(symbol.name).map((part) => part.toLowerCase())
+    const parts = BrainLexical.splitIdentifier(symbol.name).map((part) => part.toLowerCase())
     const partial = terms.find((term) => parts.includes(term))
     if (partial) hits.push({ term: partial, symbol, weight: SYMBOL_SUBWORD_WEIGHT })
   }
