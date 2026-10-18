@@ -63,10 +63,12 @@ export function CliTokenPage() {
           ...(desktopRequest.purpose ? { purpose: desktopRequest.purpose } : {}),
         }),
       })
-      if (
-        desktopRequest.purpose === "delete" &&
-        deletionNeedsSignIn(response.status, await response.clone().json().catch(() => undefined))
-      ) {
+      // Read from a copy, so the answer can still be read below when it is not this refusal.
+      const refusal: unknown = await response
+        .clone()
+        .json()
+        .catch(() => undefined)
+      if (desktopRequest.purpose === "delete" && deletionNeedsSignIn(response.status, refusal)) {
         // Arriving with an earlier Continue but still no fresh sign-in, the page asks rather than signing out again.
         if (!continued) {
           setConfirm(true)

@@ -619,7 +619,10 @@ test("a request while a billing window is open brings it forward and never takes
   app.state.billingDelay = undefined
   app.state.billing = () => Response.json({ url: "https://billing.stripe.com/p/session/fixture" })
   expect(await app.controller.billing({ kind: "portal", flow: "cancel" })).toEqual({ outcome: "completed" })
-  expect(app.windows).toEqual(["https://checkout.stripe.com/c/pay/cs_fixture", "https://billing.stripe.com/p/session/fixture"])
+  expect(app.windows).toEqual([
+    "https://checkout.stripe.com/c/pay/cs_fixture",
+    "https://billing.stripe.com/p/session/fixture",
+  ])
   // A failed request frees the next one too.
   app.state.billing = () => new Response("Bad gateway", { status: 502 })
   expect(await app.controller.billing({ kind: "portal" })).toMatchObject({ outcome: "failed" })

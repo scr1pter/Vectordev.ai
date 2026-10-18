@@ -89,7 +89,9 @@ test("Buy credits lists plans and top-ups by price, and each opens Stripe in Vec
   await expect(offers.getByRole("button", { name: /^Subscribe, / })).toHaveCount(0)
   await expect(offers.getByText("$10 once")).toBeVisible()
   // The terms say top-up credits carry forward; nothing promises they never expire.
-  await expect(offers.getByText("Credits bought once that carry forward, used after your monthly credits.")).toBeVisible()
+  await expect(
+    offers.getByText("Credits bought once that carry forward, used after your monthly credits."),
+  ).toBeVisible()
   await expect(offers).not.toContainText(/expire|expiry|expiration/i)
   await capture(page, testInfo, "account-buy-credits.png")
 
