@@ -4,7 +4,6 @@ import {
   CLOUD_SECTIONS,
   cloudHref,
   deployRepairPrompt,
-  holdsHandoff,
   parseCloudSection,
   publishPlan,
   publishRan,
@@ -42,19 +41,6 @@ describe("cloud links", () => {
     expect(parseCloudSection("data-logs")).toBe("data-logs")
     expect(parseCloudSection("aws")).toBeUndefined()
     expect(parseCloudSection(null)).toBeUndefined()
-  })
-})
-
-describe("a handed-over prompt", () => {
-  test("a handed-over prompt is sent only while the composer still holds exactly it", () => {
-    const text = "Fix the deploy"
-    const part = (content: string) => ({ type: "text", content, start: 0, end: content.length })
-    expect(holdsHandoff([part(text)], text)).toBe(true)
-    // An empty composer is never sent: a submit there stops a running turn.
-    expect(holdsHandoff([part("")], text)).toBe(false)
-    expect(holdsHandoff([part("")], "")).toBe(false)
-    expect(holdsHandoff([part(`${text} and also this`)], text)).toBe(false)
-    expect(holdsHandoff([part(text), { type: "image" }], text)).toBe(false)
   })
 })
 

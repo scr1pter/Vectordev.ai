@@ -39,17 +39,6 @@ export function cloudHref(projectPath?: string, section?: CloudSection) {
   return query ? `/cloud?${query}` : "/cloud"
 }
 
-/**
- * Whether a composer still holds exactly the prompt handed to it. Only then is
- * it sent: never a composer the user has changed since, and never an empty
- * one, which a submit treats as Stop for a running turn.
- */
-export function holdsHandoff(prompt: readonly { type: string; content?: string }[], text: string) {
-  if (!text.trim()) return false
-  if (prompt.some((part) => part.type !== "text")) return false
-  return prompt.map((part) => part.content ?? "").join("") === text
-}
-
 export type DeployEvidence = {
   project: string
   environment?: string
