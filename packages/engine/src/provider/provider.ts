@@ -2060,8 +2060,14 @@ const layer = Layer.effect(
               async (_input: RequestInfo | URL, init?: RequestInit) => {
                 // Every session request names its session (LLMRequestPrep), and so does every model call a guest can
                 // cause: prompts, compaction, titles, summaries, subagents and retries all run inside one. A request
-                // with none, such as generating an agent from the terminal, is the owner's own.
-                const sessionID = Schema.decodeUnknownOption(SessionID)(new Headers(init?.headers).get("x-session-id"))
+                // with none, such as generating an agent from the terminal, is the owner's own. Anything but one
+                // session ID, such as two joined by a second spelling of the header, names no session that can be
+                // checked, so it is held to the guest rule.
+                const header = new Headers(init?.headers).get("x-session-id")
+                const sessionID =
+                  header !== null && /^ses[\w-]*$/.test(header)
+                    ? Schema.decodeUnknownOption(SessionID)(header)
+                    : Option.none()
                 const route = await FreeModels.resolveRoute({
                   provider: model.providerID === "vector" ? "vector" : "openrouter",
                   modelID: model.id,
@@ -2069,7 +2075,10 @@ const layer = Layer.effect(
                   forKey: (key) => runtimeBridge.promise(freeModels.forKey(key)),
                   credential: (provider) => runtimeBridge.promise(freeCredentials.get(provider)),
                   trainingConsent: () => runtimeBridge.promise(freeModels.trainingConsent()),
-                  guest: () => runtimeBridge.promise(guests.marked(Option.getOrUndefined(sessionID))),
+                  guest: () =>
+                    header !== null && Option.isNone(sessionID)
+                      ? Promise.resolve(true)
+                      : runtimeBridge.promise(guests.marked(Option.getOrUndefined(sessionID))),
                 })
                 const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
                 // Built before the request: a may-train model without the user's acceptance throws, and nothing is sent.

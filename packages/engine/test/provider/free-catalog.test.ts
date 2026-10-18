@@ -3,6 +3,7 @@ import { streamText } from "ai"
 import { Effect, Layer } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FreeModels } from "@vectordevai/core/free-models"
+import { FREE_MODEL_TRAINING_GUEST_SESSION } from "@vectordevai/core/free-model-choice"
 import { ModelV2 } from "@vectordevai/core/model"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { FREE_MODEL_FALLBACKS, type FreeModelCatalog, type FreeModelInfo } from "@vectordevai/schema/free-model"
@@ -162,6 +163,36 @@ it.instance(
       }).pipe(Effect.orElseSucceed(() => undefined))
       expect(String(errors[0])).toContain("Nothing was sent")
       expect(String(errors[0])).toContain("vector models --accept-training")
+      served.catalog = off
+    }),
+  { trusted: true },
+)
+
+it.instance(
+  "a free-model request naming a session the engine cannot read is held to the guest rule",
+  () =>
+    Effect.gen(function* () {
+      const provider = yield* Provider.Service
+      served.catalog = { enabled: true, updatedAt: 1, models: [...FREE_MODEL_FALLBACKS, laguna] }
+      yield* Effect.promise(() => client.catalog(true))
+      const model = yield* pollWithTimeout(
+        provider.getModel(ProviderV2.ID.vector, ModelV2.ID.make(laguna.id)).pipe(Effect.orElseSucceed(() => undefined)),
+        "the may-train model was never listed",
+        "3 seconds",
+      )
+      // Two joined session IDs, as a second spelling of the header would produce. The guest rule is checked before the
+      // missing acceptance, so the refusal names the rule that applied, and nothing is sent either way.
+      const result = streamText({
+        model: yield* provider.getLanguage(model),
+        messages: [{ role: "user", content: "hello" }],
+        headers: { "x-session-id": "ses_first, ses_second" },
+        maxRetries: 0,
+      })
+      const errors: unknown[] = []
+      yield* Effect.promise(async () => {
+        for await (const part of result.fullStream) if (part.type === "error") errors.push(part.error)
+      }).pipe(Effect.orElseSucceed(() => undefined))
+      expect(String(errors[0])).toContain(FREE_MODEL_TRAINING_GUEST_SESSION)
       served.catalog = off
     }),
   { trusted: true },

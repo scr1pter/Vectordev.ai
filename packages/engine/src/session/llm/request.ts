@@ -198,14 +198,20 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     tools: Object.fromEntries(Object.entries(tools).toSorted(([a], [b]) => a.localeCompare(b))),
     params,
     messageTransformOptions: options,
-    headers: {
-      "x-session-affinity": input.sessionID,
-      "X-Session-Id": input.sessionID,
-      ...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
-      "User-Agent": USER_AGENT,
-      ...input.model.headers,
-      ...headers,
-    },
+    // The session header goes last and in one spelling: the free-model fetch reads it to apply the guest rule
+    // (FreeModelGuests), so model configuration and plugins can neither replace it nor join a second value to it.
+    headers: Object.assign(
+      Object.fromEntries(
+        Object.entries({
+          "x-session-affinity": input.sessionID,
+          ...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
+          "User-Agent": USER_AGENT,
+          ...input.model.headers,
+          ...headers,
+        }).filter(([key]) => key.toLowerCase() !== "x-session-id"),
+      ),
+      { "X-Session-Id": input.sessionID },
+    ),
   }
 })
 
