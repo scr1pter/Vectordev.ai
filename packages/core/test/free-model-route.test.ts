@@ -32,13 +32,19 @@ const info = ModelV2.Info.make({
   },
   request: { headers: { Authorization: "injected" }, body: { apiKey: "injected", provider: { max_price: 10 } } },
 })
+// The same model, listed by the user's own OpenRouter account.
+const owned = ModelV2.Info.make({
+  ...info,
+  providerID: ProviderV2.ID.openrouter,
+  freeModel: { source: "openrouter" },
+})
 
 test("native free route fixes destination and body after all caller overlays, reads current own credential", async () => {
   const keys = ["first-owned-key", "second-owned-key"]
   const credentials = FreeModels.CredentialsService.of({
     get: (provider) => Effect.succeed(provider === "openrouter" ? keys.shift() : "vct_shared"),
   })
-  const model = freeModelRoute(info, client, credentials, ownerSession)
+  const model = freeModelRoute(owned, client, credentials, ownerSession)
   for (const key of ["first-owned-key", "second-owned-key"]) {
     const request = LLM.request({
       model,
@@ -66,6 +72,25 @@ test("native free route fixes destination and body after all caller overlays, re
     expect(body).not.toHaveProperty("apiKey")
     expect(body).not.toHaveProperty("user")
   }
+})
+
+test("a shared selection stays on Vector's endpoint and token while an OpenRouter key is stored", async () => {
+  const model = freeModelRoute(
+    info,
+    client,
+    FreeModels.CredentialsService.of({
+      get: (provider) => Effect.succeed(provider === "openrouter" ? "own-synthetic" : "vct_shared"),
+    }),
+    ownerSession,
+  )
+  const prepared = await Effect.runPromise(
+    model.route.prepareTransport(
+      { model: model.id, messages: [{ role: "user", content: "hello" }] },
+      LLM.request({ model, prompt: "hello" }),
+    ),
+  )
+  expect(prepared.request.url).toBe(FreeModels.SHARED_CHAT_URL)
+  expect(prepared.request.headers.authorization).toBe("Bearer vct_shared")
 })
 
 test("native shared route uses Vector token only on fixed Vector endpoint and refuses paid plugins", async () => {
@@ -181,10 +206,10 @@ test("native shared requests reject oversized UTF-8 context before contacting th
   })
 })
 
-test("a saved shared selection routed to the own key is not subject to the Vector body limit", async () => {
+test("an OpenRouter selection on the user's own key is not subject to the Vector body limit", async () => {
   const requests: string[] = []
   const model = freeModelRoute(
-    info,
+    owned,
     client,
     FreeModels.CredentialsService.of({
       get: (provider) => Effect.succeed(provider === "openrouter" ? "own-synthetic" : "vct_synthetic"),

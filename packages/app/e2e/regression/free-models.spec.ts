@@ -164,17 +164,27 @@ async function setup(
   await expect(page.locator("#vector-launch")).toHaveCount(0)
 }
 
-test("groups free models once, prefers own account, and hides the group when OFF", async ({ page }, testInfo) => {
+test("groups both copies of a free model, the shared one first, and hides the group when OFF", async ({
+  page,
+}, testInfo) => {
   await setup(page, { enabled: true })
   await page.locator('[data-action="prompt-model"]').filter({ visible: true }).first().click()
   await expect(
     page.locator('[data-slot="model-section-name"]').filter({ hasText: "Free models inside of Vector" }),
   ).toBeVisible()
+  // A connected OpenRouter account no longer hides the shared copy, which stays on Vector's shared allowance.
+  const shared = page.locator('[data-option-key="vector:maker/coder:free"]')
+  await expect(shared).toHaveCount(1)
+  await expect(shared).toContainText("Maker Coder")
+  await expect(shared).toContainText("Shared Vector allowance")
   const free = page.locator('[data-option-key="openrouter:maker/coder:free"]')
   await expect(free).toHaveCount(1)
   await expect(free).toContainText("Maker Coder")
   await expect(free).toContainText("Your OpenRouter account")
-  await expect(page.locator('[data-option-key="vector:maker/coder:free"]')).toHaveCount(0)
+  const keys = await page
+    .locator('[data-option-key$=":maker/coder:free"]')
+    .evaluateAll((items) => items.map((item) => item.getAttribute("data-option-key")))
+  expect(keys.slice(0, 2)).toEqual(["vector:maker/coder:free", "openrouter:maker/coder:free"])
   await page.screenshot({ path: testInfo.outputPath("free-model-picker.png") })
   await page.keyboard.press("Escape")
   await page.unrouteAll({ behavior: "wait" })

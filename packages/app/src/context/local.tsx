@@ -114,13 +114,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       return !!provider?.models[model.modelID] && connected().has(model.providerID)
     }
 
-    const resolveSelection = (saved: ModelKey) => {
-      const model = renamedModel(saved)
-      const own = providers.all().get("openrouter")?.models[model.modelID]
-      return model.providerID === "vector" && own?.freeModel?.source === "openrouter"
-        ? { ...model, providerID: "openrouter" }
-        : model
-    }
+    // A Vector choice stays on the shared allowance, even when the user's own OpenRouter account lists the same model.
+    const resolveSelection = (saved: ModelKey) => renamedModel(saved)
 
     const freeSelection = (model: ModelKey) => isFreeModelRef(model)
 
@@ -273,10 +268,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const current = () => {
       const item = currentSelection()
       if (!item) return
-      const selected = models.find(item)
-      if (selected?.freeModel?.source !== "shared") return selected
-      const own = models.find({ providerID: "openrouter", modelID: item.modelID })
-      return own?.freeModel?.source === "openrouter" ? own : selected
+      return models.find(item)
     }
 
     createEffect(() => {

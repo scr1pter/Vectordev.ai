@@ -96,7 +96,11 @@ it.instance(
       expect(providers[ProviderV2.ID.openrouter].models["acme/paid"]).toBeDefined()
       expect(yield* provider.defaultModel()).toEqual(expected)
       expect(Provider.defaultModelIDs(providers).openrouter).toBe(expected.modelID)
-      expect(yield* provider.savedModel({ providerID: "vector", modelID: expected.modelID })).toEqual(expected)
+      // A saved Vector choice is never moved to the user's own account; it stays a shared-allowance choice.
+      expect(yield* provider.savedModel({ providerID: "vector", modelID: expected.modelID })).toEqual({
+        providerID: ProviderV2.ID.vector,
+        modelID: expected.modelID,
+      })
       expect(yield* provider.getSmallModel(ProviderV2.ID.openrouter, ModelV2.ID.make(expected.modelID))).toMatchObject({
         id: expected.modelID,
         freeModel: { source: "openrouter" },
@@ -233,3 +237,71 @@ test("the missing-provider error says to sign in only when that would list free 
   )
   expect(new Provider.NoProvidersError({}).message).not.toMatch(/sign in|openrouter/i)
 })
+
+// The owner's words of 17 October 2026: Vector's account serves the free models "no matter who uses" them, so an
+// OpenRouter account of the user's own adds its copies beside the shared ones instead of replacing them.
+const sharedCatalog = { enabled: true, updatedAt: 1, models: [...FREE_MODEL_FALLBACKS] }
+const withSharedCatalog = (credential: (provider: "vector" | "openrouter") => string | undefined) =>
+  testEffect(
+    LayerNode.compile(Provider.node, [
+      [
+        FreeModels.node,
+        Layer.succeed(FreeModels.Service, {
+          catalog: () => Effect.succeed(sharedCatalog),
+          // The user's own account lists only the first shared model.
+          forKey: () => Effect.succeed([FREE_MODEL_FALLBACKS[0]]),
+          trainingConsent: () => Effect.succeed(false),
+          setTrainingConsent: (accepted) => Effect.succeed(accepted),
+          changes: Stream.empty,
+        }),
+      ],
+      [
+        FreeModels.credentialsNode,
+        Layer.succeed(FreeModels.CredentialsService, { get: (provider) => Effect.succeed(credential(provider)) }),
+      ],
+    ]),
+  )
+
+withSharedCatalog((provider) => (provider === "openrouter" ? "synthetic-key" : "vct_synthetic")).instance(
+  "signed in with an OpenRouter account connected, every shared model stays listed and a saved shared choice stays shared",
+  () =>
+    Effect.gen(function* () {
+      const provider = yield* Provider.Service
+      const providers = yield* provider.list()
+      expect(Object.keys(providers[ProviderV2.ID.vector].models).toSorted()).toEqual(
+        FREE_MODEL_FALLBACKS.map((model) => model.id).toSorted(),
+      )
+      for (const model of Object.values(providers[ProviderV2.ID.vector].models))
+        expect(model.freeModel?.source).toBe("shared")
+      expect(providers[ProviderV2.ID.openrouter].models[FREE_MODEL_FALLBACKS[0].id]?.freeModel?.source).toBe(
+        "openrouter",
+      )
+      const shared = { providerID: ProviderV2.ID.vector, modelID: ModelV2.ID.make(FREE_MODEL_FALLBACKS[0].id) }
+      expect(yield* provider.savedModel(shared)).toEqual(shared)
+      expect(yield* provider.getModel(shared.providerID, shared.modelID)).toMatchObject({
+        providerID: "vector",
+        freeModel: { source: "shared" },
+      })
+      expect(yield* provider.freeSignIn()).toBe(false)
+    }),
+  { trusted: true, config: { provider: { openrouter: { options: { apiKey: "synthetic-key" } } } } },
+)
+
+withSharedCatalog((provider) => (provider === "openrouter" ? "synthetic-key" : undefined)).instance(
+  "an OpenRouter key alone lists that account's copies only, and a shared choice asks for a Vector sign-in",
+  () =>
+    Effect.gen(function* () {
+      const provider = yield* Provider.Service
+      const providers = yield* provider.list()
+      expect(providers[ProviderV2.ID.vector]).toBeUndefined()
+      expect(Object.keys(providers[ProviderV2.ID.openrouter].models)).toContain(FREE_MODEL_FALLBACKS[0].id)
+      expect(yield* provider.freeSignIn()).toBe(true)
+      const failure = yield* provider
+        .getModel(ProviderV2.ID.vector, ModelV2.ID.make(FREE_MODEL_FALLBACKS[0].id))
+        .pipe(Effect.flip)
+      expect(failure.message).toBe(
+        `Model unavailable: vector/${FREE_MODEL_FALLBACKS[0].id}. Sign in to Vector to use free models.`,
+      )
+    }),
+  { trusted: true, config: { provider: { openrouter: { options: { apiKey: "synthetic-key" } } } } },
+)

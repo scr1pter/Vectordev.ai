@@ -28,6 +28,7 @@ import {
 } from "@vectordevai/core/free-model-catalog"
 import {
   FREE_MODEL_UNLISTED,
+  FREE_MODELS_SIGN_IN,
   FREE_MODELS_SIGN_IN_TERMINAL,
   freeModelMayTrain,
 } from "@vectordevai/core/free-model-choice"
@@ -1937,10 +1938,10 @@ const layer = Layer.effect(
               delete item.models[modelID]
           }
         }
-        if (freeCatalog.enabled && isProviderAllowed(ProviderV2.ID.vector) && (vectorToken || openRouterKey)) {
-          const models = openRouterKey ? ownedFree : freeCatalog.models
-          if (models.length) providers[ProviderV2.ID.vector] = fromFreeModels(models)
-        }
+        // Vector's provider is the shared allowance, signed in only. An OpenRouter key of the user's own lists that
+        // account's copies under OpenRouter below and never replaces the shared models.
+        if (freeCatalog.enabled && isProviderAllowed(ProviderV2.ID.vector) && vectorToken && freeCatalog.models.length)
+          providers[ProviderV2.ID.vector] = fromFreeModels(freeCatalog.models)
         if (!freeCatalog.enabled) delete providers[ProviderV2.ID.vector]
         // Codium replaces every user or project override of its ID, so prices and destination stay Vector's.
         delete providers[planID]
@@ -2364,6 +2365,13 @@ const layer = Layer.effect(
           },
         })
       }
+      // A shared free model needs a Vector sign-in, even with an OpenRouter account connected, so say that.
+      if (!provider && providerID === ProviderV2.ID.vector && (yield* freeSignIn()))
+        return yield* new ModelNotFoundError({
+          providerID,
+          modelID,
+          unavailable: { id: providerID, reason: "no-models", message: FREE_MODELS_SIGN_IN },
+        })
       if (!provider) {
         const catalogProvider = s.getCatalog(providerID)
         const suggestions = catalogProvider
@@ -2540,12 +2548,8 @@ const layer = Layer.effect(
 
     const savedModel = Effect.fn("Provider.savedModel")(function* (model: { providerID: string; modelID: string }) {
       const s = yield* InstanceState.get(state)
+      // A saved Vector model stays on the shared allowance, even when the user's own OpenRouter account lists it too.
       const current = renamedModel(model)
-      if (
-        current.providerID === "vector" &&
-        s.providers[ProviderV2.ID.openrouter]?.models[current.modelID]?.freeModel?.source === "openrouter"
-      )
-        return { providerID: ProviderV2.ID.openrouter, modelID: ModelV2.ID.make(current.modelID) }
       if (providerRetired(current.providerID, (id) => s.declared.has(id) || id in s.providers)) return
       return { providerID: ProviderV2.ID.make(current.providerID), modelID: ModelV2.ID.make(current.modelID) }
     })
@@ -2559,7 +2563,8 @@ const layer = Layer.effect(
         return false
       const catalog = yield* freeModels.catalog()
       if (!catalog.enabled || !catalog.models.length) return false
-      return !(yield* freeCredentials.get("vector")) && !(yield* freeCredentials.get("openrouter"))
+      // An OpenRouter key of the user's own lists only that account's copies, so it still needs the sign-in.
+      return !(yield* freeCredentials.get("vector"))
     })
 
     const defaultModel = Effect.fn("Provider.defaultModel")(function* () {
@@ -2582,9 +2587,6 @@ const layer = Layer.effect(
         Effect.catch(() => Effect.succeed([] as { providerID: ProviderV2.ID; modelID: ModelV2.ID }[])),
       )
       for (const entry of recent) {
-        const owned = s.providers[ProviderV2.ID.openrouter]?.models[entry.modelID]
-        if (entry.providerID === "vector" && owned?.freeModel?.source === "openrouter")
-          return { providerID: ProviderV2.ID.openrouter, modelID: owned.id }
         const provider = s.providers[entry.providerID]
         // A vanished free choice must fail as unavailable, never quietly select a paid model.
         if (isFreeModelRef(entry)) return entry

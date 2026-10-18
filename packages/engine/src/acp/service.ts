@@ -786,11 +786,8 @@ function defaultModelFromConfig(
   configuredModel: string | undefined,
   providers: Record<ProviderV2.ID, Provider.Info>,
 ): Directory.DefaultModel | undefined {
+  // A configured Vector model stays on the shared allowance, even when the user's own OpenRouter account lists it.
   const configured = configuredModel ? Provider.parseModel(configuredModel) : undefined
-  if (configured?.providerID === "vector") {
-    const own = providers[ProviderV2.ID.openrouter]?.models[configured.modelID]
-    if (own?.freeModel?.source === "openrouter") return { providerID: ProviderV2.ID.openrouter, modelID: own.id }
-  }
   if (configured && providers[configured.providerID]?.models[configured.modelID]) return configured
   if (configured && isFreeModelRef(configured)) return configured
 

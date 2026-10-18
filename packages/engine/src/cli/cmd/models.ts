@@ -6,7 +6,7 @@ import {
   freeModelName,
   freeModelSource,
   freeModelTrainingLabel,
-  preferOwnFreeModels,
+  freeModelChoices,
 } from "@vectordevai/core/free-model-choice"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { EOL } from "os"
@@ -73,15 +73,11 @@ export const ModelsCommand = effectCmd({
     const provider = yield* Provider.Service
     const providers = yield* provider.list()
 
-    const free = preferOwnFreeModels(
+    // Both copies of a model are listed, the shared one first: a vector/… selector keeps the shared allowance even
+    // while an OpenRouter account is connected, and an openrouter/… one runs on that account.
+    const free = freeModelChoices(
       Object.values(providers).flatMap((provider) => Object.values(provider.models)),
     ).filter((model) => model.freeModel && (!args.provider || model.providerID === args.provider))
-    const hidden = new Set(
-      Object.values(providers)
-        .flatMap((provider) => Object.values(provider.models))
-        .filter((model) => model.freeModel && !free.includes(model))
-        .map((model) => `${model.providerID}/${model.id}`),
-    )
     // Human guidance goes to stderr; stdout keeps copyable, script-friendly model selectors.
     if (free.length) {
       UI.println(FREE_MODELS_TITLE)
@@ -93,8 +89,13 @@ export const ModelsCommand = effectCmd({
       if (free.some(freeModelMayTrain) && !(yield* Effect.promise(() => consent.trainingConsent())))
         UI.println(`  ${TRAINING_NOTE} Prompts to them are refused until you run "vector models --accept-training".`)
     }
-    // Signed out, the free section is missing rather than empty, so say how to get it.
-    if (!free.length && (!args.provider || args.provider === ProviderV2.ID.vector) && (yield* provider.freeSignIn()))
+    // Signed out, the shared models are missing rather than listed, even beside an OpenRouter account's own copies, so
+    // say how to get them.
+    if (
+      !free.some((model) => model.freeModel?.source === "shared") &&
+      (!args.provider || args.provider === ProviderV2.ID.vector) &&
+      (yield* provider.freeSignIn())
+    )
       UI.println(FREE_MODELS_SIGN_IN_TERMINAL)
 
     const codium = providers[ProviderV2.ID.make(ModelPlans.PROVIDER_ID)]
@@ -107,7 +108,6 @@ export const ModelsCommand = effectCmd({
       const p = providers[providerID]
       const sorted = Object.entries(p.models).sort(([a], [b]) => a.localeCompare(b))
       for (const [modelID, model] of sorted) {
-        if (hidden.has(`${providerID}/${modelID}`)) continue
         process.stdout.write(`${providerID}/${modelID}`)
         process.stdout.write(EOL)
         if (verbose) {

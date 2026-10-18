@@ -6,7 +6,7 @@ import {
   freeModelSource,
   freeModelTrainingDisclaimer,
   freeModelTrainingLabel,
-  preferOwnFreeModels,
+  freeModelChoices,
 } from "@vectordevai/core/free-model-choice"
 import type { FreeDataPolicy } from "@vectordevai/schema/free-model"
 import { providerAllowed, providerUsable } from "@vectordevai/schema/provider-policy"
@@ -309,7 +309,8 @@ export function buildModelSections<T extends PickerModel>(input: {
   popular?: readonly string[]
 }): PickerSection<T>[] {
   const term = (input.term ?? "").trim().toLowerCase()
-  const models = preferOwnFreeModels(
+  // Both copies of a free model are listed, the shared one first; each runs where it says.
+  const models = freeModelChoices(
     input.models.filter((model) => !isHiddenProvider(model.provider.id, model.provider) && isCodingModel(model)),
   )
   const sections: PickerSection<T>[] = []
@@ -325,7 +326,11 @@ export function buildModelSections<T extends PickerModel>(input: {
         policy: free.some(freeModelMayTrain)
           ? undefined
           : { label: "No-training policy", title: FREE_MODELS_DATA_POLICY },
-        items: free.sort(byRelease),
+        items: free.sort(
+          (a, b) =>
+            byRelease(a, b) ||
+            Number(a.freeModel?.source === "openrouter") - Number(b.freeModel?.source === "openrouter"),
+        ),
       }),
     )
     free.forEach((model) => taken.add(pickerModelKey(model)))

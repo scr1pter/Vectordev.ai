@@ -137,10 +137,15 @@ export function bestOwnFreeModel<T extends Pick<FreeModelChoice, "id" | "freeMod
     )[0]
 }
 
-/** Keep canonical IDs intact. The user's account takes precedence for the same model. */
-export function preferOwnFreeModels<T extends FreeModelChoice>(models: readonly T[]): T[] {
-  const own = new Set(models.filter((model) => model.freeModel?.source === "openrouter").map((model) => model.id))
-  return models.filter((model) => model.freeModel?.source !== "shared" || !own.has(model.id))
+/**
+ * Every copy of a free model stays listed, the shared one ahead of the user's own: a shared choice runs on Vector's
+ * shared allowance even while an OpenRouter account is connected, so hiding it would leave that allowance out of reach.
+ * Any other order is kept.
+ */
+export function freeModelChoices<T extends FreeModelChoice>(models: readonly T[]): T[] {
+  return models.toSorted(
+    (a, b) => Number(a.freeModel?.source === "openrouter") - Number(b.freeModel?.source === "openrouter"),
+  )
 }
 
 export type FreeModelsLimitNotice = {

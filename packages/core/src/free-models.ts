@@ -334,7 +334,9 @@ export async function resolveRoute(input: {
   // The owner's acceptance never carries a guest's input: such a session gets no-training models only.
   const guest = await input.guest()
   const trainingConsent = !guest && (await input.trainingConsent())
-  const ownKey = await input.credential("openrouter")
+  // The selection names the account: a Vector selection always runs on the shared allowance, even with an OpenRouter
+  // key stored, and the user's own key serves only the copies listed under OpenRouter.
+  const ownKey = input.provider === "openrouter" ? await input.credential("openrouter") : undefined
   if (ownKey) {
     const models = await input.forKey(ownKey)
     if (!models.some((model) => model.id === input.modelID)) {
@@ -357,8 +359,8 @@ export async function resolveRoute(input: {
       headers: {},
     }
   }
-  // Without an OpenRouter key of the user's own, every free model runs on Vector's shared allowance, including one
-  // chosen while an OpenRouter account was connected, when the shared catalog lists it.
+  // Every other free request runs on Vector's shared allowance, including an OpenRouter selection made while an
+  // OpenRouter account was connected, once that key is gone, when the shared catalog lists the model.
   const catalog = await input.catalog()
   if (!catalog.enabled || !catalog.models.some((model) => model.id === input.modelID))
     throw new Error("That free model is unavailable. Choose another model in Vector.")

@@ -373,12 +373,16 @@ it.effect("small model selection keeps zero-priced models", () =>
   }),
 )
 
-it.effect("a configured free model moves to the owned route and fails closed if it disappears", () =>
+it.effect("a configured Vector model stays shared beside an own copy and fails closed if it disappears", () =>
   Effect.gen(function* () {
     const catalog = yield* Catalog.Service
     const free = ModelV2.ID.make("acme/coder:free")
     const paid = ModelV2.ID.make("acme/paid")
     yield* catalog.transform((draft) => {
+      draft.provider.update(ProviderV2.ID.vector, () => {})
+      draft.model.update(ProviderV2.ID.vector, free, (model) => {
+        model.freeModel = { source: "shared" }
+      })
       draft.provider.update(ProviderV2.ID.openrouter, () => {})
       draft.model.update(ProviderV2.ID.openrouter, free, (model) => {
         model.freeModel = { source: "openrouter" }
@@ -386,15 +390,17 @@ it.effect("a configured free model moves to the owned route and fails closed if 
       draft.model.update(ProviderV2.ID.openrouter, paid, () => {})
       draft.model.default.set(ProviderV2.ID.vector, free)
     })
-    expect(yield* catalog.model.default()).toMatchObject({ id: free, providerID: "openrouter" })
+    // The user's own OpenRouter account lists the same model, but the configured choice is the shared allowance.
+    expect(yield* catalog.model.default()).toMatchObject({ id: free, providerID: "vector" })
     yield* catalog.transform((draft) => {
-      draft.model.update(ProviderV2.ID.openrouter, free, (model) => {
+      draft.model.update(ProviderV2.ID.vector, free, (model) => {
         model.enabled = false
       })
     })
+    // Gone from the shared catalog, it fails as unavailable instead of moving to the user's own account.
     expect(yield* catalog.model.default().pipe(Effect.result)).toMatchObject({
       _tag: "Failure",
-      failure: { _tag: "Catalog.DefaultModelUnavailableError", modelID: free },
+      failure: { _tag: "Catalog.DefaultModelUnavailableError", providerID: "vector", modelID: free },
     })
     yield* catalog.transform((draft) => draft.model.default.set(ProviderV2.ID.openrouter, paid))
     expect(yield* catalog.model.default()).toMatchObject({ id: paid, providerID: "openrouter" })

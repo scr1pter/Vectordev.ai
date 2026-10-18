@@ -11,7 +11,7 @@ import {
   freeModelTrainingLabel,
   freeModelName,
   freeModelSource,
-  preferOwnFreeModels,
+  freeModelChoices,
   FREE_MODEL_RESUME_UNAVAILABLE,
   FREE_ROUTER_DISCLAIMER,
   FREE_MODELS_OWN_KEYS,
@@ -28,9 +28,12 @@ import {
 describe("free model presentation", () => {
   const shared = { id: "maker/coder:free", name: "Maker Coder:free", freeModel: { source: "shared" as const } }
   const own = { ...shared, freeModel: { source: "openrouter" as const } }
-  test("uses the user's account for duplicate curated models without changing routing IDs", () => {
-    expect(preferOwnFreeModels([shared, own])).toEqual([own])
-    expect(preferOwnFreeModels([own, shared])).toEqual([own])
+  test("lists both copies of a model, the shared one first, without changing routing IDs", () => {
+    // A connected OpenRouter account no longer hides the shared copy: choosing it keeps the shared allowance.
+    expect(freeModelChoices([shared, own])).toEqual([shared, own])
+    expect(freeModelChoices([own, shared])).toEqual([shared, own])
+    const paid = { id: "maker/paid", name: "Maker Paid" }
+    expect(freeModelChoices([own, paid, shared])).toEqual([paid, shared, own])
     expect(freeModelName(own)).toBe("Maker Coder")
     expect(own.id).toBe("maker/coder:free")
     expect(freeModelSource(own)).toBe("Your OpenRouter account")
@@ -39,7 +42,7 @@ describe("free model presentation", () => {
   test("price and free-looking names cannot enable the section when metadata is absent", () => {
     const ordinary = { id: shared.id, name: "Maker Coder (free)", cost: { input: 0, output: 0 } }
     expect(freeModelSource(ordinary)).toBeUndefined()
-    expect(preferOwnFreeModels([ordinary])).toEqual([ordinary])
+    expect(freeModelChoices([ordinary])).toEqual([ordinary])
     expect(freeModelName(ordinary)).toBe("Maker Coder")
   })
 })

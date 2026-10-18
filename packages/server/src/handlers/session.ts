@@ -564,8 +564,9 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
  * Refuses an invited guest's prompt or resume that would run on a free model whose provider may train on prompts: it
  * would run under the owner's acceptance, which the guest never gave. A shared model's policy comes from the shared
  * catalog itself, since plugins may still be filling the location's model catalog when a guest's first request
- * arrives; a model on the owner's own OpenRouter account, where a shared model also runs when listed there, comes from
- * the location's catalog. A free model whose policy is found nowhere is not treated as no-training.
+ * arrives; a model on the owner's own OpenRouter account comes from the location's catalog. Both are read whichever
+ * provider the prompt names, so the stricter policy wins. A free model whose policy is found nowhere is not treated as
+ * no-training.
  */
 const refuseTrainingFreeModel = Effect.fn("SessionHandler.refuseTrainingFreeModel")(function* (
   model: { readonly providerID: string; readonly id: string } | undefined,

@@ -74,12 +74,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       return !!provider?.models[model.modelID]
     }
 
+    // A Vector choice stays on the shared allowance, even when the user's own OpenRouter account lists the same model.
     function resolveSelection(saved: { providerID: string; modelID: string }) {
-      const model = renamedModel(saved)
-      const own = sync.data.provider.find((provider) => provider.id === "openrouter")?.models[model.modelID]
-      return model.providerID === "vector" && own?.freeModel?.source === "openrouter"
-        ? { ...model, providerID: "openrouter" }
-        : model
+      return renamedModel(saved)
     }
 
     const freeSelection = (model: { providerID: string; modelID: string }) => isFreeModelRef(model)
@@ -263,12 +260,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const currentModel = createMemo(() => {
         const selected = selection()
         if (!selected || !isModelValid(selected)) return
-        const provider = sync.data.provider.find((provider) => provider.id === selected.providerID)
-        if (provider?.models[selected.modelID]?.freeModel?.source !== "shared") return selected
-        const own = sync.data.provider.find((provider) => provider.id === "openrouter")?.models[selected.modelID]
-        return own?.freeModel?.source === "openrouter"
-          ? { providerID: "openrouter", modelID: selected.modelID }
-          : selected
+        return selected
       })
 
       createEffect(() => {

@@ -251,15 +251,8 @@ const layer = Layer.effect(
         default: Effect.fn("CatalogV2.model.default")(function* () {
           const defaultModel = state.get().defaultModel
           if (defaultModel) {
-            if (defaultModel.providerID === "vector") {
-              const own = (yield* result.model.available()).find(
-                (model) =>
-                  model.providerID === "openrouter" &&
-                  model.id === defaultModel.modelID &&
-                  model.freeModel?.source === "openrouter",
-              )
-              if (own) return own
-            }
+            // A configured Vector model stays on the shared allowance, even when an OpenRouter account of the user's
+            // own lists the same model.
             const provider = yield* result.provider.get(defaultModel.providerID)
             if (provider && (yield* result.provider.available()).some((item) => item.id === provider.id)) {
               const model = yield* result.model.get(defaultModel.providerID, defaultModel.modelID)

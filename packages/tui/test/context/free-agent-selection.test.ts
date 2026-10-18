@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-test("actual TUI agent set and cycle preserve free intent, including unavailable models", async () => {
+test("actual TUI agent set and cycle preserve free intent, keep shared choices shared, including unavailable models", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "vector-free-agent-"))
   try {
     // Isolate context fixtures in a child so module mocks cannot affect other TUI tests.
@@ -20,10 +20,14 @@ import { createRoot } from "solid-js"
 const free = { providerID: "openrouter", modelID: "maker/coder:free" }
 const paid = { providerID: "openrouter", modelID: "maker/paid" }
 const missing = { providerID: "openrouter", modelID: "maker/missing:FREE" }
+const shared = { providerID: "vector", modelID: "maker/shared:free" }
 const directory = process.argv[1]
 const data = {
   agent: [{ name: "build", mode: "primary" }, { name: "plan", mode: "primary", model: paid }],
-  provider: [{ id: "openrouter", models: {
+  provider: [{ id: "vector", models: {
+    [shared.modelID]: { id: shared.modelID, variants: {}, freeModel: { source: "shared" } },
+    [free.modelID]: { id: free.modelID, variants: {}, freeModel: { source: "shared" } },
+  } }, { id: "openrouter", models: {
     [free.modelID]: { id: free.modelID, variants: { careful: {} }, freeModel: { source: "openrouter" } },
     [paid.modelID]: { id: paid.modelID, variants: {} },
   } }],
@@ -52,9 +56,18 @@ const result = createRoot((dispose) => {
   local.agent.set("plan")
   const unavailable = { selected: { ...local.model.selection() }, current: local.model.current() ?? null }
   local.model.set(paid)
-  const explicit = local.model.current()
+  const explicit = { ...local.model.current() }
+  // The user's own OpenRouter account lists maker/coder:free too, but a shared choice stays shared.
+  local.model.set({ providerID: "vector", modelID: free.modelID })
+  const sharedDuplicate = { ...local.model.current() }
+  local.model.set(shared)
+  local.agent.move(-1)
+  const sharedPreserved = { ...local.model.current() }
+  local.model.set({ providerID: "vector", modelID: "maker/disappeared:free" })
+  local.agent.move(1)
+  const sharedUnavailable = { selected: { ...local.model.selection() }, current: local.model.current() ?? null }
   dispose()
-  return { planned, cycled, unavailable, explicit }
+  return { planned, cycled, unavailable, explicit, sharedDuplicate, sharedPreserved, sharedUnavailable }
 })
 await Bun.write(Bun.stdout, JSON.stringify(result))
 `,
@@ -79,6 +92,10 @@ await Bun.write(Bun.stdout, JSON.stringify(result))
       cycled: { agent: "build", model: free, variant: "careful" },
       unavailable: { selected: { providerID: "openrouter", modelID: "maker/missing:FREE" }, current: null },
       explicit: { providerID: "openrouter", modelID: "maker/paid" },
+      sharedDuplicate: { providerID: "vector", modelID: "maker/coder:free" },
+      sharedPreserved: { providerID: "vector", modelID: "maker/shared:free" },
+      // A shared choice that disappeared fails as unavailable instead of moving to the user's own account.
+      sharedUnavailable: { selected: { providerID: "vector", modelID: "maker/disappeared:free" }, current: null },
     })
   } finally {
     await rm(directory, { recursive: true, force: true })
