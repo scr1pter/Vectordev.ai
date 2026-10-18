@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
-import { DEFAULT_REVIEW_CONFIG } from "@vectordevai/core/review/types"
+import { legacyName } from "@vectordevai/core/flag/legacy"
 import { DEFAULT_SPEND_POLICY } from "../../desktop/src/main/spend-limits"
 
 // The landing page argues that Vector is cheaper or better in some way, so every number it gives has to come from
@@ -46,7 +46,10 @@ test("the cost figures come from the archived subagent benchmark", async () => {
   expect(matched).toHaveLength(5)
   expect(story).toContain(`Vector's modelled cost was ${range(gap(1))} lower in the first session and ${range(gap(2))} lower in a second.`)
   expect(story).toContain(`value: "${range(gap(1))}"`)
+  expect(story).toContain(`value: "${range(gap(2))}"`)
   expect(story).toContain(`${range(gap(1))} lower modelled cost than Claude Code 2.1.215 on five scripted subagent tasks`)
+  // The hero's receipt is the same first-session figure, dated to the archived run.
+  expect(lander).toContain(`Vector ${range(gap(1))} lower than Claude Code 2.1.215`)
   const left = pairs.filter((pair) => !matched.includes(pair))
   expect(left.map((pair) => pair.name)).toEqual(["steer"])
   expect(story).toContain(
@@ -63,7 +66,7 @@ test("every benchmark figure keeps its date and its caveats", () => {
   expect(story).toContain("Codex was not part of them.")
   expect(story).toContain("not your bill")
   expect(story).toContain("Not a live bill or a measure of answer quality")
-  expect(lander).toContain("offline, 17 Oct 2026")
+  expect(lander).toContain("offline, 16 Oct 2026")
   // The 10 October figure rested on a scenario that read a missing file.
   expect(page).not.toMatch(/58–64%|60–67%/)
   expect(page).not.toMatch(/(cheaper|faster|leaner) than (Codex|every|any)/i)
@@ -80,16 +83,16 @@ test("the Run Guard, scheduled-agent and Vectorscope figures are the ones that s
   expect(SpendGuard.ERROR_STREAK).toBe(3)
   expect(story).toContain("pauses an agent stuck repeating the same call or error three times")
   expect(story).toContain(`${SpendGuard.UNPRICED_STEPS} unpriced steps also stop a run`)
-  expect(story).toContain(
-    `a $${DEFAULT_REVIEW_CONFIG.maxCostUsd.toFixed(2)} cap for one review and $${DEFAULT_REVIEW_CONFIG.maxCostUsdPerPr.toFixed(2)} across the automatic reviews of one pull request`,
-  )
-  expect(story).toContain(`value: "$${DEFAULT_REVIEW_CONFIG.maxCostUsd} · $${DEFAULT_REVIEW_CONFIG.maxCostUsdPerPr}"`)
-  // A spend cap is never a promise to the cent.
+  // A spend cap is never a promise to the cent, and an unpriced step is never counted as free.
   expect(page).toContain("within one step of the cap you set")
-  expect(page).not.toMatch(/\bexactly\b|never exceeds|guaranteed/i)
-  // The terminal gets the Run Guard and subagent steering with the next CLI release, not with npm CLI 1.99.99.
+  expect(page).not.toMatch(/\bexactly\b|never exceeds|guaranteed|holds a run to|every chat priced|prices every chat/i)
+  expect(page).not.toMatch(/cost of every run|economics of every run/i)
+  expect(story).toContain("shows as unpriced, not as $0.00")
+  // The terminal gets the Run Guard and subagent steering with the next CLI release, not with npm CLI 1.99.99, and
+  // Windows WSL servers, which keep the 1.99.99 engine, get them later still.
   expect(story).toContain("the terminal gets the Run Guard with the next CLI release")
-  expect(story).toContain("Steering background subagents reaches the terminal with the next CLI release.")
+  expect(story).toContain("Steering background subagents reaches the terminal with the next CLI release")
+  expect(story.match(/Windows WSL servers/g)?.length).toBe(4)
 })
 
 test("what is not live yet is labelled", () => {
@@ -99,7 +102,12 @@ test("what is not live yet is labelled", () => {
   expect(page).not.toMatch(/Velocity[^.]*\b(coming|in development|400B)\b/i)
   expect(lander).not.toMatch(/model coming/)
   // Free models whose providers may train arrive with the next release, behind a label and a one-time question.
+  // A connected OpenRouter account's free models are next release too: desktop 1.99.108 shows them only while
+  // vectordev.ai's free-model catalog answers, and it did not on 17 October 2026.
   expect(story).toContain("Free models inside of Vector")
+  expect(story).not.toContain("Connect your own free OpenRouter account for the free models")
+  expect(story).toMatch(/status: \{ kind: "next", text: "Next release" \}, text: "Connect your own free OpenRouter account/)
+  expect(lander).toContain("With the next release, connect a free OpenRouter account")
   expect(story).toContain("labelled “May train on your prompts”, and Vector asks you once before you first use one")
   expect(lander).toContain("Labelled models arrive with the next release, and Vector asks you once before you first use one.")
   expect(page).not.toContain("Models included with Vector")
@@ -110,16 +118,24 @@ test("what is not live yet is labelled", () => {
   expect(story).toContain(
     'planned: "The software factory: an issue becomes a reviewed preview in the cloud with no laptop open',
   )
-  // Subagents run up to eight per batch; only parallel agents are uncapped.
-  expect(lander).toContain('"runs up to eight subagents at once."')
-  expect(page).not.toMatch(/subagents[^."]*no cap|no cap[^."]*subagents/i)
+  // Eight is the batch size, not a limit on subagents running together, and nothing is "no cap".
+  expect(lander).toContain('"runs subagents in batches of up to eight."')
+  expect(page).not.toMatch(/eight subagents at once|subagents[^."]*no cap|no cap[^."]*subagents/i)
+  // Velocity has no design work yet.
+  expect(page).not.toMatch(/designed for Vector/)
 })
 
 test("the landing page says repository, never project, for Vector's own idea", () => {
   expect([lander, story, index].filter((text) => /\bprojects?\b/i.test(text))).toEqual([])
   // The redrawn sidebar and dashboard name the groups the way the copy does.
   const visible = shots.flatMap((shot) =>
-    [/>Projects</, /"Project tools"/, /under Project tools/, /at a project on your disk/, /deploys the open project/]
+    [
+      />Projects</,
+      /"Project tools"/,
+      /under (Project|Repository) tools/,
+      /at a project on your disk/,
+      /deploys the open project/,
+    ]
       .filter((pattern) => pattern.test(shot.text))
       .map((pattern) => `${shot.file}: ${pattern}`),
   )
@@ -127,7 +143,9 @@ test("the landing page says repository, never project, for Vector's own idea", (
 })
 
 test("the landing page names neither the upstream project nor Cloud Services", () => {
-  expect([page, ...shots.map((shot) => shot.text)].filter((text) => /opencode/i.test(text))).toEqual([])
+  // The upstream name is derived from its MIT notice, so it is never written here either.
+  expect(legacyName).toBeTruthy()
+  expect([page, ...shots.map((shot) => shot.text)].filter((text) => text.toLowerCase().includes(legacyName!))).toEqual([])
   expect(page).not.toMatch(/Cloud [Ss]ervices/)
 })
 
