@@ -1869,15 +1869,14 @@ function overlap(own: ReadonlyMap<string, number>, other: ReadonlyMap<string, nu
   return shared / Math.max(1, own.size)
 }
 
-// A quote has to state at least half of a memory's terms to count as evidence for it.
-const SUPPORT = 0.5
-
 // Personal memory is what the user said about themselves.
 const FIRST_PERSON = /\b(?:i|me|my|mine|myself)\b/i
 
+// A quote counts as evidence only for a memory it states whole and the same way round; a cited file's path counts as
+// part of its quote.
 function supports(text: string, evidence: Exclude<Evidence, { readonly type: "user" }>) {
   if (evidence.type === "check") return BrainLexical.named(text, evidence.command)
-  return BrainLexical.coverage(text, evidence.quote) >= SUPPORT
+  return BrainLexical.states(text, evidence.quote, evidence.type === "file" ? evidence.path : "")
 }
 
 /**

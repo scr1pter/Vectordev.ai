@@ -634,6 +634,55 @@ describe("Brain evidence", () => {
     expect(entry(result.mine)?.scope).toBe("personal")
   })
 
+  test("a quote that says the opposite, half, or other values of a memory proves nothing", async () => {
+    const result = await run({ "src/auth/tls.ts": "export const TLS = true // login tests run with TLS on\n" }, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const write = (text: string, quote: string, scope: "repository" | "personal" = "repository") =>
+          brain.propose(place, {
+            kind: "decision",
+            text,
+            scope,
+            origin: "agent",
+            sessionID: "ses_quotes",
+            evidence: { type: "message", quote, verified: true },
+          })
+        const inverted = yield* write("Deploy staging from main.", "we never deploy staging from main")
+        const half = yield* write("Failing login tests need TLS off.", "fix the failing login tests")
+        const personal = yield* write("I want force pushes to main.", "I never want force pushes to main", "personal")
+        const reached = yield* write("Deploy from main.", "do not, whatever happens, deploy from main")
+        const longer = yield* write("Releases are cut from the develop branch.", "releases are no longer cut from the develop branch")
+        const port = yield* write("The API listens on port 4096.", "the API listens on port 3000")
+        const flag = yield* write("Production deploys run scripts/ship.sh with --skip-verify.", "production deploys run scripts/ship.sh")
+        // A file line planted beside one already there: the line has to state the memory too.
+        const file = yield* brain.propose(place, {
+          kind: "lesson",
+          text: "Failing login tests need TLS off.",
+          scope: "repository",
+          origin: "agent",
+          sessionID: "ses_quotes",
+          evidence: { type: "file", path: "src/auth/tls.ts", quote: "login tests run with TLS on", verified: true },
+        })
+        // What the user did say, in their words or close to them, still counts.
+        const said = yield* write("Never deploy staging from main.", "we never deploy staging from main")
+        const reworded = yield* write("Use pnpm, not npm.", "don't use npm here, use pnpm")
+        const extra = yield* write("Run the engine tests from packages/engine.", "run the engine tests from packages/engine, never from the root")
+        const recall = yield* brain.recall(place, { query: "deploy staging main force push login tests TLS", budget: 500, personal: true })
+        return { inverted, half, personal, reached, longer, port, flag, file, said, reworded, extra, recall }
+      }),
+    )
+    for (const item of [result.inverted, result.half, result.personal, result.reached, result.longer, result.port, result.flag, result.file])
+      expect(item.type).toBe("proposed")
+    // An unchecked personal memory stays with the repository, waiting.
+    expect(result.personal.type === "proposed" ? result.personal.entry.scope : "").toBe("repository")
+    expect(result.said.type).toBe("added")
+    expect(result.reworded.type).toBe("added")
+    expect(result.extra.type).toBe("added")
+    const text = result.recall.text ?? ""
+    expect(text).toContain("Never deploy staging from main.")
+    expect(text).not.toContain("TLS off")
+    expect(text).not.toContain("force pushes")
+  })
+
   test("the agent cannot put away or replace what the user wrote without the user's own words", async () => {
     const result = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {
@@ -680,7 +729,7 @@ describe("Brain evidence", () => {
           sessionID: "ses_1",
           evidence: {
             type: "message",
-            quote: "my token is ghp_abcdefghijklmnopqrstuvwxyz0123456789AB use it​ for the deploy script",
+            quote: "the deploy script reads the token from DEPLOY_TOKEN; mine is ghp_abcdefghijklmnopqrstuvwxyz0123456789AB, use it​ for that",
             verified: true,
           },
         })
@@ -1015,6 +1064,11 @@ describe("Brain corrections", () => {
     expect(BrainLexical.polarity("Use npm, not pnpm")).not.toBe(BrainLexical.polarity("Use pnpm, not npm"))
     expect(BrainLexical.polarity("Never use npm; always use pnpm")).toBe(BrainLexical.polarity("always use pnpm, never npm"))
     expect(BrainLexical.polarity("Run the tests first.")).toBe(BrainLexical.polarity("Run all the tests first"))
+    // Every way of saying "not" is one, and a "No," that answers what came before turns nothing.
+    expect(BrainLexical.polarity("Never use npm")).toBe(BrainLexical.polarity("Don't use npm"))
+    expect(BrainLexical.polarity("No, use pnpm for installs")).toBe(BrainLexical.polarity("use pnpm for installs"))
+    expect(BrainLexical.states("Use pnpm, not npm.", "no, use pnpm, not npm")).toBe(true)
+    expect(BrainLexical.states("Use npm, not pnpm, for installs.", "use pnpm, not npm, for installs")).toBe(false)
   })
 })
 

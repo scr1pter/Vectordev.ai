@@ -222,12 +222,17 @@ export function terms(text: string) {
 // A light suffix strip, so "tests" meets "test" and "failing" meets "fails". Stemming further would join unrelated
 // identifiers, which matter more in code than plurals do.
 function stem(term: string) {
-  if (term.length > 5 && term.endsWith("ing")) return term.slice(0, -3)
-  if (term.length > 4 && term.endsWith("ies")) return `${term.slice(0, -3)}y`
+  if (term.length > 5 && term.endsWith("ing")) return single(term.slice(0, -3))
+  if (term.length > 4 && (term.endsWith("ies") || term.endsWith("ied"))) return `${term.slice(0, -3)}y`
   if (term.length > 4 && term.endsWith("es") && /(?:ss|sh|ch|x)es$/.test(term)) return term.slice(0, -2)
   if (term.length > 3 && term.endsWith("s") && !term.endsWith("ss")) return term.slice(0, -1)
-  if (term.length > 4 && term.endsWith("ed")) return term.slice(0, -2)
+  if (term.length > 4 && term.endsWith("ed")) return single(term.slice(0, -2))
   return term
+}
+
+// "running" and "stopped" are "run" and "stop"; "calling" and "passed" keep their double letter.
+function single(term: string) {
+  return term.length >= 4 && /([b-df-hj-km-np-tv-z])\1$/.test(term) && !/(?:ll|ss|zz|ff)$/.test(term) ? term.slice(0, -1) : term
 }
 
 /** Jaccard similarity of two term sets: 1 for the same words, 0 for none in common. */
@@ -238,14 +243,40 @@ export function similarity(left: ReadonlyMap<string, number>, right: ReadonlyMap
 }
 
 /**
- * How much of a memory's text its evidence states: the share of the text's terms the quote has too. Evidence is only
- * evidence for what it says, so a quote of "fix the failing login tests" proves nothing about a hook script.
+ * Whether a quote states all of a memory, the same way round. Evidence is only evidence for what it says, so sharing
+ * most of a memory's words is not enough: "fix the failing login tests" says nothing of "failing login tests need TLS
+ * off", and "we never deploy staging from main" says the opposite of "deploy staging from main". So every term of the
+ * memory has to be in the quote, every value it gives (a number, version, path or flag) as written, and every "not" it
+ * says or the quote says about its words in both. A cited file's path counts as said by its quote.
  */
-export function coverage(text: string, evidence: string) {
-  const own = terms(text)
-  if (own.size === 0) return 0
-  const cited = terms(evidence)
-  return [...own.keys()].filter((term) => cited.has(term)).length / own.size
+export function states(text: string, quote: string, file = "") {
+  const own = [...terms(text).keys()].filter((term) => !STOP_TERMS.has(term) && !PROSE_TERMS.has(term))
+  if (own.length === 0) return false
+  const cited = terms(`${quote} ${file}`)
+  if (!own.every((term) => cited.has(term))) return false
+  const mine = turns(text).filter((turn) => turn.word === "not")
+  const theirs = turns(quote).filter((turn) => turn.word === "not")
+  if (!mine.every((turn) => theirs.some((other) => other.target === turn.target))) return false
+  // A "not" in the quote that reaches the memory's words has to be in the memory too: "do not, whatever happens,
+  // deploy from main" is no evidence for "deploy from main". One about something else ("never from the root") is not.
+  if (
+    !theirs.every(
+      (turn) => !turn.window.some((term) => own.includes(term)) || mine.some((other) => other.target === turn.target),
+    )
+  )
+    return false
+  const given = values(`${quote} ${file}`)
+  return values(text).every((value) => given.some((item) => item === value || item.endsWith(`/${value}`)))
+}
+
+// Values a text gives exactly: numbers and versions, paths and file names, flags. Words can agree while these differ
+// ("port 4096", "port 3000"), and a number never reaches a term table at all.
+function values(text: string) {
+  return text
+    .toLowerCase()
+    .split(/[\s,;()[\]{}<>"'`“”‘’]+/)
+    .map((word) => word.replace(/^\.\//, "").replace(/[.:!?]+$/, ""))
+    .filter((word) => /\d/.test(word) || /[\w-]\/[\w.-]/.test(word) || /^--?[a-z]/.test(word) || /\w\.\w/.test(word))
 }
 
 // Words that say how a check runs rather than which check it is.
@@ -258,42 +289,67 @@ export function named(text: string, command: string) {
 }
 
 // Words that turn a sentence around. The term tables drop them as filler, so "Use npm, not pnpm" and "Use pnpm, not
-// npm" have the same terms; what each one applies to tells the two apart.
-const POLARITY: ReadonlySet<string> = new Set([
+// npm" have the same terms; what each one applies to tells the two apart. Every way of saying "not" counts as one, so
+// "never use npm" and "don't use npm" say the same thing.
+const NEGATION: ReadonlySet<string> = new Set([
   "not",
   "never",
   "no",
+  "nor",
+  "neither",
   "don",
   "dont",
   "doesn",
+  "didn",
   "isn",
   "aren",
+  "wasn",
+  "weren",
   "won",
+  "wouldn",
   "shouldn",
+  "couldn",
   "mustn",
   "cannot",
+  "cant",
   "without",
   "avoid",
   "instead",
-  "only",
-  "always",
   "stop",
 ])
+const EMPHASIS: ReadonlySet<string> = new Set(["only", "always"])
+
+/**
+ * Each turning word with the word it applies to (the next word that is not filler), and the few words after it that
+ * it may reach.
+ */
+function turns(text: string) {
+  // "No, use pnpm" answers what came before; it turns nothing in what follows.
+  const words =
+    text
+      .toLowerCase()
+      .replace(/\bno\s*[,.!;:—–]/g, " ")
+      .replace(/n['’]t\b/g, " not")
+      .match(/[a-z0-9_]+/g) ?? []
+  return words.flatMap((word, index) => {
+    if (!NEGATION.has(word) && !EMPHASIS.has(word)) return []
+    const window = words
+      .slice(index + 1)
+      .filter((later) => later.length >= 3 && !NEGATION.has(later) && !EMPHASIS.has(later) && !STOP_TERMS.has(later) && !PROSE_TERMS.has(later))
+      .map(stem)
+      .filter((later) => !STOP_TERMS.has(later) && !PROSE_TERMS.has(later))
+      .slice(0, 3)
+    return [{ word: NEGATION.has(word) ? "not" : word, target: window[0] ?? "", window }]
+  })
+}
 
 /**
  * Each turning word with the word it applies to, as one string: equal for two wordings that say the same thing, and
  * different for a correction, which merging would otherwise lose.
  */
 export function polarity(text: string) {
-  const words = text.toLowerCase().match(/[a-z0-9_]+/g) ?? []
-  return words
-    .flatMap((word, index) => {
-      if (!POLARITY.has(word)) return []
-      const next = words
-        .slice(index + 1)
-        .find((later) => later.length >= 3 && !POLARITY.has(later) && !STOP_TERMS.has(later) && !PROSE_TERMS.has(later))
-      return [`${word}:${next ? stem(next) : ""}`]
-    })
+  return turns(text)
+    .map((turn) => `${turn.word}:${turn.target}`)
     .toSorted()
     .join(" ")
 }
