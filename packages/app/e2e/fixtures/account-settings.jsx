@@ -10,9 +10,10 @@ import "../../src/vector-premium.css"
 // Settings > Account against a stand-in for the desktop's account bridge. The query picks the account: ?account=
 // signed-out, signed-in (no photo) or photo, ?codium= coming-soon, plan, low, ended, none (on sale, never bought) or
 // error, and ?billing= how the
-// billing window ends (completed, cancelled, closed, website or failed). Links the page opens, billing requests and
-// account actions it takes are kept on window.accountFixture for the spec to read; accountFixture.confirm() stands in
-// for the browser sign-in that confirms deleting the account. ?view=codium-error shows a Codium turn that ran out of
+// billing window ends (completed, cancelled, closed, website, busy or failed; pending keeps it open until
+// accountFixture.finish() closes it). Links the page opens, billing requests and account actions it takes are kept on
+// window.accountFixture for the spec to read; accountFixture.confirm() stands in for the browser sign-in that confirms
+// deleting the account. ?view=codium-error shows a Codium turn that ran out of
 // credits instead of Settings.
 const query = new URLSearchParams(location.search)
 const renewsAt = Date.UTC(2026, 10, 1, 12)
@@ -117,6 +118,9 @@ const change = (next) => {
 window.accountFixture = state
 // The fresh sign-in in the browser came back with its confirmation.
 state.confirm = () => change({ ...state.account, deletion: "confirmed" })
+// The person closes the open billing window.
+const open = []
+state.finish = () => open.shift()?.()
 
 const platform = {
   platform: "desktop",
@@ -149,6 +153,10 @@ const platform = {
     offers: async () => offers,
     billing: async (request) => {
       state.billing.push(request)
+      if (outcome === "pending") {
+        await new Promise((resolve) => open.push(resolve))
+        return { outcome: "closed" }
+      }
       return outcome === "failed"
         ? { outcome, message: "Subscription management is temporarily unavailable." }
         : { outcome }

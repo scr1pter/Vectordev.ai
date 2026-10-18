@@ -11,6 +11,8 @@ export function billingNotice(request: VectorBillingRequest, result: VectorBilli
   if (result.outcome === "website") return { kind: "info", text: "This continues on vectordev.ai in your browser." }
   if (result.outcome === "cancelled") return { kind: "info", text: "Checkout was cancelled. Nothing was charged." }
   if (result.outcome === "closed") return undefined
+  if (result.outcome === "busy")
+    return { kind: "info", text: "A Stripe window is already open. Finish there or close it, then try again." }
   if (request.kind === "checkout")
     return { kind: "done", text: "You are subscribed. Your monthly credits appear here in a moment." }
   if (request.kind === "topup") return { kind: "done", text: "Your credits are bought. They appear here in a moment." }
@@ -18,6 +20,23 @@ export function billingNotice(request: VectorBillingRequest, result: VectorBilli
   if (request.flow === "cancel")
     return { kind: "done", text: "Your plan is cancelled. It keeps working until the end of this billing period." }
   return undefined
+}
+
+/**
+ * What to say while the billing window is open. Checkout and the plan change and cancel steps send the person back
+ * when they finish, which closes the window; the portal's home has no end, so the person closes it.
+ */
+export function billingProgress(request: VectorBillingRequest) {
+  if (request.kind === "portal" && !request.flow) return "Manage billing in the Stripe window, then close it."
+  return "Finish in the Stripe window. It closes by itself when you are done."
+}
+
+/**
+ * Whether to offer a plan change: only to a subscriber while Codium is on sale, and not once the plan is set to end,
+ * since Stripe does not change a subscription that is cancelling.
+ */
+export function offersPlanChange(plan: { cancelAtPeriodEnd?: boolean } | undefined, enabled: boolean) {
+  return Boolean(plan && enabled && !plan.cancelAtPeriodEnd)
 }
 
 /**

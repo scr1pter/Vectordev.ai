@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { billingNotice, offerAction, offerPrice } from "./codium-billing"
+import { billingNotice, billingProgress, offerAction, offerPrice, offersPlanChange } from "./codium-billing"
 
 const offer = (id: string, price: number, available = true) => ({ id, name: `Codium ${price}`, price, available })
 
@@ -26,6 +26,13 @@ describe("Codium offers in Vector", () => {
       label: "Buy",
       request: { kind: "topup", pack: "codium-topup-50" },
     })
+  })
+
+  test("a plan change is offered to a subscriber on sale, and not once the plan is set to end", () => {
+    expect(offersPlanChange({ cancelAtPeriodEnd: false }, true)).toBe(true)
+    expect(offersPlanChange({ cancelAtPeriodEnd: true }, true)).toBe(false)
+    expect(offersPlanChange({ cancelAtPeriodEnd: false }, false)).toBe(false)
+    expect(offersPlanChange(undefined, true)).toBe(false)
   })
 
   test("shows the public price and never what it buys", () => {
@@ -57,5 +64,30 @@ describe("after the billing window", () => {
     expect(
       billingNotice({ kind: "portal" }, { outcome: "failed", message: "Billing is temporarily unavailable." }),
     ).toEqual({ kind: "error", text: "Billing is temporarily unavailable." })
+  })
+
+  test("a request made while another billing window is open says so, and never how that window ended", () => {
+    for (const request of [
+      { kind: "checkout", plan: "vector-10" },
+      { kind: "topup", pack: "codium-topup-10" },
+      { kind: "portal", flow: "cancel" },
+    ] as const)
+      expect(billingNotice(request, { outcome: "busy" })).toEqual({
+        kind: "info",
+        text: "A Stripe window is already open. Finish there or close it, then try again.",
+      })
+  })
+})
+
+describe("while the billing window is open", () => {
+  test("only the steps Stripe finishes promise that the window closes by itself", () => {
+    for (const request of [
+      { kind: "checkout", plan: "vector-10" },
+      { kind: "topup", pack: "codium-topup-10" },
+      { kind: "portal", flow: "change" },
+      { kind: "portal", flow: "cancel" },
+    ] as const)
+      expect(billingProgress(request)).toBe("Finish in the Stripe window. It closes by itself when you are done.")
+    expect(billingProgress({ kind: "portal" })).toBe("Manage billing in the Stripe window, then close it.")
   })
 })

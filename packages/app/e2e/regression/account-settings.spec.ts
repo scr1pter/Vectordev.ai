@@ -6,6 +6,7 @@ type Fixture = {
   billing: unknown[]
   codiumReads: number
   confirm: () => void
+  finish: () => void
 }
 const read = (page: Page) =>
   page.evaluate(() => {
@@ -87,6 +88,9 @@ test("Buy credits lists plans and top-ups by price, and each opens Stripe in Vec
   await expect(offers.locator("[data-offer='vector-50']")).toContainText("Current plan")
   await expect(offers.getByRole("button", { name: /^Subscribe, / })).toHaveCount(0)
   await expect(offers.getByText("$10 once")).toBeVisible()
+  // The terms say top-up credits carry forward; nothing promises they never expire.
+  await expect(offers.getByText("Credits bought once that carry forward, used after your monthly credits.")).toBeVisible()
+  await expect(offers).not.toContainText(/expire|expiry|expiration/i)
   await capture(page, testInfo, "account-buy-credits.png")
 
   await offers.getByRole("button", { name: "Buy, Codium 10 top-up" }).click()
@@ -115,14 +119,44 @@ test("someone without a plan subscribes in Vector, and a cancelled or failed che
 
   await page.goto("/e2e/fixtures/account-settings.html?account=signed-in&codium=ended&billing=failed")
   await settings.getByRole("button", { name: "Buy credits" }).click()
-  // An ending plan has nothing left to cancel.
+  // An ending plan has nothing left to cancel, and Stripe does not change a plan that is cancelling.
   await expect(settings.getByRole("button", { name: "Cancel plan" })).toHaveCount(0)
+  await expect(settings.locator("[data-offer='vector-100']")).toContainText("Current plan")
+  await expect(settings.getByRole("button", { name: "Change plan" })).toHaveCount(0)
   await settings.getByRole("button", { name: "Manage billing and invoices" }).click()
   await expect(settings.getByRole("alert")).toHaveText("Subscription management is temporarily unavailable.")
 
   await page.goto("/e2e/fixtures/account-settings.html?account=signed-in&codium=plan&billing=website")
   await settings.getByRole("button", { name: "Manage billing and invoices" }).click()
   await expect(settings.getByText("This continues on vectordev.ai in your browser.")).toBeVisible()
+})
+
+test("while the Stripe window is open, the page says how it closes, and a second window is refused", async ({
+  page,
+}) => {
+  await page.goto("/e2e/fixtures/account-settings.html?account=signed-in&codium=plan&billing=pending")
+  const settings = page.locator(".settings-v2-workspace")
+  const finish = () => page.evaluate(() => (window as unknown as { accountFixture: Fixture }).accountFixture.finish())
+  // The portal's home has no end, so the person closes the window themselves.
+  await settings.getByRole("button", { name: "Manage billing and invoices" }).click()
+  await expect(settings.getByText("Manage billing in the Stripe window, then close it.")).toBeVisible()
+  await expect(settings.getByText("It closes by itself")).toHaveCount(0)
+  await expect(settings.getByRole("button", { name: "Cancel plan" })).toBeDisabled()
+  await finish()
+  await expect(settings.getByText("Manage billing in the Stripe window, then close it.")).toHaveCount(0)
+  // Stripe sends the person back from the cancel step, which closes the window.
+  await settings.getByRole("button", { name: "Cancel plan" }).click()
+  await expect(settings.getByText("Finish in the Stripe window. It closes by itself when you are done.")).toBeVisible()
+  await finish()
+  expect(await billing(page)).toEqual([{ kind: "portal" }, { kind: "portal", flow: "cancel" }])
+
+  // Another page or dialog asked while a window was open: the desktop brings that window forward instead.
+  await page.goto("/e2e/fixtures/account-settings.html?account=signed-in&codium=plan&billing=busy")
+  await settings.getByRole("button", { name: "Cancel plan" }).click()
+  await expect(
+    settings.getByText("A Stripe window is already open. Finish there or close it, then try again."),
+  ).toBeVisible()
+  await expect(settings.getByText("Your plan is cancelled.")).toHaveCount(0)
 })
 
 test("Buy credits on a Codium turn that ran out opens the plans in Vector, not the website", async ({

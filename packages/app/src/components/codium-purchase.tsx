@@ -5,7 +5,14 @@ import { DialogBody, DialogHeader, DialogTitleGroup, DialogV2 } from "@vectordev
 import { For, Match, Show, Switch, createSignal, onCleanup, onMount } from "solid-js"
 import { usePlatform } from "@/context/platform"
 import type { VectorBillingRequest } from "@/vector-account"
-import { billingNotice, offerAction, offerPrice, type BillingNotice } from "./codium-billing"
+import {
+  billingNotice,
+  billingProgress,
+  offerAction,
+  offerPrice,
+  offersPlanChange,
+  type BillingNotice,
+} from "./codium-billing"
 import "./codium-purchase.css"
 
 /**
@@ -15,7 +22,9 @@ import "./codium-purchase.css"
  */
 export function createCodiumBilling(refresh: () => unknown, poll = 2_000) {
   const platform = usePlatform()
-  const [busy, setBusy] = createSignal(false)
+  // The request whose billing window is open.
+  const [active, setActive] = createSignal<VectorBillingRequest>()
+  const busy = () => active() !== undefined
   const [notice, setNotice] = createSignal<BillingNotice>()
   const life = { alive: true }
   onCleanup(() => {
@@ -28,14 +37,14 @@ export function createCodiumBilling(refresh: () => unknown, poll = 2_000) {
       platform.openLink(request.kind === "portal" ? ModelPlanStatus.MANAGE_URL : ModelPlanStatus.PURCHASE_URL)
       return
     }
-    setBusy(true)
+    setActive(request)
     setNotice(undefined)
     const result = await billing(request).catch(() => ({
       outcome: "failed" as const,
       message: "Vector could not open billing. Try again.",
     }))
     if (!life.alive) return
-    setBusy(false)
+    setActive(undefined)
     setNotice(billingNotice(request, result))
     await refresh()
     if (result.outcome !== "completed") return
@@ -45,7 +54,7 @@ export function createCodiumBilling(refresh: () => unknown, poll = 2_000) {
       await refresh()
     }
   }
-  return { busy, notice, run }
+  return { active, busy, notice, run }
 }
 
 export type CodiumBilling = ReturnType<typeof createCodiumBilling>
@@ -55,7 +64,7 @@ export type CodiumBilling = ReturnType<typeof createCodiumBilling>
  * reveal the markup. Choosing one opens Stripe in Vector's billing window. While Codium is not on sale, every
  * button reads "Coming soon" and nothing can be bought.
  */
-export function CodiumPurchase(props: { plan?: { id: string }; billing: CodiumBilling }) {
+export function CodiumPurchase(props: { plan?: { id: string; cancelAtPeriodEnd?: boolean }; billing: CodiumBilling }) {
   const platform = usePlatform()
   // Undefined while loading; null when vectordev.ai could not be read.
   const [offers, setOffers] = createSignal<ModelPlanStatus.Offers | null>()
@@ -122,7 +131,7 @@ export function CodiumPurchase(props: { plan?: { id: string }; billing: CodiumBi
                 <ul>
                   <For each={current().plans}>{(offer) => row(offer, "plan")}</For>
                 </ul>
-                <Show when={props.plan && current().enabled}>
+                <Show when={offersPlanChange(props.plan, current().enabled)}>
                   <div>
                     <ButtonV2
                       variant="outline"
@@ -138,7 +147,7 @@ export function CodiumPurchase(props: { plan?: { id: string }; billing: CodiumBi
                 <section class="codium-purchase-group" aria-labelledby="codium-purchase-topups">
                   <div class="codium-purchase-head">
                     <h4 id="codium-purchase-topups">Top-ups</h4>
-                    <p>Credits bought once that do not expire, used after your monthly credits.</p>
+                    <p>Credits bought once that carry forward, used after your monthly credits.</p>
                   </div>
                   <ul>
                     <For each={current().topups}>{(offer) => row(offer, "topup")}</For>
@@ -157,10 +166,12 @@ export function CodiumPurchase(props: { plan?: { id: string }; billing: CodiumBi
 export function CodiumBillingStatus(props: { billing: CodiumBilling }) {
   return (
     <>
-      <Show when={props.billing.busy()}>
-        <p role="status" class="codium-purchase-muted">
-          Finish in the Stripe window. It closes by itself when you are done.
-        </p>
+      <Show when={props.billing.active()}>
+        {(request) => (
+          <p role="status" class="codium-purchase-muted">
+            {billingProgress(request())}
+          </p>
+        )}
       </Show>
       <Show when={props.billing.notice()}>
         {(notice) => (
