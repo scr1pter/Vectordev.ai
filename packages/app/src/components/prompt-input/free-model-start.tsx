@@ -37,7 +37,8 @@ export function FreeModelStart(props: { directory: string; nudge: number }) {
     ),
   )
 
-  // Signing in from here needs the desktop app; elsewhere the engine is signed in with `vector login`.
+  // Signing in from here needs the desktop app. Elsewhere, such as the web build, the engine is signed in with
+  // `vector login`, so the card says that instead of offering a sign-in it cannot start.
   const canSignIn = () => !!platform.vectorAccount && !account.authenticated
   const signIn = () => {
     void platform.vectorAccount
@@ -64,7 +65,9 @@ export function FreeModelStart(props: { directory: string; nudge: number }) {
         <p>
           {account.authenticated
             ? language.t("freeModels.start.unavailableShared")
-            : language.t("freeModels.start.signIn")}
+            : platform.vectorAccount
+              ? language.t("freeModels.start.signIn")
+              : language.t("freeModels.start.signInEngine")}
         </p>
         <Show when={account.pending}>
           <p role="status">{language.t("freeModels.start.signingIn")}</p>

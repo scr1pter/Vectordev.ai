@@ -8,6 +8,8 @@ export const dict = {
   "freeModels.start.label": "Free models",
   "freeModels.start.title": "Choose a model to start",
   "freeModels.start.signIn": "Sign in to Vector to use free models.",
+  "freeModels.start.signInEngine":
+    "To use free models, sign in to Vector on the computer this page connects to: run vector login there, then restart Vector. Or use an API key you already have.",
   "freeModels.start.signInAction": "Sign in to Vector",
   "freeModels.start.signingIn": "Finish signing in in your browser, then return to Vector.",
   "freeModels.start.signInFailed": "Vector couldn't start signing in. Try again in Settings → Providers.",
@@ -15,12 +17,7 @@ export const dict = {
     "Free models inside of Vector are unavailable right now. Try again later, or use an API key you already have.",
   "freeModels.start.note":
     "Free models run on Vector's shared allowance at no cost to you, within a daily limit for each account. OpenRouter and the model's provider process your prompts.",
-  "freeModels.start.fallback": "Connect a provider with your API key or sign-in to send prompts.",
   "freeModels.start.ownKey": "Use my own API key",
-  "freeModels.start.ready": "{{model}} is selected. Your prompt is ready to send.",
-  "freeModels.start.readyForProject": "{{model}} is ready. Open a repository to send your first prompt.",
-  "freeModels.start.unavailable":
-    "No free model is available on your account right now. Vector won't pick a paid model for you. Try again later or choose a model yourself.",
   "command.category.suggested": "Suggested",
   "command.category.view": "View",
   "command.category.project": "Project",

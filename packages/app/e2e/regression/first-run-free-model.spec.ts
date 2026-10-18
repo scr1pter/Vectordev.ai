@@ -116,7 +116,8 @@ async function setup(page: Page, input: { draft: boolean }) {
 
 // The owner's decision of 17 October 2026: free models run on Vector's shared allowance for every signed-in Vector
 // account, so the first-run card and checklist offer signing in to Vector, never connecting an OpenRouter account. This
-// web build has no desktop account bridge, so signing in itself is not offered here; a key the user has is.
+// web build has no desktop account bridge, so the card says where to sign in (vector login on the engine's computer)
+// instead of offering a sign-in it cannot start; a key the user has is offered.
 test("fresh profile is told to sign in to Vector for free models and keeps the draft ready to send", async ({
   page,
 }) => {
@@ -126,7 +127,9 @@ test("fresh profile is told to sign in to Vector for free models and keeps the d
   const card = page.locator('[data-component="free-model-start"]')
   await expect(card).toBeVisible()
   await expect(card).toContainText("Choose a model to start")
-  await expect(card).toContainText("Sign in to Vector to use free models.")
+  await expect(card).toContainText("To use free models, sign in to Vector on the computer this page connects to")
+  await expect(card).toContainText("run vector login there")
+  await expect(card.getByRole("button", { name: "Sign in to Vector" })).toHaveCount(0)
   await expect(card).toContainText("Vector's shared allowance")
   await expect(card).not.toContainText("OpenRouter")
   await expect(card.getByRole("button", { name: "Start free with OpenRouter" })).toHaveCount(0)
