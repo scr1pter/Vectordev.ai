@@ -17,6 +17,7 @@ describe("TaskSize.classify", () => {
       "good morning",
       "hi there, how are you?",
       "hey vector what's up",
+      "hello, can you help me?",
       "thanks!",
       "thank you so much",
       "ok thanks",
@@ -32,34 +33,105 @@ describe("TaskSize.classify", () => {
 
   test("a greeting that carries work is sized as that work", () => {
     expect(tier("hi, can you fix the login bug?")).toBe("standard")
-    expect(tier("hey, what does src/app.ts do?")).toBe("light")
+    expect(tier("hey, what does src/app.ts do?")).toBe("standard")
     expect(tier("hi `foo`")).not.toBe("chat")
   })
 
-  test("light jobs: questions, small edits and single operations", () => {
+  test("light is only a short, single, clearly small action", () => {
     for (const text of [
-      "what does this function do?",
-      "how do I add OAuth?",
       "ship to vercel",
       "ship this to vercel",
+      "deploy to production",
       "fix the typo in README",
       "fix the typo in README.md",
+      "fix typos in the docs",
       "run the tests",
+      "run the migration script",
+      "run `bun typecheck`",
+      "bun test",
       "commit and push",
+      "commit all changes",
+      "push",
       "open a PR",
       "build the app",
       "rename foo to bar in utils.ts",
-      "fix the comment in utils.ts",
-      "replace the logo",
-      "switch the default port to 3000",
+      "format utils.ts",
+      "install lodash",
+      "install react and react-dom",
       "switch to the dev branch",
-      "convert this string to a number in utils.ts",
-      "deploy the entire app to vercel",
-      "make the app's icon bigger",
+      "merge main into this branch",
+      "bump the version",
+      "please fix the typo in README",
+      "can you run the tests?",
     ])
-      expect(tier(text), text).toBe("light")
+      expect(TaskSize.classify({ text }).tier, text).toBe("light")
+    expect(TaskSize.effort("light")).toBe("low")
+  })
+
+  test("a small action with a scope, a failure, a second job or an attachment is not light", () => {
+    for (const text of [
+      // A scope word widens it.
+      "deploy the entire app to vercel",
+      "fix all the typos across the codebase",
+      "rename getUser to fetchUser everywhere",
+      // A second job that is not small.
+      "run the tests and fix any failures",
+      "rename the module and update every import",
+      "install zod and add validation to the signup form",
+      // A failure needs looking into first.
+      "run the tests, they fail on CI",
+      "the deploy is broken",
+      // The same verbs on code are not the small action.
+      "merge the two config loaders into one",
+      "format the date as ISO in the header",
+      "ship dark mode",
+      "pull the data from the api",
+      // A question about the action.
+      "how do I deploy to vercel?",
+      "should I commit this?",
+    ])
+      expect(tier(text), text).toBe("standard")
+    expect(tier("fix the typo in README", { files: 1 })).toBe("standard")
     // A pasted trace full of paths says what broke, not how big the job is: it stays a single fix.
     expect(tier("fix this:\n```\n" + "    at a (src/a.ts:1:1)\n".repeat(40) + "```")).toBe("standard")
+  })
+
+  test("everything else starts at standard, at the provider's own effort", () => {
+    for (const text of [
+      // Questions about the code.
+      "what does this function do?",
+      "what does the classify function in task-size.ts do?",
+      "how do I add OAuth?",
+      "where is the session title set?",
+      // Reviews, audits and analysis.
+      "review this codebase for security issues",
+      "do a security audit",
+      "go through the codebase and find dead code",
+      "Analyze the repository and produce an architecture document",
+      // Documentation.
+      "document the whole codebase",
+      "update the README",
+      // Debugging, with or without a fix verb.
+      "make the tests pass",
+      "the tests are failing after my change, can you look?",
+      "TypeError: cannot read property 'x' of undefined",
+      "getting a 500 on /api/login",
+      "npm run build fails",
+      "it doesn't work",
+      "tests are failing",
+      // Small edits beyond the light list, and unclear asks.
+      "replace the logo",
+      "switch the default port to 3000",
+      "convert this string to a number in utils.ts",
+      "make the app's icon bigger",
+      "fix the comment in utils.ts",
+      "clean up the codebase",
+      "do the rest of the migration",
+    ]) {
+      const result = TaskSize.classify({ text })
+      expect(result.tier, text).toBe("standard")
+      expect(TaskSize.effort(result.tier), text).toBe("default")
+    }
   })
 
   test("a hard failure takes real investigation, even asked as a question", () => {
@@ -79,7 +151,7 @@ describe("TaskSize.classify", () => {
       // Standard runs at the provider's own effort, never with reasoning off.
       expect(TaskSize.effort(result.tier)).toBe("default")
     }
-    expect(tier("hang on")).not.toBe("standard")
+    expect(TaskSize.classify({ text: "hang on" }).reasons).not.toContain("hard-failure")
   })
 
   test("standard work: features, real bugs, a few files", () => {
@@ -161,11 +233,61 @@ describe("TaskSize.classify", () => {
     expect(tier("no need to go deep, rewrite the entire backend")).toBe("standard")
   })
 
+  test("a reply inside open work keeps that work's size and never lowers it", () => {
+    // The agent asked "Should I start with phase 1?" after planning a Thorough job.
+    for (const text of [
+      "yes, start with phase 1",
+      "proceed with all phases",
+      "option 2",
+      "yes, go with option 2",
+      "ok do all of that",
+      "go on",
+      "continue with step 2",
+      "keep going until done",
+      "pls continue",
+      "resume the work",
+      "you stopped, continue",
+      "do the rest of the migration",
+      "finish the remaining files",
+      "use postgres instead",
+      // A short instruction after the agent asked is part of the same work, even a small one.
+      "fix the typo in README first",
+      // A decline answers the offer too, so the work it declines is still the work.
+      "no thanks",
+      "no",
+    ]) {
+      const result = TaskSize.classify({ text, previous: "thorough", open: true })
+      expect(result.tier, text).toBe("thorough")
+      expect(result.source, text).toBe("inherited")
+    }
+    // A run that did not finish leaves the work open the same way.
+    expect(tier("use the other endpoint", { previous: "standard", open: true })).toBe("standard")
+    // A reply can raise the work, never lower it.
+    expect(tier("yes, and port the whole app to Svelte while you are at it", { previous: "light", open: true })).toBe(
+      "thorough",
+    )
+    expect(tier("yes, deploy it", { previous: "light", open: true })).toBe("light")
+    // A "continue" picks the work back up even when the reply before it asked nothing.
+    for (const text of ["continue where you left off", "keep going until done", "do the rest of the migration"])
+      expect(tier(text, { previous: "thorough" }), text).toBe("thorough")
+    // A new request after finished work is sized on its own.
+    expect(tier("fix the typo in README", { previous: "thorough" })).toBe("light")
+    expect(tier("go through the codebase and find dead code", { previous: "light" })).toBe("standard")
+    expect(tier("add OAuth login with tests, please", { previous: "thorough" })).toBe("standard")
+    // Only a social message resets to a direct reply.
+    for (const text of ["thanks", "hi", "thank you so much", "bye"])
+      expect(tier(text, { previous: "thorough", open: true }), text).toBe("chat")
+    // A "yes" to a greeting's offer is work of unknown size, so it gets the Standard harness and the history.
+    expect(TaskSize.classify({ text: "yes", open: true })).toMatchObject({ tier: "standard", source: "auto" })
+    // A greeting before a message is not work it could continue.
+    expect(tier("yes", { previous: "chat" })).toBe("chat")
+  })
+
   test("acknowledgements continue the request they answer", () => {
-    expect(tier("ok", { previous: "light", asked: true })).toBe("light")
-    expect(tier("yes", { previous: "thorough", asked: true })).toBe("thorough")
-    expect(TaskSize.classify({ text: "yes", previous: "light", asked: true }).source).toBe("inherited")
-    expect(tier("great", { previous: "standard", asked: true })).toBe("standard")
+    expect(tier("ok", { previous: "light", open: true })).toBe("light")
+    expect(tier("yes", { previous: "thorough", open: true })).toBe("thorough")
+    expect(TaskSize.classify({ text: "yes", previous: "light", open: true }).source).toBe("inherited")
+    expect(tier("great", { previous: "standard", open: true })).toBe("standard")
     expect(tier("go ahead", { previous: "standard" })).toBe("standard")
     expect(tier("continue", { previous: "thorough" })).toBe("thorough")
     expect(tier("try again", { previous: "light" })).toBe("light")
@@ -179,9 +301,46 @@ describe("TaskSize.classify", () => {
     expect(tier("sounds good", { previous: "thorough" })).toBe("chat")
     expect(tier("great", { previous: "standard" })).toBe("chat")
     // Thanks is thanks even after a question.
-    expect(tier("thanks", { previous: "light", asked: true })).toBe("chat")
+    expect(tier("thanks", { previous: "light", open: true })).toBe("chat")
     // A first message has nothing to continue.
     expect(tier("continue")).toBe("chat")
+  })
+
+  test("force words count only as an instruction about this request", () => {
+    for (const text of [
+      "be thorough",
+      "be very thorough: migrate the auth module",
+      "please be thorough and fix the login bug",
+      "review this thoroughly",
+      "use subagents to review this",
+      "refactor auth with subagents",
+      "can you use subagents for this?",
+      "run the judge on this",
+      "have the judge check it",
+      "fix the header and judge the work",
+      "use llm-as-a-judge",
+      "fix it, ultrathink",
+      "do a deep dive into the session runner",
+    ])
+      expect(TaskSize.classify({ text }).source, text).toBe("user")
+    // A mention of the same words is not an instruction: these are sized by the work they describe.
+    for (const [text, expected] of [
+      ["fix the bug with subagents not starting", "standard"],
+      ["llm as a judge launches on hi, fix it", "standard"],
+      ["how would you judge this approach?", "standard"],
+      ["why are the subagents so slow?", "standard"],
+      ["I tested it thoroughly but it still fails", "standard"],
+      ["the tests are not thorough enough", "standard"],
+      ["add an exhaustive list of providers to the docs", "standard"],
+      ["should I use subagents for this?", "standard"],
+    ] as const)
+      expect(TaskSize.classify({ text }).tier, text).toBe(expected)
+    // A command's template is its author's text, not the user's words about this run.
+    expect(TaskSize.classify({ text: "Be thorough. Fix the typo in README.md", template: true })).toMatchObject({
+      tier: "standard",
+      source: "auto",
+    })
+    expect(TaskSize.classify({ text: "- long tutorials or exhaustive file trees" }).source).toBe("auto")
   })
 
   test("the sender's choice and the off switch win", () => {
@@ -197,7 +356,7 @@ describe("TaskSize.classify", () => {
     expect(tier("hi", { structured: true })).toBe("light")
     expect(tier("hi", { choice: "chat", structured: true })).toBe("light")
     const named = TaskSize.classify({ text: "hi", agents: ["explore"] })
-    expect(named.tier).toBe("light")
+    expect(named.tier).not.toBe("chat")
     expect(named.agents).toEqual(["explore"])
     expect(tier("hi", { files: 1 })).not.toBe("chat")
   })
@@ -247,6 +406,17 @@ describe("TaskSize helpers", () => {
     expect(TaskSize.asks("I can also add tests for this if you want.")).toBe(true)
     expect(TaskSize.asks("Next I would update the remaining 12 routes the same way.")).toBe(true)
     expect(TaskSize.asks("I recommend we also migrate the auth routes.")).toBe(true)
+    // A closing pleasantry offers nothing to answer, so an "ok" after it is just a reply.
+    expect(TaskSize.asks("Done. Anything else?")).toBe(false)
+    expect(TaskSize.asks("Fixed the typo. Let me know if you need anything else.")).toBe(false)
+    expect(TaskSize.asks("I can also add tests for this if you want. Anything else?")).toBe(true)
+  })
+
+  test("waits tells a question the work waits on from an offer or a pleasantry", () => {
+    expect(TaskSize.waits("Migrated 30 routes. Should I also migrate the tests?")).toBe(true)
+    expect(TaskSize.waits("Migrated all 40 routes and the tests pass. Want me to also update the docs?")).toBe(true)
+    expect(TaskSize.waits("Migrated all 40 routes. I can also update the docs if you want.")).toBe(false)
+    expect(TaskSize.waits("Done. Anything else?")).toBe(false)
   })
 
   test("social tells a greeting from a reply to the work", () => {

@@ -622,13 +622,19 @@ describe("follow-up optimistic echo", () => {
     expectOneEchoBeforeRequest(await withDesktopContext(() => send({ judge: "thorough" })), 2)
   })
 
-  test("adds no file map for a greeting, a question or a light job", async () => {
-    for (const content of ["hi", "what does this function do?", "fix the typo in README.md"]) {
+  test("adds no file map for a greeting or a light job, and adds it for a question about the code", async () => {
+    for (const content of ["hi", "fix the typo in README.md", "ship to vercel"]) {
       const steps = await withDesktopContext(() =>
         send({ prompt: [{ type: "text", content, start: 0, end: content.length }] }),
       )
-      expect(steps.at(-1)?.parts.filter((part) => part.synthetic)).toHaveLength(0)
+      expect(steps.at(-1)?.parts.filter((part) => part.synthetic), content).toHaveLength(0)
     }
+    // A question about the code is Standard work, and the map helps answer it.
+    const content = "what does this function do?"
+    const steps = await withDesktopContext(() =>
+      send({ prompt: [{ type: "text", content, start: 0, end: content.length }] }),
+    )
+    expect(steps.at(-1)?.parts.filter((part) => part.synthetic)).toHaveLength(1)
   })
 
   test("sends exactly the echoed parts when nothing is added", async () => {

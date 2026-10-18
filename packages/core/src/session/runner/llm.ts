@@ -507,8 +507,9 @@ function requestSize(context: readonly SessionMessage.Message[]) {
     images: message.files?.filter((file) => file.mime.startsWith("image/")).length,
     agents: message.agents?.map((agent) => agent.name),
   })
+  // The classifier reads a greeting before it as no work to continue.
   const previous = before ? TaskSize.classify(describe(before)).tier : undefined
-  return TaskSize.classify({ ...describe(latest), previous, asked: TaskSize.asks(reply) })
+  return TaskSize.classify({ ...describe(latest), previous, open: TaskSize.asks(reply) })
 }
 
 export const node = makeLocationNode({

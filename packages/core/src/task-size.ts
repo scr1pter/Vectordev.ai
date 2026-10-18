@@ -6,6 +6,11 @@ export { Tier, Choice, JudgeMode } from "@vectordevai/schema/task-size"
 
 // Sizes a request from what the user typed, with no model call, so "hi" gets one direct reply and only genuinely large
 // work brings in subagents and the judge. The engine, the app and desktop all use this one classifier.
+//
+// The rules are a heuristic, so the policy is built to fail safe. Sizing real work too small costs more than sizing a
+// short request too large, so only two narrow kinds of message get less than Standard: a social message (Chat) and a
+// short, single, clearly small action (Light). Everything else starts at Standard, at the provider's own effort, and the
+// agent can raise it with escalate once it sees the work. A reply inside work that is still open keeps that work's size.
 
 /** Reasoning effort for a request when the user left effort on its default. */
 export type Effort = "off" | "low" | "default" | "high"
@@ -23,14 +28,22 @@ export type Input = {
   readonly agents?: readonly string[]
   /** The sender's explicit size; "auto" or undefined lets the rules decide. */
   readonly choice?: Choice
-  /** The size the previous request in the session finished at. */
+  /** The size of the work before this message: the last request in the session that was more than a social reply. */
   readonly previous?: Tier
-  /** Whether the previous reply asked the user something, so a "yes" or "ok" answers it. */
-  readonly asked?: boolean
+  /**
+   * Whether the request right before this message is still open: its reply asked or offered something, or its run did
+   * not finish (it was interrupted, failed or stopped). Then anything but a social message is a reply inside that work.
+   */
+  readonly open?: boolean
   /** The request asks for structured output, which needs a tool call. */
   readonly structured?: boolean
   /** false turns automatic sizing off: every request gets the full harness unless the sender picks a size. */
   readonly auto?: boolean
+  /**
+   * The text is a command's template: a workflow its author wrote, not the user's words about this request. Force
+   * words in it ("be thorough", "use subagents") are not instructions.
+   */
+  readonly template?: boolean
 }
 
 export type Result = {
@@ -109,7 +122,7 @@ export function note(tier: Tier, options: { readonly escalate: boolean; readonly
   if (tier === "light")
     return `<task_size>Light request: do it directly in as few steps as possible, without a to-do list or subagents. If you changed code, run one focused check.${escalate}</task_size>`
   if (tier === "standard")
-    return `<task_size>Standard request: do the work yourself and keep a short to-do list for multi-step work. Subagents are not offered.${options.escalate ? " If independent parts of roughly five or more files would be cheaper split up, call escalate once with your reason." : ""}</task_size>`
+    return `<task_size>Standard request: do the work yourself and keep a short to-do list for multi-step work. Subagents are not offered.${options.escalate ? " If it turns out to span the whole system, or independent parts of roughly five or more files would be cheaper split up, call escalate with your reason." : ""}</task_size>`
   if (tier === "thorough")
     return `<task_size>Thorough request: plan with the to-do list, split independent substantial parts across subagents when that is cheaper, and verify with the strongest checks available.${options.judge ? " Vector runs the judge after you finish, so do not launch it yourself." : ""}</task_size>`
   // A greeting goes out on the quick lane, which carries no note.
@@ -124,6 +137,8 @@ export function classify(input: Input): Result {
     browser: BROWSER.test(lower) || (input.images ?? 0) > 0,
     agents: [...new Set(input.agents ?? [])],
   }
+  // A greeting before this message is not work it could continue.
+  const previous = input.previous === "chat" ? undefined : input.previous
   const result = (tier: Tier, source: Source, reasons: string[], judge = true): Result => {
     // A structured answer needs its tool, and a named subagent needs the task tool, so neither is ever a bare reply.
     const floor = (input.structured || cues.agents.length > 0) && tier === "chat" ? "light" : tier
@@ -139,59 +154,77 @@ export function classify(input: Input): Result {
   const noJudge = NO_JUDGE.test(lower)
   const notThorough = NOT_THOROUGH.test(lower)
   const asked = strip(strip(strip(lower, NO_SUBAGENTS), NO_JUDGE), NOT_THOROUGH)
-  const forced = FORCE.flatMap(([code, pattern]) => (pattern.test(asked) ? [code] : []))
   const capped = CAP_LIGHT.test(lower) || notThorough
-  const plain = !input.files && !input.images && cues.agents.length === 0
-  const raw = input.text
-
+  // A force word counts only as the user's instruction about this request: a clause that asks for it ("be thorough",
+  // "use subagents", "run the judge"), never a mention ("fix the bug with subagents not starting") or a template's text.
+  const forced = input.template ? [] : instructions(asked)
   if (forced.length > 0) {
     const tier = noSubagents ? "standard" : capped ? "light" : "thorough"
     return result(tier, "user", forced, !noJudge)
   }
 
-  const phrase = chatPhrase(lower)
+  const plain = !input.files && !input.images && cues.agents.length === 0
+  const raw = input.text
   const bare = plain && !PATH.test(raw) && !URL_PATTERN.test(raw) && !raw.includes("`") && text.length <= 60
-  if (bare && phrase) {
-    // A "continue" or a "yes" (an acceptance needs something it accepts) continues the request before it with its
-    // history and tools. An "ok" or a "great" does only when the reply before it asked or offered something; otherwise
-    // it is just a reply.
-    if ((phrase === "directive" || phrase === "accept") && input.previous)
-      return result(input.previous, "inherited", [phrase === "directive" ? "continue" : "answer"], !noJudge)
-    if ((phrase === "reaction" || phrase === "ack") && input.asked && input.previous)
-      return result(input.previous, "inherited", ["answer"], !noJudge)
-    return result("chat", "auto", [phrase === "vector" ? "about-vector" : phrase])
-  }
+  const phrase = bare ? chatPhrase(lower) : undefined
+  // A greeting, thanks, a farewell, emoji or a question about Vector is a direct reply, whatever came before it.
+  if (phrase && SOCIAL.has(phrase)) return result("chat", "auto", [phrase === "vector" ? "about-vector" : phrase])
 
   // A message that is only a cue ("keep it simple", "no subagents") applies to the request it follows.
   const rest = strip(strip(asked, CAP_LIGHT), FILLER).replace(/\s+/g, " ").trim()
   if ((capped || noSubagents || noJudge) && rest.split(" ").filter(Boolean).length <= 2) {
-    const base = input.previous ?? "light"
+    const base = previous ?? "light"
     const tier = capped ? min(base, "light") : noSubagents ? min(base, "standard") : base
-    return result(max(tier, "light"), input.previous ? "inherited" : "auto", ["cue"], !noJudge)
+    return result(max(tier, "light"), previous ? "inherited" : "auto", ["cue"], !noJudge)
   }
 
-  const signals = measure(text, lower, input)
-  const sized = signals.thorough.length > 0 ? "thorough" : signals.standard.length > 0 ? "standard" : "light"
-  const reasons = sized === "thorough" ? signals.thorough : sized === "standard" ? signals.standard : signals.light
-  // "Quick question" caps at Light unless the request is plainly large; "no subagents" caps at Standard.
-  const tier = noSubagents
-    ? min(sized, "standard")
-    : capped
-      ? min(sized, signals.thorough.length > 0 ? "standard" : "light")
-      : sized
-  return result(tier, "auto", reasons.length > 0 ? reasons : ["default"], !noJudge)
+  // What the message asks for on its own, read without a leading "yes," or "go ahead and".
+  const signals = measure(text, unprefixed(lower), input)
+  const own: Tier | undefined =
+    signals.thorough.length > 0
+      ? "thorough"
+      : signals.standard.length > 0
+        ? "standard"
+        : signals.light.length > 0
+          ? "light"
+          : undefined
+  const ownReasons =
+    own === "thorough" ? signals.thorough : own === "standard" ? signals.standard : own ? signals.light : []
+  // The user's own words cap it: "no subagents" at Standard, "quick question" at Light unless it is plainly large.
+  const limit = (tier: Tier) =>
+    noSubagents ? min(tier, "standard") : capped ? min(tier, signals.thorough.length > 0 ? "standard" : "light") : tier
+
+  // A reply inside the work before it keeps that work's size and never lowers it: anything sent while that work is
+  // still open, and a "yes", a "continue" or a "go ahead, ..." at any time. A whole-message reply takes the size as it
+  // is; a longer one is raised by what it asks for itself.
+  if (previous && (phrase === "accept" || phrase === "directive" || input.open || continuing(lower))) {
+    const tier = phrase ? previous : max(previous, own ?? previous)
+    const reasons = [input.open ? "answer" : "continue", ...(tier !== previous ? ownReasons : [])]
+    return result(limit(tier), "inherited", reasons, !noJudge)
+  }
+  if (phrase) {
+    // "yes" to a greeting's offer is work of unknown size; an "ok" or a "great" to finished work is just a reply.
+    if (input.open) return result(limit("standard"), "auto", ["answer"], !noJudge)
+    return result("chat", "auto", [phrase])
+  }
+  return result(limit(own ?? "standard"), "auto", own ? ownReasons : ["default"], !noJudge)
 }
 
 /** Whether an assistant's closing text asks the user for a decision or offers more work, so a short "ok" answers it. */
 export function asks(text: string) {
-  const tail = text.trim().slice(-400).toLowerCase()
+  // A closing pleasantry ("Anything else?", "Let me know if you need anything else.") offers nothing to answer.
+  const tail = sentences(text.trim().slice(-600))
+    .filter((sentence) => !PLEASANTRY.test(sentence.toLowerCase()))
+    .join(" ")
+    .slice(-400)
+    .toLowerCase()
   if (tail.endsWith("?")) return true
   return ASKS.test(tail)
 }
 
 /**
  * Whether a reply ends on a question the work waits on, such as "Should I also migrate the tests?". A closing
- * pleasantry ("Anything else?") is not one. Vector does not judge work that stopped to ask the user something.
+ * pleasantry ("Anything else?") is not one. Vector does not judge work while it waits on the user.
  */
 export function waits(text: string) {
   const tail = text.trim().replace(/[\s*_`)\]]+$/, "")
@@ -206,7 +239,7 @@ export function waits(text: string) {
  * work, so a client must not treat it as a bare greeting.
  */
 export function social(result: Pick<Result, "tier" | "reasons">) {
-  return result.tier === "chat" && SOCIAL.has(result.reasons[0] ?? "")
+  return result.tier === "chat" && SOCIAL_REASONS.has(result.reasons[0] ?? "")
 }
 
 function measure(text: string, lower: string, input: Input) {
@@ -231,12 +264,13 @@ function measure(text: string, lower: string, input: Input) {
   const rework = REWORK.test(lower)
   const action = building || fixing || editing || rework || ACTION.test(lower)
   const small = SMALL_EDIT.test(lower)
-  const operation = OPERATION.test(lower)
-  const question = INFO_QUESTION.test(lower.trim()) && !REQUEST.test(lower.trim())
+  const trimmed = lower.trim()
+  const question =
+    (QUESTION.test(trimmed) || (AUX_QUESTION.test(trimmed) && trimmed.endsWith("?"))) && !REQUEST.test(trimmed)
   // A deadlock, a race, a leak or a crash takes real investigation, even asked as a question.
   const hard = [
     ...(HARD_FAILURE.test(lower) ? ["hard-failure"] : []),
-    ...(WHY_FAIL.test(lower.trim()) ? ["why-fail"] : []),
+    ...(WHY_FAIL.test(trimmed) ? ["why-fail"] : []),
   ]
   const length = text.replace(/\s+/g, " ").trim().length
 
@@ -254,41 +288,130 @@ function measure(text: string, lower: string, input: Input) {
     ...(length >= 1200 && action ? ["long"] : []),
   ]
   const standard = [
-    ...(building && !small && !(operation && !features) ? ["build"] : []),
+    ...(building && !small && !(OPERATION.test(lower) && !features) ? ["build"] : []),
     ...(fixing && !small ? ["fix"] : []),
     ...(/\b(?:with|add|write|and) (?:unit |integration |e2e )?tests\b/.test(lower) ? ["tests"] : []),
     ...(paths >= 2 ? [`paths:${paths}`] : []),
     ...(actionItems >= 2 ? [`items:${actionItems}`] : []),
     ...(scale >= 1 && action && !small ? ["scale"] : []),
     ...(target ? ["system"] : []),
-    ...(wide && (building || editing || rework) && !small && !operation ? ["wide"] : []),
+    ...(wide && (building || editing || rework) && !small ? ["wide"] : []),
     ...hard,
+    ...(question ? ["question"] : []),
     ...(length >= 300 && action ? ["long"] : []),
     ...(length >= 600 ? ["long"] : []),
     ...((input.images ?? 0) > 0 && action ? ["image+action"] : []),
   ]
-  const light = [
-    ...(question ? ["question"] : []),
-    ...(small ? ["small-edit"] : []),
-    ...(operation ? ["operation"] : []),
+  // A question about code is Standard, how-to questions included, and never Thorough on its own words: the agent
+  // raises it with escalate when the answer turns out to need large work.
+  if (question && !fixing) return { thorough: [], standard: [...thorough, ...standard], light: [] }
+  return { thorough, standard, light: standard.length > 0 ? [] : light(lower, input) }
+}
+
+// A short, single, clearly small action: deploying or shipping, a git step, running the tests or a script, fixing a typo,
+// renaming, formatting or installing a package. Every clause of the message has to be one of these, and nothing in it
+// may widen the job (a scope word, a failure, an attachment). Anything else is Standard.
+function light(lower: string, input: Input): string[] {
+  if ((input.files ?? 0) > 0 || (input.images ?? 0) > 0) return []
+  if (lower.split(/\s+/).filter(Boolean).length > 16 || SCOPE.test(lower) || FAILURE.test(lower)) return []
+  const kinds = clauses(lower).reduce<string[] | undefined>((found, clause, index, list) => {
+    if (!found) return undefined
+    const kind = SMALL_ACTIONS.find(([, pattern]) => pattern.test(polite(clause)))?.[0]
+    if (kind) return [...found, kind]
+    // "install react and react-dom": a bare package name after "and" is another object of the install before it.
+    const install = index > 0 && INSTALL.test(polite(list[index - 1]!)) && PACKAGE.test(clause.trim())
+    return install ? found : undefined
+  }, [])
+  return kinds && kinds.length > 0 ? [...new Set(kinds)] : []
+}
+
+// Force words are instructions about this request: a clause that starts with one ("be thorough", "use subagents", "run
+// the judge"), or an imperative clause that says "thoroughly" or ends with "with subagents". The same words in a
+// statement or a question ("the subagents are not starting", "how would you judge this?") are only mentions.
+function instructions(lower: string) {
+  return [
+    ...new Set(
+      clauses(lower).flatMap((clause) => {
+        const asked = polite(clause)
+        if (!asked) return []
+        return FORCE.flatMap(([code, start, inside]) =>
+          start.test(asked) || (inside !== undefined && imperative(asked) && inside.test(asked)) ? [code] : [],
+        )
+      }),
+    ),
   ]
-  // A question about code stays Light, how-to questions included, unless it is plainly about a large area or a hard
-  // failure; then it is Standard, at the provider's own effort.
-  if (question && !fixing) return { thorough: [], standard: [...thorough, ...hard], light }
-  return { thorough, standard, light }
+}
+
+// A message that picks the work back up: "continue where you left off", "keep going until it passes", "do the rest of
+// the migration", or one whose first or last clause is only a "yes" or a "go ahead".
+function continuing(lower: string) {
+  if (CONTINUING.test(polite(lower))) return true
+  // A closing "please" is courtesy, not an acceptance.
+  const parts = clauses(lower)
+    .map((clause) => polite(clause))
+    .filter((part) => !/^(?:please|pls|plz)$/.test(part))
+  return [parts[0], parts.at(-1)].some((part) => {
+    if (!part) return false
+    const kinds = replyKinds(words(part))
+    return kinds !== undefined && (kinds.has("accept") || kinds.has("directive"))
+  })
+}
+
+// The message without a leading reply ("yes, ", "ok go ahead and "), so what it asks for is measured on its own.
+function unprefixed(lower: string) {
+  const parts = clauses(lower)
+  const first = parts[0] ? replyKinds(words(polite(parts[0]))) : undefined
+  if (parts.length < 2 || !first || first.size === 0) return lower
+  return lower
+    .slice(lower.indexOf(parts[0]!) + parts[0]!.length)
+    .replace(/^[\s.!?;:,]+/, "")
+    .replace(/^(?:and then|then|and|but|&)\s+/, "")
+}
+
+// Splits a message into clauses at sentence breaks, commas and "and" / "then". A dot inside a word ("utils.ts") is not
+// a break.
+function clauses(lower: string) {
+  return lower
+    .split(/[!?;\n]+\s*|[.:](?:\s+|$)|,\s*|\s+(?:and then|then|and|but|&)\s+/)
+    .map((clause) => clause.trim())
+    .filter(Boolean)
+}
+
+// A clause without the politeness around the ask: "please", "can you", "just", a trailing "for me".
+function polite(clause: string) {
+  return clause
+    .trim()
+    .replace(POLITE_START, "")
+    .replace(/\s+(?:please|pls|for me|now|thanks|thank you)$/, "")
+    .replace(/[?.!\s]+$/, "")
+    .trim()
+}
+
+// An imperative clause starts with its verb, not with a subject, a determiner or a question word.
+function imperative(clause: string) {
+  return !NOT_IMPERATIVE.has(clause.split(/\s+/)[0] ?? "")
+}
+
+function words(text: string) {
+  return text
+    .replace(/[’']/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(collapse)
+}
+
+function sentences(text: string) {
+  return text.split(/(?<=[.!?])\s+|\n+/).filter((sentence) => sentence.trim())
 }
 
 type Phrase = "greeting" | "thanks" | "farewell" | "reaction" | "ack" | "accept" | "directive" | "vector" | "emoji"
 
 function chatPhrase(lower: string): Phrase | undefined {
   if (EMOJI_ONLY.test(lower)) return "emoji"
-  const words = lower
-    .replace(/[’']/g, "")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .split(/\s+/)
-    .filter(Boolean)
-  const trimmed = dropVocatives(words)
-  if (trimmed.length === 0) return words.length > 0 ? "greeting" : undefined
+  const all = words(lower)
+  const trimmed = dropVocatives(all)
+  if (trimmed.length === 0) return all.length > 0 ? "greeting" : undefined
   const phrase = collapse(trimmed.join(" "))
   if (VECTOR_QUESTIONS.has(phrase)) return "vector"
   // "hi there, how are you" and "hey vector what's up": a greeting with an optional how-are-you.
@@ -398,6 +521,9 @@ const SMALL_TALK = set([
   "hope youre well",
   "you there",
   "are you there",
+  "can you help me",
+  "can you help",
+  "could you help me",
 ])
 const THANKS = set([
   "thanks",
@@ -464,6 +590,23 @@ const ACK = set([
   "noted",
   "sounds great",
   "looks great",
+  // Declines answer an offer the same way: "no thanks" to "Want me to also update the docs?".
+  "no",
+  "nope",
+  "nah",
+  "no thanks",
+  "no thank you",
+  "not now",
+  "not yet",
+  "maybe later",
+  "thats all",
+  "all good",
+  "im good",
+  "were good",
+  "nothing else",
+  "no need",
+  "never mind",
+  "nevermind",
 ])
 // Acceptances: on their own they make no sense without something to accept, so they always continue the request
 // before them.
@@ -545,7 +688,8 @@ const REPLIES = [
   ["reaction", REACTIONS],
   ["thanks", THANKS],
 ] as const
-const SOCIAL = new Set(["greeting", "thanks", "farewell", "emoji", "about-vector"])
+const SOCIAL = new Set<Phrase>(["greeting", "thanks", "farewell", "emoji", "vector"])
+const SOCIAL_REASONS = new Set(["greeting", "thanks", "farewell", "emoji", "about-vector"])
 const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\u200d|\ufe0f|[\u{1F3FB}-\u{1F3FF}]|\s)+$/u
 
 const LOG_LINE =
@@ -560,19 +704,109 @@ const NO_SUBAGENTS =
   /\b(?:no|don'?t|do not|without|never|skip(?: the)?)\s+(?:use\s+|using\s+|launch(?:ing)?\s+|spawn(?:ing)?\s+|any\s+|the\s+)*(?:sub-?agents?|parallel agents|agents)\b/
 const NO_JUDGE =
   /\b(?:no|don'?t|do not|without|never|skip(?: the)?)\s+(?:use\s+|using\s+|run(?:ning)?\s+|the\s+|any\s+|an?\s+)*(?:llm[- ]as[- ]a[- ])?judge\b/
-const FORCE: ReadonlyArray<readonly [code: string, pattern: RegExp]> = [
-  ["explicit:thorough", /\bbe (?:very |extra |really |super |more )?thorough\b|\bthoroughly\b|\bexhaustive(?:ly)?\b/],
-  ["explicit:thorough", /\bdeep[- ]dive\b|\bgo deep\b|\btake your time\b/],
-  ["explicit:think", /\bultrathink\b|\bthink (?:hard|harder|deeply|very carefully)\b/],
+const SUBAGENTS = "(?:some |a few |multiple |several |parallel |many |the |\\d+ )?(?:sub-?agents?|parallel agents)"
+const JUDGE = "(?:the |an? )?(?:llm[- ]as[- ]an?[- ])?judge"
+// Each force word as an instruction: how a clause that asks for it starts, and what an imperative clause may say inside.
+const FORCE: ReadonlyArray<readonly [code: string, start: RegExp, inside?: RegExp]> = [
+  [
+    "explicit:thorough",
+    /^(?:be (?:very |extra |really |super |more |as |fully )?(?:thorough|exhaustive)|(?:do|give me|make it|run) (?:a |an )?(?:thorough|exhaustive|deep|in-depth|full) (?:job|pass|dive|review|audit|analysis|investigation|look)|(?:do a )?deep[- ]dive|go deep|dig deep|take your time)\b/,
+    /\b(?:thoroughly|exhaustively)\b/,
+  ],
+  ["explicit:think", /^(?:ultrathink|think (?:hard|harder|deeply|very carefully|really hard))\b/],
   [
     "explicit:subagents",
-    /\b(?:use|using|launch|spin up|spawn|start|with|bring in)\s+(?:some |a few |multiple |several |parallel |many )?sub-?agents?\b/,
+    new RegExp(
+      `^(?:use|using|launch|spin up|spawn|start|bring in|run|delegate to) ${SUBAGENTS}\\b|^split (?:it|this|the work) (?:across|between|among) ${SUBAGENTS}\\b`,
+    ),
+    new RegExp(`\\b(?:with|using|via|across) ${SUBAGENTS}$`),
   ],
   [
     "explicit:judge",
-    /\bllm[- ]as[- ]a[- ]judge\b|\b(?:have|let|ask|get) the judge\b|\buse the judge\b|\bjudge (?:it|this|the (?:work|result|change|changes))\b|\bwith the judge\b/,
+    new RegExp(
+      `^(?:use|run|launch|bring in|have|get|call|start|ask|invoke|enable) ${JUDGE}\\b|^judge (?:it|this|that|the (?:work|result|results|change|changes|diff))$`,
+    ),
+    new RegExp(`\\b(?:with|using|via) ${JUDGE}$`),
   ],
 ]
+// The words around an ask that are not the ask: "please", "can you", "just", "go ahead and".
+const POLITE_START =
+  /^(?:(?:please|pls|plz|kindly|now|then|also|just|ok|okay|so|alright|actually|quickly|go ahead and|can you|could you|would you|will you|can u|could u|i want you to|i'd like you to|id like you to|i need you to|make sure (?:to|you))\s+)+/
+// Words a statement or a question starts with; an imperative clause starts with its verb instead.
+const NOT_IMPERATIVE = new Set([
+  "i",
+  "i'm",
+  "im",
+  "i've",
+  "i'd",
+  "we",
+  "we're",
+  "you",
+  "you're",
+  "it",
+  "it's",
+  "its",
+  "they",
+  "they're",
+  "he",
+  "she",
+  "this",
+  "that",
+  "these",
+  "those",
+  "the",
+  "a",
+  "an",
+  "my",
+  "our",
+  "your",
+  "their",
+  "there",
+  "here",
+  "what",
+  "why",
+  "how",
+  "when",
+  "where",
+  "which",
+  "who",
+  "whose",
+  "is",
+  "are",
+  "was",
+  "were",
+  "do",
+  "does",
+  "did",
+  "has",
+  "have",
+  "had",
+  "should",
+  "would",
+  "could",
+  "can",
+  "will",
+  "shall",
+  "may",
+  "might",
+  "must",
+  "if",
+  "because",
+  "since",
+  "although",
+  "though",
+  "as",
+  "not",
+  "no",
+  "every",
+  "all",
+  "some",
+  "any",
+  "each",
+])
+// Picking the work back up, at the start of a message.
+const CONTINUING =
+  /^(?:continue|proceed|resume|keep going|carry on|go on|finish|complete|do the rest|pick up where|pick it up|retry|try again)\b/
 const CAP_LIGHT =
   /\b(?:quick question|briefly|just (?:answer|tell me|show me|run it)|tl;?dr|keep it (?:simple|short|light|quick)|in one line|one[- ]liner)\b/
 // "Don't be thorough", "no need to go deep", "don't overthink it": the opposite of a force word.
@@ -646,9 +880,64 @@ const SMALL_EDIT =
   /\b(?:typos?|spelling|misspell\w*|(?:fix|update|add|remove|delete|edit|change|reword|rewrite|tweak|clean up|correct|improve)\s+(?:the |a |an |this |that |these |those |my |some |its |their )?(?:[\w-]+ )?(?:comments?|docstrings?)|a comment|the comment|wording|copy text|readme|console\.log|log line|whitespace|indentation|version (?:number|bump)|bump (?:the )?version|lint (?:errors?|warnings?)|formatting|a label|the label|the title|the colou?r|padding|margin|font size)\b/
 const OPERATION =
   /\b(?:deploy|ship|publish|preview|release|roll ?back|commit|push|pull|merge|rebase|stash|install|uninstall)\b|\b(?:run|start|restart|stop|kick off|rerun|re-run) (?:the |all |my )?(?:tests?|test suite|build|dev server|server|app|linter|lint|typecheck|type check|migrations?|script|command)\b|\bbuild (?:it|this|the (?:app|project|repo|repository|site|package))\b|\b(?:open|create|make|raise) (?:a |the )?(?:pr|pull request)\b/
-const INFO_QUESTION =
-  /^(?:what|where|why|how|when|which|who|is|are|does|do|did|was|were|explain|describe|tell me|show me|list|find|summari[sz]e|walk me through)\b/
-const REQUEST = /^(?:can you|could you|would you|will you|please|pls)\b/
+// A question about the code: a wh-word or a request to explain, or an auxiliary question that ends in "?". "Do the rest"
+// and "find the bug" are instructions, not questions.
+const QUESTION = /^(?:what|where|why|how|when|which|who|whose|explain|describe|tell me|walk me through|summari[sz]e)\b/
+const AUX_QUESTION =
+  /^(?:is|are|does|do|did|was|were|has|have|had|should|would|could|can|will|shall|may|might|isn'?t|aren'?t|doesn'?t|don'?t|didn'?t)\b/
+const REQUEST = /^(?:can you|could you|would you|will you|please|pls|can u|could u)\b/
+// What makes a small action more than one: a scope over many places, or a count of them.
+const SCOPE =
+  /\b(?:every(?:thing|where|one|body)?|entire(?:ly)?|whole|across|throughout|all over|codebase|code base|monorepo|(?:repo|repository|project)[- ]wide|all (?:the |of the |our |my |of our )?(?!(?:changes|tests?|specs?|of it|of them)\b)[\w-]+|\d+\s+(?:\w+\s+)?(?:files|modules|routes|pages|components|packages|repos|repositories|services|apps))\b/
+// A failure, or a question about one, is never a small action: it needs looking into first.
+const FAILURE =
+  /\b(?:fail\w*|(?<!spelling )errors?|erroring|exceptions?|broken|break\w*|bugs?|buggy|crash\w*|wrong|issues?|problems?|not work\w*|doesn'?t|won'?t|can'?t|isn'?t|aren'?t|didn'?t|why|how|[45]\d\d)\b/
+const INSTALL =
+  /^(?:(?:npm|bun|pnpm|yarn) (?:install|i|add|remove|uninstall)|install|uninstall|reinstall)(?:\s+\S+){0,6}$|^(?:add|remove) (?:the )?\S+ (?:package|dependency|dev ?dependency|dep)(?:\s+\S+){0,4}$/
+const PACKAGE = /^[@\w][\w@/.^~-]*$/
+// The small actions a Light request may be made of. Each is matched against a whole clause, so "run the tests and fix
+// what fails" or "merge the two config loaders" is not one.
+const SMALL_ACTIONS: ReadonlyArray<readonly [kind: string, pattern: RegExp]> = [
+  ["operation", INSTALL],
+  ["operation", /^(?:re-?)?deploy(?:\s+\S+){0,6}$|^publish(?:\s+\S+){0,6}$/],
+  ["operation", /^ship (?:it|this|that|them|the (?:app|site|build|release|changes|branch|fix)|to \S+)(?:\s+\S+){0,4}$/],
+  [
+    "operation",
+    /^(?:commit|push|force[- ]push|rebase|stash|amend|cherry[- ]pick|squash|tag|checkout|check out|git \S+)(?:\s+\S+){0,8}$/,
+  ],
+  [
+    "operation",
+    /^pull(?: (?:the )?(?:latest|changes|main|master|origin|upstream))?(?:\s+\S+){0,3}$|^fetch(?: (?:origin|upstream|all|--all|the latest|main|tags))?$/,
+  ],
+  [
+    "operation",
+    /^merge(?: (?:main|master|dev|develop|origin\/\S+|upstream|it|this|the (?:pr|pull request|branch|changes)|(?:the |this )?\S+ branch|#?\d+))?(?: (?:into|in|to|with) \S+(?: branch)?)?$/,
+  ],
+  [
+    "operation",
+    /^(?:switch|change) to (?:the )?\S+ branch$|^(?:create|make|start|open) (?:a )?(?:new )?branch(?:\s+\S+){0,4}$/,
+  ],
+  ["operation", /^(?:open|create|make|raise|draft|submit|file) (?:a |the )?(?:draft )?(?:pr|pull request)(?:\s+\S+){0,8}$/],
+  [
+    "operation",
+    /^(?:run|rerun|re-run|start|restart|stop|kick off|execute|launch) (?:the |all the |all |my |our )?(?:unit |e2e |integration |focused )?(?:tests?|test suite|specs?|build|linter|lint|typecheck|type ?check|type-check|formatter|prettier|eslint|biome|dev server|server|app|migrations?|script|seed|codegen|benchmarks?|storybook)(?:\s+\S+){0,6}$/,
+  ],
+  [
+    "operation",
+    /^(?:run|execute) (?:`[^`]+`|(?:npm|bun|bunx|pnpm|yarn|npx|make|cargo|go|python3?|pytest|deno|node|just|turbo|uv|docker)\b|\S+\.(?:sh|py|ts|js|mjs|rb)\b)(?:\s+\S+){0,6}$|^(?:npm|bun|bunx|pnpm|yarn|npx) \S+(?:\s+\S+){0,5}$/,
+  ],
+  ["operation", /^build (?:it|this|the (?:app|project|repo|repository|site|package|docs|image|binary|container))(?:\s+\S+){0,4}$/],
+  [
+    "small-edit",
+    /^(?:fix|correct) (?:the |a |an |this |that |these |those |some |two |three |\d+ |my |its )?(?:typos?|spelling(?: mistakes?| errors?)?|misspellings?|misspelled \S+)(?:\s+\S+){0,6}$/,
+  ],
+  ["small-edit", /^rename(?:\s+\S+){1,8}$/],
+  [
+    "small-edit",
+    /^(?:format|reformat|prettify|lint)(?: (?:it|this|that|everything|the (?:file|files|code|project|repo)|\S+\.\w+))?(?: with \S+)?$|^fix (?:the )?(?:formatting|indentation|whitespace)(?:\s+\S+){0,6}$/,
+  ],
+  ["small-edit", /^(?:bump|increment|update|set) (?:the )?(?:package |app )?version(?: number)?(?:\s+\S+){0,4}$/],
+]
 // A deadlock, a race, a leak, a hang or a crash, and "why does ... fail": problems that take real investigation.
 const HARD_FAILURE =
   /\b(?:dead-?lock(?:s|ed|ing)?|live-?lock(?:s|ed|ing)?|race conditions?|racy|races?|memory leaks?|leak(?:s|ing|ed)?|hang(?:s|ing)?(?! on\b| tight\b)|hung|freez(?:e|es|ing)|frozen|crash(?:es|ing|ed)?|segfaults?|segmentation fault|flak(?:y|iness)|intermittent(?:ly)?|non-?deterministic|stall(?:s|ing|ed)?|stuck|corrupt(?:s|ed|ion)?|out of memory|oom|infinite loop)\b/
@@ -656,8 +945,9 @@ const WHY_FAIL =
   /^why (?:does|do|did|is|are|was|were|would|might)\b.*\b(?:fail\w*|break\w*|broken|errors?|erroring|throw\w*|time[sd]? ?out|timing out|slow\w*|wrong|stop\w*|exit\w*|not work\w*)\b|^why (?:doesn'?t|won'?t|isn'?t|aren'?t|can'?t|don'?t|didn'?t|wasn'?t)\b/
 const ASKS =
   /\b(?:shall i|should i|shall we|should we|want me to|want me|would you like|would you prefer|do you want|let me know|if you(?:'d| would)? (?:like|want|prefer|wish)|if you want|ready to (?:proceed|go|publish|deploy)|confirm|approve|okay to|ok to|go ahead\?|i (?:can|could) also|we (?:can|could) also|next,? i(?:'d| would|'ll| will| can| could| plan to)|i(?:'d)? (?:recommend|suggest)|happy to|the next steps? (?:would|is|are|could)|i can (?:go ahead|take care of|do that|handle))\b/
+// Closing courtesies that offer no particular work, a greeting reply's "How can I help?" included.
 const PLEASANTRY =
-  /\b(?:anything else|something else|anything more|any other (?:changes|questions|tasks)|any questions|further (?:help|questions|changes)|help with anything)\b/
+  /\b(?:anything else|something else|anything more|any other (?:changes|questions|tasks)|any questions|further (?:help|questions|changes)|help with anything|how can i help|what can i (?:help(?: you)? with|do for you)|what would you like(?: me)? to (?:work on|do)|what are we working on)\b/
 const CLOUD =
   /\b(?:vercel|supabase|deploy\w*|ship (?:it|this|to)|publish\w*|preview|production|prod|rollback|roll back|env vars?|environment variables?|database|db|auth|login|log in|sign[- ]?in|sign[- ]?up|domain|hosting|hosted)\b/
 const BROWSER =

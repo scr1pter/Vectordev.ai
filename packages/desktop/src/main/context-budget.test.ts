@@ -13,7 +13,9 @@ describe("context budgeting", () => {
   })
 
   test("distinguishes targeted work from broad engineering tasks", () => {
-    expect(classifyTaskDifficulty("Explain this function")).toBe("simple")
+    // A question about the code is Standard work; only a short, clearly small action is simple.
+    expect(classifyTaskDifficulty("Explain this function")).toBe("standard")
+    expect(classifyTaskDifficulty("run the tests")).toBe("simple")
     expect(classifyTaskDifficulty("Fix the import in src/app.tsx")).toBe("standard")
     expect(
       classifyTaskDifficulty(
