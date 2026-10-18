@@ -409,7 +409,11 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
     const wslServers = useWslServers()
     const ready = createMemo(
       () =>
-        !defaultServer.loading && !sidecar.loading && !windowCount.loading && !locale.loading && !updaterSettled.loading,
+        !defaultServer.loading &&
+        !sidecar.loading &&
+        !windowCount.loading &&
+        !locale.loading &&
+        !updaterSettled.loading,
     )
     const servers = createMemo(() => {
       const data = initializationData(sidecar)

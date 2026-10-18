@@ -148,9 +148,10 @@ test("your own busy task counts, with no parallel or background agents running",
   // Counted when Update is clicked, so a task that started after the page opened counts too.
   await open(page, "updater=ready&account=signed-in")
   await page.evaluate(() =>
-    (
-      window as unknown as { navigationFixture: { setRunning: (next: object) => void } }
-    ).navigationFixture.setRunning({ busy: 1, agents: 2 }),
+    (window as unknown as { navigationFixture: { setRunning: (next: object) => void } }).navigationFixture.setRunning({
+      busy: 1,
+      agents: 2,
+    }),
   )
   await page.locator("[data-vector-update]").click()
   await expect(confirm).toContainText("3 agents in the workspace are still running and will stop.")
@@ -162,9 +163,9 @@ test("agents that finish while the question is open never make it say 0 agents",
   const confirm = page.getByRole("dialog", { name: "Restart to update" })
   await expect(confirm).toContainText("2 agents in the workspace are still running and will stop.")
   await page.evaluate(() =>
-    (
-      window as unknown as { navigationFixture: { setRunning: (next: object) => void } }
-    ).navigationFixture.setRunning({ agents: 0 }),
+    (window as unknown as { navigationFixture: { setRunning: (next: object) => void } }).navigationFixture.setRunning({
+      agents: 0,
+    }),
   )
   await page.waitForTimeout(100)
   await expect(confirm).not.toContainText("0 agents")
@@ -174,9 +175,9 @@ test("agents that finish while the question is open never make it say 0 agents",
   // Once nothing is running, Update restarts straight away.
   await open(page, "updater=ready&account=signed-in&agents=2")
   await page.evaluate(() =>
-    (
-      window as unknown as { navigationFixture: { setRunning: (next: object) => void } }
-    ).navigationFixture.setRunning({ agents: 0 }),
+    (window as unknown as { navigationFixture: { setRunning: (next: object) => void } }).navigationFixture.setRunning({
+      agents: 0,
+    }),
   )
   await page.locator("[data-vector-update]").click()
   await expect.poll(() => calls(page)).toEqual(["install"])
