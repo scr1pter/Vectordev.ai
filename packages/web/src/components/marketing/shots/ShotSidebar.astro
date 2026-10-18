@@ -1,12 +1,15 @@
 ---
 // The desktop app's left sidebar (workspace-navigation.tsx) as the screenshots
-// show it: one project, its main workspace on a branch, and the tool groups.
+// show it: one repository, its main workspace on a branch, and the tool groups.
 // Most of it is a picture of the navigation. Agent Dashboard and Browser have
 // windows of their own on the page, so those two rows go to them; a window
 // that shows one itself (the dashboard's, the browser's) takes the click over.
-// "compact" leaves out the projects and connections, for a window too short to
+// "compact" leaves out the repositories and connections, for a window too short to
 // hold the whole sidebar. "collapsible" makes the hide button at its top work,
 // for a window whose own controls can bring the sidebar back.
+// The group labels use "Repositories" and "Repository tools": Vector's visible text never says "project", and the
+// app's own two labels (workspace-navigation.tsx) are due the same rename in the 1.99.109 sweep. Until that lands,
+// no copy on the page sends a reader to look for either label by name.
 import ShotIcon from "./ShotIcon.astro"
 
 interface Props {

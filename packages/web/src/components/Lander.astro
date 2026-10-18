@@ -34,39 +34,32 @@ import { sessionShot } from "./marketing/shots/shots"
 import AppShots from "./marketing/AppShots.astro"
 import LanderMotion from "./marketing/LanderMotion.astro"
 import LanderMaterials from "./marketing/LanderMaterials.astro"
+import LanderStory from "./marketing/LanderStory.astro"
 import SiteFooter from "./marketing/SiteFooter.astro"
 import { wordmarkCells } from "../lib/wordmark"
 
-// The landing page is the whole product tour: the hero and its one interactive
-// picture, the workspace in one screen, and the card shelf of what Vector does,
-// each card linked to the docs page that covers it in full.
+// The landing page: the hero and its one interactive picture, then the argument (what Vector is, why now, why
+// Vector, the numbers) in LanderStory, then the product tour: the workspace in one screen, more of the app, privacy,
+// and the card shelf of what Vector does, each card linked to the docs page that covers it in full.
 
-// The work Vector does in one window. Six, so the grid fills two even rows.
-const workspaceFacts = [
-  {
-    title: "As many agents as you want",
-    text: "No cap. Each one works in its own copy of the repository, and you merge the ones that landed.",
-  },
-  {
-    title: "Subagents for the parts",
-    text: "A large task splits itself, the pieces run at once, and a card shows what each one is doing.",
-  },
-  {
-    title: "Ships to your own cloud",
-    text: "Provision Supabase, sync environment values, publish to your Vercel account.",
-  },
-  {
-    title: "Reviewed before main",
-    text: "A summary and line comments on every pull request, or run the same pass on your branch first.",
-  },
-  {
-    title: "A browser it drives",
-    text: "It loads your app, clicks through it, reads the console, and tells you what actually happened.",
-  },
-  {
-    title: "A tokenomics engine",
-    text: "Tokens as the provider reported them, priced at catalog rates, with daily and monthly caps checked before automations start.",
-  },
+// The hero's heading is the measured edge: Vector's own agent against Claude Code, both priced at the same list rates,
+// so the saving comes from what the agent sends, not from a cheaper model. Its qualifier sits right under it, then one
+// sentence says what Vector is. The cost range spans both sessions of the archived benchmark (LanderStory's note b);
+// test/landing-copy.test.ts recomputes it.
+const heroCost = "67–75%"
+
+// The hero's rotating line completes "Vector …". Each phrase is true in desktop 1.99.109; the qualifiers (the
+// terminal gets the Run Guard and background subagents with the next CLI release, Windows WSL servers later) sit in
+// LanderStory's notes. Eight is the batch size, not a limit on subagents running together. The first phrase shows
+// under reduced motion and before the script runs.
+const heroPhrases = [
+  "runs Claude Code, Codex and Cursor Agent too.",
+  "runs subagents in batches of up to eight.",
+  "pauses an agent stuck in a loop.",
+  "reviews your branch before you push.",
+  "deploys to your own Vercel and Supabase accounts.",
+  "runs in your terminal.",
+  "is building a coding model of its own.",
 ]
 
 // The one-click plugins in the workspace: the count, and a sample to name
@@ -87,10 +80,6 @@ const pluginNames = [
   "Your own MCP server",
 ]
 
-// The shelf of things Vector does, each sentence checked against the code that
-// ships it and linked to the docs section that describes it in full. Order:
-// review, the browser, the agents, where you work with it, what it ships to,
-// then how it keeps itself honest.
 // Privacy in six claims, each checked against the code and /legal/privacy on 17 October 2026.
 // Keep the "coming soon" labels until Codium sales open. The free-model claim must hold for 1.99.108, whose free models
 // are all no-training ones, and from 1.99.109, which adds models that may train behind a label and a one-time
@@ -102,7 +91,7 @@ const privacyFacts = [
   },
   {
     title: "Straight to your provider",
-    text: "With your own key or ChatGPT sign-in, prompts go straight to that provider under its terms, never through Vector, and a model on your own computer keeps them there.",
+    text: "With your own key or ChatGPT sign-in, prompts go straight to that provider under its terms and on its bill, never through Vector, and a model on your own computer keeps them there.",
   },
   {
     title: "No copy on our servers",
@@ -126,7 +115,7 @@ const trustCards = [
   {
     icon: GitPullRequest,
     lead: "Vectorscope reviews your code.",
-    text: "On every pull request, on your branch before you push, and in the app: comments on the exact lines, never an approval.",
+    text: "On every pull request and in the app: a summary and comments on the exact lines, never an approval.",
     href: "/docs/vectorscope",
     more: "Read about code review",
   },
@@ -210,7 +199,7 @@ const trustCards = [
   {
     icon: Blocks,
     lead: `${pluginCount} plugins, one click each.`,
-    text: "GitHub, Linear, Sentry, Supabase and Stripe connect from the catalog, and any MCP server you write plugs in beside them.",
+    text: "GitHub, Linear, Sentry, Supabase and Stripe connect from the catalog, and your own MCP servers plug in beside them.",
     href: "/docs/mcp-and-plugins",
     more: "Read about plugins and MCP",
   },
@@ -245,7 +234,7 @@ const trustCards = [
   {
     icon: Split,
     lead: "Merge the hunks you trust.",
-    text: "Tick the parts of an agent's diff you want and Vector merges a patch built from exactly those.",
+    text: "Tick the parts of an agent's diff you want and Vector merges a patch built from only those.",
     href: "/docs/checkpoints#review",
     more: "Read about selective merges",
   },
@@ -265,8 +254,8 @@ const trustCards = [
   },
   {
     icon: Coins,
-    lead: "Spend, measured not modelled.",
-    text: "Every run records the tokens and cost your provider reported, then ranks the models you actually use.",
+    lead: "Spend from reported tokens.",
+    text: "Each run of Vector's own agent records the tokens your provider reported and prices them at catalog rates where the model has a price, then ranks the models you actually use.",
     href: "/docs/tokenomics",
     more: "Read about the tokenomics engine",
   },
@@ -301,8 +290,7 @@ const trustCards = [
           <i class="sky-stars"></i>
         </div>
         <div class="hero simple-hero">
-          <h1 class="wordmark" id="hero-title">
-            <span class="sr-only">Vector</span>
+          <div class="wordmark" aria-hidden="true">
             <svg
               viewBox={`0 0 ${6 * 7 - 2} 7`}
               width="252"
@@ -313,17 +301,31 @@ const trustCards = [
             >
               {wordmarkCells.map((cell) => <rect x={cell.x} y={cell.y} width="0.92" height="0.92" />)}
             </svg>
-          </h1>
+          </div>
 
-          <p class="headline">
-            <span class="headline-lead">An engineering workspace&nbsp;that</span>{" "}
-            <span class="headline-rotate" data-scramble aria-hidden="true">has an agent of its own.</span>
-            <span class="sr-only">An engineering workspace that has an agent of its own, verifies its work before calling it done, sets up your database and deploys it, runs subagents in parallel with no cap, invites your team into the session, runs in your terminal too, records what a run really cost, hosts Claude, Codex and Cursor alongside its own agent, and is building a coding model of its own.</span>
+          <h1 class="headline" id="hero-title">
+            Vector's own agent did the same scripted work as Claude&nbsp;Code for
+            <span class="headline-figure">{heroCost}&nbsp;less</span> modelled spend.
+          </h1>
+          <p class="hero-receipt">
+            Both were priced at the same list rates, so the difference is what each agent sends with every request. From
+            Vector's offline benchmark of three scripted coding tasks against a fake model server, run 11 October 2026;
+            it doesn't measure answer quality.
+            <a class="hero-receipt-more" href="#proof">See the numbers</a>
           </p>
 
-          <p class="hero-deck simple-deck">
-            Open a repository on your computer. Plan, edit, run, and ship with Vector's own agent beside your editor —
-            on your desktop, in your terminal, or from the cloud.
+          <p class="hero-deck simple-deck">Vector is a free workspace for coding agents, built around a lean agent of its own.</p>
+
+          <p class="hero-ticker">
+            <span class="ticker-lead">Vector</span>{" "}
+            <span class="ticker-phrase" data-scramble data-phrases={JSON.stringify(heroPhrases)} aria-hidden="true"
+              >{heroPhrases[0]}</span
+            >
+            <span class="sr-only"
+              >Vector runs Claude Code, Codex and Cursor Agent too, runs subagents in batches of up to eight, pauses an
+              agent stuck in a loop, reviews your branch before you push, deploys to your own Vercel and Supabase
+              accounts, runs in your terminal, and is building a coding model of its own.</span
+            >
           </p>
 
           <div class="simple-actions">
@@ -346,27 +348,19 @@ const trustCards = [
       </div>
     </section>
 
+    <LanderStory />
+
     <section id="everything" data-chapter="One workspace" class="story" aria-labelledby="everything-title">
       <div class="story-copy" data-reveal-group>
         <p class="story-kicker" data-reveal>One workspace</p>
         <h2 id="everything-title" class="story-title" data-reveal>Everything shipping&nbsp;takes.</h2>
-        <p class="story-subtitle" data-reveal>Not a chat box bolted onto an editor.</p>
+        <p class="story-subtitle" data-reveal>From the first prompt to production.</p>
         <p class="story-body" data-reveal>
           Point a swarm of agents at separate branches and let each one spawn subagents for the parts. Set up the
           database, deploy to your own cloud account, and have the change reviewed before it reaches main. Vector does
-          all of it in one window, over the repository already on your disk — with a browser it can drive, a tokenomics
-          engine that prices every chat, {pluginCount} one-click plugins, and any MCP server you write yourself.
+          all of it in one window, with a browser it can drive, {pluginCount} one-click plugins, and any MCP server you
+          write yourself.
         </p>
-        <ul class="story-facts" data-reveal>
-          {
-            workspaceFacts.map((fact) => (
-              <li>
-                <h3>{fact.title}</h3>
-                <p>{fact.text}</p>
-              </li>
-            ))
-          }
-        </ul>
         <ul class="story-models" data-reveal aria-label="A few of the plugins you can turn on">
           {pluginNames.map((name) => <li>{name}</li>)}
         </ul>
@@ -508,19 +502,11 @@ const trustCards = [
   const initScramble = () => {
     const node = document.querySelector<HTMLElement>("[data-scramble]")
     if (!node) return () => {}
-    // Each phrase completes the same opening clause, so the headline always
-    // reads as one sentence rather than a label with a caption.
-    const phrases = [
-      "has an agent of its own.",
-      "verifies before it says done.",
-      "sets up your database and deploys.",
-      "runs subagents in parallel, no cap.",
-      "invites your team into the session.",
-      "runs in your terminal too.",
-      "records what a run cost.",
-      "hosts Claude, Codex, and Cursor too.",
-      "is building a model of its own.",
-    ]
+    // Each phrase completes "Vector …", so the line always reads as one
+    // sentence. The list lives with the markup (heroPhrases), which also
+    // renders the first phrase for reduced motion and a failed script.
+    const phrases: string[] = JSON.parse(node.dataset.phrases ?? "[]")
+    if (phrases.length === 0) return () => {}
     const stages = Array.from(document.querySelectorAll<HTMLElement>("[data-hero-stage]"))
     const progress = document.querySelector<HTMLElement>("[data-hero-progress]")
     const selectStage = (index: number) => {
@@ -533,28 +519,8 @@ const trustCards = [
       return () => {}
     }
 
-    // Reserve the width of the longest phrase so a swap cannot reflow the hero
-    // beneath it mid-scramble.
-    const measure = document.createElement("span")
-    measure.setAttribute("aria-hidden", "true")
-    measure.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;pointer-events:none"
-    node.after(measure)
-    measure.style.font = getComputedStyle(node).font
-    measure.textContent = phrases.reduce((longest, phrase) => (phrase.length > longest.length ? phrase : longest), "")
-    node.style.minWidth = `${Math.min(Math.ceil(measure.getBoundingClientRect().width), node.parentElement?.clientWidth || Infinity)}px`
-    node.style.display = "inline-block"
-    measure.remove()
-    // Inter is a web font on systems without SF Pro, and it can finish loading
-    // after the first measure. Measure again once it has, so the reserved width
-    // is the real one.
-    document.fonts?.ready.then(() => {
-      if (!node.isConnected) return
-      node.after(measure)
-      measure.style.font = getComputedStyle(node).font
-      node.style.minWidth = `${Math.min(Math.ceil(measure.getBoundingClientRect().width), node.parentElement?.clientWidth || Infinity)}px`
-      measure.remove()
-    })
-
+    // The line is left-aligned and its box reserves the height of its longest
+    // phrase (.hero-ticker), so a swap cannot reflow the buttons beneath it.
     const glyphs = "abcdefghijklmnopqrstuvwxyz<>{}/\\=+*"
     let phrase = 0
     let frame = 0
@@ -921,7 +887,7 @@ const trustCards = [
 
   /* Components inside the page that ask for the site font (the product window)
      get the landing type too. The top bar is the site's shared
-     chrome and keeps Geist, exactly as on every other page. */
+     chrome and keeps Geist, as on every other page. */
   .vector-marketing > main {
     --font-sans: var(--font-landing);
   }
@@ -1156,22 +1122,68 @@ const trustCards = [
 
   .headline {
     margin: 0;
-    min-height: 2.3em;
     color: var(--ink);
-    font-size: clamp(28px, 4.5vw, 37px);
+    font-size: clamp(30px, 4.9vw, 44px);
     font-weight: 600;
-    line-height: 1.12;
-    letter-spacing: -0.025em;
+    line-height: 1.1;
+    letter-spacing: -0.028em;
+    text-wrap: balance;
   }
 
-  .headline > span {
-    display: inline;
+  /* The figure stays in ink: the hero's one lavender line is the rotating phrase below. */
+  .headline-figure {
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
-  .headline-rotate {
+  /* "Vector …" and a rotating phrase. Its box holds the longest phrase, one
+     line wide and two on a phone, so a swap never moves the buttons. */
+  .hero-ticker {
+    margin: 18px 0 0;
+    min-height: 1.5em;
+    color: var(--ink-70);
+    font-size: clamp(15.5px, 1.6vw, 17px);
+    line-height: 1.5;
+  }
+
+  .ticker-lead {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .ticker-phrase {
     color: var(--purple-soft);
-    text-shadow: 0 0 32px rgba(143, 82, 255, 0.24);
     font-variant-ligatures: none;
+  }
+
+  /* The headline's qualifier sits right under it, in plain sentences, and opens the numbers and their footnotes
+     further down. */
+  .hero-receipt {
+    max-width: 60ch;
+    margin: 14px 0 0;
+    color: var(--ink-55);
+    font-size: 13.5px;
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+
+  .hero-receipt-more {
+    color: var(--ink-70);
+    text-decoration: none;
+    white-space: nowrap;
+    border-bottom: 1px solid rgba(224, 211, 255, 0.3);
+  }
+
+  .hero-receipt-more:hover {
+    color: var(--lavender);
+    border-color: var(--purple-soft);
+  }
+
+  .hero-receipt-more:focus-visible {
+    outline: 2px solid var(--landing-accent);
+    outline-offset: 3px;
+    border-radius: 4px;
   }
 
   .hero-deck {
@@ -1246,7 +1258,8 @@ const trustCards = [
   @media (max-width: 640px) {
     .hero { padding-top: 44px; }
     .wordmark { margin-bottom: 26px; }
-    .headline { min-height: 4.6em; font-size: clamp(26px, 7.6vw, 32px); }
+    .headline { font-size: clamp(28px, 8.2vw, 34px); }
+    .hero-ticker { min-height: 3em; }
 
     .showcase { width: calc(100% - 24px); padding-top: 44px; }
   }
@@ -1266,7 +1279,7 @@ const trustCards = [
     padding-bottom: clamp(24px, 4vw, 48px) !important;
   }
   .simple-hero { max-width: 760px; }
-  .simple-deck { max-width: 560px; margin-top: 18px; font-size: 17px; line-height: 1.6; color: var(--ink-55); }
+  .simple-deck { max-width: 560px; margin-top: 22px; font-size: 17px; line-height: 1.6; color: var(--ink-70); }
   .simple-actions { margin-top: 26px; display: flex; flex-wrap: wrap; align-items: center; gap: 18px; }
   .simple-cta { width: auto; min-width: 0; margin: 0; padding-inline: 26px; }
   /* Simpler page: no floating chapter rail. */
