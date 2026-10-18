@@ -1,5 +1,15 @@
-import { modelPlanStripe, stripeRecord } from "../../../api/_lib/model-plan-stripe"
-import { MODEL_PLAN_PRICES, modelPlans, modelTopups } from "../../../api/_lib/model-plan-config"
+import {
+  MODEL_PLAN_STRIPE_VERSION,
+  MODEL_PLAN_WEBHOOK_EVENTS,
+  modelPlanStripe,
+  stripeRecord,
+} from "../../../api/_lib/model-plan-stripe"
+import { MODEL_PLAN_PRICES, modelPlanOrigin, modelPlans, modelTopups } from "../../../api/_lib/model-plan-config"
+import { modelPlanPortalConfiguration, modelPlanWebhook } from "./model-plan-setup"
+
+// A protected preview deployment lets Stripe's notifications through only with Vercel's automation bypass secret.
+const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim()
+const webhook = `${modelPlanOrigin()}/api/model-plans/webhook${bypass ? `?${new URLSearchParams({ "x-vercel-protection-bypass": bypass })}` : ""}`
 
 // Dry-run by default. Execute with --apply only in the intended Stripe account.
 if (!Bun.argv.includes("--apply")) {
@@ -14,6 +24,9 @@ if (!Bun.argv.includes("--apply")) {
     })),
   )
   console.log("Also creates a billing portal with payment-method updates, invoices and cancellation at period end.")
+  console.log(
+    `And a webhook to ${modelPlanOrigin()}/api/model-plans/webhook${bypass ? " (with the preview's protection bypass)" : ""} (API ${MODEL_PLAN_STRIPE_VERSION}) for: ${MODEL_PLAN_WEBHOOK_EVENTS.join(", ")}.`,
+  )
   console.log(
     "No changes made. Set STRIPE_SECRET_KEY to a test key and run again with --apply to prepare test billing.",
   )
@@ -79,22 +92,16 @@ for (const pack of modelTopups()) {
   console.log(`STRIPE_MODEL_TOPUP_${pack.price}_PRICE_ID=${price.id}`)
 }
 
-const portal = await modelPlanStripe("billing_portal/configurations", {
-  method: "POST",
-  idempotency: "vector-model-portal-v1",
-  body: new URLSearchParams({
-    "business_profile[headline]": "Manage your Vector Codium subscription",
-    "features[customer_update][enabled]": "true",
-    "features[customer_update][allowed_updates][0]": "email",
-    "features[invoice_history][enabled]": "true",
-    "features[payment_method_update][enabled]": "true",
-    "features[subscription_cancel][enabled]": "true",
-    "features[subscription_cancel][mode]": "at_period_end",
-    "features[subscription_update][enabled]": "false",
-  }),
-})
-if (typeof portal.id !== "string") throw new Error("Stripe did not return a billing portal configuration.")
+const portal = await modelPlanPortalConfiguration()
 console.log(`STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID=${portal.id}`)
+
+const endpoint = await modelPlanWebhook(webhook)
+if (endpoint.created) console.log(`STRIPE_MODEL_PLAN_WEBHOOK_SECRET=${endpoint.secret}`)
+if (!endpoint.created)
+  console.log(
+    `Webhook ${endpoint.id} already sends to ${modelPlanOrigin()}/api/model-plans/webhook; its signing secret is in the Stripe dashboard.` +
+      (endpoint.missing.length ? ` Add these events to it: ${endpoint.missing.join(", ")}.` : ""),
+  )
 console.log(
   "Prices are prepared. Keep MODEL_PLANS_ENABLED=false until allowances, model catalog, webhook, funding and live verification are complete.",
 )

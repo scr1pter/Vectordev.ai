@@ -326,6 +326,20 @@ beforeAll(async () => {
 })
 beforeEach(async () => {
   await redis(["FLUSHDB"])
+  // Vector's OpenRouter balance covers what is owed; codium-payments.test.ts exercises the funding check itself.
+  await redis([
+    "SET",
+    "vector:codium:funding",
+    JSON.stringify({
+      status: "open",
+      checkedAt: Date.now(),
+      since: Date.now(),
+      balance: 100_000_000,
+      owed: 0,
+      required: 0,
+      keys: 0,
+    }),
+  ])
   Object.assign(process.env, {
     NODE_ENV: "development",
     MODEL_PLANS_ENABLED: "true",

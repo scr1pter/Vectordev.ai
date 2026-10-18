@@ -434,6 +434,10 @@
     {
       "path": "/api/shares/cleanup",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/model-plans/funding",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

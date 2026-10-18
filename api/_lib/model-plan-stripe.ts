@@ -5,6 +5,29 @@ import { ApiError } from "./http.js"
 export const stripeRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value)
 
+/** The Stripe events the Codium webhook acts on; `scripts/setup-model-plans.ts --apply` subscribes exactly these. */
+export const MODEL_PLAN_WEBHOOK_EVENTS = [
+  "checkout.session.completed",
+  "customer.subscription.created",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "customer.subscription.paused",
+  "customer.subscription.resumed",
+  "invoice.paid",
+  "invoice.payment_failed",
+  "payment_intent.succeeded",
+  "charge.succeeded",
+  "charge.updated",
+  "charge.refunded",
+  "charge.refund.updated",
+  "charge.dispute.created",
+  "charge.dispute.updated",
+  "charge.dispute.closed",
+  "charge.dispute.funds_withdrawn",
+  "charge.dispute.funds_reinstated",
+] as const
+export const MODEL_PLAN_STRIPE_VERSION = "2025-02-24.acacia"
+
 export async function modelPlanStripe(
   path: string,
   input: { method?: "GET" | "POST" | "DELETE"; body?: URLSearchParams; idempotency?: string } = {},
@@ -16,7 +39,7 @@ export async function modelPlanStripe(
     method: input.method ?? "GET",
     headers: {
       authorization: `Bearer ${key}`,
-      "Stripe-Version": "2025-02-24.acacia",
+      "Stripe-Version": MODEL_PLAN_STRIPE_VERSION,
       ...(input.body ? { "content-type": "application/x-www-form-urlencoded" } : {}),
       ...(input.idempotency ? { "Idempotency-Key": input.idempotency } : {}),
     },

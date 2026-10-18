@@ -2,20 +2,25 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import { Option, Schema } from "effect"
 import type { AccountUser } from "./account.js"
 import { withBillingMutation } from "./billing-lock.js"
+import { requireCodiumSales, reserveCodiumSale } from "./codium-funding.js"
 import { modelPlanOrigin, modelPlans, modelTopups, MODEL_PLAN_ROOT } from "./model-plan-config.js"
 import { modelPlanStripe, stripeRecord } from "./model-plan-stripe.js"
 import { ApiError } from "./http.js"
 import { persistentStore } from "./persistent-store.js"
 
+// `reservation` names the checkout's hold on Vector's OpenRouter balance (see reserveCodiumSale).
+const Checkout = Schema.Struct({
+  id: Schema.String,
+  plan: Schema.String,
+  url: Schema.String,
+  expires: Schema.Number,
+  reservation: Schema.optional(Schema.String),
+})
 const Account = Schema.Struct({
   customer: Schema.String,
   closing: Schema.optional(Schema.Boolean),
-  checkout: Schema.optional(
-    Schema.Struct({ id: Schema.String, plan: Schema.String, url: Schema.String, expires: Schema.Number }),
-  ),
-  topupCheckout: Schema.optional(
-    Schema.Struct({ id: Schema.String, plan: Schema.String, url: Schema.String, expires: Schema.Number }),
-  ),
+  checkout: Schema.optional(Checkout),
+  topupCheckout: Schema.optional(Checkout),
   purchases: Schema.optional(
     Schema.Array(
       Schema.Struct({
@@ -74,6 +79,27 @@ export async function openRouterManagement(
   if (!response.ok || !stripeRecord(result))
     throw new ApiError(503, "MODEL_PLAN_UPSTREAM", "Your model allowance is temporarily unavailable.")
   return result
+}
+
+// The webhook and model requests wait this long for the account's lease before answering BILLING_MUTATION_BUSY.
+const LEASE_WAIT_MS = 5_000
+
+/**
+ * The account's billing lease for the payment webhook and model requests, which wait briefly for it instead of failing
+ * at once: Stripe sends several notifications for one payment at the same moment, and a buyer's first request often
+ * arrives while one of them is still granting the credits. Checkout and account deletion still refuse at once.
+ */
+export async function withCodiumLease<T>(
+  id: string,
+  work: (verify: () => Promise<void>) => Promise<T>,
+  fetcher: typeof fetch = fetch,
+  deadline = Date.now() + LEASE_WAIT_MS,
+): Promise<T> {
+  return withBillingMutation(`model-plan:${id}`, work, fetcher).catch(async (error: unknown) => {
+    if (!(error instanceof ApiError) || error.code !== "BILLING_MUTATION_BUSY" || Date.now() >= deadline) throw error
+    await new Promise((resolve) => setTimeout(resolve, 100 + Math.random() * 150))
+    return withCodiumLease(id, work, fetcher, deadline)
+  })
 }
 
 export function protectModelPlanKey(value: string, context: string) {
@@ -218,8 +244,8 @@ async function settlePendingTopup(id: string, fetcher: typeof fetch) {
 }
 
 export async function reconcileModelTopup(id: string, checkoutID: string, fetcher: typeof fetch = fetch) {
-  return withBillingMutation(
-    `model-plan:${id}`,
+  return withCodiumLease(
+    id,
     async (verify) => {
       const account = await readModelPlanAccount(id, fetcher)
       if (!account) throw new ApiError(400, "BILLING_ACCOUNT_MISMATCH", "The billing account does not match.")
@@ -341,8 +367,8 @@ async function walletCredential(id: string, fetcher: typeof fetch, requiredCredi
       }
     }
   }
-  return withBillingMutation(
-    `model-plan:${id}`,
+  return withCodiumLease(
+    id,
     async (verify) => {
       const account = await readModelPlanAccount(id, fetcher)
       if (!account || account.closing)
@@ -362,52 +388,76 @@ async function walletCredential(id: string, fetcher: typeof fetch, requiredCredi
         }
       }
       if (credits <= 0 || credits < requiredCredits) throw purchasedShortfall()
-      await verify()
-      const result = await openRouterManagement(
-        "",
-        {
-          name: `Codium ${id} purchased credits`,
-          limit: credits,
-          limit_reset: null,
-          include_byok_in_limit: true,
-          expires_at: null,
-        },
-        fetcher,
-        "POST",
-      )
-      if (
-        !stripeRecord(result.data) ||
-        typeof result.data.hash !== "string" ||
-        typeof result.key !== "string" ||
-        !result.key
-      )
-        throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your purchased-credit allowance could not be created.")
-      await saveAccount(
-        id,
-        { ...account, wallet: { hash: result.data.hash, encrypted: protectModelPlanKey(result.key, `${id}:wallet`) } },
-        fetcher,
-      )
-      return { key: result.key, pool: result.data.hash, available: credits }
+      return { ...(await provisionWalletKey(id, account, credits, fetcher, verify)), available: credits }
     },
     fetcher,
   )
 }
 
-export async function reconcileModelPlanAccount(id: string, fetcher: typeof fetch = fetch) {
+async function provisionWalletKey(
+  id: string,
+  account: Account,
+  credits: number,
+  fetcher: typeof fetch,
+  verify: () => Promise<void>,
+) {
+  await verify()
+  const result = await openRouterManagement(
+    "",
+    {
+      name: `Codium ${id} purchased credits`,
+      limit: credits,
+      limit_reset: null,
+      include_byok_in_limit: true,
+      expires_at: null,
+    },
+    fetcher,
+    "POST",
+  )
+  if (
+    !stripeRecord(result.data) ||
+    typeof result.data.hash !== "string" ||
+    typeof result.key !== "string" ||
+    !result.key
+  )
+    throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your purchased-credit allowance could not be created.")
+  await saveAccount(
+    id,
+    { ...account, wallet: { hash: result.data.hash, encrypted: protectModelPlanKey(result.key, `${id}:wallet`) } },
+    fetcher,
+  )
+  return { key: result.key, pool: result.data.hash }
+}
+
+/**
+ * Bring the account's OpenRouter keys in line with what Stripe says is paid, as soon as a billing notification
+ * arrives, so a buyer's credits are ready before their first request: the paid period's key gets the plan's credits
+ * (each period gets a new key, so monthly credits reset rather than roll over), the purchased-credit key gets every
+ * top-up still paid for, and a key nothing pays for any more is switched off. It reads Stripe's current state rather
+ * than applying the notification, so a replayed or out-of-order notification changes nothing.
+ */
+export async function reconcileModelPlanAccount(id: string, fetcher: typeof fetch = fetch, now = Date.now()) {
   await settlePendingTopup(id, fetcher)
-  await withBillingMutation(
-    `model-plan:${id}`,
+  await withCodiumLease(
+    id,
     async (verify) => {
       const account = await readModelPlanAccount(id, fetcher)
       if (!account) return
       const paid = account.closing
         ? []
-        : (await subscriptions(account.customer, fetcher)).filter((value) => paidModelPlan(value, id))
+        : (await subscriptions(account.customer, fetcher))
+            .map((subscription) => paidModelPlan(subscription, id, now))
+            .filter((value) => value !== undefined)
       if (account.key && paid.length !== 1) {
         await verify()
         await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
       }
-      if (account.wallet) await synchronizeWalletKey(id, account, fetcher, verify)
+      const current =
+        paid.length === 1 ? (await provisionMonthlyKey(id, account, paid[0]!, fetcher, verify)).account : account
+      if (current.wallet) return synchronizeWalletKey(id, current, fetcher, verify)
+      if (current.closing) return
+      const credits = await purchasedCredits(current, id, fetcher)
+      if (credits > 0) await provisionWalletKey(id, current, credits, fetcher, verify)
     },
     fetcher,
   )
@@ -713,8 +763,8 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
       }
     }
   }
-  return withBillingMutation(
-    `model-plan:${id}`,
+  return withCodiumLease(
+    id,
     async (verify) => {
       const account = await readModelPlanAccount(id, fetcher)
       if (!account)
@@ -735,87 +785,98 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
         )
       }
       if (paid.plan.credits < requiredCredits) throw monthlyShortfall()
-      const context = `${id}:${paid.id}:${paid.start}`
-      if (account.key?.subscription === paid.id && account.key.start === paid.start) {
-        const result = await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, undefined, fetcher)
-        const key = result.data
-        if (
-          !stripeRecord(key) ||
-          typeof key.disabled !== "boolean" ||
-          typeof key.usage !== "number" ||
-          !Number.isFinite(key.usage) ||
-          key.usage < 0
-        )
-          throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your model allowance could not be verified.")
-        requireMonthlyCredits(paid.plan.credits, key.usage, requiredCredits)
-        if (
-          key.disabled ||
-          key.limit !== paid.plan.credits ||
-          key.limit_reset !== null ||
-          key.include_byok_in_limit !== true ||
-          key.expires_at !== new Date(paid.end * 1000).toISOString()
-        ) {
-          await verify()
-          await openRouterManagement(
-            `/${encodeURIComponent(account.key.hash)}`,
-            {
-              disabled: false,
-              limit: paid.plan.credits,
-              limit_reset: null,
-              include_byok_in_limit: true,
-              expires_at: new Date(paid.end * 1000).toISOString(),
-            },
-            fetcher,
-            "PATCH",
-          )
-        }
-        return {
-          key: revealModelPlanKey(account.key.encrypted, context),
-          pool: account.key.hash,
-          available: paid.plan.credits - key.usage,
-        }
-      }
-      if (account.key)
-        await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
-      await verify()
-      const result = await openRouterManagement(
-        "",
-        {
-          name: `Vector ${id} ${paid.id} ${paid.start}`,
-          limit: paid.plan.credits,
-          limit_reset: null,
-          include_byok_in_limit: true,
-          expires_at: new Date(paid.end * 1000).toISOString(),
-        },
-        fetcher,
-        "POST",
-      )
-      if (
-        !stripeRecord(result.data) ||
-        typeof result.data.hash !== "string" ||
-        typeof result.key !== "string" ||
-        !result.key
-      )
-        throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your model allowance could not be created.")
-      await saveAccount(
-        id,
-        {
-          ...account,
-          key: {
-            hash: result.data.hash,
-            encrypted: protectModelPlanKey(result.key, context),
-            subscription: paid.id,
-            start: paid.start,
-            end: paid.end,
-            credits: paid.plan.credits,
-          },
-        },
-        fetcher,
-      )
-      return { key: result.key, pool: result.data.hash, available: paid.plan.credits }
+      const funding = await provisionMonthlyKey(id, account, paid, fetcher, verify)
+      requireMonthlyCredits(paid.plan.credits, funding.usage, requiredCredits)
+      return { key: funding.key, pool: funding.pool, available: paid.plan.credits - funding.usage }
     },
     fetcher,
   )
+}
+
+/** The paid period's key, repaired to the plan's credits, or a new one when the period changed. Callers hold the lease. */
+async function provisionMonthlyKey(
+  id: string,
+  account: Account,
+  paid: NonNullable<ReturnType<typeof paidModelPlan>>,
+  fetcher: typeof fetch,
+  verify: () => Promise<void>,
+) {
+  const context = `${id}:${paid.id}:${paid.start}`
+  const expires = new Date(paid.end * 1000).toISOString()
+  if (account.key?.subscription === paid.id && account.key.start === paid.start) {
+    const result = await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, undefined, fetcher)
+    const key = result.data
+    if (
+      !stripeRecord(key) ||
+      typeof key.disabled !== "boolean" ||
+      typeof key.usage !== "number" ||
+      !Number.isFinite(key.usage) ||
+      key.usage < 0
+    )
+      throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your model allowance could not be verified.")
+    if (
+      key.disabled ||
+      key.limit !== paid.plan.credits ||
+      key.limit_reset !== null ||
+      key.include_byok_in_limit !== true ||
+      key.expires_at !== expires
+    ) {
+      await verify()
+      await openRouterManagement(
+        `/${encodeURIComponent(account.key.hash)}`,
+        {
+          disabled: false,
+          limit: paid.plan.credits,
+          limit_reset: null,
+          include_byok_in_limit: true,
+          expires_at: expires,
+        },
+        fetcher,
+        "PATCH",
+      )
+    }
+    return {
+      key: revealModelPlanKey(account.key.encrypted, context),
+      pool: account.key.hash,
+      usage: key.usage,
+      account,
+    }
+  }
+  if (account.key)
+    await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
+  await verify()
+  const result = await openRouterManagement(
+    "",
+    {
+      name: `Vector ${id} ${paid.id} ${paid.start}`,
+      limit: paid.plan.credits,
+      limit_reset: null,
+      include_byok_in_limit: true,
+      expires_at: expires,
+    },
+    fetcher,
+    "POST",
+  )
+  if (
+    !stripeRecord(result.data) ||
+    typeof result.data.hash !== "string" ||
+    typeof result.key !== "string" ||
+    !result.key
+  )
+    throw new ApiError(503, "MODEL_PLAN_KEY_INVALID", "Your model allowance could not be created.")
+  const updated = {
+    ...account,
+    key: {
+      hash: result.data.hash,
+      encrypted: protectModelPlanKey(result.key, context),
+      subscription: paid.id,
+      start: paid.start,
+      end: paid.end,
+      credits: paid.plan.credits,
+    },
+  }
+  await saveAccount(id, updated, fetcher)
+  return { key: result.key, pool: result.data.hash, usage: 0, account: updated }
 }
 
 // A shortfall keeps the code that lets purchased credits cover the request instead.
@@ -833,6 +894,8 @@ export async function modelPlanCheckout(
   if (!plan?.priceID || !plan.credits)
     throw new ApiError(400, "MODEL_PLAN_INVALID", "Choose an available Codium subscription.")
   const priceID = plan.priceID
+  // Sell only credits Vector's OpenRouter balance can pay for.
+  const funding = await requireCodiumSales(fetcher, now)
   return withBillingMutation(
     `model-plan:${user.id}`,
     async (verify) => {
@@ -862,35 +925,34 @@ export async function modelPlanCheckout(
         )
       )
         throw new ApiError(409, "MODEL_PLAN_EXISTS", "You already have a subscription. Manage it from your account.")
-      if (account.checkout && account.checkout.expires > now) {
-        const pending = await modelPlanStripe(
-          `checkout/sessions/${encodeURIComponent(account.checkout.id)}`,
-          {},
-          fetcher,
+      const earlier = account.checkout && account.checkout.expires > now ? account.checkout : undefined
+      const pending = earlier
+        ? await modelPlanStripe(`checkout/sessions/${encodeURIComponent(earlier.id)}`, {}, fetcher)
+        : undefined
+      if (pending?.status === "complete")
+        throw new ApiError(
+          409,
+          "MODEL_PLAN_EXISTS",
+          "Checkout has already completed. Refresh your account or manage your subscription.",
         )
-        if (pending.status === "complete")
-          throw new ApiError(
-            409,
-            "MODEL_PLAN_EXISTS",
-            "Checkout has already completed. Refresh your account or manage your subscription.",
-          )
-        if (
-          pending.status === "open" &&
-          account.checkout.plan === plan.id &&
-          stripeRecord(pending.metadata) &&
-          pending.metadata.vector_model_credits_usd === String(plan.credits) &&
-          pending.metadata.vector_price_id === priceID
-        )
-          return { url: account.checkout.url }
-        if (pending.status === "open") {
-          await verify()
-          await modelPlanStripe(
-            `checkout/sessions/${encodeURIComponent(account.checkout.id)}/expire`,
-            { method: "POST" },
-            fetcher,
-          )
-        }
-      }
+      if (
+        earlier &&
+        pending?.status === "open" &&
+        earlier.plan === plan.id &&
+        stripeRecord(pending.metadata) &&
+        pending.metadata.vector_model_credits_usd === String(plan.credits) &&
+        pending.metadata.vector_price_id === priceID
+      )
+        return { url: earlier.url }
+      if (pending?.status === "open") await verify()
+      const closed =
+        earlier && pending?.status === "open"
+          ? await modelPlanStripe(
+              `checkout/sessions/${encodeURIComponent(earlier.id)}/expire`,
+              { method: "POST" },
+              fetcher,
+            )
+          : pending
       const price = await modelPlanStripe(`prices/${priceID}`, {}, fetcher)
       const recurring = stripeRecord(price.recurring) ? price.recurring : undefined
       if (
@@ -901,12 +963,27 @@ export async function modelPlanCheckout(
         recurring.interval_count !== 1
       )
         throw new ApiError(503, "MODEL_PLAN_PRICE_MISMATCH", "This subscription price is not configured correctly.")
+      const closes = (Math.floor(now / 1_800_000) + 2) * 1_800_000
+      const idempotency = `vector-model-checkout-${user.id}-${plan.id}-${createHash("sha256").update(`${priceID}:${plan.credits}`).digest("hex").slice(0, 12)}-${account.checkout?.id ?? "new"}-${Math.floor(now / 1_800_000)}`
+      // Only a checkout that can no longer be paid gives its reservation back. A paid one keeps counting until it
+      // lapses, because the reading this sale is measured against may not count its credits as owed yet.
+      await reserveCodiumSale(
+        funding,
+        {
+          id: idempotency,
+          credits: plan.credits,
+          closes,
+          released: closed?.status === "expired" ? earlier?.reservation : undefined,
+        },
+        fetcher,
+        now,
+      )
       await verify()
       const checkout = await modelPlanStripe(
         "checkout/sessions",
         {
           method: "POST",
-          idempotency: `vector-model-checkout-${user.id}-${plan.id}-${createHash("sha256").update(`${priceID}:${plan.credits}`).digest("hex").slice(0, 12)}-${account.checkout?.id ?? "new"}-${Math.floor(now / 1_800_000)}`,
+          idempotency,
           body: new URLSearchParams({
             mode: "subscription",
             "payment_method_types[0]": "card",
@@ -921,7 +998,7 @@ export async function modelPlanCheckout(
             "subscription_data[metadata][vector_model_credits_usd]": String(plan.credits),
             success_url: `${modelPlanOrigin()}/account?model_plan=success`,
             cancel_url: `${modelPlanOrigin()}/account?model_plan=cancelled`,
-            expires_at: String((Math.floor(now / 1_800_000) + 2) * 1_800),
+            expires_at: String(closes / 1000),
           }),
         },
         fetcher,
@@ -937,7 +1014,13 @@ export async function modelPlanCheckout(
         user.id,
         {
           ...account,
-          checkout: { id: checkout.id, plan: plan.id, url: checkout.url, expires: checkout.expires_at * 1000 },
+          checkout: {
+            id: checkout.id,
+            plan: plan.id,
+            url: checkout.url,
+            expires: checkout.expires_at * 1000,
+            reservation: idempotency,
+          },
         },
         fetcher,
       )
@@ -980,6 +1063,7 @@ export async function modelTopupCheckout(
   if (!pack?.priceID || !pack.credits)
     throw new ApiError(400, "MODEL_TOPUP_INVALID", "Choose an available Codium credit pack.")
   const priceID = pack.priceID
+  const funding = await requireCodiumSales(fetcher, now)
   await settlePendingTopup(user.id, fetcher)
   return withBillingMutation(
     `model-plan:${user.id}`,
@@ -1004,38 +1088,38 @@ export async function modelTopupCheckout(
         throw new ApiError(502, "BILLING_CUSTOMER", "Your billing account could not be created.")
       const account = previous ?? { customer }
       if (!previous) await saveAccount(user.id, account, fetcher)
-      if (account.topupCheckout && account.topupCheckout.expires > now) {
-        const pending = await modelPlanStripe(
-          `checkout/sessions/${encodeURIComponent(account.topupCheckout.id)}`,
-          {},
-          fetcher,
+      const earlier = account.topupCheckout && account.topupCheckout.expires > now ? account.topupCheckout : undefined
+      const pending = earlier
+        ? await modelPlanStripe(`checkout/sessions/${encodeURIComponent(earlier.id)}`, {}, fetcher)
+        : undefined
+      if (
+        earlier &&
+        pending?.status === "complete" &&
+        !account.purchases?.some((value) => value.checkout === earlier.id)
+      )
+        throw new ApiError(
+          409,
+          "MODEL_TOPUP_PROCESSING",
+          "Your last credit purchase is processing. Refresh your account and retry.",
         )
-        if (
-          pending.status === "complete" &&
-          !account.purchases?.some((value) => value.checkout === account.topupCheckout?.id)
-        )
-          throw new ApiError(
-            409,
-            "MODEL_TOPUP_PROCESSING",
-            "Your last credit purchase is processing. Refresh your account and retry.",
-          )
-        if (
-          pending.status === "open" &&
-          account.topupCheckout.plan === pack.id &&
-          stripeRecord(pending.metadata) &&
-          pending.metadata.vector_credits_usd === String(pack.credits) &&
-          pending.metadata.vector_price_id === priceID
-        )
-          return { url: account.topupCheckout.url }
-        if (pending.status === "open") {
-          await verify()
-          await modelPlanStripe(
-            `checkout/sessions/${encodeURIComponent(account.topupCheckout.id)}/expire`,
-            { method: "POST" },
-            fetcher,
-          )
-        }
-      }
+      if (
+        earlier &&
+        pending?.status === "open" &&
+        earlier.plan === pack.id &&
+        stripeRecord(pending.metadata) &&
+        pending.metadata.vector_credits_usd === String(pack.credits) &&
+        pending.metadata.vector_price_id === priceID
+      )
+        return { url: earlier.url }
+      if (pending?.status === "open") await verify()
+      const closed =
+        earlier && pending?.status === "open"
+          ? await modelPlanStripe(
+              `checkout/sessions/${encodeURIComponent(earlier.id)}/expire`,
+              { method: "POST" },
+              fetcher,
+            )
+          : pending
       const price = await modelPlanStripe(`prices/${priceID}`, {}, fetcher)
       if (
         price.active !== true ||
@@ -1044,6 +1128,7 @@ export async function modelTopupCheckout(
         price.recurring
       )
         throw new ApiError(503, "MODEL_TOPUP_PRICE_MISMATCH", "This credit-pack price is not configured correctly.")
+      const closes = (Math.floor(now / 1_800_000) + 2) * 1_800_000
       const body = new URLSearchParams({
         mode: "payment",
         "payment_method_types[0]": "card",
@@ -1053,7 +1138,7 @@ export async function modelTopupCheckout(
         "line_items[0][quantity]": "1",
         success_url: `${modelPlanOrigin()}/account?model_topup=success`,
         cancel_url: `${modelPlanOrigin()}/account?model_topup=cancelled`,
-        expires_at: String((Math.floor(now / 1_800_000) + 2) * 1_800),
+        expires_at: String(closes / 1000),
       })
       Object.entries({
         vector_account_id: user.id,
@@ -1065,12 +1150,26 @@ export async function modelTopupCheckout(
         body.set(`metadata[${key}]`, value)
         body.set(`payment_intent_data[metadata][${key}]`, value)
       })
+      const idempotency = `vector-topup-checkout-${user.id}-${pack.id}-${createHash("sha256").update(`${priceID}:${pack.credits}`).digest("hex").slice(0, 12)}-${account.topupCheckout?.id ?? "new"}-${Math.floor(now / 1_800_000)}`
+      // A paid top-up keeps its reservation when the buyer opens the next one: the reading this sale is measured
+      // against may not count its credits as owed yet. Only a checkout that can no longer be paid gives it back.
+      await reserveCodiumSale(
+        funding,
+        {
+          id: idempotency,
+          credits: pack.credits,
+          closes,
+          released: closed?.status === "expired" ? earlier?.reservation : undefined,
+        },
+        fetcher,
+        now,
+      )
       await verify()
       const checkout = await modelPlanStripe(
         "checkout/sessions",
         {
           method: "POST",
-          idempotency: `vector-topup-checkout-${user.id}-${pack.id}-${createHash("sha256").update(`${priceID}:${pack.credits}`).digest("hex").slice(0, 12)}-${account.topupCheckout?.id ?? "new"}-${Math.floor(now / 1_800_000)}`,
+          idempotency,
           body,
         },
         fetcher,
@@ -1086,7 +1185,13 @@ export async function modelTopupCheckout(
         user.id,
         {
           ...account,
-          topupCheckout: { id: checkout.id, plan: pack.id, url: checkout.url, expires: checkout.expires_at * 1000 },
+          topupCheckout: {
+            id: checkout.id,
+            plan: pack.id,
+            url: checkout.url,
+            expires: checkout.expires_at * 1000,
+            reservation: idempotency,
+          },
         },
         fetcher,
       )
