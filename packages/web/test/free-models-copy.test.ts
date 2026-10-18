@@ -46,6 +46,40 @@ test("free-model copy never says none of the providers keeps no data while the r
   ).toEqual([])
 })
 
+test("site copy never says every free-model request asks not to train, which stops being true from 1.99.109", async () => {
+  // The verifier's medium of 18 October 2026: the home page and the investor page said every included free-model
+  // request asks providers not to train. From desktop 1.99.109, a model labelled "May train on your prompts" is sent,
+  // after the user accepts once, with data collection allowed. The copy must hold before and after that release.
+  const blanket = [
+    /\b(?:every|all|each)\b[^.;]*\b(?:free[- ]models?|included)\b[^.;]*\b(?:not to train|not (?:be )?used for training|deny data collection)/i,
+    /\bevery (?:included )?free[- ]model request\b/i,
+  ]
+  const sources = [
+    ...(await Array.fromAsync(
+      new Bun.Glob("packages/web/src/{pages,components,data}/**/*.{astro,ts,tsx}").scan({ cwd: root }),
+    )),
+    "README.md",
+  ]
+  const found = await Promise.all(
+    sources.map(async (file) =>
+      (await Bun.file(root + file).text())
+        .replace(/\s+/g, " ")
+        .split(/(?<=[.;])\s/)
+        .filter((sentence) => blanket.some((pattern) => pattern.test(sentence)))
+        .map((sentence) => `${file}: ${sentence.trim().slice(0, 160)}`),
+    ),
+  )
+  expect(found.flat()).toEqual([])
+  // What replaced them says which models ask not to train, and that the others wait for the acceptance.
+  for (const file of ["packages/web/src/components/Lander.astro", "packages/web/src/pages/investors.astro"]) {
+    const text = (await Bun.file(root + file).text()).replace(/\s+/g, " ")
+    expect(text).toContain("free models whose providers don't train ask")
+    expect(text).toMatch(
+      /May train on your prompts.? (?:and )?(?:are )?sent only after (?:you accept|the user accepts) that once/,
+    )
+  }
+})
+
 test("the free-model flow never tells anyone to connect an OpenRouter account of their own", async () => {
   // The owner's decision of 17 October 2026: "i want it so that the vector app is connected to my openrouter account
   // no matter who uses the free models". Free models run on Vector's shared allowance for every signed-in account;

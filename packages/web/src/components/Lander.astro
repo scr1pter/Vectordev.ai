@@ -92,8 +92,9 @@ const pluginNames = [
 // review, the browser, the agents, where you work with it, what it ships to,
 // then how it keeps itself honest.
 // Privacy in six claims, each checked against the code and /legal/privacy on 17 October 2026.
-// Keep the "coming soon" labels until Codium sales open; "from 1.99.108" dates the no-training policy to the
-// desktop release that shipped it.
+// Keep the "coming soon" labels until Codium sales open. The free-model claim must hold for 1.99.108, whose free models
+// are all no-training ones, and from 1.99.109, which adds models that may train behind a label and a one-time
+// acceptance: Vector itself never trains.
 const privacyFacts = [
   {
     title: "Local first",
@@ -113,7 +114,7 @@ const privacyFacts = [
   },
   {
     title: "On Vector's own models",
-    text: "Codium, coming soon, routes only to providers OpenRouter records as zero data retention, and from 1.99.108 every included free-model request asks providers not to train on your prompts. They may still keep them.",
+    text: "Codium, coming soon, routes only to providers OpenRouter records as zero data retention. Requests to free models whose providers don't train ask them not to train on your prompts, and free models whose providers may train are labelled May train on your prompts and sent only after you accept that once. Providers may still keep prompts.",
   },
   {
     title: "Counts, not content",
