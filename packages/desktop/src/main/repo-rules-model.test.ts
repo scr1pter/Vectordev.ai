@@ -5,6 +5,7 @@ import {
   formatRulesForPrompt,
   matchesPattern,
   mergeRulesFile,
+  reconcileRules,
   rulesForRepository,
   selectRules,
   type RepoRule,
@@ -173,6 +174,87 @@ describe("rendering rules for the agent", () => {
   test("removing the last managed rule leaves manual Markdown intact", () => {
     const existing = `# Team notes\n\nKeep this.\n\n${formatRulesFile([rule({ id: "1", description: "Managed" })])}`
     expect(mergeRulesFile(existing, [])).toBe("# Team notes\n\nKeep this.\n")
+  })
+})
+
+describe("the managed block is where rules are changed", () => {
+  const repo = "/work/alpha"
+  const sql = rule({
+    id: "sql",
+    description: 'Code review: do not flag "SQL injection" in src/db.ts; it was reviewed and is not a problem.',
+    repositoryPath: repo,
+    filePatterns: ["src/db.ts"],
+  })
+  const services = rule({ id: "services", description: "Use repository services", repositoryPath: repo })
+
+  test("a line deleted by hand drops that rule, and the next save does not write it back", () => {
+    const edited = formatRulesFile([sql, services]).replace(/^- Code review.*\n/m, "")
+    const rules = reconcileRules([sql, services], repo, edited)
+    expect(rules.map((item) => item.id)).toEqual(["services"])
+    const next = mergeRulesFile(edited, [...rules, rule({ id: "b", description: "Rule B", repositoryPath: repo })])
+    expect(next).not.toContain("SQL injection")
+    expect(next).toContain("- Use repository services")
+    expect(next).toContain("- Rule B")
+  })
+
+  test("rules whose lines are untouched keep their ids, in the file's order", () => {
+    const file = formatRulesFile([services, sql])
+    expect(reconcileRules([sql, services], repo, file)).toEqual([services, sql])
+  })
+
+  test("a line edited or added by hand becomes the rule, with its scope read back", () => {
+    const edited = formatRulesFile([sql, services])
+      .replace("Use repository services", "Use the service layer")
+      .replace("<!-- vector:managed-rules:end -->", "- Keep migrations reversible (applies to db/**, migrations)\n\n<!-- vector:managed-rules:end -->")
+    const rules = reconcileRules([sql, services], repo, edited, "2026-10-17T00:00:00.000Z")
+    expect(rules.map((item) => [item.description, item.filePatterns])).toEqual([
+      ['Code review: do not flag "SQL injection" in src/db.ts; it was reviewed and is not a problem.', ["src/db.ts"]],
+      ["Use the service layer", []],
+      ["Keep migrations reversible", ["db/**", "migrations"]],
+    ])
+    expect(rules[0]).toBe(sql)
+    expect(rules.slice(1).every((item) => item.enabled && item.repositoryPath === repo)).toBe(true)
+    // Read twice before any save, a hand-written rule is the same rule, so it can be removed by id.
+    expect(reconcileRules([sql, services], repo, edited).map((item) => item.id)).toEqual(rules.map((item) => item.id))
+    expect(mergeRulesFile(edited, rules)).toContain("- Keep migrations reversible (applies to db/**, migrations)")
+  })
+
+  test("a deleted file, or a file without the block, holds no managed rules", () => {
+    expect(reconcileRules([sql, services], repo, "")).toEqual([])
+    expect(reconcileRules([sql, services], repo, "# Team notes\n\nKeep this.\n")).toEqual([])
+  })
+
+  test("other repositories, global rules and disabled rules are not this file's to change", () => {
+    const other = rule({ id: "other", description: "Other repo", repositoryPath: "/work/beta" })
+    const global = rule({ id: "global", description: "Everywhere" })
+    const disabled = rule({ id: "off", description: "Switched off", repositoryPath: repo, enabled: false })
+    expect(reconcileRules([other, global, disabled, sql], repo, "")).toEqual([other, global, disabled])
+    expect(reconcileRules([global, sql], "", "")).toEqual([sql])
+  })
+
+  test("an untouched file from before the markers keeps its rules until the save that migrates it", () => {
+    const legacy = [
+      "# Project rules",
+      "",
+      "<!-- Managed by Vector. Edit these in Vector under Rules, or edit this file directly. -->",
+      "",
+      "- Use repository services",
+      "",
+    ].join("\n")
+    expect(reconcileRules([services], repo, legacy)).toEqual([services])
+  })
+
+  test("a description with a line break is written on one line and still reads back as itself", () => {
+    const multiline = rule({ id: "m", description: "Keep handlers small\nand pure", repositoryPath: repo })
+    const file = formatRulesFile([multiline])
+    expect(file).toContain("- Keep handlers small and pure")
+    expect(reconcileRules([multiline], repo, file)).toEqual([multiline])
+  })
+
+  test("the file tells people that deleting a line removes the rule", () => {
+    const file = formatRulesFile([services])
+    expect(file).toContain("delete the line to remove the rule, or edit it to change the rule")
+    expect(file).toContain("keep notes of your own outside the markers")
   })
 })
 

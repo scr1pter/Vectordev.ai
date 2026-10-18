@@ -43,8 +43,10 @@ test("repository rules live in .vector/RULES.md, with no Project rules screen to
   const text = await section("vector-agent", "repository-rules")
   expect(text).toContain("Repository rules live in .vector/RULES.md")
   expect(text).toContain("Don't flag this again")
-  // Hand-written rules reach only Vector's own agents; the external CLIs get the ones Vector saved.
-  expect(text).toContain("Rules written into the file by hand reach Vector's own agents only.")
+  // The file is where rules change now: a deleted line is a removed rule, for Vector's agents and the external CLIs.
+  expect(text).toContain("delete a line to remove the rule, or edit it to change the rule")
+  expect(text).toContain("Undo takes it out again")
+  expect(text).toContain("as the file has them now")
   expect(text).not.toMatch(/workspace rail|home screen|Settings/)
   expect(text).not.toMatch(/project/i)
   expect(await page("external-agents")).toContain('href="/docs/vector-agent#repository-rules"')

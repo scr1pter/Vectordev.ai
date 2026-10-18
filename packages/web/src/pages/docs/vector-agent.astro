@@ -64,12 +64,14 @@ export const prerender = true
           </ol>
           <p>
             In <a href="/docs/vectorscope">Vectorscope</a>, <strong>Don't flag this again</strong> on a finding adds a
-            rule to a section Vector manages in the same file. Vector rewrites that section, so keep rules of your own
-            outside its markers.
+            rule to a section Vector manages in the same file, and <strong>Undo</strong> takes it out again. Each line
+            in that section is one rule: delete a line to remove the rule, or edit it to change the rule, and Vector
+            keeps your change the next time it saves. Vector rewrites everything else in the section, so keep notes of
+            your own outside its markers.
           </p>
           <ul class="feature-list">
             <li><strong>Vector agents</strong><span>Read the rules file directly — the engine loads it as an instruction file on every prompt.</span></li>
-            <li><strong>Claude Code, Codex, Cursor</strong><span>Read their own instruction files and never see it, so Vector copies the rules it saved itself, such as Vectorscope's, into the prompt it hands them. Rules written into the file by hand reach Vector's own agents only.</span></li>
+            <li><strong>Claude Code, Codex, Cursor</strong><span>Read their own instruction files, so Vector copies the rules in its section of the file, as the file has them now, into the prompt it hands them, and tells them to read the rest of the file.</span></li>
             <li><strong>Scope survives as words</strong><span>Instruction files load whole, so the file paths a rule covers are stated in the sentence the agent reads.</span></li>
           </ul>
           <p class="note">
