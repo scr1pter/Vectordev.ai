@@ -32,8 +32,6 @@ export const dict = {
 
   "command.palette": "Палитра команд",
 
-
-
   "command.session.new": "Новая сессия",
   "command.file.open": "Открыть файл",
   "command.tab.close": "Закрыть вкладку",
@@ -399,8 +397,6 @@ export const dict = {
   "language.bs": "Bosanski",
   "language.th": "ไทย",
   "language.tr": "Türkçe",
-
-
 
   "toast.permissions.autoaccept.on.title": "Разрешения принимаются автоматически",
   "toast.permissions.autoaccept.on.description":

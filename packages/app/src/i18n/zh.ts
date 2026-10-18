@@ -41,8 +41,6 @@ export const dict = {
 
   "command.palette": "命令面板",
 
-
-
   "command.session.new": "新建会话",
 
   "command.file.open": "打开文件",

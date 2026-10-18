@@ -32,8 +32,6 @@ export const dict = {
 
   "command.palette": "Paleta komandi",
 
-
-
   "command.session.new": "Nova sesija",
   "command.file.open": "Otvori datoteku",
   "command.tab.close": "Zatvori karticu",
@@ -399,8 +397,6 @@ export const dict = {
   "language.bs": "Bosanski",
   "language.th": "ไทย",
   "language.tr": "Türkçe",
-
-
 
   "toast.workspace.enabled.title": "Radni prostori omogućeni",
   "toast.workspace.enabled.description": "Više worktree-ova se sada prikazuje u bočnoj traci",

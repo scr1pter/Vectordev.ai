@@ -36,8 +36,6 @@ export const dict = {
 
   "command.palette": "命令面板",
 
-
-
   "command.session.new": "新增工作階段",
   "command.file.open": "開啟檔案",
   "command.tab.close": "關閉分頁",
@@ -393,8 +391,6 @@ export const dict = {
   "language.bs": "Bosanski",
   "language.th": "ไทย",
   "language.tr": "Türkçe",
-
-
 
   "toast.workspace.enabled.title": "工作區已啟用",
   "toast.workspace.enabled.description": "側邊欄現在顯示多個工作樹",

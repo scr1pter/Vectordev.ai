@@ -35,8 +35,6 @@ export const dict = {
 
   "command.palette": "Kommandopalett",
 
-
-
   "command.session.new": "Ny sesjon",
   "command.file.open": "Åpne fil",
   "command.tab.close": "Lukk fane",
@@ -400,8 +398,6 @@ export const dict = {
   "language.bs": "Bosanski",
   "language.th": "ไทย",
   "language.tr": "Türkçe",
-
-
 
   "toast.workspace.enabled.title": "Arbeidsområder aktivert",
   "toast.workspace.enabled.description": "Flere worktrees vises nå i sidefeltet",

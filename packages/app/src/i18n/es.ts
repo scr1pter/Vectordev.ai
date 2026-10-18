@@ -32,8 +32,6 @@ export const dict = {
 
   "command.palette": "Paleta de comandos",
 
-
-
   "command.session.new": "Nueva sesión",
   "command.file.open": "Abrir archivo",
   "command.tab.close": "Cerrar pestaña",
@@ -399,8 +397,6 @@ export const dict = {
   "language.bs": "Bosanski",
   "language.th": "ไทย",
   "language.tr": "Türkçe",
-
-
 
   "toast.workspace.enabled.title": "Espacios de trabajo habilitados",
   "toast.workspace.enabled.description": "Ahora se muestran varios worktrees en la barra lateral",

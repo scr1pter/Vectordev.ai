@@ -35,8 +35,6 @@ export const dict = {
 
   "command.palette": "Палітра команд",
 
-
-
   "command.session.new": "Нова сесія",
   "command.file.open": "Відкрити файл",
   "command.tab.close": "Закрити вкладку",
@@ -418,8 +416,6 @@ export const dict = {
   "language.uk": "Українська",
   "language.th": "ไทย",
   "language.tr": "Türkçe",
-
-
 
   "toast.workspace.enabled.title": "Робочі області увімкнено",
   "toast.workspace.enabled.description": "Кілька робочих дерев тепер відображаються на бічній панелі",

@@ -54,8 +54,6 @@ export const dict = {
 
   "command.palette": "Command palette",
 
-
-
   "command.session.new": "New task",
   "command.file.open": "Open file",
   "command.tab.close": "Close tab",
@@ -546,8 +544,6 @@ export const dict = {
   "language.uk": "Українська",
   "language.th": "ไทย",
   "language.tr": "Türkçe",
-
-
 
   "toast.workspace.enabled.title": "Workspaces enabled",
   "toast.workspace.enabled.description": "Multiple worktrees are now shown in the sidebar",
