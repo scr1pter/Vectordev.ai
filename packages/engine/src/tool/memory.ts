@@ -241,7 +241,7 @@ function written(result: Exclude<Brain.WriteResult, { type: "refused" }>, replac
   if (result.type === "superseded")
     return `Saved as ${id}, replacing ${result.previous}${replaced ? `: ${words(replaced, 120)}` : ""}.`
   if (result.type === "proposed")
-    return `Saved ${id} as a proposal, not in use yet: its evidence did not check out (the user's own words, a line on the default branch, or a check that went from failing to passing has to say what the memory says). The user can approve it in Settings > Memory.${related}`
+    return `Saved ${id} as a proposal, not in use yet: its evidence did not check out (the user's own words, a line on the default branch, or a check that went from failing to passing has to say all of what the memory says, the same way round). The user can approve it in Settings > Memory.${related}`
   return `Saved ${id} for the user's review (${holdReason(result.entry.hold)}). It is not used until they approve it.${related}`
 }
 

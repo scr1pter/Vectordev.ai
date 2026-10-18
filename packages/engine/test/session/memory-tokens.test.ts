@@ -376,7 +376,7 @@ it.instance(
       yield* llm.tool("memory", {
         action: "add",
         kind: "decision",
-        text: "Staging deploys come only from the release branch.",
+        text: "Staging deploys only from the release branch.",
         quote: "we deploy staging from the release branch only",
       })
       yield* llm.text("Noted.")
@@ -391,7 +391,7 @@ it.instance(
       yield* send("Deploy the staging environment now")
       const body = JSON.stringify((yield* llm.hits)[before]?.body ?? {})
       expect(body).toContain("vector_memory_recall")
-      expect(body).toContain("Staging deploys come only from the release branch.")
+      expect(body).toContain("Staging deploys only from the release branch.")
     }),
   60_000,
 )
