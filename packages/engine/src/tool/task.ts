@@ -25,7 +25,7 @@ import { Config } from "@/config/config"
 import { Cause, Effect, Exit, Option, Schema, Scope, Semaphore } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
-import { realpath } from "./external-directory"
+import { FSUtil } from "@vectordevai/core/fs-util"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@vectordevai/core/database/database"
 import { Provider } from "@/provider/provider"
@@ -577,7 +577,7 @@ export const TaskTool = Tool.define(
       const instance = yield* InstanceState.context
       const ownedPaths = yield* Effect.try({
         try: () => {
-          const canonical = (owned: string) => normalizedPath(path.relative(realpath(instance.directory), realpath(path.resolve(instance.directory, owned))) || ".")
+          const canonical = (owned: string) => normalizedPath(path.relative(FSUtil.realpath(instance.directory), FSUtil.realpath(path.resolve(instance.directory, owned))) || ".")
           const inherited = (SubagentLifecycle.read(parent)?.ownedPaths ?? []).map(canonical)
           const requested = [...new Set(params.owned_paths?.map(normalizedPath).filter(Boolean).map(canonical) ?? [])]
           if (inherited.length && requested.some((owned) => !inherited.some((boundary) => boundary === "." || owned === boundary || owned.startsWith(`${boundary}/`))))

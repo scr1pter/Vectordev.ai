@@ -569,6 +569,19 @@ describe("plugin.install.task", () => {
   })
 })
 
+test("plugin installation never writes a project config that is really outside the project", async () => {
+  await using tmp = await tmpdir()
+  await using outside = await tmpdir()
+  const target = await plugin(tmp.path, ["server"])
+  const original = JSON.stringify({ plugin: [] })
+  await Filesystem.write(path.join(outside.path, "vector.jsonc"), original)
+  await fs.symlink(outside.path, path.join(tmp.path, ".vector"), process.platform === "win32" ? "junction" : "dir")
+  const run = createPlugTask({ mod: "acme@1.0.0" }, deps(path.join(tmp.path, "global"), target))
+  expect(await run(ctx(tmp.path))).toBe(false)
+  expect(await fs.readFile(path.join(outside.path, "vector.jsonc"), "utf8")).toBe(original)
+  expect(await fs.readdir(outside.path)).toEqual(["vector.jsonc"])
+})
+
 test("plugin installation updates Vector config and leaves unrelated files untouched", async () => {
   await using tmp = await tmpdir()
   const target = await plugin(tmp.path, ["server"])

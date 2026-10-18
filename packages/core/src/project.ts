@@ -3,6 +3,7 @@ export * as Project from "./project"
 
 import { Context, Effect, Layer, Schema } from "effect"
 import { and, eq, ne } from "drizzle-orm"
+import { lstatSync, readdirSync, readFileSync } from "fs"
 import path from "path"
 import { AbsolutePath } from "./schema"
 import { FSUtil } from "./fs-util"
@@ -49,7 +50,7 @@ export interface Interface {
    * finishes migrating from `resolve().previous` to `resolve().id`; once project
    * persistence moves into core, this separate bridge method can go away.
    */
-  readonly commit: (input: { store: AbsolutePath; id: ID }) => Effect.Effect<void>
+  readonly commit: (input: { store: AbsolutePath; worktree: AbsolutePath; id: ID }) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/ProjectV2") {}
@@ -152,8 +153,18 @@ const layer = Layer.effect(
       }
     })
 
-    const commit = Effect.fn("Project.commit")(function* (input: { store: AbsolutePath; id: ID }) {
-      yield* fs.writeWithDirs(path.join(input.store, "vector", "project-id"), input.id).pipe(Effect.ignore)
+    const commit = Effect.fn("Project.commit")(function* (input: {
+      store: AbsolutePath
+      worktree: AbsolutePath
+      id: ID
+    }) {
+      const file = path.join(input.store, "vector", "project-id")
+      // This runs when a repository is opened, before trust, and writing follows links: a downloaded repository can carry
+      // its .git/vector as a link to any folder of the user's, or its .git as a link or a gitdir file naming another
+      // repository's store.
+      if (!ownStore(input.store, input.worktree)) return
+      if (!FSUtil.writableInside(input.store, file)) return
+      yield* fs.writeWithDirs(file, input.id).pipe(Effect.ignore)
     })
 
     return Service.of({ directories, resolve, commit })
@@ -165,3 +176,22 @@ export const node = makeGlobalNode({
   layer: layer,
   deps: [FSUtil.node, Git.node, ProjectDirectories.node, Database.node],
 })
+
+// Whether a store is the work tree's own: inside it, or the shared store of a linked worktree whose registration there
+// points back at this work tree's .git file. A repository cannot write that registration into a store it does not own.
+function ownStore(store: string, worktree: string) {
+  try {
+    if (FSUtil.contains(FSUtil.realpath(worktree), FSUtil.realpath(store))) return true
+    const dotgit = path.join(worktree, ".git")
+    if (!lstatSync(dotgit, { throwIfNoEntry: false })?.isFile()) return false
+    const registered = path.join(store, "worktrees")
+    return readdirSync(registered).some((name) => {
+      const file = path.join(registered, name, "gitdir")
+      if (!lstatSync(file, { throwIfNoEntry: false })?.isFile()) return false
+      const back = path.resolve(registered, name, readFileSync(file, "utf8").trim())
+      return path.relative(FSUtil.realpath(back), FSUtil.realpath(dotgit)) === ""
+    })
+  } catch {
+    return false
+  }
+}

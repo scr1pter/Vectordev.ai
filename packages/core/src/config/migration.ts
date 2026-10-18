@@ -71,10 +71,15 @@ function mergeSettings(left: Record<string, unknown>, right: Record<string, unkn
   )
 }
 
+/**
+ * Imports settings from `directory` into `destination`. Nothing is written unless every file it writes is a plain file
+ * that really lands inside `root`, which is the workspace for a project folder and the folder itself for the user's.
+ */
 export const run = Effect.fn("ConfigMigration.run")(function* (
   directory: string,
   local = false,
   destination = directory,
+  root = destination,
 ) {
   const fs = yield* FSUtil.Service
   if (!(yield* fs.isDir(directory))) return
@@ -186,6 +191,17 @@ export const run = Effect.fn("ConfigMigration.run")(function* (
           applyEdits(result, modify(result, [key], value, { formattingOptions: { insertSpaces: true, tabSize: 2 } })),
         original,
       )
+      // This runs before the workspace is trusted, and writing follows links: a project can ship its .gitignore or
+      // settings file as a link to a file outside it.
+      const refused = [targets[1], ...(local ? [path.join(destination, ".gitignore")] : [])].find(
+        (file) => !FSUtil.writableInside(root, file),
+      )
+      if (refused) {
+        yield* Effect.logWarning(
+          `Skipped importing settings from ${directory}: ${refused} is a link, not a plain file, or outside ${root}.`,
+        )
+        return
+      }
       if (local) {
         const gitignore = path.join(destination, ".gitignore")
         const existing = (yield* fs.readFileStringSafe(gitignore)) ?? ""
@@ -218,7 +234,22 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
 }) {
   const fs = yield* FSUtil.Service
   const results: Array<{ sources: string[]; target: string; message: string }> = []
-  const global = yield* run(input.global)
+  // Imports write before the workspace is trusted. A folder inside the workspace is written only where it really is
+  // inside the workspace, so a project folder that links out of it is never written. The home folder and the folders
+  // above a non-git workspace, whose settings load with the project's, are written only inside themselves.
+  const workspace = path.resolve(input.worktree && input.worktree !== "/" ? input.worktree : input.directory)
+  // Decided under every spelling of the workspace, not only as written: a folder reached through an alias of the
+  // workspace, or through a workspace link that points out, is the workspace's. One that cannot be resolved is held to
+  // the workspace too, which nothing behind a link loop can pass.
+  const owner = (directory: string) => {
+    try {
+      return FSUtil.within([workspace], directory) === undefined ? directory : workspace
+    } catch {
+      return workspace
+    }
+  }
+  // The global folder can come from VECTOR_AGENT_CONFIG_DIR, which can name a folder of the project's.
+  const global = yield* run(input.global, false, input.global, owner(input.global))
   if (global) results.push(global)
   const parents: string[] = []
   const visit = (directory: string): void => {
@@ -229,10 +260,11 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
   }
   if (!input.disableProject) visit(path.resolve(input.directory))
   for (const directory of parents.toReversed()) {
-    const imported = yield* run(directory)
+    const imported = yield* run(directory, false, directory, owner(directory))
     if (imported) results.push(imported)
   }
   for (const directory of new Set([input.home, ...parents])) {
+    const root = owner(directory)
     // Only the exact earlier folder is opened; other dot folders, such as ~/.Trash, which macOS refuses to list
     // without Full Disk Access, are never read. An unreadable folder holds nothing to import.
     const entries = yield* fs.readDirectoryEntries(directory).pipe(Effect.orElseSucceed(() => []))
@@ -245,6 +277,13 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
     if (!earlier) continue
     const source = path.join(directory, earlier.name)
     if (!(yield* fs.isDir(source))) continue
+    // Only the home folder's earlier folder is followed wherever it links. Anywhere else a link can be a repository's,
+    // pointing at the user's own settings elsewhere, and importing it would copy their keys into the repository
+    // before trust.
+    if (directory !== input.home && !realInside(root, source)) {
+      yield* Effect.logWarning(`Skipped importing ${source}: it links outside ${root}.`)
+      continue
+    }
     // No marker is written for a folder that cannot be listed yet, so a later launch imports it once readable.
     const listing = yield* fs.readDirectoryEntries(source).pipe(Effect.option)
     if (Option.isNone(listing)) {
@@ -254,21 +293,32 @@ export const discover = Effect.fn("ConfigMigration.discover")(function* (input: 
     const files = listing.value
     const assets = files.filter((file) => file.type === "directory" && assetNames.includes(file.name))
     const target = path.join(directory, ".vector")
-    if (entries.find((entry) => entry.name === ".vector")?.type === "symlink")
+    // A linked .vector in the user's home folder is theirs to merge. Anywhere else, such as an extracted archive or a
+    // shared folder above a non-git workspace, it is not, so it never stops Vector from starting.
+    if (entries.find((entry) => entry.name === ".vector")?.type === "symlink") {
+      if (directory !== input.home) {
+        yield* Effect.logWarning(`Skipped importing ${source}: ${target} is a link.`)
+        continue
+      }
       return yield* Effect.die(
         new Error(
           `Cannot import into linked folder ${target}. Merge the earlier settings into the intended destination before starting Vector.`,
         ),
       )
+    }
     const marker = path.join(target, "vector-migration.json")
     if (yield* fs.exists(marker)) continue
+    if (!FSUtil.writableInside(root, marker)) {
+      yield* Effect.logWarning(`Skipped importing ${source}: ${target} is not a plain folder inside ${root}.`)
+      continue
+    }
     const flock = yield* EffectFlock.Service
     const copied = yield* flock.withLock(
       Effect.gen(function* () {
         if (yield* fs.exists(marker)) return
         yield* fs.ensureDir(target)
-        const imported = yield* run(source, false, target)
-        const local = yield* run(source, true, target)
+        const imported = yield* run(source, false, target, root)
+        const local = yield* run(source, true, target, root)
         if (imported) results.push(imported)
         if (local) results.push(local)
         // package.json only carries dependencies for copied plugins and tools.
@@ -360,4 +410,13 @@ const copyAsset: (source: string, target: string) => Effect.Effect<void, FSUtil.
 // The marker is still written: retrying would report conflicts for imported files the user has since edited.
 function skipUnreadable(source: string) {
   return Effect.logWarning(`Skipped ${source} while importing earlier settings because it cannot be read.`)
+}
+
+// Whether a path really lies inside root once both are resolved. One that cannot be resolved does not.
+function realInside(root: string, file: string) {
+  try {
+    return FSUtil.contains(FSUtil.realpath(root), FSUtil.realpath(file))
+  } catch {
+    return false
+  }
 }

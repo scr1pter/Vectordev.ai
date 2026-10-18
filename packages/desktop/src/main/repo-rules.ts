@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { FSUtil } from "@vectordevai/core/fs-util"
 import { vectorConfigDir } from "./config-path"
 import { getStore } from "./store"
 import {
@@ -58,8 +59,12 @@ function readStored(): RepoRule[] {
 // as empty. A file that cannot be read for any other reason leaves its rules as saved: reading must not drop rules on
 // a permissions error, and saving to that file still fails loudly in syncRulesFile.
 function readRulesFileForReconcile(repositoryPath: string) {
+  const target = repositoryPath ? rulesFilePath(repositoryPath) : globalRulesFilePath()
+  // A repository can carry RULES.md as a link to a file of the user's; its contents must not reach agent prompts. The
+  // saved rules stay as they are, as they do for any file that cannot be read.
+  if (repositoryPath && existsSync(target) && !FSUtil.writableInside(repositoryPath, target)) return undefined
   try {
-    return readFileSync(repositoryPath ? rulesFilePath(repositoryPath) : globalRulesFilePath(), "utf8")
+    return readFileSync(target, "utf8")
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "ENOENT" ? "" : undefined
   }
@@ -126,6 +131,9 @@ export async function deleteRepoRule(id: string) {
 // a teammate authored outside that block.
 export async function syncRulesFile(repositoryPath: string, rules = readAll(), previousRules = rules) {
   const target = repositoryPath ? rulesFilePath(repositoryPath) : globalRulesFilePath()
+  // A repository can carry its .vector, or RULES.md, as a link to any file of the user's, and writing follows it.
+  if (repositoryPath && !FSUtil.writableInside(repositoryPath, target))
+    throw new Error(`Cannot save rules to ${target}: it is a link, not a plain file, or outside ${repositoryPath}.`)
   const body = mergeRulesFile(
     (await readOptionalFile(target, "utf8")) ?? "",
     rules.filter((rule) => managesRule(rule, repositoryPath)),
@@ -155,6 +163,7 @@ async function commitRules(next: RepoRule[], previous: RepoRule[], repositoryPat
   } catch (error) {
     await Promise.all(
       targets.map(async (target, index) => {
+        if (paths[index] && !FSUtil.writableInside(paths[index], target)) return
         const snapshot = snapshots[index]
         if (!snapshot) return rm(target, { force: true }).catch(() => undefined)
         await mkdir(dirname(target), { recursive: true }).catch(() => undefined)

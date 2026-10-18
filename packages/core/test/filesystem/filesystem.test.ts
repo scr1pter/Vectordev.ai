@@ -5,6 +5,8 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { testEffect } from "../lib/effect"
 import path from "path"
+import fs from "fs/promises"
+import os from "os"
 
 const live = LayerNode.compile(LayerNode.group([FSUtil.node, LayerNodePlatform.filesystem]))
 const { effect: it } = testEffect(live)
@@ -374,6 +376,77 @@ describe("FSUtil", () => {
       expect(FSUtil.contains("/a/b", "/a/c")).toBe(false)
       expect(FSUtil.contains("/a/b", "/a/bad")).toBe(false)
       if (process.platform === "win32") expect(FSUtil.contains("C:\\a", "D:\\b")).toBe(false)
+    })
+
+    test("within finds a path under every spelling of a root", async () => {
+      const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "vector-within-")))
+      const linkType = process.platform === "win32" ? "junction" : "dir"
+      try {
+        const root = path.join(base, "root")
+        const outside = path.join(base, "outside")
+        await fs.mkdir(root)
+        await fs.mkdir(outside)
+        await fs.symlink(root, path.join(base, "alias"), linkType)
+        await fs.symlink(outside, path.join(root, "away"), linkType)
+        await fs.symlink(path.join(root, "away"), path.join(base, "chain"), linkType)
+
+        expect(FSUtil.within([root], path.join(root, "a.json"))).toBe(path.join(root, "a.json"))
+        // Another spelling of the root, a link of the root's own that points out, and a link to that link.
+        expect(FSUtil.within([root], path.join(base, "alias", "a.json"))).toBe(path.join(root, "a.json"))
+        expect(FSUtil.within([root], path.join(base, "alias", "away", "a.json"))).toBe(
+          path.join(root, "away", "a.json"),
+        )
+        expect(FSUtil.within([root], path.join(base, "chain", "a.json"))).toBe(path.join(root, "away", "a.json"))
+        expect(FSUtil.within([root], path.join(outside, "a.json"))).toBeUndefined()
+        expect(FSUtil.within([root], path.join(base, "alias", "..", "outside", "a.json"))).toBeUndefined()
+      } finally {
+        await fs.rm(base, { recursive: true, force: true })
+      }
+    })
+
+    test("writableInside allows only a plain file that really lands inside the root", async () => {
+      const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "vector-writable-")))
+      const linkType = process.platform === "win32" ? "junction" : "dir"
+      try {
+        const root = path.join(base, "root")
+        const outside = path.join(base, "outside")
+        await fs.mkdir(path.join(root, "inner"), { recursive: true })
+        await fs.mkdir(outside)
+        await fs.writeFile(path.join(root, "plain.json"), "{}")
+        await fs.writeFile(path.join(outside, "victim.json"), "{}")
+        await fs.symlink(outside, path.join(root, "away"), linkType)
+        await fs.symlink(path.join(root, "inner"), path.join(root, "here"), linkType)
+        await fs.symlink(root, path.join(base, "alias"), linkType)
+        await fs.link(path.join(outside, "victim.json"), path.join(root, "hard.json"))
+
+        expect(FSUtil.writableInside(root, path.join(root, "plain.json"))).toBe(true)
+        expect(FSUtil.writableInside(root, path.join(root, "new.json"))).toBe(true)
+        expect(FSUtil.writableInside(root, path.join(root, "here", "new.json"))).toBe(true)
+        expect(FSUtil.writableInside(path.join(base, "alias"), path.join(root, "plain.json"))).toBe(true)
+        expect(FSUtil.writableInside(root, path.join(base, "alias", "plain.json"))).toBe(true)
+        // A directory link pointing out, a directory, another hard link to an outside file, and a path outside.
+        expect(FSUtil.writableInside(root, path.join(root, "away", "victim.json"))).toBe(false)
+        expect(FSUtil.writableInside(root, path.join(root, "away", "new.json"))).toBe(false)
+        expect(FSUtil.writableInside(root, path.join(root, "inner"))).toBe(false)
+        expect(FSUtil.writableInside(root, path.join(root, "hard.json"))).toBe(false)
+        expect(FSUtil.writableInside(root, path.join(outside, "victim.json"))).toBe(false)
+        expect(FSUtil.writableInside(root, path.join(root, "..", "outside", "victim.json"))).toBe(false)
+
+        // File links, which Windows creates only with a privilege that CI runners hold.
+        const linked = await fs
+          .symlink(path.join(root, "plain.json"), path.join(root, "inside-link.json"), "file")
+          .then(() => fs.symlink(path.join(outside, "missing.json"), path.join(root, "dangling.json"), "file"))
+          .then(() => true)
+          .catch((error) => {
+            if (process.platform === "win32" && error?.code === "EPERM") return false
+            throw error
+          })
+        if (!linked) return
+        expect(FSUtil.writableInside(root, path.join(root, "inside-link.json"))).toBe(false)
+        expect(FSUtil.writableInside(root, path.join(root, "dangling.json"))).toBe(false)
+      } finally {
+        await fs.rm(base, { recursive: true, force: true })
+      }
     })
 
     test("overlaps detects overlapping paths", () => {

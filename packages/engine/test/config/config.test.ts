@@ -24,6 +24,7 @@ import {
   withTestInstance,
   provideInstanceEffect,
   testInstanceStoreLayer,
+  disposeAllInstancesEffect,
 } from "../fixture/fixture"
 import { InstanceRuntime } from "@/project/instance-runtime"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
@@ -36,6 +37,7 @@ import { Global } from "@vectordevai/core/global"
 import { ProjectV2 } from "@vectordevai/core/project"
 import { Filesystem } from "@/util/filesystem"
 import { ConfigPlugin } from "@/config/plugin"
+import { ConfigPaths } from "@/config/paths"
 import { ConfigPluginV1 } from "@vectordevai/core/v1/config/plugin"
 import { AuthTest } from "../fake/auth"
 import { NpmTest } from "../fake/npm"
@@ -109,6 +111,9 @@ const it = testEffect(layer)
 const configIt = (options?: Parameters<typeof configLayer>[0]) => testEffect(configLayer(options))
 
 const schemaConfig = (config: object) => ({ $schema: "https://vectordev.ai/config.json", ...config })
+
+// Directory links that need no privilege on Windows, so the same spellings are built on every platform.
+const linkType = process.platform === "win32" ? "junction" : "dir"
 
 const provideCurrentInstance = <A, E, R>(effect: Effect.Effect<A, E, R>, ctx: InstanceContext) =>
   effect.pipe(Effect.provideService(InstanceRef, ctx))
@@ -750,6 +755,131 @@ it.instance("keeps the safe settings of a project vector.json that is a symlink"
     yield* Effect.promise(() => fs.symlink(shared, path.join(test.directory, "vector.json")))
 
     expect(yield* Config.use.get()).toMatchObject({ permission: { bash: "deny" }, username: "shared" })
+  }),
+)
+
+it.instance("never rewrites a file outside the project that a project vector.json links to", () =>
+  Effect.gen(function* () {
+    // File links need a privilege Windows does not grant by default; the .vector case below covers it there.
+    if (process.platform === "win32") return
+    const test = yield* TestInstance
+    const outside = path.join(yield* tmpdirScoped(), "config.toml")
+    const toml = 'username = "outside"\n'
+    yield* FSUtil.use.writeFileString(outside, toml)
+    yield* Effect.promise(() => fs.symlink(outside, path.join(test.directory, "vector.json"), "file"))
+
+    // Still read as the project's config, but the other tool's file is not turned into JSON before trust.
+    expect((yield* Config.use.get()).username).toBe("outside")
+    expect(yield* FSUtil.use.readFileString(outside)).toBe(toml)
+  }),
+)
+
+it.instance("never rewrites an outside file that a project vector.json is a hard link to", () =>
+  Effect.gen(function* () {
+    // Every OS creates a hard link without a privilege, so this guards the rule on Windows too.
+    const test = yield* TestInstance
+    const outside = path.join(yield* tmpdirScoped(), "config.toml")
+    const toml = 'username = "outside"\n'
+    yield* FSUtil.use.writeFileString(outside, toml)
+    yield* Effect.promise(() => fs.link(outside, path.join(test.directory, "vector.json")))
+
+    expect((yield* Config.use.get()).username).toBe("outside")
+    expect(yield* FSUtil.use.readFileString(outside)).toBe(toml)
+  }),
+)
+
+it.instance("never rewrites files in a project .vector that links outside the project", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const outside = yield* tmpdirScoped()
+    const toml = 'username = "outside"\n'
+    yield* FSUtil.use.writeFileString(path.join(outside, "vector.json"), toml)
+    yield* Effect.promise(() => fs.symlink(outside, path.join(test.directory, ".vector"), linkType))
+
+    yield* Config.use.get()
+    expect(yield* FSUtil.use.readFileString(path.join(outside, "vector.json"))).toBe(toml)
+  }),
+)
+
+it.instance("never writes outside an untrusted project through an env-named folder the project links out", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const outside = yield* tmpdirScoped()
+    // Importable settings and a plugin folder, which would make the loader import and seed a .gitignore.
+    yield* FSUtil.use.writeFileString(path.join(outside, "config.json"), '{"permission":{"bash":"deny"}}')
+    yield* FSUtil.use.writeWithDirs(path.join(outside, "plugin", "marker.ts"), "export default {}")
+    yield* Effect.promise(() => fs.symlink(outside, path.join(test.directory, "linked"), linkType))
+    const listing = () => Effect.promise(() => fs.readdir(outside).then((names) => names.toSorted()))
+    const before = yield* listing()
+
+    yield* withProcessEnv("VECTOR_AGENT_CONFIG_DIR", path.join(test.directory, "linked"), Config.use.get())
+    expect(yield* listing()).toEqual(before)
+  }),
+)
+
+it.effect("still imports and seeds the user's own env-named folder, but never through a link", () =>
+  Effect.gen(function* () {
+    const project = yield* tmpdirScoped()
+    const own = yield* tmpdirScoped()
+    const away = yield* tmpdirScoped()
+    yield* FSUtil.use.writeFileString(path.join(own, "config.json"), '{"permission":{"bash":"deny"}}')
+    yield* FSUtil.use.writeWithDirs(path.join(own, "plugin", "marker.ts"), "export default {}")
+    const load = withProcessEnv(
+      "VECTOR_AGENT_CONFIG_DIR",
+      own,
+      Config.use.get().pipe(provideInstanceEffect(project)),
+    ).pipe(Effect.ensuring(disposeAllInstancesEffect))
+    expect((yield* load).permission?.bash).toBe("deny")
+    expect(yield* FSUtil.use.readJson(path.join(own, "vector.jsonc"))).toMatchObject({ permission: { bash: "deny" } })
+    expect(yield* FSUtil.use.existsSafe(path.join(own, ".gitignore"))).toBe(true)
+
+    // A legacy settings file linked from elsewhere is read but not rewritten, and a dangling .gitignore link creates
+    // nothing. File links need a privilege on Windows, which CI runners hold.
+    const legacy = '{"$schema":"https://example.test/config.json","username":"linked"}'
+    yield* FSUtil.use.writeFileString(path.join(away, "settings.json"), legacy)
+    yield* FSUtil.use.remove(path.join(own, ".gitignore"))
+    const linked = yield* Effect.promise(() =>
+      fs
+        .symlink(path.join(away, "settings.json"), path.join(own, "vector.json"), "file")
+        .then(() => fs.symlink(path.join(away, "created"), path.join(own, ".gitignore"), "file"))
+        .then(() => true)
+        .catch((error) => {
+          if (process.platform === "win32" && error?.code === "EPERM") return false
+          throw error
+        }),
+    )
+    if (!linked) return
+    expect((yield* load).username).toBe("linked")
+    expect(yield* FSUtil.use.readFileString(path.join(away, "settings.json"))).toBe(legacy)
+    expect(yield* FSUtil.use.existsSafe(path.join(away, "created"))).toBe(false)
+  }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
+)
+
+it.instance("saves project settings only into a plain file inside the project, keeping references as written", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const outside = yield* tmpdirScoped()
+    const secret = path.join(outside, "secret.txt")
+    yield* FSUtil.use.writeFileString(secret, "outside-secret")
+    const file = path.join(test.directory, "vector.json")
+    yield* FSUtil.use.writeFileString(file, JSON.stringify({ username: `{file:${secret}}` }))
+    yield* Config.Service.use((svc) =>
+      svc.update(ConfigParse.schema(ConfigV1.Info, { model: "updated/model" }, "test:config")),
+    )
+    const saved = yield* FSUtil.use.readFileString(file)
+    expect(saved).not.toContain("outside-secret")
+    expect(JSON.parse(saved)).toMatchObject({ username: `{file:${secret}}`, model: "updated/model" })
+
+    // A vector.json that is another name for an outside file, which every OS can create as a hard link.
+    const victim = path.join(outside, "victim.json")
+    yield* FSUtil.use.writeFileString(victim, '{"username":"victim"}')
+    yield* FSUtil.use.remove(file)
+    yield* Effect.promise(() => fs.link(victim, file))
+    const exit = yield* Config.Service.use((svc) =>
+      svc.update(ConfigParse.schema(ConfigV1.Info, { model: "updated/model" }, "test:config")),
+    ).pipe(Effect.exit)
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(yield* FSUtil.use.readFileString(victim)).toBe('{"username":"victim"}')
   }),
 )
 
@@ -1621,6 +1751,221 @@ for (const marker of ["plugin", "plugins", "tool", "tools", "package.json"]) {
     }),
   )
 }
+
+describe("config paths named by environment variables", () => {
+  it.effect("are project config, in the project's own spelling, when they pass through the project", () =>
+    Effect.gen(function* () {
+      const project = yield* tmpdirScoped()
+      const outside = yield* tmpdirScoped()
+      const alias = path.join(outside, "project")
+      const away = path.join(outside, "away")
+      yield* FSUtil.use.ensureDir(away)
+      yield* writeConfigEffect(project, {}, "agent.json")
+      yield* Effect.promise(() => fs.symlink(project, alias, linkType))
+      yield* Effect.promise(() => fs.symlink(away, path.join(project, "linked"), linkType))
+      const classify = (input: string) => ConfigPaths.environmentPath(input, { directory: project })
+
+      // Through a link into the project: a file, a file that does not exist yet, and the directory itself.
+      expect(yield* classify(path.join(alias, "agent.json"))).toEqual({
+        path: path.join(project, "agent.json"),
+        project: true,
+      })
+      expect(yield* classify(path.join(alias, "missing.json"))).toEqual({
+        path: path.join(project, "missing.json"),
+        project: true,
+      })
+      expect(yield* classify(alias)).toEqual({ path: project, project: true })
+      // A link the project owns stays the project's wherever it points, under either spelling of the project.
+      for (const root of [project, alias]) {
+        expect(yield* classify(path.join(root, "linked", "agent.json"))).toEqual({
+          path: path.join(project, "linked", "agent.json"),
+          project: true,
+        })
+      }
+      // Outside the project, the path is read where it was classified, with `..` collapsed first.
+      expect(yield* classify(path.join(away, "agent.json"))).toEqual({
+        path: path.join(away, "agent.json"),
+        project: false,
+      })
+      expect(yield* classify([alias, "..", "agent.json"].join(path.sep))).toEqual({
+        path: path.join(outside, "agent.json"),
+        project: false,
+      })
+    }),
+  )
+
+  it.effect("are project config when a link chain passes through the project on its way out", () =>
+    Effect.gen(function* () {
+      const project = yield* tmpdirScoped()
+      const outside = yield* tmpdirScoped()
+      const away = yield* tmpdirScoped()
+      // A user's directory link to a project directory link that points out of the project again.
+      yield* writeConfigEffect(away, {}, "vector.json")
+      yield* Effect.promise(() => fs.symlink(away, path.join(project, "dlink"), linkType))
+      yield* Effect.promise(() => fs.symlink(path.join(project, "dlink"), path.join(outside, "dir-alias"), linkType))
+      expect(
+        yield* ConfigPaths.environmentPath(path.join(outside, "dir-alias", "vector.json"), { directory: project }),
+      ).toEqual({
+        path: path.join(project, "dlink", "vector.json"),
+        project: true,
+      })
+      expect(yield* ConfigPaths.environmentPath(path.join(outside, "dir-alias"), { directory: project })).toEqual({
+        path: path.join(project, "dlink"),
+        project: true,
+      })
+      // The same chain made of file links. Windows creates those only with a privilege, which CI runners hold.
+      const linked = yield* Effect.promise(() =>
+        fs
+          .symlink(path.join(away, "vector.json"), path.join(project, "link-out.json"), "file")
+          .then(() => fs.symlink(path.join(project, "link-out.json"), path.join(outside, "user-link.json"), "file"))
+          .then(() => true)
+          .catch((error) => {
+            if (process.platform === "win32" && error?.code === "EPERM") return false
+            throw error
+          }),
+      )
+      if (!linked) return
+      expect(yield* ConfigPaths.environmentPath(path.join(outside, "user-link.json"), { directory: project })).toEqual({
+        path: path.join(project, "link-out.json"),
+        project: true,
+      })
+      // A relative link target applies its own `..` after the links before it, so the chain is still followed.
+      yield* Effect.promise(() =>
+        fs.symlink(
+          path.join("..", path.basename(project), "link-out.json"),
+          path.join(outside, "relative-link.json"),
+          "file",
+        ),
+      )
+      expect(
+        yield* ConfigPaths.environmentPath(path.join(outside, "relative-link.json"), { directory: project }),
+      ).toEqual({ path: path.join(project, "link-out.json"), project: true })
+      // The user's own file outside the project, and a chain that never enters it, stay the user's.
+      yield* Effect.promise(() => fs.symlink(path.join(away, "vector.json"), path.join(outside, "own.json"), "file"))
+      expect(yield* ConfigPaths.environmentPath(path.join(outside, "own.json"), { directory: project })).toEqual({
+        path: path.join(outside, "own.json"),
+        project: false,
+      })
+    }),
+  )
+
+  it.effect("are not loaded at all when they cannot be resolved", () =>
+    Effect.gen(function* () {
+      // A file link loop, which Windows cannot create without a privilege.
+      if (process.platform === "win32") return
+      const project = yield* tmpdirScoped()
+      const loop = path.join(yield* tmpdirScoped(), "loop")
+      yield* Effect.promise(() => fs.symlink(loop, loop))
+      expect(yield* ConfigPaths.environmentPath(path.join(loop, "agent.json"), { directory: project })).toBeUndefined()
+    }),
+  )
+})
+
+it.effect("never writes through a .vector above a non-git workspace that links away", () =>
+  Effect.gen(function* () {
+    const root = yield* tmpdirScoped()
+    const outside = yield* tmpdirScoped()
+    const app = path.join(root, "app")
+    yield* FSUtil.use.ensureDir(app)
+    // Settings to rewrite, settings to import, local settings and a plugin folder: everything the loader writes for.
+    yield* writeConfigEffect(outside, {
+      $schema: "https://example.test/config.json",
+      theme: "outside",
+      keybinds: { app_exit: "ctrl+q" },
+      shell: "/fixture/outside-shell",
+    })
+    yield* writeConfigEffect(outside, { permission: { bash: "deny" } }, "config.json")
+    yield* writeConfigEffect(outside, { mcp: { docs: { enabled: false } } }, "config.local.json")
+    yield* FSUtil.use.writeWithDirs(path.join(outside, "plugins", "x.ts"), "export default {}")
+    yield* Effect.promise(() => fs.symlink(outside, path.join(root, ".vector"), linkType))
+    const listing = () =>
+      Effect.promise(async () => {
+        const names = (await fs.readdir(outside, { recursive: true })).map(String).toSorted()
+        return Promise.all(
+          names.map(async (name) => {
+            const file = path.join(outside, name)
+            return [name, (await fs.stat(file)).isFile() ? await fs.readFile(file, "utf8") : "dir"]
+          }),
+        )
+      })
+    const before = yield* listing()
+
+    const config = yield* Config.use.get().pipe(provideInstanceEffect(app), Effect.ensuring(disposeAllInstancesEffect))
+    expect(config.shell).toBeUndefined()
+    expect(yield* listing()).toEqual(before)
+  }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
+)
+
+it.effect("holds a .vector above a non-git workspace back until the workspace is trusted", () =>
+  Effect.gen(function* () {
+    // A non-git folder, as at the top of an extracted archive or in a shared /tmp, opened one level down.
+    const root = yield* tmpdirScoped()
+    const app = path.join(root, "app")
+    const parent = path.join(root, ".vector")
+    yield* FSUtil.use.ensureDir(app)
+    yield* writeConfigEffect(parent, {
+      shell: "/fixture/parent-shell",
+      permission: { bash: "deny" },
+      mcp: { parent: { type: "local", command: ["/fixture/parent-mcp"] } },
+    })
+    yield* FSUtil.use.writeWithDirs(path.join(parent, "command", "parent-command.md"), "Parent command")
+    yield* FSUtil.use.writeWithDirs(path.join(parent, "plugin", "marker.ts"), "export default {}")
+    const load = Config.use.get().pipe(provideInstanceEffect(app), Effect.ensuring(disposeAllInstancesEffect))
+
+    const config = yield* load
+    expect(config.shell).toBeUndefined()
+    // The folder may still narrow what the agent can do.
+    expect(config.permission?.bash).toBe("deny")
+    expect(config.mcp?.parent).toBeUndefined()
+    expect(config.command?.["parent-command"]).toBeUndefined()
+    expect((config.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item)).join()).not.toContain("marker")
+
+    // Once the workspace is trusted, the folder's commands load as before.
+    yield* Config.Service.use((service) => service.approve!()).pipe(
+      provideInstanceEffect(app),
+      Effect.ensuring(disposeAllInstancesEffect),
+    )
+    expect((yield* load).command?.["parent-command"]).toBeDefined()
+  }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
+)
+
+it.effect("treats a VECTOR_AGENT_CONFIG_DIR inside an untrusted project as project config under any spelling", () =>
+  Effect.gen(function* () {
+    const project = yield* tmpdirScoped()
+    const alias = path.join(yield* tmpdirScoped(), "project")
+    yield* Effect.promise(() => fs.symlink(project, alias, linkType))
+    const directory = path.join(project, "agent-config")
+    yield* writeConfigEffect(directory, { shell: "/fixture/dir-shell", permission: { bash: "deny" } })
+    yield* FSUtil.use.writeWithDirs(
+      path.join(directory, "agent", "granted.md"),
+      "---\npermission:\n  bash: allow\n---\nGranted agent",
+    )
+    yield* FSUtil.use.writeWithDirs(path.join(directory, "command", "project-command.md"), "Project command")
+    yield* FSUtil.use.writeWithDirs(path.join(directory, "plugin", "marker.ts"), "export default {}")
+    const load = (spelling: string) =>
+      withProcessEnv("VECTOR_AGENT_CONFIG_DIR", spelling, Config.use.get().pipe(provideInstanceEffect(project))).pipe(
+        Effect.ensuring(disposeAllInstancesEffect),
+      )
+
+    for (const spelling of [directory, path.join(alias, "agent-config")]) {
+      const config = yield* load(spelling)
+      expect(config.shell).toBeUndefined()
+      // A project may still narrow what the agent can do.
+      expect(config.permission?.bash).toBe("deny")
+      expect(config.agent?.granted).toBeUndefined()
+      expect(config.command?.["project-command"]).toBeUndefined()
+      expect((config.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item)).join()).not.toContain("marker")
+    }
+
+    // Once the project is trusted, the directory's commands load as before.
+    yield* withProcessEnv(
+      "VECTOR_AGENT_CONFIG_DIR",
+      path.join(alias, "agent-config"),
+      Config.Service.use((service) => service.approve!()).pipe(provideInstanceEffect(project)),
+    ).pipe(Effect.ensuring(disposeAllInstancesEffect))
+    expect((yield* load(path.join(alias, "agent-config"))).command?.["project-command"]).toBeDefined()
+  }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
+)
 
 it.effect("does not try to install dependencies in read-only VECTOR_AGENT_CONFIG_DIR", () =>
   Effect.gen(function* () {

@@ -1,6 +1,7 @@
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { FSUtil } from "@vectordevai/core/fs-util"
 
 import type { GuardrailCheckResult, WorkspaceValidationReport } from "./workspace-guardrails"
 
@@ -220,11 +221,14 @@ export async function recordValidationRun(projectPath: string, input: Validation
     // do not leave an empty file in every project the user ever opens.
     if (!memory.records.length && !previous.updatedAt) return memory
     const target = failureMemoryPath(projectPath)
+    // A repository can carry its .vector, or this file, as a link to any file of the user's, and writing follows it.
+    if (!FSUtil.writableInside(projectPath, target)) return memory
     await mkdir(join(projectPath, ".vector"), { recursive: true })
     // Rename is atomic within a filesystem, so a crash mid-write leaves the
     // previous memory readable instead of a truncated file nothing can parse.
-    const staged = `${target}.${process.pid}.tmp`
-    await writeFile(staged, `${JSON.stringify(memory, null, 2)}\n`, "utf8")
+    // A fresh name that must not exist yet, so a planted link at it is never followed.
+    const staged = `${target}.${randomUUID()}.tmp`
+    await writeFile(staged, `${JSON.stringify(memory, null, 2)}\n`, { encoding: "utf8", flag: "wx" })
     await rename(staged, target)
     return memory
   })
@@ -235,7 +239,8 @@ export async function recordValidationRun(projectPath: string, input: Validation
 // clearing local memory behaves.
 export async function clearFailureMemory(projectPath: string): Promise<FailureMemory> {
   return serialiseWrites(projectPath, async () => {
-    await rm(failureMemoryPath(projectPath), { force: true })
+    if (FSUtil.writableInside(projectPath, failureMemoryPath(projectPath)))
+      await rm(failureMemoryPath(projectPath), { force: true })
     return readFailureMemory(projectPath)
   })
 }

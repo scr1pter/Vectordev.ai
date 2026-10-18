@@ -1,6 +1,7 @@
 import { cmd } from "./cmd"
 import * as prompts from "@clack/prompts"
 import { UI } from "../ui"
+import { FSUtil } from "@vectordevai/core/fs-util"
 import { Global } from "@vectordevai/core/global"
 import path from "path"
 import fs from "fs/promises"
@@ -110,6 +111,12 @@ const AgentCreateCommand = effectCmd({
         }
         targetPath = path.join(scope === "global" ? Global.Path.config : path.join(ctx.worktree, ".vector"), "agents")
       }
+      // Where the agent file must really land. Writing follows links, and a project's .vector can link anywhere.
+      const root = cliPath
+        ? targetPath
+        : FSUtil.contains(Global.Path.config, targetPath)
+          ? Global.Path.config
+          : ctx.worktree
 
       // Get description
       let description: string
@@ -209,6 +216,16 @@ const AgentCreateCommand = effectCmd({
       const filePath = path.join(targetPath, `${generated.identifier}.md`)
 
       await fs.mkdir(targetPath, { recursive: true })
+
+      if (!FSUtil.writableInside(root, filePath)) {
+        const message = `Cannot create ${filePath}: it is a link, not a plain file, or outside ${root}.`
+        if (isFullyNonInteractive) {
+          console.error(`Error: ${message}`)
+          process.exit(1)
+        }
+        prompts.log.error(message)
+        throw new UI.CancelledError()
+      }
 
       if (await Filesystem.exists(filePath)) {
         if (isFullyNonInteractive) {

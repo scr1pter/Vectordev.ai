@@ -1,5 +1,4 @@
 import path from "path"
-import { lstatSync, readlinkSync } from "fs"
 import { Effect } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import type * as Tool from "./tool"
@@ -30,12 +29,12 @@ export const assertExternalDirectoryEffect = Effect.fn("Tool.assertExternalDirec
   // Both sides have to be resolved: the instance directory is itself commonly
   // reached through a link (/tmp -> /private/tmp on macOS), and comparing a real
   // path against a symlinked root would prompt for every file in the project.
-  const full = realpath(target)
+  const full = FSUtil.realpath(target)
   if (
     containsPath(full, {
       ...ins,
-      directory: realpath(ins.directory),
-      worktree: realpath(ins.worktree),
+      directory: FSUtil.realpath(ins.directory),
+      worktree: FSUtil.realpath(ins.worktree),
     })
   )
     return false
@@ -86,23 +85,6 @@ export async function assertExternalDirectory(ctx: Tool.Context, target?: string
  */
 export function readPatterns(worktree: string, target: string) {
   const requested = path.relative(worktree, target)
-  const real = path.relative(realpath(worktree), realpath(target))
+  const real = path.relative(FSUtil.realpath(worktree), FSUtil.realpath(target))
   return requested === real ? [requested] : [requested, real]
-}
-
-/** Where a path really lands, following links in it and in its parents, even when the file does not exist yet. */
-export function realpath(target: string): string {
-  const resolved = FSUtil.resolve(target)
-  const link = lstatSync(resolved, { throwIfNoEntry: false })
-  // A dangling symlink cannot be resolved by realpath, but writing through it
-  // still lands wherever it points, so follow the link by hand.
-  if (link?.isSymbolicLink()) return realpath(path.resolve(path.dirname(resolved), readlinkSync(resolved)))
-  if (link) return resolved
-  // FSUtil.resolve hands back the lexical path for something that does not exist
-  // yet, which still looks project-local when a parent is a link pointing out of
-  // the project. Resolve the deepest existing ancestor and re-attach the rest so
-  // creating a file cannot escape either.
-  const parent = path.dirname(resolved)
-  if (parent === resolved) return resolved
-  return path.join(realpath(parent), path.basename(resolved))
 }

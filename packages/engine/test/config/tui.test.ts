@@ -1,6 +1,6 @@
 import { expect, spyOn } from "bun:test"
 import path from "path"
-import { mkdtemp, rm, symlink } from "node:fs/promises"
+import { lstat, mkdtemp, readFile, readdir, rm, symlink } from "node:fs/promises"
 import os from "node:os"
 import { fileURLToPath, pathToFileURL } from "url"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
@@ -951,6 +951,160 @@ it.instance("VECTOR_TUI_CONFIG provides settings when no project config exists",
           expect(config.diff_style).toBe("stacked")
         }),
       )
+    }),
+  ),
+)
+
+it.instance("keeps env-named TUI config inside an untrusted project under project trust", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const test = yield* TestInstance
+      const outside = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "vector-tui-env-"))),
+        (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
+      )
+      const alias = path.join(outside, "project")
+      yield* Effect.promise(() => symlink(test.directory, alias, process.platform === "win32" ? "junction" : "dir"))
+      yield* fs.writeFileString(
+        path.join(test.directory, "env-plugin.ts"),
+        'export default { id: "env", tui: async () => {} }\n',
+      )
+      yield* fs.writeJson(path.join(test.directory, "custom-tui.json"), {
+        theme: "from-env",
+        plugin: ["./env-plugin.ts"],
+      })
+      yield* fs.writeWithDirs(
+        path.join(test.directory, "config-dir", "tui.json"),
+        JSON.stringify({ theme: "from-dir", plugin: ["../env-plugin.ts"] }),
+      )
+
+      // Under the project's own spelling and through a link into it, the settings apply but the plugin waits for trust.
+      for (const root of [test.directory, alias]) {
+        for (const [name, value, theme] of [
+          ["VECTOR_TUI_CONFIG", path.join(root, "custom-tui.json"), "from-env"],
+          ["VECTOR_AGENT_CONFIG_DIR", path.join(root, "config-dir"), "from-dir"],
+        ]) {
+          const state = yield* withEnv(name, value, getTuiState(test.directory))
+          expect(state.config.theme).toBe(theme)
+          expect(state.config.plugin ?? []).toEqual([])
+          expect(state.origins).toEqual([])
+        }
+      }
+
+      // The user's own file outside the project still loads its plugin as theirs.
+      yield* fs.writeFileString(
+        path.join(outside, "user-plugin.ts"),
+        'export default { id: "user", tui: async () => {} }\n',
+      )
+      yield* fs.writeJson(path.join(outside, "user-tui.json"), { plugin: ["./user-plugin.ts"] })
+      const user = yield* withEnv("VECTOR_TUI_CONFIG", path.join(outside, "user-tui.json"), getTuiState(test.directory))
+      expect(user.origins.map((item) => item.scope)).toEqual(["global"])
+    }),
+  ),
+)
+
+it.instance("never moves legacy TUI keys through a project's links or out of the workspace", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const test = yield* TestInstance
+      const outside = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "vector-tui-migrate-"))),
+        (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
+      )
+      const linkType = process.platform === "win32" ? "junction" : "dir"
+      const legacy = JSON.stringify({ theme: "outside-theme", keybinds: { app_exit: "ctrl+q" }, other: true }, null, 2)
+      const away = path.join(outside, "away")
+      yield* fs.writeWithDirs(path.join(away, "vector.json"), legacy)
+      // A project .vector that is really a folder outside, and an env-named file reached through a project link.
+      yield* Effect.promise(() => symlink(away, path.join(test.directory, ".vector"), linkType))
+      yield* Effect.promise(() => symlink(away, path.join(test.directory, "linked"), linkType))
+      const snapshot = () => Effect.promise(() => readdir(away).then((names) => names.toSorted()))
+      const before = yield* snapshot()
+
+      yield* getTuiConfig(test.directory)
+      yield* withEnv(
+        "VECTOR_AGENT_CONFIG",
+        path.join(test.directory, "linked", "vector.json"),
+        getTuiConfig(test.directory),
+      )
+      expect(yield* snapshot()).toEqual(before)
+      expect(yield* Effect.promise(() => readFile(path.join(away, "vector.json"), "utf8"))).toBe(legacy)
+
+      // File links, which is what a cloned repository carries. Windows creates them only with a privilege CI holds.
+      const victim = path.join(outside, "settings.json")
+      yield* fs.writeFileString(victim, legacy)
+      const linked = yield* Effect.promise(() =>
+        symlink(victim, path.join(test.directory, "vector.json"), "file")
+          .then(() => true)
+          .catch((error) => {
+            if (process.platform === "win32" && error?.code === "EPERM") return false
+            throw error
+          }),
+      )
+      if (!linked) return
+      yield* getTuiConfig(test.directory)
+      expect(yield* Effect.promise(() => readFile(victim, "utf8"))).toBe(legacy)
+      expect(yield* fs.existsSafe(path.join(test.directory, "tui.json"))).toBe(false)
+      expect(yield* fs.existsSafe(path.join(test.directory, "vector.json.tui-migration.bak"))).toBe(false)
+
+      // A dangling tui.json link beside a plain legacy file must not create the file it points at.
+      yield* fs.remove(path.join(test.directory, "vector.json"))
+      yield* fs.writeFileString(path.join(test.directory, "vector.json"), legacy)
+      yield* Effect.promise(() =>
+        symlink(path.join(outside, "created.json"), path.join(test.directory, "tui.json"), "file"),
+      )
+      yield* getTuiConfig(test.directory)
+      expect(yield* fs.existsSafe(path.join(outside, "created.json"))).toBe(false)
+      expect(yield* fs.readFileString(path.join(test.directory, "vector.json"))).toBe(legacy)
+      expect((yield* Effect.promise(() => lstat(path.join(test.directory, "tui.json")))).isSymbolicLink()).toBe(true)
+    }),
+  ),
+)
+
+it.instance("never moves legacy TUI keys through a .vector above a non-git workspace that links away", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const temporary = (prefix: string) =>
+        Effect.acquireRelease(
+          Effect.promise(() => mkdtemp(path.join(os.tmpdir(), prefix))),
+          (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
+        )
+      // A non-git folder opened one level down, whose .vector is really a folder somewhere else.
+      const root = yield* temporary("vector-tui-parent-")
+      const outside = yield* temporary("vector-tui-away-")
+      const legacy = JSON.stringify({ theme: "outside-theme", keybinds: { app_exit: "ctrl+q" }, other: true }, null, 2)
+      yield* fs.writeWithDirs(path.join(outside, "vector.json"), legacy)
+      yield* fs.makeDirectory(path.join(root, "app"), { recursive: true })
+      yield* Effect.promise(() =>
+        symlink(outside, path.join(root, ".vector"), process.platform === "win32" ? "junction" : "dir"),
+      )
+
+      yield* getTuiConfig(path.join(root, "app"))
+      expect(yield* Effect.promise(() => readdir(outside))).toEqual(["vector.json"])
+      expect(yield* Effect.promise(() => readFile(path.join(outside, "vector.json"), "utf8"))).toBe(legacy)
+    }),
+  ),
+)
+
+it.instance("still moves legacy TUI keys out of the user's own env-named config outside the project", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const test = yield* TestInstance
+      const outside = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "vector-tui-own-"))),
+        (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
+      )
+      yield* fs.writeJson(path.join(outside, "vector.json"), { theme: "user-theme" })
+      const config = yield* withEnv("VECTOR_AGENT_CONFIG_DIR", outside, getTuiConfig(test.directory))
+      expect(config.theme).toBe("user-theme")
+      expect(JSON.parse(yield* fs.readFileString(path.join(outside, "tui.json")))).toMatchObject({
+        theme: "user-theme",
+      })
+      expect(JSON.parse(yield* fs.readFileString(path.join(outside, "vector.json"))).theme).toBeUndefined()
     }),
   ),
 )

@@ -9,6 +9,7 @@ import type { ConfigMCPV1 } from "@vectordevai/core/v1/config/mcp"
 import { InstanceRef } from "@/effect/instance-ref"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import path from "path"
+import { FSUtil } from "@vectordevai/core/fs-util"
 import { Global } from "@vectordevai/core/global"
 import { modify, applyEdits } from "jsonc-parser"
 import { Filesystem } from "@/util/filesystem"
@@ -406,8 +407,12 @@ async function resolveConfigPath(baseDir: string, global = false) {
   return candidates[0]
 }
 
-async function addMcpToConfig(name: string, mcpConfig: ConfigMCPV1.Info, configPath: string) {
+// `root` is where the file must really land: the project, or the global config folder.
+async function addMcpToConfig(name: string, mcpConfig: ConfigMCPV1.Info, configPath: string, root: string) {
   const { ConfigSchema } = await import("@/config/schema")
+  // Writing follows links, and a project's config file can link to any file of the user's.
+  if (!FSUtil.writableInside(root, configPath))
+    throw new Error(`Cannot add the server to ${configPath}: it is a link, not a plain file, or outside ${root}.`)
   let text = "{}"
   if (await Filesystem.exists(configPath)) {
     text = await Filesystem.readText(configPath)
@@ -493,7 +498,7 @@ export const McpAddCommand = effectCmd({
             }
 
         const configPath = await resolveConfigPath(Global.Path.config, true)
-        await addMcpToConfig(args.name, mcpConfig, configPath)
+        await addMcpToConfig(args.name, mcpConfig, configPath, Global.Path.config)
         prompts.log.success(`MCP server "${args.name}" added to ${configPath}`)
         return
       }
@@ -567,7 +572,12 @@ export const McpAddCommand = effectCmd({
           command: command.split(" "),
         }
 
-        await addMcpToConfig(name, mcpConfig, configPath)
+        await addMcpToConfig(
+          name,
+          mcpConfig,
+          configPath,
+          configPath === globalConfigPath ? Global.Path.config : ctx.worktree,
+        )
         prompts.log.success(`MCP server "${name}" added to ${configPath}`)
         prompts.outro("MCP server added successfully")
         return
@@ -645,7 +655,12 @@ export const McpAddCommand = effectCmd({
           }
         }
 
-        await addMcpToConfig(name, mcpConfig, configPath)
+        await addMcpToConfig(
+          name,
+          mcpConfig,
+          configPath,
+          configPath === globalConfigPath ? Global.Path.config : ctx.worktree,
+        )
         prompts.log.success(`MCP server "${name}" added to ${configPath}`)
       }
 

@@ -9,6 +9,7 @@ import {
 
 import { ConfigSchema } from "@/config/schema"
 import { ConfigPaths } from "@/config/paths"
+import { FSUtil } from "@vectordevai/core/fs-util"
 import { Global } from "@vectordevai/core/global"
 import { Filesystem } from "@/util/filesystem"
 import { Flock } from "@vectordevai/core/util/flock"
@@ -333,9 +334,14 @@ export async function readPluginManifest(target: string): Promise<ManifestResult
 
 function patchDir(input: PatchInput) {
   if (input.global) return input.config ?? Global.Path.config
+  return path.join(patchRoot(input), ".vector")
+}
+
+// Where a patched config file must really land: the project for a project install, the config folder for a global one.
+function patchRoot(input: PatchInput) {
+  if (input.global) return input.config ?? Global.Path.config
   const git = input.vcs === "git" && input.worktree !== "/"
-  const root = git ? input.worktree : input.directory
-  return path.join(root, ".vector")
+  return git ? input.worktree : input.directory
 }
 
 function patchName(kind: Kind): "vector" | "tui" {
@@ -343,13 +349,21 @@ function patchName(kind: Kind): "vector" | "tui" {
   return "tui"
 }
 
-async function patchOne(dir: string, target: Target, spec: string, force: boolean, dep: PatchDeps): Promise<PatchOne> {
+async function patchOne(
+  dir: string,
+  root: string,
+  target: Target,
+  spec: string,
+  force: boolean,
+  dep: PatchDeps,
+): Promise<PatchOne> {
   const name = patchName(target.kind)
   await using _ = await Flock.acquire(`plug-config:${Filesystem.resolve(path.join(dir, name))}`)
 
   const files = dep.files(dir, name)
   const source =
-    (await Promise.all(files.map(async (file) => ((await dep.exists(file)) ? file : undefined)))).find(Boolean) ?? files[0]
+    (await Promise.all(files.map(async (file) => ((await dep.exists(file)) ? file : undefined)))).find(Boolean) ??
+    files[0]
 
   const src = await dep.readText(source).catch((err: NodeJS.ErrnoException) => {
     if (err.code === "ENOENT") return "{}"
@@ -395,6 +409,15 @@ async function patchOne(dir: string, target: Target, spec: string, force: boolea
     }
   }
 
+  // Writing follows links, and a project's config file can link to any file of the user's.
+  if (!FSUtil.writableInside(root, source)) {
+    return {
+      ok: false,
+      code: "patch_failed",
+      kind: target.kind,
+      error: new Error(`Cannot add the plugin to ${source}: it is a link, not a plain file, or outside ${root}.`),
+    }
+  }
   const write = await dep
     .write(source, ConfigSchema.rewrite(out.text, target.kind === "server" ? "config" : "tui"))
     .catch((error: unknown) => error)
@@ -419,9 +442,10 @@ async function patchOne(dir: string, target: Target, spec: string, force: boolea
 
 export async function patchPluginConfig(input: PatchInput, dep: PatchDeps = defaultPatchDeps): Promise<PatchResult> {
   const dir = patchDir(input)
+  const root = patchRoot(input)
   const items: PatchItem[] = []
   for (const target of input.targets) {
-    const hit = await patchOne(dir, target, input.spec, Boolean(input.force), dep)
+    const hit = await patchOne(dir, root, target, input.spec, Boolean(input.force), dep)
     if (!hit.ok) {
       return {
         ...hit,
