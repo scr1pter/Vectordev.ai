@@ -187,14 +187,15 @@ export function selectFindings(input: SelectInput): Selection {
     }
     return code
   }
-  // Kept finding → the other places it stands for, as "path:line".
+  // Kept finding → the other places it stands for, as "path:line". A duplicate hands over the places it named, and
+  // its own place too when it is somewhere else.
   const places = new Map<Finding, string[]>()
-  const fold = (into: Finding, finding: Finding) =>
+  const fold = (into: Finding, finding: Finding, elsewhere = true) =>
     places.set(into, [
       ...(places.get(into) ?? []),
       ...(places.get(finding) ?? []),
       ...(finding.also ?? []),
-      `${finding.path}:${finding.line}`,
+      ...(elsewhere ? [`${finding.path}:${finding.line}`] : []),
     ])
   const unique: Finding[] = []
   for (const finding of kept.sort(stronger)) {
@@ -207,10 +208,7 @@ export function selectFindings(input: SelectInput): Selection {
       continue
     }
     drop("duplicate")
-    if (apart(other, finding)) {
-      fold(other, finding)
-      continue
-    }
+    fold(other, finding, apart(other, finding))
     // The security reviewer's copy of a defect the code reviewer found keeps the code reviewer's category.
     if (
       other.source === "security" &&

@@ -615,6 +615,27 @@ describe("selectFindings: duplicates, continuations and caps", () => {
     expect(near.inline.map((f) => [f.line, f.also])).toEqual([[12, undefined]])
   })
 
+  test("a stronger copy of a finding that names other places keeps naming them", () => {
+    const write = "  store.write(next)"
+    const files = bigFile(120, { 12: write, 90: write })
+    const carried = withId(
+      files,
+      finding({
+        path: "src/big.ts",
+        line: 12,
+        title: "Store write is not awaited",
+        body: "Explained.\n\nThe same problem is also at line 90.",
+        also: ["src/big.ts:90"],
+        confidence: 0.8,
+      }),
+    )
+    const stronger = { ...carried, body: "Checked again.", also: undefined, confidence: 0.95, verified: true }
+    const selection = run({ anchors: files, findings: [carried, stronger] })
+    expect(selection.inline.map((f) => [f.line, f.confidence, f.also, f.body])).toEqual([
+      [12, 0.95, ["src/big.ts:90"], "Checked again.\n\nThe same problem is also at line 90."],
+    ])
+  })
+
   test("a re-review does not post again a place the open comment already names", () => {
     const write = "  store.write(next)"
     const files = bigFile(120, { 12: write, 90: write })
