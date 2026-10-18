@@ -222,38 +222,43 @@ test("the Run Guard, scheduled-agent and Vectorscope figures are the ones that s
   expect(story.match(/once a later desktop release requires that CLI/g)).toHaveLength(1)
 })
 
-test("Vector Velocity is in development, sized by its active parameters only", () => {
+test("Vector Velocity is in development and branded by one size, 550B parameters", () => {
   expect(story).toContain('label: "Vector Velocity", status: { kind: "dev", text: "In development" }')
-  expect(story).toContain(
-    "The harness cuts what each request carries; Velocity is designed to cut what each token costs, with under 20B parameters active per token.",
+  expect(story).toContain("Vector Velocity is the 550B-parameter coding model we are building")
+  expect(lander).toContain("Velocity, the 550B-parameter model we're building")
+  const texts = [page, ...shots.map((shot) => shot.text)]
+  // One size and nothing about how many of its parameters run per token.
+  expect(new Set(texts.flatMap((text) => Array.from(text.matchAll(/(\d+)B-parameter/g), (match) => match[1])))).toEqual(
+    new Set(["550"]),
   )
-  // No total size, no base model, no compute provider.
+  // Link targets are left out: the Qwen model card's address names its active size, though no page text does.
   expect(
-    [page, ...shots.map((shot) => shot.text)].filter((text) =>
-      /(?<![-\w.])\d+(?:B\+|B model| billion parameter)/.test(text),
-    ),
+    texts
+      .map((text) => text.replace(/href(?:: |=)"[^"]*"/g, ""))
+      .filter((text) =>
+        /\bactive (?:per token|param\w*)|parameters active|\bactivated\b|\bA\d+B\b|\bunder \d+B\b|\d+B (?:active|per token|for every token)|parameters (?:per|for every) token/i.test(
+          text,
+        ),
+      ),
   ).toEqual([])
-  expect(page).not.toMatch(/\b\d{3,}B (?:total|parameters)\b|\bover \d{3}B?\b/i)
+  expect(page).not.toMatch(/under 20B|\b\d+B total\b|total parameters|billion parameter/i)
+  // No base model and no compute provider.
   expect(page).not.toMatch(/Velocity[^.]*\b(?:built on|based on|fine-tun\w*|base model)\b|compute credits/i)
   expect(page).not.toMatch(/plan to build|Velocity[^."]*\bplanned\b/i)
   expect(lander).toContain('"is building a coding model of its own."')
-  // Why it matters: four large coding models with a public size or base, the same four the investor page compares,
-  // each with its active size from its maker's own page (the open base for the two whose makers publish none), and
-  // the saving stated as a design goal. Closed models without a public size are not compared.
+  // Why it matters: the same four large coding models the investor page names, each linked to its maker's page, and
+  // the saving stated as a design goal.
   expect(story).toContain(
-    "Four of the largest coding models with a public size or base use more per token: 35B for Qwen3-Coder-480B, 32B for Kimi K2.7 Code, and, going by the open models they are built on, 32B for Cursor's Composer 2.5 and 104B for Cognition's SWE-2.",
+    "designed to cost significantly less to run in Vector than four very large coding models: Qwen3-Coder-480B, Kimi K2.7 Code, Cursor's Composer 2.5 and Cognition's SWE-2. That is a design goal, not a measured result.",
   )
+  // Velocity is bigger than one of the four, so they are very large, not the largest.
+  expect(story).not.toMatch(/four of the largest|four largest/i)
   ;[
     "https://huggingface.co/Qwen/Qwen3-Coder-480B-A35B-Instruct",
     "https://huggingface.co/moonshotai/Kimi-K2.7-Code",
     "https://cursor.com/blog/composer-2-5",
-    "https://huggingface.co/moonshotai/Kimi-K2.5",
     "https://cognition.com/blog/swe-2",
-    "https://huggingface.co/moonshotai/Kimi-K3",
   ].forEach((source) => expect(story).toContain(`href: "${source}"`))
-  expect(story).toContain(
-    "designed to cost significantly less to run than all four. That is a design goal, not a measured result.",
-  )
   expect(page).not.toMatch(/largest models coding agents run on|than all three/)
   expect(story).toContain("No weights or benchmarks exist yet")
 })

@@ -240,14 +240,13 @@ const barWidth = (usd: number) => `${((usd / 0.2) * 100).toFixed(1)}%`
 const saving = (pair: { vector: number; claude: number }) => Math.round((1 - pair.vector / pair.claude) * 100)
 
 // The newest very large coding model from each of four makers, checked 17 October 2026 against each model card or
-// maker's announcement. Cursor and Cognition publish no sizes for Composer 2.5 or SWE-2, so fromBase marks the active
-// size of the open base each names: Kimi K2.5 (32B active) and Kimi K3 (104B active). Vector Velocity is in development
-// and the page gives it only "under 20B parameters active per token": no total, base model or compute provider.
+// maker's announcement. Vector Velocity is in development and the page gives it only its size, 550B parameters: no
+// active size, base model or compute provider, and no sizes for the four beyond the 480B in Qwen3-Coder's name.
 const largeModels = [
-  { name: "Qwen3-Coder-480B-A35B", maker: "Qwen", active: 35, fromBase: false, weights: "Open (Apache 2.0)", agent: "Qwen Code, Cline" },
-  { name: "Composer 2.5", maker: "Cursor", active: 32, fromBase: true, weights: "Not published", agent: "Cursor" },
-  { name: "SWE-2", maker: "Cognition", active: 104, fromBase: true, weights: "Not published", agent: "Devin" },
-  { name: "Kimi K2.7 Code", maker: "Moonshot", active: 32, fromBase: false, weights: "Open (Modified MIT)", agent: "Kimi Code CLI" },
+  { name: "Qwen3-Coder-480B", maker: "Qwen", weights: "Open (Apache 2.0)", agent: "Qwen Code, Cline" },
+  { name: "Composer 2.5", maker: "Cursor", weights: "Not published", agent: "Cursor" },
+  { name: "SWE-2", maker: "Cognition", weights: "Not published", agent: "Devin" },
+  { name: "Kimi K2.7 Code", maker: "Moonshot", weights: "Open (Modified MIT)", agent: "Kimi Code CLI" },
 ]
 ---
 
@@ -411,45 +410,43 @@ const largeModels = [
     <div class="ip-section-head">
       <div class="ip-eyebrow">The model layer</div>
       <h2 id="model-title">Neutral on models, with one built for its own harness</h2>
-      <p>Vector runs any model the developer picks. Coding models are now trained inside a harness, as Composer and SWE-1.5 were, so Vector is building Velocity for its own: one more choice in the picker, designed to cost significantly less to run than the very large coding models.</p>
+      <p>Vector runs any model the developer picks. Coding models are now trained inside a harness, as Composer and SWE-1.5 were, so Vector is building Velocity for its own: one more choice in the picker, designed to cost significantly less to run than other very large coding models.</p>
     </div>
 
     <div class="ip-gap">
       <div class="ip-gap-head">
-        <h3 id="large-title">Four very large coding models run 32B to 104B parameters for every token</h3>
+        <h3 id="large-title">Four very large coding models, and the agents they ship with</h3>
         <p>The newest very large coding model from each of four makers.</p>
       </div>
       <div class="ip-four-wrap">
         <table class="ip-four" aria-labelledby="large-title">
           <thead>
-            <tr><th scope="col">Model</th><th scope="col">Active per token</th><th scope="col">Weights</th><th scope="col">Ships with</th></tr>
+            <tr><th scope="col">Model</th><th scope="col">Weights</th><th scope="col">Ships with</th></tr>
           </thead>
           <tbody>
             {largeModels.map((model) => (
               <tr>
                 <th scope="row">{model.name}<small>{model.maker}</small></th>
-                <td class="ip-n" data-label="Active per token">{model.active}B{model.fromBase && <sup>†</sup>}</td>
                 <td data-label="Weights">{model.weights}</td>
                 <td data-label="Ships with">{model.agent}</td>
               </tr>
             ))}
             <tr class="ip-four-v">
-              <th scope="row">Vector Velocity<small>Vector · <span class="ip-stage">In development</span></small></th>
-              <td class="ip-n" data-label="Active per token">Under 20B, by design</td>
+              <th scope="row">Vector Velocity<small>Vector · 550B parameters · <span class="ip-stage">In development</span></small></th>
               <td data-label="Weights">None yet</td>
               <td data-label="Ships with">Vector, through Codium (planned)</td>
             </tr>
           </tbody>
         </table>
       </div>
-      <p class="ip-footnote">† Cursor and Cognition publish no sizes; these are the open bases they name, Kimi K2.5 and Kimi K3. From model cards and makers' posts, 17 October 2026.</p>
+      <p class="ip-footnote">Cursor and Cognition publish no sizes; Composer 2.5 is built on Kimi K2.5 and SWE-2 on Kimi K3. From model cards and makers' posts, 17 October 2026.</p>
     </div>
 
     <div class="ip-velocity">
       <div class="ip-vcard">
         <span class="ip-stage">In development</span>
         <h3>Vector Velocity</h3>
-        <p class="ip-vsize"><b class="ip-num">Under 20B</b> parameters active per token, by design</p>
+        <p class="ip-vsize"><b class="ip-num">550B</b> parameters</p>
         <p>Vector's own model, specialised for agentic computer use, agentic workflows and Vector's own harness, plus other coding and developer-tool tasks.</p>
         <ul class="ip-clean">
           <li><strong>Work has started; there are no weights or benchmarks yet,</strong> so this page makes no performance claims for it.</li>
@@ -457,8 +454,8 @@ const largeModels = [
       </div>
       <div class="ip-why-us">
         <h3 class="ip-eyebrow">Why Velocity is needed</h3>
-        <div class="ip-why-item"><h4>Designed to cost significantly less to run than all four</h4><p>Per-token compute grows with active parameters, and a task is many requests: 5 to 8 in the scripted tasks above. Velocity is designed for under 20B against their 32B to 104B, though it still needs memory for all its weights.</p></div>
-        <div class="ip-why-item"><h4>Built for Vector's own loop</h4><p>The open two run in Vector today, but their cards point to other agents. Velocity is being built for planning, tool calls, edits, checks and subagents, and is planned to sell through Codium. Smaller open coding models already run in Vector; Velocity's bet is training inside Vector's own harness, the way Cursor and Cognition trained their models inside theirs. The size sets the running cost; the harness training is the edge.</p></div>
+        <div class="ip-why-item"><h4>Designed to cost significantly less to run than all four</h4><p>A task is many requests, 5 to 8 in the scripted tasks above. Velocity is designed to finish Vector's tasks for significantly less than any of the four, because it is being built for the loop Vector runs rather than for another agent's. That is a design goal; with no weights yet, nothing is measured.</p></div>
+        <div class="ip-why-item"><h4>Built for Vector's own loop</h4><p>The open two run in Vector today, but their cards point to other agents. Velocity is being built for planning, tool calls, edits, checks and subagents, and is planned to sell through Codium. Other open coding models already run in Vector; Velocity's bet is training inside Vector's own harness, the way Cursor and Cognition trained their models inside theirs. That harness training is the edge.</p></div>
       </div>
     </div>
   </section>
@@ -478,7 +475,7 @@ const largeModels = [
       <div class="ip-milestone">
         <span class="ip-stage">In development</span>
         <h3>Vector Velocity</h3>
-        <p>Under 20B parameters active per token, for computer use, agentic workflows and Vector's harness.</p>
+        <p>A 550B-parameter model for computer use, agentic workflows and Vector's harness.</p>
       </div>
       <div class="ip-milestone">
         <span class="ip-stage">Planned</span>
@@ -591,7 +588,7 @@ const largeModels = [
         <div>
           <h4>Large coding models</h4>
           <ul>
-            <li><a href="https://huggingface.co/Qwen/Qwen3-Coder-480B-A35B-Instruct" rel="noopener">Qwen3-Coder-480B-A35B</a>, <a href="https://cursor.com/blog/composer-2-5" rel="noopener">Composer 2.5</a> (<a href="https://cursor.com/docs/models" rel="noopener">Cursor models</a>), <a href="https://cognition.com/blog/swe-2" rel="noopener">SWE-2</a>, <a href="https://huggingface.co/moonshotai/Kimi-K2.7-Code" rel="noopener">Kimi K2.7 Code</a></li>
+            <li><a href="https://huggingface.co/Qwen/Qwen3-Coder-480B-A35B-Instruct" rel="noopener">Qwen3-Coder-480B</a>, <a href="https://cursor.com/blog/composer-2-5" rel="noopener">Composer 2.5</a> (<a href="https://cursor.com/docs/models" rel="noopener">Cursor models</a>), <a href="https://cognition.com/blog/swe-2" rel="noopener">SWE-2</a>, <a href="https://huggingface.co/moonshotai/Kimi-K2.7-Code" rel="noopener">Kimi K2.7 Code</a></li>
             <li>Their bases: <a href="https://huggingface.co/moonshotai/Kimi-K2.5" rel="noopener">Kimi K2.5</a>, <a href="https://huggingface.co/moonshotai/Kimi-K3" rel="noopener">Kimi K3</a></li>
             <li>Harness-trained models: <a href="https://cursor.com/blog/composer" rel="noopener">Cursor Composer</a>, <a href="https://cognition.com/blog/swe-1-5" rel="noopener">Cognition SWE-1.5</a></li>
           </ul>
@@ -805,11 +802,9 @@ const largeModels = [
   .ip-four thead th { font-family: var(--font-mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); background: var(--raised); }
   .ip-four tbody th { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--ink); }
   .ip-four tbody th small { display: block; margin-top: 2px; font-family: var(--font-body); font-size: 12px; font-weight: 400; color: var(--muted); }
-  .ip-four td.ip-n { font-family: var(--font-mono); color: var(--ink); white-space: nowrap; }
   .ip-four tbody tr:last-child > * { border-bottom: 0; }
   .ip-four tr.ip-four-v > * { background: var(--accent-soft); }
   .ip-four tr.ip-four-v th { box-shadow: inset 3px 0 0 var(--accent); }
-  .ip-four tr.ip-four-v td.ip-n { color: var(--accent); font-weight: 500; }
   @media (max-width: 760px) {
     table.ip-four, .ip-four tbody, .ip-four tr, .ip-four th, .ip-four td { display: block; }
     .ip-four thead { display: none; }
@@ -817,11 +812,9 @@ const largeModels = [
     .ip-four tbody tr:last-child { border-bottom: 0; }
     .ip-four tbody th { grid-column: 1 / -1; border-bottom: 0; padding-bottom: 2px; }
     .ip-four td { border-bottom: 0; padding-block: 4px; }
-    .ip-four td:last-child { grid-column: 1 / -1; }
     .ip-four td::before { content: attr(data-label); display: block; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
     .ip-four tr.ip-four-v th { box-shadow: none; }
     .ip-four tr.ip-four-v { box-shadow: inset 3px 0 0 var(--accent); background: var(--accent-soft); }
-    .ip-four td.ip-n { white-space: normal; }
   }
 
   .ip-velocity { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr); gap: 24px; align-items: start; }

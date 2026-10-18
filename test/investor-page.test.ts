@@ -163,12 +163,15 @@ test("the investor page describes Vectorscope's default verify pass", () => {
   expect(page).toContain("verify pass that re-checks blocking findings")
 })
 
-test("the investor page gives Vector Velocity one status, one active size and no total, base or provider", () => {
+test("the investor page gives Vector Velocity one status, one size, 550B parameters, and no active size, base or provider", () => {
   expect(page.match(/<span class="ip-stage">In development<\/span>\s*<h3>Vector Velocity<\/h3>/g)).toHaveLength(2)
-  expect(page).toContain('<b class="ip-num">Under 20B</b> parameters active per token, by design')
-  const sizes = Array.from(page.matchAll(/under (\d+)B/gi), (match) => Number(match[1]))
-  expect(sizes.length).toBeGreaterThan(3)
-  expect(new Set(sizes)).toEqual(new Set([20]))
+  expect(page).toContain('<b class="ip-num">550B</b> parameters</p>')
+  expect(page).toContain("Vector · 550B parameters · <span")
+  expect(page).toContain("A 550B-parameter model for computer use")
+  // Nothing on the page says how many parameters run per token, Velocity's or the four's.
+  expect(page).not.toMatch(
+    /\bactive (?:per token|param\w*)|parameters active|\bactivated\b|under \d+B|\d+B (?:active|per token|for every token)|parameters (?:per|for every) token|>Qwen3-Coder-480B-A35B<|"Qwen3-Coder-480B-A35B"/i,
+  )
   expect(page).not.toMatch(/total parameters|\d+B total|billion parameters|\bover \d{3}B?\b|no work has started|Not started/i)
   const velocity = [
     section(/<div class="ip-vcard">[\s\S]*?<\/ul>/),
@@ -187,38 +190,31 @@ test("the investor page gives Vector Velocity one status, one active size and no
   expect(page).toContain("Vector runs any model the developer picks.")
   // The picker already has free and local models, so Velocity is compared only with the very large coding models.
   expect(page).toContain(
-    "one more choice in the picker, designed to cost significantly less to run than the very large coding models",
+    "one more choice in the picker, designed to cost significantly less to run than other very large coding models",
   )
   expect(page).not.toMatch(/price lowest|lowest[- ]priced|cheapest/i)
   // Codium steps count as unpriced on the dollar meter, so Velocity is not said to sell on it.
   expect(page).not.toMatch(/on that meter|already has the meter/i)
 })
 
-test("the README gives Vector Velocity the investor page's status and active size, and no total", async () => {
-  // The landing page (Lander.astro, ShotBrowserPanel.astro) is rewritten for desktop 1.99.109 on its own branch, so
-  // only the README, which the page's footnote points readers to, is held to the page here.
+test("the README gives Vector Velocity the investor page's status and size, and no active size", async () => {
+  // The landing page is held to the same status, size and four models in packages/web/test/landing-copy.test.ts; this
+  // test holds the README to the investor page.
   const readme = (await Bun.file(path.join(root, "README.md")).text()).match(/\*\*Vector Velocity\*\*[^\n]*/)?.[0] ?? ""
-  expect(readme).toContain("**Vector Velocity** (In development)")
-  expect(readme).toContain("under 20B parameters active per token")
+  expect(readme).toContain("**Vector Velocity** (In development): Vector's own 550B-parameter model")
   expect(readme).toContain("there are no weights or benchmarks yet")
-  expect(readme).not.toMatch(/Planned|No work on it has started|\d+B\+|\d+ billion|total parameters|\d+B total/i)
-  expect(page).toContain('<b class="ip-num">Under 20B</b> parameters active per token')
+  expect(readme).not.toMatch(/Planned|No work on it has started|active|under \d+B|\d+B\+|\d+ billion|total parameters|\d+B total/i)
+  expect(page).toContain('<b class="ip-num">550B</b> parameters')
 })
 
-test("the investor page compares Velocity with one set of four models and one per-token range", () => {
-  const large = Array.from(page.matchAll(/\{ name: "([^"]+)", maker: "[^"]+", active: (\d+), fromBase/g), (match) => ({
-    name: match[1],
-    active: Number(match[2]),
-  }))
-  expect(large.map((model) => model.name)).toEqual(["Qwen3-Coder-480B-A35B", "Composer 2.5", "SWE-2", "Kimi K2.7 Code"])
-  // Each runs more parameters per token than Velocity is designed to.
-  expect(large.filter((model) => model.active < 20)).toEqual([])
-  const span = `${Math.min(...large.map((model) => model.active))}B to ${Math.max(...large.map((model) => model.active))}B`
-  expect(page).toContain(`Four very large coding models run ${span} parameters for every token`)
-  expect(page).toContain(`Velocity is designed for under 20B against their ${span}`)
-  expect(page).not.toMatch(/four largest|21–35B/)
+test("the investor page compares Velocity with one set of four models, by the agents they ship with", () => {
+  const large = Array.from(page.matchAll(/\{ name: "([^"]+)", maker: "[^"]+", weights/g), (match) => match[1])
+  expect(large).toEqual(["Qwen3-Coder-480B", "Composer 2.5", "SWE-2", "Kimi K2.7 Code"])
+  expect(page).toContain("Four very large coding models, and the agents they ship with")
+  expect(page).not.toMatch(/four largest|21–35B|Four very large coding models run/)
   // There are no weights, so the page can only say what Velocity is designed to do.
   expect(page).toContain("Designed to cost significantly less to run than all four")
+  expect(page).toContain("That is a design goal; with no weights yet, nothing is measured.")
   expect(page).not.toMatch(/Velocity (is|costs|runs) (significantly )?(cheaper|less)/i)
 })
 
