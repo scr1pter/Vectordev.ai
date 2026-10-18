@@ -1,5 +1,5 @@
 import { afterEach, expect } from "bun:test"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { ModelV2 } from "@vectordevai/core/model"
@@ -20,6 +20,9 @@ const layer = (models = owned) =>
       Layer.succeed(FreeModels.Service, {
         catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
         forKey: () => Effect.succeed(models),
+        trainingConsent: () => Effect.succeed(false),
+        setTrainingConsent: (accepted) => Effect.succeed(accepted),
+        changes: Stream.empty,
       }),
     ],
     [

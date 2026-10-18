@@ -53,20 +53,11 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
         mapValues(filtered, (item) => Provider.fromModelCatalogProvider(item)),
         mapValues(connected, Provider.toPublicInfo),
       )
-      const freeCatalog = yield* freeModels.catalog()
-      if (
-        freeCatalog.enabled &&
-        !disabled.has("vector") &&
-        (!enabled || enabled.has("vector")) &&
-        freeCatalog.models.length
+      Provider.applyFreeCatalog(
+        providers,
+        yield* freeModels.catalog(),
+        !disabled.has("vector") && (!enabled || enabled.has("vector")),
       )
-        providers.vector ??= Provider.fromFreeModels(freeCatalog.models)
-      if (!freeCatalog.enabled) {
-        delete providers.vector
-        for (const provider of Object.values(providers)) {
-          for (const model of Object.values(provider.models)) delete model.freeModel
-        }
-      }
       const selectable = new Set(Object.keys(connected).filter((id) => !!providers[id]))
       return {
         all: Object.values(providers).map(Provider.toClientInfo),
@@ -74,6 +65,17 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
         connected: [...selectable],
         unavailable: yield* provider.unavailable(),
       }
+    })
+
+    const freeModelConsent = Effect.fn("ProviderHttpApi.freeModelConsent")(function* () {
+      return { training: yield* freeModels.trainingConsent() }
+    })
+
+    // Guests cannot reach this: every non-GET /provider/ route is owner-only.
+    const setFreeModelConsent = Effect.fn("ProviderHttpApi.setFreeModelConsent")(function* (ctx: {
+      payload: { training: boolean }
+    }) {
+      return { training: yield* freeModels.setTrainingConsent(ctx.payload.training) }
     })
 
     const auth = Effect.fn("ProviderHttpApi.auth")(function* () {
@@ -124,6 +126,8 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
 
     return handlers
       .handle("list", list)
+      .handle("freeModelConsent", freeModelConsent)
+      .handle("setFreeModelConsent", setFreeModelConsent)
       .handle("auth", auth)
       .handleRaw("authorize", authorizeRaw)
       .handle("callback", callback)

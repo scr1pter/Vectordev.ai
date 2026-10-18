@@ -249,6 +249,12 @@ import type {
   ProviderAuthData,
   ProviderAuthErrors,
   ProviderAuthResponses,
+  ProviderFreeModelsConsentData,
+  ProviderFreeModelsConsentErrors,
+  ProviderFreeModelsConsentResponses,
+  ProviderFreeModelsSetConsentData,
+  ProviderFreeModelsSetConsentErrors,
+  ProviderFreeModelsSetConsentResponses,
   ProviderListData,
   ProviderListErrors,
   ProviderListResponses,
@@ -2312,6 +2318,43 @@ export class Permission extends HeyApiClient {
   }
 }
 
+export class FreeModels extends HeyApiClient {
+  /**
+   * Get free-model training consent
+   *
+   * Whether the user accepted, once, that free models whose providers may train on prompts may receive them.
+   */
+  public consent<ThrowOnError extends boolean = false>(options?: Options<ProviderFreeModelsConsentData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      ProviderFreeModelsConsentResponses,
+      ProviderFreeModelsConsentErrors,
+      ThrowOnError
+    >({ url: "/provider/free-models/consent", ...options })
+  }
+
+  /**
+   * Accept or withdraw free-model training consent
+   *
+   * Record the one-time acceptance needed before a prompt is sent to a free model whose provider may train on prompts, or withdraw it.
+   */
+  public setConsent<ThrowOnError extends boolean = false>(
+    options?: Options<ProviderFreeModelsSetConsentData, ThrowOnError>,
+  ) {
+    return (options?.client ?? this.client).post<
+      ProviderFreeModelsSetConsentResponses,
+      ProviderFreeModelsSetConsentErrors,
+      ThrowOnError
+    >({
+      url: "/provider/free-models/consent",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+}
+
 export class Oauth extends HeyApiClient {
   /**
    * Start OAuth authorization
@@ -2377,6 +2420,11 @@ export class Provider extends HeyApiClient {
       url: "/provider/auth",
       ...options,
     })
+  }
+
+  private _freeModels?: FreeModels
+  get freeModels(): FreeModels {
+    return (this._freeModels ??= new FreeModels({ client: this.client }))
   }
 
   private _oauth?: Oauth

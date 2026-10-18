@@ -44,6 +44,9 @@ describe("server authentication", () => {
     // Trusting a project lets its config run code, so it is the owner's call too.
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/config/trust")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("GET", "/config/trust")).toBe(false)
+    // Accepting that free models may train on prompts is the owner's choice; a guest may only read it.
+    expect(ServerAuth.isOwnerOnlyRoute("POST", "/provider/free-models/consent")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRoute("GET", "/provider/free-models/consent")).toBe(false)
     // The app bootstraps from these, so a guest reads them, narrowed to its workspace by their handlers.
     for (const route of ["/global/health", "/global/event", "/global/config", "/project", "/project/current"])
       expect(ServerAuth.isOwnerOnlyRoute("GET", route)).toBe(false)

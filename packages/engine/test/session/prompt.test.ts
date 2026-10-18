@@ -311,6 +311,9 @@ const freePrompts = testEffect(
       Layer.succeed(FreeModels.Service, {
         catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
         forKey: () => Effect.succeed([FREE_MODEL_FALLBACKS[0]]),
+        trainingConsent: () => Effect.succeed(false),
+        setTrainingConsent: (accepted) => Effect.succeed(accepted),
+        changes: Stream.empty,
       }),
     ],
     [
@@ -350,6 +353,9 @@ const codiumPrompts = testEffect(
       Layer.succeed(FreeModels.Service, {
         catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
         forKey: () => Effect.succeed([]),
+        trainingConsent: () => Effect.succeed(false),
+        setTrainingConsent: (accepted) => Effect.succeed(accepted),
+        changes: Stream.empty,
       }),
     ],
     [

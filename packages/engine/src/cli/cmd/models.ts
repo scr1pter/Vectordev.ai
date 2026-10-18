@@ -1,9 +1,13 @@
 import {
+  FREE_MODEL_TRAINING_DISCLAIMER,
   FREE_MODELS_TITLE,
+  freeModelMayTrain,
   freeModelName,
   freeModelSource,
+  freeModelTrainingLabel,
   preferOwnFreeModels,
 } from "@vectordevai/core/free-model-choice"
+import { FreeModels } from "@vectordevai/core/free-models"
 import { EOL } from "os"
 import { Effect } from "effect"
 import { Flag } from "@vectordevai/core/flag/flag"
@@ -30,9 +34,28 @@ export const ModelsCommand = effectCmd({
       .option("refresh", {
         describe: "refresh the model catalog from the configured mirror",
         type: "boolean",
-      }),
+      })
+      .option("accept-training", {
+        describe: 'accept, once, that free models labelled "May train on your prompts" may receive your prompts',
+        type: "boolean",
+      })
+      .option("decline-training", {
+        describe: "withdraw that acceptance; prompts to those models are then refused before anything is sent",
+        type: "boolean",
+      })
+      .conflicts("accept-training", "decline-training"),
   handler: Effect.fn("Cli.models")(function* (args) {
     const { Provider } = yield* Effect.promise(() => import("@/provider/provider"))
+    // The engine reads this file before every free-model request, so a running desktop app sees the change at once.
+    const consent = FreeModels.createClient({ consentFile: FreeModels.trainingConsentFile() })
+    if (args.acceptTraining || args.declineTraining) {
+      const accepted = yield* Effect.promise(() => consent.setTrainingConsent(!!args.acceptTraining))
+      UI.println(
+        accepted
+          ? `Accepted. ${FREE_MODEL_TRAINING_DISCLAIMER} Run "vector models --decline-training" to withdraw.`
+          : 'Withdrawn. Prompts to free models labelled "May train on your prompts" are refused until you accept again.',
+      )
+    }
     if (args.refresh) {
       const enabled =
         Flag.VECTOR_MODELS_URL && ModelCatalog.mirrorURL(Flag.VECTOR_MODELS_URL) && !Flag.VECTOR_DISABLE_MODELS_FETCH
@@ -60,8 +83,14 @@ export const ModelsCommand = effectCmd({
     if (free.length) {
       UI.println(FREE_MODELS_TITLE)
       free.forEach((model) =>
-        UI.println(`  ${freeModelName(model)} — ${freeModelSource(model)} (${model.providerID}/${model.id})`),
+        UI.println(
+          `  ${freeModelName(model)} — ${[freeModelSource(model), freeModelTrainingLabel(model)].filter(Boolean).join(" · ")} (${model.providerID}/${model.id})`,
+        ),
       )
+      if (free.some(freeModelMayTrain) && !(yield* Effect.promise(() => consent.trainingConsent())))
+        UI.println(
+          `  ${FREE_MODEL_TRAINING_DISCLAIMER} Prompts to those models are refused until you run "vector models --accept-training".`,
+        )
     }
 
     const codium = providers[ProviderV2.ID.make(ModelPlans.PROVIDER_ID)]

@@ -1,5 +1,7 @@
 import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import { FreeModels } from "@vectordevai/core/free-models"
+import { freeModelDataPolicy } from "@vectordevai/core/free-model-catalog"
+import { FREE_MODEL_TRAINING_BLOCKED } from "@vectordevai/core/free-model-choice"
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
@@ -1787,10 +1789,17 @@ const layer = Layer.effect(
       })
       yield* state.assertNotBusy(input.sessionID)
       const ownKey = yield* freeCredentials.get("openrouter")
-      if (!ownKey || !(yield* freeModels.forKey(ownKey, true)).some((model) => model.id === input.modelID))
+      if (!ownKey || !(yield* freeModels.forKey(ownKey, true)).some((model) => model.id === input.modelID)) {
+        // A may-train model the shared allowance served is hidden from an account whose privacy settings exclude it.
+        const shared = ownKey ? yield* freeModels.catalog() : undefined
+        const listed = shared?.enabled ? shared.models.find((model) => model.id === input.modelID) : undefined
         return yield* new FreeModelsResumeError({
-          message: "Connect OpenRouter and choose the same available free model to continue.",
+          message:
+            listed && freeModelDataPolicy(listed) !== "no-training"
+              ? FREE_MODEL_TRAINING_BLOCKED
+              : "Connect OpenRouter and choose the same available free model to continue.",
         })
+      }
       yield* validate
       const work = Effect.gen(function* () {
         const current = yield* database.db

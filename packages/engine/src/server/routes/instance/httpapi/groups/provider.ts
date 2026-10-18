@@ -11,6 +11,8 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 
 const root = "/provider"
 
+const FreeModelConsent = Schema.Struct({ training: Schema.Boolean }).annotate({ identifier: "FreeModelConsent" })
+
 const ProviderAuthErrorName = Schema.Union([
   Schema.Literal("BadRequest"),
   Schema.Literal("ProviderAuthOauthMissing"),
@@ -43,6 +45,29 @@ export const ProviderApi = HttpApi.make("provider")
             identifier: "provider.list",
             summary: "List providers",
             description: "Get a list of all available AI providers, including both available and connected ones.",
+          }),
+        ),
+        HttpApiEndpoint.get("freeModelConsent", `${root}/free-models/consent`, {
+          query: WorkspaceRoutingQuery,
+          success: described(FreeModelConsent, "Whether may-train free models were accepted"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "provider.freeModels.consent",
+            summary: "Get free-model training consent",
+            description:
+              "Whether the user accepted, once, that free models whose providers may train on prompts may receive them.",
+          }),
+        ),
+        HttpApiEndpoint.post("setFreeModelConsent", `${root}/free-models/consent`, {
+          query: WorkspaceRoutingQuery,
+          payload: FreeModelConsent,
+          success: described(FreeModelConsent, "The recorded choice"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "provider.freeModels.setConsent",
+            summary: "Accept or withdraw free-model training consent",
+            description:
+              "Record the one-time acceptance needed before a prompt is sent to a free model whose provider may train on prompts, or withdraw it.",
           }),
         ),
         HttpApiEndpoint.get("auth", `${root}/auth`, {

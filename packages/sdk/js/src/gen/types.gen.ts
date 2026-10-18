@@ -2278,6 +2278,7 @@ export type Model = {
   name: string
   freeModel?: {
     source: "shared" | "openrouter"
+    dataPolicy?: "no-training" | "may-train" | "unreviewed"
   }
   family?: string
   capabilities: {
@@ -2907,6 +2908,10 @@ export type PermissionNotFoundError = {
   _tag: "PermissionNotFoundError"
   requestID: string
   message: string
+}
+
+export type FreeModelConsent = {
+  training: boolean
 }
 
 export type ProviderAuthMethod = {
@@ -12109,6 +12114,73 @@ export type ProviderListResponses = {
 }
 
 export type ProviderListResponse = ProviderListResponses[keyof ProviderListResponses]
+
+export type ProviderFreeModelsConsentData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/free-models/consent"
+}
+
+export type ProviderFreeModelsConsentErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ProviderFreeModelsConsentError = ProviderFreeModelsConsentErrors[keyof ProviderFreeModelsConsentErrors]
+
+export type ProviderFreeModelsConsentResponses = {
+  /**
+   * Whether may-train free models were accepted
+   */
+  200: FreeModelConsent
+}
+
+export type ProviderFreeModelsConsentResponse =
+  ProviderFreeModelsConsentResponses[keyof ProviderFreeModelsConsentResponses]
+
+export type ProviderFreeModelsSetConsentData = {
+  body?: FreeModelConsent
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/free-models/consent"
+}
+
+export type ProviderFreeModelsSetConsentErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ProviderFreeModelsSetConsentError =
+  ProviderFreeModelsSetConsentErrors[keyof ProviderFreeModelsSetConsentErrors]
+
+export type ProviderFreeModelsSetConsentResponses = {
+  /**
+   * The recorded choice
+   */
+  200: FreeModelConsent
+}
+
+export type ProviderFreeModelsSetConsentResponse =
+  ProviderFreeModelsSetConsentResponses[keyof ProviderFreeModelsSetConsentResponses]
 
 export type ProviderAuthData = {
   body?: never

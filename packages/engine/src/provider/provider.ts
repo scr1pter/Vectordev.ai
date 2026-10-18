@@ -7,8 +7,8 @@ import { ProviderSDK } from "@vectordevai/core/provider-sdk"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
-import type { FreeModelInfo } from "@vectordevai/schema/free-model"
-import { isFreeModel } from "@vectordevai/schema/free-model"
+import { FreeDataPolicy, isFreeModel, type FreeModelCatalog, type FreeModelInfo } from "@vectordevai/schema/free-model"
+import { freeModelDataPolicy } from "@vectordevai/core/free-model-catalog"
 import { ProviderUnavailable, providerRetired, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
 import {
@@ -1025,7 +1025,13 @@ export const Model = Schema.Struct({
   providerID: ProviderV2.ID,
   api: ProviderApiInfo,
   name: Schema.String,
-  freeModel: optional(Schema.Struct({ source: Schema.Literals(["shared", "openrouter"]) })),
+  freeModel: optional(
+    Schema.Struct({
+      source: Schema.Literals(["shared", "openrouter"]),
+      // "may-train" and "unreviewed" models carry the "May train on your prompts" label and need one-time consent.
+      dataPolicy: optional(FreeDataPolicy),
+    }),
+  ),
   family: optional(Schema.String),
   capabilities: ProviderCapabilities,
   cost: ProviderCost,
@@ -1101,7 +1107,9 @@ export function toClientInfo(provider: Info): Info {
 }
 
 export function defaultModelIDs<
-  T extends { models: Record<string, { id: string; freeModel?: { source: "shared" | "openrouter" } }> },
+  T extends {
+    models: Record<string, { id: string; freeModel?: { source: "shared" | "openrouter"; dataPolicy?: FreeDataPolicy } }>
+  },
 >(providers: Record<string, T>) {
   return Object.fromEntries(
     Object.entries(providers).flatMap(([id, item]) => {
@@ -1363,6 +1371,21 @@ export function fromModelCatalogProvider(provider: ModelCatalog.Provider): Info 
   }
 }
 
+/**
+ * What clients see of free models. With the shared catalog on, its models are listed under Vector. With it off, only
+ * the shared allowance's own models lose their free tag: free models on the user's own OpenRouter account keep it,
+ * or connecting OpenRouter would show no free section and select no model.
+ */
+export function applyFreeCatalog(providers: Record<string, Info>, catalog: FreeModelCatalog, vectorAllowed: boolean) {
+  if (catalog.enabled && vectorAllowed && catalog.models.length) providers.vector ??= fromFreeModels(catalog.models)
+  if (catalog.enabled) return providers
+  delete providers.vector
+  for (const provider of Object.values(providers))
+    for (const model of Object.values(provider.models))
+      if (model.freeModel && model.freeModel.source !== "openrouter") delete model.freeModel
+  return providers
+}
+
 export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "vector" | "openrouter" = "vector"): Info {
   return {
     id: ProviderV2.ID.make(providerID),
@@ -1377,7 +1400,10 @@ export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "ve
           id: ModelV2.ID.make(model.id),
           providerID: ProviderV2.ID.make(providerID),
           name: model.name,
-          freeModel: { source: providerID === "vector" ? "shared" : "openrouter" },
+          freeModel: {
+            source: providerID === "vector" ? "shared" : "openrouter",
+            dataPolicy: freeModelDataPolicy(model),
+          },
           api: {
             id: model.id,
             npm: "@ai-sdk/openai-compatible",
@@ -1959,6 +1985,12 @@ const layer = Layer.effect(
       Stream.runForEach(() => InstanceState.invalidateAll(state)),
       Effect.forkScoped({ startImmediately: true }),
     )
+    // State built while the free catalog read OFF, such as a cached OFF served at startup, would hide free models for
+    // the whole app session once vectordev.ai turns them on. Rebuild whenever the catalog changes.
+    yield* freeModels.changes.pipe(
+      Stream.runForEach(() => InstanceState.invalidateAll(state)),
+      Effect.forkScoped({ startImmediately: true }),
+    )
 
     // A plan bought, a sign-in or a sign-out must not require restarting the local engine.
     const refreshCodium = Effect.fn("Provider.refreshCodium")(function* (options?: ModelPlans.CatalogOptions) {
@@ -2015,8 +2047,16 @@ const layer = Layer.effect(
                   catalog: () => runtimeBridge.promise(freeModels.catalog()),
                   forKey: (key) => runtimeBridge.promise(freeModels.forKey(key)),
                   credential: (provider) => runtimeBridge.promise(freeCredentials.get(provider)),
+                  trainingConsent: () => runtimeBridge.promise(freeModels.trainingConsent()),
                 })
                 const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
+                // Built before the request: a may-train model without the user's acceptance throws, and nothing is sent.
+                const payload = serializeFreeModelRequest(
+                  freeModelRequest({ ...body, model: model.id }, route.models, {
+                    trainingConsent: route.trainingConsent,
+                  }),
+                  route.url === FreeModels.SHARED_CHAT_URL,
+                )
                 return fetch(route.url, {
                   method: "POST",
                   redirect: "error",
@@ -2026,12 +2066,14 @@ const layer = Layer.effect(
                     Authorization: `Bearer ${route.key}`,
                     "HTTP-Referer": "https://vectordev.ai/",
                     "X-OpenRouter-Title": "Vector",
+                    ...route.headers,
                   },
-                  body: serializeFreeModelRequest(
-                    freeModelRequest({ ...body, model: model.id }, route.models),
-                    route.url === FreeModels.SHARED_CHAT_URL,
-                  ),
-                }).then(FreeModels.preserveLimit)
+                  body: payload,
+                })
+                  .then((response) =>
+                    route.source === "openrouter" ? FreeModels.explainPolicyRefusal(response) : response,
+                  )
+                  .then(FreeModels.preserveLimit)
               },
               { preconnect: fetch.preconnect },
             ),
@@ -2459,11 +2501,17 @@ const layer = Layer.effect(
 const priority = ["gpt-5", "claude-sonnet-4", "gemini-3-pro"]
 const smallModelFamilyPriority = ["gemini-flash", "gpt-nano", "claude-haiku"]
 export function sort<
-  T extends { id: string; freeModel?: { source: "shared" | "openrouter" }; limit?: { context: number } },
+  T extends {
+    id: string
+    freeModel?: { source: "shared" | "openrouter"; dataPolicy?: FreeDataPolicy }
+    limit?: { context: number }
+  },
 >(models: T[]) {
   return sortBy(
     models,
     [(model) => (model.freeModel?.source === "openrouter" ? 0 : 1), "asc"],
+    // A model whose provider may train on prompts is never chosen automatically ahead of a no-training one.
+    [(model) => (model.freeModel?.dataPolicy && model.freeModel.dataPolicy !== "no-training" ? 1 : 0), "asc"],
     [(model) => (model.freeModel?.source === "openrouter" ? (model.limit?.context ?? 0) : 0), "desc"],
     [(model) => priority.findIndex((filter) => model.id.includes(filter)), "desc"],
     [(model) => (model.id.includes("latest") ? 0 : 1), "asc"],
