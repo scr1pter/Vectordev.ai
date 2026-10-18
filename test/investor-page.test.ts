@@ -62,6 +62,7 @@ test("every page that gives Vector Velocity's planned size gives the same one", 
   const files = [
     "README.md",
     "packages/web/src/components/Lander.astro",
+    "packages/web/src/components/marketing/LanderStory.astro",
     "packages/web/src/components/marketing/shots/ShotBrowserPanel.astro",
     "packages/web/src/pages/investors.astro",
   ]
