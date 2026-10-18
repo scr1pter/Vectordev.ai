@@ -31,7 +31,7 @@
     },
     {
       "source": "/docs/project-rules",
-      "destination": "/docs/vector-agent#project-rules",
+      "destination": "/docs/vector-agent#repository-rules",
       "permanent": true
     },
     {
@@ -186,7 +186,7 @@
     },
     {
       "source": "/docs/settings-appearance",
-      "destination": "/docs/desktop-app#settings-appearance",
+      "destination": "/docs/desktop-app#settings",
       "permanent": true
     },
     {
