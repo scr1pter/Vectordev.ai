@@ -3410,8 +3410,6 @@ export default function NewLayout(props: ParentProps) {
   globalThis.window?.addEventListener("keydown", handleGlobalKeyDown, { capture: true })
   onCleanup(() => globalThis.window?.removeEventListener("keydown", handleGlobalKeyDown, { capture: true }))
 
-  // The sidebar's Update button. A failed install already puts the gear back; the toast says why and opens Updates &
-  // about, which shows the error with Try again.
   // Counted when Update is clicked. The lists on screen cover only the open task, and a restart stops every agent, so
   // the parallel agents are read again from every repository; without the desktop bridge the on-screen list stands in.
   const countRunningAgents = async () => {
@@ -3423,6 +3421,8 @@ export default function NewLayout(props: ParentProps) {
       (workspaces ?? parallelRecords()).filter(isParallelWorkspaceRunning).length,
     )
   }
+  // The sidebar's Update button. A failed install already puts the gear back; the toast says why and opens Updates &
+  // about, which shows the error with Try again.
   const installUpdateFromNavigation = () =>
     void installUpdate(platform.updater, (message) =>
       showToast(navigationUpdateFailure(message, () => openSettingsAt("about"))),
