@@ -45,7 +45,7 @@ test("every free model of 17 October 2026 is offered except NVIDIA's trial endpo
     "xingchen-agi/xing4.0-29b-a4b:free",
   ])
   // The owner's count of 17 October 2026: 19 zero-price IDs, the router included. Each one not offered is NVIDIA's,
-  // barred by its terms, or a Google Lyria model, which charges per song or clip and has no tools.
+  // barred by its terms, or a Google Lyria preview, which the capture lists at zero token prices but without tools.
   const zeroPrice = fixture.models
     .filter((item: typeof cohere) => zeroFreeModelPricing(item.pricing))
     .map((item: { id: string }) => item.id)
@@ -66,9 +66,16 @@ test("every free model of 17 October 2026 is offered except NVIDIA's trial endpo
   for (const item of fixture.models.filter((model: { id: string }) => model.id.startsWith("nvidia/")))
     expect(barredFreeModel(item.id)).toContain("NVIDIA's API Trial Terms")
   expect(offered.some((id: string) => barredFreeModel(id))).toBe(false)
-  // Items priced per song or clip never qualify, nor does any router but the free one.
-  for (const id of ["google/lyria-3-pro-preview", "google/lyria-3-clip-preview"])
+  // Lyria is left out for its missing tools, the reason the docs give: its capture has zero prices and no `tools`. With
+  // tools, it would still need a `:free` ID.
+  for (const id of ["google/lyria-3-pro-preview", "google/lyria-3-clip-preview"]) {
+    expect(zeroFreeModelPricing(metadata(id).pricing)).toBe(true)
+    expect(metadata(id).supported_parameters).not.toContain("tools")
     expect(eligibleFreeModel(metadata(id), fixture.capturedAt)).toBe(false)
+    const withTools = { ...metadata(id), supported_parameters: [...metadata(id).supported_parameters, "tools"] }
+    expect(eligibleFreeModel(withTools, fixture.capturedAt)).toBe(false)
+    expect(eligibleFreeModel({ ...withTools, id: `${id}:free` }, fixture.capturedAt)).toBe(true)
+  }
   for (const id of ["openrouter/auto", "openrouter/free:nitro", "OpenRouter/free", " openrouter/free"])
     expect(isFreeModelID(id)).toBe(false)
   expect(isFreeModelID("openrouter/free")).toBe(true)
