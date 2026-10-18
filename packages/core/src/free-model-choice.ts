@@ -27,6 +27,9 @@ export const FREE_MODEL_TRAINING_CONSENT_REQUIRED = `${FREE_MODEL_TRAINING_DISCL
 /** OpenRouter has separate privacy settings for free and paid models; the free one decides whether these route at all. */
 export const FREE_MODEL_TRAINING_BLOCKED =
   'Your OpenRouter privacy settings block free models whose providers may train on prompts. To use this one, open openrouter.ai/settings/privacy, allow free models from providers that may train on your data, then send again. Or choose a model without the "May train on your prompts" label.'
+/** Vector itself asks for no-training routing for a model it has not reviewed, so no account setting can lift it. */
+export const FREE_MODEL_UNREVIEWED_BLOCKED =
+  "Vector has not reviewed this free model's data policy yet, so it asks OpenRouter to route it only to providers that don't train on prompts, and none of this model's providers qualifies. Choose another free model."
 export const OPENROUTER_ACCOUNT_COPY =
   "Use your own free OpenRouter account: up to 50 requests a day, subject to availability. No payment or credits needed. Keep automatic top-ups, default or enforced account plugins, and external provider keys disabled."
 export const OPENROUTER_REMOTE_COPY =

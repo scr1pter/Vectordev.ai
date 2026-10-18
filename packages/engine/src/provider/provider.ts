@@ -2071,9 +2071,12 @@ const layer = Layer.effect(
                   },
                   body: payload,
                 })
-                  .then((response) =>
-                    route.source === "openrouter" ? FreeModels.explainPolicyRefusal(response) : response,
-                  )
+                  .then((response) => {
+                    const chosen = route.models.find((item) => item.id === model.id)
+                    return route.source === "openrouter" && chosen
+                      ? FreeModels.explainPolicyRefusal(response, freeModelDataPolicy(chosen))
+                      : response
+                  })
                   .then(FreeModels.preserveLimit)
               },
               { preconnect: fetch.preconnect },

@@ -5,6 +5,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { createHash, randomUUID } from "node:crypto"
 import { Context, Effect, Layer, Option, Queue, Schema, Stream } from "effect"
 import {
+  type FreeDataPolicy,
   FreeModelCatalog,
   FreeModelInfo,
   FREE_MODELS_CONSENT_ACCEPTED,
@@ -27,7 +28,7 @@ import {
   isFreeModelID,
   offeredFreeModel,
 } from "./free-model-catalog"
-import { FREE_MODEL_TRAINING_BLOCKED } from "./free-model-choice"
+import { FREE_MODEL_TRAINING_BLOCKED, FREE_MODEL_UNREVIEWED_BLOCKED } from "./free-model-choice"
 
 // The disclosure parameter tells vectordev.ai this client labels free models that may train and asks first.
 export const CATALOG_URL = `https://vectordev.ai/api/free-models/models?disclosure=${FREE_MODELS_DISCLOSURE}`
@@ -360,17 +361,20 @@ export async function resolveRoute(input: {
 }
 
 /**
- * OpenRouter answers 404 "No endpoints found matching your data policy" when the user's own privacy settings exclude
- * every endpoint a request may use. Replace that with what to change, keeping the status.
+ * OpenRouter answers 404 "No endpoints found matching your data policy" when no endpoint a request may use passes
+ * both the user's own privacy settings and the request's data_collection. Replace that with what to do, keeping the
+ * status. For a may-train model, which was sent "allow", the user's settings are the cause. An unreviewed model was
+ * sent "deny" by Vector itself, so no setting can help. A no-training model keeps OpenRouter's own answer.
  */
-export async function explainPolicyRefusal(response: Response) {
-  if (response.status !== 404) return response
+export async function explainPolicyRefusal(response: Response, policy: FreeDataPolicy) {
+  if (response.status !== 404 || policy === "no-training") return response
   const text = await response
     .clone()
     .text()
     .catch(() => "")
   if (!/data policy|privacy|training/i.test(text)) return response
-  return Response.json({ error: { message: FREE_MODEL_TRAINING_BLOCKED, code: 404 } }, { status: 404 })
+  const message = policy === "unreviewed" ? FREE_MODEL_UNREVIEWED_BLOCKED : FREE_MODEL_TRAINING_BLOCKED
+  return Response.json({ error: { message, code: 404 } }, { status: 404 })
 }
 
 /** Preserve quota metadata before compatible SDKs reduce an SSE error to its message string. */
