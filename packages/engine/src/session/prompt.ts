@@ -2498,7 +2498,7 @@ function namedOnly(execute: NonNullable<AITool["execute"]>, named: readonly stri
     )
     if (types.every((type) => named.includes(type))) return execute(args, options)
     throw new Error(
-      "Subagents are not offered for this request. Do the work yourself, or call escalate if it truly needs subagents.",
+      "Subagents are not offered for this request. Do the work yourself; call escalate only for exceptionally hard work across the whole system or dozens of files.",
     )
   }
 }

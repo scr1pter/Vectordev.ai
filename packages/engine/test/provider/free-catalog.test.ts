@@ -57,9 +57,11 @@ it.instance(
       )
       // Each model says whether its provider may train on prompts, and the default never picks one that may.
       expect(vector.models[laguna.id].freeModel).toEqual({ source: "shared", dataPolicy: "may-train" })
+      // North Mini Code's reviewed fallback also says its reasoning may be switched off for a greeting.
       expect(vector.models[FREE_MODEL_FALLBACKS[0].id].freeModel).toEqual({
         source: "shared",
         dataPolicy: "no-training",
+        reasoning: "optional",
       })
       expect(Provider.defaultModelIDs({ vector }).vector).not.toBe(laguna.id)
       served.catalog = off
@@ -78,6 +80,7 @@ it.instance("with the shared catalog off, the user's own OpenRouter free models 
     expect(providers.openrouter.models[FREE_MODEL_FALLBACKS[0].id].freeModel).toEqual({
       source: "openrouter",
       dataPolicy: "no-training",
+      reasoning: "optional",
     })
     expect(providers.openrouter.models[laguna.id].freeModel).toEqual({ source: "openrouter", dataPolicy: "may-train" })
     // The default for the user's own account is a no-training model, even when a may-train one is wider.

@@ -109,7 +109,7 @@ export function withheld(tier: Tier, agents = 0): ReadonlySet<string> {
  */
 export function note(tier: Tier, options: { readonly escalate: boolean; readonly judge: boolean }) {
   const escalate = options.escalate
-    ? " If the work turns out large (the whole system, or independent parts of roughly five or more files that would be cheaper split up), call escalate with your reason."
+    ? " Call escalate only for exceptionally hard work across the whole system or dozens of files; an app, a feature, bug fixes or a deploy never need it."
     : ""
   if (tier === "light")
     return `<task_size>Light request: do it directly, without a to-do list. Subagents are not offered.${escalate}</task_size>`

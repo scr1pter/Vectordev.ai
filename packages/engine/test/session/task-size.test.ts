@@ -1490,6 +1490,8 @@ describe("task sizing", () => {
         expect(judgeRequests(bodies)).toBe(1)
       }),
     { git: true },
+    // Several fake-server turns, the judge's among them.
+    30_000,
   )
 
   it.instance(
@@ -1532,6 +1534,8 @@ describe("task sizing", () => {
         expect(toolNames(body)).toEqual(expect.arrayContaining(["task", "todowrite"]))
       }),
     { git: true },
+    // Several fake-server turns, the judge's among them.
+    30_000,
   )
 
   it.instance(
