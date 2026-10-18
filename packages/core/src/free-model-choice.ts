@@ -116,6 +116,23 @@ export function freeModelTrainingDisclaimer(model: Pick<FreeModelChoice, "freeMo
   return undefined
 }
 
+/**
+ * The largest-context model served through the user's own OpenRouter account, preferring one whose provider does not
+ * train on prompts: Vector never picks a "May train on your prompts" model for the user ahead of a no-training one,
+ * and never OpenRouter's free router, which picks a model at random. Price and `:free` suffixes are never treated as
+ * eligibility; only server-approved metadata is, so a paid or shared model can never be chosen here. The desktop app
+ * and the TUI both choose with it.
+ */
+export function bestOwnFreeModel<T extends Pick<FreeModelChoice, "id" | "freeModel"> & { limit: { context: number } }>(
+  models: readonly T[],
+) {
+  return models
+    .filter((model) => model.freeModel?.source === "openrouter" && model.id !== FREE_ROUTER_ID)
+    .toSorted(
+      (a, b) => Number(freeModelMayTrain(a)) - Number(freeModelMayTrain(b)) || b.limit.context - a.limit.context,
+    )[0]
+}
+
 /** Keep canonical IDs intact. The user's account takes precedence for the same model. */
 export function preferOwnFreeModels<T extends FreeModelChoice>(models: readonly T[]): T[] {
   const own = new Set(models.filter((model) => model.freeModel?.source === "openrouter").map((model) => model.id))

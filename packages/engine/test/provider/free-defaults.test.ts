@@ -149,3 +149,42 @@ test("OpenRouter's free router is never anyone's default, whatever its context",
     "cohere/north-mini-code:free",
   )
 })
+
+// The verifier's medium of 18 October 2026: the router was only ranked last, so a provider whose only model it was
+// still had it as its default, and the engine, the app and ACP then chose it.
+const router = {
+  id: "openrouter/free",
+  name: "Free Models Router",
+  contextLength: 200_000,
+  maxOutputTokens: 8192,
+  providers: [{ id: "openrouter", name: "OpenRouter", retention: "", dataPolicy: "may-train" as const }],
+}
+
+test("a provider whose only model is OpenRouter's free router has no default, and no automatic choice is the router", () => {
+  expect(Provider.defaultModelIDs({ vector: Provider.fromFreeModels([router]) })).toEqual({})
+  expect(Provider.defaultModelIDs({ openrouter: Provider.fromFreeModels([router], "openrouter") })).toEqual({})
+  const shared = Provider.fromFreeModels([router, FREE_MODEL_FALLBACKS[0]])
+  expect(Provider.defaultModelIDs({ vector: shared }).vector).toBe(FREE_MODEL_FALLBACKS[0].id)
+  expect(Provider.automaticModels(Object.values(Provider.fromFreeModels([router]).models))).toEqual([])
+  // Lists still show it, last, for someone to pick.
+  expect(Provider.sort(Object.values(shared.models)).map((model) => String(model.id))).toEqual([
+    FREE_MODEL_FALLBACKS[0].id,
+    router.id,
+  ])
+})
+
+testEffect(layer([router])).instance(
+  "an OpenRouter account that lists only the free router gets no automatic model",
+  () =>
+    Effect.gen(function* () {
+      const provider = yield* Provider.Service
+      const providers = yield* provider.list()
+      expect(providers[ProviderV2.ID.openrouter].models[router.id]?.freeModel).toEqual({
+        source: "openrouter",
+        dataPolicy: "may-train",
+      })
+      expect(Provider.defaultModelIDs(providers).openrouter).toBeUndefined()
+      expect(yield* provider.defaultModel().pipe(Effect.result)).toMatchObject({ _tag: "Failure" })
+    }),
+  { trusted: true, config: { provider: { openrouter: { options: { apiKey: "synthetic-key" } } } } },
+)

@@ -1,10 +1,10 @@
 import { unavailableModel } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
-import { isFreeModelRef, retainFreeModelSelection } from "@vectordevai/schema/free-model"
+import { FREE_ROUTER_ID, isFreeModelRef, retainFreeModelSelection } from "@vectordevai/schema/free-model"
 import { useLanguage } from "./language"
 import { showToast } from "@/utils/toast"
 import { takeProviderNotice } from "@/utils/provider-notices"
-import { bestOwnFreeModel } from "@/utils/free-model"
+import { bestOwnFreeModel } from "@vectordevai/core/free-model-choice"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { createSimpleContext } from "@vectordevai/ui/context"
 import { base64Encode } from "@vectordevai/core/util/encode"
@@ -203,7 +203,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (validModel(model)) return model
         }
 
-        const first = Object.values(provider.models)[0]
+        // OpenRouter's free router picks a model at random, so it is never chosen for anyone, even as the only model.
+        const first = Object.values(provider.models).find((model) => model.id !== FREE_ROUTER_ID)
         if (!first) continue
         const model = { providerID: provider.id, modelID: first.id }
         if (validModel(model)) return model

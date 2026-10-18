@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { bestOwnFreeModel } from "./free-model"
+import { bestOwnFreeModel } from "../src/free-model-choice"
 
 const model = (id: string, context: number, source?: "openrouter" | "shared") => ({
   id,

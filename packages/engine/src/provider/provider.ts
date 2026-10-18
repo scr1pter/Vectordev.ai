@@ -1127,7 +1127,7 @@ export function defaultModelIDs<
       const model =
         id === ModelPlans.PROVIDER_ID
           ? Object.values(item.models)[0]
-          : sort(
+          : automaticModels(
               Object.values(item.models).filter(
                 (model) => id !== "openrouter" || model.freeModel?.source === "openrouter",
               ),
@@ -2532,9 +2532,9 @@ const layer = Layer.effect(
 
       const configured = Object.keys(cfg.provider ?? {})
       const providers = Object.values(s.providers).filter((p) => configured.length === 0 || configured.includes(p.id))
-      const free = sort(Object.values(s.providers).flatMap((provider) => Object.values(provider.models))).find(
-        (model) => model.freeModel?.source === "openrouter",
-      )
+      const free = automaticModels(
+        Object.values(s.providers).flatMap((provider) => Object.values(provider.models)),
+      ).find((model) => model.freeModel?.source === "openrouter")
       if (free) return { providerID: free.providerID, modelID: free.id }
       if (s.providers[ProviderV2.ID.openrouter])
         return yield* new NoModelsError({ providerID: ProviderV2.ID.openrouter })
@@ -2542,7 +2542,7 @@ const layer = Layer.effect(
       const automatic = providers.filter((p) => p.id !== planID)
       const provider = automatic.find((p) => p.id !== "vector") ?? automatic[0]
       if (!provider) return yield* new NoProvidersError({ codium: s.providers[planID] !== undefined })
-      const [model] = sort(Object.values(provider.models))
+      const [model] = automaticModels(Object.values(provider.models))
       if (!model) return yield* new NoModelsError({ providerID: provider.id })
       return {
         providerID: provider.id,
@@ -2567,16 +2567,15 @@ const layer = Layer.effect(
 
 const priority = ["gpt-5", "claude-sonnet-4", "gemini-3-pro"]
 const smallModelFamilyPriority = ["gemini-flash", "gpt-nano", "claude-haiku"]
-export function sort<
-  T extends {
-    id: string
-    freeModel?: { source: "shared" | "openrouter"; dataPolicy?: FreeDataPolicy }
-    limit?: { context: number }
-  },
->(models: T[]) {
+type Sortable = {
+  id: string
+  freeModel?: { source: "shared" | "openrouter"; dataPolicy?: FreeDataPolicy }
+  limit?: { context: number }
+}
+export function sort<T extends Sortable>(models: T[]) {
   return sortBy(
     models,
-    // OpenRouter's free router picks a model at random, so it is never anyone's default.
+    // OpenRouter's free router picks a model at random, so lists show it last.
     [(model) => (model.id === FREE_ROUTER_ID ? 1 : 0), "asc"],
     [(model) => (model.freeModel?.source === "openrouter" ? 0 : 1), "asc"],
     // A model whose provider may train on prompts is never chosen automatically ahead of a no-training one.
@@ -2586,6 +2585,14 @@ export function sort<
     [(model) => (model.id.includes("latest") ? 0 : 1), "asc"],
     [(model) => model.id, "desc"],
   )
+}
+
+/**
+ * The models Vector may choose for someone, best first. OpenRouter's free router picks a model at random, so it is
+ * never chosen automatically, even as a provider's only model; it runs only when someone picks it.
+ */
+export function automaticModels<T extends Sortable>(models: T[]) {
+  return sort(models.filter((model) => model.id !== FREE_ROUTER_ID))
 }
 
 export function parseModel(model: string) {
