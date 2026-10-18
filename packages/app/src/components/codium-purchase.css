@@ -18,6 +18,13 @@
   font-weight: 560;
 }
 
+.codium-purchase-change {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  max-width: 560px;
+}
+
 .codium-purchase-head p,
 .codium-purchase-muted {
   margin: 2px 0 0;
