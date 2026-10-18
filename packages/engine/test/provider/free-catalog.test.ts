@@ -107,6 +107,32 @@ it.instance("an invited guest is offered no free model that may train, on either
 )
 
 it.instance(
+  "a helper call never moves a conversation onto a free model that may train",
+  () =>
+    Effect.gen(function* () {
+      // The may-train model is listed first, so only the policy check keeps helper calls off it.
+      const provider = yield* Provider.Service
+      served.catalog = { enabled: true, updatedAt: 1, models: [laguna, ...FREE_MODEL_FALLBACKS] }
+      yield* Effect.promise(() => client.catalog(true))
+      const vector = yield* pollWithTimeout(
+        provider.list().pipe(Effect.map((providers) => providers[ProviderV2.ID.vector])),
+        "the free catalog was never listed",
+        "3 seconds",
+      )
+      expect(Object.keys(vector.models)[0]).toBe(laguna.id)
+      expect((yield* provider.getSmallModel(ProviderV2.ID.vector))?.id).toBe(
+        ModelV2.ID.make(FREE_MODEL_FALLBACKS[0].id),
+      )
+      // A conversation already on the may-train model, which the user chose and accepted, keeps its helpers there.
+      expect((yield* provider.getSmallModel(ProviderV2.ID.vector, ModelV2.ID.make(laguna.id)))?.id).toBe(
+        ModelV2.ID.make(laguna.id),
+      )
+      served.catalog = off
+    }),
+  { trusted: true },
+)
+
+it.instance(
   "a prompt to a may-train free model without the user's acceptance is refused before anything is sent",
   () =>
     Effect.gen(function* () {

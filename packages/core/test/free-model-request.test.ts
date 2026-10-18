@@ -203,7 +203,9 @@ test("a fallback never weakens the chosen model's data policy", () => {
   for (const model of all) {
     const request = freeModelRequest(hello(model.id), all, { trainingConsent: true })
     if (request.provider.data_collection !== "allow") continue
-    expect(request.models.filter((id) => all.find((item) => item.id === id)?.providers[0].dataPolicy !== "may-train")).toEqual([])
+    expect(
+      request.models.filter((id) => all.find((item) => item.id === id)?.providers[0].dataPolicy !== "may-train"),
+    ).toEqual([])
     expect(request.provider.only.filter((id) => !id.startsWith(model.providers[0].id.split("/")[0]))).toEqual([])
   }
 })
