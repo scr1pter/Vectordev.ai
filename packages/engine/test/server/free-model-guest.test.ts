@@ -40,18 +40,26 @@ type Outbound = { url: string; model?: string; consent?: string; text: string }
 /**
  * The owner has accepted the training notice and is signed in to Vector, the cached catalog lists Cohere (no-training)
  * and Laguna (may-train), and an invited guest may work in the test directory. Model fetches are off in tests, so the
- * engine serves that cached catalog. Every request that would leave this machine is refused here and recorded, so nothing reaches vectordev.ai, and a test can say whether the engine tried to send to Laguna.
+ * engine serves that cached catalog. Every request that would leave this machine is refused here and recorded, so
+ * nothing reaches vectordev.ai through the legacy route, and a test can say whether the engine tried to send to Laguna.
  */
-async function serve(run: (input: Harness) => Promise<void>, answer?: (request: Request) => Response | undefined) {
+async function serve(
+  run: (input: Harness) => Promise<void>,
+  options: { answer?: (request: Request) => Response | undefined; config?: Record<string, unknown> } = {},
+) {
   // The configured test provider refuses every request at once unless `answer` replies, so a turn on it ends without
   // waiting to retry.
   await using provider = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch: (request) =>
-      answer?.(request) ?? Response.json({ error: { message: "The test provider answers nothing." } }, { status: 400 }),
+      options.answer?.(request) ??
+      Response.json({ error: { message: "The test provider answers nothing." } }, { status: 400 }),
   })
-  await using tmp = await tmpdir({ trusted: true, config: testProviderConfig(`${provider.url.origin}/v1`) })
+  await using tmp = await tmpdir({
+    trusted: true,
+    config: { ...testProviderConfig(`${provider.url.origin}/v1`), ...options.config },
+  })
   const cache = path.join(Global.Path.cache, "free-models-v2.json")
   await mkdir(path.dirname(cache), { recursive: true })
   await writeFile(cache, JSON.stringify({ enabled: true, updatedAt: Date.now(), models: [cohere, laguna] }))
@@ -302,6 +310,40 @@ test("a guest's request forwarded from another engine keeps the session off may-
   })
 }, 60_000)
 
+test("a title request for a guest's session never goes to a may-train model", async () => {
+  // The test provider answers every prompt, so the session gets a title, and the title agent runs on Laguna.
+  const chunk = (delta: unknown, finish: string | null) =>
+    `data: ${JSON.stringify({ id: "c1", object: "chat.completion.chunk", created: 0, model: "test-model", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`
+  const answer = () =>
+    new Response(chunk({ role: "assistant", content: "Done." }, null) + chunk({}, "stop") + "data: [DONE]\n\n", {
+      headers: { "content-type": "text/event-stream" },
+    })
+  await serve(
+    async (h) => {
+      // The title request starts once the main request is answered, and runs on beside the rest of the turn.
+      const titled = async (session: string) => {
+        await h.send(`/session/${session}/message`, session === own ? h.owner : h.guest, {
+          model: { providerID: "lmstudio", modelID: "test-model" },
+          parts: [{ type: "text", text: `first prompt of ${session}` }],
+        })
+        for (let attempt = 0; attempt < 100; attempt++) {
+          if (h.outbound.some((item) => item.text.includes(`first prompt of ${session}`))) return
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+      }
+      // The control: the owner's own session sends its title request to Laguna.
+      const own = await newSession(h, h.owner)
+      await titled(own)
+      expect(h.toLaguna().filter((item) => item.text.includes(`first prompt of ${own}`)).length).toBe(1)
+      // The guest's session is refused it where it would be sent, and so has no model-written title.
+      const guest = await newSession(h, h.guest)
+      await titled(guest)
+      expect(h.toLaguna().filter((item) => item.text.includes(`first prompt of ${guest}`))).toEqual([])
+    },
+    { answer, config: { agent: { title: { model: `vector/${laguna.id}` } } } },
+  )
+}, 60_000)
+
 // A guest answers here, or on another engine that forwards the answer to this remote workspace as its owner.
 for (const replier of ["guest", "forwarded guest"] as const)
   test(`a ${replier}'s answer to a question keeps the session's later requests off may-train models`, async () => {
@@ -327,36 +369,39 @@ for (const replier of ["guest", "forwarded guest"] as const)
         { headers: { "content-type": "text/event-stream" } },
       )
     }
-    await serve(async (h) => {
-      // The owner's session in the guest's workspace asks a question, which the guest answers.
-      const session = await newSession(h, h.owner)
-      await h.send(`/session/${session}/prompt_async`, h.owner, {
-        model: { providerID: "lmstudio", modelID: "test-model" },
-        parts: [{ type: "text", text: "owner prompt" }],
-      })
-      const pending = async () => {
-        for (let attempt = 0; attempt < 300; attempt++) {
-          const listed = (await (await h.get("/question", h.guest)).json()) as { id: string; sessionID: string }[]
-          const found = listed.find((item) => item.sessionID === session)
-          if (found) return found.id
-          await new Promise((resolve) => setTimeout(resolve, 100))
+    await serve(
+      async (h) => {
+        // The owner's session in the guest's workspace asks a question, which the guest answers.
+        const session = await newSession(h, h.owner)
+        await h.send(`/session/${session}/prompt_async`, h.owner, {
+          model: { providerID: "lmstudio", modelID: "test-model" },
+          parts: [{ type: "text", text: "owner prompt" }],
+        })
+        const pending = async () => {
+          for (let attempt = 0; attempt < 300; attempt++) {
+            const listed = (await (await h.get("/question", h.guest)).json()) as { id: string; sessionID: string }[]
+            const found = listed.find((item) => item.sessionID === session)
+            if (found) return found.id
+            await new Promise((resolve) => setTimeout(resolve, 100))
+          }
+          throw new Error("The question was never asked")
         }
-        throw new Error("The question was never asked")
-      }
-      const answerer = replier === "guest" ? h.guest : { ...h.owner, [GUEST_REQUEST_HEADER]: "1" }
-      expect((await h.send(`/question/${await pending()}/reply`, answerer, { answers: [["Yes"]] })).ok).toBe(true)
-      // The answer went to the model as a tool result, so the owner's next prompt there may not go to Laguna.
-      await h.send(`/session/${session}/abort`, h.owner, {})
-      await h.send(`/session/${session}/message`, h.owner, {
-        model: { providerID: "vector", modelID: laguna.id },
-        parts: [{ type: "text", text: "owner prompt on laguna" }],
-      })
-      expect(h.toLaguna()).toEqual([])
-      const errors = (await messages(h, session)).flatMap((message) =>
-        message.info.error?.data?.message ? [message.info.error.data.message] : [],
-      )
-      expect(errors.some((message) => message.includes(FREE_MODEL_TRAINING_GUEST_SESSION))).toBe(true)
-    }, question)
+        const answerer = replier === "guest" ? h.guest : { ...h.owner, [GUEST_REQUEST_HEADER]: "1" }
+        expect((await h.send(`/question/${await pending()}/reply`, answerer, { answers: [["Yes"]] })).ok).toBe(true)
+        // The answer went to the model as a tool result, so the owner's next prompt there may not go to Laguna.
+        await h.send(`/session/${session}/abort`, h.owner, {})
+        await h.send(`/session/${session}/message`, h.owner, {
+          model: { providerID: "vector", modelID: laguna.id },
+          parts: [{ type: "text", text: "owner prompt on laguna" }],
+        })
+        expect(h.toLaguna()).toEqual([])
+        const errors = (await messages(h, session)).flatMap((message) =>
+          message.info.error?.data?.message ? [message.info.error.data.message] : [],
+        )
+        expect(errors.some((message) => message.includes(FREE_MODEL_TRAINING_GUEST_SESSION))).toBe(true)
+      },
+      { answer: question },
+    )
   }, 60_000)
 
 test("the v2 runner sends nothing to a may-train model in a session a guest has worked in", async () => {
