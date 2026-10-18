@@ -324,6 +324,75 @@ describe("task sizing", () => {
         expect(tools).toEqual(expect.arrayContaining(["todowrite", "question", "escalate"]))
         expect(tools).not.toContain("task")
         expect(body?.reasoning_effort).toBeUndefined()
+        // escalate can be called again, so the note no longer says to call it once.
+        expect(JSON.stringify(body?.messages)).toContain("call escalate with your reason")
+        expect(JSON.stringify(body?.messages)).not.toContain("escalate once")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "questions about the code, reviews and debugging start at standard, at the provider's own effort",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions } = yield* setup()
+        const asks = [
+          "what does the classify function in task-size.ts do?",
+          "review this codebase for security issues",
+          "make the tests pass",
+          "getting a 500 on /api/login",
+        ]
+        for (const text of asks) {
+          const chat = yield* sessions.create({ title: "Pinned" })
+          yield* llm.text("Here is what I found.")
+          const result = yield* send(prompt, chat.id, text)
+          expect(result.info.role === "assistant" && result.info.size, text).toBe("standard")
+        }
+        const bodies = (yield* llm.inputs).filter((body) => !isTitle(body))
+        expect(bodies).toHaveLength(asks.length)
+        for (const body of bodies) {
+          expect(toolNames(body)).toEqual(expect.arrayContaining(["todowrite", "question", "escalate", "read"]))
+          expect(toolNames(body)).not.toContain("task")
+          // Neither reasoning off nor low.
+          expect(body?.reasoning_effort).toBeUndefined()
+        }
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a mention of subagents or the judge is not an ask for them",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        for (const text of ["fix the bug with subagents not starting", "llm as a judge launches on hi, fix it"]) {
+          const chat = yield* sessions.create({ title: "Pinned" })
+          yield* llm.tool("write", { filePath: path.join(directory, "fix.ts"), content: "export {}\n" })
+          yield* llm.text("Fixed.")
+          const result = yield* send(prompt, chat.id, text)
+          expect(result.info.role === "assistant" && result.info.size, text).toBe("standard")
+          expect((yield* sessions.children(chat.id)).length, text).toBe(0)
+        }
+        for (const body of (yield* llm.inputs).filter((body) => !isTitle(body))) {
+          expect(toolNames(body)).not.toContain("task")
+          expect(body?.reasoning_effort).toBeUndefined()
+        }
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "telling Vector to run the judge runs it, even with the setting off",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup()
+        const chat = yield* sessions.create({ title: "Pinned" })
+        yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export {}\n" })
+        yield* llm.text("Migrated the router.")
+        yield* llm.text("VERDICT: PASS")
+        yield* send(prompt, chat.id, "migrate the router, then run the judge")
+        expect((yield* llm.inputs).filter(isJudge)).toHaveLength(1)
+        expect((yield* sessions.children(chat.id)).length).toBe(1)
       }),
     { git: true },
   )
@@ -359,6 +428,8 @@ describe("task sizing", () => {
         )
         expect(outputs[0]).toContain("now Standard")
         expect(outputs[1]).toContain("now Thorough")
+        // The Light note stays as it was for the cache, and the result says it no longer applies.
+        expect(outputs[1]).toContain("replaces the size note")
       }),
     { git: true },
   )
@@ -494,7 +565,7 @@ describe("task sizing", () => {
           message.parts.flatMap((part) => (part.type === "tool" && part.metadata?.judge ? [part] : [])),
         )
         expect(judged).toHaveLength(1)
-        expect(judged[0]?.metadata?.judge).toEqual({ round: 1, verdict: "PASS" })
+        expect(judged[0]?.metadata?.judge).toEqual({ round: 1, size: "thorough", verdict: "PASS" })
       }),
     { git: true },
   )
@@ -520,8 +591,8 @@ describe("task sizing", () => {
           message.parts.flatMap((part) => (part.type === "tool" && part.metadata?.judge ? [part.metadata.judge] : [])),
         )
         expect(verdicts).toEqual([
-          { round: 1, verdict: "FAIL" },
-          { round: 2, verdict: "PASS" },
+          { round: 1, size: "thorough", verdict: "FAIL" },
+          { round: 2, size: "thorough", verdict: "PASS" },
         ])
         expect((yield* llm.inputs).filter((body) => !isTitle(body))).toHaveLength(6)
       }),
@@ -727,6 +798,124 @@ describe("task sizing", () => {
   )
 
   it.instance(
+    "a thorough plan that asks a question keeps its size, subagents and judge when the user answers in a sentence",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        const answers = ["yes, start with phase 1", "proceed with all phases", "option 2", "continue where you left off"]
+        for (const answer of answers) {
+          const chat = yield* sessions.create({ title: "Pinned" })
+          yield* llm.text("Here is the plan in three phases. Should I start with phase 1?")
+          yield* send(prompt, chat.id, "migrate the app to the new router across 40 files")
+          const before = (yield* llm.inputs).length
+          yield* llm.tool("write", { filePath: path.join(directory, "r.ts"), content: "export {}\n" })
+          yield* llm.text("Phase 1 is done.")
+          yield* llm.text("VERDICT: PASS")
+          const result = yield* send(prompt, chat.id, answer)
+          const bodies = (yield* llm.inputs).slice(before).filter((body) => !isTitle(body))
+          // The implementation runs with the plan's harness: subagents, the to-do list and high effort.
+          expect(toolNames(bodies[0]), answer).toEqual(expect.arrayContaining(["task", "task_manage", "todowrite"]))
+          expect(bodies[0]?.reasoning_effort, answer).toBe("high")
+          expect(JSON.stringify(bodies[0]?.messages), answer).toContain("new router across 40 files")
+          expect(result.info.role === "assistant" && result.info.size, answer).toBe("thorough")
+          // And the judge checks it.
+          const judged = bodies.filter(isJudge)
+          expect(judged, answer).toHaveLength(1)
+          expect(JSON.stringify(judged[0]?.messages), answer).toContain("r.ts")
+          expect((yield* sessions.children(chat.id)).length, answer).toBe(1)
+        }
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a judged large task that ended with an offer is judged once the user declines it or says thanks",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions, directory } = yield* setup({ sizing: { judge: "thorough" } })
+        const offer = "Migrated all 40 routes and the tests pass. Want me to also update the docs?"
+
+        // A decline answers the offer inside the work, so it runs with the work's harness and the judge follows.
+        const declined = yield* sessions.create({ title: "Pinned" })
+        yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export {}\n" })
+        yield* llm.text(offer)
+        yield* send(prompt, declined.id, "migrate the app to the new router across 40 files")
+        expect((yield* sessions.children(declined.id)).length).toBe(0)
+        yield* llm.text("Understood, I will leave the docs.")
+        yield* llm.text("VERDICT: PASS")
+        yield* send(prompt, declined.id, "no thanks")
+        expect((yield* sessions.children(declined.id)).length).toBe(1)
+
+        // A thanks is a direct reply, and the judge still checks the work it thanks for. A FAIL is repaired with the
+        // work's own tools, not the quick lane's.
+        const thanked = yield* sessions.create({ title: "Pinned" })
+        yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export const a = 1\n" })
+        yield* llm.text(offer)
+        yield* send(prompt, thanked.id, "migrate the app to the new router across 40 files")
+        const before = (yield* llm.inputs).length
+        yield* llm.text("You're welcome!")
+        yield* llm.text("VERDICT: FAIL\nBLOCKERS:\n- router.ts exports a number")
+        yield* llm.tool("write", { filePath: path.join(directory, "router.ts"), content: "export const a = () => {}\n" })
+        yield* llm.text("Repaired the export.")
+        yield* llm.text("VERDICT: PASS")
+        yield* send(prompt, thanked.id, "thanks")
+        const bodies = (yield* llm.inputs).slice(before).filter((body) => !isTitle(body))
+        expect(toolNames(bodies[0])).toEqual([])
+        expect(bodies[0]?.reasoning_effort).toBe("none")
+        expect(isJudge(bodies[1]!)).toBe(true)
+        expect(JSON.stringify(bodies[1]?.messages)).toContain("new router across 40 files")
+        expect(JSON.stringify(bodies[1]?.messages)).toContain("router.ts")
+        expect(toolNames(bodies[2])).toEqual(expect.arrayContaining(["write", "task", "todowrite"]))
+        expect(bodies[2]?.reasoning_effort).toBe("high")
+        expect(bodies.filter(isJudge)).toHaveLength(2)
+        expect((yield* sessions.children(thanked.id)).length).toBe(2)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a yes to a greeting reply's offer gets the history and the work's tools",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions } = yield* setup()
+        const chat = yield* sessions.create({})
+        yield* llm.text("Hi! Should I take a look at the failing tests in this repository?")
+        yield* send(prompt, chat.id, "hi")
+        yield* llm.text("Looking at them now.")
+        yield* send(prompt, chat.id, "yes")
+        const bodies = (yield* llm.inputs).filter((body) => !isTitle(body))
+        expect(bodies).toHaveLength(2)
+        expect(toolNames(bodies[0])).toEqual([])
+        expect(toolNames(bodies[1])).toEqual(expect.arrayContaining(["read", "todowrite", "question"]))
+        expect(conversation(bodies[1]).length).toBeGreaterThan(1)
+        expect(JSON.stringify(bodies[1]?.messages)).toContain("failing tests in this repository")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "/init runs at standard: the to-do list and questions, no subagents, the provider's own effort",
+    () =>
+      Effect.gen(function* () {
+        const { llm, prompt, sessions } = yield* setup()
+        const chat = yield* sessions.create({ title: "Pinned" })
+        yield* llm.text("Wrote AGENTS.md.")
+        const result = yield* prompt.command({
+          sessionID: chat.id,
+          command: "init",
+          arguments: "",
+          model: "lmstudio/north-mini-code",
+        })
+        const [body] = (yield* llm.inputs).filter((item) => !isTitle(item))
+        expect(toolNames(body)).toEqual(expect.arrayContaining(["todowrite", "question"]))
+        expect(toolNames(body)).not.toContain("task")
+        expect(body?.reasoning_effort).toBeUndefined()
+        expect(result.info.role === "assistant" && result.info.size).toBe("standard")
+      }),
+    { git: true },
+  )
+
+  it.instance(
     "a command is sized from what its template asks for",
     () =>
       Effect.gen(function* () {
@@ -734,6 +923,7 @@ describe("task sizing", () => {
           command: {
             tidy: { template: "fix the typo in README.md" },
             port: { template: "port the app to Svelte" },
+            careful: { template: "Be thorough and use subagents. Explain $ARGUMENTS" },
           },
         })
         const tidy = yield* sessions.create({ title: "Pinned" })
@@ -742,11 +932,31 @@ describe("task sizing", () => {
         const port = yield* sessions.create({ title: "Pinned" })
         yield* llm.text("Ported.")
         yield* prompt.command({ sessionID: port.id, command: "port", arguments: "", model: "lmstudio/north-mini-code" })
-        const [light, large] = (yield* llm.inputs).filter((body) => !isTitle(body))
+        // A template's force words are its author's text, not the user's ask; the user's own arguments are.
+        const careful = yield* sessions.create({ title: "Pinned" })
+        yield* llm.text("Explained.")
+        yield* prompt.command({
+          sessionID: careful.id,
+          command: "careful",
+          arguments: "the parser",
+          model: "lmstudio/north-mini-code",
+        })
+        const asked = yield* sessions.create({ title: "Pinned" })
+        yield* llm.text("Fixed.")
+        yield* prompt.command({
+          sessionID: asked.id,
+          command: "tidy",
+          arguments: "be thorough",
+          model: "lmstudio/north-mini-code",
+        })
+        const [light, large, template, argument] = (yield* llm.inputs).filter((body) => !isTitle(body))
         expect(toolNames(light)).not.toContain("todowrite")
         expect(light?.reasoning_effort).toBe("none")
         expect(toolNames(large)).toEqual(expect.arrayContaining(["task", "todowrite"]))
         expect(large?.reasoning_effort).toBe("high")
+        expect(toolNames(template)).not.toContain("task")
+        expect(template?.reasoning_effort).toBeUndefined()
+        expect(toolNames(argument)).toEqual(expect.arrayContaining(["task", "todowrite"]))
       }),
     { git: true },
   )

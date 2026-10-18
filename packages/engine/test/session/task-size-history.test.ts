@@ -80,6 +80,14 @@ function wrote(file: string, text = "Wrote it.", finish = "tool-calls") {
   return message
 }
 
+// Vector's judge run, as the task card it records on an assistant message.
+function judgedBy(verdict: string, workSize?: string) {
+  const message = assistant(`VERDICT: ${verdict}`, verdict === "FAIL" ? "tool-calls" : "stop", [{ tool: "task" }])
+  const part = message.parts.find((item) => item.type === "tool")
+  if (part?.type === "tool") part.metadata = { judge: { round: 1, verdict, ...(workSize ? { size: workSize } : {}) } }
+  return message
+}
+
 // The compaction marker a summary answers, with what the runner recorded of the request it summarised.
 function marker(carried?: SessionTaskSize.Carried) {
   const message = user("")
@@ -276,10 +284,10 @@ describe("SessionTaskSize.size", () => {
     expect(tail[0]?.tier).toBe("thorough")
   })
 
-  test("a continue after a compaction that recorded nothing is a light job, not a bare reply", () => {
+  test("a continue after a compaction that recorded nothing is work of unknown size, not a bare reply", () => {
     const compaction = marker()
     const requests = size([compaction, summary(compaction), user("continue")])
-    expect(requests.at(-1)?.tier).toBe("light")
+    expect(requests.at(-1)?.tier).toBe("standard")
     expect(size([compaction, summary(compaction), user("hi")]).at(-1)?.tier).toBe("chat")
   })
 
@@ -306,9 +314,104 @@ describe("SessionTaskSize.size", () => {
     const answered = size([...before, user("yes", { judge: "thorough" }), assistant("Migrated the tests.")])
     expect(answered.map((request) => request.tier)).toEqual(["thorough", "thorough"])
     expect(SessionTaskSize.judgeable(answered, later)?.files).toEqual(["/r/router.ts"])
-    // A light follow-up that is not a continuation is judged on its own, and in "thorough" mode it is not.
-    const unrelated = size([...before, user("fix the typo in README", { judge: "thorough" }), assistant("Fixed.")])
-    expect(SessionTaskSize.judgeable(unrelated, later)).toBeUndefined()
+    // A short instruction after the agent asked is part of the same work, so it is judged with it too.
+    const instead = size([...before, user("fix the typo in README first", { judge: "thorough" }), assistant("Fixed.")])
+    expect(instead.map((request) => request.tier)).toEqual(["thorough", "thorough"])
+    expect(SessionTaskSize.judgeable(instead, later)?.requests).toHaveLength(2)
+    // A light request after finished work is judged on its own, and in "thorough" mode it is not.
+    const done = [ask, wrote("/r/router.ts"), assistant("Migrated all 40 routes.")]
+    const next = MessageID.ascending()
+    const unrelated = size([...done, user("fix the typo in README", { judge: "thorough" }), assistant("Fixed.")])
+    expect(unrelated.map((request) => request.tier)).toEqual(["thorough", "light"])
+    expect(SessionTaskSize.judgeable(unrelated, next)).toBeUndefined()
+  })
+
+  test("large work that ended on an offer is judged once the user declines it or says thanks", () => {
+    const ask = user("migrate the app to the new router across 40 files", { judge: "thorough" })
+    const offer = [
+      ask,
+      wrote("/r/router.ts"),
+      assistant("Migrated all 40 routes and the tests pass. Want me to also update the docs?"),
+    ]
+    for (const text of ["thanks", "no thanks", "no", "ok thanks"]) {
+      const after = MessageID.ascending()
+      const requests = size([...offer, user(text, { judge: "thorough" }), assistant("You're welcome!")])
+      const work = SessionTaskSize.judgeable(requests, after)
+      expect(work?.files, text).toEqual(["/r/router.ts"])
+      expect(work?.tier, text).toBe("thorough")
+      expect(SessionTaskSize.requestText(work!.requests[0]!), text).toContain("new router")
+    }
+    // A greeting answers nothing, so it never brings in the judge; the work waits for the reply that does.
+    const greeted = MessageID.ascending()
+    expect(
+      SessionTaskSize.judgeable(size([...offer, user("hi", { judge: "thorough" }), assistant("Hi!")]), greeted),
+    ).toBeUndefined()
+    // Once judged, a later thanks has nothing left to judge.
+    const judged = [...offer, user("thanks"), assistant("You're welcome!"), judgedBy("PASS", "thorough")]
+    const after = MessageID.ascending()
+    const done = size([...judged, user("thanks again"), assistant("Anytime!")])
+    expect(SessionTaskSize.judgeable(done, after)).toBeUndefined()
+  })
+
+  test("a judge FAIL raises the request it repairs to the size of the work it judged", () => {
+    const requests = size([
+      user("migrate the app to the new router across 40 files", { judge: "thorough" }),
+      wrote("/r/router.ts"),
+      assistant("Migrated all 40 routes. Want me to also update the docs?"),
+      user("thanks", { judge: "thorough" }),
+      assistant("You're welcome!"),
+      judgedBy("FAIL", "thorough"),
+      user("<vector_judge_verdict>FAIL</vector_judge_verdict>", { synthetic: true }),
+    ])
+    expect(requests.map((request) => request.tier)).toEqual(["thorough", "thorough"])
+    expect(requests[1]?.result.tier).toBe("chat")
+  })
+
+  test("a run that did not finish, or a dismissed question, leaves the work open for the next message", () => {
+    const ask = user("migrate the app to the new router across 40 files")
+    const interrupted = assistant("Migrating the routes", "tool-calls")
+    if (interrupted.info.role === "assistant")
+      interrupted.info.error = { name: "MessageAbortedError", data: { message: "Aborted" } }
+    const stopped = size([ask, interrupted, user("use the v6 api instead")])
+    expect(stopped.map((request) => [request.tier, request.result.source])).toEqual([
+      ["thorough", "auto"],
+      ["thorough", "inherited"],
+    ])
+    const cut = size([user("migrate the app to the new router across 40 files"), assistant("Migrated 12 of", "length"), user("ok")])
+    expect(cut.at(-1)?.tier).toBe("thorough")
+    const asking = user("migrate the app to the new router across 40 files")
+    const dismissed = assistant("Which router?", "stop")
+    dismissed.parts.push({
+      id: PartID.ascending(),
+      sessionID,
+      messageID: dismissed.info.id,
+      type: "tool",
+      callID: "question",
+      tool: "question",
+      state: { status: "error", input: {}, error: "dismissed", time: { start: 1, end: 2 } },
+    } as SessionV1.Part)
+    const answered = size([asking, dismissed, user("the new one")])
+    expect(answered.at(-1)?.tier).toBe("thorough")
+    // A finished run leaves nothing open: a plain "ok" afterwards is just a reply.
+    const finished = size([user("migrate the app to the new router across 40 files"), assistant("Migrated all 40."), user("ok")])
+    expect(finished.at(-1)?.tier).toBe("chat")
+  })
+
+  test("a yes to a greeting reply's offer gets the work harness, not the quick lane", () => {
+    const requests = size([
+      user("hi"),
+      assistant("Hi! Should I take a look at the failing tests in this repository?"),
+      user("yes"),
+    ])
+    expect(requests.map((request) => request.tier)).toEqual(["chat", "standard"])
+    // A greeting reply's pleasantry offers nothing.
+    expect(size([user("hi"), assistant("Hi! How can I help you today?"), user("ok")]).at(-1)?.tier).toBe("chat")
+  })
+
+  test("asking for the judge in the message turns it on for that request; a mention does not", () => {
+    expect(size([user("migrate the router, then run the judge")])[0]?.judge).toBe("thorough")
+    expect(size([user("use llm-as-a-judge on this change", { judge: "changes" })])[0]?.judge).toBe("changes")
+    expect(size([user("llm as a judge launches on hi, fix it")])[0]).toMatchObject({ tier: "standard", judge: "off" })
   })
 
   test("changed files come from patches and completed edits after the last verdict", () => {

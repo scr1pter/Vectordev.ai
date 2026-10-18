@@ -46,7 +46,9 @@ export const EscalateTool = Tool.define<typeof Parameters, Metadata, never>(
           }
         return {
           title: `${TaskSize.label(to)} task`,
-          output: `This request is now ${TaskSize.label(to)}${GAINS[to] ? `: ${GAINS[to]} are offered from your next step` : ""}. Reason noted: ${params.reason.slice(0, 200)}`,
+          // The request's size note was written for its old size and stays as it was, so the prompt cache keeps it; this
+          // result is what tells the model the size changed.
+          output: `This request is now ${TaskSize.label(to)}${GAINS[to] ? `: ${GAINS[to]} are offered from your next step` : ""}. This replaces the size note on the request. Reason noted: ${params.reason.slice(0, 200)}`,
           metadata: { from: current.tier, to },
         }
       }),

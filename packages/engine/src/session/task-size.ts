@@ -78,20 +78,22 @@ export function size(input: Input): Request[] {
   let sticky: Request["offered"] | undefined
   let end = 0
   // A compaction that recorded nothing (one from before Vector recorded requests) still leaves work to continue: a
-  // "continue" or a "yes" after it is a Light job with tools and history, never a bare reply.
+  // "continue" or a "yes" after it is work of unknown size, so Standard with tools and history, never a bare reply.
   const compacted = input.messages.some((message) => message.parts.some((part) => part.type === "compaction"))
   for (const group of groups(input.messages)) {
     const previous = sized.at(-1)
     // What a "continue" or a "yes" continues: the last request that was more than a greeting, since a "thanks" and its
     // reply in between are not the work.
     const prior = sized.findLast((request) => request.tier !== "chat")
-    const asked = previous ? TaskSize.asks(closingText(previous.messages)) : false
+    // The request before is still open when its reply asked or offered something, or its run did not finish: then the
+    // user's next message, short of a social one, is a reply inside that work.
+    const open = previous ? waiting(previous) : false
     const result = group.users.reduce<TaskSize.Result | undefined>(
       (current, user) => {
         const next = TaskSize.classify({
           ...describe(user),
-          previous: current?.tier ?? prior?.tier ?? (compacted ? "light" : undefined),
-          asked: current ? false : asked,
+          previous: current?.tier ?? prior?.tier ?? (compacted ? "standard" : undefined),
+          open: current ? false : open,
           auto: input.auto,
         })
         if (!current) return next
@@ -135,7 +137,12 @@ export function size(input: Input): Request[] {
       tier,
       escalated: raised !== undefined,
       offered,
-      judge: judgeMode(group.users, group.carried?.judge ?? input.judge, result.judge),
+      judge: judgeMode(
+        group.users,
+        group.carried?.judge ?? input.judge,
+        result.judge,
+        result.reasons.includes("explicit:judge"),
+      ),
       ...(group.carried ? { carried: group.carried } : {}),
     })
   }
@@ -183,7 +190,7 @@ export function judgeable(requests: readonly Request[], since: string) {
   )
   const last = requests.at(-1)
   if (touched === -1 || !last || !last.result.judge) return
-  const unit = requests.slice(origin(requests, touched))
+  const unit = requests.slice(settled(requests, origin(requests, touched)))
   // "thorough" judges Thorough work; "changes" judges any work.
   const qualifies = unit.some(
     (request) =>
@@ -202,7 +209,38 @@ export function judgeable(requests: readonly Request[], since: string) {
   ]
   if (files.length === 0) return
   // The judge reads everything the user asked for in that work, not only the request that qualified it.
-  return { requests: unit.filter((request) => request.tier !== "chat"), files }
+  const work = unit.filter((request) => request.tier !== "chat")
+  return { requests: work, files, tier: work.reduce<TaskSize.Tier>((top, request) => TaskSize.max(top, request.tier), "light") }
+}
+
+/**
+ * Whether a request ended with its work still open: the agent's reply asked or offered something, it asked through the
+ * question tool and the user dismissed it, or the run did not finish (interrupted, failed, stopped or cut off).
+ */
+export function waiting(request: Pick<Request, "messages">) {
+  if (TaskSize.asks(closingText(request.messages))) return true
+  const last = request.messages.findLast((message) => message.info.role === "assistant")
+  if (!last || last.info.role !== "assistant") return true
+  if (last.parts.some((part) => part.type === "tool" && part.tool === "question" && part.state.status !== "completed"))
+    return true
+  return last.info.error !== undefined || UNFINISHED.has(last.info.finish ?? "")
+}
+
+const UNANSWERING = new Set(["greeting", "emoji", "about-vector"])
+
+// Finish reasons of a run that stopped before its answer was done.
+const UNFINISHED = new Set(["length", "tool-calls", "unknown", "error", "content-filter"])
+
+// Work that stopped on a question was not judged then. When the user declines, thanks or moves on instead of continuing
+// it, it is judged with the run that answered them, so a finished large task that closed with an offer still gets its
+// verdict.
+function settled(requests: readonly Request[], index: number): number {
+  // A greeting or a question about Vector answers nothing, so a "hi" never brings in the judge.
+  if (UNANSWERING.has(requests[index]?.result.reasons[0] ?? "")) return index
+  const before = requests.slice(0, index).findLastIndex((request) => request.tier !== "chat")
+  const request = requests[before]
+  if (!request || !TaskSize.waits(closingText(request.messages)) || judgeRuns(request).length > 0) return index
+  return settled(requests, origin(requests, before))
 }
 
 // The request a continuation goes back to: "yes" or "continue" inherits the last request before it that was work.
@@ -343,14 +381,19 @@ function describe(message: SessionV1.WithParts) {
   }
 }
 
-// The highest size the agent raised the request to; a raise only ever goes up.
+// The highest size the request was raised to; a raise only ever goes up. The agent raises it with escalate, and a judge
+// FAIL raises it to the size of the work it judged, so the repair runs with that work's tools even when the run that
+// answered was only a "thanks".
 function escalation(messages: readonly SessionV1.WithParts[]) {
   return messages
     .flatMap((message) => (message.info.role === "assistant" ? message.parts : []))
     .flatMap((part) => {
-      if (part.type !== "tool" || part.tool !== "escalate" || part.state.status !== "completed") return []
+      if (part.type !== "tool") return []
+      if (part.tool === "task" && isRecord(part.metadata?.judge) && part.metadata.judge.verdict === "FAIL")
+        return isTier(part.metadata.judge.size) ? [part.metadata.judge.size] : []
+      if (part.tool !== "escalate" || part.state.status !== "completed") return []
       const to = part.state.metadata?.to
-      return to === "light" || to === "standard" || to === "thorough" ? [to as TaskSize.Tier] : []
+      return isTier(to) ? [to] : []
     })
     .reduce<TaskSize.Tier | undefined>((highest, to) => (highest ? TaskSize.max(highest, to) : to), undefined)
 }
@@ -386,16 +429,23 @@ function judgeMode(
   // The config's setting, or what a compaction recorded for the request.
   configured: TaskSize.JudgeMode | undefined,
   allowed: boolean,
+  // The user's message told Vector to run the judge ("run the judge", "use llm-as-a-judge").
+  asked: boolean,
 ): TaskSize.JudgeMode {
   if (!allowed) return "off"
+  const mode = chosenMode(users) ?? configured ?? "off"
+  // The ask is a Thorough request of its own, so the judge looks at it even with the setting off.
+  return asked && mode === "off" ? "thorough" : mode
+}
+
+function chosenMode(users: readonly SessionV1.WithParts[]): TaskSize.JudgeMode | undefined {
   const chosen = users.findLast((user) => user.info.role === "user" && user.info.judge !== undefined)
   if (chosen?.info.role === "user" && chosen.info.judge) return chosen.info.judge
   // Older clients turned the judge on by sending its policy as a hidden instruction with each prompt.
   const legacy = users.some((user) =>
     user.parts.some((part) => part.type === "text" && part.synthetic && part.text.startsWith(LEGACY_JUDGE_POLICY)),
   )
-  if (legacy) return "thorough"
-  return configured ?? "off"
+  return legacy ? "thorough" : undefined
 }
 
 function usedTool(message: SessionV1.WithParts, tool: string) {

@@ -668,7 +668,7 @@ const layer = Layer.effect(
         mode: parent.name,
         agent: parent.name,
         variant: input.lastUser.model.variant,
-        size: last.tier,
+        size: work.tier,
         path: { cwd: ctx.directory, root: ctx.worktree },
         cost: 0,
         tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -690,7 +690,8 @@ const layer = Layer.effect(
         type: "tool",
         callID: ulid(),
         tool: TaskTool.id,
-        metadata: { judge: { round } },
+        // The size of the work judged: a FAIL raises the request it repairs to it (see SessionTaskSize.size).
+        metadata: { judge: { round, size: work.tier } },
         state: { status: "running", input: args, time: { start: Date.now() } },
       })
       const abort = new AbortController()
@@ -752,7 +753,7 @@ const layer = Layer.effect(
         result
           ? ({
               ...part,
-              metadata: { judge: { round, ...(verdict ? { verdict } : {}) } },
+              metadata: { judge: { round, size: work.tier, ...(verdict ? { verdict } : {}) } },
               state: {
                 status: "completed",
                 input: args,
@@ -764,7 +765,7 @@ const layer = Layer.effect(
             } satisfies SessionV1.ToolPart)
           : ({
               ...part,
-              metadata: { judge: { round } },
+              metadata: { judge: { round, size: work.tier } },
               state: {
                 status: "error",
                 error: "The judge could not run",
@@ -2287,7 +2288,7 @@ const layer = Layer.effect(
               ? { size: cmd.size }
               : (yield* config.get()).sizing?.auto === false
                 ? {}
-                : { size: commandSize(template) }),
+                : { size: commandSize(template, input.arguments) }),
           ...(input.judge ? { judge: input.judge } : {}),
         },
         // @file references in an MCP prompt or a skill are not the user's choice; the user's own attachments are.
@@ -2325,14 +2326,21 @@ function sizable(session: Session.Info, user: SessionV1.User) {
   return !session.parentID && !session.internal && (user.agent === "build" || user.agent === "plan")
 }
 
-// A command's template is a workflow someone wrote: it is sized from what it asks for, but its length is documentation
-// rather than a measure of the job, and a command is never a bare reply.
-function commandSize(template: string): TaskSize.Tier {
-  const result = TaskSize.classify({ text: template })
-  if (result.tier === "chat") return "light"
-  if (result.tier === "thorough" && result.reasons.every((reason) => reason === "long")) return "standard"
-  return result.tier
+// A command's template is a workflow someone wrote, not the user's words about this run. A short one is read like a
+// message, except that its force words are not instructions; a long one is guidance on how to work, so its words say
+// nothing about the size of the job and it runs Standard. The user's own arguments can still ask for more ("/review be
+// thorough") or name large work, and a command is never a bare reply.
+function commandSize(template: string, args: string): TaskSize.Tier {
+  const typed = args.trim() ? TaskSize.classify({ text: args }) : undefined
+  if (typed?.source === "user") return typed.tier
+  const own = template.length > COMMAND_WORKFLOW ? "standard" : TaskSize.classify({ text: template, template: true }).tier
+  // Arguments that only name a target ("src/auth.ts") say nothing about the size.
+  const asked = typed && !typed.reasons.includes("default") ? typed.tier : "light"
+  return TaskSize.max(TaskSize.max(own, "light"), asked)
 }
+
+// A template longer than this is a written workflow (/init is about 4,000 characters) rather than a one-line ask.
+const COMMAND_WORKFLOW = 600
 
 // Whether the provider caches the prompt prefix, so a smaller tool set on the next request would write it again.
 function caches(model: Provider.Model) {
