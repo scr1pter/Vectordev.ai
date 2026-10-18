@@ -78,16 +78,30 @@ export async function refreshFreeModelCatalog(
       ? [model.value]
       : []
   })
-  const checked = await Promise.all(
-    candidates.map(async (model) => {
-      // The free router has no endpoint list of its own; its price and parameters come from its listing.
-      if (isFreeRouter(model.id)) return freeModelInfo(model, [], { reviewedOnly: true })
-      // The cron runs once a day, so one unreadable endpoint list drops only its own model, not the whole refresh.
-      const endpoints = await read(`${ROOT}/models/${model.id}/endpoints`, EndpointList, request).catch(() => undefined)
-      return endpoints && freeModelInfo(model, endpoints.data.endpoints, { reviewedOnly: true })
-    }),
-  )
+  const failed: string[] = []
+  const check = async (model: typeof FreeModelMetadata.Type) => {
+    // The free router has no endpoint list of its own; its price and parameters come from its listing.
+    if (isFreeRouter(model.id)) return freeModelInfo(model, [], { reviewedOnly: true })
+    // The cron runs once a day, so one unreadable endpoint list drops only its own model, not the whole refresh.
+    const endpoints = await read(`${ROOT}/models/${model.id}/endpoints`, EndpointList, request).catch(() => {
+      failed.push(model.id)
+      return undefined
+    })
+    return endpoints && freeModelInfo(model, endpoints.data.endpoints, { reviewedOnly: true })
+  }
+  // Five endpoint lists at a time, so a growing catalog never bursts OpenRouter's rate limit during the cron.
+  const checked: (FreeModelInfo | undefined)[] = []
+  for (const batch of Array.from({ length: Math.ceil(candidates.length / 5) }, (_, index) =>
+    candidates.slice(index * 5, index * 5 + 5),
+  ))
+    checked.push(...(await Promise.all(batch.map(check))))
   const models = checked.filter((model): model is FreeModelInfo => model !== undefined)
+  // Model IDs are public metadata; the headers and the errors behind them are never logged.
+  if (failed.length) console.warn("Free model endpoint lists unavailable:", failed.join(", "))
+  // With reads failing and nothing of its own left to list, the result says nothing about the models: an OpenRouter
+  // outage or rate limit during the cron. Answer 503 and keep the stored catalog instead of publishing OFF.
+  if (failed.length && !models.some((model) => !isFreeRouter(model.id)))
+    throw new ApiError(503, "FREE_MODELS_CATALOG_UNAVAILABLE", "The free model catalog could not be refreshed.")
   // No-training models first, the long-standing ones in their reviewed order, then by ID, and the free router last.
   const order = new Map(FREE_MODEL_FALLBACKS.map((item, index) => [item.id, index]))
   models.sort(
@@ -97,8 +111,8 @@ export async function refreshFreeModelCatalog(
       (order.get(a.id) ?? 100) - (order.get(b.id) ?? 100) ||
       a.id.localeCompare(b.id),
   )
-  // With nothing that qualifies, publish OFF so clients hide the section instead of showing it empty. The free router
-  // lists no endpoints and picks a model at random, so it alone never keeps the section on.
+  // With every list read and nothing that qualifies, publish OFF so clients hide the section instead of showing it
+  // empty. The free router lists no endpoints and picks a model at random, so it alone never keeps the section on.
   const catalog = models.some((model) => !isFreeRouter(model.id))
     ? { enabled: true, updatedAt: now, models }
     : { enabled: false, updatedAt: now, models: [] }
