@@ -10,6 +10,9 @@ process.env.XDG_DATA_HOME = path.join(exerciseGlobalRoot, "data")
 process.env.XDG_CONFIG_HOME = path.join(exerciseGlobalRoot, "config")
 process.env.XDG_STATE_HOME = path.join(exerciseGlobalRoot, "state")
 process.env.XDG_CACHE_HOME = path.join(exerciseGlobalRoot, "cache")
+// The free-model training acceptance lives under the home directory, not XDG_STATE_HOME, so the exercise's withdrawal
+// must not reach the developer's real one.
+process.env.VECTOR_TEST_HOME = path.join(exerciseGlobalRoot, "home")
 process.env.VECTOR_DISABLE_SHARE = "true"
 export const exerciseConfigDirectory = path.join(exerciseGlobalRoot, "config", "vector")
 export const exerciseDataDirectory = path.join(exerciseGlobalRoot, "data", "vector")
