@@ -33,8 +33,8 @@ export type CodiumFunding = typeof Funding.Type
 const FUNDING_KEY = "vector:codium:funding"
 const LOCK_KEY = "vector:codium:funding:lock"
 // One reservation per checkout, "<checkout's idempotency key>" -> "<lapses at>:<cents>". A buyer's new checkout gives
-// back only the reservation of the earlier checkout it closes, so one buyer holds one unpaid checkout of each kind
-// while every purchase they paid for keeps counting.
+// back their earlier checkout's reservation only when that one can no longer be paid (it closed it, or Stripe had), so
+// a buyer holds one unpaid open checkout of each kind while every purchase they paid for keeps counting.
 const RESERVED_KEY = "vector:codium:funding:reserved"
 // Drops lapsed reservations and the one given back (ARGV[3]) and adds up the others, leaving out ARGV[2]'s own, which a
 // retry of the same checkout is reserving again.
