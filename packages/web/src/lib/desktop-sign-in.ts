@@ -35,6 +35,16 @@ export function desktopSignInCallback(payload: Record<string, unknown>, state: s
   return `vector://auth/callback?${new URLSearchParams({ code: payload.code, state })}`
 }
 
+/**
+ * What /auth/cli does when Vector asks to confirm deleting the account: wait until the person chooses Continue on the
+ * page, so a link alone cannot sign anyone out or send a confirmation; then ask for a fresh sign-in if this one is
+ * not recent; then send the confirmation back to Vector.
+ */
+export function deletionConfirmation(continued: boolean, accessToken: string, now = Date.now()) {
+  if (!continued) return "ask" as const
+  return signedInRecently(accessToken, now) ? ("confirm" as const) : ("sign-in-again" as const)
+}
+
 const SessionClaims = Schema.Struct({
   amr: Schema.Array(Schema.Struct({ method: Schema.String, timestamp: Schema.Number })),
 })

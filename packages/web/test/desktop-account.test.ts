@@ -5,7 +5,12 @@ import codeHandler from "../../../api/account/cli-code"
 import exchangeHandler from "../../../api/account/cli-exchange"
 import deleteHandler from "../../../api/account/delete"
 import { verifyCliToken, verifyDeletionGrant } from "../../../api/_lib/cli-token"
-import { desktopSignInCallback, desktopSignInRequest, signedInRecently } from "../src/lib/desktop-sign-in"
+import {
+  deletionConfirmation,
+  desktopSignInCallback,
+  desktopSignInRequest,
+  signedInRecently,
+} from "../src/lib/desktop-sign-in"
 import { createVectorAccount } from "../../desktop/src/main/vector-account"
 
 const records = new Map<string, string>()
@@ -314,6 +319,11 @@ test("the deletion confirmation keeps its purpose through sign-in and asks again
   expect(signedInRecently(session(Date.now() - 6 * 60_000))).toBe(false)
   expect(signedInRecently("not-a-token")).toBe(false)
   expect(signedInRecently("a.%%%.b")).toBe(false)
+  // Nothing is sent, and nobody is signed out, until the person chooses Continue on the page.
+  expect(deletionConfirmation(false, session(Date.now() - 60_000))).toBe("ask")
+  expect(deletionConfirmation(false, session(Date.now() - 60 * 60_000))).toBe("ask")
+  expect(deletionConfirmation(true, session(Date.now() - 60_000))).toBe("confirm")
+  expect(deletionConfirmation(true, session(Date.now() - 6 * 60_000))).toBe("sign-in-again")
 })
 
 test("deleting from the desktop runs through the browser's fresh sign-in and ends with the account gone", async () => {

@@ -2,14 +2,16 @@
 import { Check, Copy, LoaderCircle, RefreshCw, TerminalSquare } from "lucide-react"
 import { useEffect, useState } from "react"
 import { readAccountApiResponse, vectorAccountClient } from "../../../lib/account-client"
-import { desktopSignInCallback, desktopSignInRequest, signedInRecently } from "../../../lib/desktop-sign-in"
+import { deletionConfirmation, desktopSignInCallback, desktopSignInRequest } from "../../../lib/desktop-sign-in"
 import "./account.css"
 
 /**
  * /auth/cli — pairs the Vector CLI with a Vector account. Signed-in users get
  * a vct_ token to paste into `vector login`; everyone else bounces to /login.
  * With purpose=delete, the desktop app is confirming that the person deleting
- * the account is signed in here, so an older sign-in has to be made again.
+ * the account is signed in here: nothing happens until they choose Continue,
+ * so a link alone cannot sign anyone out or send a confirmation, and a sign-in
+ * older than a few minutes has to be made again.
  */
 export function CliTokenPage() {
   const [token, setToken] = useState("")
@@ -18,13 +20,15 @@ export function CliTokenPage() {
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
   const [callback, setCallback] = useState("")
+  // Deleting waits for the person to choose Continue on this page.
+  const [confirm, setConfirm] = useState(false)
   const query = typeof location !== "undefined" ? new URLSearchParams(location.search) : undefined
   const desktop = query?.get("desktop") === "1"
   const deleting = desktop && query?.get("purpose") === "delete"
 
   // Always read the live session: Supabase rotates access tokens, so a token
   // captured at mount goes stale and would 401 on "New token".
-  const mint = async () => {
+  const mint = async (confirmed = false) => {
     setError("")
     const desktopRequest = desktopSignInRequest(location.search)
     const client = await vectorAccountClient()
@@ -34,7 +38,16 @@ export function CliTokenPage() {
       location.replace(`/login?returnTo=${encodeURIComponent(desktopRequest?.returnPath ?? "/auth/cli")}`)
       return
     }
-    if (desktopRequest?.purpose === "delete" && !signedInRecently(session.data.session.access_token)) {
+    const deletion =
+      desktopRequest?.purpose === "delete"
+        ? deletionConfirmation(confirmed, session.data.session.access_token)
+        : undefined
+    if (deletion === "ask") {
+      setEmail(session.data.session.user.email ?? "")
+      setConfirm(true)
+      return
+    }
+    if (desktopRequest && deletion === "sign-in-again") {
       // Only this browser's session is signed out; the person signs in again and comes straight back here.
       await client.auth.signOut({ scope: "local" })
       location.replace(`/login?${new URLSearchParams({ returnTo: desktopRequest.returnPath, reauth: "1" })}`)
@@ -105,18 +118,28 @@ export function CliTokenPage() {
           <TerminalSquare size={20} />
         </span>
         <p className="account-kicker">{desktop ? "Vector desktop" : "Vector CLI"}</p>
-        <h1>{deleting ? "Confirm in Vector." : desktop ? "Continue in Vector." : "Connect your terminal."}</h1>
+        <h1>
+          {confirm
+            ? "Delete your Vector account?"
+            : deleting
+              ? "Confirm in Vector."
+              : desktop
+                ? "Continue in Vector."
+                : "Connect your terminal."}
+        </h1>
         <p className="cli-pair-copy">
           {email ? (
             <>
               Signed in as <strong>{email}</strong>.{" "}
             </>
           ) : null}
-          {deleting
-            ? "Open Vector to finish deleting your account there. This link works once and expires in five minutes."
-            : desktop
-              ? "Open Vector to finish signing in. This link works once and expires in five minutes."
-              : "Run this command in your terminal. It links the Vector CLI to your free account and expires in 90 days."}
+          {confirm
+            ? "Vector asked to confirm that you want to delete this account. Continue to confirm it is you, then choose Delete my account in Vector to finish. If you did not start this, close this page."
+            : deleting
+              ? "Open Vector to finish deleting your account there. This link works once and expires in five minutes."
+              : desktop
+                ? "Open Vector to finish signing in. This link works once and expires in five minutes."
+                : "Run this command in your terminal. It links the Vector CLI to your free account and expires in 90 days."}
         </p>
 
         {error && <p className="account-error">{error}</p>}
@@ -132,6 +155,21 @@ export function CliTokenPage() {
           </div>
         )}
         <div className="cli-pair-actions">
+          {confirm && (
+            <button
+              type="button"
+              className="cli-pair-copy-button"
+              onClick={() => {
+                setConfirm(false)
+                setLoading(true)
+                void mint(true)
+                  .catch(fail)
+                  .finally(() => setLoading(false))
+              }}
+            >
+              Continue
+            </button>
+          )}
           {callback && (
             <a className="cli-pair-copy-button" href={callback}>
               Open Vector
@@ -143,9 +181,11 @@ export function CliTokenPage() {
               {copied ? "Copied" : "Copy command"}
             </button>
           )}
-          <button type="button" className="cli-pair-refresh" onClick={() => void mint().catch(fail)}>
-            <RefreshCw size={14} /> {token ? "New token" : "Try again"}
-          </button>
+          {!confirm && (
+            <button type="button" className="cli-pair-refresh" onClick={() => void mint(deleting).catch(fail)}>
+              <RefreshCw size={14} /> {token ? "New token" : "Try again"}
+            </button>
+          )}
         </div>
 
         {!desktop && (
