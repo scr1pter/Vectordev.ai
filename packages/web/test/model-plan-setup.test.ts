@@ -1,5 +1,9 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test"
-import { modelPlanPortalConfiguration, modelPlanWebhook } from "../scripts/model-plan-setup"
+import {
+  modelPlanChangePortalConfiguration,
+  modelPlanPortalConfiguration,
+  modelPlanWebhook,
+} from "../scripts/model-plan-setup"
 
 // A local stand-in for Stripe that keeps idempotency keys for a day, as Stripe does, so a repeated key replays the
 // first answer even after the object it created is gone.
@@ -56,9 +60,17 @@ const server = Bun.serve({
         active: true,
         metadata: { vector_codium: body.get("metadata[vector_codium]") },
         features: { subscription_update: { enabled: body.get("features[subscription_update][enabled]") === "true" } },
+        settings: Object.fromEntries(body),
       }
       stripe.configurations.push(configuration)
       return remember(configuration)
+    }
+    if (url.pathname.startsWith("/v1/billing_portal/configurations/")) {
+      const configuration = stripe.configurations.find((value) => value.id === url.pathname.split("/").at(-1))
+      if (!configuration) return new Response(null, { status: 404 })
+      // An update replaces the settings it names; the fixture keeps the whole request to compare.
+      configuration.settings = { ...(configuration.settings as Record<string, string>), ...Object.fromEntries(body) }
+      return Response.json(configuration)
     }
     throw new Error(`Unexpected request ${request.method} ${url.pathname}`)
   },
@@ -127,5 +139,38 @@ describe("the Codium Stripe setup", () => {
     // A configuration someone switched plan changes on for is refused, not used.
     stripe.configurations[0]!.features = { subscription_update: { enabled: true } }
     await expect(modelPlanPortalConfiguration(fetcher)).rejects.toThrow("Turn plan switching off")
+  })
+
+  test("plan changes get their own portal: a bigger plan starts a full month today, a smaller one waits for renewal", async () => {
+    const plans = [10, 50, 100, 200].map((amount) => ({ product: `prod_${amount}`, price: `price_${amount}` }))
+    expect(await modelPlanChangePortalConfiguration(plans, fetcher)).toEqual({ id: "bpc_1", created: true })
+    const created = stripe.configurations[0]!.settings as Record<string, string>
+    expect(created).toMatchObject({
+      "metadata[vector_codium]": "plan-change-v1",
+      "features[subscription_update][enabled]": "true",
+      "features[subscription_update][default_allowed_updates][0]": "price",
+      // Codium grants a paid period only for a full month's invoice, so nothing is prorated.
+      "features[subscription_update][proration_behavior]": "none",
+      "features[subscription_update][billing_cycle_anchor]": "now",
+      "features[subscription_update][schedule_at_period_end][conditions][0][type]": "decreasing_item_amount",
+      "features[subscription_cancel][mode]": "at_period_end",
+      "features[subscription_update][products][0][product]": "prod_10",
+      "features[subscription_update][products][3][prices][0]": "price_200",
+    })
+    expect(Object.keys(created).filter((key) => key.endsWith("[product]"))).toHaveLength(4)
+
+    // The cancellation-only portal is a separate configuration and still refuses plan changes.
+    expect(await modelPlanPortalConfiguration(fetcher)).toEqual({ id: "bpc_2", created: true })
+    expect(stripe.configurations[1]!.features).toEqual({ subscription_update: { enabled: false } })
+
+    // A later run with a new price updates the same configuration instead of adding one.
+    stripe.idempotency.clear()
+    const repriced = plans.map((plan) => (plan.price === "price_50" ? { ...plan, price: "price_50b" } : plan))
+    expect(await modelPlanChangePortalConfiguration(repriced, fetcher)).toEqual({ id: "bpc_1", created: false })
+    expect(stripe.configurations).toHaveLength(2)
+    expect(stripe.configurations[0]!.settings).toMatchObject({
+      "features[subscription_update][products][1][prices][0]": "price_50b",
+      "features[subscription_update][proration_behavior]": "none",
+    })
   })
 })

@@ -1,3 +1,4 @@
+import { Option, Schema } from "effect"
 import { ApiError, type ApiRequest } from "./http.js"
 
 export type AccountUser = {
@@ -65,6 +66,31 @@ export async function requireAccountUser(
     throw new ApiError(403, "EMAIL_NOT_CONFIRMED", "Confirm your email address before continuing.")
   }
   return { id: user.id, email, ...accountProfile("user_metadata" in user ? user.user_metadata : undefined) }
+}
+
+const RECENT_SIGN_IN_MS = 10 * 60 * 1000
+// A Supabase access token records how its session was established, and when, in "amr"; refreshing the token keeps it.
+const SessionClaims = Schema.Struct({
+  amr: Schema.Array(Schema.Struct({ method: Schema.String, timestamp: Schema.Number })),
+})
+
+/**
+ * Refuses a browser session whose sign-in is more than ten minutes old. Call it after requireAccountUser, which has
+ * had Supabase verify the token, so its claims can be read as they stand. Deleting the account from the desktop app
+ * asks for this, so that holding the app's own long-lived token is never enough.
+ */
+export function requireRecentSignIn(request: Pick<ApiRequest, "headers">, now = Date.now()) {
+  const payload = bearerToken(request)?.split(".")[1]
+  const claims = payload
+    ? Option.getOrUndefined(
+        Schema.decodeUnknownOption(Schema.fromJsonString(SessionClaims))(
+          Buffer.from(payload, "base64url").toString("utf8"),
+        ),
+      )
+    : undefined
+  const latest = Math.max(0, ...(claims?.amr ?? []).map((entry) => entry.timestamp))
+  if (now - latest * 1000 > RECENT_SIGN_IN_MS)
+    throw new ApiError(401, "RECENT_SIGN_IN_REQUIRED", "Sign in again to confirm it is you.")
 }
 
 /**

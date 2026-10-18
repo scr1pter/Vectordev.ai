@@ -14,23 +14,21 @@ export type CodiumSummary =
       renewal?: { label: "Renews" | "Ends"; date: string }
       purchased: string
       notice?: ReturnType<typeof ModelPlanStatus.notice>
-      /** Whether vectordev.ai has a subscription or purchase for this account to manage. */
+      /** Whether vectordev.ai keeps billing for this account: a plan, a purchase or past invoices to manage. */
       billing: boolean
-      /** Whether vectordev.ai sells Codium now, so a purchase link leads somewhere. */
-      purchase: boolean
     }
 
 /**
  * What Settings > Account shows for Vector Codium. The status only ever carries shares and states, and this keeps it
  * that way: a percentage of this month's credits and a state for purchased credits, never an amount, so the markup on
- * a purchase cannot be worked out. While Codium is not on sale and the account has bought nothing, it is Coming soon.
+ * a purchase cannot be worked out. While Codium is not on sale and the account has never paid for it, it is Coming soon.
  */
 export function codiumSummary(status?: ModelPlanStatus.Status): CodiumSummary {
   if (!status) return { kind: "loading" }
   if (status.error) return { kind: "error", text: status.error }
   if (!status.signedIn) return { kind: "signed-out" }
   const plan = status.plan
-  if (!status.enabled && !plan && !status.purchased.bought) return { kind: "coming-soon" }
+  if (!status.enabled && !plan && !status.purchased.bought && !status.customer) return { kind: "coming-soon" }
   return {
     kind: "plan",
     plan: plan?.name ?? "No plan",
@@ -49,9 +47,23 @@ export function codiumSummary(status?: ModelPlanStatus.Status): CodiumSummary {
       : {}),
     purchased: ModelPlanStatus.formatPurchased(status.purchased),
     notice: ModelPlanStatus.notice(status),
-    billing: Boolean(plan || status.purchased.bought),
-    purchase: status.enabled,
+    billing: Boolean(plan || status.purchased.bought || status.customer),
   }
+}
+
+/**
+ * Which step of deleting the account the page shows. The desktop's own state comes first, so a confirmation still in
+ * the browser, or one already given, shows again when the page is reopened.
+ */
+export function deletionStep(open: boolean, deletion?: "confirming" | "confirmed") {
+  if (deletion) return deletion
+  return open ? ("type" as const) : ("closed" as const)
+}
+
+/** Whether the typed email is the account's own, as vectordev.ai compares them. */
+export function sameEmail(typed: string, email?: string) {
+  const value = typed.trim().toLowerCase()
+  return Boolean(value && email && value === email.trim().toLowerCase())
 }
 
 /** The account card's heading and line under it: the name from Google or the account, else the email alone. */

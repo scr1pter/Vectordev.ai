@@ -60,10 +60,10 @@ Do all of this in **test mode** first, for the preview test run in [section 4](#
 
    It prints the values for the environment variables in [section 3](#3-vercel-environment):
    - `STRIPE_MODEL_PLAN_<price>_PRICE_ID` and `STRIPE_MODEL_TOPUP_<price>_PRICE_ID` for the four prices;
-   - `STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID`;
+   - `STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID` and `STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID`, the two portal configurations;
    - `STRIPE_MODEL_PLAN_WEBHOOK_SECRET`. Stripe shows the signing secret only once, so copy it straight into Vercel.
 
-   Running the script again reuses what exists: prices by their lookup keys, the portal configuration it created, and the webhook at the same address. If that webhook's bypass secret changed, the script updates its address and keeps its signing secret; if it is missing events, the script lists them. If you deleted the webhook, the script creates a new one and prints its new secret.
+   Running the script again reuses what exists: prices by their lookup keys, the two portal configurations it created (the plan-change one is updated to the current prices), and the webhook at the same address. If that webhook's bypass secret changed, the script updates its address and keeps its signing secret; if it is missing events, the script lists them. If you deleted the webhook, the script creates a new one and prints its new secret.
 
 3. To do it by hand instead:
    - **Prices**, all USD:
@@ -73,7 +73,10 @@ Do all of this in **test mode** first, for the preview test run in [section 4](#
      - URL `https://vectordev.ai/api/model-plans/webhook`;
      - API version `2025-02-24.acacia`;
      - events `checkout.session.completed`, `customer.subscription.created`, `.updated`, `.deleted`, `.paused`, `.resumed`, `invoice.paid`, `invoice.payment_failed`, `payment_intent.succeeded`, `charge.succeeded`, `charge.updated`, `charge.refunded`, `charge.refund.updated`, `charge.dispute.created`, `.updated`, `.closed`, `.funds_withdrawn` and `.funds_reinstated`.
-   - **Customer portal**: allow payment-method updates, invoice history and cancellation at the end of the period. Leave **plan switching off**: a mid-period switch bills a proration, which Codium does not grant, and switching would also skip the sales pause.
+   - **Customer portal**, two configurations:
+     - **Without plan changes** (`STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID`): email updates, payment-method updates, invoice history and cancellation at the end of the period. Plan switching off. This one opens while Codium sales are paused or `MODEL_PLANS_ENABLED` is `false`, so nobody can buy a bigger plan then.
+     - **With plan changes** (`STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID`): the same, plus subscription updates to a different price, listing the four monthly products, each with its one price. Set proration to **none**, the billing cycle anchor to **now** (Stripe's API calls it `billing_cycle_anchor: now`; the dashboard may not offer it, so the script is the reliable way), and **schedule downgrades at the end of the period** (`decreasing_item_amount`).
+     - Why those settings: Codium grants a month's credits only for a full, paid invoice for that month. A bigger plan therefore starts a new month on it today, charged in full, and what is left of the old month's credits ends then. A smaller plan waits for the renewal date. A prorated charge would pay for part of a month, which Codium never grants, and would leave the subscriber without monthly credits until renewal.
 4. Keep the card as the only payment method, with no trials or coupons: Codium grants credits only for a full, paid card charge.
 5. Optional: turn on Stripe's emailed receipts for successful payments and refunds, in Stripe's customer email settings.
 
@@ -99,7 +102,8 @@ Set these for **Production** with the live values (secrets only in Vercel, never
 | `MODEL_PLANS_ENABLED`                                                               | `false` until the test-mode run passes and the live values are in, then `true`                                                     |
 | `STRIPE_SECRET_KEY`                                                                 | Stripe live secret key (`sk_live_…`)                                                                                               |
 | `STRIPE_MODEL_PLAN_WEBHOOK_SECRET`                                                  | The webhook's signing secret (`whsec_…`)                                                                                           |
-| `STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID`                                                | The portal configuration (`bpc_…`)                                                                                                 |
+| `STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID`                                                | The portal configuration without plan changes (`bpc_…`)                                                                            |
+| `STRIPE_MODEL_PLAN_CHANGE_PORTAL_CONFIG_ID`                                         | The portal configuration with plan changes (`bpc_…`). Unset, nobody can change plans.                                              |
 | `STRIPE_MODEL_PLAN_{10,50,100,200}_PRICE_ID`                                        | The four monthly price IDs                                                                                                         |
 | `STRIPE_MODEL_TOPUP_{10,50,100,200}_PRICE_ID`                                       | The four one-time price IDs                                                                                                        |
 | `MODEL_CREDIT_MARKUP_PERCENT`, or each `MODEL_PLAN_…` / `MODEL_TOPUP_…_CREDITS_USD` | Your private credit allowances. There is no default.                                                                               |
@@ -149,9 +153,21 @@ Then:
 
    With the extra $50 from preparation step 6, it should answer `{"enabled":true,"status":"open","ran":true,"notified":false}`. Then set the branch's `CODIUM_FUNDING_MARGIN_USD` above the OpenRouter balance (for example `100000`), redeploy and call it again: it answers `"status":"paused"`, checkout refuses with "temporarily unavailable", and the pause email arrives. Set the margin back, redeploy and call it again: sales reopen and the reopen email arrives.
 
-6. Cancel the plan in the preview's portal. Its key stays switched off, as the refund left it, and expires at the end of the period.
+6. Change plans in the preview's portal (account page → Manage billing → Update plan): buy the $10 plan again with a new test checkout, then choose the $50 plan. Stripe should charge $50 today and show a new billing period starting now. Within seconds the `Vector <your account id> sub_…` key for the $10 month is switched off and a new key appears, capped at the $50 plan's credits. Then choose the $10 plan: the portal should say it starts on the renewal date, and nothing is charged now. While that change waits, open the portal again and note whether Stripe still lets you change or cancel the plan: the app refuses a further change then, and allows cancelling, so tell the developers if Stripe behaves otherwise.
+7. Buy a $10 top-up on the preview's account page with the 3D Secure test card `4000 0027 6000 3184`. The bank's confirmation appears inside Stripe's checkout page and the purchase completes. The desktop app always talks to vectordev.ai, so its billing window can only be tried against Production: once you sell, buy the smallest top-up from Settings → Account → Buy credits in Vector and check that the window closes by itself and the account shows the credits.
+8. Cancel the plan in the preview's portal. Its key stays switched off, as the refund left it, and expires at the end of the period.
 
 Afterwards, delete the branch's Preview variables and the test webhook (Stripe test mode → Developers → Webhooks). The test's OpenRouter keys end switched off by the refunds, so Production's funding check does not count them. Then run section 1 in live mode, put the live values in Production (section 3), and set `MODEL_PLANS_ENABLED=true` there when you decide to sell.
+
+## Buying from the Vector app
+
+Vector 1.99.109 and later handle billing inside the app, under Settings → Account. Clicking your name in the sidebar opens it.
+
+- **Buy credits** lists the four plans and four top-ups with their prices, and never their credits. While `MODEL_PLANS_ENABLED` is `false`, every button says "Coming soon" and nothing can be bought.
+- **Subscribe** and **Buy** open Stripe Checkout in a Vector window. **Change plan**, **Cancel plan** and **Manage billing and invoices** open Stripe's customer portal there. The window sits above Vector's own, with a title bar that names the Stripe address and a close button, and has its own private session. It closes itself when Stripe returns to `https://vectordev.ai/account`; the portal's home stays open until the person closes it or uses Stripe's link back. Only the page is kept to Stripe: a bank's card check (3D Secure), Link and captchas load inside it. Other links open in the browser. One billing window is open at a time; a second request brings it forward.
+- **Change plan** is not offered for a plan set to end. vectordev.ai also refuses a change while a smaller plan waits for the renewal date, and says so.
+- The app sends its Vector sign-in token to `/api/model-plans/checkout`, `/topup` and `/portal`, which accept it as they accept a website session. The portal, which can charge the saved card and change the billing email, accepts only a token from a sign-in made in Vector 1.99.109 or later, never one pasted into `vector login --token`. So someone who signed in on an older version gets the account page in the browser for the portal until they sign in again; checkout and top-ups work in the app for them. Deploy the website before releasing that app version. Against an older deployment the app opens vectordev.ai in the browser instead.
+- **Delete account** asks for the account's email, then a fresh sign-in in the browser (vectordev.ai checks it is from the last 10 minutes), and deletes the account from the app. Deploy the website first for this too.
 
 ## Reading the ledger
 
@@ -176,6 +192,10 @@ All amounts are US cents. The answer has three parts:
 Anyone without the secret, signed-in buyers included, gets a 404. The ledger shows what each purchase includes, so never share its output or the secret.
 
 ## Known limits
+
+- A plan change made in the portal keeps the credits checkout recorded for the old plan in the subscription's metadata; Codium ignores them once the subscription is on another plan and grants the new plan's configured credits. A later change to `MODEL_PLAN_…_CREDITS_USD` therefore also changes what an upgraded subscription's next month grants.
+- An upgrade whose payment fails or waits for the bank leaves the subscription without monthly credits until the payment completes, because the latest invoice is then unpaid. Test it with `4000 0000 0000 0341` (the card is attached but the charge fails) before selling.
+- An upgrade in the portal does not reserve its credits the way a checkout does. The funding check keeps room for one more of the largest purchase, so one upgrade is always covered, and the new month's key is counted from the next check.
 
 - Stripe drafts each renewal invoice and charges it about an hour later. The new month's credits start when that charge succeeds, so for about an hour after each renewal a subscriber has only their purchased credits.
 - A checkout page opened before a pause can still be paid for until it expires, up to an hour later. The pause stops new checkouts; the open one's credits were already reserved when it opened.

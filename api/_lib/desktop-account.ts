@@ -24,10 +24,16 @@ function binding(value: unknown) {
     typeof value.state !== "string" ||
     typeof value.challenge !== "string" ||
     !opaque.test(value.state) ||
-    !opaque.test(value.challenge)
+    !opaque.test(value.challenge) ||
+    ("purpose" in value && value.purpose !== undefined && value.purpose !== "delete")
   )
     throw invalid()
-  return { state: value.state, challenge: value.challenge }
+  return {
+    state: value.state,
+    challenge: value.challenge,
+    // A code for deleting the account buys a deletion grant instead of a sign-in (see cli-exchange.ts).
+    ...("purpose" in value && value.purpose === "delete" ? { purpose: "delete" as const } : {}),
+  }
 }
 
 export async function mintDesktopCode(
@@ -77,6 +83,8 @@ export async function consumeDesktopCode(input: unknown, fetcher: typeof fetch =
   )
   if (typeof raw !== "string") throw invalid()
   const parsed: unknown = JSON.parse(raw)
+  const purpose =
+    parsed && typeof parsed === "object" && "purpose" in parsed && parsed.purpose === "delete" ? "delete" : "sign-in"
   if (
     !parsed ||
     typeof parsed !== "object" ||
@@ -93,7 +101,10 @@ export async function consumeDesktopCode(input: unknown, fetcher: typeof fetch =
   const name =
     "name" in parsed.user && typeof parsed.user.name === "string" ? parsed.user.name.trim().slice(0, 120) : ""
   const avatar = "avatar" in parsed.user ? accountAvatar(parsed.user.avatar) : undefined
-  return { id: parsed.user.id, email: parsed.user.email, ...(name ? { name } : {}), ...(avatar ? { avatar } : {}) }
+  return {
+    purpose,
+    user: { id: parsed.user.id, email: parsed.user.email, ...(name ? { name } : {}), ...(avatar ? { avatar } : {}) },
+  }
 }
 
 function codeKey(code: string) {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
-import { accountIdentity, codiumSummary } from "./account-model"
+import { accountIdentity, codiumSummary, deletionStep, sameEmail } from "./account-model"
 
 const renewsAt = Date.UTC(2026, 10, 1, 12)
 
@@ -26,8 +26,16 @@ describe("Codium on the Account page", () => {
     })
   })
 
-  test("is Coming soon while sales are off and the account has bought nothing", () => {
+  test("is Coming soon while sales are off and the account has never paid for Codium", () => {
     expect(codiumSummary(status({ enabled: false, access: false }))).toEqual({ kind: "coming-soon" })
+  })
+
+  test("keeps billing reachable for someone with past invoices but no plan or credits", () => {
+    expect(codiumSummary(status({ enabled: false, access: false, customer: true }))).toMatchObject({
+      kind: "plan",
+      plan: "No plan",
+      billing: true,
+    })
   })
 
   test("shows the plan and the share of this month's credits left, never an amount", () => {
@@ -45,7 +53,6 @@ describe("Codium on the Account page", () => {
       renewal: { label: "Renews", date: ModelPlanStatus.formatDate(renewsAt) },
       purchased: "Running low",
       billing: true,
-      purchase: true,
     })
     if (summary.kind !== "plan") throw new Error("Expected the plan summary")
     // The balance lines carry a percentage and a state, never a credit count.
@@ -57,7 +64,7 @@ describe("Codium on the Account page", () => {
       codiumSummary(status({ plan: { id: "vector-10", name: "Codium 10", renewsAt, cancelAtPeriodEnd: true } })),
     ).toMatchObject({ credits: "Balance unavailable", renewal: { label: "Ends" } })
     const none = codiumSummary(status())
-    expect(none).toMatchObject({ kind: "plan", plan: "No plan", purchased: "None", billing: false, purchase: true })
+    expect(none).toMatchObject({ kind: "plan", plan: "No plan", purchased: "None", billing: false })
     expect(none).not.toHaveProperty("credits")
     expect(none).not.toHaveProperty("renewal")
   })
@@ -69,7 +76,7 @@ describe("Codium on the Account page", () => {
         plan: { id: "vector-10", name: "Codium 10", left: 1, renewsAt, cancelAtPeriodEnd: false },
       }),
     )
-    expect(summary).toMatchObject({ kind: "plan", plan: "Codium 10", purchase: false, billing: true })
+    expect(summary).toMatchObject({ kind: "plan", plan: "Codium 10", billing: true })
     expect(summary).toMatchObject({ notice: { kind: "unavailable" } })
   })
 
@@ -93,5 +100,21 @@ describe("account identity", () => {
       detail: undefined,
     })
     expect(accountIdentity({})).toEqual({ title: "", detail: undefined })
+  })
+})
+
+describe("deleting the account", () => {
+  test("shows the desktop's own step first, so a confirmation in progress survives reopening the page", () => {
+    expect(deletionStep(false)).toBe("closed")
+    expect(deletionStep(true)).toBe("type")
+    expect(deletionStep(false, "confirming")).toBe("confirming")
+    expect(deletionStep(true, "confirmed")).toBe("confirmed")
+  })
+
+  test("asks for the account's own email, compared as vectordev.ai compares it", () => {
+    expect(sameEmail(" Ana@Example.com ", "ana@example.com")).toBe(true)
+    expect(sameEmail("ana@example.co", "ana@example.com")).toBe(false)
+    expect(sameEmail("", "ana@example.com")).toBe(false)
+    expect(sameEmail("ana@example.com")).toBe(false)
   })
 })

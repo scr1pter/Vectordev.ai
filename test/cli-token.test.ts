@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, test } from "bun:test"
-import { mintCliToken, verifyCliToken } from "../api/_lib/cli-token.js"
+import {
+  mintCliToken,
+  mintDeletionGrant,
+  verifyCliToken,
+  verifyDeletionGrant,
+  verifyDesktopToken,
+} from "../api/_lib/cli-token.js"
 import { ApiError } from "../api/_lib/http.js"
 
 describe("cli tokens", () => {
@@ -18,8 +24,9 @@ describe("cli tokens", () => {
   test("rejects tampered payloads", () => {
     const { token } = mintCliToken({ id: "u1", email: "k@vectordev.ai" })
     const [payload, signature] = token.slice(4).split(".")
-    const forged = Buffer.from(JSON.stringify({ v: 1, sub: "someone-else", email: "x@y.z", exp: Date.now() + 1e9 }))
-      .toString("base64url")
+    const forged = Buffer.from(
+      JSON.stringify({ v: 1, sub: "someone-else", email: "x@y.z", exp: Date.now() + 1e9 }),
+    ).toString("base64url")
     expect(() => verifyCliToken(`vct_${forged}.${signature}`)).toThrow(ApiError)
     expect(() => verifyCliToken(`vct_${payload}.AAAA`)).toThrow(ApiError)
   })
@@ -41,8 +48,53 @@ describe("cli tokens", () => {
     }
   })
 
+  test("only a token marked as the desktop app's own passes for it, and the mark changes nothing else", () => {
+    const user = { id: "u1", email: "k@vectordev.ai" }
+    const desktop = mintCliToken(user, Date.now(), "desktop").token
+    expect(verifyDesktopToken(desktop)).toEqual(user)
+    expect(verifyCliToken(desktop)).toEqual(user)
+    const pasted = mintCliToken(user).token
+    expect(verifyCliToken(pasted)).toEqual(user)
+    expect(() => verifyDesktopToken(pasted)).toThrow(
+      expect.objectContaining({ statusCode: 403, code: "DESKTOP_SIGN_IN_REQUIRED" }),
+    )
+    // An expired or forged desktop token is refused as any CLI token is.
+    expect(() => verifyDesktopToken(mintCliToken(user, Date.now() - 91 * 86_400_000, "desktop").token)).toThrow(
+      expect.objectContaining({ code: "CLI_TOKEN_EXPIRED" }),
+    )
+    expect(() => verifyDesktopToken(`${desktop}x`)).toThrow(expect.objectContaining({ code: "CLI_TOKEN_INVALID" }))
+    expect(() => verifyDesktopToken(mintDeletionGrant(user).grant)).toThrow(ApiError)
+  })
+
   test("refuses to mint without a configured secret", () => {
     process.env.VECTOR_LICENSE_SECRET = "short"
     expect(() => mintCliToken({ id: "u1", email: "k@vectordev.ai" })).toThrow(ApiError)
+  })
+})
+
+describe("deletion grants", () => {
+  const user = { id: "3f2b9c9a-1111-4222-8333-444455556666", email: "k@vectordev.ai" }
+  beforeEach(() => {
+    process.env.VECTOR_LICENSE_SECRET = "a".repeat(48)
+  })
+
+  test("last ten minutes and name a single use", () => {
+    const now = Date.now()
+    const first = mintDeletionGrant(user, now)
+    expect(first.grant).toStartWith("vdg_")
+    expect(first.expiresAt).toBe(now + 10 * 60 * 1000)
+    const verified = verifyDeletionGrant(first.grant, now)
+    expect(verified).toMatchObject({ ...user, expiresAt: first.expiresAt })
+    expect(verified.jti).not.toBe(verifyDeletionGrant(mintDeletionGrant(user, now).grant, now).jti)
+    expect(() => verifyDeletionGrant(first.grant, first.expiresAt)).toThrow(ApiError)
+  })
+
+  test("and CLI tokens never pass for each other", () => {
+    const { grant } = mintDeletionGrant(user)
+    const { token } = mintCliToken(user)
+    expect(() => verifyCliToken(grant)).toThrow(ApiError)
+    expect(() => verifyCliToken(`vct_${grant.slice(4)}`)).toThrow(ApiError)
+    expect(() => verifyDeletionGrant(token)).toThrow(ApiError)
+    expect(() => verifyDeletionGrant(`vdg_${token.slice(4)}`)).toThrow(ApiError)
   })
 })

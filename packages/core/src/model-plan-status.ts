@@ -18,6 +18,7 @@ const Share = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
 const Remote = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
   access: Schema.Boolean,
+  customer: Schema.optional(Schema.Boolean),
   plan: Schema.optional(
     Schema.Struct({
       id: Schema.String,
@@ -46,6 +47,8 @@ export type Status = {
   enabled: boolean
   /** Whether the account can start a Codium model request right now. */
   access: boolean
+  /** Whether vectordev.ai keeps a billing account for this person, so the billing portal has invoices to show. */
+  customer?: boolean
   plan?: {
     id: string
     name: string
@@ -118,12 +121,54 @@ export async function salesOpen(request: (url: string, init: RequestInit) => Pro
   return Option.isSome(decoded) ? decoded.value.enabled : undefined
 }
 
+const Offer = Schema.Struct({ id: Schema.String, name: Schema.String, price: Schema.Number, available: Schema.Boolean })
+const Config = Schema.Struct({
+  enabled: Schema.Boolean,
+  plans: Schema.Array(Offer),
+  topups: Schema.optional(Schema.Array(Offer)),
+})
+
+/**
+ * A Codium plan or top-up as Vector offers it: its name and its public price. What it buys stays off every screen, as
+ * does how purchases compare, since either beside the price would reveal the markup.
+ */
+export type Offer = { id: string; name: string; price: number; available: boolean }
+export type Offers = { enabled: boolean; plans: Offer[]; topups: Offer[] }
+
+/** The plans and top-ups vectordev.ai lists publicly, for buying inside Vector; undefined when they cannot be read. */
+export async function fetchOffers(
+  request: (url: string, init: RequestInit) => Promise<Response> = fetch,
+): Promise<Offers | undefined> {
+  const response = await request(CONFIG_URL, {
+    headers: { accept: "application/json" },
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => undefined)
+  const decoded = response?.ok
+    ? Schema.decodeUnknownOption(Config)(await response.json().catch(() => undefined))
+    : Option.none()
+  if (Option.isNone(decoded)) return undefined
+  // Only these four fields, whatever else the configuration carries.
+  const offer = (item: Offer) => ({
+    id: item.id,
+    name: item.name,
+    price: item.price,
+    available: decoded.value.enabled && item.available,
+  })
+  return {
+    enabled: decoded.value.enabled,
+    plans: decoded.value.plans.map(offer),
+    topups: (decoded.value.topups ?? []).map(offer),
+  }
+}
+
 /** The shares and flags the server worked out, as Vector's screens read them. */
 export function fromRemote(remote: typeof Remote.Type): Status {
   return {
     signedIn: true,
     enabled: remote.enabled !== false,
     access: remote.access,
+    ...(remote.customer ? { customer: true } : {}),
     plan: remote.plan && {
       id: remote.plan.id,
       name: remote.plan.name,

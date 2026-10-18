@@ -425,7 +425,10 @@ test("real KV atomically consumes a PKCE-bound desktop grant once without burnin
   )
   expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
   expect(results.filter((result) => result.status === "rejected")).toHaveLength(5)
-  expect(results.find((result) => result.status === "fulfilled")).toEqual({ status: "fulfilled", value: user })
+  expect(results.find((result) => result.status === "fulfilled")).toEqual({
+    status: "fulfilled",
+    value: { purpose: "sign-in", user },
+  })
 })
 
 describe("shared free inference", () => {

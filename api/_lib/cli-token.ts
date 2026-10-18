@@ -1,4 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto"
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
+import { Option, Schema } from "effect"
 import { ApiError } from "./http.js"
 
 /**
@@ -11,6 +12,7 @@ import { ApiError } from "./http.js"
 export type CliTokenUser = { id: string; email: string }
 
 const CLI_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000
+const DELETION_GRANT_TTL_MS = 10 * 60 * 1000
 
 function secret() {
   // Prefer a dedicated secret; otherwise derive a purpose-bound key so this
@@ -24,32 +26,103 @@ function secret() {
 
 const encode = (value: string) => Buffer.from(value, "utf8").toString("base64url")
 
-function sign(payload: string) {
-  return createHmac("sha256", secret()).update(`vector-cli-v1.${payload}`).digest("base64url")
+function sign(payload: string, domain = "vector-cli-v1") {
+  return createHmac("sha256", secret()).update(`${domain}.${payload}`).digest("base64url")
 }
 
-export function mintCliToken(user: CliTokenUser, now = Date.now()) {
+/**
+ * `client` "desktop" marks a token the desktop app's main process got from its own sign-in (api/account/cli-exchange),
+ * which it keeps encrypted. A token handed out to paste into a terminal has no mark: it can end up in shell history,
+ * a dotfile or a screenshot, so it never opens the billing portal (see verifyDesktopToken). Verifiers from before the
+ * mark ignore it, so a marked token works everywhere an unmarked one does.
+ */
+export function mintCliToken(user: CliTokenUser, now = Date.now(), client?: "desktop") {
   const expiresAt = now + CLI_TOKEN_TTL_MS
-  const payload = encode(JSON.stringify({ v: 1, sub: user.id, email: user.email, exp: expiresAt }))
+  const payload = encode(
+    JSON.stringify({ v: 1, sub: user.id, email: user.email, exp: expiresAt, ...(client ? { client } : {}) }),
+  )
   return { token: `vct_${payload}.${sign(payload)}`, expiresAt }
 }
 
 export function verifyCliToken(token: string, now = Date.now()): CliTokenUser {
-  const invalid = new ApiError(401, "CLI_TOKEN_INVALID", "That CLI token is not valid. Generate a new one.")
-  if (typeof token !== "string" || !token.startsWith("vct_")) throw invalid
-  const [payload, signature] = token.slice("vct_".length).split(".")
-  if (!payload || !signature) throw invalid
-  const expected = Buffer.from(sign(payload))
-  const provided = Buffer.from(signature)
-  if (expected.length !== provided.length || !timingSafeEqual(expected, provided)) throw invalid
-  let parsed: { v?: number; sub?: string; email?: string; exp?: number }
-  try {
-    parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"))
-  } catch {
-    throw invalid
-  }
-  if (parsed.v !== 1 || typeof parsed.sub !== "string" || typeof parsed.email !== "string") throw invalid
+  const parsed = cliPayload(token, now)
+  return { id: parsed.sub, email: parsed.email }
+}
+
+/**
+ * A CLI token from the desktop app's own sign-in, for Stripe's billing portal, which can charge the saved card for a
+ * bigger plan at once and change the billing email. A pasted token, or a desktop sign-in from before Vector 1.99.109,
+ * gets DESKTOP_SIGN_IN_REQUIRED, and the desktop then opens the account page on the website.
+ */
+export function verifyDesktopToken(token: string, now = Date.now()): CliTokenUser {
+  const parsed = cliPayload(token, now)
+  if (parsed.client !== "desktop")
+    throw new ApiError(403, "DESKTOP_SIGN_IN_REQUIRED", "Sign in to Vector again to manage billing in the app.")
+  return { id: parsed.sub, email: parsed.email }
+}
+
+function cliPayload(token: string, now: number) {
+  const parsed = signedPayload(
+    token,
+    "vct_",
+    "vector-cli-v1",
+    new ApiError(401, "CLI_TOKEN_INVALID", "That CLI token is not valid. Generate a new one."),
+  )
   if (typeof parsed.exp !== "number" || parsed.exp <= now)
     throw new ApiError(401, "CLI_TOKEN_EXPIRED", "That CLI token has expired. Generate a new one.")
-  return { id: parsed.sub, email: parsed.email }
+  return parsed
+}
+
+/**
+ * Deletion grants (`vdg_…`): what the desktop app receives, instead of a CLI token, after a sign-in on vectordev.ai
+ * from the last ten minutes that was made to delete the account. They last ten minutes and are signed under their own
+ * domain, so neither kind passes for the other; api/account/delete.ts accepts each one once.
+ */
+export function mintDeletionGrant(user: CliTokenUser, now = Date.now()) {
+  const expiresAt = now + DELETION_GRANT_TTL_MS
+  const payload = encode(
+    JSON.stringify({
+      v: 1,
+      sub: user.id,
+      email: user.email,
+      exp: expiresAt,
+      jti: randomBytes(16).toString("base64url"),
+    }),
+  )
+  return { grant: `vdg_${payload}.${sign(payload, "vector-delete-v1")}`, expiresAt }
+}
+
+export function verifyDeletionGrant(grant: string, now = Date.now()) {
+  const invalid = new ApiError(
+    401,
+    "DELETION_GRANT_INVALID",
+    "This confirmation is no longer valid. Confirm with your Vector sign-in again.",
+  )
+  const parsed = signedPayload(grant, "vdg_", "vector-delete-v1", invalid)
+  if (typeof parsed.exp !== "number" || parsed.exp <= now || typeof parsed.jti !== "string" || !parsed.jti)
+    throw invalid
+  return { id: parsed.sub, email: parsed.email, jti: parsed.jti, expiresAt: parsed.exp }
+}
+
+const Signed = Schema.Struct({
+  v: Schema.Literal(1),
+  sub: Schema.String,
+  email: Schema.String,
+  exp: Schema.optional(Schema.Unknown),
+  jti: Schema.optional(Schema.Unknown),
+  client: Schema.optional(Schema.Unknown),
+})
+
+function signedPayload(token: string, prefix: string, domain: string, invalid: ApiError) {
+  if (typeof token !== "string" || !token.startsWith(prefix)) throw invalid
+  const [payload, signature] = token.slice(prefix.length).split(".")
+  if (!payload || !signature) throw invalid
+  const expected = Buffer.from(sign(payload, domain))
+  const provided = Buffer.from(signature)
+  if (expected.length !== provided.length || !timingSafeEqual(expected, provided)) throw invalid
+  const parsed = Schema.decodeUnknownOption(Schema.fromJsonString(Signed))(
+    Buffer.from(payload, "base64url").toString("utf8"),
+  )
+  if (Option.isNone(parsed)) throw invalid
+  return parsed.value
 }

@@ -3,7 +3,7 @@ import { Option, Schema } from "effect"
 import { readCodiumFunding } from "./codium-funding.js"
 import { ApiError, handleApiError, json, queryValue, requireMethod, type ApiRequest, type ApiResponse } from "./http.js"
 import { openRouterManagement, readModelPlanAccount, withCodiumLease } from "./model-plan-account.js"
-import { modelPlans, modelTopups } from "./model-plan-config.js"
+import { modelPlans, modelTopups, subscriptionPlanCredits } from "./model-plan-config.js"
 import { modelPlanStripe, stripeRecord } from "./model-plan-stripe.js"
 import { persistentStore } from "./persistent-store.js"
 
@@ -234,8 +234,7 @@ function subscriptionSale(charge: Record<string, unknown>, id: string) {
   const line = priced[0]?.line
   const plan = priced[0]?.plan
   const period = line && stripeRecord(line.period) ? line.period : undefined
-  const credits =
-    metadata.vector_model_credits_usd === undefined ? plan?.credits : Number(metadata.vector_model_credits_usd)
+  const credits = subscriptionPlanCredits(metadata, plan)
   if (!plan || credits === undefined || !Number.isFinite(credits) || credits <= 0 || credits > plan.price) return
   return {
     kind: "subscription" as const,

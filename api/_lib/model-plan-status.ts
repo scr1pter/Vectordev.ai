@@ -1,6 +1,5 @@
-import { requireAccountUser } from "./account.js"
 import { modelPlanStatus } from "./model-plan-account.js"
-import { requireModelPlanUser } from "./model-plan-chat.js"
+import { requireBillingUser } from "./model-plan-billing.js"
 import {
   configuredPlanModels,
   modelPlanRequestCredits,
@@ -13,11 +12,8 @@ import { handleApiError, json, requireMethod, type ApiRequest, type ApiResponse 
 export async function handleModelPlanStatus(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {
   try {
     requireMethod(request, "GET")
-    // The website signs in with a browser session; the desktop app and CLI hold a signed Vector account token,
-    // verified and checked against revocation exactly as model requests are.
-    const account = /^Bearer vct_/.test(String(request.headers.authorization ?? ""))
-      ? await requireModelPlanUser(request, fetcher)
-      : await requireAccountUser(request, fetcher)
+    // The website signs in with a browser session; the desktop app and CLI hold a signed Vector account token.
+    const account = await requireBillingUser(request, fetcher)
     const enabled = modelPlansEnabled()
     if (!process.env.STRIPE_SECRET_KEY) {
       json(response, 200, {

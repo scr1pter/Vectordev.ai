@@ -220,3 +220,27 @@
 .settings-account-danger [data-component="button-v2"][data-variant="ghost"] {
   color: #fda4af;
 }
+
+.settings-account-field {
+  display: grid;
+  gap: 6px;
+  max-width: 420px;
+  color: var(--settings-text);
+  font-size: 12px;
+}
+
+.settings-account-field input {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--settings-line-strong, var(--vx-line-strong));
+  border-radius: 8px;
+  background: var(--settings-control, var(--vx-control));
+  color: var(--settings-text, var(--vx-text));
+  font: inherit;
+  font-size: 13px;
+}
+
+.settings-account-field input:focus-visible {
+  outline: 2px solid var(--vx-purple);
+  outline-offset: 1px;
+}

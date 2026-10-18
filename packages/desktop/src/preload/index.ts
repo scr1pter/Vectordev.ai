@@ -304,6 +304,11 @@ const api: ElectronAPI = {
     cancel: () => ipcRenderer.invoke("vector-account-cancel"),
     logout: () => ipcRenderer.invoke("vector-account-logout"),
     codium: () => ipcRenderer.invoke("vector-account-codium"),
+    offers: () => ipcRenderer.invoke("vector-account-offers"),
+    billing: (request) => ipcRenderer.invoke("vector-account-billing", request),
+    confirmDeletion: () => ipcRenderer.invoke("vector-account-confirm-deletion"),
+    cancelDeletion: () => ipcRenderer.invoke("vector-account-cancel-deletion"),
+    deleteAccount: (email) => ipcRenderer.invoke("vector-account-delete", email),
     onChange: (callback) => {
       const handler = (_event: unknown, status: Parameters<typeof callback>[0]) => callback(status)
       ipcRenderer.on("vector-account-changed", handler)

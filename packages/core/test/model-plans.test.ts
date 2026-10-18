@@ -431,6 +431,7 @@ test("status reads the plan and the share of each balance left, never an amount,
     signedIn: true,
     enabled: true,
     access: true,
+    customer: true,
     plan: { id: "vector-50", name: "Codium 50", left: 0.06, renewsAt: 1_790_000_000_000, cancelAtPeriodEnd: false },
     purchased: { bought: true, state: "low" },
     empty: false,
@@ -558,6 +559,56 @@ test("someone signed out learns whether Codium is on sale from the public config
   expect(seen.every((item) => item.url === "https://vectordev.ai/api/model-plans/config" && !item.authorization)).toBe(
     true,
   )
+})
+
+test("the offers Vector shows carry names and prices only, and nothing is available while sales are off", async () => {
+  const seen: { url: string; authorization: string | null }[] = []
+  const answer =
+    (body: unknown, status = 200) =>
+    async (url: string, init: RequestInit) => {
+      seen.push({ url, authorization: new Headers(init.headers).get("authorization") })
+      return Response.json(body, { status })
+    }
+  // What /api/model-plans/config answers, with each purchase's multiple and typical tasks beside its price.
+  const config = (enabled: boolean) => ({
+    product: "Vector Codium",
+    enabled,
+    plans: [10, 50].map((price, index) => ({
+      id: `vector-${price}`,
+      name: `Codium ${price}`,
+      price,
+      available: enabled,
+      ...(index ? { multiple: 5.2 } : {}),
+      tasks: [[50, 500]],
+    })),
+    topups: [{ id: "codium-topup-10", name: "Codium 10 top-up", price: 10, available: true, tasks: [] }],
+  })
+  const offers = await ModelPlanStatus.fetchOffers(answer(config(true)))
+  expect(offers).toEqual({
+    enabled: true,
+    plans: [
+      { id: "vector-10", name: "Codium 10", price: 10, available: true },
+      { id: "vector-50", name: "Codium 50", price: 50, available: true },
+    ],
+    topups: [{ id: "codium-topup-10", name: "Codium 10 top-up", price: 10, available: true }],
+  })
+  expect(JSON.stringify(offers)).not.toMatch(/multiple|tasks|5\.2|credits/)
+  // While Codium is off, an item the server marks available still cannot be bought.
+  const off = await ModelPlanStatus.fetchOffers(answer(config(false)))
+  expect(off?.enabled).toBe(false)
+  expect([...off!.plans, ...off!.topups].every((offer) => !offer.available)).toBe(true)
+  expect(await ModelPlanStatus.fetchOffers(answer({ error: "unavailable" }, 503))).toBeUndefined()
+  expect(await ModelPlanStatus.fetchOffers(answer({ enabled: true }))).toBeUndefined()
+  expect(await ModelPlanStatus.fetchOffers(() => Promise.reject(new Error("offline")))).toBeUndefined()
+  expect(seen.every((item) => item.url === "https://vectordev.ai/api/model-plans/config" && !item.authorization)).toBe(
+    true,
+  )
+})
+
+test("status says when vectordev.ai keeps a billing account, so invoices stay reachable without a plan", () => {
+  const remote = { enabled: true, access: false, purchased: { bought: false }, empty: true, low: false }
+  expect(ModelPlanStatus.fromRemote({ ...remote, customer: true }).customer).toBe(true)
+  expect(ModelPlanStatus.fromRemote(remote)).not.toHaveProperty("customer")
 })
 
 test("status keeps no amount, even from a server that still sends one", async () => {

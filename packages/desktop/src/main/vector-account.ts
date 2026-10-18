@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto"
-import type { VectorAccountStatus } from "@vectordevai/app/vector-account"
+import type { VectorAccountStatus, VectorBillingResult, VectorDeletionResult } from "@vectordevai/app/vector-account"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
+import type { BillingOutcome } from "./billing-navigation"
 
 type StoredAccount = {
   ciphertext: string
@@ -15,6 +16,8 @@ type StoredAccount = {
   expiresAt: number
 }
 type Pending = { state: string; verifier: string; expiresAt: number; exchanging?: boolean }
+/** The ten-minute deletion grant vectordev.ai gave for a fresh sign-in. Main-process memory only, never stored. */
+type Grant = { value: string; email: string; expiresAt: number }
 type Dependencies = {
   read(): unknown
   write(value: StoredAccount): void
@@ -26,6 +29,10 @@ type Dependencies = {
   fetch(url: string, options: RequestInit): Promise<Response>
   sync(token: string | undefined): Promise<void>
   changed(status: VectorAccountStatus): void
+  /** Shows a Stripe page in Vector's billing window and resolves when that window is done. */
+  billingWindow(url: string): Promise<BillingOutcome>
+  /** Brings the open billing window forward, for a request made while it is open. */
+  focusBilling(): void
   now?(): number
 }
 
@@ -38,7 +45,17 @@ const photoData = /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2
 
 export function createVectorAccount(deps: Dependencies) {
   const now = deps.now ?? Date.now
-  const state: { pending?: Pending; error?: string; refreshing?: boolean; work: Promise<void> } = {
+  const state: {
+    pending?: Pending
+    /** The browser sign-in that confirms deleting the account, kept apart so a normal sign-in is not disturbed. */
+    reauth?: Pending
+    grant?: Grant
+    error?: string
+    refreshing?: boolean
+    /** A billing request is under way, from asking vectordev.ai until its window is done. */
+    billing?: boolean
+    work: Promise<void>
+  } = {
     work: Promise.resolve(),
   }
   const stored = () => {
@@ -76,6 +93,12 @@ export function createVectorAccount(deps: Dependencies) {
   const status = (): VectorAccountStatus => {
     const account = stored()
     const authenticated = Boolean(account && account.expiresAt > now())
+    const deletion =
+      state.grant && state.grant.expiresAt > now()
+        ? ("confirmed" as const)
+        : state.reauth && state.reauth.expiresAt > now()
+          ? ("confirming" as const)
+          : undefined
     return {
       authenticated,
       pending: Boolean(state.pending && state.pending.expiresAt > now()),
@@ -85,6 +108,7 @@ export function createVectorAccount(deps: Dependencies) {
             ...(account.name ? { name: account.name } : {}),
             ...(account.avatar ? { avatar: account.avatar } : {}),
             expiresAt: account.expiresAt,
+            ...(deletion ? { deletion } : {}),
           }
         : {}),
       ...(state.error ? { error: state.error } : {}),
@@ -109,6 +133,25 @@ export function createVectorAccount(deps: Dependencies) {
     if (!account || account.expiresAt <= now() || !(await deps.available())) return
     return deps.decrypt(account.ciphertext)
   }
+  const browserSignIn = async (pending: Pending, purpose?: "delete") => {
+    const url = new URL("https://vectordev.ai/auth/cli")
+    url.search = new URLSearchParams({
+      desktop: "1",
+      ...(purpose ? { purpose } : {}),
+      state: pending.state,
+      code_challenge: createHash("sha256").update(pending.verifier).digest("base64url"),
+      code_challenge_method: "S256",
+    }).toString()
+    return deps
+      .openBrowser(url.href)
+      .then(() => true)
+      .catch(() => false)
+  }
+  const pendingSignIn = () => ({
+    state: randomBytes(32).toString("base64url"),
+    verifier: randomBytes(32).toString("base64url"),
+    expiresAt: now() + 300_000,
+  })
   // Display only, so every failure keeps the last good name and photo.
   const applyProfile = async (ciphertext: string, profile: { name: string; source?: string }) => {
     const current = stored()
@@ -132,6 +175,65 @@ export function createVectorAccount(deps: Dependencies) {
       })
     }).catch(() => undefined)
     notify()
+  }
+
+  // One billing request: ask vectordev.ai for the Stripe page, then show it in the billing window.
+  const openBilling = async (input: unknown): Promise<VectorBillingResult> => {
+    const request = billingRequest(input)
+    if (!request) return { outcome: "failed", message: "Vector could not open billing for that choice." }
+    const secret = await token().catch(() => undefined)
+    if (!secret) return { outcome: "failed", message: "Sign in to Vector to manage billing." }
+    const response = await deps
+      .fetch(`${ModelPlanStatus.API_URL}/${request.kind}`, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          authorization: `Bearer ${secret}`,
+        },
+        body: JSON.stringify(request.body),
+        redirect: "error",
+        signal: AbortSignal.timeout(15_000),
+      })
+      .catch(() => undefined)
+    if (!response)
+      return {
+        outcome: "failed",
+        message: "Vector could not reach vectordev.ai. Check your connection and try again.",
+      }
+    const payload: unknown = await response.json().catch(() => undefined)
+    const error = apiError(payload)
+    // A vectordev.ai from before 1.99.109 takes only a website session on these routes, and hands the account token
+    // to Supabase, which refuses it. And the billing portal, which can charge the saved card, opens only for a sign-in
+    // made in Vector 1.99.109 or later (DESKTOP_SIGN_IN_REQUIRED). Neither answer is a sign-out: the website still
+    // does all of this.
+    if (
+      !response.ok &&
+      (error?.code === "SESSION_INVALID" ||
+        error?.code === "SIGN_IN_REQUIRED" ||
+        error?.code === "DESKTOP_SIGN_IN_REQUIRED" ||
+        (!error && (response.status === 404 || response.status === 405)))
+    ) {
+      await deps
+        .openBrowser(request.kind === "portal" ? ModelPlanStatus.MANAGE_URL : ModelPlanStatus.PURCHASE_URL)
+        .catch(() => undefined)
+      return { outcome: "website" }
+    }
+    if (!response.ok)
+      return { outcome: "failed", message: error?.message ?? "Vector could not open billing. Try again shortly." }
+    const url = payload && typeof payload === "object" && "url" in payload ? payload.url : undefined
+    if (
+      typeof url !== "string" ||
+      !url.startsWith(request.kind === "portal" ? "https://billing.stripe.com/" : "https://checkout.stripe.com/")
+    )
+      return { outcome: "failed", message: "Vector could not open billing. Try again shortly." }
+    const outcome = await deps.billingWindow(url)
+    if (outcome === "failed")
+      return {
+        outcome: "failed",
+        message: "Vector could not open the Stripe page. Check your connection and try again.",
+      }
+    return { outcome }
   }
 
   return {
@@ -178,24 +280,108 @@ export function createVectorAccount(deps: Dependencies) {
     async start() {
       if (!(await deps.available())) return fail(secureStorageError)
       state.error = undefined
-      const pending = {
-        state: randomBytes(32).toString("base64url"),
-        verifier: randomBytes(32).toString("base64url"),
-        expiresAt: now() + 300_000,
-      }
+      const pending = pendingSignIn()
       state.pending = pending
-      const url = new URL("https://vectordev.ai/auth/cli")
-      url.search = new URLSearchParams({
-        desktop: "1",
-        state: pending.state,
-        code_challenge: createHash("sha256").update(pending.verifier).digest("base64url"),
-        code_challenge_method: "S256",
-      }).toString()
-      await deps.openBrowser(url.href).catch(() => {
+      if (!(await browserSignIn(pending))) {
         state.pending = undefined
         state.error = "Vector could not open your browser. Try signing in again."
-      })
+      }
       return notify()
+    },
+    /** The plans and top-ups vectordev.ai sells, by name and price; read here so the renderer needs no network. */
+    offers() {
+      return ModelPlanStatus.fetchOffers(deps.fetch)
+    },
+    /**
+     * Opens Codium checkout, a top-up or Stripe's customer portal in Vector's billing window. The account token goes
+     * only to vectordev.ai, and the window loads only the Stripe address vectordev.ai answers with. One request runs at
+     * a time: another, from a second page or dialog, gets "busy" and the open window comes forward, so no request
+     * reports how a different one ended and no second Stripe session is made.
+     */
+    async billing(input: unknown): Promise<VectorBillingResult> {
+      if (state.billing) {
+        deps.focusBilling()
+        return { outcome: "busy" }
+      }
+      state.billing = true
+      return openBilling(input).finally(() => {
+        state.billing = undefined
+      })
+    },
+    /**
+     * Deleting the account needs a sign-in on vectordev.ai from the last few minutes, made in the browser because
+     * Google refuses sign-in inside an app window. The answer comes back to consume() as a ten-minute grant.
+     */
+    async confirmDeletion() {
+      if (!status().authenticated) return fail("Sign in to Vector before deleting your account.")
+      state.error = undefined
+      state.grant = undefined
+      const reauth = pendingSignIn()
+      state.reauth = reauth
+      if (!(await browserSignIn(reauth, "delete"))) {
+        state.reauth = undefined
+        state.error = "Vector could not open your browser. Try again."
+      }
+      return notify()
+    },
+    cancelDeletion() {
+      state.reauth = undefined
+      state.grant = undefined
+      state.error = undefined
+      return notify()
+    },
+    /** Deletes the account with the grant the fresh sign-in gave, then forgets it on this machine. */
+    async deleteAccount(email: unknown): Promise<VectorDeletionResult> {
+      const grant = state.grant
+      if (!grant || grant.expiresAt <= now()) {
+        state.grant = undefined
+        notify()
+        return { deleted: false, message: "Your confirmation expired. Confirm with your Vector sign-in again." }
+      }
+      if (typeof email !== "string" || email.trim().toLowerCase() !== grant.email.trim().toLowerCase())
+        return { deleted: false, message: "Type the email address on this account to confirm." }
+      const response = await deps
+        .fetch("https://vectordev.ai/api/account/delete", {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            "content-type": "application/json",
+            authorization: `Bearer ${grant.value}`,
+          },
+          body: JSON.stringify({ confirm: email.trim() }),
+          redirect: "error",
+          signal: AbortSignal.timeout(30_000),
+        })
+        .catch(() => undefined)
+      const payload: unknown = await response?.json().catch(() => undefined)
+      if (
+        !response?.ok ||
+        !payload ||
+        typeof payload !== "object" ||
+        !("deleted" in payload) ||
+        payload.deleted !== true
+      ) {
+        const error = apiError(payload)
+        // A used or expired grant cannot be retried; anything else can, with the same confirmation.
+        if (error?.code === "DELETION_GRANT_INVALID" || error?.code === "DELETION_GRANT_USED") state.grant = undefined
+        notify()
+        return {
+          deleted: false,
+          message: error?.message ?? "Vector could not delete your account. Check your connection and try again.",
+        }
+      }
+      state.grant = undefined
+      state.reauth = undefined
+      state.pending = undefined
+      state.error = undefined
+      // The account and its tokens are gone on vectordev.ai, so this machine forgets it even if the local server
+      // cannot be told; the token it still holds no longer works anywhere.
+      await queue(async () => {
+        await deps.sync(undefined).catch(() => undefined)
+        await deps.clear()
+      }).catch(() => undefined)
+      notify()
+      return { deleted: true }
     },
     cancel() {
       state.pending = undefined
@@ -204,6 +390,8 @@ export function createVectorAccount(deps: Dependencies) {
     },
     async logout() {
       state.pending = undefined
+      state.reauth = undefined
+      state.grant = undefined
       state.error = undefined
       await queue(async () => {
         await deps.sync(undefined)
@@ -242,7 +430,9 @@ export function createVectorAccount(deps: Dependencies) {
           remaining.push(raw)
           continue
         }
-        const pending = state.pending
+        // The deletion confirmation has its own slot, matched by its state, so a sign-in started meanwhile still works.
+        const reauth = state.reauth && url?.searchParams.get("state") === state.reauth.state ? state.reauth : undefined
+        const pending = reauth ?? state.pending
         if (
           !url ||
           url.protocol !== "vector:" ||
@@ -279,6 +469,27 @@ export function createVectorAccount(deps: Dependencies) {
           })
           .catch(() => undefined)
         const payload: unknown = await response?.json().catch(() => undefined)
+        if (reauth) {
+          if (state.reauth !== reauth) continue
+          state.reauth = undefined
+          const grant = deletionGrant(payload, response?.ok === true, now())
+          const email = stored()?.email
+          if (!grant) {
+            fail("Vector could not confirm it is you. The link may have expired; start again from Delete account.")
+            continue
+          }
+          // The grant deletes whichever account signed in on the website, so it must be the one in this app.
+          if (!email || grant.email.trim().toLowerCase() !== email.trim().toLowerCase()) {
+            fail(
+              `You confirmed as ${grant.email}. Sign in to vectordev.ai as ${email ?? "this account"} and try again.`,
+            )
+            continue
+          }
+          state.grant = { ...grant, email }
+          state.error = undefined
+          notify()
+          continue
+        }
         if (state.pending !== pending) continue
         if (
           !response?.ok ||
@@ -335,6 +546,60 @@ export function createVectorAccount(deps: Dependencies) {
       return remaining
     },
   }
+}
+
+/** Which billing request the renderer asked for, checked here, since it reaches the main process over IPC. */
+function billingRequest(input: unknown) {
+  if (!input || typeof input !== "object" || !("kind" in input)) return
+  const id = (value: unknown) => (typeof value === "string" && /^[a-z0-9-]{1,40}$/.test(value) ? value : undefined)
+  if (input.kind === "checkout") {
+    const plan = id("plan" in input ? input.plan : undefined)
+    return plan ? { kind: "checkout" as const, body: { plan } } : undefined
+  }
+  if (input.kind === "topup") {
+    const pack = id("pack" in input ? input.pack : undefined)
+    return pack ? { kind: "topup" as const, body: { pack } } : undefined
+  }
+  if (input.kind !== "portal") return
+  const flow = "flow" in input ? input.flow : undefined
+  if (flow !== undefined && flow !== "change" && flow !== "cancel") return
+  return { kind: "portal" as const, body: flow ? { flow } : {} }
+}
+
+/** vectordev.ai's `{ error: { code, message } }`, with the message kept to a line the app can show. */
+function apiError(payload: unknown) {
+  const error = payload && typeof payload === "object" && "error" in payload ? payload.error : undefined
+  if (!error || typeof error !== "object") return
+  const code = "code" in error && typeof error.code === "string" ? error.code : undefined
+  const message =
+    "message" in error && typeof error.message === "string" && error.message.trim()
+      ? error.message.trim().slice(0, 300)
+      : undefined
+  return { code, message }
+}
+
+/** The exchange's answer to a deletion confirmation: a vdg_ grant, never a sign-in token. */
+function deletionGrant(payload: unknown, ok: boolean, now: number) {
+  if (
+    !ok ||
+    !payload ||
+    typeof payload !== "object" ||
+    "token" in payload ||
+    !("grant" in payload) ||
+    typeof payload.grant !== "string" ||
+    !/^vdg_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(payload.grant) ||
+    !("expiresAt" in payload) ||
+    typeof payload.expiresAt !== "number" ||
+    payload.expiresAt <= now ||
+    !("user" in payload) ||
+    !payload.user ||
+    typeof payload.user !== "object" ||
+    !("email" in payload.user) ||
+    typeof payload.user.email !== "string"
+  )
+    return
+  // vectordev.ai grants ten minutes; a longer answer is not trusted past that.
+  return { value: payload.grant, email: payload.user.email, expiresAt: Math.min(payload.expiresAt, now + 600_000) }
 }
 
 /** The account token may only be copied to the app's authenticated local sidecar. */

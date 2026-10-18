@@ -9,13 +9,18 @@ import {
   type ApiRequest,
   type ApiResponse,
 } from "../_lib/http.js"
+import { verifyDeletionGrant } from "../_lib/cli-token.js"
+import { persistentStore } from "../_lib/persistent-store.js"
 import { revocationConfigured, revokeAccountTokens } from "../_lib/revocation.js"
 import { cancelModelPlanAccount } from "../_lib/model-plan-account.js"
 import { forgetUsage } from "../_lib/usage.js"
 
 /**
- * Deleting a Vector account. The order matters, because the steps are not
- * equally reversible:
+ * Deleting a Vector account, from the website with its browser session or from
+ * the desktop app with a deletion grant (see cli-token.ts), which needs a sign-in
+ * from the last ten minutes. The desktop's long-lived account token is never
+ * enough: it is stored on the machine and carries the email to type. The order
+ * matters, because the steps are not equally reversible:
  *
  *   1. confirm the person typed their own email, so a stray click cannot do this
  *   2. check the Supabase admin key exists BEFORE destroying anything, so a
@@ -34,7 +39,8 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     requireMethod(request, "POST")
     requireTrustedJsonRequest(request, 4_096)
     const body = await readJson<{ confirm?: unknown }>(request, 4_096)
-    const user = await requireAccountUser(request)
+    const grant = /^Bearer (vdg_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(String(request.headers.authorization ?? ""))?.[1]
+    const user = grant ? await requireUnusedGrant(grant) : await requireAccountUser(request)
     await enforceRateLimit(request, response, {
       scope: "account-delete",
       identifier: user.id,
@@ -72,6 +78,11 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     })
     const usageForgotten = await forgetUsage(user.id)
     await deleteAccountUser(admin, user.id)
+    // Only a finished deletion uses the grant up, so a step that failed can be retried with the same confirmation.
+    if ("jti" in user)
+      await persistentStore(["SET", grantKey(user.jti), "1", "EX", String(GRANT_RECORD_SECONDS), "NX"]).catch(
+        () => undefined,
+      )
 
     json(response, 200, {
       deleted: true,
@@ -83,6 +94,24 @@ export default async function handler(request: ApiRequest, response: ApiResponse
   } catch (error) {
     handleApiError(response, error)
   }
+}
+
+// Longer than a grant's ten minutes, so a used grant stays refused until it has expired anyway.
+const GRANT_RECORD_SECONDS = 15 * 60
+
+async function requireUnusedGrant(grant: string) {
+  const verified = verifyDeletionGrant(grant)
+  if (await persistentStore(["GET", grantKey(verified.jti)]))
+    throw new ApiError(
+      401,
+      "DELETION_GRANT_USED",
+      "This confirmation was already used. Confirm with your Vector sign-in again.",
+    )
+  return verified
+}
+
+function grantKey(jti: string) {
+  return `vector:deletion-grant:${jti}`
 }
 
 function adminConfiguration() {
