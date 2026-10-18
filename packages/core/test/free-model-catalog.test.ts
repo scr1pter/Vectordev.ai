@@ -9,6 +9,7 @@ import {
   freeModelDataPolicy,
   freeModelInfo,
   offeredFreeModel,
+  personalOnlyFreeModel,
 } from "../src/free-model-catalog"
 
 // Every free OpenRouter model and endpoint, captured from the public API on 17 October 2026.
@@ -82,6 +83,18 @@ test("each endpoint carries its reviewed policy, and today's may-train providers
   })
   // No retention text claims zero data retention.
   expect(JSON.stringify(info("cohere/north-mini-code:free"))).not.toMatch(/zero data retention|\bZDR\b/i)
+})
+
+test("Gemma is offered through the user's own account only, with the reason, and every other model is not", () => {
+  // The shared allowance cannot apply the EEA, Swiss and UK limit in Google's Gemini API terms.
+  for (const id of ["google/gemma-4-26b-a4b-it:free", "google/gemma-4-31b-it:free"]) {
+    expect(personalOnlyFreeModel(id)).toContain("Paid Services")
+    expect(offeredFreeModel(metadata(id), fixture.capturedAt)).toBe(true)
+  }
+  expect([...REVIEWED_FREE_ENDPOINTS.keys()].filter((id) => personalOnlyFreeModel(id))).toEqual([
+    "google/gemma-4-26b-a4b-it:free",
+    "google/gemma-4-31b-it:free",
+  ])
 })
 
 test("an unknown policy is never presented as no-training", () => {

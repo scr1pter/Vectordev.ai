@@ -25,6 +25,7 @@ test("a personal account gets every free model its settings allow, each with its
     ["thinkingmachines/inkling-small:free", ["thinkingmachines/nvfp4:may-train"]],
     ["thinkingmachines/inkling:free", ["thinkingmachines/nvfp4:may-train"]],
     ["dots-studio/dots-3-note-preview:free", ["atlas-cloud/fp8:no-training"]],
+    // Kept off the shared allowance (personalOnlyFreeModel), but offered on the user's own account.
     ["google/gemma-4-26b-a4b-it:free", ["google-ai-studio:no-training"]],
     ["google/gemma-4-31b-it:free", ["google-ai-studio:no-training"]],
     ["poolside/laguna-s-2.1:free", ["poolside/fp4:may-train"]],

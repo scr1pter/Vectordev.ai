@@ -304,14 +304,13 @@ describe("curated free catalog", () => {
   })
   test("curates every reviewed free model of 17 October 2026, each with its data policy, into real KV", async () => {
     const catalog = await refreshFreeModelCatalog(fetcher, fixture.capturedAt)
-    // No-training models first, then the ones whose providers may train; NVIDIA's trial endpoints never appear.
+    // No-training models first, then the ones whose providers may train; NVIDIA's trial endpoints never appear, and
+    // Gemma is offered through the user's own account only.
     expect(
       catalog.models.map((model) => `${model.id}:${model.providers.map((provider) => provider.dataPolicy).join()}`),
     ).toEqual([
       "cohere/north-mini-code:free:no-training",
       "dots-studio/dots-3-note-preview:free:no-training",
-      "google/gemma-4-26b-a4b-it:free:no-training",
-      "google/gemma-4-31b-it:free:no-training",
       "xingchen-agi/xing4.0-29b-a4b:free:no-training",
       "liquid/lfm-2.5-2.6b:free:may-train",
       "poolside/laguna-s-2.1:free:may-train",
@@ -324,13 +323,13 @@ describe("curated free catalog", () => {
     // A client that discloses may-train models gets them all; any other client gets the no-training ones only.
     expect(await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000, { disclosure: true })).toEqual(catalog)
     expect((await currentFreeModelCatalog(fetcher, fixture.capturedAt + 1000)).models.map((model) => model.id)).toEqual(
-      catalog.models.slice(0, 5).map((model) => model.id),
+      catalog.models.slice(0, 3).map((model) => model.id),
     )
     expect(Number(await redis(["TTL", FREE_MODELS_CATALOG_KEY]))).toBeGreaterThan(54 * 3600 - 60)
     expect(FREE_MODELS_CATALOG_KEY).toBe("vector:free-models:catalog:v4:policy")
-    // Only reviewed, offered candidates get an endpoint lookup; barred and per-item priced models never do.
-    expect(state.catalogReads.slice(2).filter((path) => /nvidia|lyria|openrouter\/free/.test(path))).toEqual([])
-    expect(state.catalogReads.slice(2)).toHaveLength(10)
+    // Only reviewed, offered candidates get an endpoint lookup; barred, personal-only and per-item priced models never do.
+    expect(state.catalogReads.slice(2).filter((path) => /nvidia|lyria|gemma|openrouter\/free/.test(path))).toEqual([])
+    expect(state.catalogReads.slice(2)).toHaveLength(8)
     expect(JSON.stringify(catalog)).not.toMatch(/zero data retention|ZDR/i)
   })
   test("an account whose privacy settings hide may-train models publishes a no-training catalog", async () => {

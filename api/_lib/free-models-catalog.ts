@@ -8,6 +8,7 @@ import {
   freeModelInfo,
   isFreeModelID,
   offeredFreeModel,
+  personalOnlyFreeModel,
   reviewedFreeModel,
 } from "../../packages/core/src/free-model-catalog.js"
 import { FREE_MODELS_TITLE } from "../../packages/core/src/free-model-choice.js"
@@ -69,11 +70,13 @@ export async function refreshFreeModelCatalog(
     true,
   )
   const allowed = new Set(available.data.map((item) => item.id))
-  // The shared allowance serves reviewed models only; unreviewed ones are offered through a user's own account.
+  // The shared allowance serves reviewed models only; unreviewed and personal-only ones are offered through a user's
+  // own account.
   const candidates = publicModels.data.flatMap((item) => {
     const model = Schema.decodeUnknownOption(FreeModelMetadata)(item)
     return Option.isSome(model) &&
       reviewedFreeModel(model.value.id) &&
+      !personalOnlyFreeModel(model.value.id) &&
       offeredFreeModel(model.value, now) &&
       allowed.has(model.value.id)
       ? [model.value]
@@ -140,9 +143,9 @@ export async function currentFreeModelCatalog(
     )
   )
     throw unavailable("FREE_MODELS_CATALOG_INVALID")
-  const models = options.disclosure
-    ? decoded.value.models
-    : decoded.value.models.filter((model) => freeModelDataPolicy(model) === "no-training")
+  // A catalog stored before a model became personal-only must not keep serving it.
+  const shared = decoded.value.models.filter((model) => !personalOnlyFreeModel(model.id))
+  const models = options.disclosure ? shared : shared.filter((model) => freeModelDataPolicy(model) === "no-training")
   // A fresh refresh that found no qualifying model is a deliberate OFF answer, not an outage.
   if (!decoded.value.enabled || !models.length)
     return { enabled: false, updatedAt: decoded.value.updatedAt, models: [] }
