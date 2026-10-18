@@ -62,7 +62,10 @@ export const prerender = true
             and nothing is sent until you accept. That one acceptance covers every model with the label, including
             ones Vector has not reviewed yet, until you withdraw it. A prompt to one of them falls back only to
             another such model from the same provider, never to a different provider. An invited guest in a shared
-            workspace is not offered these models, since only the workspace owner can accept the notice. In the terminal, <code>vector models --accept-training</code> accepts
+            workspace is not offered these models, since only the workspace owner can accept the notice. Once a guest
+            has worked in a session, nothing from that session goes to them, your own prompts in it included, because
+            the guest's messages are part of what each request sends. In the terminal,
+            <code>vector models --accept-training</code> accepts
             and <code>vector models --decline-training</code> withdraws; in the desktop app, Withdraw is on the
             Free models inside of Vector card in the Help panel. Vector itself never trains on your prompts.
             Vector never picks one of these models for you ahead of a no-training model. Desktop 1.99.108 and
