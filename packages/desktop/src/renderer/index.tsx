@@ -4,9 +4,9 @@ import {
   ACCEPTED_FILE_EXTENSIONS,
   AppBaseProviders,
   AppInterface,
+  detectLocale,
   handleNotificationClick,
   loadLocaleDict,
-  normalizeLocale,
   observeTelemetryPreference,
   scrubDiagnosticEvent,
   telemetryEnabled,
@@ -362,14 +362,10 @@ function LoadingSplash() {
 
 function DesktopRoot(props: { windowState: DesktopWindowState }) {
   const platform = createPlatform(props.windowState)
+  // Vector's language follows the computer, never a language saved by an earlier version. Its dictionary loads before
+  // the first render so the window never shows English first.
   const loadLocale = async () => {
-    const current = await platform.storage?.("vector.global.dat").getItem("language")
-    const legacy = current ? undefined : await platform.storage?.().getItem("language.v1")
-    const raw = current ?? legacy
-    if (!raw) return
-    const locale = raw.match(/"locale"\s*:\s*"([^"]+)"/)?.[1]
-    if (!locale) return
-    const next = normalizeLocale(locale)
+    const next = detectLocale()
     if (next !== "en") await loadLocaleDict(next)
     return next satisfies Locale
   }

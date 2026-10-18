@@ -577,14 +577,14 @@ function DraftProviders(props: ParentProps) {
   )
 }
 
+// Vector has one look: its own theme in dark. The preload paints it before the first frame (it puts back a theme or
+// colour scheme saved by an earlier version); this keeps it if anything picks another one while the app runs.
 function VectorThemeSync() {
-  const settings = useSettings()
   const theme = useTheme()
 
   createEffect(() => {
-    const preference = settings.appearance.theme()
-    if (theme.colorScheme() === preference) return
-    theme.setColorScheme(preference)
+    if (theme.themeId() !== "vector-modern") theme.setTheme("vector-modern")
+    if (theme.colorScheme() !== "dark") theme.setColorScheme("dark")
   })
 
   return null

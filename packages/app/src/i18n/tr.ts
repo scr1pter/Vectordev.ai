@@ -9,8 +9,6 @@ export const dict = {
   "command.category.provider": "Sağlayıcı",
   "command.category.server": "Sunucu",
   "command.category.session": "Oturum",
-  "command.category.theme": "Tema",
-  "command.category.language": "Dil",
   "command.category.file": "Dosya",
   "command.category.context": "Bağlam",
   "command.category.terminal": "Terminal",
@@ -38,13 +36,7 @@ export const dict = {
 
   "command.palette": "Komut paleti",
 
-  "command.theme.cycle": "Tema değiştir",
-  "command.theme.set": "Tema kullan: {{theme}}",
-  "command.theme.scheme.cycle": "Renk şemasını değiştir",
-  "command.theme.scheme.set": "Renk şeması kullan: {{scheme}}",
 
-  "command.language.cycle": "Dil değiştir",
-  "command.language.set": "Dil kullan: {{language}}",
 
   "command.session.new": "Yeni oturum",
   "command.file.open": "Dosya aç",
@@ -411,11 +403,7 @@ export const dict = {
   "language.th": "ไทย",
   "language.tr": "Türkçe",
 
-  "toast.language.title": "Dil",
-  "toast.language.description": "{{language}} diline geçildi",
 
-  "toast.theme.title": "Tema değiştirildi",
-  "toast.scheme.title": "Renk şeması",
 
   "toast.workspace.enabled.title": "Çalışma alanları etkinleştirildi",
   "toast.workspace.enabled.description": "Kenar çubuğunda birden fazla çalışma ağacı gösterilecek",

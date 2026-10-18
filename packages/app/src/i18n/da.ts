@@ -5,8 +5,6 @@ export const dict = {
   "command.category.provider": "Udbyder",
   "command.category.server": "Server",
   "command.category.session": "Session",
-  "command.category.theme": "Tema",
-  "command.category.language": "Sprog",
   "command.category.file": "Fil",
   "command.category.context": "Kontekst",
   "command.category.terminal": "Terminal",
@@ -34,13 +32,7 @@ export const dict = {
 
   "command.palette": "Kommandopalette",
 
-  "command.theme.cycle": "Skift tema",
-  "command.theme.set": "Brug tema: {{theme}}",
-  "command.theme.scheme.cycle": "Skift farveskema",
-  "command.theme.scheme.set": "Brug farveskema: {{scheme}}",
 
-  "command.language.cycle": "Skift sprog",
-  "command.language.set": "Brug sprog: {{language}}",
 
   "command.session.new": "Ny session",
   "command.file.open": "Åbn fil",
@@ -406,11 +398,7 @@ export const dict = {
   "language.th": "ไทย",
   "language.tr": "Türkçe",
 
-  "toast.language.title": "Sprog",
-  "toast.language.description": "Skiftede til {{language}}",
 
-  "toast.theme.title": "Tema skiftet",
-  "toast.scheme.title": "Farveskema",
 
   "toast.permissions.autoaccept.on.title": "Accepterer tilladelser automatisk",
   "toast.permissions.autoaccept.on.description":

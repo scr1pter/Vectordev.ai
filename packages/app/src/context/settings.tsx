@@ -252,7 +252,12 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
   name: "Settings",
   gate: false,
   init: () => {
-    const [store, setStore, _, ready] = persisted("settings.v3", createStore<Settings>(defaultSettings))
+    // A copy: a store writes into the object it is given, so handing it defaultSettings would turn the defaults into
+    // whatever was saved, for the retired keys below and for Restore default settings.
+    const [store, setStore, _, ready] = persisted(
+      "settings.v3",
+      createStore<Settings>(structuredClone(defaultSettings)),
+    )
     const showFileTree = withFallback(() => store.general?.showFileTree, defaultSettings.general.showFileTree)
     const showSearch = withFallback(() => store.general?.showSearch, defaultSettings.general.showSearch)
     const showStatus = withFallback(() => store.general?.showStatus, defaultSettings.general.showStatus)
@@ -263,16 +268,16 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     const newLayoutDesigns = createMemo(() => true)
     const visible = (preference: () => boolean) => createMemo(() => !newLayoutDesigns() || preference())
 
+    // Appearance, Editor and Chat lost their Settings pages in 1.99.109, so the colour scheme, colours, interface
+    // font size, rounding, glass, editor typography and flags, and chat width and spacing saved by an earlier version
+    // are not read: whoever changed one could never change it back. Vector applies its own dark look instead. The
+    // keys stay in the type so an older settings.v3 still loads. Reduced motion stays, Accessibility still sets it.
     createEffect(() => {
       if (typeof document === "undefined") return
       const root = document.documentElement
-      const themePreference = store.appearance?.theme ?? defaultSettings.appearance.theme
-      const resolvedTheme =
-        themePreference === "system"
-          ? window.matchMedia?.("(prefers-color-scheme: light)").matches
-            ? "light"
-            : "dark"
-          : themePreference
+      const appearance = defaultSettings.appearance
+      const editor = defaultSettings.editor
+      const chat = defaultSettings.chat
       const animationSpeed = store.appearance?.animationSpeed ?? defaultSettings.appearance.animationSpeed
       const animationDuration =
         animationSpeed === "off"
@@ -282,31 +287,22 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
             : animationSpeed === "fast"
               ? "110ms"
               : "180ms"
-      const rounded = store.appearance?.roundedCorners ?? defaultSettings.appearance.roundedCorners
       const density = store.appearance?.density ?? defaultSettings.appearance.density
       const uiScale = store.accessibility?.uiScale ?? defaultSettings.accessibility.uiScale
-      const appearanceFontSize = store.appearance?.fontSize ?? defaultSettings.appearance.fontSize
       root.style.setProperty("--font-family-mono", monoFontFamily(store.appearance?.mono))
       root.style.setProperty("--font-family-sans", sansFontFamily(store.appearance?.sans))
-      root.style.setProperty(
-        "--vector-editor-font-size",
-        `${store.editor?.fontSize ?? defaultSettings.editor.fontSize}px`,
-      )
-      root.style.setProperty(
-        "--vector-editor-line-height",
-        `${store.editor?.lineHeight ?? defaultSettings.editor.lineHeight}`,
-      )
-      const editorFont = store.editor?.fontFamily ?? defaultSettings.editor.fontFamily
+      root.style.setProperty("--vector-editor-font-size", `${editor.fontSize}px`)
+      root.style.setProperty("--vector-editor-line-height", `${editor.lineHeight}`)
       root.style.setProperty(
         "--vector-editor-font-family",
-        `${editorFont ? `"${editorFont}", ` : ""}"JetBrainsMono Nerd Font Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, monospace`,
+        `${editor.fontFamily ? `"${editor.fontFamily}", ` : ""}"JetBrainsMono Nerd Font Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, monospace`,
       )
-      root.style.setProperty("--vector-ui-font-size", `${appearanceFontSize}px`)
+      root.style.setProperty("--vector-ui-font-size", `${appearance.fontSize}px`)
       root.style.setProperty("--vector-ui-scale", `${uiScale}`)
-      root.style.setProperty("--vector-ui-computed-font-size", `${appearanceFontSize * uiScale}px`)
-      root.style.setProperty("--vector-radius-control", rounded ? "999px" : "12px")
-      root.style.setProperty("--vector-radius-panel", rounded ? "26px" : "12px")
-      root.style.setProperty("--vector-radius-card", rounded ? "18px" : "8px")
+      root.style.setProperty("--vector-ui-computed-font-size", `${appearance.fontSize * uiScale}px`)
+      root.style.setProperty("--vector-radius-control", appearance.roundedCorners ? "999px" : "12px")
+      root.style.setProperty("--vector-radius-panel", appearance.roundedCorners ? "26px" : "12px")
+      root.style.setProperty("--vector-radius-card", appearance.roundedCorners ? "18px" : "8px")
       root.style.setProperty("--vector-animation-duration", animationDuration)
       root.style.setProperty(
         "--vector-density-space",
@@ -320,40 +316,31 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         store.appearance?.fontPersonality ?? defaultSettings.appearance.fontPersonality
       root.dataset.vectorFont = store.appearance?.fontPersonality ?? defaultSettings.appearance.fontPersonality
       root.dataset.vectorDensity = density
-      root.dataset.colorScheme = resolvedTheme
-      root.dataset.vectorTheme = resolvedTheme
-      root.dataset.vectorThemePreference = themePreference
-      root.style.setProperty("color-scheme", resolvedTheme)
-      root.dataset.vectorRoundedCorners = store.appearance?.roundedCorners ? "true" : "false"
-      root.dataset.vectorGlass = store.appearance?.glassmorphism ? "true" : "false"
+      root.dataset.colorScheme = appearance.theme
+      root.dataset.vectorTheme = appearance.theme
+      root.dataset.vectorThemePreference = appearance.theme
+      root.style.setProperty("color-scheme", appearance.theme)
+      root.dataset.vectorRoundedCorners = appearance.roundedCorners ? "true" : "false"
+      root.dataset.vectorGlass = appearance.glassmorphism ? "true" : "false"
       root.dataset.vectorAnimationSpeed = animationSpeed
       root.dataset.vectorReduceAnimations = store.appearance?.reduceAnimations ? "true" : "false"
       root.dataset.vectorHighContrast = store.accessibility?.highContrast ? "true" : "false"
       root.dataset.vectorFocusIndicators = store.accessibility?.focusIndicators ? "true" : "false"
       root.dataset.vectorLargerTargets = store.accessibility?.largerClickTargets ? "true" : "false"
-      root.dataset.vectorEditorWordWrap = store.editor?.wordWrap ? "true" : "false"
-      root.dataset.vectorEditorLineNumbers = store.editor?.showLineNumbers ? "true" : "false"
-      root.dataset.vectorEditorActiveLine = store.editor?.highlightActiveLine ? "true" : "false"
-      root.dataset.vectorEditorWhitespace = store.editor?.renderWhitespace ? "true" : "false"
-      root.dataset.vectorChatWidth = store.chat?.chatWidth ?? defaultSettings.chat.chatWidth
-      root.dataset.vectorMessageSpacing = store.chat?.messageSpacing ?? defaultSettings.chat.messageSpacing
-      root.dataset.vectorSidebarCollapsed = store.appearance?.sidebarCollapsed ? "true" : "false"
+      root.dataset.vectorEditorWordWrap = editor.wordWrap ? "true" : "false"
+      root.dataset.vectorEditorLineNumbers = editor.showLineNumbers ? "true" : "false"
+      root.dataset.vectorEditorActiveLine = editor.highlightActiveLine ? "true" : "false"
+      root.dataset.vectorEditorWhitespace = editor.renderWhitespace ? "true" : "false"
+      root.dataset.vectorChatWidth = chat.chatWidth
+      root.dataset.vectorMessageSpacing = chat.messageSpacing
+      root.dataset.vectorSidebarCollapsed = appearance.sidebarCollapsed ? "true" : "false"
       root.style.setProperty("--vector-chat-backdrop-image", 'url("/vector-space-backdrop.png")')
-      root.style.setProperty("--vector-accent", store.appearance?.accentColor ?? defaultSettings.appearance.accentColor)
-      root.style.setProperty(
-        "--vector-workspace-bg",
-        store.appearance?.workspaceColor ?? defaultSettings.appearance.workspaceColor,
-      )
-      root.style.setProperty(
-        "--vector-sidebar-bg",
-        store.appearance?.sidebarColor ?? defaultSettings.appearance.sidebarColor,
-      )
-      root.style.setProperty("--vector-chat-bg", store.appearance?.chatColor ?? defaultSettings.appearance.chatColor)
-      root.style.setProperty("--vector-chat-width", store.chat?.chatWidth ?? defaultSettings.chat.chatWidth)
-      root.style.setProperty(
-        "--vector-message-spacing",
-        store.chat?.messageSpacing ?? defaultSettings.chat.messageSpacing,
-      )
+      root.style.setProperty("--vector-accent", appearance.accentColor)
+      root.style.setProperty("--vector-workspace-bg", appearance.workspaceColor)
+      root.style.setProperty("--vector-sidebar-bg", appearance.sidebarColor)
+      root.style.setProperty("--vector-chat-bg", appearance.chatColor)
+      root.style.setProperty("--vector-chat-width", chat.chatWidth)
+      root.style.setProperty("--vector-message-spacing", chat.messageSpacing)
       if (typeof localStorage !== "undefined") {
         localStorage.setItem("vector.element", store.appearance?.element ?? defaultSettings.appearance.element)
       }
@@ -433,10 +420,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
           setStore("general", "showReasoningSummaries", value)
         },
         llmJudge: withFallback(() => store.general?.llmJudge, defaultSettings.general.llmJudge),
-        autoModelRouting: withFallback(
-          () => store.general?.autoModelRouting,
-          defaultSettings.general.autoModelRouting,
-        ),
+        autoModelRouting: withFallback(() => store.general?.autoModelRouting, defaultSettings.general.autoModelRouting),
         setLlmJudge(value: boolean) {
           setStore("general", "llmJudge", value)
         },
@@ -480,14 +464,6 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         customAgents: visible(showCustomAgents),
       },
       appearance: {
-        theme: withFallback(() => store.appearance?.theme, defaultSettings.appearance.theme),
-        setTheme(value: VectorThemePreference) {
-          setStore("appearance", "theme", value)
-        },
-        fontSize: withFallback(() => store.appearance?.fontSize, defaultSettings.appearance.fontSize),
-        setFontSize(value: number) {
-          setStore("appearance", "fontSize", value)
-        },
         font: withFallback(() => store.appearance?.mono, defaultSettings.appearance.mono),
         setFont(value: string) {
           setStore("appearance", "mono", value.trim() ? value : "")
@@ -519,36 +495,9 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setFontPersonality(value: VectorFontPreference) {
           setStore("appearance", "fontPersonality", value)
         },
-        accentColor: withFallback(() => store.appearance?.accentColor, defaultSettings.appearance.accentColor),
-        setAccentColor(value: string) {
-          setStore("appearance", "accentColor", value)
-        },
-        workspaceColor: withFallback(() => store.appearance?.workspaceColor, defaultSettings.appearance.workspaceColor),
-        setWorkspaceColor(value: string) {
-          setStore("appearance", "workspaceColor", value)
-        },
-        sidebarColor: withFallback(() => store.appearance?.sidebarColor, defaultSettings.appearance.sidebarColor),
-        setSidebarColor(value: string) {
-          setStore("appearance", "sidebarColor", value)
-        },
-        chatColor: withFallback(() => store.appearance?.chatColor, defaultSettings.appearance.chatColor),
-        setChatColor(value: string) {
-          setStore("appearance", "chatColor", value)
-        },
         density: withFallback(() => store.appearance?.density, defaultSettings.appearance.density),
         setDensity(value: VectorDensityPreference) {
           setStore("appearance", "density", value)
-        },
-        sidebarCollapsed: withFallback(
-          () => store.appearance?.sidebarCollapsed,
-          defaultSettings.appearance.sidebarCollapsed,
-        ),
-        setSidebarCollapsed(value: boolean) {
-          setStore("appearance", "sidebarCollapsed", value)
-        },
-        roundedCorners: withFallback(() => store.appearance?.roundedCorners, defaultSettings.appearance.roundedCorners),
-        setRoundedCorners(value: boolean) {
-          setStore("appearance", "roundedCorners", value)
         },
         animationSpeed: withFallback(() => store.appearance?.animationSpeed, defaultSettings.appearance.animationSpeed),
         setAnimationSpeed(value: VectorAnimationSpeedPreference) {
@@ -561,43 +510,17 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setReduceAnimations(value: boolean) {
           setStore("appearance", "reduceAnimations", value)
         },
-        glassmorphism: withFallback(() => store.appearance?.glassmorphism, defaultSettings.appearance.glassmorphism),
-        setGlassmorphism(value: boolean) {
-          setStore("appearance", "glassmorphism", value)
-        },
+        // Retired with the Appearance page, like the rest of the effect above.
+        glassmorphism: () => defaultSettings.appearance.glassmorphism,
       },
       editor: {
-        fontSize: withFallback(() => store.editor?.fontSize, defaultSettings.editor.fontSize),
-        setFontSize(value: number) {
-          setStore("editor", "fontSize", value)
-        },
-        fontFamily: withFallback(() => store.editor?.fontFamily, defaultSettings.editor.fontFamily),
-        setFontFamily(value: string) {
-          setStore("editor", "fontFamily", value)
-        },
-        lineHeight: withFallback(() => store.editor?.lineHeight, defaultSettings.editor.lineHeight),
-        setLineHeight(value: number) {
-          setStore("editor", "lineHeight", value)
-        },
-        wordWrap: withFallback(() => store.editor?.wordWrap, defaultSettings.editor.wordWrap),
-        setWordWrap(value: boolean) {
-          setStore("editor", "wordWrap", value)
-        },
-        showLineNumbers: withFallback(() => store.editor?.showLineNumbers, defaultSettings.editor.showLineNumbers),
-        setShowLineNumbers(value: boolean) {
-          setStore("editor", "showLineNumbers", value)
-        },
-        highlightActiveLine: withFallback(
-          () => store.editor?.highlightActiveLine,
-          defaultSettings.editor.highlightActiveLine,
-        ),
-        setHighlightActiveLine(value: boolean) {
-          setStore("editor", "highlightActiveLine", value)
-        },
-        renderWhitespace: withFallback(() => store.editor?.renderWhitespace, defaultSettings.editor.renderWhitespace),
-        setRenderWhitespace(value: boolean) {
-          setStore("editor", "renderWhitespace", value)
-        },
+        // Retired with the Editor page: Vector's defaults, whatever an earlier version saved.
+        wordWrap: () => defaultSettings.editor.wordWrap,
+        showLineNumbers: () => defaultSettings.editor.showLineNumbers,
+        highlightActiveLine: () => defaultSettings.editor.highlightActiveLine,
+        renderWhitespace: () => defaultSettings.editor.renderWhitespace,
+        // Vector Tab spends the selected model's tokens, so a saved "off" is still honoured; the editor's status bar
+        // switches it.
         aiAutocomplete: withFallback(() => store.editor?.aiAutocomplete, defaultSettings.editor.aiAutocomplete),
         setAiAutocomplete(value: boolean) {
           setStore("editor", "aiAutocomplete", value)
@@ -605,16 +528,6 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         followAgent: withFallback(() => store.editor?.followAgent, defaultSettings.editor.followAgent),
         setFollowAgent(value: boolean) {
           setStore("editor", "followAgent", value)
-        },
-      },
-      chat: {
-        chatWidth: withFallback(() => store.chat?.chatWidth, defaultSettings.chat.chatWidth),
-        setChatWidth(value: VectorChatWidthPreference) {
-          setStore("chat", "chatWidth", value)
-        },
-        messageSpacing: withFallback(() => store.chat?.messageSpacing, defaultSettings.chat.messageSpacing),
-        setMessageSpacing(value: VectorMessageSpacingPreference) {
-          setStore("chat", "messageSpacing", value)
         },
       },
       keybinds: {
@@ -724,7 +637,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         },
       },
       resetAll() {
-        setStore(reconcile(defaultSettings))
+        setStore(reconcile(structuredClone(defaultSettings)))
       },
     }
   },

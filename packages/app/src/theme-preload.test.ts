@@ -16,76 +16,76 @@ beforeEach(() => {
 })
 
 describe("theme preload", () => {
-  test("reads Vector theme, scheme, and cached CSS before hydration", () => {
+  test("paints Vector's dark look before hydration whatever an earlier version saved", () => {
     localStorage.setItem("vector-theme-id", "nightowl")
-    localStorage.setItem("vector-color-scheme", "dark")
+    localStorage.setItem("vector-color-scheme", "light")
+    localStorage.setItem("vector-theme-css-light", "--background-base:#fefefe;")
     localStorage.setItem("vector-theme-css-dark", "--background-base:#123456;")
     document.head.innerHTML = '<meta name="theme-color" content="#fafafa">'
 
     run()
 
-    expect(document.documentElement.dataset.theme).toBe("nightowl")
+    expect(document.documentElement.dataset.theme).toBe("vector-modern")
     expect(document.documentElement.dataset.colorScheme).toBe("dark")
     expect(document.documentElement.style.backgroundColor).toBe("#080808")
     expect(document.querySelector('meta[name="theme-color"]')?.getAttribute("content")).toBe("#080808")
-    expect(document.getElementById("vector-theme-preload")?.textContent).toContain("--background-base:#123456;")
+    // No cached theme CSS is painted, and none is left for a later launch to paint.
+    expect(document.getElementById("vector-theme-preload")).toBeNull()
+    expect(localStorage.getItem("vector-theme-css-light")).toBeNull()
+    expect(localStorage.getItem("vector-theme-css-dark")).toBeNull()
   })
 
-  test("migrates unique suffix matches before hydration", () => {
-    localStorage.setItem("other-theme-id", "nightowl")
-    localStorage.setItem("other-color-scheme", "dark")
-    localStorage.setItem("other-theme-css-dark", "--background-base:#abcdef;")
+  test("a Match system scheme on a light computer still starts dark", () => {
+    localStorage.setItem("vector-color-scheme", "system")
+    Object.defineProperty(window, "matchMedia", {
+      value: (query: string) => ({ matches: query.includes("light") }) as MediaQueryList,
+      configurable: true,
+    })
 
     run()
 
-    expect(document.documentElement.dataset.theme).toBe("nightowl")
     expect(document.documentElement.dataset.colorScheme).toBe("dark")
-    expect(localStorage.getItem("vector-theme-id")).toBe("nightowl")
-    expect(localStorage.getItem("other-theme-id")).toBe("nightowl")
-    expect(localStorage.getItem("other-color-scheme")).toBe("dark")
-    expect(localStorage.getItem("other-theme-css-dark")).toBe("--background-base:#abcdef;")
-    expect(document.getElementById("vector-theme-preload")?.textContent).toContain("--background-base:#abcdef;")
+    expect(document.documentElement.style.backgroundColor).toBe("#080808")
   })
 
-  test("restores an unavailable saved theme as Classic without discarding its cached CSS", () => {
-    localStorage.setItem("vector-theme-id", "missing-test-theme")
-    localStorage.setItem("vector-color-scheme", "dark")
-    localStorage.setItem("vector-theme-css-light", "--background-base:#abcdef;")
-    localStorage.setItem("vector-theme-css-dark", "--background-base:#123456;")
+  test("leaves the theme provider the same dark Vector theme to restore", () => {
+    localStorage.setItem("vector-theme-id", "dracula")
+    localStorage.setItem("vector-color-scheme", "light")
+    // Another app's saved theme, which the provider's one-time migration would otherwise copy in.
+    localStorage.setItem("previous-theme-id", "vector-modern")
+    localStorage.setItem("previous-color-scheme", "light")
 
     run()
-    expect(document.getElementById("vector-theme-preload")?.textContent).toContain("--background-base:#123456;")
 
-    expect(restoreThemePreference((id) => new Set(["vector-modern", "nightowl", "vector"]).has(id))).toBe("vector")
-    expect(localStorage.getItem("vector-theme-id")).toBe("vector")
-    expect(localStorage.getItem("vector-theme-css-light")).toBe("--background-base:#abcdef;")
-    expect(localStorage.getItem("vector-theme-css-dark")).toBe("--background-base:#123456;")
-    expect(document.getElementById("vector-theme-preload")?.textContent).toContain("--background-base:#123456;")
+    expect(localStorage.getItem("vector-theme-id")).toBe("vector-modern")
     expect(localStorage.getItem("vector-color-scheme")).toBe("dark")
-
-    run()
-    expect(document.documentElement.dataset.theme).toBe("vector")
-    expect(document.documentElement.dataset.colorScheme).toBe("dark")
-    expect(document.getElementById("vector-theme-preload")?.textContent).toContain("--background-base:#123456;")
+    expect(restoreThemePreference((id) => ["vector-modern", "dracula"].includes(id))).toBe("vector-modern")
+    expect(localStorage.getItem("vector-color-scheme")).toBe("dark")
   })
 
-  test("preserves an available saved theme and its preload while the theme loads", () => {
-    localStorage.setItem("vector-theme-id", "nightowl")
-    localStorage.setItem("vector-theme-css-light", "--background-base:#abcdef;")
-    run()
+  test("still paints dark when storage is unavailable", () => {
+    const original = Object.getOwnPropertyDescriptor(window, "localStorage")
+    Object.defineProperty(window, "localStorage", {
+      get() {
+        throw new Error("blocked")
+      },
+      configurable: true,
+    })
+    try {
+      run()
+    } finally {
+      if (original) Object.defineProperty(window, "localStorage", original)
+    }
 
-    expect(restoreThemePreference((id) => new Set(["vector-modern", "nightowl"]).has(id))).toBe("nightowl")
-    expect(localStorage.getItem("vector-theme-id")).toBe("nightowl")
-    expect(localStorage.getItem("vector-theme-css-light")).toBe("--background-base:#abcdef;")
-    expect(document.getElementById("vector-theme-preload")?.textContent).toContain("--background-base:#abcdef;")
+    expect(document.documentElement.dataset.theme).toBe("vector-modern")
+    expect(document.documentElement.dataset.colorScheme).toBe("dark")
   })
 })
 
-for (const initialize of [
-  run,
-  () => restoreThemePreference((id) => ["vector", "vector-modern", "nightowl"].includes(id)),
-]) {
-  describe(initialize === run ? "preload migration" : "provider migration", () => {
+// The provider's own migration, for a page without the preload. The app's pages always run the preload first.
+{
+  const initialize = () => restoreThemePreference((id) => ["vector", "vector-modern", "nightowl"].includes(id))
+  describe("provider migration", () => {
     for (const id of ["oc-1", "oc-2"]) {
       test(`maps ${id} to Modern`, () => {
         localStorage.setItem("previous-theme-id", id)

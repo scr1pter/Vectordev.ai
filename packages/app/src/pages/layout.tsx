@@ -52,7 +52,6 @@ import { setSessionHandoff } from "@/pages/session/handoff"
 import { SessionRouteKey, SessionStateKey } from "@/utils/server-scope"
 
 import { useDialog } from "@vectordevai/ui/context/dialog"
-import { useTheme, type ColorScheme } from "@vectordevai/ui/theme/context"
 import { useCommand, type CommandOption } from "@/context/command"
 import { ConstrainDragXAxis, getDraggableId } from "@/utils/solid-dnd"
 import { DebugBar } from "@/components/debug-bar"
@@ -60,7 +59,7 @@ import { HelpButton } from "@/components/help-button"
 import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { ServerConnection, useServer } from "@/context/server"
-import { useLanguage, type Locale } from "@/context/language"
+import { useLanguage } from "@/context/language"
 import { pathKey } from "@/utils/path-key"
 import {
   displayName,
@@ -122,7 +121,6 @@ export default function LegacyLayout(props: ParentProps) {
   const providers = useProviders()
   const dialog = useDialog()
   const command = useCommand()
-  const theme = useTheme()
   const language = useLanguage()
   createEffect(() => setV2Toast(false))
   const initialDirectory = decode64(params.dir)
@@ -138,14 +136,6 @@ export default function LegacyLayout(props: ParentProps) {
       dir: store[0].path.directory || dir,
     }
   })
-  const availableThemeEntries = createMemo(() => theme.ids().map((id) => [id, theme.themes()[id]] as const))
-  const colorSchemeOrder: ColorScheme[] = ["system", "light", "dark"]
-  const colorSchemeKey: Record<ColorScheme, "theme.scheme.system" | "theme.scheme.light" | "theme.scheme.dark"> = {
-    system: "theme.scheme.system",
-    light: "theme.scheme.light",
-    dark: "theme.scheme.dark",
-  }
-  const colorSchemeLabel = (scheme: ColorScheme) => language.t(colorSchemeKey[scheme])
   const currentDir = createMemo(() => route().dir)
 
   const [state, setState] = createStore({
@@ -329,50 +319,6 @@ export default function LegacyLayout(props: ParentProps) {
     clearSidebarHoverState()
     navigate(href)
     layout.mobileSidebar.hide()
-  }
-
-  function cycleTheme(direction = 1) {
-    const ids = availableThemeEntries().map(([id]) => id)
-    if (ids.length === 0) return
-    const currentIndex = ids.indexOf(theme.themeId())
-    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + direction + ids.length) % ids.length
-    const nextThemeId = ids[nextIndex]
-    theme.setTheme(nextThemeId)
-    showToast({
-      title: language.t("toast.theme.title"),
-      description: theme.name(nextThemeId),
-    })
-  }
-
-  function cycleColorScheme(direction = 1) {
-    const current = theme.colorScheme()
-    const currentIndex = colorSchemeOrder.indexOf(current)
-    const nextIndex =
-      currentIndex === -1 ? 0 : (currentIndex + direction + colorSchemeOrder.length) % colorSchemeOrder.length
-    const next = colorSchemeOrder[nextIndex]
-    theme.setColorScheme(next)
-    showToast({
-      title: language.t("toast.scheme.title"),
-      description: colorSchemeLabel(next),
-    })
-  }
-
-  function setLocale(next: Locale) {
-    if (next === language.locale()) return
-    language.setLocale(next)
-    showToast({
-      title: language.t("toast.language.title"),
-      description: language.t("toast.language.description", { language: language.label(next) }),
-    })
-  }
-
-  function cycleLanguage(direction = 1) {
-    const locales = language.locales
-    const currentIndex = locales.indexOf(language.locale())
-    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + direction + locales.length) % locales.length
-    const next = locales[nextIndex]
-    if (!next) return
-    setLocale(next)
   }
 
   const useSDKNotificationToasts = () =>
@@ -1005,13 +951,6 @@ export default function LegacyLayout(props: ParentProps) {
           })
         },
       },
-      {
-        id: "theme.cycle",
-        title: language.t("command.theme.cycle"),
-        category: language.t("command.category.theme"),
-        keybind: "mod+shift+t",
-        onSelect: () => cycleTheme(1),
-      },
     ]
 
     Array.from({ length: 9 }, (_, i) => {
@@ -1027,56 +966,6 @@ export default function LegacyLayout(props: ParentProps) {
         onSelect: () => navigateToProjectIndex(index),
       })
     })
-
-    for (const [id] of availableThemeEntries()) {
-      commands.push({
-        id: `theme.set.${id}`,
-        title: language.t("command.theme.set", { theme: theme.name(id) }),
-        category: language.t("command.category.theme"),
-        onSelect: () => theme.commitPreview(),
-        onHighlight: () => {
-          theme.previewTheme(id)
-          return () => theme.cancelPreview()
-        },
-      })
-    }
-
-    commands.push({
-      id: "theme.scheme.cycle",
-      title: language.t("command.theme.scheme.cycle"),
-      category: language.t("command.category.theme"),
-      keybind: "mod+shift+s",
-      onSelect: () => cycleColorScheme(1),
-    })
-
-    for (const scheme of colorSchemeOrder) {
-      commands.push({
-        id: `theme.scheme.${scheme}`,
-        title: language.t("command.theme.scheme.set", { scheme: colorSchemeLabel(scheme) }),
-        category: language.t("command.category.theme"),
-        onSelect: () => theme.commitPreview(),
-        onHighlight: () => {
-          theme.previewColorScheme(scheme)
-          return () => theme.cancelPreview()
-        },
-      })
-    }
-
-    commands.push({
-      id: "language.cycle",
-      title: language.t("command.language.cycle"),
-      category: language.t("command.category.language"),
-      onSelect: () => cycleLanguage(1),
-    })
-
-    for (const locale of language.locales) {
-      commands.push({
-        id: `language.set.${locale}`,
-        title: language.t("command.language.set", { language: language.label(locale) }),
-        category: language.t("command.category.language"),
-        onSelect: () => setLocale(locale),
-      })
-    }
 
     return commands
   })

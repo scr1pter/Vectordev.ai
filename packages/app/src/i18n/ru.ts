@@ -5,8 +5,6 @@ export const dict = {
   "command.category.provider": "Провайдер",
   "command.category.server": "Сервер",
   "command.category.session": "Сессия",
-  "command.category.theme": "Тема",
-  "command.category.language": "Язык",
   "command.category.file": "Файл",
   "command.category.context": "Контекст",
   "command.category.terminal": "Терминал",
@@ -34,13 +32,7 @@ export const dict = {
 
   "command.palette": "Палитра команд",
 
-  "command.theme.cycle": "Цикл тем",
-  "command.theme.set": "Использовать тему: {{theme}}",
-  "command.theme.scheme.cycle": "Цикл цветовой схемы",
-  "command.theme.scheme.set": "Использовать цветовую схему: {{scheme}}",
 
-  "command.language.cycle": "Цикл языков",
-  "command.language.set": "Использовать язык: {{language}}",
 
   "command.session.new": "Новая сессия",
   "command.file.open": "Открыть файл",
@@ -408,11 +400,7 @@ export const dict = {
   "language.th": "ไทย",
   "language.tr": "Türkçe",
 
-  "toast.language.title": "Язык",
-  "toast.language.description": "Переключено на {{language}}",
 
-  "toast.theme.title": "Тема переключена",
-  "toast.scheme.title": "Цветовая схема",
 
   "toast.permissions.autoaccept.on.title": "Разрешения принимаются автоматически",
   "toast.permissions.autoaccept.on.description":
