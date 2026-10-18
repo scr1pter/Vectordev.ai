@@ -201,6 +201,10 @@ export async function executeReviewJob(ctx: ReviewJobContext, deps: ReviewJobDep
     // still failing after its retries, exits 0, with a note when there is a summary comment to put it in.
     const message = messageOf(error)
     deps.log(`The review could not start: ${message}`)
+    if (seen.cannotStart) {
+      deps.log(`Configuration error: ${seen.cannotStart}`)
+      return { exitCode: 1, posted: { reviewIds: [] }, error: seen.cannotStart }
+    }
     const status = statusOf(error)
     if (status === 401 || status === 403 || status === 404)
       return { exitCode: 1, posted: { reviewIds: [] }, error: message }
@@ -219,6 +223,7 @@ export async function executeReviewJob(ctx: ReviewJobContext, deps: ReviewJobDep
 // What the job had read when it failed, for the note it leaves.
 interface Seen {
   sticky?: { id: number; body: string }
+  cannotStart?: string // why the model cannot run, which fails the job whatever GitHub does
 }
 
 async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen): Promise<ReviewJobResult> {
@@ -233,7 +238,7 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
     posted,
     ...(error ? { error } : {}),
   })
-  // A configuration error fails the job and posts nothing.
+  // A configuration error fails the job and posts nothing, except a model that cannot run, which says so (step 4).
   const configError = (message: string) => {
     log(`Configuration error: ${message}`)
     return finish(1, message)
@@ -285,29 +290,9 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
     (value) => value,
     (error: unknown) => new Error(messageOf(error)),
   )
-  if (model instanceof Error) {
-    // The job fails either way; without a note the pull request shows only a red check, and a person who commented
-    // `/vector review` sees nothing at all. The note is best effort: a GitHub failure while listing or posting must
-    // not escape, or executeReviewJob would turn this configuration error into a green job.
-    await gh
-      .listIssueComments(ctx.pr)
-      .then((list) => {
-        const found = findSticky(list, ctx.botLogin) ?? findSticky(list, ACTIONS_BOT)
-        const body = clean(
-          buildNoteBody({
-            previous: found?.body,
-            note: noteCannotStart(model.message),
-            state: found ? readState(found.body) : undefined,
-          }),
-        )
-        return found ? gh.updateIssueComment(found.id, body) : gh.createIssueComment(ctx.pr, body).then(() => undefined)
-      })
-      .then(
-        () => undefined,
-        (error: unknown) => log(`Could not post why the review cannot start: ${messageOf(error)}`),
-      )
-    return configError(model.message)
-  }
+  // A model that cannot run fails the job only once the skips below have had their say, so a pull request the settings
+  // skip without a word stays quiet. If GitHub fails before then, executeReviewJob still fails the job with this.
+  if (model instanceof Error) seen.cannotStart = model.message
 
   // 3. Earlier state.
   const comments = await gh.listIssueComments(ctx.pr)
@@ -388,6 +373,22 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
     size,
     monthCostUsd: month?.costUsd,
   })
+  if (decision.skip && decision.notify === "none") {
+    log(`Skipped: ${decision.reason}.`)
+    return finish(0)
+  }
+  if (model instanceof Error) {
+    // The job fails either way; without a note the pull request shows only a red check, and a person who commented
+    // `/vector review` sees nothing at all. The note is best effort, and wins over a skip's note: it names what to fix.
+    await upsertSticky(
+      buildNoteBody({
+        previous: stickyBody,
+        note: noteCannotStart(model.message),
+        state: sticky ? readState(sticky.body) : undefined,
+      }),
+    ).catch((error: unknown) => log(`Could not post why the review cannot start: ${messageOf(error)}`))
+    return configError(model.message)
+  }
   if (decision.skip) {
     log(`Skipped: ${decision.reason}.`)
     if (decision.notify === "summary") {

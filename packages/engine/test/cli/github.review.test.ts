@@ -1057,6 +1057,74 @@ describe("vector github review against a fake GitHub", () => {
   )
 
   test(
+    "5c. a model that cannot run says nothing on a pull request the settings skip without a word",
+    async () => {
+      const reason = "acme/model needs ACME_API_KEY."
+      const broken = { resolveModel: () => Promise.reject(new Error(reason)) }
+      const skipped: { name: string; review?: Json; labels?: string[]; draft?: boolean }[] = [
+        // A default skip label that the workflow's own `if:` lets through.
+        { name: "no-review label", labels: ["no-review"] },
+        { name: "paused", labels: ["vector:paused"] },
+        { name: "skipLabels", review: { skipLabels: ["wip"] }, labels: ["WIP"] },
+        { name: "skipAuthors", review: { skipAuthors: ["carol"] } },
+        { name: "skipBranches", review: { skipBranches: ["feat*"] } },
+        { name: "draft", draft: true },
+      ]
+      for (const item of skipped) {
+        await using w = await world(
+          item.review ? { baseFiles: { ".vector/review.json": JSON.stringify(item.review) } } : {},
+        )
+        if (item.labels) w.fake.pull.labels = item.labels
+        if (item.draft) w.fake.pull.draft = true
+        const { result, log } = await job(w, reviewer(), broken)
+        expect({ name: item.name, exitCode: result.exitCode, comments: w.fake.issueComments.length }).toEqual({
+          name: item.name,
+          exitCode: 0,
+          comments: 0,
+        })
+        expect(log.some((line) => line.startsWith("Skipped: "))).toBe(true)
+        expect(posts(w, /\/issues\/7\/comments$/)).toHaveLength(0)
+      }
+
+      // An automatic run on a head that is already reviewed leaves the summary as it was.
+      await using w = await world()
+      await job(w, reviewer({ findings: () => [TOKEN_AT_IMPORT] }))
+      const before = sticky(w)!.body
+      const { result } = await job(w, reviewer(), broken)
+      expect(result.exitCode).toBe(0)
+      expect(sticky(w)!.body).toBe(before)
+      expect(w.fake.issueComments.filter((comment) => comment.body.includes(SUMMARY_MARKER))).toHaveLength(1)
+    },
+    TIMEOUT * 2,
+  )
+
+  test(
+    "5d. a model that cannot run still says why when the review would have run",
+    async () => {
+      const reason = "acme/model needs ACME_API_KEY."
+      const broken = { resolveModel: () => Promise.reject(new Error(reason)) }
+      // A command overrides the skip label, so the person who asked hears why nothing happened.
+      await using w = await world()
+      w.fake.pull.labels = ["no-review"]
+      const command: RouteComment = { id: 7001, kind: "issue", author: "alice", body: "/vector review" }
+      const asked = await job(w, reviewer(), { ...broken, trigger: "command", comment: command })
+      expect(asked.result.exitCode).toBe(1)
+      expect(asked.result.error).toBe(reason)
+      expect(sticky(w)!.body).toContain(noteCannotStart(reason))
+
+      // A new head on a reviewed pull request is due a review, so it gets the note too.
+      await using reviewed = await world()
+      await job(reviewed, reviewer({ findings: () => [TOKEN_AT_IMPORT] }))
+      await push(reviewed, { "src/list.ts": UNRELATED_LIST })
+      const pushed = await job(reviewed, reviewer(), broken)
+      expect(pushed.result.exitCode).toBe(1)
+      expect(sticky(reviewed)!.body).toContain(noteCannotStart(reason))
+      expect(state(reviewed)).toMatchObject({ reviews: 1 })
+    },
+    TIMEOUT * 2,
+  )
+
+  test(
     "6. the head moved during the review: commit_id is the reviewed head, anchors are its own, and the summary says so",
     async () => {
       await using w = await world()
