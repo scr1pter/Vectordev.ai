@@ -159,6 +159,7 @@ export const dict: Record<string, string> = {
   "ui.tool.memory.learned": "Learned",
   "ui.tool.memory.undone": "Undone",
   "ui.tool.memory.personal": "something about you",
+  "ui.tool.memory.private": "something from a private document",
   "ui.tool.memory.undo": "Undo",
   "ui.tool.memory.retry": "Undo did not work, try again",
 

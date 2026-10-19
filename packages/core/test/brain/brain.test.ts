@@ -1777,4 +1777,44 @@ describe("Brain files", () => {
     expect([...result.shared.values()].join("\n")).not.toContain("Fridays")
     expect([...result.all.values()].join("\n")).toContain("Fridays")
   })
+
+  test("what the agent learned from a private document is in use for the repository but kept where personal memory is", async () => {
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const learned = yield* brain.propose(place, {
+          kind: "lesson",
+          text: "Run the prepare-remote script before the integration tests.",
+          scope: "repository",
+          origin: "agent",
+          private: true,
+        })
+        if (learned.type === "refused") throw new Error(learned.message)
+        // A replacement of it stays private, written in a session that read no document or not.
+        const replaced = yield* brain.propose(place, {
+          kind: "lesson",
+          text: "Run the prepare-remote script before the integration and end to end tests.",
+          scope: "repository",
+          origin: "agent",
+          supersedes: learned.entry.id,
+        })
+        const query = { query: "prepare remote script integration tests", budget: 300 }
+        return {
+          learned,
+          replaced,
+          owner: yield* brain.recall(place, { ...query, personal: true }),
+          guest: yield* brain.recall(place, { ...query, personal: false }),
+          searched: yield* brain.search(place, { query: query.query, personal: false }),
+          digest: yield* brain.digest(place, { personal: false, index: true }),
+        }
+      }),
+    )
+    expect(result.learned).toMatchObject({ type: "added", entry: { status: "active", scope: "repository", private: true } })
+    expect(result.replaced).toMatchObject({ type: "superseded", entry: { private: true } })
+    expect(result.owner.text).toContain("end to end")
+    expect(result.owner.personal).toHaveLength(1)
+    expect(result.owner.shared ?? "").not.toContain("prepare-remote")
+    expect(result.guest.text ?? "").not.toContain("prepare-remote")
+    expect(result.searched).toEqual([])
+    expect(result.digest.text ?? "").not.toContain("remembers 1 note")
+  })
 })

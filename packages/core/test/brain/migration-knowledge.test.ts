@@ -131,8 +131,15 @@ describe("Brain knowledge migration", () => {
       .all()
     const uses = db.query("SELECT entry_id, request_id, cited, outcome FROM brain_use ORDER BY id").all()
     const documents = db.query("SELECT count(*) AS n FROM brain_document").get()
+    const entries = db.query("SELECT id, private FROM brain_entry").all()
     db.close()
-    expect(migrations).toEqual([{ id: "20261018000000_brain" }, { id: "20261101000000_knowledge" }])
+    expect(migrations).toEqual([
+      { id: "20261018000000_brain" },
+      { id: "20261101000000_knowledge" },
+      { id: "20261102000000_private_memory" },
+    ])
+    // What was learned before private memory existed is not private.
+    expect(entries).toEqual([{ id: "m1a2b3", private: 0 }])
     expect(state).toEqual([
       {
         revision: 7,

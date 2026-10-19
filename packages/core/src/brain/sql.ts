@@ -37,6 +37,9 @@ export const BrainEntryTable = sqliteTable(
     source_line: integer(),
     origin_session_id: text(),
     signature: text(),
+    // Learned after reading a private document, so withheld where that document is: from guests and models that may
+    // train on prompts.
+    private: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     index("brain_entry_repository_status_idx").on(table.repository_id, table.status),

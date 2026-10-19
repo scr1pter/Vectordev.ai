@@ -62,6 +62,15 @@ The client MUST refresh the session before it expires.
 Clients MUST retry at most 3 times after a 429 response.
 `
 
+const SETUP = `# Setup guide
+
+## 1 Tests
+
+The test command for this repository is ./scripts/prepare-remote.sh followed by bun test, every time.
+`
+
+const LESSON = "Run ./scripts/prepare-remote.sh before bun test every time."
+
 const PASTE = `# Billing rules
 
 ${Array.from({ length: 8 }, (_, index) => `Invoice batch ${index} MUST be issued in integer cents and settled within ${index + 2} days of the order.`).join("\n")}
@@ -254,6 +263,79 @@ describe("tool.memory documents", () => {
       const kept = yield* run({ action: "add", file: "docs/notes.md" }, attached, sessionID)
       expect(kept.output).toContain("Kept")
       yield* Effect.promise(() => rm(outside, { force: true }))
+    }),
+  )
+
+  it.instance("what it learns from a private document's cards is in use at once, and as private as the document", () =>
+    Effect.gen(function* () {
+      const knowledge = yield* BrainKnowledge.Service
+      const brain = yield* Brain.Service
+      const place = yield* (yield* Instruction.Service).place()
+      const added = yield* knowledge.add(place, { type: "text", name: "Setup guide.md", text: SETUP, origin: "upload" })
+      if (added.type === "refused") throw new Error(added.message)
+      yield* knowledge.wait(place, added.document.id, "searchable", 10_000)
+      const run = yield* memory
+      const sessionID = SessionID.make("ses_documents_learn_private")
+      const asked = history({ sessionID, said: "How do I run the tests here?" })
+      const search = yield* run({ action: "search", text: "test command repository" }, asked, sessionID)
+      const card = known(search.metadata)?.cards?.[0]
+      expect(card).toBeDefined()
+      const read = history({ sessionID, said: "How do I run the tests here?", tools: [{ tool: "memory", metadata: search.metadata }] })
+      const write = yield* run({ action: "add", kind: "lesson", text: LESSON, file: card }, read, sessionID)
+      expect(write.metadata.result).toBe("added")
+      // The transcript keeps no words of it, as for personal memory.
+      expect(write.metadata.learned).toEqual({ scope: "repository", private: true })
+      const entry = (yield* brain.search(place, { query: "prepare remote bun test", personal: true }))[0]
+      expect(entry).toMatchObject({ text: LESSON, status: "active", scope: "repository", private: true })
+      // Withheld where the document is: from guests' sessions and models that may train.
+      expect(yield* brain.search(place, { query: "prepare remote bun test", personal: false })).toEqual([])
+      const recalled = yield* brain.recall(place, {
+        query: "how do I run the tests with prepare remote",
+        budget: 300,
+        personal: false,
+      })
+      expect(recalled.text ?? "").not.toContain("prepare-remote")
+      const guest = yield* knowledge.recall(place, {
+        query: "how do I run the tests with prepare remote",
+        files: [],
+        tier: "standard",
+        tight: false,
+        personal: false,
+        exclude: new Set(),
+      })
+      expect([guest.text ?? "", guest.shared ?? ""].join("\n")).not.toContain("prepare-remote")
+      const training = yield* run({ action: "search", text: "prepare remote bun test" }, asked, sessionID, { mayTrain: true })
+      expect(training.output).not.toContain("prepare-remote")
+      const owner = yield* run({ action: "search", text: "prepare remote bun test" }, asked, sessionID)
+      expect(owner.output).toContain(SessionMemory.withheld(entry!.id))
+      expect(owner.output).not.toContain("prepare-remote")
+    }),
+  )
+
+  it.instance("what it learns from a document that came from outside waits for the user", () =>
+    Effect.gen(function* () {
+      const knowledge = yield* BrainKnowledge.Service
+      const brain = yield* Brain.Service
+      const place = yield* (yield* Instruction.Service).place()
+      // Kept while a session read the web, then approved by the user: its words are usable, its origin still outside.
+      const added = yield* knowledge.add(place, { type: "text", name: "Setup guide.md", text: SETUP, origin: "agent", hold: "web" })
+      if (added.type === "refused") throw new Error(added.message)
+      yield* knowledge.wait(place, added.document.id, "searchable", 10_000)
+      expect(yield* knowledge.update(place, added.document.id, { action: "approve" })).toBe("updated")
+      const run = yield* memory
+      const sessionID = SessionID.make("ses_documents_learn_outside")
+      const asked = history({ sessionID, said: "How do I run the tests here?" })
+      const search = yield* run({ action: "search", text: "test command repository" }, asked, sessionID)
+      const card = known(search.metadata)?.cards?.[0]
+      expect(card).toBeDefined()
+      const read = history({ sessionID, said: "How do I run the tests here?", tools: [{ tool: "memory", metadata: search.metadata }] })
+      const write = yield* run({ action: "add", kind: "lesson", text: LESSON, file: card }, read, sessionID)
+      expect(write.metadata.result).toBe("held")
+      expect(write.metadata.hold).toBe("web")
+      expect(yield* brain.search(place, { query: "prepare remote bun test", personal: true })).toEqual([])
+      // The same session may not put memory away either.
+      const forget = yield* run({ action: "forget", id: "m0000" }, read, sessionID)
+      expect(forget.output).not.toContain("Put away")
     }),
   )
 

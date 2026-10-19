@@ -29,6 +29,8 @@ export type MemoryEntryView = {
   lastUsedAt?: number
   createdAt?: number
   updatedAt: number
+  /** Learned from a private document: kept from guests and from models that may train on prompts. */
+  private?: boolean
 }
 
 export type MemoryFiles = { memory: string; rules: string; repository: readonly string[] }

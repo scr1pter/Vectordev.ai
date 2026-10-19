@@ -42,7 +42,7 @@ type Metadata = {
    * What the agent just put in use on its own, for the session's "Learned: … · Undo" line. The words are there only for
    * a repository entry; a personal entry's stay out of the transcript.
    */
-  learned?: { scope: BrainSchema.Scope; text?: string }
+  learned?: { scope: BrainSchema.Scope; text?: string; private?: boolean }
   /** Personal entries this result stands in for; the transcript keeps their ids, never their words. */
   [SessionMemory.PERSONAL]?: string[]
   /** Document cards and passages this result stands for, rendered again for every request. */
@@ -94,7 +94,7 @@ export const MemoryTool = Tool.define<
               output:
                 found.length || cards.length
                   ? [
-                      ...found.map((entry) => (entry.scope === "personal" ? SessionMemory.withheld(entry.id) : describe(entry))),
+                      ...found.map((entry) => (kept(entry) ? SessionMemory.withheld(entry.id) : describe(entry))),
                       ...cards.map((card) => SessionMemory.document(card.id)),
                     ].join("\n")
                   : "Nothing in memory matches. Search with other words, or carry on without it.",
@@ -144,8 +144,9 @@ export const MemoryTool = Tool.define<
           if (params.action === "get") {
             const detail = params.id ? yield* brain.get(place, params.id, { personal }) : undefined
             if (!detail) return refused("get", `No memory ${params.id ?? ""} here.`)
-            // A personal entry's evidence is the user's own words, so it shows as its line alone.
-            if (detail.entry.scope === "personal")
+            // A personal entry's evidence is the user's own words, and a private one's came from a private document, so
+            // either shows as its line alone.
+            if (kept(detail.entry))
               return {
                 title: `Memory ${detail.entry.id}`,
                 output: SessionMemory.withheld(detail.entry.id),
@@ -158,7 +159,7 @@ export const MemoryTool = Tool.define<
                 ...detail.evidence.slice(-3).map((item) => `  evidence: ${evidenceLine(item)}`),
                 ...(detail.related.length
                   ? [
-                      `Related: ${detail.related.map((item) => (item.scope === "personal" ? `[${item.id}] (personal)` : `[${item.id}] ${item.text.slice(0, 60)}`)).join("; ")}`,
+                      `Related: ${detail.related.map((item) => (kept(item) ? `[${item.id}] (personal)` : `[${item.id}] ${item.text.slice(0, 60)}`)).join("; ")}`,
                     ]
                   : []),
               ].join("\n"),
@@ -172,11 +173,21 @@ export const MemoryTool = Tool.define<
           const history = yield* sessions
             .messages({ sessionID: SessionID.make(ctx.sessionID) })
             .pipe(Effect.catch(() => Effect.succeed([])))
+          // Vector keeps what it learns from the documents it was given, as private as they are. What it read from a
+          // document that came from outside (kept while a session read the web, an MCP server or a subagent, in a
+          // guest's session or from an untrusted repository) is outside content like any other.
+          const read = yield* knowledge.sources(place, SessionMemory.documents([...history, ...ctx.messages]))
           const hold = guest
             ? "guest"
             : place.held
               ? "untrusted-repository"
-              : SessionMemory.taint([...history, ...ctx.messages])
+              : (SessionMemory.taint([...history, ...ctx.messages]) ??
+                read.documents.flatMap((document) =>
+                  document.hold && OUTSIDE.includes(document.hold) ? [document.hold] : [],
+                )[0])
+          // A document forgotten since it was read was the user's to keep private too.
+          const privately =
+            read.missing.length > 0 || read.documents.some((document) => document.visibility === "private")
 
           // An entry the agent may not see here is one it may not change either.
           const target = params.id && params.action !== "add" ? yield* brain.get(place, params.id, { personal }) : undefined
@@ -264,6 +275,7 @@ export const MemoryTool = Tool.define<
             sessionID: ctx.sessionID,
             since: SessionMemory.since(ctx.messages),
             ...(hold ? { hold } : {}),
+            ...(privately ? { private: true } : {}),
           })
           if (result.type === "refused") return refused(params.action, result.message)
           // A write that put words in use, rather than finding them there or holding them, is something learned.
@@ -280,7 +292,8 @@ export const MemoryTool = Tool.define<
                 ? {
                     learned: {
                       scope: result.entry.scope,
-                      ...(result.entry.scope === "repository" ? { text: result.entry.text } : {}),
+                      ...(result.entry.private ? { private: true } : {}),
+                      ...(kept(result.entry) ? {} : { text: result.entry.text }),
                     },
                   }
                 : {}),
@@ -401,8 +414,17 @@ function evidenceLine(item: BrainSchema.Evidence) {
 // The words memory keeps, quoted, so the agent knows what memory says rather than assuming its own wording was saved.
 // A personal entry's words stay out of the transcript.
 function words(entry: BrainSchema.Entry, length = 300) {
-  return entry.scope === "personal" ? "(personal memory)" : `"${entry.text.slice(0, length)}"`
+  return kept(entry) ? "(personal memory)" : `"${entry.text.slice(0, length)}"`
 }
+
+// Personal memory and what was learned from a private document stay out of the transcript, which a guest may open or
+// a model that may train may read later: each request fills their lines in where they are allowed.
+function kept(entry: BrainSchema.Entry) {
+  return entry.scope === "personal" || entry.private === true
+}
+
+/** Why a document's content counts as outside content: how it came in. */
+const OUTSIDE: readonly BrainSchema.Hold[] = ["web", "mcp", "subagent", "guest", "untrusted-repository"]
 
 function written(result: Exclude<Brain.WriteResult, { type: "refused" }>, replaced: BrainSchema.Entry | undefined) {
   const id = result.entry.id
@@ -435,7 +457,7 @@ function inactive(entry: BrainSchema.Entry) {
 }
 
 function withheld(entries: readonly BrainSchema.Entry[]) {
-  const ids = entries.filter((entry) => entry.scope === "personal").map((entry) => entry.id)
+  const ids = entries.filter(kept).map((entry) => entry.id)
   return ids.length ? { [SessionMemory.PERSONAL]: ids } : {}
 }
 

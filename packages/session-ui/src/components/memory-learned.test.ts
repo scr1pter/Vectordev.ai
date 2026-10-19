@@ -20,6 +20,12 @@ describe("memoryLearned", () => {
     })
   })
 
+  test("an entry learned from a private document comes without its words, and says so", () => {
+    expect(
+      memoryLearned({ action: "add", result: "added", id: "m4k2q", learned: { scope: "repository", private: true } }),
+    ).toEqual({ id: "m4k2q", text: undefined, private: true })
+  })
+
   test("a held write, a search, a refusal and words memory already had are not something learned", () => {
     expect(memoryLearned({ action: "add", result: "held", id: "m4k2q", hold: "web" })).toBeUndefined()
     expect(memoryLearned({ action: "search", result: "2" })).toBeUndefined()

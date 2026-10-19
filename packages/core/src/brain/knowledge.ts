@@ -205,6 +205,14 @@ export interface Interface {
   ) => Effect.Effect<readonly BrainSchema.Card[]>
   /** Reads the repository's tracked docs into documents, at most every 10 minutes per repository. */
   readonly scan: (place: Brain.Place, options?: { readonly force?: boolean }) => Effect.Effect<number>
+  /**
+   * The documents card, passage and document ids came from, whoever may see them: where what a session read came
+   * from. `missing` are ids no document holds now (one forgotten since, or read again in other words).
+   */
+  readonly sources: (
+    place: Brain.Place,
+    ids: readonly string[],
+  ) => Effect.Effect<{ readonly documents: readonly BrainSchema.Document[]; readonly missing: readonly string[] }>
   readonly worker: () => Effect.Effect<BrainWorker.Status>
 }
 
@@ -1931,6 +1939,31 @@ function make(input: {
     return "updated" as const
   })
 
+  const sources = Effect.fn("BrainKnowledge.sources")(function* (place: Brain.Place, ids: readonly string[]) {
+    if (ids.length === 0) return { documents: [], missing: [] }
+    const items = yield* db
+      .select({ ref: BrainItemTable.ref, document: BrainItemTable.document_id })
+      .from(BrainItemTable)
+      .where(and(eq(BrainItemTable.repository_id, place.repository), inArray(BrainItemTable.ref, [...ids])))
+      .all()
+      .pipe(Effect.orDie)
+    const owners = new Map(items.map((item) => [item.ref, item.document]))
+    const wanted = [...new Set(ids.map((id) => owners.get(id) ?? id))]
+    const rows = yield* db
+      .select()
+      .from(BrainDocumentTable)
+      .where(and(eq(BrainDocumentTable.repository_id, place.repository), inArray(BrainDocumentTable.id, wanted)))
+      .all()
+      .pipe(Effect.orDie)
+    const found = new Set(rows.map((row) => row.id))
+    return {
+      // With why each was held, approved since or not: approving lets a document's words be used, and it still came
+      // from where it came from.
+      documents: rows.map((row) => ({ ...toDocument(row), ...(row.hold_reason ? { hold: row.hold_reason } : {}) })),
+      missing: ids.filter((id) => !found.has(owners.get(id) ?? id)),
+    }
+  })
+
   // --- The repository's own docs ----------------------------------------------------------------------------------
 
   const scan = Effect.fn("BrainKnowledge.scan")(function* (place: Brain.Place, options?: { force?: boolean }) {
@@ -2019,6 +2052,7 @@ function make(input: {
     get,
     search,
     scan,
+    sources,
     worker: () => worker.status(),
   }
 }

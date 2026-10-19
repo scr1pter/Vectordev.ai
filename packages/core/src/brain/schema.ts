@@ -92,6 +92,11 @@ export const Entry = Schema.Struct({
   lastUsedAt: Schema.optional(Schema.Finite),
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
+  /**
+   * Learned in a session that read a private document, so kept from the same places the document is: sessions an
+   * invited guest is in and models that may train on prompts.
+   */
+  private: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "MemoryEntry" })
 export type Entry = typeof Entry.Type
 

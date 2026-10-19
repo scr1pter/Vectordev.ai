@@ -31,6 +31,8 @@ import "./settings-memory.css"
 
 type Scope = "repository" | "personal"
 
+const PRIVATE = "Learned from a private document, so it is kept from guests and from models that may train on prompts."
+
 // Settings > Memory: one place for what steers Vector. Rules people wrote and the user's MEMORY.md are shown as they
 // are read (and changed in their files); what Vector learned is listed with where it came from, and can be searched,
 // edited, pinned, approved, put away or forgotten. It replaces the Local memory card in General and the old rules page.
@@ -311,6 +313,11 @@ function RecentlyLearned(props: {
                     <Show when={entry.scope === "personal"}>
                       <span class="settings-memory-tag">Every repository</span>
                     </Show>
+                    <Show when={entry.private}>
+                      <span class="settings-memory-tag" title={PRIVATE}>
+                        Private
+                      </span>
+                    </Show>
                     <span class="settings-memory-id">{entry.id}</span>
                   </div>
                   <p class="settings-memory-text">{entry.text}</p>
@@ -421,6 +428,11 @@ function MemoryRow(props: {
         </Show>
         <Show when={props.entry.scope === "personal"}>
           <span class="settings-memory-tag">Every repository</span>
+        </Show>
+        <Show when={props.entry.private}>
+          <span class="settings-memory-tag" title={PRIVATE}>
+            Private
+          </span>
         </Show>
         <Show when={props.entry.stale}>
           <span class="settings-memory-tag settings-memory-tag--warn">Its cited code changed</span>

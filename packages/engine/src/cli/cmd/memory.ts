@@ -287,6 +287,7 @@ function line(entry: BrainSchema.Entry) {
     entry.hold ? `held: ${entry.hold}` : undefined,
     entry.stale ? "stale" : undefined,
     entry.scope === "personal" ? "personal" : undefined,
+    entry.private ? "private" : undefined,
     entry.source ? path.basename(entry.source.file) : undefined,
   ].filter((mark): mark is string => mark !== undefined)
   return `${UI.Style.TEXT_HIGHLIGHT}${entry.id}${UI.Style.TEXT_NORMAL} ${entry.kind}: ${entry.text.replace(/\s+/g, " ").slice(0, 160)}${marks.length ? `${UI.Style.TEXT_DIM} (${marks.join(", ")})${UI.Style.TEXT_NORMAL}` : ""}`

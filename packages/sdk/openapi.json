@@ -30140,6 +30140,9 @@
           },
           "updatedAt": {
             "type": "number"
+          },
+          "private": {
+            "type": "boolean"
           }
         },
         "required": [

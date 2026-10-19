@@ -162,6 +162,30 @@ export function outside(part: SessionV1.Part) {
   return part.type === "text" && part.metadata?.[BrainSchema.OUTSIDE] !== undefined
 }
 
+/**
+ * The document knowledge this conversation took in, by id: the cards recalled into its messages, the outlines of the
+ * attachments it kept, and the cards and passages the memory tool showed. What the agent learns after reading them
+ * takes their documents' privacy, and waits for the user when one came from outside.
+ */
+export function documents(messages: readonly SessionV1.WithParts[]) {
+  return [
+    ...new Set(
+      messages.flatMap((message) =>
+        message.parts.flatMap((part) => {
+          const known = knowledge(part)
+          return [
+            ...(recall(part)?.cards ?? []),
+            ...(known?.cards ?? []),
+            ...(known?.get.map((item) => item.id) ?? []),
+            // A tool result naming a document only says it was kept; an outline the request carried showed it.
+            ...(part.type === "text" && known?.document ? [known.document] : []),
+          ]
+        }),
+      ),
+    ),
+  ]
+}
+
 /** The personal entries a memory tool result stands in for. */
 export function personal(part: SessionV1.Part) {
   if (part.type !== "tool" || part.tool !== "memory" || part.state.status !== "completed") return []

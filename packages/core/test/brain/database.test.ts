@@ -76,7 +76,11 @@ describe("BrainDatabase", () => {
       }),
     )
     expect(reopened).toEqual({
-      migrations: [{ id: "20261018000000_brain" }, { id: "20261101000000_knowledge" }],
+      migrations: [
+        { id: "20261018000000_brain" },
+        { id: "20261101000000_knowledge" },
+        { id: "20261102000000_private_memory" },
+      ],
       state: [{ repository_id: "repo-1" }],
     })
   })

@@ -2893,6 +2893,7 @@ export type MemoryEntry = {
   lastUsedAt?: number
   createdAt: number
   updatedAt: number
+  private?: boolean
 }
 
 export type MemoryStats = {

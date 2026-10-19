@@ -138,6 +138,8 @@ export type Proposal = {
   readonly since?: number
   /** Why the caller holds this write for review: the session read untrusted content, or a guest drove it. */
   readonly hold?: BrainSchema.Hold
+  /** The session read a private document, so this is withheld where the document is (see `Entry.private`). */
+  readonly private?: boolean
 }
 
 export type Refusal =
@@ -344,12 +346,14 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
   const repositoryFiles = (place: Place) => [...place.sources.map((source) => source.path), failureFile(place)]
 
   // What one place may see: its repository's learned entries and the mirrors of its own working tree's files (another
-  // worktree's RULES.md may differ), plus the user's own rules always and their personal memory when allowed.
+  // worktree's RULES.md may differ), plus the user's own rules always and their personal memory when allowed. What was
+  // learned from a private document goes where personal memory goes.
   const visible = (place: Place, personal: boolean) =>
     or(
       and(
         eq(BrainEntryTable.repository_id, place.repository),
         or(isNull(BrainEntryTable.source_file), inArray(BrainEntryTable.source_file, repositoryFiles(place))),
+        personal ? undefined : eq(BrainEntryTable.private, false),
       ),
       personal
         ? eq(BrainEntryTable.repository_id, PERSONAL)
@@ -487,6 +491,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
         source_line: item.line,
         origin_session_id: null,
         signature: item.signature ?? null,
+        private: false,
       } satisfies Row
     })
     const rendered = render(source, content, rows)
@@ -659,7 +664,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
             score: ((lexical?.score ?? 0) + (pathHit ? 5 : 0)) * row.confidence * recency,
             matched: lexical?.matched ?? [],
             path: pathHit,
-            personal: row.repository_id === PERSONAL,
+            personal: row.repository_id === PERSONAL || row.private,
             origin: row.origin,
             confidence: row.confidence,
             updatedAt: row.updated_at,
@@ -1256,6 +1261,8 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       source_line: null,
       origin_session_id: proposal.sessionID ?? null,
       signature: null,
+      // A replacement for a private entry stays private.
+      private: proposal.private === true || previous?.private === true,
     }
     yield* db
       .transaction((tx) =>
@@ -2192,6 +2199,7 @@ function toEntry(row: Row): BrainSchema.Entry {
     ...(row.last_used_at ? { lastUsedAt: row.last_used_at } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ...(row.private ? { private: true } : {}),
   }
 }
 

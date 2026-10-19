@@ -2610,13 +2610,13 @@ ToolRegistry.register({
     const learned = createMemo(() => (props.status === "completed" ? memoryLearned(props.metadata) : undefined))
     return (
       <Show when={learned()} fallback={<GenericTool {...props} />}>
-        {(item) => <MemoryLearned id={item().id} text={item().text} />}
+        {(item) => <MemoryLearned id={item().id} text={item().text} private={item().private} />}
       </Show>
     )
   },
 })
 
-function MemoryLearned(props: { id: string; text?: string }) {
+function MemoryLearned(props: { id: string; text?: string; private?: boolean }) {
   const data = useData()
   const i18n = useI18n()
   const [state, setState] = createSignal<"learned" | "undoing" | "undone" | "failed">("learned")
@@ -2634,7 +2634,9 @@ function MemoryLearned(props: { id: string; text?: string }) {
               <span data-slot="basic-tool-tool-title">
                 {i18n.t(state() === "undone" ? "ui.tool.memory.undone" : "ui.tool.memory.learned")}
               </span>
-              <span data-slot="basic-tool-tool-subtitle">{props.text ?? i18n.t("ui.tool.memory.personal")}</span>
+              <span data-slot="basic-tool-tool-subtitle">
+                {props.text ?? i18n.t(props.private ? "ui.tool.memory.private" : "ui.tool.memory.personal")}
+              </span>
             </div>
             <Show when={data.undoMemory && state() !== "undone"}>
               <span data-slot="basic-tool-tool-action">
