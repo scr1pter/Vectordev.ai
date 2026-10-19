@@ -94,6 +94,52 @@ describe("BrainScan", () => {
     }
   })
 
+  test("a password-like value in the same sentence as a password, login or code word is that secret, wherever it sits", () => {
+    const secrets = [
+      ["The admin password for staging is Tr0ub4dor&3x.", "Tr0ub4dor"],
+      ["The staging admin's password, Tr0ub4dor&3x, is in the seed script.", "Tr0ub4dor"],
+      ["Log in to staging as admin with Tr0ub4dor&3x.", "Tr0ub4dor"],
+      ["Staging login: admin, password hunter2hunter2.", "hunter2"],
+      ["The SSH passphrase for the deploy box is correct horse battery staple.", "horse battery"],
+      ["pw for the staging admin: Tr0ub4dor&3x", "Tr0ub4dor"],
+      ["Use hunter2hunter2 as the staging admin password.", "hunter2"],
+      ["Staging basic auth is admin:Tr0ub4dor&3x.", "Tr0ub4dor"],
+      ["The wifi code for the office is 8842-1937-2210.", "8842"],
+      ["The PIN for the office safe is 4821.", "4821"],
+      ["The wifi password for the guest network is swordfish.", "swordfish"],
+      ["Use 'blue velvet sky' as the wifi password.", "velvet"],
+    ] as const
+    for (const [text, secret] of secrets) {
+      expect(BrainScan.credential(text), text).toBe(true)
+      const out = BrainScan.redact(text, {})
+      expect(out.text, text).not.toContain(secret)
+      expect(BrainScan.remainder(out.text), text).toBeGreaterThanOrEqual(16)
+    }
+    // Words about passwords and logins, and the names, paths and numbers beside them, are not secrets.
+    const talk = [
+      "Passwords are hashed with argon2id in packages/auth.",
+      "Password hashes use sha256 with a per-user salt.",
+      "Passwords must be at least 12 characters and rotate every 90 days.",
+      "Login uses OAuth2 via passport.js.",
+      "The login page uses the LoginForm component.",
+      "Login tests need NODE_TLS_REJECT_UNAUTHORIZED=0 in CI.",
+      "- **Login**: always test with the e2e suite.",
+      'Login errors must say "Invalid email or password" exactly.',
+      "Show 'Forgot your password?' as the link for the password reset.",
+      "The login fix landed in 8e22ed0c7f2a6b1d4c3e5f7a9b0c1d2e3f4a5b6c.",
+      "Pin Node to 20.11.1 and pnpm to 9.12.3.",
+      "Sign in with GitHub uses @octokit/auth-app.",
+      "The password for staging is stored in 1Password.",
+      "Login rate limit is 100000 requests per hour.",
+      "The login is localhost:3000 in dev.",
+      "Password reset tokens expire after 3600 seconds.",
+    ]
+    for (const text of talk) {
+      expect(BrainScan.credential(text), text).toBe(false)
+      expect(BrainScan.redact(text, {}).text, text).toBe(text)
+    }
+  })
+
   test("redacts the value of a secret environment variable wherever it appears", () => {
     const out = BrainScan.redact("Staging uses abcd1234efgh5678 as its key.", { STAGING_TOKEN: "abcd1234efgh5678" })
     expect(out.text).toBe("Staging uses [redacted] as its key.")

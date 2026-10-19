@@ -373,23 +373,24 @@ it.instance(
     Effect.gen(function* () {
       const { llm } = yield* setup()
       const prompt = yield* SessionPrompt.Service
-      const sessionID = yield* chat()
-      yield* llm.tool("memory", {
-        action: "add",
-        kind: "fact",
-        text: "The staging admin password is Tr0ub4dor&3x for the seed script.",
-        quote: "the staging admin password is Tr0ub4dor&3x for the seed script",
-      })
-      yield* llm.text("ok")
-      yield* prompt.prompt({
-        sessionID,
-        agent: "build",
-        model: ref,
-        size: "light",
-        parts: [{ type: "text", text: "Remember the staging admin password is Tr0ub4dor&3x for the seed script." }],
-      })
-      const [call] = yield* memoryParts(sessionID)
-      expect(call?.state.metadata.result).toBe("refused")
+      // Said right after "password", and with words between them.
+      for (const text of [
+        "The staging admin password is Tr0ub4dor&3x for the seed script.",
+        "The admin password for staging is Tr0ub4dor&3x.",
+      ]) {
+        const sessionID = yield* chat()
+        yield* llm.tool("memory", { action: "add", kind: "fact", text, quote: text.replace(/\.$/, "") })
+        yield* llm.text("ok")
+        yield* prompt.prompt({
+          sessionID,
+          agent: "build",
+          model: ref,
+          size: "light",
+          parts: [{ type: "text", text: `Remember: ${text}` }],
+        })
+        const [call] = yield* memoryParts(sessionID)
+        expect(call?.state.metadata.result, text).toBe("refused")
+      }
       const before = (yield* llm.hits).length
       yield* llm.text("ok")
       yield* prompt.prompt({

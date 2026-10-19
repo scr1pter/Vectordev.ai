@@ -64,9 +64,11 @@ const SECRET_SHAPES = [
 ]
 
 // A secret written in plain words: "the admin password is Tr0ub4dor&3x", "the wifi passphrase is correct horse battery
-// staple". A phrase runs to the end of its clause; any other secret is the one word after "is".
+// staple", "the admin password for staging is Tr0ub4dor&3x", "the wifi code for the office is 8842-1937-2210". A few
+// words of what it is for may sit between the name and "is". A phrase runs to the end of its clause; any other secret is
+// the one word after "is".
 const SPOKEN =
-  /\b(password|passwd|passcode|passphrase|pin(?: code)?|secret|token|api key|access key|(?:unlock|recovery|seed|pass) (?:phrase|code|key|words)|pass)\s+(?:is|was|are|were)\s+["'“]?([^\s"'”,;]+(?:\s+[^\s"'”,;.]+)*)/gi
+  /\b(password|passwd|passcode|passphrase|pin(?: code)?|secret|token|api key|access key|(?:unlock|recovery|seed|pass) (?:phrase|code|key|words)|(?:wi-?fi|door|alarm|gate|safe|entry|access) (?:code|password|key)|pass)(?:\s+(?:for|of|on|to|at)\s+(?:(?:the|a|an|our|my|your)\s+)?[\w'-]+(?:\s+[\w'-]+){0,2}?)?\s+(?:is|was|are|were)\s+["'“]?([^\s"'”,;]+(?:\s+[^\s"'”,;.]+)*)/gi
 
 // Words after "the password is" that say something about it rather than give it: "is stored in 1Password", "is
 // required", "is the same as staging".
@@ -80,9 +82,28 @@ const DESCRIBES = /(?:ed|able|ible|ive|ly|ing|ful|less|ous)$/i
 // ("correct horse battery staple") is all words, so a passphrase or recovery phrase is taken whole.
 const PASSWORD_LIKE = /\d|[!@#$%^&*_+=~?<>|\\]|[a-z][A-Z]/
 
-// A username and password pair: "login: admin / hunter2hunter2", "credentials are deploy/s3cret!".
+// A username and password pair: "login: admin / hunter2hunter2", "credentials are deploy/s3cret!", "basic auth is
+// admin:Tr0ub4dor&3x". The password has a letter and a digit or symbol, so "localhost:3000" is not one.
 const LOGIN =
-  /\b((?:login|logins|credentials?|creds)\s*(?::|=|\bis\b|\bare\b))\s*["']?[^\s"'/]+\s*\/\s*(?=[^\s"',;]*[\d!@#$%^&*_+=~?])[^\s"',;]+/gi
+  /\b((?:login|logins|credentials?|creds|basic auth)\s*(?::|=|\bis\b|\bare\b))\s*["']?[^\s"'/:]+\s*[/:]\s*(?!\/)(?=[^\s"',;]*[A-Za-z])(?=[^\s"',;]*[\d!@#$%^&*_+=~?])[^\s"',;]+/gi
+
+// Words that name a password, a login or a code. A password-like value in the same sentence is that secret, wherever it
+// sits: "the staging admin's password, Tr0ub4dor&3x, is in the seed script", "log in to staging as admin with
+// Tr0ub4dor&3x", "use hunter2hunter2 as the admin password". A PIN or a door code is digits.
+const SECRET_NEAR =
+  /\b(?:passwords?|passwd|pw|passphrases?|passcodes?|credentials?|creds|basic auth|log ?ins?|logon|sign ?ins?|(?:wi-?fi|door|alarm|gate|safe|entry|access) (?:codes?|passwords?|keys?)|pins?(?: codes?)?)\b/gi
+
+// A sentence: up to a full stop, question mark, exclamation mark or semicolon that ends it, or a line break. A dot inside
+// a word ("utils.ts") does not end one.
+const SENTENCE = /(?:[^\n.!?;]|[.!?;](?![\s]|$))+/g
+
+// Punctuation and markup around a word that is not part of it: "**Login**:", "(Tr0ub4dor&3x),".
+const EDGE = /^[*_`"'“”‘’([{<,.;:!?]+|[*_`"'“”‘’)\]}>,.;:!?]+$/g
+
+// Quoted words given as a password: "use 'blue velvet sky' as the wifi password". Quoted text that names a password
+// itself ("Show 'Forgot your password?' as the link") is the interface's copy, not a secret.
+const AS_PASSWORD =
+  /(["'“‘])((?:(?!password|passphrase|log ?in|sign ?in)[^"'”’\n]){4,80})["'”’](?=\s+(?:as|for)\s+(?:(?:the|our|my|your|a)\s+)?(?:[\w'-]+\s+){0,3}(?:password|passphrase|passcode|pin|pw)\b)/gi
 
 // An AWS secret access key is 40 characters that read like a path once split at "/", so beside an access key id any
 // such run is the secret.
@@ -94,19 +115,47 @@ function spoken(text: string) {
     const first = value.split(/\s+/)[0]!.replace(/[.!?]+$/, "")
     if (NOT_A_VALUE.test(first) || /^\$|^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/.test(first)) return match
     const phrase = /phrase|words/i.test(name)
-    // A password is a password in any word ("the staging password is swordfish"); another secret is one when it looks
-    // like a key. A PIN is digits; "the version pin is 5.6.2" is not one.
-    const password = /^pass(?:word|wd|code)?$/i.test(name)
-    if (
-      /^pin/i.test(name)
-        ? !/^\d{4,8}$/.test(first)
-        : !phrase && (password ? first.length < 4 || DESCRIBES.test(first) : first.length < 6 || !PASSWORD_LIKE.test(first))
-    )
-      return match
-    const secret = phrase ? value.replace(/[.!?]+$/, "") : first
+    const password = /pass(?:word|wd|code)?$/i.test(name)
+    // A password is a password in any word ("the staging password is swordfish"). A PIN or a door code is digits ("the
+    // version pin is 5.6.2" is not one); another secret is one when it looks like a key.
+    const code = /^pin|code$/i.test(name)
+    const secret =
+      phrase ||
+      (password && first.length >= 4 && !DESCRIBES.test(first)) ||
+      (!password && code && /^(?:\d{4,8}|\d{2,5}(?:-\d{2,5})+)$/.test(first)) ||
+      (!password && !code && first.length >= 6 && PASSWORD_LIKE.test(first))
+    if (!secret) return match
+    const hidden = phrase ? value.replace(/[.!?]+$/, "") : first
     const at = match.length - value.length
-    return `${match.slice(0, at)}${REDACTED}${match.slice(at + secret.length)}`
+    return `${match.slice(0, at)}${REDACTED}${match.slice(at + hidden.length)}`
   })
+}
+
+// A PIN or a code beside its name: four to six digits, or groups of digits ("8842-1937-2210").
+const DIGITS = /^(?:\d{4,6}|\d{2,5}(?:-\d{2,5})+)$/
+
+function near(text: string) {
+  return text.replace(SENTENCE, (sentence) => {
+    const named = sentence.match(SECRET_NEAR) ?? []
+    if (named.length === 0) return sentence
+    const coded = named.some((word) => /pin|code/i.test(word))
+    const worded = named.some((word) => !/^pins?(?: codes?)?$/i.test(word))
+    return sentence.replace(/\S+/g, (word) => {
+      const token = word.replace(EDGE, "")
+      return (worded && passwordLike(token)) || (coded && DIGITS.test(token)) ? word.replace(token, REDACTED) : word
+    })
+  })
+}
+
+// A word that reads like a password rather than a name, a path or a number: a symbol among letters or digits
+// ("Tr0ub4dor&3x", "P@ssw0rd"), or letters broken up by digits more than once ("hunter2hunter2", "s3cr3tpass"). A hashing
+// scheme ("argon2id", "sha256"), a path, a version, a flag, a package scope, an environment variable, a commit and an
+// assignment are not.
+function passwordLike(token: string) {
+  if (token.length < 6 || /^[@#$-]|[/.=()[\]{}<>`]/.test(token) || /^[A-Z][A-Z0-9_]*$/.test(token)) return false
+  if (/^[0-9a-f]{7,64}$/i.test(token)) return false
+  if (/[!@#$%^&*+~?|\\]/.test(token) && /[A-Za-z0-9]/.test(token)) return true
+  return token.length >= 8 && /[A-Za-z]/.test(token) && (token.match(/\d+/g)?.length ?? 0) >= 2
 }
 
 /**
@@ -115,7 +164,13 @@ function spoken(text: string) {
  */
 export function credential(text: string) {
   const clean = stripHidden(text)
-  return spoken(clean) !== clean || clean.search(LOGIN) >= 0 || assigned(clean) !== clean
+  return (
+    spoken(clean) !== clean ||
+    clean.search(LOGIN) >= 0 ||
+    assigned(clean) !== clean ||
+    near(clean) !== clean ||
+    clean.search(AS_PASSWORD) >= 0
+  )
 }
 
 // A long run of mixed letters and digits with no word in it is a key far more often than it is prose or a path. A path
@@ -143,10 +198,12 @@ function opaque(match: string) {
 
 /** The text with every credential replaced by [redacted], and whether anything was. */
 export function redact(text: string, env: Record<string, string | undefined> = process.env) {
-  const shaped = spoken(assigned(SECRET_SHAPES.reduce((out, shape) => out.replace(shape, REDACTED), text))).replace(
-    LOGIN,
-    `$1 ${REDACTED}`,
-  )
+  const shaped = near(
+    spoken(assigned(SECRET_SHAPES.reduce((out, shape) => out.replace(shape, REDACTED), text))).replace(
+      LOGIN,
+      `$1 ${REDACTED}`,
+    ),
+  ).replace(AS_PASSWORD, `$1${REDACTED}$1`)
   const aws = AWS_ID.test(shaped) ? shaped.replace(AWS_SECRET, REDACTED) : shaped
   const known = keyed(redactSecrets(aws, collectSecretValues(env)))
   const out = known.replace(OPAQUE, (match) => (opaque(match) ? REDACTED : match))

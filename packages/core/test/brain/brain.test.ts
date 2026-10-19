@@ -1533,6 +1533,40 @@ describe("Brain secrets", () => {
     expect(result.recall.text ?? "").not.toContain("Tr0ub4dor")
   })
 
+  test("a password in everyday phrasing is refused for the agent and kept without its value for the user", async () => {
+    const texts = [
+      "The admin password for staging is Tr0ub4dor&3x.",
+      "Log in to staging as admin with Tr0ub4dor&3x before seeding.",
+      "Use hunter2hunter2 as the staging admin password.",
+      "The SSH passphrase for the deploy box is correct horse battery staple.",
+    ]
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const agent = yield* Effect.forEach(texts, (text, index) =>
+          brain.propose(place, {
+            kind: "fact",
+            text,
+            scope: "repository",
+            origin: "agent",
+            sessionID: `ses_everyday_${index}`,
+            evidence: { type: "message", quote: text, verified: true },
+          }),
+        )
+        const user = yield* Effect.forEach(texts, (text) =>
+          brain.propose(place, { kind: "fact", text, scope: "repository", origin: "user" }),
+        )
+        return { agent: agent.map((item) => item.type), user: user.map((item) => (item.type === "refused" ? "" : item.entry.text)) }
+      }),
+    )
+    expect(result.agent).toEqual(["refused", "refused", "refused", "refused"])
+    expect(result.user).toEqual([
+      "The admin password for staging is [redacted].",
+      "Log in to staging as admin with [redacted] before seeding.",
+      "Use [redacted] as the staging admin password.",
+      "The SSH passphrase for the deploy box is [redacted].",
+    ])
+  })
+
   test("more secret shapes are refused for the agent or kept without their value", async () => {
     const texts = [
       ["The staging admin password is swordfish.", "swordfish"],
