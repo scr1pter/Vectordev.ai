@@ -36,6 +36,9 @@ export const LINKS = "vector.memory.links"
 
 export type Link = { readonly mode: "pointer" | "guard"; readonly file: string; readonly ids: readonly string[] }
 
+/** What the spec guard's lines add to one request at most, rendered again for each request. */
+export const GUARD = { tokens: 200 } as const
+
 /** The placeholder a code-link line is saved as. */
 export function linked(mode: Link["mode"], file: string) {
   return mode === "pointer" ? `[documents linked to ${file}]` : `[requirements linked to ${file}]`

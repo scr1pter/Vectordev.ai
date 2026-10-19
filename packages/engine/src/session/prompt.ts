@@ -52,6 +52,7 @@ import { LLM } from "./llm"
 import { Shell } from "@vectordevai/core/shell"
 import { ShellID } from "@/tool/shell/id"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { Token } from "@vectordevai/core/util/token"
 import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
@@ -2415,6 +2416,36 @@ const layer = Layer.effect(
           }).pipe(Effect.map((line) => [linkKey(link), line.text ?? ""] as const)),
         ),
       )
+      // The spec guard adds at most about 200 tokens to one request. Past that, the first line left out says how many
+      // more changed files are linked and the rest are left out, counted again for each request like the lines are.
+      const guardLines = new Map<string, string>()
+      const requests = new Map<number, { spent: number; more: string[] }>()
+      let request = 0
+      for (const message of msgs) {
+        if (message.info.role === "user") request += 1
+        for (const part of message.parts)
+          for (const link of Instruction.links(part)) {
+            const line = link.mode === "guard" ? (linkLines.get(linkKey(link)) ?? "") : ""
+            if (!line) continue
+            const budget = requests.get(request) ?? { spent: 0, more: [] }
+            requests.set(request, budget)
+            const key = `${part.id}\0${linkKey(link)}`
+            if (budget.spent + Token.estimate(line) > Instruction.GUARD.tokens) {
+              budget.more.push(key)
+              continue
+            }
+            budget.spent += Token.estimate(line)
+            guardLines.set(key, line)
+          }
+      }
+      for (const budget of requests.values())
+        if (budget.more[0])
+          guardLines.set(
+            budget.more[0],
+            budget.more.length === 1
+              ? "1 more changed file is linked to requirements: read it to see them."
+              : `${budget.more.length} more changed files are linked to requirements: read one to see them.`,
+          )
       const entries = [...new Set([...recalls.flatMap((recall) => recall.ids), ...toolPersonal])]
       const memory = entries.length ? yield* brain.lines(place, entries, { personal }) : new Map<string, string>()
       const cardIds = [...new Set([...recalls.flatMap((recall) => recall.cards), ...known.flatMap((item) => item.cards)])]
@@ -2464,10 +2495,10 @@ const layer = Layer.effect(
           if (withheld.length === 0 && !value && own.length === 0) return [part]
           const filled = withheld.reduce(
             (text, id) =>
-              text.replaceAll(SessionMemory.withheld(id), memory.get(id)?.replace(/^- /, "") ?? SessionMemory.withheld(id)),
+              text.replaceAll(SessionMemory.withheld(id), () => memory.get(id)?.replace(/^- /, "") ?? SessionMemory.withheld(id)),
             part.state.output,
           )
-          const rendered = [
+          const output = fill(filled, [
             ...(value?.cards ?? []).map(
               (id) =>
                 [SessionMemory.document(id), cards.get(id)?.replace(/^- /, "") ?? `[${id}] is not available here.`] as const,
@@ -2479,11 +2510,16 @@ const layer = Layer.effect(
                   passages.get(`${item.id}\0${item.part ?? ""}`) ?? `[${item.id}] is no longer in memory.`,
                 ] as const,
             ),
-          ].reduce((text, [placeholder, line]) => text.replace(placeholder, line), filled)
-          const output = own.reduce(
-            (text, link) => text.replace(Instruction.linked(link.mode, link.file), linkLines.get(linkKey(link)) ?? ""),
-            rendered,
-          )
+            ...own.map(
+              (link) =>
+                [
+                  Instruction.linked(link.mode, link.file),
+                  link.mode === "guard"
+                    ? (guardLines.get(`${part.id}\0${linkKey(link)}`) ?? "")
+                    : (linkLines.get(linkKey(link)) ?? ""),
+                ] as const,
+            ),
+          ])
           return [{ ...part, state: { ...part.state, output } }]
         }),
       }))
@@ -2841,6 +2877,20 @@ function attachedSource(file: SessionV1.FilePart) {
 
 // Whether the user keeps this attached file in memory instead of sending it: then it is not read when the message is
 // admitted, and the runner keeps it as a document.
+// Each placeholder's line takes the place of the placeholder's last copy, all in one pass: Vector adds its own after
+// the tool's output, which can quote one (a file that mentions it), and a line filled in is never read for another.
+function fill(text: string, lines: readonly (readonly [placeholder: string, line: string])[]) {
+  const spots = [
+    ...new Map(
+      lines.flatMap(([placeholder, line]) => {
+        const at = text.lastIndexOf(placeholder)
+        return at < 0 ? [] : [[at, { at, end: at + placeholder.length, line }] as const]
+      }),
+    ).values(),
+  ].toSorted((a, b) => b.at - a.at)
+  return spots.reduce((out, spot) => out.slice(0, spot.at) + spot.line + out.slice(spot.end), text)
+}
+
 function keptInstead(parts: PromptInput["parts"], file: { readonly id?: string; readonly filename?: string }) {
   return parts.some((part) => {
     if (part.type !== "text") return false

@@ -218,7 +218,7 @@ const POINTER =
 const GUARD =
   /Linked requirements: \[r[0-9a-z]{12}\] \(The refreshTokenTtl MUST be 14 days\.\)\. Check the change still meets them\./g
 
-const setup = Effect.fn("test.setup")(function* () {
+const setup = Effect.fn("test.setup")(function* (input: { spec?: string; files?: Record<string, string> } = {}) {
   const dir = (yield* TestInstance).directory
   const llm = yield* TestLLMServer
   const fs = yield* FSUtil.Service
@@ -226,7 +226,8 @@ const setup = Effect.fn("test.setup")(function* () {
   const snapshot = yield* Effect.promise(() => WorkspaceTrust.snapshot(dir, [path.join(dir, "vector.json")]))
   yield* Effect.promise(() => WorkspaceTrust.approve(Global.Path.state, snapshot))
   const file = path.join(dir, "src", "auth", "session.ts")
-  yield* fs.writeWithDirs(file, CODE)
+  for (const [name, content] of Object.entries(input.files ?? { "src/auth/session.ts": CODE }))
+    yield* fs.writeWithDirs(path.join(dir, name), content)
   // Committed, so the file is not a working-tree change that recall would bring the spec in for.
   execFileSync("git", ["add", "-A"], { cwd: dir })
   execFileSync("git", ["commit", "-q", "-m", "session"], { cwd: dir })
@@ -235,7 +236,7 @@ const setup = Effect.fn("test.setup")(function* () {
   const added = yield* knowledge.add(place, {
     type: "bytes",
     name: "Auth spec.md",
-    bytes: new TextEncoder().encode(SPEC),
+    bytes: new TextEncoder().encode(input.spec ?? SPEC),
     origin: "upload",
   })
   if (added.type === "refused") throw new Error(added.message)
@@ -363,6 +364,67 @@ it.instance(
       const twice = yield* instruction.resolve([], file, messageID, asking({}))
       expect(once.filter((item) => item.link)).toHaveLength(1)
       expect(twice.filter((item) => item.link)).toEqual([])
+    }),
+  { git: true },
+  60_000,
+)
+
+it.instance(
+  "the spec guard adds at most about 200 tokens to a request and says how many more changed files are linked",
+  () =>
+    Effect.gen(function* () {
+      const names = Array.from({ length: 10 }, (_, index) => `limitValue${index}`)
+      const { llm, dir } = yield* setup({
+        spec: `# Limits\n\n${names.map((name, index) => `## ${index + 1} Limit\n\nThe \`${name}\` MUST stay at ${index + 1}.\n`).join("\n")}`,
+        files: Object.fromEntries(names.map((name, index) => [`src/limits/${name}.ts`, `export const ${name} = ${index + 1}\n`])),
+      })
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      for (const [index, name] of names.entries())
+        yield* llm.tool("edit", {
+          filePath: path.join(dir, "src", "limits", `${name}.ts`),
+          oldString: `= ${index + 1}`,
+          newString: `= ${index + 2}`,
+        })
+      yield* llm.text("Done.")
+      const last = (yield* send(chat.id, "raise every limit by one", "standard")).at(-1) ?? ""
+      const lines = [...last.matchAll(/Linked requirements: .*?Check the change still meets them\./g)].map((match) => match[0])
+      expect(lines.length).toBeGreaterThan(0)
+      expect(lines.length).toBeLessThan(names.length)
+      expect(lines.reduce((sum, line) => sum + Math.round(line.length / 4), 0)).toBeLessThanOrEqual(200)
+      expect(last).toContain(`${names.length - lines.length} more changed file`)
+      expect(last).toContain("linked to requirements: read")
+    }),
+  { git: true },
+  90_000,
+)
+
+it.instance(
+  "a file that quotes a placeholder keeps its text, and a line's $ signs stay as written",
+  () =>
+    Effect.gen(function* () {
+      const { llm, file } = yield* setup({
+        spec: "# Auth spec\n\n## 1 Sessions\n\nThe `refreshTokenTtl` MUST be 14 days ($& and $' stay).\n",
+        files: {
+          "src/auth/session.ts": `// [documents linked to src/auth/session.ts] and [requirements linked to src/auth/session.ts]\n${CODE}`,
+        },
+      })
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* llm.tool("read", { filePath: file })
+      yield* llm.tool("edit", { filePath: file, oldString: "86_400", newString: "86400" })
+      yield* llm.text("Done.")
+      const last = (yield* send(chat.id, "clean up this helper", "standard")).at(-1) ?? ""
+      expect(last).toContain("// [documents linked to src/auth/session.ts] and [requirements linked to src/auth/session.ts]")
+      expect(count(last, /Documents linked to src\/auth\/session\.ts: \[r[0-9a-z]{12}\] requirement/g)).toBe(1)
+      expect(count(last, /Linked requirements: \[r[0-9a-z]{12}\]/g)).toBe(1)
+      expect(last).toContain("14 days ($& and $'")
     }),
   { git: true },
   60_000,
