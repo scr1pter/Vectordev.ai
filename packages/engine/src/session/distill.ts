@@ -22,8 +22,9 @@ import { Session } from "./session"
 // "Find more with a model…": a model the user chose reads a document's sparse sections in a hidden helper session, so no
 // session opens for the user, and what it suggests is quote-locked (BrainDistill) and kept as proposed records. The
 // helper's tokens and cost go on the document's History and into usage, and count towards the session it was asked
-// from, if any. It is off unless VECTOR_KNOWLEDGE_DISTILL is set, and refused for a session a guest is in, a model that
-// may train on prompts and the Zen gateway. One provider request at most, of at most 4,000 output tokens.
+// from, if any; the helper's transcript, which holds the document's text, is removed once they are measured. It is off
+// unless VECTOR_KNOWLEDGE_DISTILL is set, and refused for a session a guest is in, a model that may train on prompts and
+// the Zen gateway. One provider request at most, of at most 4,000 output tokens.
 
 export type Input = {
   readonly document: string
@@ -57,7 +58,7 @@ export type Estimate = {
 export type Distilled = {
   readonly type: "distilled"
   readonly model: string
-  /** The hidden helper session. */
+  /** The hidden session that keeps the helper's spend, with none of the document's text. */
   readonly sessionID: SessionID
   readonly records: readonly BrainSchema.Record[]
   readonly duplicate: number
@@ -78,6 +79,9 @@ export class Service extends Context.Service<Service, Interface>()("@vector/Sess
 
 /** The longest the helper's one request may take. */
 export const TIMEOUT = Duration.minutes(5)
+
+// The helper's title: never the document's, which is the document's own text and private with it.
+const TITLE = "Document suggestions"
 
 // Every tool and question denied, StructuredOutput allowed back: the session's rules come after the agent's own.
 const RULES: PermissionV1.Rule[] = [
@@ -183,7 +187,7 @@ const layer = Layer.effect(
       if (planned.type === "refused") return planned
       // A helper session: it stays out of session lists, and counts towards the session it was asked from.
       const session = yield* sessions.create({
-        title: `Document suggestions · ${planned.document.title}`,
+        title: TITLE,
         internal: BrainDistill.HELPER,
         ...(input.sessionID ? { parentID: input.sessionID } : {}),
         permission: RULES,
@@ -223,7 +227,9 @@ const layer = Layer.effect(
         : assistant?.structured === undefined
           ? (failure(assistant) ?? "The model gave no suggestions Vector could read.")
           : undefined
-      const spent = measureCost(yield* sessions.messages({ sessionID: session.id }).pipe(Effect.orDie))
+      const messages = yield* sessions.messages({ sessionID: session.id }).pipe(Effect.orDie)
+      const spent = measureCost(messages)
+      const kept = yield* receipt(session, messages)
       const tokens = {
         input: spent?.input ?? 0,
         output: spent?.output ?? 0,
@@ -237,7 +243,7 @@ const layer = Layer.effect(
         records: locked.kept,
         run: {
           model: planned.name,
-          session: session.id,
+          session: kept,
           tokens,
           cost,
           costKind: planned.costKind,
@@ -248,7 +254,7 @@ const layer = Layer.effect(
       return {
         type: "distilled" as const,
         model: planned.name,
-        sessionID: session.id,
+        sessionID: kept,
         records: stored?.records ?? [],
         duplicate: stored?.duplicate ?? 0,
         dropped,
@@ -259,12 +265,40 @@ const layer = Layer.effect(
       } satisfies Distilled
     })
 
+    // The helper's session holds the passages that were sent and the model's copies of them, so it does not outlive
+    // the run: once its spend is measured it is removed, event log included, and a hidden receipt in its place keeps
+    // only what each message spent, so usage still counts the request. Removing a session leaves the totals of the
+    // session it was asked from as they were. If the removal fails the helper stays as it is, never counted twice.
+    const receipt = Effect.fnUntraced(function* (helper: Session.Info, messages: readonly SessionV1.WithParts[]) {
+      const removed = yield* sessions.remove(helper.id).pipe(Effect.exit)
+      if (Exit.isFailure(removed)) return helper.id
+      const kept = yield* sessions.create({
+        title: TITLE,
+        internal: BrainDistill.HELPER,
+        ...(helper.parentID ? { parentID: helper.parentID } : {}),
+        permission: RULES,
+      })
+      yield* Effect.forEach(messages, (message) => sessions.updateMessage(spendOf(message.info, kept.id)), {
+        discard: true,
+      })
+      return kept.id
+    })
+
     return Service.of({ estimate, run })
   }),
 )
 
 function refuse(reason: Reason, message: string): Refused {
   return { type: "refused", reason, message }
+}
+
+// A message as the receipt keeps it: when it ran, on which model, and what it spent. Nothing it carried is kept: no
+// part, no structured reply, and no error, whose message can quote the request.
+function spendOf(info: SessionV1.Info, sessionID: SessionID): SessionV1.Info {
+  if (info.role === "user")
+    return { id: info.id, sessionID, role: "user", time: info.time, agent: info.agent, model: info.model }
+  const { structured: _, error: __, ...spend } = info
+  return { ...spend, sessionID }
 }
 
 // The provider's own words for why a request failed, when it gave any.

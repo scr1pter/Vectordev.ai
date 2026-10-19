@@ -18,6 +18,9 @@ import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
+import { EventTable } from "@vectordevai/core/event/sql"
+import { MessageTable, PartTable, SessionMessageTable } from "@vectordevai/core/session/sql"
+import { sql } from "drizzle-orm"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
@@ -322,6 +325,8 @@ it.instance(
     Effect.gen(function* () {
       const { llm, knowledge, place, document, distill } = yield* setup()
       const sessions = yield* Session.Service
+      // Asked for from a session of the user's, which the helper's spend counts towards.
+      const launching = yield* sessions.create({ title: "Billing work" })
       const listed = (yield* sessions.list()).map((session) => session.id)
 
       // The estimate comes first and sends nothing.
@@ -332,7 +337,7 @@ it.instance(
       expect(yield* requests(llm)).toHaveLength(0)
 
       yield* llm.push(reply().tool("StructuredOutput", { records: [VERBATIM, INVENTED] }).usage({ input: 1_400, output: 160 }))
-      const result = yield* distill.run(place, { document })
+      const result = yield* distill.run(place, { document, sessionID: launching.id })
       expect(result.type).toBe("distilled")
       if (result.type !== "distilled") return
 
@@ -373,6 +378,36 @@ it.instance(
       expect(helper.internal).toBe("brain.distill")
       const usage = yield* sessions.usage()
       expect(usage.helpers?.find((item) => item.id === "brain.distill")).toMatchObject({ sessions: 1, responses: 1 })
+      expect(usage.helpers?.find((item) => item.id === "brain.distill")?.cost).toBeCloseTo(result.cost)
+      expect((yield* sessions.get(launching.id)).subagentCost).toBeCloseTo(result.cost)
+
+      // The helper's transcript held the passages that were sent and the model's quotes of them. Neither outlives the
+      // run: the session that keeps its spend has no parts, and no message, part or event Vector stored has the text.
+      expect(helper.title).toBe("Document suggestions")
+      const receipt = yield* sessions.messages({ sessionID: result.sessionID })
+      expect(receipt.map((message) => message.info.role)).toEqual(["user", "assistant"])
+      expect(receipt.flatMap((message) => message.parts)).toEqual([])
+      const db = (yield* Database.Service).db
+      const holding = (phrase: string) =>
+        Effect.all([
+          db.select({ id: EventTable.id }).from(EventTable).where(sql`${EventTable.data} like ${`%${phrase}%`}`).all(),
+          db.select({ id: MessageTable.id }).from(MessageTable).where(sql`${MessageTable.data} like ${`%${phrase}%`}`).all(),
+          db.select({ id: PartTable.id }).from(PartTable).where(sql`${PartTable.data} like ${`%${phrase}%`}`).all(),
+          db
+            .select({ id: SessionMessageTable.id })
+            .from(SessionMessageTable)
+            .where(sql`${SessionMessageTable.data} like ${`%${phrase}%`}`)
+            .all(),
+        ]).pipe(Effect.map((tables) => tables.flat().length))
+      // The passage, the model's quote of it, and the document's title.
+      expect(yield* holding("paid back to the original card")).toBe(0)
+      expect(yield* holding("Partial refunds go through the same review")).toBe(0)
+      expect(yield* holding("Billing notes")).toBe(0)
+
+      // Forgetting the document leaves nothing of it behind, and the spend still counts.
+      expect(yield* knowledge.remove(place, document)).toBe("removed")
+      expect(yield* holding("paid back to the original card")).toBe(0)
+      expect((yield* sessions.usage()).helpers?.find((item) => item.id === "brain.distill")?.cost).toBeCloseTo(result.cost)
     }),
   90_000,
 )
