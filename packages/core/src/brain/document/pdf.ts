@@ -1,7 +1,7 @@
 export * as BrainPdf from "./pdf"
 
 import { getDocumentProxy } from "unpdf"
-import { DecodeStream, Parser, StreamsSequenceStream } from "unpdf/pdfjs"
+import { DecodeStream, Parser, Pattern, PDFFunctionFactory, StreamsSequenceStream } from "unpdf/pdfjs"
 import type { BrainSchema } from "../schema"
 import { budget, refuse, type BrainLimits } from "./limits"
 import type { Draft, Read, ReadRefusal } from "./read"
@@ -162,6 +162,16 @@ Parser.prototype.makeFilter = function (
 ) {
   // pdf.js reads a stream it is told is empty as no bytes at all.
   return makeFilter.call(this, stream, name, UNCOUNTED.has(name) ? 0 : length, params, cipher)
+}
+
+// Nothing is drawn, so what pdf.js builds only to draw is never built. Its size comes from what the file states rather
+// than from bytes anything decodes: a sampled function's table holds the product of its /Size, a stitching function
+// builds every function it lists again each time it is listed, and a mesh shading keeps a point for every few bits of
+// its data and hundreds for every patch. So a function (a tint, a gradient's colours, a transfer curve) leaves its
+// output as it found it, and every shading is refused, which pdf.js takes as one it cannot read and leaves out.
+PDFFunctionFactory.prototype.create = () => () => undefined
+Pattern.parseShading = () => {
+  throw new Error("Shadings are never read.")
 }
 
 async function extract(

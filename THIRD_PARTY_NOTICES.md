@@ -753,7 +753,7 @@ Source: https://github.com/mozilla/pdf.js (Apache-2.0), version 6.4.299, embedde
 
 Vector's document reader reads PDF text with `unpdf@1.9.0` (MIT; its notice is in DEPENDENCY_NOTICES.md), whose published `dist/pdfjs.mjs` is a bundled build of pdf.js 6.4.299. That bundle keeps no license header, so pdf.js's own license is reproduced here rather than left behind unpdf's MIT license.
 
-Vector modifies that file: `patches/unpdf@1.9.0.patch` adds `DecodeStream`, `Parser` and `StreamsSequenceStream` to its exports, so the reader can count the bytes pdf.js decodes. pdf.js's code is otherwise unchanged.
+Vector modifies that file: `patches/unpdf@1.9.0.patch` adds `DecodeStream`, `Parser`, `StreamsSequenceStream`, `PDFFunctionFactory` and `Pattern` to its exports, so the reader can count the bytes pdf.js decodes and leave out what only drawing needs. pdf.js's code is otherwise unchanged.
 
 Copyright 2012 Mozilla Foundation
 

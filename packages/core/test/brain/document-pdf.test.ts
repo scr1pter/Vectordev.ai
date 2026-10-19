@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { BrainLimits } from "@vectordevai/core/brain/document/limits"
 import { BrainDocument } from "@vectordevai/core/brain/document/read"
-import { lines, pdf, type Run } from "./fixture/pdf"
+import { deflated, lines, pdf, stream, type Extra, type Run } from "./fixture/pdf"
 
 const read = async (bytes: Uint8Array, limits = BrainLimits.LIMITS.worker) => {
   const result = await BrainDocument.read({ name: "spec.pdf", bytes }, limits)
@@ -290,5 +290,74 @@ describe("BrainDocument PDF from a hostile file", () => {
     )
     expect(result.type).toBe("extracted")
     if (result.type === "extracted") expect(result.text).not.toContain("Brotli")
+  })
+
+  // A sampled function's table, the functions a stitching function lists and a mesh's points are as large as the file
+  // says, not as large as anything decoded. Here each keeps its data in a stream that inflates past the cap, so the
+  // file is refused if any of them is built at all, and none is: only drawing needs them.
+  const MB = 1024 * 1024
+  const sampled = stream(
+    "<< /FunctionType 0 /Domain [0 1] /Range [0 1] /Size [2097152] /BitsPerSample 8 /Filter /FlateDecode",
+    deflated("", 2 * MB),
+  )
+  const mesh = stream(
+    "<< /ShadingType 5 /ColorSpace /DeviceGray /BitsPerCoordinate 8 /BitsPerComponent 8 /VerticesPerRow 2 /Decode [0 1 0 1 0 1] /Filter /FlateDecode",
+    deflated("", 2 * MB),
+  )
+  test.each<[string, (first: number) => Extra]>([
+    [
+      "a colour's tint transform",
+      (first) => ({
+        resources: `/ColorSpace << /Cs1 [/Separation /Spot /DeviceGray ${first} 0 R] >>`,
+        content: "/Cs1 cs 0.5 sc",
+        objects: [sampled],
+      }),
+    ],
+    [
+      "a transfer curve",
+      (first) => ({
+        resources: `/ExtGState << /Gs1 << /TR ${first} 0 R >> >>`,
+        content: "/Gs1 gs",
+        objects: [sampled],
+      }),
+    ],
+    [
+      "a stitching function's parts",
+      (first) => ({
+        resources: `/ColorSpace << /Cs1 [/Separation /Spot /DeviceGray ${first} 0 R] >>`,
+        content: "/Cs1 cs 0.5 sc",
+        objects: [
+          `<< /FunctionType 3 /Domain [0 1] /Functions [${first + 1} 0 R ${first + 1} 0 R] /Bounds [0.5] /Encode [0 1 0 1] >>`,
+          sampled,
+        ],
+      }),
+    ],
+    [
+      "a gradient's colours",
+      (first) => ({
+        resources: `/Shading << /Sh1 ${first} 0 R >>`,
+        content: "/Sh1 sh",
+        objects: [
+          `<< /ShadingType 2 /ColorSpace /DeviceGray /Coords [0 0 100 0] /Function ${first + 1} 0 R >>`,
+          sampled,
+        ],
+      }),
+    ],
+    [
+      "a mesh's points",
+      (first) => ({ resources: `/Shading << /Sh1 ${first} 0 R >>`, content: "/Sh1 sh", objects: [mesh] }),
+    ],
+    [
+      "a mesh filling a shape as its pattern",
+      (first) => ({
+        resources: `/Pattern << /P1 << /PatternType 2 /Shading ${first} 0 R >> >>`,
+        content: "/Pattern cs /P1 scn 0 0 100 100 re f",
+        objects: [mesh],
+      }),
+    ],
+  ])("the reader never builds %s", async (_, extra) => {
+    const read = await timed(pdf({ pages: [{ runs: body }], extra }), { ...BrainLimits.LIMITS.inline, streams: MB })
+    expect(read.result.type).toBe("extracted")
+    if (read.result.type === "extracted") expect(read.result.text).toContain("Uploads are limited")
   })
 })

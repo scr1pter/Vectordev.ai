@@ -1,6 +1,6 @@
 // A small PDF writer for the reader's tests: text runs at given positions, sizes and fonts, an outline, image-only
-// pages, metadata, a JavaScript open action and an encryption dictionary. Every fixture is generated here, so no binary
-// document is committed.
+// pages, metadata, a JavaScript open action, an encryption dictionary and objects of a test's own. Every fixture is
+// generated here, so no binary document is committed.
 
 import { Zlib } from "fflate"
 
@@ -47,6 +47,18 @@ export type Options = {
   readonly encrypted?: boolean
   /** The page tree lists itself among its kids after the pages, so walking it never ends. */
   readonly loop?: boolean
+  /** Objects of the test's own, numbered from `first`, which the first page draws with. */
+  readonly extra?: (first: number) => Extra
+}
+
+export type Extra = {
+  readonly objects: readonly string[]
+  /** Entries for the first page's fonts, such as `/F4 12 0 R`. */
+  readonly fonts?: string
+  /** Entries for the first page's other resources, such as `/Shading << /Sh1 13 0 R >>`. */
+  readonly resources?: string
+  /** Operators the first page runs before its text. */
+  readonly content?: string
 }
 
 const FONTS = { regular: "F1", bold: "F2", mono: "F3" } as const
@@ -61,6 +73,7 @@ export function pdf(options: Options) {
   const outlineItems = options.outline ?? []
   const info = outlineRoot + (outlineItems.length > 0 ? 1 + outlineItems.length : 0)
   const encrypt = info + 1
+  const extra = options.extra?.(info + (options.encrypted ? 2 : 1))
   const catalog = [
     "/Type /Catalog /Pages 2 0 R",
     outlineItems.length > 0 ? `/Outlines ${outlineRoot} 0 R /PageMode /UseOutlines` : "",
@@ -83,8 +96,9 @@ export function pdf(options: Options) {
     ),
   )
   for (const [index, page] of options.pages.entries()) {
+    const own = index === 0 ? extra : undefined
     add(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [${(page.media ?? [0, 0, 612, 792]).join(" ")}]${page.crop ? ` /CropBox [${page.crop.join(" ")}]` : ""} /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> /XObject << /Im1 6 0 R >> >> /Contents ${page.packed ? `${firstPage + index * 3 + 2} 0 R` : `[${firstPage + index * 3 + 1} 0 R ${firstPage + index * 3 + 2} 0 R]`} >>`,
+      `<< /Type /Page /Parent 2 0 R /MediaBox [${(page.media ?? [0, 0, 612, 792]).join(" ")}]${page.crop ? ` /CropBox [${page.crop.join(" ")}]` : ""} /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R ${own?.fonts ?? ""} >> /XObject << /Im1 6 0 R >> ${own?.resources ?? ""} >> /Contents ${page.packed ? `${firstPage + index * 3 + 2} 0 R` : `[${firstPage + index * 3 + 1} 0 R ${firstPage + index * 3 + 2} 0 R]`} >>`,
     )
     const image = page.image || page.ocr ? ["q 500 0 0 700 56 46 cm /Im1 Do Q"] : []
     const runs = (page.runs ?? []).map(
@@ -95,7 +109,7 @@ export function pdf(options: Options) {
       (run) =>
         `BT 3 Tr /${FONTS[run.font ?? "regular"]} ${run.size ?? 11} Tf 1 0 0 1 ${run.x} ${run.y} Tm (${escape(run.text)}) Tj ET`,
     )
-    const text = [...image, ...runs, ...ocr].join("\n")
+    const text = [...(own?.content ? [own.content] : []), ...image, ...runs, ...ocr].join("\n")
     add(stream("<<", page.packed ? "" : text))
     add(
       stream(
@@ -122,6 +136,7 @@ export function pdf(options: Options) {
   add(`<< /Title (${escape(options.title ?? "")}) /Producer (Vector test fixture) >>`)
   if (options.encrypted)
     add(`<< /Filter /Standard /V 1 /R 2 /Length 40 /P -4 /O <${"7a".repeat(32)}> /U <${"3c".repeat(32)}> >>`)
+  for (const object of extra?.objects ?? []) add(object)
   const header = "%PDF-1.7\n%\xe2\xe3\xcf\xd3\n"
   const offsets: number[] = []
   const body = objects.reduce((out, object, index) => {
@@ -145,7 +160,7 @@ export function pdf(options: Options) {
 
 // Text followed by this many spaces, compressed a megabyte at a time, so a fixture that inflates to gigabytes never
 // holds them.
-function deflated(head: string, spaces: number) {
+export function deflated(head: string, spaces: number) {
   const chunks: string[] = []
   const zlib = new Zlib({ level: 6 }, (chunk) => {
     chunks.push(Array.from(chunk, (byte) => String.fromCharCode(byte)).join(""))
@@ -157,7 +172,8 @@ function deflated(head: string, spaces: number) {
   return chunks.join("")
 }
 
-function stream(dictionary: string, data: string, breaks = "\n") {
+/** A stream object: its dictionary's entries before /Length (opened with `<<`), then its data. */
+export function stream(dictionary: string, data: string, breaks = "\n") {
   return `${dictionary} /Length ${data.length} >>\nstream${breaks}${data}\nendstream`
 }
 

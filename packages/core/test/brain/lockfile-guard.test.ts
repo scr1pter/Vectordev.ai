@@ -48,7 +48,7 @@ describe("document reader dependencies", () => {
     expect(section.slice(0, 13_000)).toContain("Apache License\n                           Version 2.0, January 2004")
   })
 
-  test("pdf.js is patched to export the decoders the reader counts, and the notices say so", async () => {
+  test("pdf.js is patched to export what the reader counts and leaves out, and the notices say so", async () => {
     expect((await Bun.file(path.join(root, "package.json")).json()).patchedDependencies["unpdf@1.9.0"]).toBe(
       "patches/unpdf@1.9.0.patch",
     )
@@ -56,8 +56,10 @@ describe("document reader dependencies", () => {
     expect(typeof pdfjs.DecodeStream.prototype.ensureBuffer).toBe("function")
     expect(typeof pdfjs.Parser.prototype.makeFilter).toBe("function")
     expect(pdfjs.StreamsSequenceStream.prototype).toBeInstanceOf(pdfjs.DecodeStream)
+    expect(typeof pdfjs.PDFFunctionFactory.prototype.create).toBe("function")
+    expect(typeof pdfjs.Pattern.parseShading).toBe("function")
     expect(await Bun.file(path.join(root, "THIRD_PARTY_NOTICES.md")).text()).toContain(
-      "`patches/unpdf@1.9.0.patch` adds `DecodeStream`, `Parser` and `StreamsSequenceStream`",
+      "`patches/unpdf@1.9.0.patch` adds `DecodeStream`, `Parser`, `StreamsSequenceStream`, `PDFFunctionFactory` and `Pattern`",
     )
   })
 })
