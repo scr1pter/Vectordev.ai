@@ -2876,8 +2876,6 @@ function attachedSource(file: SessionV1.FilePart) {
   return { type: "bytes" as const, name: file.filename ?? "attachment", bytes: new Uint8Array(bytes), mime: file.mime }
 }
 
-// Whether the user keeps this attached file in memory instead of sending it: then it is not read when the message is
-// admitted, and the runner keeps it as a document.
 // Each placeholder's line takes the place of the placeholder's last copy, all in one pass: Vector adds its own after
 // the tool's output, which can quote one (a file that mentions it), and a line filled in is never read for another.
 function fill(text: string, lines: readonly (readonly [placeholder: string, line: string])[]) {
@@ -2892,6 +2890,8 @@ function fill(text: string, lines: readonly (readonly [placeholder: string, line
   return spots.reduce((out, spot) => out.slice(0, spot.at) + spot.line + out.slice(spot.end), text)
 }
 
+// Whether the user keeps this attached file in memory instead of sending it: then it is not read when the message is
+// admitted, and the runner keeps it as a document.
 function keptInstead(parts: PromptInput["parts"], file: { readonly id?: string; readonly filename?: string }) {
   return parts.some((part) => {
     if (part.type !== "text") return false
