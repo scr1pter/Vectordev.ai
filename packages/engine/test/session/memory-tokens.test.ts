@@ -245,7 +245,7 @@ const LEARNED = [
   ...TOPICS.map((topic) => `The ${topic} service has its own feature flag, ${topic}_v2, read at startup only.`),
 ]
 
-type Sizes = { hi: number; light: number; large: number }
+type Sizes = { hi: number; ok: number; light: number; large: number }
 
 // One request per fresh session, so nothing but memory differs between the two runs.
 const measure = Effect.fn("test.measure")(function* () {
@@ -270,6 +270,7 @@ const measure = Effect.fn("test.measure")(function* () {
   })
   return {
     hi: yield* send("hi"),
+    ok: yield* send("ok"),
     light: yield* send("Rename the login button label to Sign in", "light"),
     large: yield* send("Redesign how login sessions are handled across the auth module", "thorough"),
   }
@@ -320,16 +321,19 @@ it.instance(
       const report = {
         toolTokens: Token.estimate(JSON.stringify(tool(full.light) ?? {})),
         digestTokens: Token.estimate(digest),
-        added: { hi: added("hi"), light: added("light"), large: added("large") },
+        added: { hi: added("hi"), ok: added("ok"), light: added("light"), large: added("large") },
         recall: { light: Token.estimate(recall("light")), large: Token.estimate(recall("large")) },
         legacyPerRequest: legacy,
       }
       console.log(`memory token gate: ${JSON.stringify(report)}`)
 
-      // A greeting carries no memory at all, and no memory tool.
+      // A greeting or a bare acknowledgement carries no memory at all, and no memory tool.
       expect(report.added.hi).toBe(0)
       expect(full.hi).not.toContain("vector_memory")
       expect(tool(full.hi)).toBeUndefined()
+      expect(report.added.ok).toBe(0)
+      expect(full.ok).not.toContain("vector_memory")
+      expect(tool(full.ok)).toBeUndefined()
       expect(tool(full.light)).toBeDefined()
       // Light and Thorough work carry the digest plus a recall inside their size's budget.
       expect(digest).toContain("Money is integer cents, never floats.")

@@ -202,7 +202,7 @@ describe("SessionTaskSize.size", () => {
     for (const text of [
       "ship to vercel",
       "fix the typo in README",
-      "ok",
+      "yes",
       "quick question: what does parseArgs do?",
       "no, keep the old routes working",
     ]) {

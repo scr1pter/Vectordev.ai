@@ -85,13 +85,11 @@ describe("TaskSize.classify", () => {
       "how do I normalize a vector?",
       "hi `foo`",
       // Replies to the work are never social: they continue it, which only the history can say.
-      "ok",
       "yes",
       "no thanks",
       "continue",
       "looks good",
-      // An acknowledgement alone may mean "go ahead".
-      "got it",
+      // An agreement alone may mean "go ahead".
       "sounds good",
     ])
       expect(tier(text), text).toBe("standard")
@@ -114,6 +112,27 @@ describe("TaskSize.classify", () => {
       expect(TaskSize.classify({ text }), text).toMatchObject({ tier: "standard", reasons: ["work"] })
     expect(tier("hi", { files: 1 })).toBe("standard")
     expect(tier("hi", { images: 1 })).toBe("standard")
+  })
+
+  test("a bare acknowledgement is a direct reply unless a plan or a question waits on it", () => {
+    for (const text of ["ok", "OK.", "okay", "k", "ok!", "got it", "gotcha", "cool", "nice", "thanks"]) {
+      expect(TaskSize.classify({ text }), text).toMatchObject({ tier: "chat" })
+      expect(tier(text, { previous: "standard" }), text).toBe("chat")
+    }
+    expect(TaskSize.classify({ text: "ok" }).reasons).toEqual(["ack"])
+    // After a plan from Plan mode it is never a bare reply ("ok" carries the plan out), and while the agent's question
+    // waits it answers it.
+    for (const text of ["ok", "okay"])
+      expect(TaskSize.classify({ text, previous: "thorough", plan: true }), text).toMatchObject({
+        tier: "thorough",
+        source: "inherited",
+      })
+    for (const text of ["ok", "okay", "got it"]) {
+      expect(tier(text, { previous: "thorough", plan: true }), text).not.toBe("chat")
+      expect(tier(text, { previous: "standard", open: true }), text).toBe("standard")
+    }
+    // An acknowledgement with an ask is the ask.
+    for (const text of ["ok, now add tests", "got it, ship it", "ok do it"]) expect(tier(text), text).toBe("standard")
   })
 
   test("asking whether it works asks the agent to check, so it is work, not a report that it works", () => {
@@ -277,7 +296,6 @@ describe("TaskSize.classify", () => {
       "run the tests",
       "commit this",
       "add a test for the parser",
-      "ok",
       "yes",
       "build it",
       "looks good",
@@ -293,8 +311,8 @@ describe("TaskSize.classify", () => {
         source: "auto",
         reasons: ["work"],
       })
-    // A social message after finished work is a direct reply.
-    for (const text of ["thanks", "hi", "thanks, that works", "perfect"])
+    // A social message after finished work is a direct reply, a bare acknowledgement included.
+    for (const text of ["thanks", "hi", "thanks, that works", "perfect", "ok", "got it"])
       expect(tier(text, { previous: "thorough" }), text).toBe("chat")
     // A greeting before a message is not work it could continue.
     expect(TaskSize.classify({ text: "continue", previous: "chat" }).source).toBe("auto")

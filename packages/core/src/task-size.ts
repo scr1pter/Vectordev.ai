@@ -225,8 +225,8 @@ function pleasantry(sentence: string) {
   )
 }
 
-// "ack" ("got it", "sounds great") is social only beside another social kind: "got it, thanks" is a thanks, while a
-// bare "sounds good" after a plan may mean "go ahead".
+// "ack" ("got it", "sounds great") names a message only when it is a bare acknowledgement ("ok", "got it"); beside
+// another social kind it is that kind ("got it, thanks" is a thanks), and a bare "sounds good" may mean "go ahead".
 type Kind = "greeting" | "thanks" | "farewell" | "reaction" | "success" | "about-vector" | "emoji" | "ack"
 
 // A short message of prose, every clause of it social: "thanks, that works", "hey, how are you doing today?", "ok
@@ -243,6 +243,9 @@ function socialKind(input: Input, text: string, lower: string): Kind | undefined
   if (VECTOR_QUESTIONS.has(all.join(" "))) return "about-vector"
   // Only a name or two ("vector?", "hey there" without the hey): someone checking that Vector is there.
   if (all.length > 0 && dropVocatives(all).length === 0) return "greeting"
+  // A bare acknowledgement ("ok", "got it") answers nothing while nothing waits on it. After a plan from Plan mode it
+  // may mean "go ahead", so there it carries the plan out.
+  if (!input.plan && ACKNOWLEDGEMENTS.has(dropVocatives(all).join(" "))) return "ack"
   const kinds = sentences(lower).flatMap((sentence) =>
     clauses(sentence).map((clause) => clauseKinds(clause, sentence.trim().endsWith("?"))),
   )
@@ -591,6 +594,8 @@ const ACKS = set([
   "fine",
   "fair enough",
 ])
+// Acknowledgements that are social on their own, unless a plan waits on them: "ok", "got it".
+const ACKNOWLEDGEMENTS = set(["ok", "okay", "okey", "okie", "k", "kk", "alright", "got it", "gotcha", "ok got it", "okay got it"])
 // Words that may sit inside a social message without being one: "ok thanks", "thanks a lot", "hello again", "how are
 // you doing today", a name.
 const FILLERS = set([
