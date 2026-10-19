@@ -714,7 +714,7 @@ const scenarios: Scenario[] = [
     object(body)
     check(Array.isArray(body.documents), "documents list should return documents")
     check(typeof body.indexing === "boolean", "documents list should say whether anything is being read")
-    check(body.limits?.upload === 64 * 1024 * 1024, "documents list should give the upload limit")
+    check(isRecord(body.limits) && body.limits.upload === 64 * 1024 * 1024, "documents list should give the upload limit")
   }),
   // The upload takes multipart form data only; memory-documents.test.ts sends real files.
   http.protected
@@ -728,7 +728,7 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({ path: "/memory/documents/path", headers: ctx.headers(), body: { path: "missing.md" } }))
     .json(400, (body) => {
       object(body)
-      check(body.data?.reason === "not-found", "a missing file should be refused as not found")
+      check(isRecord(body.data) && body.data.reason === "not-found", "a missing file should be refused as not found")
     }),
   http.protected
     .post("/memory/documents/text", "memory.documents.text")
@@ -743,7 +743,7 @@ const scenarios: Scenario[] = [
       (body) => {
         object(body)
         check(body.type === "queued", "pasted text should be queued as a document")
-        check(body.document?.visibility === "private", "pasted text is private")
+        check(isRecord(body.document) && body.document.visibility === "private", "pasted text is private")
       },
       "status",
     ),
