@@ -288,16 +288,20 @@ describe("BrainKnowledge suggestions", () => {
         const moved = yield* setup.db.get<{ status: string; document: string }>(
           sql`SELECT i.status, r.document_id AS document FROM brain_record r JOIN brain_item i ON i.id = r.item WHERE r.id = ${proposed.id}`,
         )
-        yield* added(setup, text("Billing.md", BILLING.replace(REFUNDS, "Refunds are handled by finance.")))
+        const third = yield* added(setup, text("Billing.md", BILLING.replace(REFUNDS, "Refunds are handled by finance.")))
         const gone = yield* setup.db.get<{ status: string }>(
           sql`SELECT i.status FROM brain_record r JOIN brain_item i ON i.id = r.item WHERE r.id = ${proposed.id}`,
         )
-        return { proposed, kept, second: second.document!.id, moved, gone }
+        // Forgetting the document forgets what a model suggested from it.
+        yield* setup.knowledge.remove(setup.place, third.document!.id)
+        const forgotten = yield* setup.db.all<{ id: string }>(sql`SELECT id FROM brain_record WHERE origin = 'distilled'`)
+        return { proposed, kept, second: second.document!.id, moved, gone, forgotten }
       }),
     )
     expect(result.kept.map((card) => card.id)).toContain(result.proposed.id)
     expect(result.moved).toEqual({ status: "active", document: result.second })
     expect(result.gone).toEqual({ status: "archived" })
+    expect(result.forgotten).toEqual([])
   })
 
   test("a held document is not offered, and once approved its held passage still is not", async () => {
