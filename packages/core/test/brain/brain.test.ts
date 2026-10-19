@@ -5,6 +5,7 @@ import path from "node:path"
 import { Effect, Layer } from "effect"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainLexical } from "@vectordevai/core/brain/lexical"
+import { BrainParse } from "@vectordevai/core/brain/parse"
 import { BrainPaths } from "@vectordevai/core/brain/paths"
 import { Global } from "@vectordevai/core/global"
 import { tmpdir } from "../fixture/tmpdir"
@@ -143,6 +144,34 @@ describe("Brain digest", () => {
     expect(result.digest.text).toContain("recalled when relevant")
     expect(result.digest.text).not.toContain("staging Vercel")
     expect(result.recall.text).toContain("staging Vercel project")
+  })
+
+  test("MEMORY.md past its budget keeps its headings with what is under them, and a heading that is a fact", async () => {
+    const memory = [
+      "# About me",
+      "",
+      "I am a backend engineer; my time zone is IST.",
+      "",
+      "## I use Neovim",
+      "",
+      "## Style",
+      "",
+      ...Array.from({ length: 70 }, (_, i) => `- Preference ${i}: keep function ${i} names short and descriptive, prefer early returns in handler${i}.`),
+      "",
+      "```sh",
+      "# not a heading",
+      "bun run dev",
+      "```",
+    ].join("\n")
+    const result = await run({ "config/MEMORY.md": memory }, ({ brain, place }) => brain.digest(place, { personal: true, index: true }))
+    const text = result.text ?? ""
+    expect(text).toContain("recalled when relevant")
+    expect(text).toContain("# About me\n- I am a backend engineer")
+    expect(text).toContain("## I use Neovim")
+    expect(text).toContain("## Style\n- Preference 0:")
+    expect(result.tokens).toBeLessThan(Brain.BUDGET.memory + 120)
+    // A "#" line in a fenced example belongs to the example, not to the file's sections.
+    expect(BrainParse.headings(memory).map((mark) => mark.text)).toEqual(["# About me", "## I use Neovim", "## Style"])
   })
 })
 

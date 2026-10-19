@@ -135,6 +135,19 @@ export function memory(content: string): Item[] {
   }))
 }
 
+/** A file's headings as written, with their 1-based lines; a fenced example's "#" lines are not headings. */
+export function headings(content: string) {
+  const state = { fence: false }
+  return uncomment(content)
+    .split("\n")
+    .flatMap((raw, index) => {
+      const line = raw.replace(/\s+$/, "")
+      if (/^\s*(?:```|~~~)/.test(line)) state.fence = !state.fence
+      if (state.fence || !/^#{1,6}\s+\S/.test(line)) return []
+      return [{ line: index + 1, text: line }]
+    })
+}
+
 export function memoryText(content: string) {
   return uncomment(content)
     .split("\n")

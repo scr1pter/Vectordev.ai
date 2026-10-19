@@ -1798,17 +1798,37 @@ function render(
   const whole = BrainParse.memoryText(content)
   if (active.length === rows.length && Token.estimate(whole) <= BUDGET.memory)
     return { ...(whole ? { text: whole } : {}), ids: active.map((row) => row.id) }
-  // Past its budget, MEMORY.md goes in file order until the budget is spent; the rest is recalled when relevant.
-  const kept = active.reduce<Row[]>(
-    (list, row) => (Token.estimate([...list, row].map((item) => `- ${item.body}`).join("\n")) > BUDGET.memory - 40 ? list : [...list, row]),
-    [],
+  // Past its budget, MEMORY.md goes in file order until the budget is spent; the rest is recalled when relevant. Each
+  // kept item goes under its heading, and a heading with nothing under it stays too: people write facts as headings
+  // ("## I use Neovim").
+  const marks = BrainParse.headings(content)
+  const section = (line: number) => marks.findLast((mark) => mark.line < line)
+  const alone = marks.filter((mark, index) =>
+    rows.every((row) => (row.source_line ?? 0) < mark.line || (row.source_line ?? 0) > (marks[index + 1]?.line ?? Infinity)),
   )
-  const more = active.length - kept.length
+  const entries = [
+    ...alone.map((mark) => ({ line: mark.line, text: mark.text, row: undefined, heading: undefined })),
+    ...active.map((row) => ({ line: row.source_line ?? 0, text: `- ${row.body}`, row, heading: section(row.source_line ?? 0) })),
+  ].toSorted((a, b) => a.line - b.line)
+  const kept = entries.reduce<{ lines: string[]; rows: Row[]; headed: number[] }>(
+    (list, entry) => {
+      const head = entry.heading && !list.headed.includes(entry.heading.line) ? [entry.heading] : []
+      const lines = [...list.lines, ...head.map((mark) => mark.text), entry.text]
+      if (Token.estimate(lines.join("\n")) > BUDGET.memory - 40) return list
+      return {
+        lines,
+        rows: entry.row ? [...list.rows, entry.row] : list.rows,
+        headed: [...list.headed, ...head.map((mark) => mark.line)],
+      }
+    },
+    { lines: [], rows: [], headed: [] },
+  )
+  const more = active.length - kept.rows.length
   const text = [
-    ...kept.map((row) => `- ${row.body}`),
+    ...kept.lines,
     ...(more > 0 ? [`(${more} more saved item${more === 1 ? " is" : "s are"} recalled when relevant.)`] : []),
   ].join("\n")
-  return { ...(text ? { text } : {}), ids: kept.map((row) => row.id) }
+  return { ...(text ? { text } : {}), ids: kept.rows.map((row) => row.id) }
 }
 
 function label(place: Place, file: string) {
