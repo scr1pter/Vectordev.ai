@@ -177,8 +177,9 @@ export function classify(line: string, name: string, file = ""): "definition" | 
 }
 
 const REGISTRATION = [
-  // Express, Hono, Elysia, Fastify, Koa routers, chi and gin in Go: `.get("/x", …)`, `r.Get("/x", …)`.
-  /\.(get|post|put|patch|delete|head|options|all)\s*\(\s*["'`]/i,
+  // Express, Hono, Elysia, Fastify, Koa routers, chi and gin in Go: `.get("/x", …)`, `r.Get("/x", …)`, on a receiver
+  // named like a router or an app, or with a handler after the path (the second group).
+  /\.(get|post|put|patch|delete|head|options|all)\s*\(\s*["'`][^"'`]*["'`]\s*(,\s*(?:async\b|function\b|\(|[A-Za-z_$][\w$.]*\s*[,)]))?/i,
   // NestJS: `@Get("/x")`.
   /@(Get|Post|Put|Patch|Delete|Head|Options|All)\s*\(/,
   // Spring: `@GetMapping("/x")`, `@RequestMapping("/x")`.
@@ -191,9 +192,16 @@ const REGISTRATION = [
   /\b(HandleFunc|Handle)\s*\(/,
 ] as const
 
+// Receivers a `.get("/x")` registers a route on with no handler on its line: `app`, `router`, `r` (chi, gin), `e`
+// (Echo), `adminRouter`. On anything else it needs a handler after the path: `cache.get("/v1/users/1")` and an API
+// client's `api.get("/users")` are lookups.
+const ROUTER = /^(?:app|router|routes?|mux|group|[reg]|v\d+)$|(?:router|routes|app)$/i
+
 /** The routes a line registers, with their method when the line gives one. */
 export function routes(line: string) {
-  const registration = REGISTRATION.map((pattern) => pattern.exec(line)).find((match) => match !== null)
+  const registration = REGISTRATION.map((pattern) => pattern.exec(line)).find(
+    (match, at) => match !== null && (at > 0 || match[2] !== undefined || ROUTER.test(receiver(line, match.index))),
+  )
   if (!registration) return []
   const verb = registration[1]!.toUpperCase()
   const method = ["REQUEST", "ROUTE", "ALL", "HANDLEFUNC", "HANDLE"].includes(verb) ? undefined : verb
@@ -201,6 +209,11 @@ export function routes(line: string) {
     route: BrainExtract.route(match[2]!),
     ...((match[1] ?? method) ? { method: match[1] ?? method } : {}),
   }))
+}
+
+// The name a call at `at` is made on (its last 64 characters): `router` in `router.get(`.
+function receiver(line: string, at: number) {
+  return /[\w$]*$/.exec(line.slice(Math.max(0, at - 64), at))![0]
 }
 
 /** Whether a line registers the route a document names (with the same method, when both give one). */

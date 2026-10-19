@@ -144,6 +144,15 @@ describe("BrainAnchor.names", () => {
     expect(BrainAnchor.registers('mux.HandleFunc("GET /v1/users/{id}", users)', name)).toBe(true)
     expect(BrainAnchor.registers('app.post("/v1/users/:id", handler)', name)).toBe(false)
     expect(BrainAnchor.registers('const url = "/v1/users/" + id', name)).toBe(false)
+    // A lookup is not a route: a router-like receiver or a handler after the path is.
+    const health = { kind: "route" as const, text: "/v1/health" }
+    expect(BrainAnchor.registers('const status = cache.get("/v1/health")', health)).toBe(false)
+    expect(BrainAnchor.registers('const status = await api.get("/v1/health")', health)).toBe(false)
+    expect(BrainAnchor.registers('app.get("/v1/health")', health)).toBe(true)
+    expect(BrainAnchor.registers('r.Get("/v1/users/{id}", getUser)', name)).toBe(true)
+    expect(BrainAnchor.registers('usersRouter.get("/v1/users/:id",', name)).toBe(true)
+    expect(BrainAnchor.registers('billing.get("/v1/users/:id", async (c) => c.json(user))', name)).toBe(true)
+    expect(BrainAnchor.registers('new Elysia().get("/v1/users/:id", ({ params }) => find(params.id))', name)).toBe(true)
   })
 })
 
