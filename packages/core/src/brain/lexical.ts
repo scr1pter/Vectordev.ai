@@ -385,3 +385,48 @@ export function rank(documents: readonly Document[], query: ReadonlyMap<string, 
     })
     .toSorted((a, b) => b.score - a.score || a.id.localeCompare(b.id))
 }
+
+export type Posting = {
+  readonly item: number
+  readonly term: string
+  /** How often the term occurs in the item. */
+  readonly count: number
+  /** The item's length in terms. */
+  readonly length: number
+}
+
+/**
+ * `rank` over a stored keyword index: the postings of the query's terms, with the corpus's size, average item length
+ * and each term's document frequency, so a search reads only the rows for its own terms. The same corpus gives the same
+ * scores and order as `rank`, items in place of ids. A query term weighs its value up to 1: the counts `terms` gives
+ * weigh 1, as `rank` reads them, and a term added at 0.5 (house vocabulary) adds half.
+ */
+export function rankPostings(input: {
+  readonly postings: readonly Posting[]
+  readonly total: number
+  readonly average: number
+  readonly frequency: ReadonlyMap<string, number>
+  readonly query: ReadonlyMap<string, number>
+}) {
+  if (input.total === 0 || input.query.size === 0) return []
+  const average = Math.max(1, input.average)
+  const items = Map.groupBy(
+    input.postings.filter((posting) => input.query.has(posting.term)),
+    (posting) => posting.item,
+  )
+  return [...items]
+    .map(([item, postings]) => {
+      const counts = new Map(postings.map((posting) => [posting.term, posting.count]))
+      const length = postings[0]?.length ?? 0
+      const matched = [...input.query.keys()].filter((term) => counts.has(term))
+      const score = matched.reduce((sum, term) => {
+        const count = counts.get(term) ?? 0
+        const containing = input.frequency.get(term) ?? 0
+        const idf = Math.log(1 + (input.total - containing + 0.5) / (containing + 0.5))
+        const weight = Math.min(1, input.query.get(term) ?? 0)
+        return sum + (weight * (idf * (count * 2.2))) / (count + 1.2 * (0.25 + (0.75 * length) / average))
+      }, 0)
+      return { item, score, matched }
+    })
+    .toSorted((a, b) => b.score - a.score || a.item - b.item)
+}
