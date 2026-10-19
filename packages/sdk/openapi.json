@@ -6916,7 +6916,7 @@
             }
           }
         },
-        "description": "Turn Vector's learning on or off. Memory already saved stays until you erase it.",
+        "description": "Turn Vector's learning on or off, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.",
         "summary": "Change memory settings",
         "requestBody": {
           "content": {
@@ -6926,9 +6926,14 @@
                 "properties": {
                   "learning": {
                     "type": "boolean"
+                  },
+                  "repositoryDocs": {
+                    "type": "boolean"
+                  },
+                  "keepOriginals": {
+                    "type": "boolean"
                   }
                 },
-                "required": ["learning"],
                 "additionalProperties": false
               }
             }
@@ -6938,6 +6943,1332 @@
           {
             "lang": "js",
             "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.settings.update({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/documents": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.documents.list",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The repository's documents, with settings, limits and progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDocumentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Documents Vector keeps for the repository at `directory`: uploads, attachments, what the agent kept and the repository's own docs. Poll every couple of seconds while `indexing` is true.",
+        "summary": "List documents",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.list({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "tags": ["memory"],
+        "operationId": "memory.documents.upload",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document, queued to be read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDocumentResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "MemoryTooLargeError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryTooLargeError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Upload one file (at most 64 MB) as multipart form data. It is read on this computer into sections, passages and records. A file of the same name as a document here is refused with reason `version` unless `replace` is `true`.",
+        "summary": "Upload a document",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "origin": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": ["upload", "chat"]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sessionID": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "replace": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": ["true", "false"]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["file"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.upload({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/documents/path": {
+      "post": {
+        "tags": ["memory"],
+        "operationId": "memory.documents.path",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document, queued to be read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDocumentResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Add a file on the computer the engine runs on: an absolute path the user chose, or a path inside the repository. Only regular files are read, never a link, and a repository path must not lead out of it.",
+        "summary": "Add a document by path",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "origin": {
+                    "type": "string",
+                    "enum": ["upload", "chat"]
+                  },
+                  "sessionID": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "replace": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.path({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/documents/text": {
+      "post": {
+        "tags": ["memory"],
+        "operationId": "memory.documents.text",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document, queued to be read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDocumentResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "MemoryTooLargeError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryTooLargeError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Keep pasted text (at most 2 MB) as a Markdown document named `name`.",
+        "summary": "Add pasted text as a document",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "sessionID": {
+                    "type": "string"
+                  },
+                  "replace": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["name", "text"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.text({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/documents/probe": {
+      "post": {
+        "tags": ["memory"],
+        "operationId": "memory.documents.probe",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file's format, pages and size in tokens",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDocumentProbe"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read a file by path only for its format, pages and size in tokens, storing nothing, so the composer can suggest remembering it instead of sending it.",
+        "summary": "Probe a document",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.probe({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/documents/{documentID}": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.documents.get",
+        "parameters": [
+          {
+            "name": "documentID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A document's id, such as d4k2q7m3x"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One document with its outline, first records and versions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDocumentDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "One document: its outline, counts, first records, code links, held passages, warnings and versions.",
+        "summary": "Get a document",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.get({\n  ...\n})"
+          }
+        ]
+      },
+      "patch": {
+        "tags": ["memory"],
+        "operationId": "memory.documents.update",
+        "parameters": [
+          {
+            "name": "documentID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A document's id, such as d4k2q7m3x"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Rename it, change who may see it, approve or reject a held document, read it again, or pause and resume its reading.",
+        "summary": "Change a document",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "visibility": {
+                    "type": "string",
+                    "enum": ["private", "repository"]
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": ["approve", "reject", "reindex", "pause", "resume"]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.update({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["memory"],
+        "operationId": "memory.documents.remove",
+        "parameters": [
+          {
+            "name": "documentID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A document's id, such as d4k2q7m3x"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document was forgotten",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "The document was forgotten"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Forget a document and every version of it: its records, passages, links and kept copy. Vector does not keep it again on its own; you can always add it again.",
+        "summary": "Forget a document",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.remove({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/documents/{documentID}/pages/{page}": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.documents.page",
+        "parameters": [
+          {
+            "name": "documentID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A document's id, such as d4k2q7m3x"
+            },
+            "required": true
+          },
+          {
+            "name": "page",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A page number, from 1"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The page's text with the spans its records came from",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDocumentPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "The text Vector read from one page of a paged document, with where each record's quote sits.",
+        "summary": "Read a page of a document",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.page({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/documents/{documentID}/file": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.documents.file",
+        "parameters": [
+          {
+            "name": "documentID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A document's id, such as d4k2q7m3x"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "The original file as it was added, as an attachment, only while the repository keeps originals. The copy is not redacted.",
+        "summary": "Download a document's original",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.file({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/records": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.records.list",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "requirement",
+                "constraint",
+                "decision",
+                "contract",
+                "procedure",
+                "term",
+                "entity",
+                "fact",
+                "question"
+              ]
+            },
+            "required": false
+          },
+          {
+            "name": "document",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["active", "held", "archived", "all"]
+            },
+            "required": false
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of records",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryRecordPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Records Vector read from documents, in document order, or best first for `query`. Filter by `kind`, `document` and `status` (archived records are left out unless asked for); pass `cursor` for the next page.",
+        "summary": "List records",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.records.list({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/records/{recordID}": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.records.get",
+        "parameters": [
+          {
+            "name": "recordID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A record's id, such as r4k2q7m3x9ab"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One record with its passage, links, conflicts and history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryRecordDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "One record: the passage it came from, the code it is linked to, what it conflicts with and how it changed.",
+        "summary": "Get a record",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.records.get({\n  ...\n})"
+          }
+        ]
+      },
+      "patch": {
+        "tags": ["memory"],
+        "operationId": "memory.records.update",
+        "parameters": [
+          {
+            "name": "recordID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A record's id, such as r4k2q7m3x9ab"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The record after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryRecordResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Edit a record's text or kind, pin it, say it is not what Vector called it, forget or restore it, or save it as a memory entry. Edits and decisions hold when the document is read again.",
+        "summary": "Change a record",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "requirement",
+                      "constraint",
+                      "decision",
+                      "contract",
+                      "procedure",
+                      "term",
+                      "entity",
+                      "fact",
+                      "question"
+                    ]
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": ["not-applicable", "forget", "restore", "make-memory"]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.records.update({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/knowledge": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.knowledge",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cards for the ids that are still there",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemoryCard"
+                  },
+                  "description": "Cards for the ids that are still there"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "The cards for record, passage and document ids an answer cited, for citation chips. Ids that are gone or held are left out.",
+        "summary": "Resolve citations",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.knowledge({\n  ...\n})"
           }
         ]
       }
@@ -30277,6 +31608,218 @@
         "required": ["entry", "evidence", "related"],
         "additionalProperties": false
       },
+      "MemoryDocumentStats": {
+        "type": "object",
+        "properties": {
+          "tokens": {
+            "type": "number"
+          },
+          "read": {
+            "type": "number"
+          },
+          "sections": {
+            "type": "number"
+          },
+          "passages": {
+            "type": "number"
+          },
+          "records": {
+            "type": "number"
+          },
+          "kinds": {
+            "type": "object",
+            "properties": {
+              "requirement": {
+                "type": "number"
+              },
+              "constraint": {
+                "type": "number"
+              },
+              "decision": {
+                "type": "number"
+              },
+              "contract": {
+                "type": "number"
+              },
+              "procedure": {
+                "type": "number"
+              },
+              "term": {
+                "type": "number"
+              },
+              "entity": {
+                "type": "number"
+              },
+              "fact": {
+                "type": "number"
+              },
+              "question": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "requirement",
+              "constraint",
+              "decision",
+              "contract",
+              "procedure",
+              "term",
+              "entity",
+              "fact",
+              "question"
+            ],
+            "additionalProperties": false
+          },
+          "held": {
+            "type": "number"
+          },
+          "linked": {
+            "type": "number"
+          },
+          "embedded": {
+            "type": "number"
+          }
+        },
+        "required": ["tokens", "read", "sections", "passages", "records", "kinds", "held", "linked", "embedded"],
+        "additionalProperties": false
+      },
+      "MemoryDocument": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "ordinal": {
+            "type": "number"
+          },
+          "version": {
+            "type": "number"
+          },
+          "previous": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": ["pdf", "docx", "pptx", "xlsx", "csv", "markdown", "html", "json", "yaml", "openapi", "text"]
+          },
+          "origin": {
+            "type": "string",
+            "enum": ["upload", "chat", "agent", "repository", "cli"]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": ["private", "repository"]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "reading",
+              "linking",
+              "searchable",
+              "embedding",
+              "ready",
+              "partial",
+              "held",
+              "failed",
+              "superseded"
+            ]
+          },
+          "hold": {
+            "type": "string",
+            "enum": [
+              "web",
+              "mcp",
+              "subagent",
+              "untrusted-repository",
+              "guest",
+              "instruction-like",
+              "hidden-unicode",
+              "hidden-text",
+              "suggested"
+            ]
+          },
+          "bytes": {
+            "type": "number"
+          },
+          "pages": {
+            "type": "number"
+          },
+          "unread": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "sourcePath": {
+            "type": "string"
+          },
+          "stored": {
+            "type": "boolean"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/MemoryDocumentStats"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "truncated",
+                "scanned",
+                "encrypted",
+                "macros-ignored",
+                "external-links",
+                "secrets-removed",
+                "tables-approximate"
+              ]
+            }
+          },
+          "error": {
+            "type": "string"
+          },
+          "embedModel": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "indexedAt": {
+            "type": "number"
+          },
+          "paused": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "ordinal",
+          "version",
+          "name",
+          "title",
+          "format",
+          "origin",
+          "visibility",
+          "status",
+          "bytes",
+          "unread",
+          "stored",
+          "stats",
+          "warnings",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
       "MemoryError": {
         "type": "object",
         "properties": {
@@ -30293,6 +31836,12 @@
               },
               "message": {
                 "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "document": {
+                "$ref": "#/components/schemas/MemoryDocument"
               }
             },
             "required": ["code", "message"],
@@ -30329,9 +31878,740 @@
         "properties": {
           "learning": {
             "type": "boolean"
+          },
+          "repositoryDocs": {
+            "type": "boolean"
+          },
+          "keepOriginals": {
+            "type": "boolean"
           }
         },
-        "required": ["learning"],
+        "required": ["learning", "repositoryDocs", "keepOriginals"],
+        "additionalProperties": false
+      },
+      "MemoryModelStatus": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": ["absent", "downloading", "verifying", "ready", "failed"]
+          },
+          "model": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "number"
+          },
+          "bytes": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": ["state"],
+        "additionalProperties": false
+      },
+      "MemoryDocumentLimits": {
+        "type": "object",
+        "properties": {
+          "upload": {
+            "type": "number"
+          },
+          "text": {
+            "type": "number"
+          },
+          "documents": {
+            "type": "number"
+          },
+          "repository": {
+            "type": "number"
+          },
+          "perMinute": {
+            "type": "number"
+          }
+        },
+        "required": ["upload", "text", "documents", "repository", "perMinute"],
+        "additionalProperties": false
+      },
+      "MemoryWorker": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["worker", "in-process"]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "threads": {
+            "type": "number"
+          }
+        },
+        "required": ["mode", "threads"],
+        "additionalProperties": false
+      },
+      "MemoryDocumentList": {
+        "type": "object",
+        "properties": {
+          "documents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryDocument"
+            }
+          },
+          "model": {
+            "$ref": "#/components/schemas/MemoryModelStatus"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/MemorySettings"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/MemoryDocumentLimits"
+          },
+          "indexing": {
+            "type": "boolean"
+          },
+          "worker": {
+            "$ref": "#/components/schemas/MemoryWorker"
+          }
+        },
+        "required": ["documents", "model", "settings", "limits", "indexing", "worker"],
+        "additionalProperties": false
+      },
+      "MemoryDocumentResult": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["queued", "unchanged", "version"]
+          },
+          "document": {
+            "$ref": "#/components/schemas/MemoryDocument"
+          },
+          "previous": {
+            "type": "string"
+          }
+        },
+        "required": ["type", "document"],
+        "additionalProperties": false
+      },
+      "MemoryTooLargeError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["MemoryTooLargeError"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
+        "additionalProperties": false
+      },
+      "MemoryDocumentProbe": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": ["pdf", "docx", "pptx", "xlsx", "csv", "markdown", "html", "json", "yaml", "openapi", "text"]
+          },
+          "pages": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "number"
+          },
+          "suggest": {
+            "type": "string",
+            "enum": ["remember-instead", "none"]
+          }
+        },
+        "required": ["format", "tokens", "suggest"],
+        "additionalProperties": false
+      },
+      "MemoryRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "document": {
+            "type": "string"
+          },
+          "passage": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "requirement",
+              "constraint",
+              "decision",
+              "contract",
+              "procedure",
+              "term",
+              "entity",
+              "fact",
+              "question"
+            ]
+          },
+          "subject": {
+            "type": "string"
+          },
+          "card": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "object"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "proposed", "quarantined", "archived"]
+          },
+          "hold": {
+            "type": "string",
+            "enum": [
+              "web",
+              "mcp",
+              "subagent",
+              "untrusted-repository",
+              "guest",
+              "instruction-like",
+              "hidden-unicode",
+              "hidden-text",
+              "suggested"
+            ]
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "origin": {
+            "type": "string",
+            "enum": ["extracted", "distilled", "user"]
+          },
+          "userEdited": {
+            "type": "boolean"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "page": {
+            "type": "number"
+          },
+          "changedVersion": {
+            "type": "number"
+          },
+          "uses": {
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "document",
+          "passage",
+          "section",
+          "kind",
+          "subject",
+          "card",
+          "quote",
+          "fields",
+          "status",
+          "confidence",
+          "origin",
+          "userEdited",
+          "pinned",
+          "uses",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "MemoryRecordPage": {
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryRecord"
+            }
+          },
+          "cursor": {
+            "type": "string"
+          }
+        },
+        "required": ["records"],
+        "additionalProperties": false
+      },
+      "MemoryAnchor": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "line": {
+            "type": "number"
+          },
+          "method": {
+            "type": "string",
+            "enum": ["path", "definition", "use", "route", "env", "constant", "user", "outcome"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["fresh", "drifted", "missing"]
+          },
+          "origin": {
+            "type": "string",
+            "enum": ["extracted", "user", "outcome"]
+          },
+          "checkedAt": {
+            "type": "number"
+          }
+        },
+        "required": ["owner", "path", "method", "status", "origin", "checkedAt"],
+        "additionalProperties": false
+      },
+      "MemoryDocumentDetail": {
+        "type": "object",
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/MemoryDocument"
+          },
+          "outline": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "heading": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "level": {
+                  "type": "number"
+                },
+                "pageStart": {
+                  "type": "number"
+                },
+                "pageEnd": {
+                  "type": "number"
+                }
+              },
+              "required": ["id", "heading", "path", "level"],
+              "additionalProperties": false
+            }
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "records": {
+                "type": "number"
+              },
+              "active": {
+                "type": "number"
+              },
+              "held": {
+                "type": "number"
+              },
+              "archived": {
+                "type": "number"
+              },
+              "passages": {
+                "type": "number"
+              }
+            },
+            "required": ["records", "active", "held", "archived", "passages"],
+            "additionalProperties": false
+          },
+          "records": {
+            "$ref": "#/components/schemas/MemoryRecordPage"
+          },
+          "anchors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryAnchor"
+            }
+          },
+          "held": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "hold": {
+                  "type": "string",
+                  "enum": [
+                    "web",
+                    "mcp",
+                    "subagent",
+                    "untrusted-repository",
+                    "guest",
+                    "instruction-like",
+                    "hidden-unicode",
+                    "hidden-text",
+                    "suggested"
+                  ]
+                },
+                "page": {
+                  "type": "number"
+                }
+              },
+              "required": ["id", "hold"],
+              "additionalProperties": false
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "truncated",
+                "scanned",
+                "encrypted",
+                "macros-ignored",
+                "external-links",
+                "secrets-removed",
+                "tables-approximate"
+              ]
+            }
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "number"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "queued",
+                    "reading",
+                    "linking",
+                    "searchable",
+                    "embedding",
+                    "ready",
+                    "partial",
+                    "held",
+                    "failed",
+                    "superseded"
+                  ]
+                },
+                "bytes": {
+                  "type": "number"
+                },
+                "createdAt": {
+                  "type": "number"
+                }
+              },
+              "required": ["id", "version", "status", "bytes", "createdAt"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["document", "outline", "counts", "records", "anchors", "held", "warnings", "versions"],
+        "additionalProperties": false
+      },
+      "MemoryDocumentPage": {
+        "type": "object",
+        "properties": {
+          "document": {
+            "type": "string"
+          },
+          "page": {
+            "type": "number"
+          },
+          "pages": {
+            "type": "number"
+          },
+          "unread": {
+            "type": "boolean"
+          },
+          "passages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "section": {
+                  "type": "string"
+                },
+                "page": {
+                  "type": "number"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "hold": {
+                  "type": "string",
+                  "enum": [
+                    "web",
+                    "mcp",
+                    "subagent",
+                    "untrusted-repository",
+                    "guest",
+                    "instruction-like",
+                    "hidden-unicode",
+                    "hidden-text",
+                    "suggested"
+                  ]
+                },
+                "records": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "requirement",
+                          "constraint",
+                          "decision",
+                          "contract",
+                          "procedure",
+                          "term",
+                          "entity",
+                          "fact",
+                          "question"
+                        ]
+                      },
+                      "start": {
+                        "type": "number"
+                      },
+                      "end": {
+                        "type": "number"
+                      },
+                      "page": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["id", "kind", "start", "end"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["id", "section", "text", "records"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["document", "page", "pages", "unread", "passages"],
+        "additionalProperties": false
+      },
+      "MemoryPassage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "document": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "page": {
+            "type": "number"
+          },
+          "header": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "tokens": {
+            "type": "number"
+          }
+        },
+        "required": ["id", "document", "section", "header", "text", "tokens"],
+        "additionalProperties": false
+      },
+      "MemoryReviewItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["conflict", "drift", "held"]
+          },
+          "a": {
+            "type": "string"
+          },
+          "b": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "object"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["open", "dismissed", "resolved"]
+          },
+          "winner": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          }
+        },
+        "required": ["id", "kind", "a", "subject", "detail", "status", "createdAt", "updatedAt"],
+        "additionalProperties": false
+      },
+      "MemoryRecordEvent": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "number"
+          },
+          "action": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string",
+            "enum": ["user", "agent", "vector"]
+          },
+          "detail": {
+            "type": "object"
+          }
+        },
+        "required": ["at", "action", "actor"],
+        "additionalProperties": false
+      },
+      "MemoryRecordDetail": {
+        "type": "object",
+        "properties": {
+          "record": {
+            "$ref": "#/components/schemas/MemoryRecord"
+          },
+          "passage": {
+            "$ref": "#/components/schemas/MemoryPassage"
+          },
+          "anchors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryAnchor"
+            }
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryReviewItem"
+            }
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryRecordEvent"
+            }
+          }
+        },
+        "required": ["record", "anchors", "conflicts", "history"],
+        "additionalProperties": false
+      },
+      "MemoryRecordResult": {
+        "type": "object",
+        "properties": {
+          "record": {
+            "$ref": "#/components/schemas/MemoryRecord"
+          },
+          "entry": {
+            "$ref": "#/components/schemas/MemoryEntry"
+          }
+        },
+        "required": ["record"],
+        "additionalProperties": false
+      },
+      "MemoryCard": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "requirement",
+              "constraint",
+              "decision",
+              "contract",
+              "procedure",
+              "term",
+              "entity",
+              "fact",
+              "question",
+              "passage",
+              "document"
+            ]
+          },
+          "document": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "page": {
+            "type": "number"
+          },
+          "section": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "kind", "document", "title", "text"],
         "additionalProperties": false
       },
       "Project": {

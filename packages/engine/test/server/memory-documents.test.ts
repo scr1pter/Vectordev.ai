@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process"
 import fs from "fs/promises"
 import path from "path"
 import { Flag } from "@vectordevai/core/flag/flag"
+import { createVectorClient } from "@vectordevai/sdk/v2"
 import { ServerAuth } from "../../src/server/auth"
 import { Server } from "../../src/server/server"
 import { resetDatabase } from "../fixture/db"
@@ -310,6 +311,19 @@ describe("memory document routes", () => {
     expect(page).toMatchObject({ page: 21, pages: 21, unread: false })
     expect(page.passages.map((passage: { text: string }) => passage.text).join("\n")).toContain("Page 21")
     expect((await call(at(tmp.path, `/memory/documents/${id}/pages/22`), { headers: owner })).status).toBe(400)
+  }, 60_000)
+
+  test("the generated SDK uploads a file as multipart form data and reads it back", async () => {
+    await using tmp = await tmpdir({ git: true, trusted: true, config: { formatter: false, lsp: false } })
+    const sdk = createVectorClient({ baseUrl: listener.url.origin, directory: tmp.path, headers: owner })
+    const uploaded = await sdk.memory.documents.upload({ file: new File([SPEC], "Auth spec.md"), title: "From the SDK" })
+    expect(uploaded.error).toBeUndefined()
+    expect(uploaded.data).toMatchObject({ type: "queued", document: { title: "From the SDK", format: "markdown" } })
+    await searchable(tmp.path, uploaded.data!.document.id)
+    const records = await sdk.memory.records.list({ document: uploaded.data!.document.id, limit: "2" })
+    expect(records.data?.records).toHaveLength(2)
+    const asked = await sdk.memory.documents.upload({ file: new File([`${SPEC}\nMore.\n`], "Auth spec.md") })
+    expect(asked.error).toMatchObject({ data: { reason: "version" } })
   }, 60_000)
 
   test("a repository that keeps originals serves the kept copy only as a download, and stops when told", async () => {

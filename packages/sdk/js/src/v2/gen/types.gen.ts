@@ -2932,11 +2932,89 @@ export type MemoryDetail = {
   related: Array<MemoryEntry>
 }
 
+export type MemoryDocumentStats = {
+  tokens: number
+  read: number
+  sections: number
+  passages: number
+  records: number
+  kinds: {
+    requirement: number
+    constraint: number
+    decision: number
+    contract: number
+    procedure: number
+    term: number
+    entity: number
+    fact: number
+    question: number
+  }
+  held: number
+  linked: number
+  embedded: number
+}
+
+export type MemoryDocument = {
+  id: string
+  ordinal: number
+  version: number
+  previous?: string
+  name: string
+  title: string
+  format: "pdf" | "docx" | "pptx" | "xlsx" | "csv" | "markdown" | "html" | "json" | "yaml" | "openapi" | "text"
+  origin: "upload" | "chat" | "agent" | "repository" | "cli"
+  visibility: "private" | "repository"
+  status:
+    | "queued"
+    | "reading"
+    | "linking"
+    | "searchable"
+    | "embedding"
+    | "ready"
+    | "partial"
+    | "held"
+    | "failed"
+    | "superseded"
+  hold?:
+    | "web"
+    | "mcp"
+    | "subagent"
+    | "untrusted-repository"
+    | "guest"
+    | "instruction-like"
+    | "hidden-unicode"
+    | "hidden-text"
+    | "suggested"
+  bytes: number
+  pages?: number
+  unread: Array<number>
+  sourcePath?: string
+  stored: boolean
+  stats: MemoryDocumentStats
+  warnings: Array<
+    | "truncated"
+    | "scanned"
+    | "encrypted"
+    | "macros-ignored"
+    | "external-links"
+    | "secrets-removed"
+    | "tables-approximate"
+  >
+  error?: string
+  embedModel?: string
+  createdAt: number
+  updatedAt: number
+  indexedAt?: number
+  paused?: boolean
+}
+
 export type MemoryError = {
   name: "MemoryError"
   data: {
     code: "refused" | "not-found"
     message: string
+    reason?: string
+    document?: MemoryDocument
   }
 }
 
@@ -2950,6 +3028,278 @@ export type MemoryTidy = {
 
 export type MemorySettings = {
   learning: boolean
+  repositoryDocs: boolean
+  keepOriginals: boolean
+}
+
+export type MemoryModelStatus = {
+  state: "absent" | "downloading" | "verifying" | "ready" | "failed"
+  model?: string
+  progress?: number
+  bytes?: number
+  total?: number
+  error?: string
+}
+
+export type MemoryDocumentLimits = {
+  upload: number
+  text: number
+  documents: number
+  repository: number
+  perMinute: number
+}
+
+export type MemoryWorker = {
+  mode: "worker" | "in-process"
+  reason?: string
+  threads: number
+}
+
+export type MemoryDocumentList = {
+  documents: Array<MemoryDocument>
+  model: MemoryModelStatus
+  settings: MemorySettings
+  limits: MemoryDocumentLimits
+  indexing: boolean
+  worker: MemoryWorker
+}
+
+export type MemoryDocumentResult = {
+  type: "queued" | "unchanged" | "version"
+  document: MemoryDocument
+  previous?: string
+}
+
+export type MemoryTooLargeError = {
+  name: "MemoryTooLargeError"
+  data: {
+    message: string
+  }
+}
+
+export type MemoryDocumentProbe = {
+  format: "pdf" | "docx" | "pptx" | "xlsx" | "csv" | "markdown" | "html" | "json" | "yaml" | "openapi" | "text"
+  pages?: number
+  tokens: number
+  suggest: "remember-instead" | "none"
+}
+
+export type MemoryRecord = {
+  id: string
+  document: string
+  passage: string
+  section: string
+  kind: "requirement" | "constraint" | "decision" | "contract" | "procedure" | "term" | "entity" | "fact" | "question"
+  subject: string
+  card: string
+  quote: string
+  fields: {
+    [key: string]: unknown
+  }
+  status: "active" | "proposed" | "quarantined" | "archived"
+  hold?:
+    | "web"
+    | "mcp"
+    | "subagent"
+    | "untrusted-repository"
+    | "guest"
+    | "instruction-like"
+    | "hidden-unicode"
+    | "hidden-text"
+    | "suggested"
+  confidence: number
+  origin: "extracted" | "distilled" | "user"
+  userEdited: boolean
+  pinned: boolean
+  page?: number
+  changedVersion?: number
+  uses: number
+  createdAt: number
+  updatedAt: number
+}
+
+export type MemoryRecordPage = {
+  records: Array<MemoryRecord>
+  cursor?: string
+}
+
+export type MemoryAnchor = {
+  owner: string
+  path: string
+  symbol?: string
+  line?: number
+  method: "path" | "definition" | "use" | "route" | "env" | "constant" | "user" | "outcome"
+  status: "fresh" | "drifted" | "missing"
+  origin: "extracted" | "user" | "outcome"
+  checkedAt: number
+}
+
+export type MemoryDocumentDetail = {
+  document: MemoryDocument
+  outline: Array<{
+    id: string
+    heading: string
+    path: string
+    level: number
+    pageStart?: number
+    pageEnd?: number
+  }>
+  counts: {
+    records: number
+    active: number
+    held: number
+    archived: number
+    passages: number
+  }
+  records: MemoryRecordPage
+  anchors: Array<MemoryAnchor>
+  held: Array<{
+    id: string
+    hold:
+      | "web"
+      | "mcp"
+      | "subagent"
+      | "untrusted-repository"
+      | "guest"
+      | "instruction-like"
+      | "hidden-unicode"
+      | "hidden-text"
+      | "suggested"
+    page?: number
+  }>
+  warnings: Array<
+    | "truncated"
+    | "scanned"
+    | "encrypted"
+    | "macros-ignored"
+    | "external-links"
+    | "secrets-removed"
+    | "tables-approximate"
+  >
+  versions: Array<{
+    id: string
+    version: number
+    status:
+      | "queued"
+      | "reading"
+      | "linking"
+      | "searchable"
+      | "embedding"
+      | "ready"
+      | "partial"
+      | "held"
+      | "failed"
+      | "superseded"
+    bytes: number
+    createdAt: number
+  }>
+}
+
+export type MemoryDocumentPage = {
+  document: string
+  page: number
+  pages: number
+  unread: boolean
+  passages: Array<{
+    id: string
+    section: string
+    page?: number
+    text: string
+    hold?:
+      | "web"
+      | "mcp"
+      | "subagent"
+      | "untrusted-repository"
+      | "guest"
+      | "instruction-like"
+      | "hidden-unicode"
+      | "hidden-text"
+      | "suggested"
+    records: Array<{
+      id: string
+      kind:
+        | "requirement"
+        | "constraint"
+        | "decision"
+        | "contract"
+        | "procedure"
+        | "term"
+        | "entity"
+        | "fact"
+        | "question"
+      start: number
+      end: number
+      page?: number
+    }>
+  }>
+}
+
+export type MemoryPassage = {
+  id: string
+  document: string
+  section: string
+  page?: number
+  header: string
+  text: string
+  tokens: number
+}
+
+export type MemoryReviewItem = {
+  id: string
+  kind: "conflict" | "drift" | "held"
+  a: string
+  b?: string
+  subject: string
+  detail: {
+    [key: string]: unknown
+  }
+  status: "open" | "dismissed" | "resolved"
+  winner?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export type MemoryRecordEvent = {
+  at: number
+  action: string
+  actor: "user" | "agent" | "vector"
+  detail?: {
+    [key: string]: unknown
+  }
+}
+
+export type MemoryRecordDetail = {
+  record: MemoryRecord
+  passage?: MemoryPassage
+  anchors: Array<MemoryAnchor>
+  conflicts: Array<MemoryReviewItem>
+  history: Array<MemoryRecordEvent>
+}
+
+export type MemoryRecordResult = {
+  record: MemoryRecord
+  entry?: MemoryEntry
+}
+
+export type MemoryCard = {
+  id: string
+  kind:
+    | "requirement"
+    | "constraint"
+    | "decision"
+    | "contract"
+    | "procedure"
+    | "term"
+    | "entity"
+    | "fact"
+    | "question"
+    | "passage"
+    | "document"
+  document: string
+  title: string
+  page?: number
+  section?: string
+  text: string
 }
 
 export type Project = {
@@ -11802,7 +12152,9 @@ export type MemorySettingsGetResponse = MemorySettingsGetResponses[keyof MemoryS
 
 export type MemorySettingsUpdateData = {
   body?: {
-    learning: boolean
+    learning?: boolean
+    repositoryDocs?: boolean
+    keepOriginals?: boolean
   }
   path?: never
   query?: {
@@ -11833,6 +12185,554 @@ export type MemorySettingsUpdateResponses = {
 }
 
 export type MemorySettingsUpdateResponse = MemorySettingsUpdateResponses[keyof MemorySettingsUpdateResponses]
+
+export type MemoryDocumentsListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/documents"
+}
+
+export type MemoryDocumentsListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryDocumentsListError = MemoryDocumentsListErrors[keyof MemoryDocumentsListErrors]
+
+export type MemoryDocumentsListResponses = {
+  /**
+   * The repository's documents, with settings, limits and progress
+   */
+  200: MemoryDocumentList
+}
+
+export type MemoryDocumentsListResponse = MemoryDocumentsListResponses[keyof MemoryDocumentsListResponses]
+
+export type MemoryDocumentsUploadData = {
+  body?: {
+    file: Blob | File
+    origin?: "upload" | "chat" | null
+    sessionID?: string | null
+    title?: string | null
+    replace?: "true" | "false" | null
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/documents"
+}
+
+export type MemoryDocumentsUploadErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * MemoryTooLargeError
+   */
+  413: MemoryTooLargeError
+}
+
+export type MemoryDocumentsUploadError = MemoryDocumentsUploadErrors[keyof MemoryDocumentsUploadErrors]
+
+export type MemoryDocumentsUploadResponses = {
+  /**
+   * The document, queued to be read
+   */
+  200: MemoryDocumentResult
+}
+
+export type MemoryDocumentsUploadResponse = MemoryDocumentsUploadResponses[keyof MemoryDocumentsUploadResponses]
+
+export type MemoryDocumentsPathData = {
+  body?: {
+    path: string
+    origin?: "upload" | "chat"
+    sessionID?: string
+    title?: string
+    replace?: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/documents/path"
+}
+
+export type MemoryDocumentsPathErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryDocumentsPathError = MemoryDocumentsPathErrors[keyof MemoryDocumentsPathErrors]
+
+export type MemoryDocumentsPathResponses = {
+  /**
+   * The document, queued to be read
+   */
+  200: MemoryDocumentResult
+}
+
+export type MemoryDocumentsPathResponse = MemoryDocumentsPathResponses[keyof MemoryDocumentsPathResponses]
+
+export type MemoryDocumentsTextData = {
+  body?: {
+    name: string
+    text: string
+    sessionID?: string
+    replace?: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/documents/text"
+}
+
+export type MemoryDocumentsTextErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * MemoryTooLargeError
+   */
+  413: MemoryTooLargeError
+}
+
+export type MemoryDocumentsTextError = MemoryDocumentsTextErrors[keyof MemoryDocumentsTextErrors]
+
+export type MemoryDocumentsTextResponses = {
+  /**
+   * The document, queued to be read
+   */
+  200: MemoryDocumentResult
+}
+
+export type MemoryDocumentsTextResponse = MemoryDocumentsTextResponses[keyof MemoryDocumentsTextResponses]
+
+export type MemoryDocumentsProbeData = {
+  body?: {
+    path: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/documents/probe"
+}
+
+export type MemoryDocumentsProbeErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryDocumentsProbeError = MemoryDocumentsProbeErrors[keyof MemoryDocumentsProbeErrors]
+
+export type MemoryDocumentsProbeResponses = {
+  /**
+   * The file's format, pages and size in tokens
+   */
+  200: MemoryDocumentProbe
+}
+
+export type MemoryDocumentsProbeResponse = MemoryDocumentsProbeResponses[keyof MemoryDocumentsProbeResponses]
+
+export type MemoryDocumentsRemoveData = {
+  body?: never
+  path: {
+    /**
+     * A document's id, such as d4k2q7m3x
+     */
+    documentID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/documents/{documentID}"
+}
+
+export type MemoryDocumentsRemoveErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryDocumentsRemoveError = MemoryDocumentsRemoveErrors[keyof MemoryDocumentsRemoveErrors]
+
+export type MemoryDocumentsRemoveResponses = {
+  /**
+   * The document was forgotten
+   */
+  200: boolean
+}
+
+export type MemoryDocumentsRemoveResponse = MemoryDocumentsRemoveResponses[keyof MemoryDocumentsRemoveResponses]
+
+export type MemoryDocumentsGetData = {
+  body?: never
+  path: {
+    /**
+     * A document's id, such as d4k2q7m3x
+     */
+    documentID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/documents/{documentID}"
+}
+
+export type MemoryDocumentsGetErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryDocumentsGetError = MemoryDocumentsGetErrors[keyof MemoryDocumentsGetErrors]
+
+export type MemoryDocumentsGetResponses = {
+  /**
+   * One document with its outline, first records and versions
+   */
+  200: MemoryDocumentDetail
+}
+
+export type MemoryDocumentsGetResponse = MemoryDocumentsGetResponses[keyof MemoryDocumentsGetResponses]
+
+export type MemoryDocumentsUpdateData = {
+  body?: {
+    title?: string
+    visibility?: "private" | "repository"
+    action?: "approve" | "reject" | "reindex" | "pause" | "resume"
+  }
+  path: {
+    /**
+     * A document's id, such as d4k2q7m3x
+     */
+    documentID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/documents/{documentID}"
+}
+
+export type MemoryDocumentsUpdateErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryDocumentsUpdateError = MemoryDocumentsUpdateErrors[keyof MemoryDocumentsUpdateErrors]
+
+export type MemoryDocumentsUpdateResponses = {
+  /**
+   * The document after the change
+   */
+  200: MemoryDocument
+}
+
+export type MemoryDocumentsUpdateResponse = MemoryDocumentsUpdateResponses[keyof MemoryDocumentsUpdateResponses]
+
+export type MemoryDocumentsPageData = {
+  body?: never
+  path: {
+    /**
+     * A document's id, such as d4k2q7m3x
+     */
+    documentID: string
+    /**
+     * A page number, from 1
+     */
+    page: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/documents/{documentID}/pages/{page}"
+}
+
+export type MemoryDocumentsPageErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryDocumentsPageError = MemoryDocumentsPageErrors[keyof MemoryDocumentsPageErrors]
+
+export type MemoryDocumentsPageResponses = {
+  /**
+   * The page's text with the spans its records came from
+   */
+  200: MemoryDocumentPage
+}
+
+export type MemoryDocumentsPageResponse = MemoryDocumentsPageResponses[keyof MemoryDocumentsPageResponses]
+
+export type MemoryDocumentsFileData = {
+  body?: never
+  path: {
+    /**
+     * A document's id, such as d4k2q7m3x
+     */
+    documentID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/documents/{documentID}/file"
+}
+
+export type MemoryDocumentsFileErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryDocumentsFileError = MemoryDocumentsFileErrors[keyof MemoryDocumentsFileErrors]
+
+export type MemoryDocumentsFileResponses = {
+  /**
+   * Success
+   */
+  200: Blob | File
+}
+
+export type MemoryDocumentsFileResponse = MemoryDocumentsFileResponses[keyof MemoryDocumentsFileResponses]
+
+export type MemoryRecordsListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    kind?:
+      | "requirement"
+      | "constraint"
+      | "decision"
+      | "contract"
+      | "procedure"
+      | "term"
+      | "entity"
+      | "fact"
+      | "question"
+    document?: string
+    query?: string
+    status?: "active" | "held" | "archived" | "all"
+    cursor?: string
+    limit?: string
+  }
+  url: "/memory/records"
+}
+
+export type MemoryRecordsListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryRecordsListError = MemoryRecordsListErrors[keyof MemoryRecordsListErrors]
+
+export type MemoryRecordsListResponses = {
+  /**
+   * A page of records
+   */
+  200: MemoryRecordPage
+}
+
+export type MemoryRecordsListResponse = MemoryRecordsListResponses[keyof MemoryRecordsListResponses]
+
+export type MemoryRecordsGetData = {
+  body?: never
+  path: {
+    /**
+     * A record's id, such as r4k2q7m3x9ab
+     */
+    recordID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/records/{recordID}"
+}
+
+export type MemoryRecordsGetErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryRecordsGetError = MemoryRecordsGetErrors[keyof MemoryRecordsGetErrors]
+
+export type MemoryRecordsGetResponses = {
+  /**
+   * One record with its passage, links, conflicts and history
+   */
+  200: MemoryRecordDetail
+}
+
+export type MemoryRecordsGetResponse = MemoryRecordsGetResponses[keyof MemoryRecordsGetResponses]
+
+export type MemoryRecordsUpdateData = {
+  body?: {
+    text?: string
+    kind?:
+      | "requirement"
+      | "constraint"
+      | "decision"
+      | "contract"
+      | "procedure"
+      | "term"
+      | "entity"
+      | "fact"
+      | "question"
+    pinned?: boolean
+    action?: "not-applicable" | "forget" | "restore" | "make-memory"
+  }
+  path: {
+    /**
+     * A record's id, such as r4k2q7m3x9ab
+     */
+    recordID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/records/{recordID}"
+}
+
+export type MemoryRecordsUpdateErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryRecordsUpdateError = MemoryRecordsUpdateErrors[keyof MemoryRecordsUpdateErrors]
+
+export type MemoryRecordsUpdateResponses = {
+  /**
+   * The record after the change
+   */
+  200: MemoryRecordResult
+}
+
+export type MemoryRecordsUpdateResponse = MemoryRecordsUpdateResponses[keyof MemoryRecordsUpdateResponses]
+
+export type MemoryKnowledgeData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    ids: string
+  }
+  url: "/memory/knowledge"
+}
+
+export type MemoryKnowledgeErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryKnowledgeError = MemoryKnowledgeErrors[keyof MemoryKnowledgeErrors]
+
+export type MemoryKnowledgeResponses = {
+  /**
+   * Cards for the ids that are still there
+   */
+  200: Array<MemoryCard>
+}
+
+export type MemoryKnowledgeResponse = MemoryKnowledgeResponses[keyof MemoryKnowledgeResponses]
 
 export type ProjectListData = {
   body?: never
