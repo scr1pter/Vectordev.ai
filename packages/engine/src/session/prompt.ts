@@ -2238,7 +2238,7 @@ const layer = Layer.effect(
           const request = msgs[start]!
           const given = SessionMemory.delivered(turn)
           const fetched = SessionMemory.fetched(turn)
-          if (given.size === 0 && fetched.length === 0) return Effect.void
+          if (!SessionMemory.finished(turn) || (given.size === 0 && fetched.length === 0)) return Effect.void
           return knowledge.credit(place, {
             sessionID,
             requestID: request.info.id,

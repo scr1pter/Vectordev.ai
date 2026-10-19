@@ -40,6 +40,7 @@ import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
+import { SessionMemory } from "../../src/session/memory"
 import { SessionRunState } from "../../src/session/run-state"
 import { SessionStatus } from "../../src/session/status"
 import { Skill } from "../../src/skill"
@@ -357,6 +358,30 @@ it.instance(
       const done = yield* settled(record.id, entry, 1)
       expect(done.credited).toBe(1)
       expect(done.item).toEqual({ helpful: 0, harmful: 0 })
+    }),
+  { git: true },
+  90_000,
+)
+
+it.instance(
+  "a request whose run has not answered it yet is not credited until it has",
+  () =>
+    Effect.gen(function* () {
+      const { record, entry, dir } = yield* setup()
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* script(dir, `Retries now stop after three, as [${record.id}] says.`)
+      yield* send(chat.id, "make the client retry after a 429 response like the spec says")
+      yield* settled(record.id, entry, 1)
+      const saved = yield* sessions.messages({ sessionID: chat.id })
+      // The turn as it was before its answer came: still at its tool calls.
+      const answered = saved.filter((message) => message.info.role !== "user")
+      expect(SessionMemory.finished(saved)).toBe(true)
+      expect(SessionMemory.finished(saved.slice(0, 1))).toBe(false)
+      expect(SessionMemory.finished(saved.slice(0, saved.indexOf(answered.at(-1)!)))).toBe(false)
     }),
   { git: true },
   90_000,

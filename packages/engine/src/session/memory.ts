@@ -444,6 +444,15 @@ export function delivered(messages: readonly SessionV1.WithParts[]) {
   ])
 }
 
+/**
+ * Whether a request's turn is over: its last message is the agent's finished answer. A request admitted while the run
+ * before it was ending has none yet, and is credited once its own run answers it.
+ */
+export function finished(turn: readonly SessionV1.WithParts[]) {
+  const last = turn.at(-1)?.info
+  return last?.role === "assistant" && last.time.completed !== undefined && last.finish !== undefined && last.finish !== "tool-calls"
+}
+
 /** The ids an answer cited as [id] that it was given: a made-up or mistyped id is no citation. */
 export function cited(text: string, given: ReadonlySet<string>) {
   return [...new Set([...text.matchAll(CITATION)].flatMap((match) => (match[1] ? [match[1]] : [])))].filter((id) =>
