@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import fs from "node:fs/promises"
 import path from "node:path"
-import { sql } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { Effect, Layer } from "effect"
+import { BrainJobTable } from "@vectordevai/core/brain/sql"
 import { BrainWorker } from "@vectordevai/core/brain/worker/host"
 import { SPEC_V1 } from "./fixture/documents"
 import { added, countingWorker, placeFor, services, text, withKnowledge } from "./fixture/knowledge"
@@ -235,6 +236,77 @@ describe("BrainKnowledge.add", () => {
       ),
     )
     expect(left?.status).toBe("searchable")
+  }, 60_000)
+
+  // Two processes on one brain.db: the first holds an upload's only bytes while it reads something else, past the
+  // upload's lease, and the second starts its own drainer meanwhile.
+  const sharing = async (expire: number, wait: number, options: { readonly changed?: boolean } = {}) => {
+    await using tmp = await tmpdir()
+    const root = path.join(tmp.path, "repo")
+    await fs.mkdir(root, { recursive: true })
+    const file = path.join(tmp.path, "brain.db")
+    const place = placeFor(root)
+    const gate = Promise.withResolvers<void>()
+    const first: string[] = []
+    const second: string[] = []
+    const result = await Effect.runPromise(
+      services(
+        place,
+        (a) =>
+          Effect.gen(function* () {
+            yield* a.knowledge.add(place, text("big.md", "# Big\n\nUploads MUST stop at 50 MB per file."))
+            const second = path.join(root, "second.md")
+            yield* Effect.promise(() => fs.writeFile(second, "# Second\n\nRetries MUST stop after 3 tries."))
+            const upload = yield* a.knowledge.add(
+              place,
+              options.changed ? { type: "path", path: second, origin: "cli" } : text("second.md", "# Second\n\nRetries MUST stop after 3 tries."),
+            )
+            if (upload.type === "refused") throw new Error(upload.message)
+            // A file edited after it was added: the next process cannot read the bytes it was added with.
+            if (options.changed) yield* Effect.promise(() => fs.writeFile(second, "# Second\n\nRetries MUST stop after 5 tries."))
+            yield* a.db
+              .update(BrainJobTable)
+              .set({ lease_until: Date.now() - expire })
+              .where(eq(BrainJobTable.document_id, upload.document.id))
+              .run()
+            yield* Effect.sleep(wait)
+            yield* services(
+              place,
+              (b) =>
+                Effect.gen(function* () {
+                  yield* b.knowledge.add(place, text("third.md", "# Third\n\nTimeouts MUST be 30 seconds."))
+                  yield* Effect.sleep("500 millis")
+                }),
+              { file, dir: tmp.path, worker: countingWorker(second), owner: "b" },
+            )
+            gate.resolve()
+            return { id: upload.document.id, done: yield* a.knowledge.wait(place, upload.document.id, "searchable", 10_000) }
+          }),
+        { file, dir: tmp.path, worker: countingWorker(first, gate.promise), owner: "a" },
+      ),
+    )
+    return { ...result, first, second }
+  }
+
+  test("another process leaves an upload alone while the process that has its bytes may still read it", async () => {
+    const result = await sharing(1, 0)
+    expect(result.second).not.toContain(result.id)
+    expect(result.first).toContain(result.id)
+    expect(result.done?.status).toBe("searchable")
+  }, 30_000)
+
+  test("a file changed since it was added goes back to the process that has its bytes, not to failed", async () => {
+    const result = await sharing(1, 0, { changed: true })
+    expect(result.second).not.toContain(result.id)
+    expect(result.first).toContain(result.id)
+    expect(result.done?.status).toBe("searchable")
+  }, 60_000)
+
+  test("the process that has an upload's bytes keeps its lease while it reads something else", async () => {
+    // Long enough out that the upload would count as left behind, had its process not renewed it since.
+    const result = await sharing(11 * 60_000, 31_000)
+    expect(result.second).not.toContain(result.id)
+    expect(result.done?.status).toBe("searchable")
   }, 60_000)
 
   test("a document read in the background worker from source is stored the same way", async () => {

@@ -256,6 +256,8 @@ const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
 const LEASE = MINUTE
 const RENEW = 30_000
+/** How long a lease must have been out before its process is taken to be gone: well over the longest read. */
+const ABANDONED = 10 * MINUTE
 const BACKOFF = [MINUTE, 10 * MINUTE, 60 * MINUTE]
 const FORGOTTEN = 180 * DAY
 const SCAN_EVERY = 10 * MINUTE
@@ -567,17 +569,29 @@ function make(input: {
     yield* Queue.offer(input.wakeup, undefined)
     if (state.draining) return
     state.draining = true
+    // Every job whose bytes only this process holds keeps its lease while the process lives, waiting its turn or being
+    // read, so another process sharing brain.db never takes one up and finds nothing to read.
+    yield* Effect.suspend(() =>
+      state.pending.size === 0
+        ? Effect.void
+        : db
+            .update(BrainJobTable)
+            .set({ lease_until: Date.now() + LEASE })
+            .where(and(eq(BrainJobTable.lease_owner, owner), inArray(BrainJobTable.document_id, [...state.pending.keys()])))
+            .run()
+            .pipe(Effect.orDie, Effect.asVoid),
+    ).pipe(Effect.delay(RENEW), Effect.forever, Effect.forkIn(input.scope))
     yield* Effect.gen(function* () {
       for (;;) {
         yield* Queue.take(input.wakeup).pipe(Effect.raceFirst(Effect.sleep(RENEW)))
         for (;;) {
-          const job = yield* claim().pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-          if (!job) break
+          const claimed = yield* claim().pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+          if (!claimed) break
           // A job that dies is retried later like a failed read, never at once, so one bad file cannot spin the drainer.
-          yield* run(job).pipe(
+          yield* run(claimed.job, claimed.before).pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("brain document job failed", { cause }).pipe(
-                Effect.andThen(retry(job, "Vector could not store what it read from this document.")),
+                Effect.andThen(retry(claimed.job, "Vector could not store what it read from this document.")),
               ),
             ),
           )
@@ -586,11 +600,20 @@ function make(input: {
     }).pipe(Effect.forkIn(input.scope))
   })
 
+  // The next job this process may read, with whose lease it was before. The bytes of an upload, an attachment or
+  // pasted text live only in the process that added them, which keeps their lease while it lives, so another process
+  // leaves such a job alone until that lease has been out for longer than any read takes.
   const claim = Effect.fnUntraced(function* () {
     const now = Date.now()
     const ready = yield* db
-      .select({ id: BrainJobTable.id })
+      .select({
+        id: BrainJobTable.id,
+        owner: BrainJobTable.lease_owner,
+        until: BrainJobTable.lease_until,
+        source: BrainDocumentTable.source_path,
+      })
       .from(BrainJobTable)
+      .leftJoin(BrainDocumentTable, eq(BrainDocumentTable.id, BrainJobTable.document_id))
       .where(
         and(
           eq(BrainJobTable.kind, "extract"),
@@ -602,7 +625,15 @@ function make(input: {
       .orderBy(asc(BrainJobTable.created_at))
       .all()
       .pipe(Effect.orDie)
-    for (const candidate of ready) {
+    const takeable = ready.filter(
+      (candidate) =>
+        candidate.owner === null ||
+        candidate.owner === owner ||
+        candidate.source !== null ||
+        candidate.until === null ||
+        now - candidate.until > ABANDONED,
+    )
+    for (const candidate of takeable) {
       // Claimed only if no other process took it in between: the lease is checked again as it is written.
       const claimed = yield* db
         .update(BrainJobTable)
@@ -616,12 +647,15 @@ function make(input: {
         .returning()
         .get()
         .pipe(Effect.orDie)
-      if (claimed) return claimed
+      if (claimed) return { job: claimed, before: { owner: candidate.owner, until: candidate.until } }
     }
     return undefined
   })
 
-  const run = Effect.fnUntraced(function* (job: typeof BrainJobTable.$inferSelect) {
+  const run = Effect.fnUntraced(function* (
+    job: typeof BrainJobTable.$inferSelect,
+    before: { readonly owner: string | null; readonly until: number | null },
+  ) {
     const document = job.document_id
       ? yield* db.select().from(BrainDocumentTable).where(eq(BrainDocumentTable.id, job.document_id)).get().pipe(Effect.orDie)
       : undefined
@@ -630,6 +664,24 @@ function make(input: {
       return
     }
     const file = state.pending.get(document.id) ?? (yield* Effect.promise(() => reread(document)))
+    // A file that changed or went since it was added, taken from a process that may still hold its bytes: that process
+    // gets the job back, leased to it again so it can read the job at once and this one cannot take it straight back.
+    // A process that does not come for it within a few such leases is gone, and so is the file.
+    const elsewhere =
+      before.owner !== null && before.owner !== owner && before.until !== null && Date.now() - before.until < ABANDONED
+    if (!file && elsewhere && job.attempts + 1 < BACKOFF.length)
+      return yield* db
+        .update(BrainJobTable)
+        .set({
+          state: "queued",
+          attempts: job.attempts + 1,
+          lease_owner: before.owner,
+          lease_until: Date.now() + LEASE,
+          next_at: Date.now(),
+        })
+        .where(eq(BrainJobTable.id, job.id))
+        .run()
+        .pipe(Effect.orDie, Effect.asVoid)
     if (!file) return yield* failed(job, document, "Vector lost this file before it finished reading it. Add it again.")
     // Re-reading a document it already serves keeps it searchable; a new one shows that it is being read.
     if (document.status === "queued") yield* setStatus(document.id, "reading")
