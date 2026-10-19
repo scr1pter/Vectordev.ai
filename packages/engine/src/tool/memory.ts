@@ -31,6 +31,11 @@ type Metadata = {
   result?: string
   id?: string
   hold?: BrainSchema.Hold
+  /**
+   * What the agent just put in use on its own, for the session's "Learned: … · Undo" line. The words are there only for
+   * a repository entry; a personal entry's stay out of the transcript.
+   */
+  learned?: { scope: BrainSchema.Scope; text?: string }
   /** Personal entries this result stands in for; the transcript keeps their ids, never their words. */
   [SessionMemory.PERSONAL]?: string[]
 }
@@ -149,8 +154,11 @@ export const MemoryTool = Tool.define<
             kind: params.kind ?? "lesson",
             text: params.text,
             scope: params.scope ?? "repository",
-            // An entry about a file comes up again when that file is read, so its cited file is its path scope.
-            ...(evidence?.type === "file" && evidence.verified ? { paths: [evidence.path] } : {}),
+            // An entry about a file comes up again when that file is read, so its cited file in this working tree is
+            // its path scope, checked or not.
+            ...(evidence?.type === "file" && FSUtil.contains(place.root, path.resolve(place.root, evidence.path))
+              ? { paths: [evidence.path] }
+              : {}),
             ...(evidence ? { evidence } : {}),
             ...(params.action === "update" ? { supersedes: params.id } : {}),
             origin: "agent",
@@ -159,6 +167,8 @@ export const MemoryTool = Tool.define<
             ...(hold ? { hold } : {}),
           })
           if (result.type === "refused") return refused(params.action, result.message)
+          // A write that put words in use, rather than finding them there or holding them, is something learned.
+          const learned = result.type === "added" || result.type === "superseded" || result.type === "promoted"
           return {
             title: `Memory ${result.type}: ${result.entry.id}`,
             output: written(result, target?.entry),
@@ -167,6 +177,14 @@ export const MemoryTool = Tool.define<
               result: result.type,
               id: result.entry.id,
               ...(result.entry.hold ? { hold: result.entry.hold } : {}),
+              ...(learned
+                ? {
+                    learned: {
+                      scope: result.entry.scope,
+                      ...(result.entry.scope === "repository" ? { text: result.entry.text } : {}),
+                    },
+                  }
+                : {}),
             },
           }
         }).pipe(Effect.orDie),
@@ -181,6 +199,8 @@ const SECRET_FILE =
 // Evidence is checked here against the conversation and the files, never taken from the model's word: a quote must be
 // the user's own, a file line must be on the default branch in a file the agent did not change in this session, and a
 // command must be a check that failed and then passed in it. The brain then checks that the evidence states the memory.
+// Checked evidence raises an entry's confidence and is shown with it; whether the entry goes into use is the session's
+// outside content to decide, and personal memory and changes to the user's own entries still take their words.
 const verify = Effect.fnUntraced(function* (
   params: Schema.Schema.Type<typeof Parameters>,
   ctx: Tool.Context<Metadata>,
@@ -246,7 +266,7 @@ function written(result: Exclude<Brain.WriteResult, { type: "refused" }>, replac
     "related" in result && result.related
       ? ` Related ${result.related.id}: ${words(result.related, 120)}. If this replaces it, use update(${result.related.id}) instead.`
       : ""
-  if (result.type === "added") return `Saved as ${id}.${related}`
+  if (result.type === "added") return `Saved as ${id}, in use from the next request.${related}`
   if (result.type === "merged") {
     if (result.entry.status === "active") return `Already known as ${id}: ${words(result.entry)}`
     if (result.entry.status === "archived")
@@ -256,8 +276,6 @@ function written(result: Exclude<Brain.WriteResult, { type: "refused" }>, replac
   if (result.type === "promoted") return `Confirmed ${id}: ${words(result.entry)}. It is in use now.`
   if (result.type === "superseded")
     return `Saved as ${id}, replacing ${result.previous}${replaced ? `: ${words(replaced, 120)}` : ""}.`
-  if (result.type === "proposed")
-    return `Saved ${id} as a proposal, not in use yet: its evidence did not check out (the user's own words, a line on the default branch, or a check that went from failing to passing has to say all of what the memory says, the same way round). The user can approve it in Settings > Memory.${related}`
   return `Saved ${id} for the user's review (${holdReason(result.entry.hold)}). It is not used until they approve it.${related}`
 }
 

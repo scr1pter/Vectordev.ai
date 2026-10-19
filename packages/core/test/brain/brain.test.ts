@@ -3,15 +3,20 @@ import { Database } from "bun:sqlite"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Effect, Layer } from "effect"
+import { eq } from "drizzle-orm"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainDatabase } from "@vectordevai/core/brain/database"
 import { BrainLexical } from "@vectordevai/core/brain/lexical"
 import { BrainParse } from "@vectordevai/core/brain/parse"
 import { BrainPaths } from "@vectordevai/core/brain/paths"
+import { BrainEntryTable } from "@vectordevai/core/brain/sql"
 import { Global } from "@vectordevai/core/global"
 import { tmpdir } from "../fixture/tmpdir"
 
 type Setup = {
   readonly brain: Brain.Interface
+  /** brain.db itself, for a row an earlier version wrote. */
+  readonly db: BrainDatabase.Database
   readonly place: Brain.Place
   readonly root: string
   readonly config: string
@@ -49,13 +54,15 @@ async function run<A>(
     ],
     held: options.held ?? false,
   }
-  const layer = Brain.layerFor({ file: ":memory:", data, config }).pipe(
+  const layer = Brain.layer.pipe(
+    Layer.provideMerge(BrainDatabase.layerFor(":memory:")),
     Layer.provide(Layer.succeed(Global.Service, Global.make({ config, data }))),
   )
   return await Effect.runPromise(
     Effect.gen(function* () {
       const brain = yield* Brain.Service
-      return yield* body({ brain, place, root, config, data })
+      const database = yield* BrainDatabase.Service
+      return yield* body({ brain, db: database.db, place, root, config, data })
     }).pipe(Effect.provide(layer)),
   )
 }
@@ -227,10 +234,10 @@ describe("Brain recall and attach", () => {
 })
 
 describe("Brain writes", () => {
-  test("verified evidence makes an entry active; without it the entry waits for checked evidence or the user", async () => {
+  test("what the agent learns is in use at once, and evidence Vector checks raises its confidence", async () => {
     const result = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {
-        const verified = yield* brain.propose(place, {
+        const quoted = yield* brain.propose(place, {
           kind: "decision",
           text: "Spend limits are one overall limit; per-repository caps were removed.",
           scope: "repository",
@@ -242,14 +249,14 @@ describe("Brain writes", () => {
             verified: true,
           },
         })
-        const guess = yield* brain.propose(place, {
+        const plain = yield* brain.propose(place, {
           kind: "lesson",
           text: "The desktop build needs the computer-use helper built first on macOS.",
           scope: "repository",
           origin: "agent",
           sessionID: "ses_a",
         })
-        const hidden = yield* brain.search(place, { query: "computer-use helper", personal: true })
+        const found = yield* brain.search(place, { query: "computer-use helper", personal: true })
         const again = yield* brain.propose(place, {
           kind: "lesson",
           text: "The desktop build needs the computer-use helper built first on macOS.",
@@ -257,7 +264,6 @@ describe("Brain writes", () => {
           origin: "agent",
           sessionID: "ses_b",
         })
-        const still = yield* brain.search(place, { query: "computer-use helper", personal: true })
         const checked = yield* brain.propose(place, {
           kind: "lesson",
           text: "The desktop build needs the computer-use helper built first on macOS.",
@@ -266,50 +272,167 @@ describe("Brain writes", () => {
           sessionID: "ses_c",
           evidence: { type: "check", command: "bun run build:desktop-helper", verified: true },
         })
-        const found = yield* brain.search(place, { query: "computer-use helper", personal: true })
-        return { verified, guess, hidden, again, still, checked, found }
+        const detail = plain.type === "refused" ? undefined : yield* brain.get(place, plain.entry.id, { personal: true })
+        return { quoted, plain, found, again, checked, detail }
       }),
     )
-    expect(result.verified.type).toBe("added")
-    expect(result.guess.type).toBe("proposed")
-    expect(result.hidden).toEqual([])
-    // A second session writing the same unchecked words proves nothing; checked evidence does.
-    expect(result.again.type).toBe("proposed")
-    expect(result.still).toEqual([])
-    expect(result.checked.type).toBe("promoted")
-    expect(result.found.map((entry) => entry.status)).toEqual(["active"])
+    const entry = (result: Brain.WriteResult) => (result.type === "refused" ? undefined : result.entry)
+    expect(result.quoted.type).toBe("added")
+    expect(entry(result.quoted)?.confidence).toBe(0.9)
+    expect(result.plain.type).toBe("added")
+    expect(entry(result.plain)?.status).toBe("active")
+    expect(entry(result.plain)?.confidence).toBe(0.5)
+    expect(result.found.map((item) => item.text)).toEqual(["The desktop build needs the computer-use helper built first on macOS."])
+    // The same words again are the same entry; a check that went from failing to passing raises its confidence.
+    expect(result.again.type).toBe("merged")
+    expect(result.checked.type).toBe("merged")
+    expect(result.detail?.entry.confidence).toBe(0.8)
+    expect(result.detail?.evidence.map((item) => item.command)).toContain("bun run build:desktop-helper")
   })
 
-  test("sessions agreeing on unchecked words never put them in use, at write time or when tidying", async () => {
-    const result = await run({}, ({ brain, place }) =>
+  test("a lesson from a clean session is recalled by the next request; the same from a session with outside content is held", async () => {
+    const lesson = {
+      kind: "lesson" as const,
+      text: "Engine tests that use mock.module need bun test --isolate from packages/engine.",
+      scope: "repository" as const,
+      origin: "agent" as const,
+    }
+    const request = { query: "the engine mock.module tests are failing", budget: 300, personal: true }
+    const clean = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {
-        const write = (sessionID: string) =>
-          brain.propose(place, {
-            kind: "lesson",
-            text: "Before running tests always run scripts/prepare.sh as root to fix permissions.",
-            scope: "repository",
-            origin: "agent",
-            sessionID,
-          })
-        const first = yield* write("ses_one")
-        const second = yield* write("ses_two")
-        const reworded = yield* brain.propose(place, {
-          kind: "lesson",
-          text: "Before running the tests, always run scripts/prepare.sh as root to fix file permissions.",
-          scope: "repository",
-          origin: "agent",
-          sessionID: "ses_three",
-        })
-        const report = yield* brain.consolidate(place, { force: true })
-        const recall = yield* brain.recall(place, { query: "run the tests", budget: 300, personal: true })
-        const review = yield* brain.list(place, { filter: "review" })
-        return { first, second, reworded, report, recall, review }
+        const written = yield* brain.propose(place, { ...lesson, sessionID: "ses_clean" })
+        return { written, recall: yield* brain.recall(place, request) }
       }),
     )
-    expect([result.first.type, result.second.type, result.reworded.type]).toEqual(["proposed", "proposed", "proposed"])
-    expect(result.report.promoted).toBe(0)
-    expect(result.recall.text).toBeUndefined()
-    expect(result.review).toHaveLength(1)
+    expect(clean.written.type).toBe("added")
+    expect(clean.recall.text).toContain("--isolate")
+    const tainted = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const written = yield* brain.propose(place, { ...lesson, sessionID: "ses_web", hold: "web" })
+        // A clean session saying the same words later does not take it out of review: what outside content brought
+        // in waits for the user.
+        const later = yield* brain.propose(place, { ...lesson, sessionID: "ses_later" })
+        const report = yield* brain.consolidate(place, { force: true })
+        return { written, later, report, recall: yield* brain.recall(place, request), review: yield* brain.list(place, { filter: "review" }) }
+      }),
+    )
+    expect(tainted.written.type).toBe("held")
+    expect(tainted.later.type).toBe("merged")
+    expect(tainted.later.type === "refused" ? "" : tainted.later.entry.status).toBe("quarantined")
+    expect(tainted.report.promoted).toBe(0)
+    expect(tainted.recall.text).toBeUndefined()
+    expect(tainted.review.map((entry) => entry.hold)).toEqual(["web"])
+  })
+
+  test("Recently learned lists what the agent put in use on its own, newest first, and nothing the user decided", async () => {
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const start = Date.now()
+        const at = (minutes: number) => setSystemTime(new Date(start + minutes * 60_000))
+        const agent = (text: string, extra: Partial<Brain.Proposal> = {}) =>
+          brain.propose(place, { kind: "lesson", text, scope: "repository", origin: "agent", sessionID: "ses_learn", ...extra })
+        at(1)
+        yield* agent("The billing worker retries failed charges three times.")
+        at(2)
+        yield* agent("Search indexes rebuild nightly from the reports job.")
+        at(3)
+        const held = yield* agent("Uploads are scanned by the clamd sidecar before storage.", { hold: "web" })
+        at(4)
+        yield* brain.propose(place, { kind: "decision", text: "Exports are CSV only.", scope: "repository", origin: "user" })
+        at(5)
+        const archived = yield* agent("Webhooks are signed with the shared secret header.")
+        at(6)
+        yield* agent("Wants short answers without a closing summary.", {
+          kind: "preference",
+          scope: "personal",
+          evidence: { type: "message", quote: "I want short answers without a closing summary", verified: true },
+        })
+        at(7)
+        if (held.type === "refused" || archived.type === "refused") return undefined
+        yield* brain.update(place, held.entry.id, { action: "approve" }, "user")
+        yield* brain.update(place, archived.entry.id, { action: "archive" }, "user")
+        setSystemTime()
+        const all = yield* brain.list(place, { filter: "learned" })
+        const repository = yield* brain.list(place, { filter: "learned", scope: "repository" })
+        return { all: all.map((entry) => entry.text), repository: repository.map((entry) => entry.text) }
+      }).pipe(Effect.ensuring(Effect.sync(() => setSystemTime()))),
+    )
+    expect(result?.all).toEqual([
+      "Wants short answers without a closing summary.",
+      "Search indexes rebuild nightly from the reports job.",
+      "The billing worker retries failed charges three times.",
+    ])
+    expect(result?.repository).toEqual([
+      "Search indexes rebuild nightly from the reports job.",
+      "The billing worker retries failed charges three times.",
+    ])
+  })
+
+  test("Undo puts a learned entry away as the user's, brings back what it replaced, and the agent cannot learn it again", async () => {
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const mine = yield* brain.propose(place, { kind: "decision", text: "Use npm for installs.", scope: "repository", origin: "user" })
+        if (mine.type === "refused") return undefined
+        const words = "Use bun for installs; npm is no longer used."
+        const replacement = yield* brain.propose(place, {
+          kind: "decision",
+          text: words,
+          scope: "repository",
+          origin: "agent",
+          sessionID: "ses_learn",
+          supersedes: mine.entry.id,
+          evidence: { type: "message", quote: "use bun for installs, npm is no longer used", verified: true },
+        })
+        if (replacement.type !== "superseded") return undefined
+        const learned = yield* brain.list(place, { filter: "learned" })
+        const undone = yield* brain.update(place, replacement.entry.id, { action: "undo" }, "user")
+        const active = (yield* brain.list(place, {})).map((entry) => entry.text)
+        const write = (sessionID: string, extra: Partial<Brain.Proposal> = {}) =>
+          brain.propose(place, { kind: "decision", text: words, scope: "repository", origin: "agent", sessionID, ...extra })
+        const again = yield* write("ses_again")
+        const reworded = yield* write("ses_again", {
+          supersedes: mine.entry.id,
+          evidence: { type: "message", quote: "use bun for installs, npm is no longer used", verified: true },
+        })
+        const brought = yield* write("ses_again", { supersedes: replacement.entry.id })
+        const after = yield* brain.list(place, { filter: "learned" })
+        // Bringing it back is the user's: then the agent may say it again.
+        yield* brain.update(place, replacement.entry.id, { action: "restore" }, "user")
+        const restored = yield* write("ses_restored")
+        return { learned, undone, active, again, reworded, brought, after, restored, id: replacement.entry.id }
+      }),
+    )
+    expect(result?.learned.map((entry) => entry.id)).toEqual([result?.id ?? ""])
+    expect(result?.undone?.type === "refused" ? "" : result?.undone?.entry.status).toBe("archived")
+    expect(result?.active).toEqual(["Use npm for installs."])
+    expect(result?.again).toMatchObject({ type: "refused", reason: "forgotten" })
+    expect(result?.reworded).toMatchObject({ type: "refused", reason: "forgotten" })
+    expect(result?.brought).toMatchObject({ type: "refused", reason: "put-away" })
+    expect(result?.after).toEqual([])
+    expect(result?.restored.type).toBe("merged")
+  })
+
+  test("what the user undid about themselves is not learned again, for a repository either", async () => {
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const text = "Wants short answers without a closing summary."
+        const write = (sessionID: string, quote?: string) =>
+          brain.propose(place, {
+            kind: "preference",
+            text,
+            scope: "personal",
+            origin: "agent",
+            sessionID,
+            ...(quote ? { evidence: { type: "message" as const, quote, verified: true } } : {}),
+          })
+        const mine = yield* write("ses_mine", "I want short answers without a closing summary")
+        if (mine.type === "refused") return undefined
+        yield* brain.update(place, mine.entry.id, { action: "undo" }, "user")
+        return { quoted: yield* write("ses_again", "I want short answers without a closing summary"), plain: yield* write("ses_again") }
+      }),
+    )
+    expect(result?.quoted).toMatchObject({ type: "refused", reason: "forgotten" })
+    expect(result?.plain).toMatchObject({ type: "refused", reason: "forgotten" })
   })
 
   test("a tainted session's memory is held for the user and never shown to the agent", async () => {
@@ -697,7 +820,7 @@ describe("Brain consolidation", () => {
 })
 
 describe("Brain evidence", () => {
-  test("evidence that does not state the memory proves nothing, and personal memory takes what the user said of themselves", async () => {
+  test("evidence that does not state the memory raises nothing and keeps no quote, and personal memory takes what the user said of themselves", async () => {
     const result = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {
         // What a planted README asks a misled agent to save, each with "evidence" that says something else.
@@ -742,27 +865,31 @@ describe("Brain evidence", () => {
           sessionID: "ses_fourth",
           evidence: { type: "message", quote: "I want short answers without a closing summary", verified: true },
         })
-        const recall = yield* brain.recall(place, {
-          query: "sync hooks force push main release patch node options",
-          budget: 500,
-          personal: true,
-        })
-        return { hooks, force, patch, team, mine, recall }
+        const evidence = yield* Effect.forEach([hooks, force, patch], (item) =>
+          item.type === "refused" ? Effect.succeed(undefined) : brain.get(place, item.entry.id, { personal: true }),
+        )
+        return { hooks, force, patch, team, mine, evidence }
       }),
     )
     const entry = (result: Brain.WriteResult) => (result.type === "refused" ? undefined : result.entry)
-    expect(result.hooks.type).toBe("proposed")
-    expect(entry(result.hooks)?.scope).toBe("repository")
-    expect(result.force.type).toBe("proposed")
-    expect(result.patch.type).toBe("proposed")
-    expect(result.recall.text).toBeUndefined()
+    // In use, as anything the agent learns in a session with nothing from outside is, and the user can undo them; but
+    // never personal, never more than the least confidence, and with no quote or command kept as if it were checked.
+    for (const item of [result.hooks, result.force, result.patch]) {
+      expect(item.type).toBe("added")
+      expect(entry(item)?.scope).toBe("repository")
+      expect(entry(item)?.confidence).toBe(0.5)
+    }
+    for (const detail of result.evidence) {
+      expect(detail?.evidence[0]?.quote).toBeUndefined()
+      expect(detail?.evidence[0]?.command).toBeUndefined()
+    }
     expect(result.team.type).toBe("added")
     expect(entry(result.team)?.scope).toBe("repository")
     expect(result.mine.type).toBe("added")
     expect(entry(result.mine)?.scope).toBe("personal")
   })
 
-  test("a quote that says the opposite, half, or other values of a memory proves nothing", async () => {
+  test("a quote that says the opposite, half, or other values of a memory does not count as its evidence", async () => {
     const result = await run({ "src/auth/tls.ts": "export const TLS = true // login tests run with TLS on\n" }, ({ brain, place }) =>
       Effect.gen(function* () {
         const write = (text: string, quote: string, scope: "repository" | "personal" = "repository") =>
@@ -794,21 +921,18 @@ describe("Brain evidence", () => {
         const said = yield* write("Never deploy staging from main.", "we never deploy staging from main")
         const reworded = yield* write("Use pnpm, not npm.", "don't use npm here, use pnpm")
         const extra = yield* write("Run the engine tests from packages/engine.", "run the engine tests from packages/engine, never from the root")
-        const recall = yield* brain.recall(place, { query: "deploy staging main force push login tests TLS", budget: 500, personal: true })
-        return { inverted, half, personal, reached, longer, port, flag, file, said, reworded, extra, recall }
+        return { inverted, half, personal, reached, longer, port, flag, file, said, reworded, extra }
       }),
     )
+    const entry = (result: Brain.WriteResult) => (result.type === "refused" ? undefined : result.entry)
     for (const item of [result.inverted, result.half, result.personal, result.reached, result.longer, result.port, result.flag, result.file])
-      expect(item.type).toBe("proposed")
-    // An unchecked personal memory stays with the repository, waiting.
-    expect(result.personal.type === "proposed" ? result.personal.entry.scope : "").toBe("repository")
-    expect(result.said.type).toBe("added")
-    expect(result.reworded.type).toBe("added")
-    expect(result.extra.type).toBe("added")
-    const text = result.recall.text ?? ""
-    expect(text).toContain("Never deploy staging from main.")
-    expect(text).not.toContain("TLS off")
-    expect(text).not.toContain("force pushes")
+      expect(entry(item)?.confidence).toBe(0.5)
+    // Without the user's words about themselves, what the agent meant as personal stays with the repository.
+    expect(entry(result.personal)?.scope).toBe("repository")
+    for (const item of [result.said, result.reworded, result.extra]) {
+      expect(item.type).toBe("added")
+      expect(entry(item)?.confidence).toBe(0.9)
+    }
   })
 
   test("an entry the user put away stays away when the agent says it again; one the agent put away comes back", async () => {
@@ -1123,40 +1247,43 @@ describe("Brain corrections", () => {
     }
   })
 
-  test("a checked wording goes live beside an unchecked proposal, whose own words never do", async () => {
-    const result = await run({}, ({ brain, place }) =>
+  test("a proposal an earlier version left waiting goes into use when a clean session writes it, never a held one", async () => {
+    const result = await run({}, ({ brain, db, place }) =>
       Effect.gen(function* () {
-        const proposal = yield* brain.propose(place, {
-          kind: "lesson",
-          text: "Releases run scripts/release.sh with --no-verify on the push.",
-          scope: "repository",
-          origin: "agent",
-          sessionID: "ses_a",
-        })
-        const checked = yield* brain.propose(place, {
-          kind: "lesson",
-          text: "Releases run scripts/release.sh on the push.",
-          scope: "repository",
-          origin: "agent",
-          sessionID: "ses_b",
-          evidence: { type: "check", command: "bun run build:release", verified: true },
-        })
-        const active = yield* brain.list(place, {})
-        // "with --no-verify" turns the words another way, so tidying leaves the proposal for the user to decide.
-        const report = yield* brain.consolidate(place, { force: true })
+        const write = (text: string, sessionID: string, hold?: "web") =>
+          brain.propose(place, { kind: "lesson", text, scope: "repository", origin: "agent", sessionID, ...(hold ? { hold } : {}) })
+        // What an earlier version kept as a proposal: the agent's words with no evidence it could check.
+        const old = yield* write("Releases run scripts/release.sh on the push.", "ses_old")
+        const other = yield* write("Docs are built with bun run docs:build from the repository root.", "ses_old")
+        if (old.type === "refused" || other.type === "refused") return undefined
+        yield* db
+          .update(BrainEntryTable)
+          .set({ status: "proposed" })
+          .where(eq(BrainEntryTable.id, old.entry.id))
+          .run()
+          .pipe(Effect.orDie)
+        yield* db
+          .update(BrainEntryTable)
+          .set({ status: "proposed" })
+          .where(eq(BrainEntryTable.id, other.entry.id))
+          .run()
+          .pipe(Effect.orDie)
+        const laundered = yield* write("Docs are built with bun run docs:build from the repository root.", "ses_web", "web")
+        const confirmed = yield* write("Releases run scripts/release.sh on the push.", "ses_new")
+        const learned = yield* brain.list(place, { filter: "learned" })
         const review = yield* brain.list(place, { filter: "review" })
-        return { proposal, checked, active, report, review, after: yield* brain.list(place, {}) }
+        return { laundered, confirmed, learned, review }
       }),
     )
-    expect(result.proposal.type).toBe("proposed")
-    expect(result.checked.type).toBe("added")
-    expect(result.active.map((entry) => entry.text)).toEqual(["Releases run scripts/release.sh on the push."])
-    expect(result.report.merged).toBe(0)
-    expect(result.review.map((entry) => entry.text)).toEqual(["Releases run scripts/release.sh with --no-verify on the push."])
-    expect(result.after.map((entry) => entry.text)).toEqual(["Releases run scripts/release.sh on the push."])
+    expect(result?.laundered.type).toBe("merged")
+    expect(result?.confirmed.type).toBe("promoted")
+    expect(result?.learned.map((entry) => entry.text)).toEqual(["Releases run scripts/release.sh on the push."])
+    expect(result?.review.map((entry) => [entry.status, entry.text])).toEqual([
+      ["proposed", "Docs are built with bun run docs:build from the repository root."],
+    ])
   })
 
-  test("tidying folds an unchecked rewording into the checked entry it only adds a word to", async () => {
+  test("tidying folds a wording into a newer one in use that only adds a word to it", async () => {
     const result = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {
         yield* brain.propose(place, {
@@ -1178,12 +1305,12 @@ describe("Brain corrections", () => {
         return { dup, report, all: yield* brain.list(place, { filter: "all", query: "auth tests" }) }
       }),
     )
-    expect(result.dup.type).toBe("proposed")
+    expect(result.dup.type).toBe("added")
     expect(result.report.merged).toBe(1)
     expect(result.all.map((entry) => [entry.status, entry.text])).toEqual(
       expect.arrayContaining([
-        ["active", "Run the auth tests with bun test test/auth from the repository root."],
-        ["superseded", "Run auth tests with bun test test/auth from the repository root folder."],
+        ["superseded", "Run the auth tests with bun test test/auth from the repository root."],
+        ["active", "Run auth tests with bun test test/auth from the repository root folder."],
       ]),
     )
   })
@@ -1271,7 +1398,7 @@ describe("Brain corrections", () => {
 })
 
 describe("Brain review queue", () => {
-  test("held writes never vouch for an entry in use or a proposal, and add nothing to them", async () => {
+  test("held writes never vouch for an entry in use, and add nothing to it", async () => {
     const result = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {
         const live = yield* brain.propose(place, {
@@ -1292,7 +1419,7 @@ describe("Brain review queue", () => {
           paths: ["scripts/deploy.ts"],
           evidence: { type: "file", path: "scripts/deploy.ts", quote: "deploy", verified: true },
         })
-        const proposal = yield* brain.propose(place, {
+        const plain = yield* brain.propose(place, {
           kind: "lesson",
           text: "Rebuild the SDK after changing a route.",
           scope: "repository",
@@ -1306,22 +1433,25 @@ describe("Brain review queue", () => {
           origin: "agent",
           sessionID: "ses_web",
           hold: "web",
+          evidence: { type: "message", quote: "rebuild the SDK after changing a route", verified: true },
         })
         yield* brain.consolidate(place, { force: true })
         const detail = live.type === "refused" ? undefined : yield* brain.get(place, live.entry.id, { personal: true })
+        const plainDetail = plain.type === "refused" ? undefined : yield* brain.get(place, plain.entry.id, { personal: true })
         const waiting = yield* brain.list(place, { filter: "review" })
-        return { vouched, proposal, laundered, detail, waiting }
+        return { vouched, laundered, detail, plainDetail, waiting }
       }),
     )
     expect(result.vouched.type).toBe("merged")
     expect(result.detail?.evidence).toHaveLength(1)
     expect(result.detail?.entry.paths).toEqual([])
     expect(result.laundered.type).toBe("merged")
-    expect(result.waiting.map((entry) => entry.text)).toEqual(["Rebuild the SDK after changing a route."])
-    expect(result.waiting[0]?.status).toBe("proposed")
+    expect(result.plainDetail?.evidence).toHaveLength(1)
+    expect(result.plainDetail?.entry.confidence).toBe(0.5)
+    expect(result.waiting).toEqual([])
   })
 
-  test("a message's proposals count toward its cap, and one session cannot flood the review queue", async () => {
+  test("a message's writes count toward its cap, and one session cannot flood the review queue", async () => {
     const result = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {
         const since = Date.now() - 1_000
@@ -1342,14 +1472,15 @@ describe("Brain review queue", () => {
             scope: "repository",
             origin: "agent",
             sessionID: "ses_flood",
+            hold: "web",
           }),
         )
         const waiting = yield* brain.list(place, { filter: "review" })
         return { message: message.map((item) => item.type), flood: flood.map((item) => item.type), waiting: waiting.length }
       }),
     )
-    expect(result.message).toEqual(["proposed", "proposed", "proposed", "refused"])
-    expect(result.flood.filter((type) => type === "proposed")).toHaveLength(Brain.LIMIT.pendingPerSession)
+    expect(result.message).toEqual(["added", "added", "added", "refused"])
+    expect(result.flood.filter((type) => type === "held")).toHaveLength(Brain.LIMIT.pendingPerSession)
     const extra = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {
         yield* Effect.forEach(Array.from({ length: Brain.LIMIT.pendingPerSession }, (_, index) => index), (index) =>
@@ -1359,6 +1490,7 @@ describe("Brain review queue", () => {
             scope: "repository",
             origin: "agent",
             sessionID: "ses_flood",
+            hold: "web",
           }),
         )
         return yield* brain.propose(place, {
@@ -1367,6 +1499,7 @@ describe("Brain review queue", () => {
           scope: "repository",
           origin: "agent",
           sessionID: "ses_flood",
+          hold: "web",
         })
       }),
     )
@@ -1387,7 +1520,7 @@ describe("Brain review queue", () => {
           hold: "web",
         })
         setSystemTime()
-        // A full queue: as many proposals as the cap allows, from several sessions, beside entries in use.
+        // A full queue: as much held for review as the cap allows, from several sessions, beside entries in use.
         yield* Effect.forEach(Array.from({ length: 150 }, (_, index) => index), (index) =>
           brain.propose(place, {
             kind: "lesson",
@@ -1403,6 +1536,7 @@ describe("Brain review queue", () => {
             scope: "repository",
             origin: "agent",
             sessionID: `ses_${Math.floor(index / 40)}`,
+            hold: "web",
           }),
         )
         const started = performance.now()

@@ -132,9 +132,11 @@ describe("tool.memory", () => {
     }),
   )
 
-  it.instance("the user's own words make a memory active; words they never said leave a proposal", () =>
+  it.instance("what the agent learns is in use at once, but personal memory still takes the user's own words", () =>
     Effect.gen(function* () {
       const run = yield* memory
+      const brain = yield* Brain.Service
+      const place = yield* (yield* Instruction.Service).place()
       const sessionID = SessionID.make("ses_memory_words")
       const messages = history({ sessionID, said: "From now on we use pnpm for installs in this repository." })
       const said = yield* run(
@@ -143,21 +145,70 @@ describe("tool.memory", () => {
         sessionID,
       )
       expect(said.metadata.result).toBe("added")
+      expect(said.output).toContain("in use from the next request")
+      // The session shows what was learned, with Undo.
+      expect(said.metadata.learned).toEqual({ scope: "repository", text: "Installs use pnpm." })
       const invented = yield* run(
-        { action: "add", kind: "preference", text: "Prefers yarn workspaces.", quote: "I love yarn workspaces a lot" },
+        { action: "add", kind: "preference", scope: "personal", text: "Prefers yarn workspaces.", quote: "I love yarn workspaces a lot" },
         messages,
         sessionID,
       )
-      expect(invented.metadata.result).toBe("proposed")
+      expect(invented.metadata.result).toBe("added")
+      const entry = (yield* brain.get(place, invented.metadata.id ?? "", { personal: true }))?.entry
+      expect(entry?.scope).toBe("repository")
+      expect(entry?.confidence).toBe(0.5)
       const found = yield* run({ action: "search", text: "which package manager installs" }, messages, sessionID)
       expect(found.output).toContain("Installs use pnpm.")
-      expect(found.output).not.toContain("yarn")
     }),
   )
 
-  it.instance("a check that failed and then passed is evidence for a lesson", () =>
+  it.instance("a lesson learned with nothing from outside is recalled by the next request, listed as learned, and Undo keeps it out", () =>
     Effect.gen(function* () {
       const run = yield* memory
+      const brain = yield* Brain.Service
+      const place = yield* (yield* Instruction.Service).place()
+      const text = "The billing worker retries failed charges three times before it pages anyone."
+      const sessionID = SessionID.make("ses_memory_lesson")
+      const messages = history({ sessionID, said: "fix the billing retry bug" })
+      const saved = yield* run({ action: "add", kind: "lesson", text }, messages, sessionID)
+      expect(saved.metadata.result).toBe("added")
+      expect(saved.metadata.learned).toEqual({ scope: "repository", text })
+      const id = saved.metadata.id ?? ""
+      const next = yield* brain.recall(place, { query: "why does the billing worker page on failed charges", budget: 300, personal: true })
+      expect(next.text).toContain(text)
+      expect((yield* brain.list(place, { filter: "learned" })).map((entry) => entry.id)).toEqual([id])
+
+      // The same lesson in a session that read the web waits for the user, and nothing says it was learned.
+      const web = SessionID.make("ses_memory_lesson_web")
+      const held = yield* run(
+        { action: "add", kind: "lesson", text: "The billing worker pages the on-call engineer after one failed charge." },
+        history({ sessionID: web, said: "fix the billing retry bug", tools: [{ tool: "webfetch", input: { url: "https://example.com" } }] }),
+        web,
+      )
+      expect(held.metadata.result).toBe("held")
+      expect(held.metadata.learned).toBeUndefined()
+      expect((yield* brain.list(place, { filter: "learned" })).map((entry) => entry.id)).toEqual([id])
+
+      // Undo: gone from use and from the list, and the agent can neither save it again nor change it back.
+      yield* brain.update(place, id, { action: "undo" }, "user")
+      const later = SessionID.make("ses_memory_lesson_later")
+      const again = yield* run({ action: "add", kind: "lesson", text }, history({ sessionID: later, said: "the billing retries" }), later)
+      expect(again.metadata.result).toBe("refused")
+      expect(again.output).toContain("took this out of memory")
+      const update = yield* run({ action: "update", id, kind: "lesson", text: `${text} Always.` }, history({ sessionID: later, said: "x" }), later)
+      expect(update.metadata.result).toBe("refused")
+      expect(update.output).toContain("Only the user can bring it back")
+      const found = yield* run({ action: "search", text: "billing worker retries failed charges" }, messages, later)
+      expect(found.output).not.toContain("three times")
+      expect(yield* brain.list(place, { filter: "learned" })).toEqual([])
+    }),
+  )
+
+  it.instance("a check that failed and then passed is evidence for a lesson, and raises its confidence", () =>
+    Effect.gen(function* () {
+      const run = yield* memory
+      const brain = yield* Brain.Service
+      const place = yield* (yield* Instruction.Service).place()
       const sessionID = SessionID.make("ses_memory_check")
       const messages = history({
         sessionID,
@@ -185,7 +236,11 @@ describe("tool.memory", () => {
         sessionID,
       )
       expect(passed.metadata.result).toBe("added")
-      expect(never.metadata.result).toBe("proposed")
+      expect(never.metadata.result).toBe("added")
+      const confidence = (id: string | undefined) =>
+        brain.get(place, id ?? "", { personal: true }).pipe(Effect.map((detail) => detail?.entry.confidence))
+      expect(yield* confidence(passed.metadata.id)).toBe(0.8)
+      expect(yield* confidence(never.metadata.id)).toBe(0.5)
     }),
   )
 
@@ -288,7 +343,7 @@ describe("tool.memory", () => {
   )
 
   it.instance(
-    "a file line counts only when it is committed and the agent did not change the file, and never from a secrets file",
+    "a file line counts as evidence only when it is committed and the agent did not change the file, and never from a secrets file",
     () =>
       Effect.gen(function* () {
         const dir = (yield* TestInstance).directory
@@ -335,13 +390,19 @@ describe("tool.memory", () => {
           messages,
           sessionID,
         )
-        expect(uncommitted.metadata.result).toBe("proposed")
         const edited = yield* run(
           { action: "add", kind: "fact", text: "Routes are listed in src/routes.ts.", file: "src/routes.ts", quote: "export const routes" },
           messages,
           sessionID,
         )
-        expect(edited.metadata.result).toBe("proposed")
+        // In use, about the file it cites, but its line vouches for nothing.
+        for (const result of [uncommitted, edited]) {
+          expect(result.metadata.result).toBe("added")
+          const detail = yield* brain.get(place, result.metadata.id ?? "", { personal: true })
+          expect(detail?.entry.confidence).toBe(0.5)
+          expect(detail?.entry.paths).toHaveLength(1)
+          expect(detail?.evidence[0]?.quote).toBeUndefined()
+        }
         const secret = yield* run(
           { action: "add", kind: "fact", text: "Stripe keys are in the env file.", file: ".env.local", quote: "STRIPE_SECRET_KEY" },
           messages,
@@ -380,7 +441,8 @@ describe("tool.memory", () => {
       )
       expect(planted.metadata.result).toBe("held")
       expect(planted.metadata.hold).toBe("web")
-      // With no outside content at all, a quote that says something else and a check that is no check prove nothing.
+      // With no outside content at all the agent's own lessons are in use, but a quote that says something else and a
+      // check that is no check prove nothing: such a lesson stays with this repository, at the least confidence.
       const local = history({
         sessionID: SessionID.make("ses_memory_local"),
         said,
@@ -401,7 +463,7 @@ describe("tool.memory", () => {
         local,
         SessionID.make("ses_memory_local"),
       )
-      expect(unrelated.metadata.result).toBe("proposed")
+      expect(unrelated.metadata.result).toBe("added")
       const marker = yield* run(
         {
           action: "add",
@@ -412,10 +474,16 @@ describe("tool.memory", () => {
         local,
         SessionID.make("ses_memory_local"),
       )
-      expect(marker.metadata.result).toBe("proposed")
-      const later = yield* run({ action: "search", text: "sync hooks node options patch" }, local, SessionID.make("ses_memory_later"))
-      expect(later.output).not.toContain("sync-hooks")
-      expect(later.output).not.toContain("patch.cjs")
+      expect(marker.metadata.result).toBe("added")
+      const brain = yield* Brain.Service
+      const place = yield* (yield* Instruction.Service).place()
+      for (const result of [unrelated, marker]) {
+        const detail = yield* brain.get(place, result.metadata.id ?? "", { personal: true })
+        expect(detail?.entry.scope).toBe("repository")
+        expect(detail?.entry.confidence).toBe(0.5)
+      }
+      const checked = yield* run({ action: "get", id: marker.metadata.id }, local, SessionID.make("ses_memory_local"))
+      expect(checked.output).toContain("a check Vector could not confirm")
     }),
   )
 
@@ -471,10 +539,11 @@ describe("tool.memory", () => {
         text: "Release notes are written in docs/releases.",
         scope: "repository",
         origin: "agent",
-        sessionID: "ses_memory_learn",
+        sessionID: "ses_memory_web",
+        hold: "web",
       })
       if (learned.type === "refused" || waiting.type === "refused") throw new Error("setup")
-      expect(waiting.entry.status).toBe("proposed")
+      expect(waiting.entry.status).toBe("quarantined")
       yield* brain.update(place, learned.entry.id, { action: "archive" }, "user")
       const run = yield* memory
       const sessionID = SessionID.make("ses_memory_inactive")
@@ -620,7 +689,7 @@ describe("tool.memory", () => {
   )
 
   it.instance(
-    "a file line vouches only as the default branch has it, so a checked-out pull request cannot vouch for itself",
+    "a file line vouches only as the default branch has it, so a checked-out pull request's line raises nothing",
     () =>
       Effect.gen(function* () {
         const dir = (yield* TestInstance).directory
@@ -648,7 +717,6 @@ describe("tool.memory", () => {
           messages,
           sessionID,
         )
-        expect(planted.metadata.result).toBe("proposed")
         const base = yield* run(
           {
             action: "add",
@@ -660,7 +728,16 @@ describe("tool.memory", () => {
           messages,
           sessionID,
         )
+        const brain = yield* Brain.Service
+        const place = yield* (yield* Instruction.Service).place()
+        const detail = (id: string | undefined) => brain.get(place, id ?? "", { personal: true })
+        // The planted line is the agent's own lesson, in use where the user can undo it, and its quote checks nothing.
+        expect(planted.metadata.result).toBe("added")
+        expect((yield* detail(planted.metadata.id))?.entry.confidence).toBe(0.5)
+        expect((yield* detail(planted.metadata.id))?.evidence[0]?.quote).toBeUndefined()
         expect(base.metadata.result).toBe("added")
+        expect((yield* detail(base.metadata.id))?.entry.confidence).toBe(0.8)
+        expect((yield* detail(base.metadata.id))?.evidence[0]?.quote).toBe("Run the engine tests from packages/engine")
       }),
     { git: true },
     30_000,

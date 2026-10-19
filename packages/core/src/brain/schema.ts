@@ -35,8 +35,9 @@ export const LearnedKind = Schema.Literals(["preference", "decision", "lesson", 
 export type LearnedKind = typeof LearnedKind.Type
 
 /**
- * - active: used by the agent.
- * - proposed: written without evidence Vector could check; active once seen in a second session or approved.
+ * - active: used by the agent. What the agent learns is active at once, unless it is held.
+ * - proposed: left by an earlier version, which held what the agent wrote without evidence it could check. Active once
+ *   the user approves it, or once a session with nothing from outside in it writes the same words.
  * - quarantined: held for the user's review (untrusted source, guest, web or MCP content, instruction-like text).
  *   Neither proposed nor quarantined entries are ever shown to the agent, so a session cannot launder its own writes.
  * - archived: decayed or put away; restorable.
