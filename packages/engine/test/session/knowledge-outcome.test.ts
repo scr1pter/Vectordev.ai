@@ -320,6 +320,36 @@ it.instance(
 )
 
 it.instance(
+  "a revert in a session a guest is in takes no credit back",
+  () =>
+    Effect.gen(function* () {
+      const { record, entry, dir } = yield* setup()
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* script(dir, `Retries now stop after three, as [${record.id}] says, and [${entry}] held.`)
+      yield* send(chat.id, "make the client retry after a 429 response like the spec says")
+      const passed = yield* settled(record.id, entry, 1)
+      expect(passed.item).toEqual({ helpful: 1, harmful: 0 })
+      // A guest joins later and undoes the owner's run.
+      const guests = yield* FreeModelGuests.Service
+      yield* guests.mark(chat.id)
+      const saved = yield* sessions.messages({ sessionID: chat.id })
+      const request = saved.find((message) => message.info.role === "user")!
+      const revert = yield* SessionRevert.Service
+      yield* revert.revert({ sessionID: chat.id, messageID: request.info.id })
+      yield* revert.cleanup(yield* sessions.get(chat.id))
+      const after = yield* counts(record.id, entry)
+      expect(after.item).toEqual({ helpful: 1, harmful: 0 })
+      expect(after.memory).toEqual({ helpful: 1, harmful: 0 })
+    }),
+  { git: true },
+  90_000,
+)
+
+it.instance(
   "a card recalled but neither cited nor opened gains nothing, though the tests went green",
   () =>
     Effect.gen(function* () {

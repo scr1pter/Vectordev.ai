@@ -83,6 +83,7 @@ describe("BrainDatabase", () => {
         { id: "20261103000000_tombstone_terms" },
         { id: "20261104000000_credit" },
         { id: "20261120000000_code" },
+        { id: "20261121000000_credited_once" },
       ],
       state: [{ repository_id: "repo-1" }],
     })

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm"
 import { blob, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
 import type { BrainCode } from "./code"
 import type { BrainSchema } from "./schema"
@@ -82,7 +83,13 @@ export const BrainEventTable = sqliteTable(
     actor: text().$type<"user" | "agent" | "vector">().notNull(),
     detail: text({ mode: "json" }).$type<Record<string, unknown>>(),
   },
-  (table) => [index("brain_event_repository_idx").on(table.repository_id, table.at)],
+  (table) => [
+    index("brain_event_repository_idx").on(table.repository_id, table.at),
+    // A request's credit marker, once per repository (migration 20261121000000_credited_once).
+    uniqueIndex("brain_event_credited_idx")
+      .on(table.repository_id, table.entry_id)
+      .where(sql`${table.action} = 'credited'`),
+  ],
 )
 
 // A forgotten entry leaves only the hash of its normalised text, so Vector does not learn it again. No text is kept.

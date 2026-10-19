@@ -5344,25 +5344,28 @@ function make(input: {
   // --- Proven knowledge -------------------------------------------------------------------------------------------
 
   const credit = Effect.fn("BrainKnowledge.credit")(function* (place: Brain.Place, input: CreditInput) {
-    const done = yield* db
-      .select({ id: BrainEventTable.id })
-      .from(BrainEventTable)
-      .where(
-        and(
-          eq(BrainEventTable.repository_id, place.repository),
-          eq(BrainEventTable.entry_id, input.requestID),
-          eq(BrainEventTable.action, "credited"),
-        ),
-      )
+    const now = Date.now()
+    // The marker goes in first, and one per request is let in: of two credits that end together, one counts it.
+    const marker = yield* db
+      .insert(BrainEventTable)
+      .values({
+        entry_id: input.requestID,
+        repository_id: place.repository,
+        at: now,
+        action: "credited",
+        actor: "vector",
+        detail: { session: input.sessionID, outcome: input.outcome },
+      })
+      .onConflictDoNothing()
+      .returning({ id: BrainEventTable.id })
       .get()
       .pipe(Effect.orDie)
-    if (done) return { helpful: 0, ignored: 0, applied: 0, skipped: true }
+    if (!marker) return { helpful: 0, ignored: 0, applied: 0, skipped: true }
     const delivered = new Set([...input.delivered, ...input.fetched])
     // Only a citation of what the run was given counts: an id the model made up proves nothing.
     const cited = new Set(input.cited.filter((id) => delivered.has(id)))
     const used = [...new Set([...cited, ...input.fetched])]
     const pass = input.outcome === "pass"
-    const now = Date.now()
     const items =
       delivered.size === 0
         ? []
@@ -5433,15 +5436,9 @@ function make(input: {
         )
       : []
     yield* db
-      .insert(BrainEventTable)
-      .values({
-        entry_id: input.requestID,
-        repository_id: place.repository,
-        at: now,
-        action: "credited",
-        actor: "vector",
-        detail: { session: input.sessionID, outcome: input.outcome, used, anchors: applied },
-      })
+      .update(BrainEventTable)
+      .set({ detail: { session: input.sessionID, outcome: input.outcome, used, anchors: applied } })
+      .where(eq(BrainEventTable.id, marker.id))
       .run()
       .pipe(Effect.orDie)
     if (used.length > 0 || applied.length > 0) yield* revise(place.repository)

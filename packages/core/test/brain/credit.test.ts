@@ -241,6 +241,39 @@ describe("BrainKnowledge.credit", () => {
     expect(result.gone).toEqual([])
   })
 
+  test("two credits of one request that end together count it once", async () => {
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          yield* added(setup, text("Auth spec.md", SPEC_V1))
+          const retry = yield* recordOf(setup, "retry 429")
+          const credit = () =>
+            setup.knowledge.credit(setup.place, {
+              sessionID: "ses_a",
+              requestID: "msg_1",
+              outcome: "pass",
+              delivered: [retry.id],
+              cited: [retry.id],
+              fetched: [],
+              edited: [path.join(setup.root, "src", "retry.ts")],
+            })
+          const both = yield* Effect.all([credit(), credit()], { concurrency: "unbounded" })
+          return {
+            retry,
+            both,
+            items: yield* counts(setup),
+            events: yield* setup.db.all(sql`SELECT entry_id FROM brain_event WHERE action = 'credited'`),
+            anchors: yield* setup.db.all(sql`SELECT path FROM brain_anchor WHERE origin = 'outcome'`),
+          }
+        }),
+      { files: { "src/retry.ts": "export const MAX_RETRIES = 3\n" } },
+    )
+    expect(result.both.map((credited) => credited.skipped).toSorted()).toEqual([false, true])
+    expect(result.items.find((row) => row.ref === result.retry.id)!.helpful).toBe(1)
+    expect(result.events).toHaveLength(1)
+    expect(result.anchors).toHaveLength(1)
+  })
+
   test("a credited card outranks an otherwise equal one in recall, and an entry's credit decays at tidying", async () => {
     const result = await withKnowledge((setup) =>
       Effect.gen(function* () {

@@ -11,6 +11,7 @@ import { SessionRunState } from "./run-state"
 import { SessionSummary } from "./summary"
 import { BackgroundJob } from "@/background/job"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { Instruction } from "./instruction"
 
 export const RevertInput = Schema.Struct({
@@ -47,6 +48,7 @@ const layer = Layer.effect(
     const background = yield* BackgroundJob.Service
     const knowledge = yield* BrainKnowledge.Service
     const instruction = yield* Instruction.Service
+    const guests = yield* FreeModelGuests.Service
 
     const revert = Effect.fn("SessionRevert.revert")(function* (input: RevertInput) {
       yield* state.assertNotBusy(input.sessionID)
@@ -156,12 +158,13 @@ const layer = Layer.effect(
         (job) => background.cancel(job.id),
         { concurrency: "unbounded", discard: true },
       )
-      // What the reverted runs cited loses the credit they gave it: the undo says they did not work out.
+      // What the reverted runs cited loses the credit they gave it: the undo says they did not work out. A session a
+      // guest is in takes no credit back, as it gives none: a guest's undo cannot lower the owner's records.
       const requests = [
         ...remove.flatMap((msg) => (msg.info.role === "user" ? [msg.info.id] : [])),
         ...(target && removeParts.length > 0 ? [target.info.role === "user" ? target.info.id : target.info.parentID] : []),
       ]
-      if (requests.length > 0)
+      if (requests.length > 0 && !(yield* guests.marked(sessionID)))
         yield* instruction.place().pipe(
           Effect.flatMap((place) => knowledge.reverted(place, { sessionID, requests })),
           Effect.catchCause((cause) => Effect.logWarning("brain revert credit failed", { cause })),
@@ -195,6 +198,7 @@ export const node = LayerNode.make({
     BackgroundJob.node,
     BrainKnowledge.node,
     Instruction.node,
+    FreeModelGuests.node,
   ],
 })
 
