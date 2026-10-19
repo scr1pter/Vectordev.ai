@@ -20,38 +20,12 @@ import { LayerNode } from "../src/effect/layer-node"
 import { Global } from "../src/global"
 import { Ripgrep } from "../src/ripgrep"
 import { Token } from "../src/util/token"
-import { pdf } from "../test/brain/fixture/pdf"
+import { specPdf, specQueries } from "../test/brain/fixture/spec-pdf"
 
 const pages = Number(process.argv[process.argv.indexOf("--pages") + 1]) || 300
 
 // Seconds each stage may take, and megabytes brain.db may grow by.
 const LIMITS = { extract: 30, structure: 5, store: 4, searchable: 30, growth: 8, recall: 0.025 }
-
-const TOPICS = ["sessions", "uploads", "billing", "exports", "webhooks", "queues", "search", "reports", "imports", "audit"]
-
-// A page of spec: a numbered heading every fifth page, then body text with requirements, limits and an endpoint.
-const page = (index: number) => {
-  const topic = TOPICS[index % TOPICS.length]!
-  const lines = [
-    ...(index % 5 === 0
-      ? [{ text: `${Math.floor(index / 5) + 1} ${topic[0]!.toUpperCase()}${topic.slice(1)} rules`, size: 16, font: "bold" as const }]
-      : []),
-    // 22 lines of about 95 characters: about 520 tokens a page, 150,000 for 300 pages.
-    ...Array.from({ length: 22 }, (_, line) => {
-      const n = index * 22 + line
-      const text =
-        line % 11 === 0
-          ? `The ${topic} service MUST finish request ${n} within ${(n % 90) + 10} seconds or report a timeout.`
-          : line % 11 === 5
-            ? `Clients call GET /v1/${topic}/${n} with a bearer token and retry at most ${(n % 4) + 2} times after a 429.`
-            : `The ${topic} module keeps record ${n} in the ${topic}_state table and replays it in order after a restart.`
-      return { text, size: 10, font: "regular" as const }
-    }),
-  ]
-  return {
-    runs: lines.map((line, at) => ({ text: line.text, x: 54, y: 760 - at * 30, size: line.size, font: line.font })),
-  }
-}
 
 const seconds = (since: number) => (performance.now() - since) / 1000
 const results: { stage: string; value: number; limit: number; unit: string }[] = []
@@ -61,7 +35,7 @@ const report = (stage: string, value: number, limit: number, unit = "s") => {
 }
 
 const started = performance.now()
-const bytes = pdf({ title: "Bench spec", pages: Array.from({ length: pages }, (_, index) => page(index)) })
+const bytes = specPdf(pages)
 console.log(`Generated a ${pages}-page PDF of ${(bytes.length / 1024 / 1024).toFixed(1)} MB in ${seconds(started).toFixed(1)} s`)
 
 // The readers alone, then structure and records, on this thread, for the breakdown.
@@ -110,10 +84,7 @@ await Effect.runPromise(
     const grown = (yield* Effect.promise(() => fs.stat(file))).size - empty
     const wal = (yield* Effect.promise(() => fs.stat(`${file}-wal`).catch(() => ({ size: 0 })))).size
     report("brain.db growth", (grown + wal) / 1024 / 1024, LIMITS.growth, "MB")
-    const queries = TOPICS.flatMap((topic) => [
-      `how long may the ${topic} service take to finish a request?`,
-      `how many times do clients retry the ${topic} endpoint after a 429?`,
-    ])
+    const queries = specQueries()
     // The first search in a process prepares its statements; requests after it are what the p95 is about.
     const cold = performance.now()
     yield* knowledge.recall(brainPlace, {
