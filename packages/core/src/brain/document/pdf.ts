@@ -1,7 +1,15 @@
 export * as BrainPdf from "./pdf"
 
 import { getDocumentProxy } from "unpdf"
-import { DecodeStream, Parser, Pattern, PDFFunctionFactory, StreamsSequenceStream } from "unpdf/pdfjs"
+import {
+  CMap,
+  DecodeStream,
+  PartialEvaluator,
+  Parser,
+  Pattern,
+  PDFFunctionFactory,
+  StreamsSequenceStream,
+} from "unpdf/pdfjs"
 import type { BrainSchema } from "../schema"
 import { budget, refuse, type BrainLimits } from "./limits"
 import type { Draft, Read, ReadRefusal } from "./read"
@@ -172,6 +180,51 @@ Parser.prototype.makeFilter = function (
 PDFFunctionFactory.prototype.create = () => () => undefined
 Pattern.parseShading = () => {
   throw new Error("Shadings are never read.")
+}
+
+/** What pdf.js keeps for one code of a range, counted against the cap: about one map entry and a short string. */
+const ENTRY = 64
+
+// A font's character map and a composite font's widths give a range of codes in a few bytes, and pdf.js stores every
+// code in the range one by one, so a small file can ask for hundreds of millions. Text needs both, so each range is
+// counted against the decoders' cap before pdf.js stores it, and past the cap the read is refused.
+const ranged = <T>(map: (this: CMap, low: number, high: number, destination: T) => void) =>
+  function (this: CMap, low: number, high: number, destination: T) {
+    if (decoding.budget && high >= low && !decoding.budget.take((high - low + 1) * ENTRY))
+      throw new RangeError(TOO_LARGE)
+    return map.call(this, low, high, destination)
+  }
+CMap.prototype.mapCidRange = ranged(CMap.prototype.mapCidRange)
+CMap.prototype.mapBfRange = ranged(CMap.prototype.mapBfRange)
+
+const extractWidths = PartialEvaluator.prototype.extractWidths
+PartialEvaluator.prototype.extractWidths = function (this: PartialEvaluator, dict, descriptor, properties) {
+  const codes = properties.composite
+    ? widthRanges(this, dict.get("W"), 1) + (properties.vertical ? widthRanges(this, dict.get("W2"), 3) : 0)
+    : 0
+  if (decoding.budget && codes > 0 && !decoding.budget.take(codes * ENTRY)) throw new RangeError(TOO_LARGE)
+  return extractWidths.call(this, dict, descriptor, properties)
+}
+
+// The codes a composite font's /W (one value each) or /W2 (three) gives by range, read the way pdf.js reads them:
+// `first [values…]` lists its codes one by one, which the file's own bytes bound, while `first last values` gives
+// every code from first to last.
+function widthRanges(evaluator: PartialEvaluator, list: unknown, values: number) {
+  if (!Array.isArray(list)) return 0
+  const state = { at: 0, codes: 0 }
+  while (state.at < list.length) {
+    const first = evaluator.xref.fetchIfRef(list[state.at])
+    const last = evaluator.xref.fetchIfRef(list[state.at + 1])
+    if (typeof first !== "number" || !Number.isInteger(first)) break
+    if (Array.isArray(last)) {
+      state.at += 2
+      continue
+    }
+    if (typeof last !== "number" || !Number.isInteger(last)) break
+    state.codes += Math.max(0, last - first + 1)
+    state.at += 2 + values
+  }
+  return state.codes
 }
 
 async function extract(

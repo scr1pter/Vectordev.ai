@@ -15,7 +15,10 @@ export type Limits = {
     readonly csv: number
     readonly text: number
   }
-  /** Bytes a PDF's compressed streams may inflate to in all, pictures aside. */
+  /**
+   * Bytes a PDF may make its reader hold in all: what its compressed streams inflate to, pictures aside, and the codes
+   * its fonts give by range.
+   */
   readonly streams: number
   /** PDF pages read; the rest are left out and the document says it was truncated. */
   readonly pages: number

@@ -58,8 +58,11 @@ describe("document reader dependencies", () => {
     expect(pdfjs.StreamsSequenceStream.prototype).toBeInstanceOf(pdfjs.DecodeStream)
     expect(typeof pdfjs.PDFFunctionFactory.prototype.create).toBe("function")
     expect(typeof pdfjs.Pattern.parseShading).toBe("function")
+    expect(typeof pdfjs.CMap.prototype.mapBfRange).toBe("function")
+    expect(typeof pdfjs.CMap.prototype.mapCidRange).toBe("function")
+    expect(typeof pdfjs.PartialEvaluator.prototype.extractWidths).toBe("function")
     expect(await Bun.file(path.join(root, "THIRD_PARTY_NOTICES.md")).text()).toContain(
-      "`patches/unpdf@1.9.0.patch` adds `DecodeStream`, `Parser`, `StreamsSequenceStream`, `PDFFunctionFactory` and `Pattern`",
+      "`patches/unpdf@1.9.0.patch` adds `DecodeStream`, `Parser`, `StreamsSequenceStream`, `PDFFunctionFactory`, `Pattern`, `CMap` and `PartialEvaluator`",
     )
   })
 })

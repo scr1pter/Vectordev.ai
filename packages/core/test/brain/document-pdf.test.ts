@@ -210,7 +210,7 @@ describe("BrainDocument PDF from a hostile file", () => {
     "Retries back off for a minute before trying again.",
     "The worker resumes the upload where it stopped.",
   ])
-  const timed = async (bytes: Uint8Array, limits = BrainLimits.LIMITS.inline) => {
+  const timed = async (bytes: Uint8Array, limits: BrainLimits.Limits = BrainLimits.LIMITS.inline) => {
     const started = performance.now()
     const result = await BrainDocument.read({ name: "hostile.pdf", bytes }, limits)
     return { result, elapsed: performance.now() - started }
@@ -359,5 +359,82 @@ describe("BrainDocument PDF from a hostile file", () => {
     const read = await timed(pdf({ pages: [{ runs: body }], extra }), { ...BrainLimits.LIMITS.inline, streams: MB })
     expect(read.result.type).toBe("extracted")
     if (read.result.type === "extracted") expect(read.result.text).toContain("Uploads are limited")
+  })
+
+  // A font's character map and a composite font's widths give a range of codes in a few bytes, and pdf.js stores each
+  // code in it, so each code counts against the cap: 64 bytes each, 16,384 codes to the megabyte here.
+  const unicode = (codes: number) => (first: number) => {
+    const cmap = `/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /Wide def 1 begincodespacerange <0000> <FFFF> endcodespacerange 1 beginbfrange <0000> <${(codes - 1).toString(16).padStart(4, "0")}> <0041> endbfrange endcmap CMapName currentdict /CMap defineresource pop end end`
+    return {
+      fonts: `/F4 ${first} 0 R`,
+      content: "BT /F4 11 Tf 1 0 0 1 72 300 Tm (ab) Tj ET",
+      objects: [
+        `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode ${first + 1} 0 R >>`,
+        stream("<<", cmap),
+      ],
+    }
+  }
+  const composite =
+    (entries: { readonly encoding?: string; readonly widths: string }) =>
+    (first: number): Extra => ({
+      fonts: `/F4 ${first} 0 R`,
+      content: "BT /F4 11 Tf 1 0 0 1 72 300 Tm <00410042> Tj ET",
+      objects: [
+        `<< /Type /Font /Subtype /Type0 /BaseFont /Wide /Encoding ${entries.encoding ?? "/Identity-H"} /DescendantFonts [${first + 1} 0 R] >>`,
+        `<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Wide /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${first + 2} 0 R ${entries.widths} >>`,
+        "<< /Type /FontDescriptor /FontName /Wide /Flags 4 /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 1000 /Descent 0 /CapHeight 1000 /StemV 80 >>",
+        stream(
+          "<< /Type /CMap /CMapName /Ranged /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>",
+          "/CIDInit /ProcSet findresource begin 12 dict begin begincmap 1 begincodespacerange <0000> <FFFF> endcodespacerange 1 begincidrange <0000> <FFFF> 0 endcidrange endcmap CMapName currentdict /CMap defineresource pop end end",
+        ),
+      ],
+    })
+  test.each<[string, (first: number) => Extra, (first: number) => Extra]>([
+    ["a character map's range", unicode(100_000), unicode(10_000)],
+    ["a composite font's widths", composite({ widths: "/W [0 99999 500]" }), composite({ widths: "/W [0 9999 500]" })],
+    [
+      "a vertical font's widths",
+      composite({ encoding: "/Identity-V", widths: "/W2 [0 99999 1000 500 880]" }),
+      composite({ encoding: "/Identity-V", widths: "/W2 [0 9999 1000 500 880 20000 [1000 500 880]]" }),
+    ],
+    [
+      "an encoding's range of codes",
+      (first) => composite({ encoding: `${first + 3} 0 R`, widths: "/W [0 [500]]" })(first),
+      (first) => composite({ widths: "/W [0 [500]]" })(first),
+    ],
+  ])("%s: codes past the cap are refused, and fewer are read", async (_, over, under) => {
+    const limits = { ...BrainLimits.LIMITS.inline, streams: MB }
+    expect((await timed(pdf({ pages: [{ runs: body }], extra: over }), limits)).result).toMatchObject({
+      type: "refused",
+      reason: "too-large",
+    })
+    const read = await timed(pdf({ pages: [{ runs: body }], extra: under }), limits)
+    expect(read.result.type).toBe("extracted")
+    if (read.result.type === "extracted") expect(read.result.text).toContain("Uploads are limited")
+  })
+
+  test("a font giving ten million codes one width in a few bytes is refused at once; a full two-byte font is read", async () => {
+    const wide = await timed(
+      pdf({ pages: [{ runs: body }], extra: composite({ widths: "/W [0 9999999 500]" }) }),
+      BrainLimits.LIMITS.worker,
+    )
+    expect(wide.result).toMatchObject({ type: "refused", reason: "too-large" })
+    expect(wide.elapsed).toBeLessThan(1_000)
+    const full = await timed(
+      pdf({
+        pages: [{ runs: body }],
+        extra: (first) => {
+          const font = composite({ widths: "/W [0 65535 1000]" })(first)
+          const map = unicode(65_536)(first + font.objects.length)
+          return {
+            ...font,
+            fonts: `${font.fonts} ${map.fonts!.replace("/F4", "/F5")}`,
+            content: `${font.content}\nBT /F5 11 Tf 1 0 0 1 72 280 Tm (ab) Tj ET`,
+            objects: [...font.objects, ...map.objects],
+          }
+        },
+      }),
+    )
+    expect(full.result.type).toBe("extracted")
   })
 })
