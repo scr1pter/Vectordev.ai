@@ -707,8 +707,11 @@ function make(input: {
         Effect.ensuring(Fiber.interrupt(renew)),
       )
     if (result.type === "error") {
-      // A document that takes too long would take too long again.
+      // A document that takes too long would take too long again, and one that stopped the reader would stop it again,
+      // or be read on the main thread, which nothing can stop.
       if (result.error.reason === "timeout") return yield* failed(job, document, result.error.message)
+      if (result.error.reason === "crashed")
+        return yield* failed(job, document, "Vector's background reader stopped while reading this document, so it was not read.")
       return yield* retry(job, result.error.message)
     }
     if (result.type === "refused") return yield* failed(job, document, result.message)

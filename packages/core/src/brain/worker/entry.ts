@@ -13,22 +13,30 @@ import type { BrainWorkerProtocol } from "./protocol"
 // serves the user. When no worker can start, the same `handle` runs on the main thread under tighter limits. It uses
 // Node APIs only: the desktop runs it in Electron's utility process, which has no Bun.
 
-/** One request, answered. Never rejects: a reader's failure is a `failed` answer. */
-export function handle(request: BrainWorkerProtocol.Request): Promise<BrainWorkerProtocol.Response> {
-  return answer(request).catch((error: unknown) => ({
+/**
+ * One request, answered. Never rejects: a reader's failure is a `failed` answer. On the main thread the host passes
+ * `signal`, which tells the readers to stop at their next turn of the event loop.
+ */
+export function handle(
+  request: BrainWorkerProtocol.Request,
+  signal?: AbortSignal,
+): Promise<BrainWorkerProtocol.Response> {
+  return answer(request, signal).catch((error: unknown) => ({
     id: request.id,
     type: "failed" as const,
     message: error instanceof Error ? error.message : String(error),
   }))
 }
 
-async function answer(request: BrainWorkerProtocol.Request): Promise<BrainWorkerProtocol.Response> {
+async function answer(request: BrainWorkerProtocol.Request, signal?: AbortSignal): Promise<BrainWorkerProtocol.Response> {
   if (request.type === "ping") return { id: request.id, type: "pong" }
   const limits = BrainLimits.LIMITS[request.limits]
   const extracted = await BrainDocument.read(
     { name: request.name, bytes: request.bytes, ...(request.mime ? { mime: request.mime } : {}) },
     limits,
+    signal,
   )
+  if (signal?.aborted) return { id: request.id, type: "failed", message: "Reading was stopped." }
   if (extracted.type === "refused")
     return { id: request.id, type: "refused", reason: extracted.reason, message: extracted.message }
   if (request.type === "probe")

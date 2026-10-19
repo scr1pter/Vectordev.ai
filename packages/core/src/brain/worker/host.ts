@@ -1,5 +1,6 @@
 export * as BrainWorker from "./host"
 
+import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { Worker } from "node:worker_threads"
@@ -76,7 +77,10 @@ const DEFAULTS = {
 // Node and Electron honour these; Bun ignores them, so there the readers' own caps and terminate are the guard.
 const RESOURCES = { maxOldGenerationSizeMb: 512, maxYoungGenerationSizeMb: 64 }
 
-/** Two crashes this close together and documents are read on the main thread for the rest of the process. */
+/**
+ * Two crashes this close together that no one document explains (the reader died with nothing to read, or on two
+ * different files) and documents are read on the main thread for the rest of the process.
+ */
 const CRASH_WINDOW = 10 * 60_000
 
 const ENTRY = new URL("./entry.ts", import.meta.url)
@@ -126,9 +130,13 @@ function make(bundled: string | undefined, options: Options) {
     mode: Status["mode"]
     reason?: string
     threads: number
-    crashes: number[]
+    /** When the reader died, and the file it was reading then, by the hash of its bytes. */
+    crashes: { readonly at: number; readonly file?: string }[]
     next: number
-    waiting: Map<number, { resolve: (message: unknown) => void; reject: (error: ExtractError) => void }>
+    waiting: Map<
+      number,
+      { resolve: (message: unknown) => void; reject: (error: ExtractError) => void; bytes?: Uint8Array }
+    >
     timer?: ReturnType<typeof setTimeout>
   } = {
     mode: options.inline || (bundled === undefined && !fromSource) ? "in-process" : "worker",
@@ -144,15 +152,23 @@ function make(bundled: string | undefined, options: Options) {
   }
   const lock = Semaphore.makeUnsafe(1)
 
-  // One worker failed for good: whatever waited on it fails, and two crashes in the window end worker mode.
+  // One worker failed for good: whatever waited on it fails. A file that kills the reader is that file's doing, and it
+  // must never be read on the main thread, so the same file dying again counts once; only crashes that no one file
+  // explains end worker mode.
   const crashed = (worker: Worker, message: string) => {
     if (state.worker === worker) state.worker = undefined
     const waiting = [...state.waiting.values()]
     state.waiting.clear()
-    waiting.forEach((item) => item.reject(new ExtractError({ reason: "crashed", message })))
     const now = Date.now()
-    state.crashes = [...state.crashes.filter((at) => now - at < CRASH_WINDOW), now]
+    const read = waiting.find((item) => item.bytes)?.bytes
+    const file = read ? createHash("sha256").update(read).digest("hex") : undefined
+    state.crashes = [
+      ...state.crashes.filter((crash) => now - crash.at < CRASH_WINDOW && (!file || crash.file !== file)),
+      { at: now, ...(file ? { file } : {}) },
+    ]
     if (state.crashes.length >= 2) fallBack("Vector's background reader stopped twice in 10 minutes.")
+    // Last, since a waiting read may carry on at once.
+    waiting.forEach((item) => item.reject(new ExtractError({ reason: "crashed", message })))
   }
 
   const fallBack = (reason: string) => {
@@ -238,6 +254,7 @@ function make(bundled: string | undefined, options: Options) {
       state.waiting.set(request.id, {
         resolve: (message) => resume(Effect.succeed(message)),
         reject: (error) => resume(Effect.fail(error)),
+        ...(request.type === "ping" ? {} : { bytes: request.bytes }),
       })
       worker.postMessage(request)
       return Effect.sync(() => state.waiting.delete(request.id))
@@ -248,25 +265,30 @@ function make(bundled: string | undefined, options: Options) {
       Effect.gen(function* () {
         clearTimeout(state.timer)
         const worker = state.mode === "worker" ? yield* running() : undefined
+        const late = new ExtractError({
+          reason: "timeout",
+          message: `Reading took longer than ${Math.round(ms / 1000)} seconds, so Vector stopped it.`,
+        })
+        // On the main thread a read cannot be stopped from outside, so it is told to stop: the readers give the event
+        // loop a turn after every page and every 200 blocks there, and stop at the next one once the time is up.
+        const abort = new AbortController()
         const answer = worker
           ? yield* send(worker, request).pipe(
               Effect.timeoutOrElse({
                 duration: ms,
-                orElse: () =>
-                  Effect.sync(stop).pipe(
-                    Effect.andThen(
-                      Effect.fail(
-                        new ExtractError({
-                          reason: "timeout",
-                          message: `Reading took longer than ${Math.round(ms / 1000)} seconds, so Vector stopped it.`,
-                        }),
-                      ),
-                    ),
-                  ),
+                orElse: () => Effect.sync(stop).pipe(Effect.andThen(Effect.fail(late))),
               }),
             )
           : yield* Effect.promise(() =>
-              BrainWorkerEntry.handle(request.type === "ping" ? request : { ...request, limits: "inline" }),
+              BrainWorkerEntry.handle(
+                request.type === "ping" ? request : { ...request, limits: "inline" },
+                abort.signal,
+              ),
+            ).pipe(
+              Effect.timeoutOrElse({
+                duration: ms,
+                orElse: () => Effect.sync(() => abort.abort()).pipe(Effect.andThen(Effect.fail(late))),
+              }),
             )
         if (state.worker) {
           const current = state.worker

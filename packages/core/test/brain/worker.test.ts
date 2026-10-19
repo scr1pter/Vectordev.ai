@@ -56,6 +56,13 @@ parentPort.postMessage({ type: "ready" })`
 const EXIT = `import { parentPort } from "node:worker_threads"
 parentPort.on("message", () => process.exit(3))
 parentPort.postMessage({ type: "ready" })`
+// Answers, then dies with nothing left to read: the reader itself does not hold up here.
+const IDLE_EXIT = `import { parentPort } from "node:worker_threads"
+parentPort.on("message", (request) => {
+  parentPort.postMessage({ id: request.id, type: "failed", message: "nothing read" })
+  setTimeout(() => process.exit(3), 20)
+})
+parentPort.postMessage({ type: "ready" })`
 const SILENT = `import { parentPort } from "node:worker_threads"
 parentPort.on("message", () => {})`
 const BROKEN = `throw new Error("threads are not allowed here")`
@@ -175,22 +182,60 @@ describe("BrainWorker", () => {
     expect(result.threads).toBe(0)
   }, 60_000)
 
-  test("two crashes in ten minutes move reading to the main thread", async () => {
+  test("a file that stops the reader never moves reading to the main thread, however often it is read", async () => {
     const result = await run(EXIT, {}, (worker) =>
       Effect.gen(function* () {
         const first = yield* Effect.exit(worker.extract(input))
-        const between = yield* worker.status()
         const second = yield* Effect.exit(worker.extract(input))
-        const third = yield* worker.extract(input)
-        return { first, between, second, third, status: yield* worker.status() }
+        const third = yield* Effect.exit(worker.extract(input))
+        return { first, second, third, status: yield* worker.status() }
       }),
     )
-    expect(JSON.stringify(result.first)).toContain('"reason":"crashed"')
-    expect(result.between.mode).toBe("worker")
-    expect(JSON.stringify(result.second)).toContain('"reason":"crashed"')
-    expect(result.status.mode).toBe("in-process")
-    expect(result.status.reason).toContain("stopped twice in 10 minutes")
-    expect(result.third.type).toBe("extracted")
+    for (const attempt of [result.first, result.second, result.third])
+      expect(JSON.stringify(attempt)).toContain('"reason":"crashed"')
+    expect(result.status.mode).toBe("worker")
+  }, 60_000)
+
+  test("two crashes in ten minutes that no one file explains move reading to the main thread", async () => {
+    const idle = await run(IDLE_EXIT, {}, (worker) =>
+      Effect.gen(function* () {
+        const first = yield* Effect.exit(worker.extract(input))
+        yield* Effect.sleep("300 millis")
+        const between = yield* worker.status()
+        yield* Effect.exit(worker.extract(input))
+        yield* Effect.sleep("300 millis")
+        const third = yield* worker.extract(input)
+        return { first, between, third, status: yield* worker.status() }
+      }),
+    )
+    expect(JSON.stringify(idle.first)).toContain('"reason":"failed"')
+    expect(idle.between.mode).toBe("worker")
+    expect(idle.status.mode).toBe("in-process")
+    expect(idle.status.reason).toContain("stopped twice in 10 minutes")
+    expect(idle.third.type).toBe("extracted")
+    const other = { ...input, name: "other.pdf", bytes: pdf({ pages: [{ runs: lines(["Tokens expire after 30 days."]) }] }) }
+    const two = await run(EXIT, {}, (worker) =>
+      Effect.gen(function* () {
+        yield* Effect.exit(worker.extract(input))
+        yield* Effect.exit(worker.extract(other))
+        return yield* worker.status()
+      }),
+    )
+    expect(two.mode).toBe("in-process")
+  }, 60_000)
+
+  test("a read on the main thread stops at its time limit too", async () => {
+    const long = pdf({
+      pages: Array.from({ length: 40 }, (_, page) => ({
+        runs: lines(Array.from({ length: 30 }, (_, line) => `Page ${page} line ${line}: clients MUST retry at most 3 times.`)),
+      })),
+    })
+    const started = performance.now()
+    const result = await run(undefined, { inline: true, timeout: { pdf: 20, other: 20 } }, (worker) =>
+      Effect.exit(worker.extract({ ...input, name: "long.pdf", bytes: long })),
+    )
+    expect(JSON.stringify(result)).toContain('"reason":"timeout"')
+    expect(performance.now() - started).toBeLessThan(5_000)
   }, 60_000)
 
   test("an answer that does not decode is not used", async () => {

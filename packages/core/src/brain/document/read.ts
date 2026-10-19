@@ -113,21 +113,30 @@ export type Read = {
  * Reads a document into blocks. Every reader is synchronous except the PDF reader (pdf.js answers in promises), which
  * is also the only heavy one, so it loads on the first PDF.
  */
-export async function read(input: Input, limits: BrainLimits.Limits): Promise<Extracted | ReadRefusal> {
+export async function read(
+  input: Input,
+  limits: BrainLimits.Limits,
+  signal?: AbortSignal,
+): Promise<Extracted | ReadRefusal> {
   const sniffed = BrainSniff.sniff(input, limits)
   if (sniffed.type === "refused") return sniffed
-  const result = await dispatch(sniffed, input.bytes, limits)
+  const result = await dispatch(sniffed, input.bytes, limits, signal)
   if (result.type === "refused") return result
-  const extracted = layout(input.name, result, limits)
+  const extracted = await layout(input.name, result, limits, signal)
   if (extracted.blocks.length === 0 && extracted.unread.length === 0)
     return refuse("empty", "This document has no text Vector can read.")
   return extracted
 }
 
-async function dispatch(sniffed: BrainSniff.Sniffed, bytes: Uint8Array, limits: BrainLimits.Limits) {
+async function dispatch(
+  sniffed: BrainSniff.Sniffed,
+  bytes: Uint8Array,
+  limits: BrainLimits.Limits,
+  signal: AbortSignal | undefined,
+) {
   if (sniffed.format === "pdf") {
     const { BrainPdf } = await import("./pdf")
-    return BrainPdf.read(bytes, limits)
+    return BrainPdf.read(bytes, limits, signal)
   }
   if (sniffed.format === "docx" || sniffed.format === "pptx" || sniffed.format === "xlsx")
     return BrainOoxml.read(sniffed.format, bytes, limits)
@@ -163,7 +172,7 @@ function count(text: string) {
   return text.split("[redacted]").length - 1
 }
 
-function layout(name: string, input: Read, limits: BrainLimits.Limits): Extracted {
+async function layout(name: string, input: Read, limits: BrainLimits.Limits, signal?: AbortSignal): Promise<Extracted> {
   const out = {
     text: "",
     blocks: [] as Block[],
@@ -176,9 +185,12 @@ function layout(name: string, input: Read, limits: BrainLimits.Limits): Extracte
     out.redactions += cleaned.reduce((sum, item) => sum + item.redactions, 0)
     return { texts: cleaned.map((item) => item.text), hidden: cleaned.some((item) => item.hidden) }
   }
-  for (const draft of input.drafts) {
+  for (const [index, draft] of input.drafts.entries()) {
     const room = limits.chars - out.text.length - 2
-    if (room <= 0) {
+    // Cleaning is most of a read's work. On the main thread the event loop gets a turn every 200 blocks, and a read
+    // told to stop keeps what it laid out so far.
+    if (limits.yield && index > 0 && index % 200 === 0) await new Promise((resolve) => setImmediate(resolve))
+    if (room <= 0 || signal?.aborted) {
       out.truncated = true
       break
     }

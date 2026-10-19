@@ -73,22 +73,22 @@ const TOO_LARGE = "This PDF expands to more than Vector reads safely, so it was 
 /** One PDF at a time, since the decoders count against the read under way (see `decoding`). */
 const queue = { tail: Promise.resolve() as Promise<unknown> }
 
-export function read(bytes: Uint8Array, limits: BrainLimits.Limits): Promise<Read | ReadRefusal> {
-  const turn = queue.tail.then(() => readOne(bytes, limits))
+export function read(bytes: Uint8Array, limits: BrainLimits.Limits, signal?: AbortSignal): Promise<Read | ReadRefusal> {
+  const turn = queue.tail.then(() => readOne(bytes, limits, signal))
   queue.tail = turn.catch(() => undefined)
   return turn
 }
 
-async function readOne(bytes: Uint8Array, limits: BrainLimits.Limits): Promise<Read | ReadRefusal> {
+async function readOne(bytes: Uint8Array, limits: BrainLimits.Limits, signal?: AbortSignal): Promise<Read | ReadRefusal> {
   const decoded = budget(limits.streams)
   decoding.budget = decoded
-  const result = await open(bytes, limits, decoded).finally(() => {
+  const result = await open(bytes, limits, decoded, signal).finally(() => {
     decoding.budget = undefined
   })
   return decoded.over ? refuse("too-large", TOO_LARGE) : result
 }
 
-async function open(bytes: Uint8Array, limits: BrainLimits.Limits, decoded: BrainLimits.Budget) {
+async function open(bytes: Uint8Array, limits: BrainLimits.Limits, decoded: BrainLimits.Budget, signal?: AbortSignal) {
   // pdf.js takes ownership of the buffer it is given, so it gets a copy.
   const opened = await getDocumentProxy(bytes.slice(), OPTIONS).then(
     (document) => ({ document }),
@@ -104,7 +104,7 @@ async function open(bytes: Uint8Array, limits: BrainLimits.Limits, decoded: Brai
           "This file is password protected. Vector doesn't ask for document passwords; add an unprotected copy.",
         )
       : refuse("invalid", "This PDF is damaged and could not be read.")
-  return extract(opened.document, limits, decoded)
+  return extract(opened.document, limits, decoded, signal)
     .catch(() => refuse("invalid", "This PDF is damaged and could not be read."))
     .finally(() => opened.document.loadingTask.destroy())
 }
@@ -164,7 +164,12 @@ Parser.prototype.makeFilter = function (
   return makeFilter.call(this, stream, name, UNCOUNTED.has(name) ? 0 : length, params, cipher)
 }
 
-async function extract(document: Document, limits: BrainLimits.Limits, decoded: BrainLimits.Budget): Promise<Read> {
+async function extract(
+  document: Document,
+  limits: BrainLimits.Limits,
+  decoded: BrainLimits.Budget,
+  signal?: AbortSignal,
+): Promise<Read> {
   const warnings = new Set<BrainSchema.DocumentWarning>()
   const meta = await document.getMetadata().catch(() => undefined)
   const info: Record<string, unknown> =
@@ -177,8 +182,9 @@ async function extract(document: Document, limits: BrainLimits.Limits, decoded: 
   const unread: number[] = []
   const links: string[] = []
   const state = { chars: 0 }
-  // Once the decoders are over their cap the read is refused, so no further page is opened.
-  for (let number = 1; number <= count && !decoded.over; number++) {
+  // Once the decoders are over their cap the read is refused, and once it is told to stop it is not wanted, so no
+  // further page is opened.
+  for (let number = 1; number <= count && !decoded.over && !signal?.aborted; number++) {
     const page = await document.getPage(number).catch(() => undefined)
     const content = await page?.getTextContent().catch(() => undefined)
     const [left, bottom, right, top] = (page?.view ?? []) as number[]

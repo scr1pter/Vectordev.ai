@@ -161,4 +161,20 @@ describe("BrainDocument limits", () => {
     expect(result.type === "extracted" && result.text.length).toBeLessThanOrEqual(400)
     expect(result.type === "extracted" && result.warnings).toContain("truncated")
   })
+
+  test("on the main thread a long read gives the event loop turns, and stops when it is told to", async () => {
+    const markdown = new TextEncoder().encode(
+      Array.from({ length: 3_000 }, (_, index) => `Paragraph ${index}: the service MUST log request ${index}.`).join("\n\n"),
+    )
+    const ticks = { count: 0 }
+    const timer = setInterval(() => ticks.count++, 0)
+    const result = await BrainDocument.read({ name: "long.md", bytes: markdown }, BrainLimits.LIMITS.inline)
+    clearInterval(timer)
+    expect(result.type).toBe("extracted")
+    expect(ticks.count).toBeGreaterThan(0)
+    const stopped = new AbortController()
+    stopped.abort()
+    const cut = await BrainDocument.read({ name: "long.md", bytes: markdown }, BrainLimits.LIMITS.inline, stopped.signal)
+    expect(cut.type === "extracted" ? cut.blocks.length : 0).toBeLessThan(3_000)
+  })
 })

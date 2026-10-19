@@ -358,4 +358,35 @@ describe("BrainKnowledge.add", () => {
     expect(result.documents[0]?.status).toBe("queued")
   })
 
+  test("a document that stopped the background reader fails, and is never read again", async () => {
+    const calls: string[] = []
+    const crashing = Layer.succeed(
+      BrainWorker.Service,
+      BrainWorker.Service.of({
+        extract: (input) =>
+          Effect.sync(() => calls.push(input.document)).pipe(
+            Effect.andThen(
+              Effect.fail(new BrainWorker.ExtractError({ reason: "crashed", message: "Vector's background reader stopped." })),
+            ),
+          ),
+        probe: () => Effect.die("not used"),
+        status: () => Effect.succeed({ mode: "worker" as const, threads: 0 }),
+      }),
+    )
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          const queued = yield* setup.knowledge.add(setup.place, text("Auth spec.md", SPEC_V1))
+          if (queued.type === "refused") throw new Error(queued.message)
+          const document = yield* setup.knowledge.wait(setup.place, queued.document.id, "searchable", 5_000)
+          const jobs = yield* setup.db.all(sql`SELECT id FROM brain_job`)
+          return { document, jobs }
+        }),
+      { worker: crashing },
+    )
+    expect(calls).toHaveLength(1)
+    expect(result.document).toMatchObject({ status: "failed" })
+    expect(result.document?.error).toContain("stopped while reading this document")
+    expect(result.jobs).toEqual([])
+  })
 })
