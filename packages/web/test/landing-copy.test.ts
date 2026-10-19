@@ -21,22 +21,55 @@ const page = [lander, index, footer].join("\n")
 // Link targets are left out: a model card's address can name an active size, though no page text does.
 const visible = [page, ...shots.map((shot) => shot.text)].map((text) => text.replace(/href(?:: |=)"[^"]*"/g, ""))
 
-test("the self-evolving agent is labelled as coming in 1.99.110", () => {
-  expect(lander).toContain('<p class="story-kicker" data-reveal>Self-evolving · coming in 1.99.110</p>')
+// The brain ships in desktop 1.99.110, built in this tree. Its section and the memory card name that release, so they
+// stay true for someone still on an earlier one, and the "coming" label is gone.
+test("the self-evolving agent and the memory card name desktop 1.99.110, the release the brain ships in", async () => {
+  expect(await Bun.file(path.join(repo, "packages/core/src/brain/brain.ts")).exists()).toBe(true)
+  expect(await Bun.file(path.join(repo, "packages/core/src/brain/knowledge.ts")).exists()).toBe(true)
+  expect(lander).toContain('<p class="story-kicker" data-reveal>Self-evolving · new in desktop 1.99.110</p>')
   expect(lander).toContain('data-chapter="Self-evolving"')
-  // The section says what the brain does, not that it is live.
+  expect(lander).not.toContain("coming in 1.99.110")
+  expect(lander).toContain(
+    '"From desktop 1.99.110, rules, memory and the documents you add are stored and searched on your computer',
+  )
+  expect(lander).toContain('href: "/docs/brain"')
+  expect(lander).not.toContain("/docs/local-memory")
   expect(lander).not.toMatch(/Vector (now )?(learns|remembers)[^.]*today/i)
 })
 
-// When desktop 1.99.110 is published the brain is live, so the section drops its "coming" label.
-test.skipIf(Bun.semver.order(publishedDesktopVersion, "1.99.110") < 0)(
-  "once desktop 1.99.110 is published, the self-evolving section no longer says it is coming",
-  async () => {
-    // If the brain slipped past 1.99.110, keep the label and move the version in it instead.
-    expect(await Bun.file(path.join(repo, "packages/core/src/brain/brain.ts")).exists()).toBe(true)
-    expect(lander).not.toContain("coming in 1.99.110")
-  },
-)
+// Every number the section gives comes from the dated knowledge eval, with its date and what it is not.
+test("the self-evolving section quotes the dated knowledge eval and keeps its caveat", async () => {
+  const report = await Bun.file(path.join(repo, "docs/benchmarks/vector-knowledge-2026-10-19/report.json")).json()
+  const working = report.found.working
+  const section = lander.slice(
+    lander.indexOf('<section id="evolving"'),
+    lander.indexOf("</section>", lander.indexOf('<section id="evolving"')),
+  )
+  expect(report.date).toBe("2026-10-19")
+  expect(report.dirty).toBe(false)
+  expect(section).toContain(
+    `On Vector's knowledge eval of 19 October 2026, recall through code links brought in the governing requirement for ${working.pagerank} of ${working.tasks} tasks, against ${working.keywords} of ${working.tasks} by keywords alone, at ${Math.round(report.tokens.light.mean)} tokens a request on average.`,
+  )
+  expect(section).toContain(
+    `The eval is ${["zero", "one", "two", "three", "four", "five", "six"][report.fixture.documents]} short specs and ${report.fixture.working + report.fixture.hops + report.fixture.irrelevant} requests written alongside the feature, not an independent benchmark.`,
+  )
+  // The only figures in the section are the eval's, and none of them is a time.
+  const words = section.replace(/<[^>]+>/g, " ").replace(/1\.99\.110|19 October 2026/g, "")
+  const figures = Array.from(words.matchAll(/\d[\d,.]*/g), (match) => match[0])
+  expect(figures.toSorted()).toEqual(
+    [
+      working.pagerank,
+      working.tasks,
+      working.keywords,
+      working.tasks,
+      Math.round(report.tokens.light.mean),
+      report.fixture.working + report.fixture.hops + report.fixture.irrelevant,
+    ]
+      .map(String)
+      .toSorted(),
+  )
+  expect(section).not.toMatch(/\bms\b|seconds|faster|cheaper|Codex/i)
+})
 
 test("Vector Velocity is in development and branded by one size, 550B parameters", () => {
   expect(lander).toContain('"is building a 550B model of its own."')

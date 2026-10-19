@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
 import { DEFAULT_REVIEW_CONFIG } from "../packages/core/src/review/types"
-import { publishedDesktopVersion } from "../packages/web/src/data/vector-releases"
 import summary from "../docs/benchmarks/vector-efficiency-2026-10/summary.json"
+import knowledge from "../docs/benchmarks/vector-knowledge-2026-10-19/report.json"
 
 const root = path.join(import.meta.dir, "..")
 const page = await Bun.file(path.join(root, "packages/web/src/pages/investors.astro")).text()
@@ -102,7 +102,7 @@ test("every technology carries its status, and only the shipped ones say Today",
   )
   expect(items.length).toBe(markup.match(/<div class="ip-milestone/g)?.length)
   expect(Object.fromEntries(items)).toEqual({
-    "Vector Brain": "In development · 1.99.110",
+    "Vector Brain": "Desktop 1.99.110",
     "Tokenomics engine": "Today",
     "Subagent system": "Today",
     Vectorscope: "Today",
@@ -116,16 +116,29 @@ test("every technology carries its status, and only the shipped ones say Today",
   expect(markup).not.toMatch(/next release/i)
 })
 
-// When desktop 1.99.110 is published the brain is live, so its status changes.
-test.skipIf(Bun.semver.order(publishedDesktopVersion, "1.99.110") < 0)(
-  "once desktop 1.99.110 is published, Vector Brain no longer says it is in development",
-  async () => {
-    // If the brain slipped past 1.99.110, keep the label and move the version in it instead.
-    expect(await Bun.file(path.join(root, "packages/core/src/brain/brain.ts")).exists()).toBe(true)
-    expect(milestone("Vector Brain")).not.toContain("In development")
-    expect(markup).not.toContain("in development for desktop 1.99.110")
-  },
-)
+// The brain ships in desktop 1.99.110, built in this tree, so its card names that release instead of saying it is in
+// development, and its one figure comes from the dated knowledge eval with that eval's caveats.
+test("Vector Brain names desktop 1.99.110 and quotes the dated knowledge eval", async () => {
+  expect(await Bun.file(path.join(root, "packages/core/src/brain/knowledge.ts")).exists()).toBe(true)
+  const brain = milestone("Vector Brain")
+  expect(brain).not.toContain("In development")
+  expect(markup).not.toContain("in development for desktop 1.99.110")
+  const working = knowledge.found.working
+  expect(knowledge.date).toBe("2026-10-19")
+  expect(knowledge.dirty).toBe(false)
+  expect(brain).toContain(
+    `Through code links, ${working.pagerank} of ${working.tasks} eval tasks got their requirement; keywords alone, ${working.keywords} of ${working.tasks}.†`,
+  )
+  const method = markup.match(/<strong>† Knowledge eval\.<\/strong>([^<]*)<\/p>/)?.[1] ?? ""
+  ;[
+    "19 October 2026",
+    "docs/benchmarks/vector-knowledge-2026-10-19",
+    "five short specs for a small invented repository",
+    `${knowledge.fixture.working + knowledge.fixture.hops + knowledge.fixture.irrelevant} requests, written alongside the feature; no model call`,
+    "Not an independent benchmark.",
+  ].forEach((caveat) => expect(method).toContain(caveat))
+  expect(knowledge.fixture.documents).toBe(5)
+})
 
 test("the investor page gives Vector Velocity one status, one size, 550B parameters, and no active size, base or provider", () => {
   const velocity = milestone("Vector Velocity")
@@ -148,9 +161,9 @@ test("the README gives Vector Velocity the investor page's status and size, and 
 })
 
 test("the brain is labelled wherever the page opens with it", () => {
-  // The lede is what investors read first, so the brain's status sits in it too, not only in its card.
-  expect(markup).toContain("and, in development for desktop 1.99.110, a brain that learns each repository it works in")
-  expect(page).toContain("a brain that learns each repository and a model of its own, both in development")
+  // The lede is what investors read first, so the brain's release sits in it too, not only in its card.
+  expect(markup).toContain("and, from desktop 1.99.110, a brain that learns each repository it works in")
+  expect(page).toContain("a brain that learns each repository from desktop 1.99.110, and a model of its own in development")
 })
 
 test("the investor page names the outside agents Vector runs and the business it plans", () => {
