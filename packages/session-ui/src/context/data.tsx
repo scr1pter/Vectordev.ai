@@ -9,6 +9,7 @@ import type {
 } from "@vectordevai/sdk/v2"
 import { createSimpleContext } from "@vectordevai/ui/context"
 import { PreloadMultiFileDiffResult } from "@pierre/diffs/ssr"
+import type { KnowledgeCard } from "../components/knowledge-citations"
 
 export type NormalizedProviderListResponse = {
   all: Map<string, Provider>
@@ -53,6 +54,12 @@ export type SessionHrefFn = (sessionID: string) => string
 /** Takes back a memory entry the agent learned, as the user; resolves to whether that worked. */
 export type MemoryUndoFn = (memoryID: string) => Promise<boolean>
 
+/**
+ * What cited memory and document ids are, for citation chips and the "Used from memory" footer, from the owner's
+ * engine. Ids it may not show (a guest, a forgotten document) are left out.
+ */
+export type KnowledgeFn = (ids: string[]) => Promise<KnowledgeCard[]>
+
 export const { use: useData, provider: DataProvider } = createSimpleContext({
   name: "Data",
   init: (props: {
@@ -61,6 +68,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
     onNavigateToSession?: NavigateToSessionFn
     onSessionHref?: SessionHrefFn
     onMemoryUndo?: MemoryUndoFn
+    onKnowledge?: KnowledgeFn
   }) => {
     return {
       get store() {
@@ -72,6 +80,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
       navigateToSession: props.onNavigateToSession,
       sessionHref: props.onSessionHref,
       undoMemory: props.onMemoryUndo,
+      knowledge: props.onKnowledge,
     }
   },
 })

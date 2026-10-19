@@ -359,9 +359,14 @@ export function Markdown(
     streaming?: boolean
     class?: string
     classList?: Record<string, boolean>
+    /**
+     * Runs on the rendered blocks after every render, for marks the HTML cannot carry (citation chips). It must leave
+     * the DOM the same when run twice; what it reads makes the render run again when it changes.
+     */
+    decorate?: (root: HTMLDivElement) => void
   },
 ) {
-  const [local, others] = splitProps(props, ["text", "cacheKey", "streaming", "class", "classList"])
+  const [local, others] = splitProps(props, ["text", "cacheKey", "streaming", "class", "classList", "decorate"])
   const marked = useMarked()
   const i18n = useI18n()
   const [root, setRoot] = createSignal<HTMLDivElement>()
@@ -488,6 +493,7 @@ export function Markdown(
     container
       .querySelectorAll<HTMLElement>('[data-slot="markdown-copy-button"]')
       .forEach((button) => setCopyState(button, labels, button.dataset.copied === "true"))
+    local.decorate?.(container)
     if (!copyCleanup)
       copyCleanup = setupCodeCopy(container, () => ({
         copy: i18n.t("ui.message.copy"),

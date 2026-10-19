@@ -3,6 +3,7 @@ import {
   Component,
   createEffect,
   createMemo,
+  createResource,
   createSignal,
   For,
   Match,
@@ -66,6 +67,7 @@ import { useLocation } from "@solidjs/router"
 import { attached, inline, kind } from "./message-file"
 import { readPartText } from "./message-part-text"
 import { memoryLearned } from "./memory-learned"
+import { chipTitle, cites, decorateCitations, delivered, segments, type KnowledgeCard } from "./knowledge-citations"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 
 async function writeClipboard(text: string): Promise<boolean> {
@@ -1629,6 +1631,44 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
     () => props.message.role === "assistant" && typeof (props.message as AssistantMessage).time.completed !== "number",
   )
   const text = () => readPartText(data.store.part_text_accum_delta, part())
+  // Citations of memory and document cards: solid chips for ids the model was given in this session up to this
+  // answer, plain text marked unverified for any other. Most answers cite nothing and skip all of it.
+  const citing = createMemo(() => props.message.role === "assistant" && !streaming() && cites(text()))
+  const given = createMemo(() => {
+    if (!citing()) return new Set<string>()
+    // The session up to this answer, and always the request it answers.
+    const messages = data.store.message?.[props.message.sessionID] ?? []
+    const at = messages.findIndex((message) => message.id === props.message.id)
+    const parent = (props.message as AssistantMessage).parentID
+    return delivered(
+      [
+        ...(at === -1 ? messages : messages.slice(0, at + 1)),
+        ...messages.filter((message) => message.id === parent),
+      ].flatMap((message) => data.store.part?.[message.id] ?? []),
+    )
+  })
+  const [cards] = createResource(
+    () => {
+      if (!citing() || !data.knowledge) return false
+      const ids = [
+        ...new Set(
+          segments(text(), given()).flatMap((segment) =>
+            segment.type === "citation" && segment.verified ? [segment.id] : [],
+          ),
+        ),
+      ]
+      return ids.length > 0 ? ids.join(",") : false
+    },
+    (ids) =>
+      data.knowledge!(ids.split(","))
+        .then((found) => new Map(found.map((card) => [card.id, card] as const)))
+        .catch(() => new Map<string, KnowledgeCard>()),
+  )
+  const decorate = (root: HTMLDivElement) => {
+    if (!citing()) return
+    const resolved = cards.latest
+    decorateCitations(root, given(), (id) => chipTitle(id, resolved?.get(id)))
+  }
   const isLastTextPart = createMemo(() => {
     const last = (data.store.part?.[props.message.id] ?? [])
       .filter((item): item is TextPart => item?.type === "text" && !!item.text?.trim())
@@ -1656,7 +1696,10 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
     <Show when={text()}>
       <div data-component="text-part" data-timeline-part-id={part().id}>
         <div data-slot="text-part-body">
-          <Show when={streaming()} fallback={<Markdown text={text()} cacheKey={part().id} streaming={false} />}>
+          <Show
+            when={streaming()}
+            fallback={<Markdown text={text()} cacheKey={part().id} streaming={false} decorate={decorate} />}
+          >
             <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
           </Show>
         </div>

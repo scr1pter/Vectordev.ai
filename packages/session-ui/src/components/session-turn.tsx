@@ -22,6 +22,7 @@ import { DiffChanges } from "@vectordevai/ui/diff-changes"
 import { Icon } from "@vectordevai/ui/icon"
 import { TextShimmer } from "@vectordevai/ui/text-shimmer"
 import { SessionRetry } from "./session-retry"
+import { KnowledgeFooter } from "./knowledge-footer"
 import { TextReveal } from "@vectordevai/ui/text-reveal"
 import { createAutoScroll } from "@vectordevai/ui/hooks"
 import { useI18n } from "@vectordevai/ui/context/i18n"
@@ -435,6 +436,9 @@ export function SessionTurn(
                 </div>
               </Show>
               <SessionRetry status={status()} show={active()} />
+              <Show when={!working()}>
+                <KnowledgeFooter parts={parts()} />
+              </Show>
               <Show when={edited() > 0 && !working()}>
                 <div
                   data-slot="session-turn-diffs"

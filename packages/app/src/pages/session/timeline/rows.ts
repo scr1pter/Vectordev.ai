@@ -8,6 +8,7 @@ import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
 import { budgetStopNotice, type BudgetStopNotice } from "@/components/budget-stop-copy"
 import { AssistantMessage, Part, SessionStatus, SnapshotFileDiff, UserMessage } from "@vectordevai/sdk/v2"
 import { groupParts, renderable, type PartGroup } from "@vectordevai/session-ui/message-part"
+import { recallOf } from "@vectordevai/session-ui/knowledge-citations"
 import { TimelineRow, type SummaryDiff } from "./timeline-row"
 
 export { TimelineRow, type SummaryDiff } from "./timeline-row"
@@ -33,6 +34,7 @@ export type TimelineRowMap = {
   Thinking: { userMessageID: string; reasoningHeading?: string }
   Retry: { userMessageID: string }
   DiffSummary: { userMessageID: string; diffs: SummaryDiff[] }
+  MemoryUsed: { userMessageID: string }
   Error: {
     userMessageID: string
     text: string
@@ -165,6 +167,10 @@ export namespace Timeline {
         }),
       )
     }
+
+    // What Vector brought in from memory, once the turn is done.
+    if ((status === "idle" || !isActive) && userParts.some((part) => (recallOf(part)?.ids.length ?? 0) > 0))
+      rows.push(new TimelineRow.MemoryUsed({ userMessageID: userMessage.id }))
 
     if (error) {
       const data = error.data?.message

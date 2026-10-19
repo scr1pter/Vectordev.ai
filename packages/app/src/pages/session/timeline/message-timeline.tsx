@@ -45,6 +45,7 @@ import { DialogFooter, DialogHeader, DialogTitleGroup, DialogV2 } from "@vectord
 import { InlineInput } from "@vectordevai/ui/inline-input"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { SessionRetry } from "@vectordevai/session-ui/session-retry"
+import { KnowledgeFooter } from "@vectordevai/session-ui/knowledge-footer"
 import { isScrollKeyTarget, scrollKey, scrollKeyOwner, ScrollView } from "@vectordevai/ui/scroll-view"
 import { StickyAccordionHeader } from "@vectordevai/ui/sticky-accordion-header"
 import { TextReveal } from "@vectordevai/ui/text-reveal"
@@ -1325,6 +1326,16 @@ export function MessageTimeline(props: {
                 }
                 onReview={props.onReviewChanges}
               />
+            </div>
+          </TimelineRowFrame>
+        )
+      }
+      case "MemoryUsed": {
+        const memoryUsedRow = row as Accessor<TimelineRowByTag<"MemoryUsed">>
+        return (
+          <TimelineRowFrame row={memoryUsedRow}>
+            <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
+              <KnowledgeFooter parts={getMsgParts(memoryUsedRow().userMessageID)} />
             </div>
           </TimelineRowFrame>
         )

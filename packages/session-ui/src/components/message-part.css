@@ -1522,3 +1522,29 @@ body:not([data-new-layout]) {
 [data-component="tool-trigger"][data-memory-learned="undone"] [data-slot="basic-tool-tool-subtitle"] {
   text-decoration: line-through;
 }
+
+/* A citation of a memory or document card the model was given: a small solid chip, its line on hover. Any other id
+   in that shape stays plain text with a dotted underline, so it never looks like a source. */
+[data-component="knowledge-citation"][data-verified="true"] {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 1px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in oklch, var(--vector-accent, var(--v2-text-text-code-accent)) 35%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--vector-accent, var(--v2-text-text-code-accent)) 12%, transparent);
+  color: var(--v2-text-text-base);
+  font-family: var(--font-family-mono);
+  font-size: 0.78em;
+  line-height: 1.5;
+  vertical-align: 0.08em;
+  cursor: help;
+  white-space: nowrap;
+}
+
+[data-component="knowledge-citation"][data-verified="false"] {
+  color: var(--v2-text-text-muted);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: help;
+}

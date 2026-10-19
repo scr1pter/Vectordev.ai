@@ -162,6 +162,7 @@ export const dict: Record<string, string> = {
   "ui.tool.memory.private": "something from a private document",
   "ui.tool.memory.undo": "Undo",
   "ui.tool.memory.retry": "Undo did not work, try again",
+  "ui.knowledge.used": "Used from memory",
 
   "ui.basicTool.called": "Called `{{tool}}`",
   "ui.toolErrorCard.failed": "Failed",

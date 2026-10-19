@@ -34,6 +34,10 @@ export namespace TimelineRow {
     userMessageID: string
     diffs: SummaryDiff[]
   }> {}
+  /** The turn's "Used from memory" footer: what recall put in its request. */
+  export class MemoryUsed extends Data.TaggedClass("MemoryUsed")<{
+    userMessageID: string
+  }> {}
   export class Error extends Data.TaggedClass("Error")<{
     userMessageID: string
     text: string
@@ -53,6 +57,7 @@ export namespace TimelineRow {
     | AssistantPart
     | Thinking
     | DiffSummary
+    | MemoryUsed
     | Error
     | Retry
 
@@ -72,6 +77,8 @@ export namespace TimelineRow {
         return `thinking:${row.userMessageID}`
       case "DiffSummary":
         return `diff-summary:${row.userMessageID}`
+      case "MemoryUsed":
+        return `memory-used:${row.userMessageID}`
       case "Error":
         return `error:${row.userMessageID}`
       case "Retry":

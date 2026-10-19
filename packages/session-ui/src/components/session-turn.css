@@ -239,3 +239,87 @@ body:not([data-new-layout]) [data-component="session-turn"] {
 [data-slot="session-turn-list"] {
   gap: 24px;
 }
+
+/* "Used from memory": one quiet line under a turn, opened to show each item and why Vector chose it. */
+[data-component="knowledge-footer"] {
+  width: 100%;
+  min-width: 0;
+  margin-top: 4px;
+  color: var(--v2-text-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+[data-component="knowledge-footer"] [data-slot="knowledge-footer-trigger"] {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+[data-component="knowledge-footer"] [data-slot="knowledge-footer-trigger"]:hover {
+  color: var(--v2-text-text-base);
+}
+
+[data-component="knowledge-footer"] [data-slot="knowledge-footer-chevron"] {
+  flex: none;
+  align-self: center;
+  width: 12px;
+  height: 12px;
+  transform: rotate(-90deg);
+  transition: transform 120ms ease;
+}
+
+[data-component="knowledge-footer"][data-open] [data-slot="knowledge-footer-chevron"] {
+  transform: none;
+}
+
+[data-component="knowledge-footer"] [data-slot="knowledge-footer-label"] {
+  flex: none;
+  color: var(--v2-text-text-base);
+  font-weight: var(--font-weight-medium);
+}
+
+[data-component="knowledge-footer"] [data-slot="knowledge-footer-summary"] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+[data-component="knowledge-footer"] [data-slot="knowledge-footer-items"] {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 0 18px;
+  padding: 0;
+  list-style: none;
+}
+
+[data-component="knowledge-footer"] [data-slot="knowledge-footer-item-head"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--v2-text-text-base);
+}
+
+[data-component="knowledge-footer"] [data-slot="knowledge-footer-id"] {
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  color: var(--v2-text-text-muted);
+}
+
+[data-component="knowledge-footer"] [data-slot="knowledge-footer-text"],
+[data-component="knowledge-footer"] [data-slot="knowledge-footer-reason"] {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+[data-component="knowledge-footer"] [data-slot="knowledge-footer-text"] {
+  color: var(--v2-text-text-base);
+}

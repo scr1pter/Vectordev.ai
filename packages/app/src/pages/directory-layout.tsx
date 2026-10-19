@@ -1,4 +1,6 @@
 import { DataProvider } from "@vectordevai/session-ui/context"
+import type { KnowledgeCard } from "@vectordevai/session-ui/knowledge-citations"
+import type { VectorClient } from "@vectordevai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@vectordevai/core/util/encode"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
@@ -28,6 +30,7 @@ export function DirectoryDataProvider(
   const serverSync = useServerSync()
   const directory = () => (typeof props.directory === "function" ? props.directory() : props.directory)
   const slug = createMemo(() => base64Encode(directory()))
+  const knowledge = knowledgeResolver(() => sdk().client)
   const href = (sessionID: string) => {
     const server = props.server?.()
     if (server) return sessionHref(server, sessionID)
@@ -75,12 +78,54 @@ export function DirectoryDataProvider(
                 () => false,
               )
           }
+          // What cited memory and document ids are, for citation chips and "Used from memory". The engine answers
+          // the owner only, so a guest's chips show the id alone.
+          onKnowledge={knowledge}
         >
           <LocalProvider>{props.children}</LocalProvider>
         </DataProvider>
       )}
     </Show>
   )
+}
+
+// Asks the engine once per id, documents in one batch and memory entries one by one; an id it does not answer for
+// (forgotten, held, or a guest asking) stays unknown, and a failed request is asked again next time.
+function knowledgeResolver(client: () => VectorClient) {
+  const known = new Map<string, Promise<KnowledgeCard | undefined>>()
+  const remember = (id: string, pending: Promise<KnowledgeCard | undefined>) =>
+    known.set(
+      id,
+      pending.catch(() => {
+        known.delete(id)
+        return undefined
+      }),
+    )
+  return async (ids: string[]) => {
+    const missing = [...new Set(ids)].filter((id) => !known.has(id))
+    const documents = missing.filter((id) => /^[rpd]/.test(id)).slice(0, 50)
+    if (documents.length > 0) {
+      const batch = client()
+        .memory.knowledge({ ids: documents.join(",") })
+        .then((result) => new Map((result.data ?? []).map((card) => [card.id, card] as const)))
+      for (const id of documents)
+        remember(
+          id,
+          batch.then((cards) => cards.get(id)),
+        )
+    }
+    for (const id of missing.filter((id) => /^[mf]/.test(id)))
+      remember(
+        id,
+        client()
+          .memory.get({ memoryID: id })
+          .then((result) =>
+            result.data ? { id, kind: result.data.entry.kind, text: result.data.entry.text } : undefined,
+          ),
+      )
+    const found = await Promise.all(ids.map((id) => known.get(id) ?? Promise.resolve(undefined)))
+    return found.filter((card): card is KnowledgeCard => card !== undefined)
+  }
 }
 
 export const ProjectDirString = Schema.String.pipe(Schema.brand("ProjectDirString"))
