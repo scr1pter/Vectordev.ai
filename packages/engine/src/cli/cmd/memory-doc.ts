@@ -4,7 +4,9 @@ import path from "path"
 import { Effect } from "effect"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
+import { Flag } from "@vectordevai/core/flag/flag"
 import { Instruction } from "@/session/instruction"
+import { SessionDistill } from "@/session/distill"
 import { cmd } from "./cmd"
 import { effectCmd, fail } from "../effect-cmd"
 import { UI } from "../ui"
@@ -28,6 +30,7 @@ export const MemoryDocCommand = cmd({
       .command(MemoryDocReindexCommand)
       .command(MemoryDocApproveCommand)
       .command(MemoryDocRejectCommand)
+      .command(MemoryDocDistillCommand)
       .demandCommand(),
   async handler() {},
 })
@@ -317,18 +320,104 @@ const decide = (action: "approve" | "reject", describe: string, done: string) =>
     command: `${action} <id>`,
     describe,
     builder: (yargs) =>
-      yargs.positional("id", { describe: "a document's id or number, or a held passage's or record's id", type: "string", demandOption: true }),
+      yargs
+        .positional("id", { describe: "a document's id or number, or a held passage's or record's id", type: "string", demandOption: true })
+        .option("suggestions", {
+          describe: "for approve: keep every record a model suggested for the document",
+          type: "boolean",
+          default: false,
+          hidden: !Flag.VECTOR_KNOWLEDGE_DISTILL,
+        }),
     handler: Effect.fn(`Cli.memory.doc.${action}`)(function* (args) {
       const memory = yield* where
       const id = /^#?\d+$/.test(args.id) ? yield* resolve(args.id) : args.id
-      if ((yield* memory.knowledge.update(memory.place, id, { action })) === "not-found")
+      const change = args.suggestions && action === "approve" ? ("keep-suggestions" as const) : action
+      if ((yield* memory.knowledge.update(memory.place, id, { action: change })) === "not-found")
         return yield* fail(`Nothing ${args.id} waits for your review here.`)
-      UI.println(UI.Style.TEXT_SUCCESS_BOLD + `${done} ${id}` + UI.Style.TEXT_NORMAL)
+      UI.println(UI.Style.TEXT_SUCCESS_BOLD + `${change === "keep-suggestions" ? "Kept the suggestions for" : done} ${id}` + UI.Style.TEXT_NORMAL)
     }),
   })
 
 export const MemoryDocApproveCommand = decide("approve", "let Vector use a document or passage that waited for your review", "Approved")
 export const MemoryDocRejectCommand = decide("reject", "forget a document, or put away a passage or record, that waited for your review", "Rejected")
+
+// `vector memory doc distill <id>`: a model reads the sections the rules found little in, after the estimate, and what
+// it suggests waits for review. Behind VECTOR_KNOWLEDGE_DISTILL, and hidden from help without it.
+export const MemoryDocDistillCommand = effectCmd({
+  command: "distill <id>",
+  describe: Flag.VECTOR_KNOWLEDGE_DISTILL
+    ? "ask a model to find more in a document; every suggestion quotes it and waits for your review"
+    : false,
+  builder: (yargs) =>
+    yargs
+      .positional("id", { describe: "the document's id or number", type: "string", demandOption: true })
+      .option("model", { describe: "provider/model to ask; the default model otherwise", type: "string" })
+      .option("max-tokens", {
+        describe: "the most section text to send, in tokens (1,000 to 30,000)",
+        type: "number",
+        default: 30_000,
+      })
+      .option("yes", { describe: "send it; without this only the estimate is shown", type: "boolean", default: false })
+      .option("json", { describe: "print JSON", type: "boolean", default: false }),
+  handler: Effect.fn("Cli.memory.doc.distill")(function* (args) {
+    const memory = yield* where
+    const distill = yield* SessionDistill.Service
+    const input = {
+      document: yield* resolve(args.id),
+      ...(args.model ? { model: args.model } : {}),
+      maxTokens: args.maxTokens,
+    }
+    if (!args.yes) {
+      const estimate = yield* distill.estimate(memory.place, input)
+      if (estimate.refused) return yield* fail(estimate.refused.message)
+      if (args.json) return print(estimate)
+      UI.println(
+        `Vector would send ${estimate.sections} section${estimate.sections === 1 ? "" : "s"} (about ${estimate.input.toLocaleString("en-US")} tokens) to ${estimate.model}, with up to ${estimate.output.toLocaleString("en-US")} tokens back.`,
+      )
+      UI.println(costLine(estimate))
+      UI.println(UI.Style.TEXT_DIM + "Nothing was sent. Run again with --yes to send it." + UI.Style.TEXT_NORMAL)
+      return
+    }
+    const result = yield* distill.run(memory.place, input)
+    if (result.type === "refused") return yield* fail(result.message)
+    if (args.json) return print(result)
+    const dropped = result.dropped.quote + result.dropped.scan + result.dropped.invalid
+    UI.println(
+      `${UI.Style.TEXT_SUCCESS_BOLD}${result.records.length} suggestion${result.records.length === 1 ? "" : "s"} from ${result.model}${UI.Style.TEXT_NORMAL}, waiting for your review.`,
+    )
+    if (dropped > 0)
+      UI.println(
+        `Dropped ${dropped}: ${result.dropped.quote} with a quote not in the document, ${result.dropped.scan} that failed a check, ${result.dropped.invalid} Vector could not read.`,
+      )
+    if (result.error) UI.println(`${UI.Style.TEXT_WARNING}${result.error}${UI.Style.TEXT_NORMAL}`)
+    UI.println(
+      UI.Style.TEXT_DIM +
+        `Spent ${(result.tokens.input + result.tokens.output).toLocaleString("en-US")} tokens${result.costKind === "priced" ? `, $${result.cost.toFixed(4)} at catalog rates` : ""}.` +
+        UI.Style.TEXT_NORMAL,
+    )
+    if (result.records.length === 0) return
+    UI.empty()
+    for (const record of result.records) {
+      UI.println(recordLine(record))
+      UI.println(`  ${UI.Style.TEXT_DIM}“${record.quote}”${UI.Style.TEXT_NORMAL}`)
+    }
+    UI.empty()
+    UI.println(
+      UI.Style.TEXT_DIM +
+        `Keep one with vector memory doc approve <id>, drop it with vector memory doc reject <id>, or keep them all with vector memory doc approve ${input.document} --suggestions.` +
+        UI.Style.TEXT_NORMAL,
+    )
+  }),
+})
+
+// What a request may cost, in the CLI's words: catalog rates for a priced model.
+function costLine(estimate: SessionDistill.Estimate) {
+  if (estimate.costKind === "free") return "The model is free."
+  if (estimate.costKind === "plan") return "Your plan covers the model."
+  if (estimate.lowUsd === undefined || estimate.highUsd === undefined)
+    return "The model has no listed price, so Vector cannot estimate what it costs."
+  return `About $${estimate.lowUsd.toFixed(4)} to $${estimate.highUsd.toFixed(4)} at catalog rates.`
+}
 
 // `vector memory links <file>`: what documents say about a file, by the links Vector found to it in the code.
 export const MemoryLinksCommand = effectCmd({

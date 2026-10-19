@@ -178,3 +178,56 @@ cliIt.concurrent(
     }),
   180_000,
 )
+
+cliIt.concurrent(
+  "doc distill shows the estimate first, sends only with --yes and the flag, and keeps the verbatim suggestion only",
+  (fixture) =>
+    Effect.gen(function* () {
+      const billing =
+        "# Billing notes\n\n## Refunds policy\n\nRefunds are approved by a support lead and paid back to the original card within ten business days.\n"
+      const repo = yield* repository(fixture, { "billing.md": billing })
+      const run = (args: string[], flag: boolean) =>
+        fixture.vector.spawn(["memory", "doc", ...args], {
+          cwd: repo.root,
+          env: { VECTOR_AGENT_DB: path.join(fixture.home, "vector.db"), ...(flag ? { VECTOR_KNOWLEDGE_DISTILL: "1" } : {}) },
+          timeoutMs: 60_000,
+        })
+      const added = yield* repo.doc(["add", "billing.md", "--json"])
+      fixture.vector.expectExit(added, 0, "vector memory doc add")
+      const id = (JSON.parse(added.stdout) as { document: { id: string } }[])[0]!.document.id
+      const model = ["--model", "lmstudio/test-model"]
+
+      // Off by default.
+      const off = yield* run(["distill", id, ...model, "--yes"], false)
+      fixture.vector.expectExit(off, 1, "vector memory doc distill with the flag off")
+      expect(`${off.stdout}${off.stderr}`).toContain("VECTOR_KNOWLEDGE_DISTILL")
+      // The estimate sends nothing.
+      const estimate = yield* run(["distill", id, ...model, "--json"], true)
+      fixture.vector.expectExit(estimate, 0, "vector memory doc distill estimate")
+      expect(JSON.parse(estimate.stdout)).toMatchObject({ enabled: true, model: "lmstudio/test-model", sections: 1, output: 4000 })
+      expect(yield* fixture.llm.calls).toBe(0)
+
+      yield* fixture.llm.tool("StructuredOutput", {
+        records: [
+          {
+            kind: "requirement",
+            text: "Refunds are approved by a support lead",
+            quote: "Refunds are approved by a support lead and paid back to the original card within ten business days.",
+          },
+          { kind: "constraint", text: "Refunds are paid within 5 days", quote: "Refunds are paid within 5 days." },
+        ],
+      })
+      const sent = yield* run(["distill", id, ...model, "--yes", "--json"], true)
+      fixture.vector.expectExit(sent, 0, "vector memory doc distill --yes")
+      const result = JSON.parse(sent.stdout) as { records: { id: string; status: string }[]; dropped: { quote: number } }
+      expect(result.records.map((record) => record.status)).toEqual(["proposed"])
+      expect(result.dropped.quote).toBe(1)
+      expect(yield* fixture.llm.calls).toBe(1)
+
+      fixture.vector.expectExit(yield* run(["approve", id, "--suggestions"], true), 0, "vector memory doc approve --suggestions")
+      const shown = yield* run(["show", id, "--records", "--json"], true)
+      const records = JSON.parse(shown.stdout) as { id: string; status: string; origin: string }[]
+      expect(records.find((record) => record.id === result.records[0]!.id)).toMatchObject({ status: "active", origin: "distilled" })
+    }),
+  120_000,
+)
