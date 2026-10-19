@@ -216,9 +216,13 @@ it.effect("native import is passive, remapped, complete, and notifications see t
     ).toHaveLength(2)
     // The transcript's "user" is whoever published it, so its text is marked as outside content: memory never takes
     // it as the words of the user who continues the session.
-    const parts = yield* db.select().from(PartTable).where(eq(PartTable.session_id, converted.sessionID)).all().pipe(Effect.orDie)
+    const parts = (
+      yield* db.select().from(PartTable).where(eq(PartTable.session_id, converted.sessionID)).all().pipe(Effect.orDie)
+    ).map((row) =>
+      Schema.decodeUnknownSync(SessionV1.Part)({ ...row.data, id: row.id, sessionID: row.session_id, messageID: row.message_id }),
+    )
     expect(parts.length).toBeGreaterThan(0)
-    expect(parts.every((part) => part.data.type === "text" && part.data.metadata?.[BrainSchema.OUTSIDE] === "import")).toBe(true)
+    expect(parts.every((part) => part.type === "text" && part.metadata?.[BrainSchema.OUTSIDE] === "import")).toBe(true)
   }),
 )
 
