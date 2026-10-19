@@ -191,20 +191,20 @@ describe("vector review: what the user's documents require", () => {
     Effect.gen(function* () {
       const repo = yield* branched
       const run = fake()
-      const asked: (readonly string[])[] = []
+      const asked: { files: readonly string[]; shared: boolean }[] = []
       const result = yield* review(
         { directory: repo.dir },
         {
           ...run.deps,
           requirements: (input) =>
             Effect.sync(() => {
-              asked.push(input.files)
+              asked.push({ files: input.files, shared: input.shared })
               return "- [r0000000000000] requirement · Spec: last() returns the last item → src/list.ts"
             }),
         },
       )
       expect(result.exitCode).toBe(0)
-      expect(asked).toEqual([["src/list.ts"]])
+      expect(asked).toEqual([{ files: ["src/list.ts"], shared: false }])
       expect(run.calls[0]!.context.requirements).toContain("last() returns the last item")
     }),
   )
@@ -705,6 +705,22 @@ describe("vector review: --post", () => {
       expect(github.comments[0]).not.toContain("<!-- vector-review:summary -->")
       expect(github.comments[0]).not.toContain("vector-review:state")
       expect(run.err()).toContain("Posted to acme/widgets#7: https://github.com/acme/widgets/pull/7#issuecomment-1")
+    }),
+  )
+
+  it.live("a review posted to the pull request asks only for what shared documents require", () =>
+    Effect.gen(function* () {
+      const repo = yield* pullRequest
+      const github = fakeGitHub({ token: TOKEN })
+      const run = fake({ github: github.access, findings: two })
+      const shared: boolean[] = []
+      const result = yield* review(
+        { directory: repo.dir, pr: 7, post: true, yes: true },
+        { ...run.deps, requirements: (input) => Effect.sync(() => void shared.push(input.shared)) },
+      )
+      expect(result.exitCode).toBe(0)
+      expect(github.comments).toHaveLength(1)
+      expect(shared).toEqual([true])
     }),
   )
 

@@ -126,8 +126,13 @@ export interface LocalReviewDeps<RunR = never, ModelR = never> {
   now?: () => number
   color?: boolean
   github?: GitHubAccess // for --post; the GitHub CLI's token and the real API by default
-  // What the user's documents require of the changed files, from Vector's brain; none outside a Vector repository
-  requirements?: (input: { files: readonly string[]; model: ResolvedModel }) => Effect.Effect<string | undefined>
+  // What the user's documents require of the changed files, from Vector's brain; none outside a Vector repository.
+  // `shared` is set when the review leaves this computer (--post): then no private document may be in it.
+  requirements?: (input: {
+    files: readonly string[]
+    model: ResolvedModel
+    shared: boolean
+  }) => Effect.Effect<string | undefined>
 }
 
 // What --post needs from GitHub: a token for the remote's host, who it belongs to, and the two writes it makes.
@@ -364,7 +369,7 @@ export function executeLocalReview<RunR, ModelR>(
     })
     // The specs the change touches, with drift flags, so the reviewer can tell when it breaks one.
     const requirements = deps.requirements
-      ? yield* deps.requirements({ files: review.map((file) => file.path), model })
+      ? yield* deps.requirements({ files: review.map((file) => file.path), model, shared: options.post === true })
       : undefined
     const headFiles =
       trust === "untrusted"
@@ -1256,7 +1261,7 @@ export const ReviewCommand = effectCmd({
         stdout: write,
         stderr: (text) => void process.stderr.write(text),
         color: process.stdout.isTTY === true && !process.env.NO_COLOR,
-        // Private documents only for a review model that may not train on prompts.
+        // Private documents only for a review model that may not train on prompts, and never in a posted review.
         requirements: (input) =>
           Effect.gen(function* () {
             const place = yield* instruction.place()
@@ -1266,7 +1271,7 @@ export const ReviewCommand = effectCmd({
             return yield* ReviewContext.requirements({
               place,
               files: input.files,
-              personal: chosen !== undefined && !freeModelMayTrain(chosen),
+              personal: !input.shared && chosen !== undefined && !freeModelMayTrain(chosen),
             })
           }).pipe(
             Effect.provideService(BrainKnowledge.Service, knowledge),
