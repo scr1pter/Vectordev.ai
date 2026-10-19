@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { BrainLimits } from "@vectordevai/core/brain/document/limits"
 import { BrainDocument } from "@vectordevai/core/brain/document/read"
+import { BrainText } from "@vectordevai/core/brain/document/text"
 
 const shapes = async (text: string, name = "notes.txt") => {
   const result = await BrainDocument.read({ name, bytes: new TextEncoder().encode(text) }, BrainLimits.LIMITS.worker)
@@ -59,5 +60,29 @@ describe("BrainDocument text, reStructuredText and AsciiDoc", () => {
 
   test("a numbered list item is not a heading", async () => {
     expect(await shapes("1. Install the package.\n2. Run it.\n")).toEqual(["list#:0Install the package.|0Run it."])
+  })
+
+  test("hyphenated breaks join across a chain of lines, and empty lines keep their space", () => {
+    expect(BrainText.join(["The retry budget is recal-", "culated every min-", "ute by the worker."])).toBe(
+      "The retry budget is recalculated every minute by the worker.",
+    )
+    expect(BrainText.join(["", "x-", "y-", "z", "", "End-", "User"])).toBe("xyz  End- User")
+  })
+
+  test("reading takes time in proportion to the text, however its lines repeat", () => {
+    // Each of these took time growing with the square of its length: 200 KB of unclosed fences took about 8 seconds.
+    const patterns = {
+      wrapped: "the retry budget grows when the service is slow to answer at all\n",
+      hyphenated: "recal-\nculated ",
+      fences: "```x\n",
+      quotes: "> a\n\nb\n",
+      indented: "\n    code\nx\n",
+    }
+    for (const [name, unit] of Object.entries(patterns)) {
+      const text = unit.repeat(Math.floor(300_000 / unit.length))
+      const started = performance.now()
+      BrainText.read(text)
+      expect(performance.now() - started, name).toBeLessThan(500)
+    }
   })
 })

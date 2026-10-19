@@ -27,6 +27,16 @@ export function read(text: string): Read {
     state.list = undefined
   }
   const blank = (index: number) => index < 0 || index >= lines.length || !lines[index]!.trim()
+  // Where each fence marker next closes, remembered, so a file of fences that never close is not searched to its end
+  // once per fence.
+  const closers = new Map<string, number>()
+  const closer = (marker: string, index: number) => {
+    const known = closers.get(marker)
+    if (known !== undefined && (known < 0 || known > index)) return known
+    const found = find(lines, index + 1, (other) => other.trim() === marker)
+    closers.set(marker, found)
+    return found
+  }
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]!
     const trimmed = line.trim()
@@ -44,7 +54,7 @@ export function read(text: string): Read {
     const fence = trimmed.match(FENCE)
     if (fence && state.paragraph.length === 0) {
       // A delimiter with no partner is a rule between sections, not the start of code.
-      const close = lines.findIndex((other, at) => at > index && other.trim() === fence[1])
+      const close = closer(fence[1]!, index)
       flush()
       if (close > 0)
         drafts.push({
@@ -106,7 +116,7 @@ export function read(text: string): Read {
       continue
     }
     if (trimmed.startsWith(">")) {
-      const end = lines.findIndex((other, at) => at > index && !other.trim().startsWith(">"))
+      const end = find(lines, index + 1, (other) => !other.trim().startsWith(">"))
       const stop = end < 0 ? lines.length : end
       flush()
       drafts.push({
@@ -160,23 +170,43 @@ function caps(line: string) {
   )
 }
 
+// Lines are searched from where a block starts, never from the top, so many blocks in a long file cost no more than
+// reading it once.
+function find(lines: readonly string[], from: number, test: (line: string) => boolean) {
+  for (let at = from; at < lines.length; at++) if (test(lines[at]!)) return at
+  return -1
+}
+
 function indentedEnd(lines: readonly string[], from: number) {
-  const end = lines.findIndex((line, at) => at >= from && line.trim() !== "" && !/^(?: {2,}|\t)/.test(line))
+  const end = find(lines, from, (line) => line.trim() !== "" && !/^(?: {2,}|\t)/.test(line))
   const stop = end < 0 ? lines.length : end
   // Trailing blank lines belong to what follows.
   return lines.slice(from, stop).findLastIndex((line) => line.trim() !== "") + from + 1
 }
 
 function dedent(lines: readonly string[]) {
-  const indent = Math.min(...lines.filter((line) => line.trim()).map((line) => line.match(/^\s*/)![0].length))
+  const indent = lines
+    .filter((line) => line.trim())
+    .reduce((least, line) => Math.min(least, line.match(/^\s*/)![0].length), Infinity)
   return lines.map((line) => line.slice(indent)).join("\n")
 }
 
-/** Hard-wrapped lines as one paragraph, joining a word a line break hyphenated. */
+/**
+ * Hard-wrapped lines as one paragraph, joining a word a line break hyphenated. Pieces are gathered and joined once, and
+ * only the last few characters are looked at for a hyphen, so a paragraph of many lines costs no more than its length.
+ */
 export function join(lines: readonly string[]) {
-  return lines.reduce((out, line) => {
-    if (!out) return line
-    if (/\p{L}-$/u.test(out) && /^\p{Ll}/u.test(line)) return `${out.slice(0, -1)}${line}`
-    return `${out} ${line}`
-  }, "")
+  const state = { pieces: [] as string[], tail: "" }
+  for (const line of lines) {
+    if (!state.tail) {
+      if (line) state.pieces.push(line)
+      state.tail = line.slice(-3)
+      continue
+    }
+    const hyphenated = /\p{L}-$/u.test(state.tail) && /^\p{Ll}/u.test(line)
+    if (hyphenated) state.pieces[state.pieces.length - 1] = state.pieces.at(-1)!.slice(0, -1)
+    state.pieces.push(hyphenated ? line : ` ${line}`)
+    state.tail = `${hyphenated ? state.tail.slice(0, -1) : state.tail}${hyphenated ? line : ` ${line}`}`.slice(-3)
+  }
+  return state.pieces.join("")
 }
