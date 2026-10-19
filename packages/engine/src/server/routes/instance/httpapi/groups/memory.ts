@@ -239,6 +239,12 @@ export const MemoryDocumentDetail = Schema.Struct({
       createdAt: Schema.Finite,
     }),
   ),
+  /** What this version changed from the one before; absent for a first version. */
+  diff: Schema.optional(BrainSchema.VersionDiff),
+  /** The document's steps, newest first, at most 50: added, a new version, records changed, linked, edited, decided. */
+  history: Schema.Array(BrainSchema.DocumentEvent),
+  /** Runs in the last 30 days whose answers cited or opened one of its cards, and how they ended. */
+  usage: BrainSchema.DocumentUsage,
 }).annotate({ identifier: "MemoryDocumentDetail" })
 
 export const MemoryDocumentUpdatePayload = Schema.Struct({

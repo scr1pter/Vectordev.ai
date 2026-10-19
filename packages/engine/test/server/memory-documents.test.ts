@@ -257,11 +257,19 @@ describe("memory document routes", () => {
 
     const renamed = await json(tmp.path, `/memory/documents/${version.document.id}`, "PATCH", { title: "Auth spec v2" })
     expect(await renamed.json()).toMatchObject({ id: version.document.id, title: "Auth spec v2", version: 2 })
-    const versions = (await get(tmp.path, `/memory/documents/${version.document.id}`)).versions
-    expect(versions.map((item: { version: number; status: string }) => [item.version, item.status])).toEqual([
+    const second = await get(tmp.path, `/memory/documents/${version.document.id}`)
+    expect(second.versions.map((item: { version: number; status: string }) => [item.version, item.status])).toEqual([
       [2, "searchable"],
       [1, "superseded"],
     ])
+    // What the new version changed, and the document's History: the edit and pin it kept, newest first.
+    expect(second.diff).toMatchObject({ version: 2, previous: id, added: { requirement: 1 }, edits: 1, pins: 1 })
+    expect(second.history.map((event: { action: string }) => event.action)).toEqual(
+      expect.arrayContaining(["version", "added", "edited", "pinned", "made-memory"]),
+    )
+    expect(second.history.find((event: { action: string }) => event.action === "pinned").record).toBe(retry.id)
+    expect(second.usage).toEqual({ runs: 0, passed: 0, reverted: 0 })
+    expect(detail.history).toEqual([expect.objectContaining({ action: "added", actor: "user", detail: { version: 1 } })])
     // Forgetting a document forgets every version of it.
     const removed = await call(at(tmp.path, `/memory/documents/${version.document.id}`), { method: "DELETE", headers: owner })
     expect(await removed.json()).toBe(true)

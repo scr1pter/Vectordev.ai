@@ -291,6 +291,9 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
         held: detail.held,
         warnings: detail.document.warnings,
         versions: detail.versions,
+        ...(detail.diff ? { diff: detail.diff } : {}),
+        history: detail.history,
+        usage: detail.usage,
       }
     })
 
