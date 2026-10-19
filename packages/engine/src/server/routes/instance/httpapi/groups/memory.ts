@@ -300,6 +300,10 @@ export const MemoryRecordUpdatePayload = Schema.Struct({
   kind: Schema.optional(BrainSchema.RecordKind),
   pinned: Schema.optional(Schema.Boolean),
   action: Schema.optional(Schema.Literals(["not-applicable", "forget", "restore", "make-memory"])),
+  /** Link the record to a file of the repository, at a symbol's definition when one is given. */
+  link: Schema.optional(Schema.Struct({ path: Schema.String, symbol: Schema.optional(Schema.String) })),
+  /** Take a link away by its number; Vector does not make it again. */
+  unlink: Schema.optional(Schema.Finite),
 })
 
 export const MemoryRecordResult = Schema.Struct({
@@ -307,6 +311,38 @@ export const MemoryRecordResult = Schema.Struct({
   /** The memory entry `make-memory` saved. */
   entry: Schema.optional(BrainSchema.Entry),
 }).annotate({ identifier: "MemoryRecordResult" })
+
+export const MemoryLinksQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  /** A file of the repository, relative to it. */
+  file: Schema.String,
+})
+
+export const MemoryReviewQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  /** "true" checks links against the code first, so drift is current. */
+  check: Schema.optional(Schema.Literals(["true", "false"])),
+})
+
+export const MemoryReviewPayload = Schema.Struct({
+  /**
+   * dismiss: not an issue. keep-document / keep-code: for drift, which side is right. keep: for a conflict, keep the
+   * side `winner` names and put the other away. approve / reject: for held content.
+   */
+  action: Schema.Literals(["dismiss", "keep-document", "keep-code", "keep", "approve", "reject"]),
+  winner: Schema.optional(Schema.String),
+})
+
+export const MemoryReviewResult = Schema.Struct({
+  /** The item as it is now; held content that was settled has none. */
+  item: Schema.optional(BrainSchema.ReviewItem),
+  /** The decision `keep-code` saved. */
+  entry: Schema.optional(BrainSchema.Entry),
+}).annotate({ identifier: "MemoryReviewResult" })
+
+const ReviewItemID = Schema.String.annotate({
+  description: "A review item's id: v… for a conflict or drift, or the held passage, record or document's own id",
+})
 
 export const MemoryKnowledgeQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
@@ -586,6 +622,42 @@ export const MemoryApi = HttpApi.make("memory")
             summary: "Change a record",
             description:
               "Edit a record's text or kind, pin it, say it is not what Vector called it, forget or restore it, or save it as a memory entry. Edits and decisions hold when the document is read again.",
+          }),
+        ),
+        HttpApiEndpoint.get("links", `${root}/links`, {
+          query: MemoryLinksQuery,
+          success: described(Schema.Array(BrainSchema.Link), "What is linked to the file"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.links",
+            summary: "List a file's links",
+            description:
+              "Document records and passages linked to a file of the repository (by a definition, a use, a route, an env read, a constant or a path), with each link's state, and memory entries whose paths cover the file.",
+          }),
+        ),
+        HttpApiEndpoint.get("review", `${root}/review`, {
+          query: MemoryReviewQuery,
+          success: described(Schema.Array(BrainSchema.ReviewItem), "What needs the user's look"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.review.list",
+            summary: "List what needs a look",
+            description:
+              "Open items for the user: documents, rules and memory that disagree, linked code that drifted from what a document says (with values, such as 50 MB against 64 MB), and held documents, passages and records.",
+          }),
+        ),
+        HttpApiEndpoint.patch("resolveReview", `${root}/review/:itemID`, {
+          params: { itemID: ReviewItemID },
+          query: WorkspaceRoutingQuery,
+          payload: MemoryReviewPayload,
+          success: described(MemoryReviewResult, "The item after the decision"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.review.resolve",
+            summary: "Settle an item",
+            description:
+              "The user's decision on an item: dismiss it, keep the document or the code for drift (keeping the code saves a decision), keep one side of a conflict, or approve or reject held content. Vector never settles one itself.",
           }),
         ),
         HttpApiEndpoint.get("knowledge", `${root}/knowledge`, {

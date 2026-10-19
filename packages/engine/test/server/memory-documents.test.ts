@@ -134,6 +134,9 @@ describe("memory document routes", () => {
       ["GET", "/memory/records/rnone"],
       ["PATCH", "/memory/records/rnone", JSON.stringify({ pinned: true })],
       ["GET", "/memory/knowledge?ids=rnone"],
+      ["GET", "/memory/links?file=src/upload.ts"],
+      ["GET", "/memory/review"],
+      ["PATCH", "/memory/review/vnone", JSON.stringify({ action: "dismiss" })],
       ["GET", "/memory/settings"],
       ["PATCH", "/memory/settings", JSON.stringify({ keepOriginals: true })],
     ]
@@ -324,6 +327,40 @@ describe("memory document routes", () => {
     expect(records.data?.records).toHaveLength(2)
     const asked = await sdk.memory.documents.upload({ file: new File([`${SPEC}\nMore.\n`], "Auth spec.md") })
     expect(asked.error).toMatchObject({ data: { reason: "version" } })
+  }, 60_000)
+
+  test("a document linked to code lists its links, its drift needs a look, and settling it saves the decision", async () => {
+    await using tmp = await tmpdir({ git: true, trusted: true, config: { formatter: false, lsp: false } })
+    await fs.mkdir(path.join(tmp.path, "src"), { recursive: true })
+    await fs.writeFile(path.join(tmp.path, "src", "upload.ts"), "// Upload limits.\nexport const MAX_UPLOAD_BYTES = 64 * 1024 * 1024\n")
+    const sdk = createVectorClient({ baseUrl: listener.url.origin, directory: tmp.path, headers: owner })
+    const uploaded = await sdk.memory.documents.upload({
+      file: new File(["# Limits\n\n## 1 Uploads\n\nUploads are limited to at most 50 MB per file by `MAX_UPLOAD_BYTES`.\n"], "Limits.md"),
+    })
+    await searchable(tmp.path, uploaded.data!.document.id)
+    const links = await sdk.memory.links({ file: "src/upload.ts" })
+    const constant = links.data!.find((link) => link.anchor?.method === "constant")
+    expect(constant).toMatchObject({
+      type: "record",
+      kind: "constraint",
+      title: "Limits",
+      anchor: { symbol: "MAX_UPLOAD_BYTES", line: 2, status: "fresh", value: { value: 64 * MB, unit: "B" } },
+    })
+    const review = await sdk.memory.review.list({ check: "true" })
+    const [item] = review.data!.filter((entry) => entry.kind === "drift")
+    expect(item).toMatchObject({ detail: { type: "value", document: "50 MB", code: "64 MB", path: "src/upload.ts", line: 2 } })
+    const kept = await sdk.memory.review.resolve({ itemID: item!.id, action: "keep-code" })
+    expect(kept.data).toMatchObject({ item: { status: "resolved", winner: "code" }, entry: { kind: "decision", origin: "user" } })
+    expect((await sdk.memory.review.list()).data!.some((entry) => entry.kind === "drift")).toBe(false)
+    const unknown = await sdk.memory.review.resolve({ itemID: "vnothing", action: "dismiss" })
+    expect(unknown.error).toMatchObject({ data: { code: "not-found" } })
+    // The owner takes the link away, and it is gone.
+    const unlinked = await sdk.memory.records.update({ recordID: constant!.owner, unlink: constant!.anchor!.id })
+    expect(unlinked.error).toBeUndefined()
+    const after = (await sdk.memory.links({ file: "src/upload.ts" })).data!
+    expect(after.some((link) => link.anchor?.id === constant!.anchor!.id)).toBe(false)
+    // The decision the owner kept covers the file, so it is linked to it too.
+    expect(after).toContainEqual(expect.objectContaining({ type: "entry", kind: "decision", title: "Memory" }))
   }, 60_000)
 
   test("a repository that keeps originals serves the kept copy only as a download, and stops when told", async () => {

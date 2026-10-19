@@ -395,6 +395,27 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       return { record: result.record, ...(result.entry ? { entry: result.entry } : {}) }
     })
 
+    const links = Effect.fn("MemoryHttpApi.links")(function* (ctx: { query: { file: string } }) {
+      return yield* knowledge.links(yield* instruction.place(), ctx.query.file, { personal: true })
+    })
+
+    const review = Effect.fn("MemoryHttpApi.review")(function* (ctx: { query: { check?: "true" | "false" } }) {
+      const place = yield* instruction.place()
+      if (ctx.query.check === "true") yield* knowledge.drift(place, { force: true })
+      return yield* knowledge.review(place)
+    })
+
+    const resolveReview = Effect.fn("MemoryHttpApi.resolveReview")(function* (ctx: {
+      params: { itemID: string }
+      payload: BrainKnowledge.Resolution
+    }) {
+      const result = yield* knowledge.resolve(yield* instruction.place(), ctx.params.itemID, ctx.payload)
+      if (!result) return yield* missing(ctx.params.itemID, `Nothing here needs a look as ${ctx.params.itemID}, or not that way.`)
+      if (result.type === "refused") return yield* refused(result.message)
+      if (result.type === "settled") return {}
+      return { item: result.item, ...(result.entry ? { entry: result.entry } : {}) }
+    })
+
     const cited = Effect.fn("MemoryHttpApi.knowledge")(function* (ctx: { query: { ids: string } }) {
       const ids = ctx.query.ids.split(",").map((id) => id.trim()).filter(Boolean)
       if (ids.length > BrainKnowledge.LIMIT.cards) return yield* refused("Ask for at most 50 ids at a time.", "limit")
@@ -424,6 +445,9 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       .handle("records", records)
       .handle("record", record)
       .handle("updateRecord", updateRecord)
+      .handle("links", links)
+      .handle("review", review)
+      .handle("resolveReview", resolveReview)
       .handle("knowledge", cited)
   }),
 )

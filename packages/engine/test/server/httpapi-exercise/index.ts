@@ -801,6 +801,20 @@ const scenarios: Scenario[] = [
     .get("/memory/knowledge", "memory.knowledge")
     .at((ctx) => ({ path: "/memory/knowledge?ids=rnone,dnone", headers: ctx.headers() }))
     .json(200, (body) => check(Array.isArray(body) && body.length === 0, "ids nothing holds give no cards")),
+  http.protected
+    .get("/memory/links", "memory.links")
+    .at((ctx) => ({ path: "/memory/links?file=src/none.ts", headers: ctx.headers() }))
+    .json(200, (body) => check(Array.isArray(body) && body.length === 0, "a file nothing is linked to has no links")),
+  http.protected.get("/memory/review", "memory.review.list").json(200, array),
+  http.protected
+    .patch("/memory/review/{itemID}", "memory.review.resolve")
+    .mutating()
+    .at((ctx) => ({
+      path: route("/memory/review/{itemID}", { itemID: "vnone" }),
+      headers: ctx.headers(),
+      body: { action: "dismiss" },
+    }))
+    .json(400, object, "status"),
   http.protected.get("/experimental/workspace/adapter", "experimental.workspace.adapter.list").json(200, array),
   http.protected.get("/experimental/workspace", "experimental.workspace.list").json(200, array),
   http.protected.get("/experimental/workspace/status", "experimental.workspace.status").json(200, array),

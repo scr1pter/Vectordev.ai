@@ -330,6 +330,91 @@ const decide = (action: "approve" | "reject", describe: string, done: string) =>
 export const MemoryDocApproveCommand = decide("approve", "let Vector use a document or passage that waited for your review", "Approved")
 export const MemoryDocRejectCommand = decide("reject", "forget a document, or put away a passage or record, that waited for your review", "Rejected")
 
+// `vector memory links <file>`: what documents say about a file, by the links Vector found to it in the code.
+export const MemoryLinksCommand = effectCmd({
+  command: "links <file>",
+  describe: "show which documents and memory are linked to a file of this repository",
+  builder: (yargs) =>
+    yargs
+      .positional("file", { describe: "a file of the repository", type: "string", demandOption: true })
+      .option("relink", {
+        describe: "link every document to the code again first, and say which names were too common to link",
+        type: "boolean",
+        default: false,
+      })
+      .option("json", { describe: "print JSON", type: "boolean", default: false }),
+  handler: Effect.fn("Cli.memory.links")(function* (args) {
+    const memory = yield* where
+    const linked = args.relink ? yield* memory.knowledge.link(memory.place) : undefined
+    const file = path.relative(memory.place.root, path.resolve(process.cwd(), args.file)).split(path.sep).join("/")
+    const links = yield* memory.knowledge.links(memory.place, file, { personal: true })
+    if (args.json) return print(linked ? { links, linked } : links)
+    if (linked)
+      UI.println(
+        `${UI.Style.TEXT_DIM}Linked again: ${linked.anchors} links, ${linked.pending} names waiting for their code${linked.common.length ? `; too common to link: ${linked.common.slice(0, 10).join(", ")}` : ""}.${UI.Style.TEXT_NORMAL}`,
+      )
+    if (links.length === 0) return UI.println(`Nothing Vector keeps is linked to ${file}.`)
+    for (const link of links) {
+      const anchor = link.anchor
+      const how = anchor
+        ? ` ${UI.Style.TEXT_DIM}(${anchor.method}${anchor.symbol ? ` ${anchor.symbol}` : ""}${anchor.line ? `:${anchor.line}` : ""}, ${anchor.status}${anchor.value ? `, code gives ${anchor.value.raw}` : ""})${UI.Style.TEXT_NORMAL}`
+        : ""
+      UI.println(`${UI.Style.TEXT_HIGHLIGHT}${link.owner}${UI.Style.TEXT_NORMAL} ${link.kind} · ${link.title}: ${link.text.replace(/\s+/g, " ").slice(0, 160)}${how}`)
+    }
+  }),
+})
+
+// `vector memory review`: what needs the user's look, and their decision on each item.
+export const MemoryReviewCommand = effectCmd({
+  command: "review",
+  describe: "list what needs your look: documents and memory that disagree, code that drifted, and held content",
+  builder: (yargs) =>
+    yargs.command(MemoryReviewResolveCommand).option("json", { describe: "print JSON", type: "boolean", default: false }),
+  handler: Effect.fn("Cli.memory.review")(function* (args) {
+    const memory = yield* where
+    // The list is only useful with drift as the code is now.
+    yield* memory.knowledge.drift(memory.place, { force: true })
+    const items = yield* memory.knowledge.review(memory.place)
+    if (args.json) return print(items)
+    if (items.length === 0) return UI.println("Nothing needs a look.")
+    for (const item of items) UI.println(reviewLine(item))
+    UI.empty()
+    UI.println(
+      UI.Style.TEXT_DIM +
+        "Settle one with: vector memory review resolve <id> <dismiss|keep-document|keep-code|keep|approve|reject> [winner]" +
+        UI.Style.TEXT_NORMAL,
+    )
+  }),
+})
+
+export const MemoryReviewResolveCommand = effectCmd({
+  command: "resolve <id> <action> [winner]",
+  describe: "settle an item: dismiss it, keep the document or the code, keep one side of a conflict, approve or reject",
+  builder: (yargs) =>
+    yargs
+      .positional("id", { describe: "the item's id, as review lists it", type: "string", demandOption: true })
+      .positional("action", {
+        choices: ["dismiss", "keep-document", "keep-code", "keep", "approve", "reject"] as const,
+        demandOption: true,
+      })
+      .positional("winner", { describe: "for keep: the side of the conflict to keep", type: "string" })
+      .option("json", { describe: "print JSON", type: "boolean", default: false }),
+  handler: Effect.fn("Cli.memory.review.resolve")(function* (args) {
+    const memory = yield* where
+    if (args.action === "keep" && !args.winner) return yield* fail("Name the side to keep: vector memory review resolve <id> keep <winner>")
+    const result = yield* memory.knowledge.resolve(memory.place, args.id, {
+      action: args.action,
+      ...(args.winner ? { winner: args.winner } : {}),
+    })
+    if (!result) return yield* fail(`Nothing needs a look as ${args.id}, or not that way.`)
+    if (result.type === "refused") return yield* fail(result.message)
+    if (args.json) return print(result)
+    if (result.type === "settled") return UI.println(`${args.action === "approve" ? "Approved" : "Rejected"} ${args.id}.`)
+    UI.println(`${result.item.status === "dismissed" ? "Dismissed" : "Settled"} ${args.id}.`)
+    if (result.entry) UI.println(`Saved as a decision: [${result.entry.id}] ${result.entry.text}`)
+  }),
+})
+
 // `vector memory repo-docs on|off`: whether Vector reads the repository's own docs (READMEs, docs/, ADRs, API specs).
 export const MemoryRepoDocsCommand = effectCmd({
   command: "repo-docs [state]",
@@ -412,6 +497,21 @@ function line(document: BrainSchema.Document) {
     document.version > 1 ? `v${document.version}` : undefined,
   ].filter((mark): mark is string => mark !== undefined)
   return `${UI.Style.TEXT_HIGHLIGHT}#${document.ordinal} ${document.id}${UI.Style.TEXT_NORMAL} ${document.title} ${UI.Style.TEXT_DIM}(${document.format}${document.pages ? `, ${document.pages} pages` : ""}, ${document.stats.records} records; ${marks.join(", ")})${UI.Style.TEXT_NORMAL}`
+}
+
+function reviewLine(item: BrainSchema.ReviewItem) {
+  const detail = item.detail
+  const text = (value: unknown) => (typeof value === "string" ? value : "")
+  const side = (value: unknown) =>
+    value && typeof value === "object" && "id" in value && "text" in value ? `[${text(value.id)}] ${text(value.text)}` : ""
+  const head = `${UI.Style.TEXT_HIGHLIGHT}${item.id}${UI.Style.TEXT_NORMAL} ${item.kind}`
+  if (item.kind === "drift" && detail.type === "value")
+    return `${head}: [${item.a}] says ${text(detail.document)}; the code says ${text(detail.code)} (${text(detail.path)}:${String(detail.line ?? "")})`
+  if (item.kind === "drift")
+    return `${head}: [${item.a}] is linked to ${text(detail.path)}${detail.line ? `:${String(detail.line)}` : ""}${detail.symbol ? ` ${text(detail.symbol)}` : ""}, which ${detail.type === "missing" ? "is gone" : "changed"}`
+  if (item.kind === "conflict")
+    return `${head} (${text(detail.type)}): ${side(detail.a)} against ${side(detail.b)}${detail.prefer ? ` ${UI.Style.TEXT_DIM}(Vector would keep [${text(detail.prefer)}])${UI.Style.TEXT_NORMAL}` : ""}`
+  return `${head}: ${text(detail.type)} of ${text(detail.title)}, held: ${text(detail.hold)}${detail.text ? ` ${UI.Style.TEXT_DIM}${text(detail.text).slice(0, 120)}${UI.Style.TEXT_NORMAL}` : ""}`
 }
 
 function recordLine(record: BrainSchema.Record) {

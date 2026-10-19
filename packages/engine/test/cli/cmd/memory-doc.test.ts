@@ -140,3 +140,41 @@ cliIt.concurrent(
     }),
   120_000,
 )
+
+cliIt.concurrent(
+  "links shows what a file is linked to, review lists the drift, and review resolve keeps the code",
+  (fixture) =>
+    Effect.gen(function* () {
+      const repo = yield* repository(fixture, {
+        "limits.md": "# Limits\n\n## 1 Uploads\n\nUploads are limited to at most 50 MB per file by `MAX_UPLOAD_BYTES`.\n",
+        "upload.ts": "// Upload limits.\nexport const MAX_UPLOAD_BYTES = 64 * 1024 * 1024\n",
+      })
+      yield* Effect.promise(() => Bun.$`git init -q`.cwd(repo.root).quiet())
+      const run = (args: string[]) =>
+        fixture.vector.spawn(["memory", ...args], {
+          cwd: repo.root,
+          env: { VECTOR_AGENT_DB: path.join(fixture.home, "vector.db") },
+          timeoutMs: 60_000,
+        })
+      fixture.vector.expectExit(yield* repo.doc(["add", "limits.md"]), 0, "vector memory doc add")
+      const links = yield* run(["links", "upload.ts", "--json"])
+      fixture.vector.expectExit(links, 0, "vector memory links")
+      const linked = JSON.parse(links.stdout) as { kind: string; anchor?: { method: string; symbol?: string } }[]
+      expect(linked).toContainEqual(
+        expect.objectContaining({ kind: "constraint", anchor: expect.objectContaining({ method: "constant", symbol: "MAX_UPLOAD_BYTES" }) }),
+      )
+      const listed = yield* run(["review"])
+      fixture.vector.expectExit(listed, 0, "vector memory review")
+      expect(`${listed.stdout}${listed.stderr}`).toContain("says 50 MB; the code says 64 MB (upload.ts:2)")
+      const items = JSON.parse((yield* run(["review", "--json"])).stdout) as { id: string; kind: string }[]
+      const drift = items.find((item) => item.kind === "drift")!
+      const kept = yield* run(["review", "resolve", drift.id, "keep-code", "--json"])
+      fixture.vector.expectExit(kept, 0, "vector memory review resolve")
+      expect(JSON.parse(kept.stdout)).toMatchObject({ type: "item", item: { status: "resolved" }, entry: { kind: "decision" } })
+      const after = yield* run(["review"])
+      expect(`${after.stdout}${after.stderr}`).toContain("Nothing needs a look.")
+      const unknown = yield* run(["review", "resolve", "vnothing", "dismiss"])
+      fixture.vector.expectExit(unknown, 1, "vector memory review resolve of nothing")
+    }),
+  180_000,
+)

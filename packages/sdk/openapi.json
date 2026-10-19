@@ -8175,6 +8175,22 @@
                   "action": {
                     "type": "string",
                     "enum": ["not-applicable", "forget", "restore", "make-memory"]
+                  },
+                  "link": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "symbol": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["path"],
+                    "additionalProperties": false
+                  },
+                  "unlink": {
+                    "type": "number"
                   }
                 },
                 "additionalProperties": false
@@ -8186,6 +8202,259 @@
           {
             "lang": "js",
             "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.records.update({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/links": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.links",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "file",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What is linked to the file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemoryLink"
+                  },
+                  "description": "What is linked to the file"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Document records and passages linked to a file of the repository (by a definition, a use, a route, an env read, a constant or a path), with each link's state, and memory entries whose paths cover the file.",
+        "summary": "List a file's links",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.links({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/review": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.review.list",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "check",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What needs the user's look",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemoryReviewItem"
+                  },
+                  "description": "What needs the user's look"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Open items for the user: documents, rules and memory that disagree, linked code that drifted from what a document says (with values, such as 50 MB against 64 MB), and held documents, passages and records.",
+        "summary": "List what needs a look",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.review.list({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/review/{itemID}": {
+      "patch": {
+        "tags": ["memory"],
+        "operationId": "memory.review.resolve",
+        "parameters": [
+          {
+            "name": "itemID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A review item's id: v… for a conflict or drift, or the held passage, record or document's own id"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The item after the decision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryReviewResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "The user's decision on an item: dismiss it, keep the document or the code for drift (keeping the code saves a decision), keep one side of a conflict, or approve or reject held content. Vector never settles one itself.",
+        "summary": "Settle an item",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": ["dismiss", "keep-document", "keep-code", "keep", "approve", "reject"]
+                  },
+                  "winner": {
+                    "type": "string"
+                  }
+                },
+                "required": ["action"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.review.resolve({\n  ...\n})"
           }
         ]
       }
@@ -32169,6 +32438,9 @@
       "MemoryAnchor": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "number"
+          },
           "owner": {
             "type": "string"
           },
@@ -32185,6 +32457,25 @@
             "type": "string",
             "enum": ["path", "definition", "use", "route", "env", "constant", "user", "outcome"]
           },
+          "weight": {
+            "type": "number"
+          },
+          "value": {
+            "type": "object",
+            "properties": {
+              "raw": {
+                "type": "string"
+              },
+              "value": {
+                "type": "number"
+              },
+              "unit": {
+                "type": "string"
+              }
+            },
+            "required": ["raw", "value"],
+            "additionalProperties": false
+          },
           "status": {
             "type": "string",
             "enum": ["fresh", "drifted", "missing"]
@@ -32197,7 +32488,7 @@
             "type": "number"
           }
         },
-        "required": ["owner", "path", "method", "status", "origin", "checkedAt"],
+        "required": ["id", "owner", "path", "method", "weight", "status", "origin", "checkedAt"],
         "additionalProperties": false
       },
       "MemoryDocumentDetail": {
@@ -32571,6 +32862,47 @@
           }
         },
         "required": ["record"],
+        "additionalProperties": false
+      },
+      "MemoryLink": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["record", "passage", "entry"]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "document": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "anchor": {
+            "$ref": "#/components/schemas/MemoryAnchor"
+          }
+        },
+        "required": ["owner", "type", "kind", "title", "text"],
+        "additionalProperties": false
+      },
+      "MemoryReviewResult": {
+        "type": "object",
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/MemoryReviewItem"
+          },
+          "entry": {
+            "$ref": "#/components/schemas/MemoryEntry"
+          }
+        },
         "additionalProperties": false
       },
       "MemoryCard": {

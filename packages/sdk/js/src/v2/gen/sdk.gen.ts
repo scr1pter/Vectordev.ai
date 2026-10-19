@@ -193,6 +193,8 @@ import type {
   MemoryGetResponses,
   MemoryKnowledgeErrors,
   MemoryKnowledgeResponses,
+  MemoryLinksErrors,
+  MemoryLinksResponses,
   MemoryListErrors,
   MemoryListResponses,
   MemoryRecordsGetErrors,
@@ -203,6 +205,10 @@ import type {
   MemoryRecordsUpdateResponses,
   MemoryRemoveErrors,
   MemoryRemoveResponses,
+  MemoryReviewListErrors,
+  MemoryReviewListResponses,
+  MemoryReviewResolveErrors,
+  MemoryReviewResolveResponses,
   MemorySettingsGetErrors,
   MemorySettingsGetResponses,
   MemorySettingsUpdateErrors,
@@ -4176,6 +4182,11 @@ export class Records extends HeyApiClient {
         | "question"
       pinned?: boolean
       action?: "not-applicable" | "forget" | "restore" | "make-memory"
+      link?: {
+        path: string
+        symbol?: string
+      }
+      unlink?: number
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -4191,6 +4202,8 @@ export class Records extends HeyApiClient {
             { in: "body", key: "kind" },
             { in: "body", key: "pinned" },
             { in: "body", key: "action" },
+            { in: "body", key: "link" },
+            { in: "body", key: "unlink" },
           ],
         },
       ],
@@ -4201,6 +4214,85 @@ export class Records extends HeyApiClient {
       ThrowOnError
     >({
       url: "/memory/records/{recordID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Review extends HeyApiClient {
+  /**
+   * List what needs a look
+   *
+   * Open items for the user: documents, rules and memory that disagree, linked code that drifted from what a document says (with values, such as 50 MB against 64 MB), and held documents, passages and records.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      check?: "true" | "false"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "check" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<MemoryReviewListResponses, MemoryReviewListErrors, ThrowOnError>({
+      url: "/memory/review",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Settle an item
+   *
+   * The user's decision on an item: dismiss it, keep the document or the code for drift (keeping the code saves a decision), keep one side of a conflict, or approve or reject held content. Vector never settles one itself.
+   */
+  public resolve<ThrowOnError extends boolean = false>(
+    parameters: {
+      itemID: string
+      directory?: string
+      workspace?: string
+      action?: "dismiss" | "keep-document" | "keep-code" | "keep" | "approve" | "reject"
+      winner?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "itemID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "action" },
+            { in: "body", key: "winner" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<
+      MemoryReviewResolveResponses,
+      MemoryReviewResolveErrors,
+      ThrowOnError
+    >({
+      url: "/memory/review/{itemID}",
       ...options,
       ...params,
       headers: {
@@ -4465,6 +4557,38 @@ export class Memory extends HeyApiClient {
   }
 
   /**
+   * List a file's links
+   *
+   * Document records and passages linked to a file of the repository (by a definition, a use, a route, an env read, a constant or a path), with each link's state, and memory entries whose paths cover the file.
+   */
+  public links<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      file: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "file" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<MemoryLinksResponses, MemoryLinksErrors, ThrowOnError>({
+      url: "/memory/links",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Resolve citations
    *
    * The cards for record, passage and document ids an answer cited, for citation chips. Ids that are gone or held are left out.
@@ -4509,6 +4633,11 @@ export class Memory extends HeyApiClient {
   private _records?: Records
   get records(): Records {
     return (this._records ??= new Records({ client: this.client }))
+  }
+
+  private _review?: Review
+  get review(): Review {
+    return (this._review ??= new Review({ client: this.client }))
   }
 }
 

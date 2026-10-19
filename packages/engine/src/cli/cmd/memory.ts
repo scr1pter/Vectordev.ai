@@ -7,7 +7,7 @@ import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Instruction } from "@/session/instruction"
 import { cmd } from "./cmd"
-import { MemoryDocCommand, MemoryRepoDocsCommand } from "./memory-doc"
+import { MemoryDocCommand, MemoryLinksCommand, MemoryRepoDocsCommand, MemoryReviewCommand } from "./memory-doc"
 import { effectCmd, fail } from "../effect-cmd"
 import { UI } from "../ui"
 
@@ -35,6 +35,8 @@ export const MemoryCommand = cmd({
       .command(MemoryLearningCommand)
       .command(MemoryExportCommand)
       .command(MemoryDocCommand)
+      .command(MemoryLinksCommand)
+      .command(MemoryReviewCommand)
       .command(MemoryRepoDocsCommand)
       .demandCommand(),
   async handler() {},

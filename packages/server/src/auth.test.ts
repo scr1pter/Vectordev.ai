@@ -61,6 +61,15 @@ describe("server authentication", () => {
       expect(ServerAuth.isOwnerOnlyRoute(method!, route!)).toBe(true)
   })
 
+  test("what documents are linked to, and what needs the owner's look, are the owner's own", () => {
+    for (const [method, route] of [
+      ["GET", "/memory/links"],
+      ["GET", "/memory/review"],
+      ["PATCH", "/memory/review/:itemID"],
+    ])
+      expect(ServerAuth.isOwnerOnlyRoute(method!, route!)).toBe(true)
+  })
+
   test("host commands and permission answers require the server owner", () => {
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/pty")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("GET", "/pty/:ptyID/connect-token")).toBe(true)

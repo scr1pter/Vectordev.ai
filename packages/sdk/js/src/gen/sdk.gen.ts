@@ -255,6 +255,9 @@ import type {
   MemoryKnowledgeData,
   MemoryKnowledgeErrors,
   MemoryKnowledgeResponses,
+  MemoryLinksData,
+  MemoryLinksErrors,
+  MemoryLinksResponses,
   MemoryListData,
   MemoryListErrors,
   MemoryListResponses,
@@ -270,6 +273,12 @@ import type {
   MemoryRemoveData,
   MemoryRemoveErrors,
   MemoryRemoveResponses,
+  MemoryReviewListData,
+  MemoryReviewListErrors,
+  MemoryReviewListResponses,
+  MemoryReviewResolveData,
+  MemoryReviewResolveErrors,
+  MemoryReviewResolveResponses,
   MemorySettingsGetData,
   MemorySettingsGetErrors,
   MemorySettingsGetResponses,
@@ -2381,6 +2390,38 @@ export class Records extends HeyApiClient {
   }
 }
 
+export class Review extends HeyApiClient {
+  /**
+   * List what needs a look
+   *
+   * Open items for the user: documents, rules and memory that disagree, linked code that drifted from what a document says (with values, such as 50 MB against 64 MB), and held documents, passages and records.
+   */
+  public list<ThrowOnError extends boolean = false>(options?: Options<MemoryReviewListData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<MemoryReviewListResponses, MemoryReviewListErrors, ThrowOnError>({
+      url: "/memory/review",
+      ...options,
+    })
+  }
+
+  /**
+   * Settle an item
+   *
+   * The user's decision on an item: dismiss it, keep the document or the code for drift (keeping the code saves a decision), keep one side of a conflict, or approve or reject held content. Vector never settles one itself.
+   */
+  public resolve<ThrowOnError extends boolean = false>(options: Options<MemoryReviewResolveData, ThrowOnError>) {
+    return (options.client ?? this.client).patch<MemoryReviewResolveResponses, MemoryReviewResolveErrors, ThrowOnError>(
+      {
+        url: "/memory/review/{itemID}",
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          ...options.headers,
+        },
+      },
+    )
+  }
+}
+
 export class Memory extends HeyApiClient {
   /**
    * List memory
@@ -2479,6 +2520,18 @@ export class Memory extends HeyApiClient {
   }
 
   /**
+   * List a file's links
+   *
+   * Document records and passages linked to a file of the repository (by a definition, a use, a route, an env read, a constant or a path), with each link's state, and memory entries whose paths cover the file.
+   */
+  public links<ThrowOnError extends boolean = false>(options: Options<MemoryLinksData, ThrowOnError>) {
+    return (options.client ?? this.client).get<MemoryLinksResponses, MemoryLinksErrors, ThrowOnError>({
+      url: "/memory/links",
+      ...options,
+    })
+  }
+
+  /**
    * Resolve citations
    *
    * The cards for record, passage and document ids an answer cited, for citation chips. Ids that are gone or held are left out.
@@ -2503,6 +2556,11 @@ export class Memory extends HeyApiClient {
   private _records?: Records
   get records(): Records {
     return (this._records ??= new Records({ client: this.client }))
+  }
+
+  private _review?: Review
+  get review(): Review {
+    return (this._review ??= new Review({ client: this.client }))
   }
 }
 

@@ -3124,11 +3124,18 @@ export type MemoryRecordPage = {
 }
 
 export type MemoryAnchor = {
+  id: number
   owner: string
   path: string
   symbol?: string
   line?: number
   method: "path" | "definition" | "use" | "route" | "env" | "constant" | "user" | "outcome"
+  weight: number
+  value?: {
+    raw: string
+    value: number
+    unit?: string
+  }
   status: "fresh" | "drifted" | "missing"
   origin: "extracted" | "user" | "outcome"
   checkedAt: number
@@ -3278,6 +3285,21 @@ export type MemoryRecordDetail = {
 
 export type MemoryRecordResult = {
   record: MemoryRecord
+  entry?: MemoryEntry
+}
+
+export type MemoryLink = {
+  owner: string
+  type: "record" | "passage" | "entry"
+  kind: string
+  title: string
+  document?: string
+  text: string
+  anchor?: MemoryAnchor
+}
+
+export type MemoryReviewResult = {
+  item?: MemoryReviewItem
   entry?: MemoryEntry
 }
 
@@ -12665,6 +12687,11 @@ export type MemoryRecordsUpdateData = {
       | "question"
     pinned?: boolean
     action?: "not-applicable" | "forget" | "restore" | "make-memory"
+    link?: {
+      path: string
+      symbol?: string
+    }
+    unlink?: number
   }
   path: {
     /**
@@ -12700,6 +12727,112 @@ export type MemoryRecordsUpdateResponses = {
 }
 
 export type MemoryRecordsUpdateResponse = MemoryRecordsUpdateResponses[keyof MemoryRecordsUpdateResponses]
+
+export type MemoryLinksData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    file: string
+  }
+  url: "/memory/links"
+}
+
+export type MemoryLinksErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryLinksError = MemoryLinksErrors[keyof MemoryLinksErrors]
+
+export type MemoryLinksResponses = {
+  /**
+   * What is linked to the file
+   */
+  200: Array<MemoryLink>
+}
+
+export type MemoryLinksResponse = MemoryLinksResponses[keyof MemoryLinksResponses]
+
+export type MemoryReviewListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    check?: "true" | "false"
+  }
+  url: "/memory/review"
+}
+
+export type MemoryReviewListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryReviewListError = MemoryReviewListErrors[keyof MemoryReviewListErrors]
+
+export type MemoryReviewListResponses = {
+  /**
+   * What needs the user's look
+   */
+  200: Array<MemoryReviewItem>
+}
+
+export type MemoryReviewListResponse = MemoryReviewListResponses[keyof MemoryReviewListResponses]
+
+export type MemoryReviewResolveData = {
+  body?: {
+    action: "dismiss" | "keep-document" | "keep-code" | "keep" | "approve" | "reject"
+    winner?: string
+  }
+  path: {
+    /**
+     * A review item's id: v… for a conflict or drift, or the held passage, record or document's own id
+     */
+    itemID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/review/{itemID}"
+}
+
+export type MemoryReviewResolveErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryReviewResolveError = MemoryReviewResolveErrors[keyof MemoryReviewResolveErrors]
+
+export type MemoryReviewResolveResponses = {
+  /**
+   * The item after the decision
+   */
+  200: MemoryReviewResult
+}
+
+export type MemoryReviewResolveResponse = MemoryReviewResolveResponses[keyof MemoryReviewResolveResponses]
 
 export type MemoryKnowledgeData = {
   body?: never
