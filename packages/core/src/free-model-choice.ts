@@ -211,5 +211,5 @@ export function freeModelsLimitMessage(
   limit: FreeModelsLimitNotice,
   options: { locale?: string; terminal?: boolean } = {},
 ) {
-  return `${freeModelsLimitTitle(limit)}. Free models provided by Vector are expected to be available again at ${freeModelsResetLabel(limit, options.locale)}. ${options.terminal ? FREE_MODELS_OWN_KEYS_TERMINAL : FREE_MODELS_OWN_KEYS}`
+  return `${freeModelsLimitTitle(limit)}. They are expected to be available again at ${freeModelsResetLabel(limit, options.locale)}. ${options.terminal ? FREE_MODELS_OWN_KEYS_TERMINAL : FREE_MODELS_OWN_KEYS}`
 }

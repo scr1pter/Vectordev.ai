@@ -50,7 +50,7 @@ export function freeModelLimit(reason: FreeModelLimitReason, resetAt: number): F
     reason,
     resetAt,
     // Clients from 1.99.109 write their own notice from reason and resetAt; this is for any other reader.
-    message: `${freeModelsLimitTitle({ reason, resetAt })}. Free models provided by Vector are expected to be available again at ${RESET.format(resetAt)}. Until then, use a model from a provider you've connected with your own key.`,
+    message: `${freeModelsLimitTitle({ reason, resetAt })}. They are expected to be available again at ${RESET.format(resetAt)}. Until then, use a model from a provider you've connected with your own key.`,
   }
 }
 
@@ -289,7 +289,7 @@ export async function handleFreeModelsChat(
             message:
               error instanceof ApiError
                 ? error.statusCode === 413
-                  ? "This conversation exceeds the 4.5 MB shared-request limit. Compact it or connect your own provider."
+                  ? "This conversation is larger than the 4.5 MB limit for free models provided by Vector. Compact it, or use a model from a provider you've connected with your own key."
                   : error.message
                 : FREE_MODELS_UNAVAILABLE,
           }

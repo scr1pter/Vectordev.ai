@@ -98,7 +98,7 @@ test("limit notices say when free models provided by Vector are available again 
   const limit = { reason: "user_daily" as const, resetAt: Date.UTC(2030, 0, 1, 12) }
   const desktop = freeModelsLimitMessage(limit, { locale: "en-US" })
   expect(desktop).toStartWith(
-    `${freeModelsLimitTitle(limit)}. Free models provided by Vector are expected to be available again at`,
+    `${freeModelsLimitTitle(limit)}. They are expected to be available again at`,
   )
   expect(desktop).toContain(freeModelsResetLabel(limit, "en-US"))
   expect(desktop).toEndWith(FREE_MODELS_OWN_KEYS)
