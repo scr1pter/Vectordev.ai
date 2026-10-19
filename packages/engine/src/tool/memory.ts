@@ -42,7 +42,7 @@ type Metadata = {
    * What the agent just put in use on its own, for the session's "Learned: … · Undo" line. The words are there only for
    * a repository entry; a personal entry's stay out of the transcript.
    */
-  learned?: { scope: BrainSchema.Scope; text?: string; private?: boolean }
+  learned?: { scope: BrainSchema.Scope; text?: string; private?: boolean; document?: boolean }
   /** Personal entries this result stands in for; the transcript keeps their ids, never their words. */
   [SessionMemory.PERSONAL]?: string[]
   /** Document cards and passages this result stands for, rendered again for every request. */
@@ -177,17 +177,22 @@ export const MemoryTool = Tool.define<
           // document that came from outside (kept while a session read the web, an MCP server or a subagent, in a
           // guest's session or from an untrusted repository) is outside content like any other.
           const read = yield* knowledge.sources(place, SessionMemory.documents([...history, ...ctx.messages]))
+          // A quote from a document's card or passage is evidence only in that passage's own words. What is learned
+          // from it is as private as its document, and waits for the user when the document came from outside.
+          const quoted =
+            params.action !== "forget" && params.text && params.file && params.quote && QUOTABLE.test(params.file)
+              ? yield* knowledge.quoted(place, { id: params.file, quote: params.quote, personal })
+              : undefined
+          if (quoted?.type === "refused") return refused(params.action, quoted.message)
+          const sources = [...read.documents, ...(quoted ? [quoted.document] : [])]
           const hold = guest
             ? "guest"
             : place.held
               ? "untrusted-repository"
               : (SessionMemory.taint([...history, ...ctx.messages]) ??
-                read.documents.flatMap((document) =>
-                  document.hold && OUTSIDE.includes(document.hold) ? [document.hold] : [],
-                )[0])
+                sources.flatMap((document) => (document.hold && OUTSIDE.includes(document.hold) ? [document.hold] : []))[0])
           // A document forgotten since it was read was the user's to keep private too.
-          const privately =
-            read.missing.length > 0 || read.documents.some((document) => document.visibility === "private")
+          const privately = read.missing.length > 0 || sources.some((document) => document.visibility === "private")
 
           // An entry the agent may not see here is one it may not change either.
           const target = params.id && params.action !== "add" ? yield* brain.get(place, params.id, { personal }) : undefined
@@ -239,6 +244,9 @@ export const MemoryTool = Tool.define<
               result.type === "unchanged"
                 ? result.document
                 : ((yield* knowledge.wait(place, result.document.id, "searchable", 10_000)) ?? result.document)
+            // Kept on the agent's word and in use: the session shows it with Undo, which forgets it. A private
+            // document's title stays out of the transcript.
+            const learned = result.type !== "unchanged" && document.status !== "held" && document.status !== "failed"
             return {
               title: `Kept ${document.title}`,
               output: keptLine(document, result.type),
@@ -247,6 +255,15 @@ export const MemoryTool = Tool.define<
                 result: result.type,
                 id: document.id,
                 ...(document.hold ? { hold: document.hold } : {}),
+                ...(learned
+                  ? {
+                      learned: {
+                        scope: "repository" as const,
+                        document: true,
+                        ...(document.visibility === "private" ? { private: true } : { text: document.title }),
+                      },
+                    }
+                  : {}),
                 [SessionMemory.KNOWLEDGE]: { document: document.id },
               },
             }
@@ -259,7 +276,10 @@ export const MemoryTool = Tool.define<
               params.action,
               "Vector does not cite .env, key or credentials files as evidence. Quote the user, or cite another file.",
             )
-          const evidence = yield* verify(params, ctx, place.root, git)
+          const evidence =
+            quoted && params.file && params.quote
+              ? { type: "document" as const, path: params.file.replace(/^\[|\]$/g, ""), quote: params.quote, verified: true }
+              : yield* verify(params, ctx, place.root, git)
           const result = yield* brain.propose(place, {
             kind: params.kind ?? "lesson",
             text: params.text,
@@ -278,6 +298,8 @@ export const MemoryTool = Tool.define<
             ...(privately ? { private: true } : {}),
           })
           if (result.type === "refused") return refused(params.action, result.message)
+          // Derived from the card it quotes, and related to what else it bears on.
+          if (evidence?.type === "document") yield* knowledge.derive(place, { entry: result.entry, from: evidence.path })
           // A write that put words in use, rather than finding them there or holding them, is something learned.
           const learned = result.type === "added" || result.type === "superseded" || result.type === "promoted"
           return {
@@ -305,6 +327,8 @@ export const MemoryTool = Tool.define<
 )
 
 const DOCUMENT_ID = /^[rpd][0-9a-z]{4,}$/
+/** A record's or passage's id, which `add` may cite as its file with a quote from it. */
+const QUOTABLE = /^\[?[rp][0-9a-z]{4,}\]?$/
 
 // What the agent may keep as a document: the user's pasted text, or a file in this working tree or attached here.
 function keepable(file: string, root: string, messages: readonly SessionV1.WithParts[]) {
@@ -408,6 +432,7 @@ function evidenceLine(item: BrainSchema.Evidence) {
   if (item.type === "file") return item.quote ? `${item.path ?? "a file"}: "${item.quote}"` : `${item.path ?? "a file"}, unchecked`
   if (item.type === "check") return item.command ? `\`${item.command}\` passed after failing` : "a check Vector could not confirm"
   if (item.type === "file-item") return "a file"
+  if (item.type === "document") return item.quote ? `[${item.path ?? "a document"}]: "${item.quote}"` : `[${item.path ?? "a document"}], unchecked`
   return "the user saved it"
 }
 

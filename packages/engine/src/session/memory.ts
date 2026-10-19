@@ -343,7 +343,7 @@ export function quoted(messages: readonly SessionV1.WithParts[], quote: string) 
   return messages.some((message) => message.info.role === "user" && normal(typed(message)).includes(wanted))
 }
 
-type Run = { readonly command: string; readonly exit: number | undefined }
+type Run = { readonly command: string; readonly exit: number | undefined; readonly at: number }
 
 function runs(messages: readonly SessionV1.WithParts[]): Run[] {
   return messages.flatMap((message) =>
@@ -353,7 +353,7 @@ function runs(messages: readonly SessionV1.WithParts[]): Run[] {
       const command = typeof part.state.input?.command === "string" ? part.state.input.command : undefined
       if (!command) return []
       const exit = part.state.status === "completed" ? part.state.metadata?.exit : 1
-      return [{ command: normal(command), exit: typeof exit === "number" ? exit : undefined }]
+      return [{ command: normal(command), exit: typeof exit === "number" ? exit : undefined, at: part.state.time.start }]
     }),
   )
 }
@@ -385,6 +385,114 @@ export function checked(messages: readonly SessionV1.WithParts[], command: strin
   return all
     .slice(0, passed)
     .some((run) => run.exit !== undefined && run.exit !== 0 && check(run.command) === target)
+}
+
+/**
+ * Whether a check went from failing to passing in the request that started at `since`: a test, lint, build or typecheck
+ * run that passed then, where the run of the same check before it failed (in this request or an earlier one), and that
+ * still passed the last time it ran. A check that only ever passed proves nothing, nor does one broken again since.
+ */
+export function recovered(messages: readonly SessionV1.WithParts[], since: number) {
+  const all = runs(messages).filter((run) => CHECK.test(run.command))
+  const targets = new Set(all.filter((run) => run.at >= since).map((run) => check(run.command)))
+  return [...targets].some((target) => {
+    const same = all.filter((run) => check(run.command) === target)
+    if (same.at(-1)?.exit !== 0) return false
+    return same.some(
+      (run, index) =>
+        run.at >= since && run.exit === 0 && index > 0 && same[index - 1]!.exit !== undefined && same[index - 1]!.exit !== 0,
+    )
+  })
+}
+
+/** Whether Vector's judge passed the work in these messages. */
+export function judged(messages: readonly SessionV1.WithParts[]) {
+  return messages.some((message) =>
+    message.parts.some((part) => {
+      if (part.type !== "tool") return false
+      const judge = part.metadata?.judge
+      return Boolean(judge && typeof judge === "object" && "verdict" in judge && judge.verdict === "PASS")
+    }),
+  )
+}
+
+// Ids of memory and document knowledge in the brain's base32: memory entries (m, 5 or 13), file entries (f, 6), records
+// and passages (r, p, 12) and documents (d, 8). Exact lengths keep words such as "[demand]" from reading as one.
+const ID =
+  "(?:m(?:[0-9a-hjkmnp-tv-z]{13}|[0-9a-hjkmnp-tv-z]{5})|f[0-9a-hjkmnp-tv-z]{6}|[rp][0-9a-hjkmnp-tv-z]{12}|d[0-9a-hjkmnp-tv-z]{8})"
+const CITATION = new RegExp(`\\[(${ID})\\]`, "g")
+
+/**
+ * Every id these messages gave the model: what recall put in a request, what memory tool calls returned or printed,
+ * the outline of a kept attachment, and what code-link lines named. A citation is verified only against these.
+ */
+export function delivered(messages: readonly SessionV1.WithParts[]) {
+  return new Set([
+    ...injected(messages),
+    ...messages.flatMap((message) =>
+      message.parts.flatMap((part) => {
+        const known = knowledge(part)
+        if (part.type === "text") return part.synthetic && known?.document ? [known.document] : []
+        if (part.type !== "tool" || part.tool !== "memory" || part.state.status !== "completed") return []
+        return [
+          ...personal(part),
+          ...(typeof part.state.metadata?.id === "string" ? [part.state.metadata.id] : []),
+          ...[...part.state.output.matchAll(CITATION)].flatMap((match) => (match[1] ? [match[1]] : [])),
+        ]
+      }),
+    ),
+  ])
+}
+
+/** The ids an answer cited as [id] that it was given: a made-up or mistyped id is no citation. */
+export function cited(text: string, given: ReadonlySet<string>) {
+  return [...new Set([...text.matchAll(CITATION)].flatMap((match) => (match[1] ? [match[1]] : [])))].filter((id) =>
+    given.has(id),
+  )
+}
+
+/** What the agent's answers in these messages say, Vector's own notes left out. */
+export function answered(messages: readonly SessionV1.WithParts[]) {
+  return messages
+    .filter((message) => message.info.role === "assistant")
+    .flatMap((message) => message.parts.flatMap((part) => (part.type === "text" && !part.synthetic ? [part.text] : [])))
+    .join("\n")
+}
+
+/** What the agent opened with the memory tool's get: an entry, record, passage or document, by id. */
+export function fetched(messages: readonly SessionV1.WithParts[]) {
+  return [
+    ...new Set(
+      messages.flatMap((message) =>
+        message.parts.flatMap((part) => {
+          if (part.type !== "tool" || part.tool !== "memory" || part.state.status !== "completed") return []
+          if (part.state.input.action !== "get") return []
+          return [
+            ...(knowledge(part)?.get.map((item) => item.id) ?? []),
+            ...(typeof part.state.metadata?.id === "string" ? [part.state.metadata.id] : []),
+          ]
+        }),
+      ),
+    ),
+  ]
+}
+
+/** The files the agent edited, wrote or patched in these messages, as it named them. */
+export function edited(messages: readonly SessionV1.WithParts[]) {
+  return [
+    ...new Set(
+      messages.flatMap((message) =>
+        message.parts.flatMap((part) => {
+          if (part.type !== "tool" || part.state.status !== "completed") return []
+          const input = part.state.input
+          if ((part.tool === "edit" || part.tool === "write") && typeof input.filePath === "string") return [input.filePath]
+          if (part.tool === "apply_patch" && typeof input.patchText === "string")
+            return [...input.patchText.matchAll(/^\*\*\* (?:Add|Update) File: (.+)$/gm)].map((match) => match[1]!.trim())
+          return []
+        }),
+      ),
+    ),
+  ]
 }
 
 /**

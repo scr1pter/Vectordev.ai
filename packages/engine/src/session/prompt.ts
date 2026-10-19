@@ -1917,6 +1917,8 @@ const layer = Layer.effect(
         // budget its size allows. It is saved on the message, so later steps send the same bytes and the cache holds.
         if (!quick && sized && sized.tier !== "chat" && !session.parentID && !session.internal)
           msgs = yield* recallFor({ sessionID, msgs, user: lastUser, tier: sized.tier, personal })
+        // A subagent a Thorough request launched starts with a brief, saved on its first message as ids.
+        if (session.parentID && !session.internal) msgs = yield* briefFor({ session, msgs, personal })
         msgs = yield* withheldRecall(sessionID, msgs, personal)
         msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
           Effect.provideService(RuntimeFlags.Service, flags),
@@ -2186,12 +2188,23 @@ const layer = Layer.effect(
 
       // Read after queued patches land so a successful response includes the step's final parts too.
       yield* processor.settle(sessionID)
-      // Tidying memory is plain code with no model call, and runs at most every few hours per repository.
+      // Tidying memory is plain code with no model call, and runs at most every few hours per repository; documents are
+      // tidied in the same pass.
       if (!session.parentID && !session.internal) {
         const background = yield* InstanceState.get(backgroundTasks)
         yield* instruction
           .place()
-          .pipe(Effect.flatMap((place) => brain.consolidate(place)), Effect.ignore, Effect.forkIn(background.scope))
+          .pipe(
+            Effect.flatMap((place) =>
+              brain
+                .consolidate(place)
+                .pipe(Effect.flatMap((tidied) => (tidied.skipped ? Effect.void : knowledge.consolidate(place)))),
+            ),
+            Effect.ignore,
+            Effect.forkIn(background.scope),
+          )
+        // What the run's answers cited or the agent opened is credited by how the run ended.
+        yield* creditRun(sessionID).pipe(Effect.ignore, Effect.forkIn(background.scope))
         // The repository's tracked docs are read beside it, and what documents are linked to is checked against the
         // code, each at most every 10 minutes per repository.
         yield* instruction
@@ -2203,6 +2216,101 @@ const layer = Layer.effect(
           )
       }
       return yield* lastAssistant(sessionID)
+    })
+
+    // Proven knowledge, once a run is over: for each of its last requests, what the answers cited (of what they were
+    // given) or the agent opened, and whether a check went from failing to passing or the judge passed the work. Each
+    // request is credited once. A session a guest is in, or one that took in outside content, credits nothing: planted
+    // text could steer what gets cited.
+    const creditRun = Effect.fn("SessionPrompt.creditRun")(function* (sessionID: SessionID) {
+      if (yield* guests.marked(sessionID)) return
+      const msgs = yield* sessions.messages({ sessionID })
+      if (SessionMemory.taint(msgs)) return
+      const starts = msgs
+        .flatMap((message, index) => (message.info.role === "user" && SessionMemory.asked(message) ? [index] : []))
+        .slice(-3)
+      if (starts.length === 0) return
+      const place = yield* instruction.place()
+      yield* Effect.forEach(
+        starts,
+        (start, index) => {
+          const turn = msgs.slice(start, starts[index + 1] ?? msgs.length)
+          const request = msgs[start]!
+          const given = SessionMemory.delivered(turn)
+          const fetched = SessionMemory.fetched(turn)
+          if (given.size === 0 && fetched.length === 0) return Effect.void
+          return knowledge.credit(place, {
+            sessionID,
+            requestID: request.info.id,
+            outcome:
+              SessionMemory.recovered(msgs.slice(0, start + turn.length), request.info.time.created) ||
+              SessionMemory.judged(turn)
+                ? "pass"
+                : "none",
+            delivered: [...given],
+            cited: SessionMemory.cited(SessionMemory.answered(turn), given),
+            fetched,
+            edited: SessionMemory.edited(turn),
+          })
+        },
+        { discard: true },
+      )
+    })
+
+    // A subagent's brief: a Thorough request's subagents (at most 4 of them) start with up to 200 tokens of the cards
+    // and memory that bear on their task, recalled once from the task they were given. It is saved on the subagent's
+    // first message as ids, as a request's recall is, so each of its requests renders it again where that is allowed
+    // (a forgotten document is gone from it, and a private one stays out of a model that may train). A subagent of a
+    // smaller request starts with none.
+    const briefFor = Effect.fn("SessionPrompt.brief")(function* (input: {
+      session: Session.Info
+      msgs: SessionV1.WithParts[]
+      personal: boolean
+    }) {
+      const first = input.msgs.find((message) => message.info.role === "user")
+      if (!first || SessionMemory.recalled(first) || recallsTried.has(first.info.id)) return input.msgs
+      recallsTried.add(first.info.id)
+      if (recallsTried.size > MAX_INSTRUCTION_SNAPSHOTS * 4) recallsTried.delete(recallsTried.values().next().value!)
+      const record = SubagentLifecycle.read(input.session)
+      const query = SessionMemory.asked(first)
+      if (!record || !input.session.parentID || !query) return input.msgs
+      const launcher = yield* MessageV2.getInfo({
+        sessionID: input.session.parentID,
+        messageID: MessageID.make(record.parentMessageID),
+      }).pipe(
+        Effect.provideService(Database.Service, database),
+        Effect.catch(() => Effect.succeed(undefined)),
+      )
+      if (launcher?.role !== "assistant" || launcher.size !== "thorough") return input.msgs
+      const place = yield* instruction.place()
+      const result = yield* knowledge.brief(place, {
+        query,
+        personal: input.personal,
+        exclude: new Set(),
+        sessionID: input.session.id,
+        requestID: launcher.parentID,
+      })
+      if (!result.text) return input.msgs
+      const part = yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: first.info.id,
+        sessionID: input.session.id,
+        type: "text",
+        text: result.shared ?? "",
+        synthetic: true,
+        metadata: {
+          [SessionMemory.RECALL]: {
+            ids: [...result.ids],
+            tokens: result.tokens,
+            personal: [...(result.personal ?? [])],
+            ...(result.newest ? { newest: true } : {}),
+            ...(result.cards.length ? { cards: [...result.cards], why: result.why } : {}),
+            brief: true,
+          },
+        },
+      } satisfies SessionV1.TextPart)
+      first.parts.push(part)
+      return input.msgs
     })
 
     // A request message's recalled memory, saved on the message as a synthetic part (nothing when nothing is relevant).

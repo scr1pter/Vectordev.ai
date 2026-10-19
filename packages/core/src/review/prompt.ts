@@ -62,6 +62,8 @@ export interface PromptInput {
   headFiles?: HeadFile[]
   related?: RelatedCode[]
   history?: HistoryEntry[]
+  // Requirements and contracts from the user's documents linked to the changed files, with drift flags (Vector's brain)
+  requirements?: string
   instructions?: string // AGENTS.md (or CLAUDE.md) and .vector/RULES.md
   instructionsSource?: "base branch" | "working tree"
   checks?: CheckResult[]
@@ -101,6 +103,7 @@ const MAX_TRUSTED_CHARS = 16_000
 const MAX_TEAM_PATTERNS = 30
 const MAX_CHECKS = 20
 const MAX_CHECK_CHARS = 4_000
+const MAX_REQUIREMENT_CHARS = 1_600
 
 const TOOLS = "You can use read, grep, glob and list. You cannot edit files, run commands or browse the web."
 
@@ -267,6 +270,10 @@ function data(input: PromptInput, open: PriorFinding[], notInlined: NonNullable<
   if (input.mode === "incremental" && input.since) target.push(`The last review was of \`${short(input.since)}\`.`)
   if (input.trust === "untrusted") target.push(UNTRUSTED_WORKTREE)
   if (input.headFiles?.some((file) => file.annotated)) target.push(ANNOTATED)
+  if (input.requirements?.trim())
+    target.push(
+      "`<untrusted_linked_requirements>` lists requirements and contracts from the user's documents that are linked to the changed files, with whether each link still holds. When the change breaks one, report it at the code that breaks it and cite its [id]; do not report one the change leaves alone.",
+    )
   if (input.checks?.length)
     target.push(
       "`<ci_checks>` holds this commit's CI results. A failing check is evidence: when the change causes it, report the defect behind it at the code that causes it. Do not report failures the change did not cause.",
@@ -344,6 +351,7 @@ function data(input: PromptInput, open: PriorFinding[], notInlined: NonNullable<
         ),
       ),
     )
+  if (input.requirements?.trim()) out.push(wrapUntrusted("linked_requirements", clip(input.requirements.trim(), MAX_REQUIREMENT_CHARS)))
   const history = (input.history ?? []).filter((entry) => entry.text.trim()).slice(0, MAX_HISTORY_FILES)
   if (history.length)
     out.push(

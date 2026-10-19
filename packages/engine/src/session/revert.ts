@@ -10,6 +10,8 @@ import { SessionID, MessageID, PartID } from "./schema"
 import { SessionRunState } from "./run-state"
 import { SessionSummary } from "./summary"
 import { BackgroundJob } from "@/background/job"
+import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { Instruction } from "./instruction"
 
 export const RevertInput = Schema.Struct({
   sessionID: SessionID,
@@ -43,6 +45,8 @@ const layer = Layer.effect(
     const summary = yield* SessionSummary.Service
     const state = yield* SessionRunState.Service
     const background = yield* BackgroundJob.Service
+    const knowledge = yield* BrainKnowledge.Service
+    const instruction = yield* Instruction.Service
 
     const revert = Effect.fn("SessionRevert.revert")(function* (input: RevertInput) {
       yield* state.assertNotBusy(input.sessionID)
@@ -152,6 +156,16 @@ const layer = Layer.effect(
         (job) => background.cancel(job.id),
         { concurrency: "unbounded", discard: true },
       )
+      // What the reverted runs cited loses the credit they gave it: the undo says they did not work out.
+      const requests = [
+        ...remove.flatMap((msg) => (msg.info.role === "user" ? [msg.info.id] : [])),
+        ...(target && removeParts.length > 0 ? [target.info.role === "user" ? target.info.id : target.info.parentID] : []),
+      ]
+      if (requests.length > 0)
+        yield* instruction.place().pipe(
+          Effect.flatMap((place) => knowledge.reverted(place, { sessionID, requests })),
+          Effect.catchCause((cause) => Effect.logWarning("brain revert credit failed", { cause })),
+        )
       for (const msg of remove) {
         yield* sessions.removeMessage({ sessionID, messageID: msg.info.id })
       }
@@ -179,6 +193,8 @@ export const node = LayerNode.make({
     SessionSummary.node,
     SessionRunState.node,
     BackgroundJob.node,
+    BrainKnowledge.node,
+    Instruction.node,
   ],
 })
 

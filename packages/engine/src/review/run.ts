@@ -86,7 +86,7 @@ export interface RunInput {
   focus?: FocusHunk[]
   skipped: SkippedFile[]
   headFiles?: { path: string; text: string; exact: boolean }[]
-  context: Pick<PromptInput, "related" | "history" | "instructions" | "teamDismissed" | "humanComments">
+  context: Pick<PromptInput, "related" | "history" | "requirements" | "instructions" | "teamDismissed" | "humanComments">
   pr?: PromptInput["pr"]
   prior: PriorFinding[]
   rules: string

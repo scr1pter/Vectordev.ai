@@ -62,6 +62,10 @@ import type {
   SummaryFinding,
 } from "@vectordevai/core/review/types"
 import { Git } from "@/git"
+import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { freeModelMayTrain } from "@vectordevai/core/free-model-choice"
+import { Provider } from "@/provider/provider"
+import { Instruction } from "@/session/instruction"
 import { ReviewContext } from "@/review/context"
 import type { ReviewModel, ResolvedModel } from "@/review/model"
 import type { Review } from "@/review/run"
@@ -122,6 +126,8 @@ export interface LocalReviewDeps<RunR = never, ModelR = never> {
   now?: () => number
   color?: boolean
   github?: GitHubAccess // for --post; the GitHub CLI's token and the real API by default
+  // What the user's documents require of the changed files, from Vector's brain; none outside a Vector repository
+  requirements?: (input: { files: readonly string[]; model: ResolvedModel }) => Effect.Effect<string | undefined>
 }
 
 // What --post needs from GitHub: a token for the remote's host, who it belongs to, and the two writes it makes.
@@ -356,6 +362,10 @@ export function executeLocalReview<RunR, ModelR>(
       ignore: [...(config.ignoreDefaults ? DEFAULT_IGNORES.map((rule) => rule.glob) : []), ...config.ignore],
       ignored,
     })
+    // The specs the change touches, with drift flags, so the reviewer can tell when it breaks one.
+    const requirements = deps.requirements
+      ? yield* deps.requirements({ files: review.map((file) => file.path), model })
+      : undefined
     const headFiles =
       trust === "untrusted"
         ? yield* ReviewSource.headFiles({
@@ -397,7 +407,7 @@ export function executeLocalReview<RunR, ModelR>(
       ...(range.focus ? { focus: range.focus } : {}),
       skipped,
       ...(headFiles ? { headFiles } : {}),
-      context,
+      context: { ...context, ...(requirements ? { requirements } : {}) },
       ...(pr ? { pr } : {}),
       prior,
       rules: rulesForPaths(
@@ -1216,6 +1226,9 @@ export const ReviewCommand = effectCmd({
   handler: Effect.fn("Cli.review")(function* (args) {
     const { ReviewModel } = yield* Effect.promise(() => import("@/review/model"))
     const { Review } = yield* Effect.promise(() => import("@/review/run"))
+    const knowledge = yield* BrainKnowledge.Service
+    const instruction = yield* Instruction.Service
+    const provider = yield* Provider.Service
     const result = yield* executeLocalReview(
       {
         directory: repositoryRoot(process.cwd()),
@@ -1243,6 +1256,22 @@ export const ReviewCommand = effectCmd({
         stdout: write,
         stderr: (text) => void process.stderr.write(text),
         color: process.stdout.isTTY === true && !process.env.NO_COLOR,
+        // Private documents only for a review model that may not train on prompts.
+        requirements: (input) =>
+          Effect.gen(function* () {
+            const place = yield* instruction.place()
+            const chosen = yield* provider
+              .getModel(input.model.providerID, input.model.modelID)
+              .pipe(Effect.catch(() => Effect.succeed(undefined)))
+            return yield* ReviewContext.requirements({
+              place,
+              files: input.files,
+              personal: chosen !== undefined && !freeModelMayTrain(chosen),
+            })
+          }).pipe(
+            Effect.provideService(BrainKnowledge.Service, knowledge),
+            Effect.catchCause(() => Effect.succeed(undefined)),
+          ),
       },
     )
     if (result.error) UI.error(result.error)

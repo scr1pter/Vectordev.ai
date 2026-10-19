@@ -186,6 +186,39 @@ function fake(options: Fake = {}) {
 
 const review = (options: LocalReviewOptions, deps: LocalReviewDeps) => executeLocalReview(options, deps)
 
+describe("vector review: what the user's documents require", () => {
+  it.live("the requirements linked to the changed files go to the reviewer with the rest of its context", () =>
+    Effect.gen(function* () {
+      const repo = yield* branched
+      const run = fake()
+      const asked: (readonly string[])[] = []
+      const result = yield* review(
+        { directory: repo.dir },
+        {
+          ...run.deps,
+          requirements: (input) =>
+            Effect.sync(() => {
+              asked.push(input.files)
+              return "- [r0000000000000] requirement · Spec: last() returns the last item → src/list.ts"
+            }),
+        },
+      )
+      expect(result.exitCode).toBe(0)
+      expect(asked).toEqual([["src/list.ts"]])
+      expect(run.calls[0]!.context.requirements).toContain("last() returns the last item")
+    }),
+  )
+
+  it.live("a review with nothing linked carries no requirements", () =>
+    Effect.gen(function* () {
+      const repo = yield* branched
+      const run = fake()
+      yield* review({ directory: repo.dir }, { ...run.deps, requirements: () => Effect.succeed(undefined) })
+      expect(run.calls[0]!.context.requirements).toBeUndefined()
+    }),
+  )
+})
+
 describe("vector review: what it compares", () => {
   it.live("reviews the branch against its merge-base with the default branch", () =>
     Effect.gen(function* () {
