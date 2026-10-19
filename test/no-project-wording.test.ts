@@ -35,8 +35,6 @@ const reviewed: Record<string, string[]> = {
   "packages/desktop/src/main/repo-rules-model.ts": ["Project rules"],
   // The terminal UI's context name, never shown.
   "packages/tui/src/context/project.tsx": ["Project"],
-  // A competitor's own feature in the comparison table.
-  "packages/web/src/pages/investors.astro": ["Cloud projects; cannot import a repo"],
 }
 
 const sources = [
