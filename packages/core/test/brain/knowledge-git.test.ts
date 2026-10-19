@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
 import fs from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 import { Effect } from "effect"
 import { UntrustedGit } from "@vectordevai/core/untrusted-git"
@@ -98,6 +99,44 @@ describe.skipIf(process.platform === "win32")("the brain's git calls", () => {
     expect(result.scanned).toBe(1)
     expect(result.indexed.files).toBeGreaterThan(0)
     expect(result.ran).toBe("")
+  })
+})
+
+describe("UntrustedGit.program", () => {
+  // Windows looks for a bare program name in the child's working directory before PATH, which for the brain is a
+  // repository it may not trust. On Windows, git comes from an absolute PATH entry only.
+  test("on Windows, takes git from an absolute PATH entry, never from a repository or a relative entry", async () => {
+    await using tmp = await tmpdir()
+    const repo = path.join(tmp.path, "repo")
+    const bin = path.join(tmp.path, "Git", "cmd")
+    await fs.mkdir(repo, { recursive: true })
+    await fs.mkdir(bin, { recursive: true })
+    await fs.writeFile(path.join(repo, "git.exe"), "planted")
+    await fs.writeFile(path.join(bin, "git.exe"), "installed")
+    const relative = path.relative(process.cwd(), repo)
+    const PATH = (...dirs: string[]) => ({ PATH: dirs.join(path.delimiter) })
+    expect(UntrustedGit.program("win32", PATH(".", "", relative, `"${bin}"`))).toBe(path.join(bin, "git.exe"))
+    expect(UntrustedGit.program("win32", PATH(".", relative))).toBeUndefined()
+    expect(UntrustedGit.program("win32", {})).toBeUndefined()
+    // A folder named git.exe is not a program.
+    await fs.mkdir(path.join(tmp.path, "odd", "git.exe"), { recursive: true })
+    expect(UntrustedGit.program("win32", PATH(path.join(tmp.path, "odd"), bin))).toBe(path.join(bin, "git.exe"))
+    expect(UntrustedGit.program("darwin", PATH("."))).toBe("git")
+  })
+
+  test.skipIf(process.platform !== "win32")("on Windows, a git.exe in the repository's root does not run", async () => {
+    await using tmp = await tmpdir()
+    const root = path.join(tmp.path, "repo")
+    await fs.mkdir(root, { recursive: true })
+    git(root, "init", "-q")
+    // hostname.exe in git's place would print the computer's name instead of the repository's root.
+    await fs.copyFile(
+      path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "hostname.exe"),
+      path.join(root, "git.exe"),
+    )
+    const top = (await UntrustedGit.run(root, ["rev-parse", "--show-toplevel"])).trim()
+    expect(top.toLowerCase()).not.toBe(os.hostname().toLowerCase())
+    expect(top.replace(/\\/g, "/").toLowerCase().endsWith("/repo")).toBe(true)
   })
 })
 
