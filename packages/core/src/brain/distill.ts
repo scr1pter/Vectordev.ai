@@ -186,7 +186,7 @@ export function prompt(input: { readonly title: string; readonly sections: reado
     const pages = section.passages.flatMap((passage) => (passage.page === undefined ? [] : [passage.page]))
     const attributes = [
       `section="${attribute(section.path || "Introduction")}"`,
-      ...(pages.length > 0 ? [`pages="${Math.min(...pages)}-${Math.max(...pages)}"`] : []),
+      ...(pages.length > 0 ? [`pages="${range(Math.min(...pages), Math.max(...pages))}"`] : []),
     ].join(" ")
     return `<document_data ${attributes}>\n${section.passages.map((passage) => BrainCard.escape(passage.body)).join("\n\n")}\n</document_data>`
   })
@@ -361,6 +361,10 @@ const FOLD: Readonly<Record<string, string>> = {
   "–": "-",
   "—": "-",
   " ": " ",
+}
+
+function range(first: number, last: number) {
+  return first === last ? String(first) : `${first}-${last}`
 }
 
 function attribute(text: string) {
