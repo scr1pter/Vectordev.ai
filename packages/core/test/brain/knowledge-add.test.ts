@@ -218,4 +218,34 @@ describe("BrainKnowledge.add", () => {
     expect(result.document?.status).toBe("searchable")
     expect(result.document?.stats.records).toBeGreaterThan(3)
   }, 60_000)
+
+  test("a job that dies is retried a minute later, not again at once", async () => {
+    const calls: string[] = []
+    const dying = Layer.succeed(
+      BrainWorker.Service,
+      BrainWorker.Service.of({
+        extract: (input) =>
+          Effect.sync(() => calls.push(input.document)).pipe(Effect.andThen(Effect.die(new Error("the store broke")))),
+        probe: () => Effect.die("not used"),
+        status: () => Effect.succeed({ mode: "worker" as const, threads: 0 }),
+      }),
+    )
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          const queued = yield* setup.knowledge.add(setup.place, text("Auth spec.md", SPEC_V1))
+          yield* Effect.sleep("300 millis")
+          const job = yield* setup.db.get<{ state: string; attempts: number; next: number; error: string }>(
+            sql`SELECT state, attempts, next_at AS next, error FROM brain_job`,
+          )
+          return { queued, job, documents: yield* setup.knowledge.documents(setup.place, { personal: true }) }
+        }),
+      { worker: dying },
+    )
+    expect(calls).toHaveLength(1)
+    expect(result.job).toMatchObject({ state: "queued", attempts: 1, error: "Vector could not store what it read from this document." })
+    expect(result.job!.next).toBeGreaterThan(Date.now() + 50_000)
+    expect(result.documents[0]?.status).toBe("queued")
+  })
+
 })

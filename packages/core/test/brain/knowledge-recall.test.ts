@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { sql } from "drizzle-orm"
 import { Effect } from "effect"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainCard } from "@vectordevai/core/brain/card"
@@ -239,4 +240,27 @@ describe("BrainKnowledge.recall", () => {
     expect(Token.estimate(result.shown!)).toBeLessThanOrEqual(130)
     expect(result.withheld).toBeUndefined()
   })
+
+  test("a passage the agent opens counts once, however often a request renders it again", async () => {
+    const result = await withKnowledge((setup) =>
+      Effect.gen(function* () {
+        yield* added(setup, text("Auth spec.md", SPEC_V1))
+        const card = (yield* setup.knowledge.search(setup.place, { query: "refresh tokens expire", personal: true }))[0]!
+        const uses = () =>
+          setup.db.get<{ uses: number; rows: number }>(
+            sql`SELECT uses, (SELECT count(*) FROM brain_use WHERE entry_id = ${card.id} AND tier = 'get') AS rows FROM brain_item WHERE ref = ${card.id}`,
+          )
+        const before = yield* uses()
+        yield* setup.knowledge.get(setup.place, { id: card.id, budget: 600, personal: true, sessionID: "ses_1", requestID: "msg_1" })
+        const opened = yield* uses()
+        yield* setup.knowledge.get(setup.place, { id: card.id, budget: 600, personal: true, sessionID: "ses_1" })
+        yield* setup.knowledge.get(setup.place, { id: card.id, budget: 600, personal: true, sessionID: "ses_1" })
+        return { before, opened, rendered: yield* uses() }
+      }),
+    )
+    expect(result.opened!.uses).toBe(result.before!.uses + 1)
+    expect(result.opened!.rows).toBe(1)
+    expect(result.rendered).toEqual(result.opened)
+  })
+
 })

@@ -539,7 +539,14 @@ function make(input: {
         for (;;) {
           const job = yield* claim().pipe(Effect.catchCause(() => Effect.succeed(undefined)))
           if (!job) break
-          yield* run(job).pipe(Effect.catchCause((cause) => Effect.logWarning("brain document job failed", { cause })))
+          // A job that dies is retried later like a failed read, never at once, so one bad file cannot spin the drainer.
+          yield* run(job).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("brain document job failed", { cause }).pipe(
+                Effect.andThen(retry(job, "Vector could not store what it read from this document.")),
+              ),
+            ),
+          )
         }
       }
     }).pipe(Effect.forkIn(input.scope))
@@ -615,29 +622,37 @@ function make(input: {
       )
     if (result.type === "error") {
       // A document that takes too long would take too long again.
-      if (result.error.reason === "timeout" || job.attempts + 1 >= BACKOFF.length)
-        return yield* failed(job, document, result.error.message)
-      const next = Date.now() + BACKOFF[job.attempts]!
-      yield* db
-        .update(BrainJobTable)
-        .set({
-          state: "queued",
-          attempts: job.attempts + 1,
-          next_at: next,
-          lease_until: next + LEASE,
-          error: result.error.message,
-          updated_at: Date.now(),
-        })
-        .where(eq(BrainJobTable.id, job.id))
-        .run()
-        .pipe(Effect.orDie)
-      if (document.status === "queued") yield* setStatus(document.id, "queued")
-      return
+      if (result.error.reason === "timeout") return yield* failed(job, document, result.error.message)
+      return yield* retry(job, result.error.message)
     }
     if (result.type === "refused") return yield* failed(job, document, result.message)
     yield* store(document, result.structured)
     state.pending.delete(document.id)
     yield* db.delete(BrainJobTable).where(eq(BrainJobTable.id, job.id)).run().pipe(Effect.orDie)
+  })
+
+  // Another attempt after 1 minute, then 10, then an hour; after the third the document could not be read.
+  const retry = Effect.fnUntraced(function* (job: typeof BrainJobTable.$inferSelect, message: string) {
+    const document = job.document_id
+      ? yield* db.select().from(BrainDocumentTable).where(eq(BrainDocumentTable.id, job.document_id)).get().pipe(Effect.orDie)
+      : undefined
+    if (!document) return yield* db.delete(BrainJobTable).where(eq(BrainJobTable.id, job.id)).run().pipe(Effect.orDie)
+    if (job.attempts + 1 >= BACKOFF.length) return yield* failed(job, document, message)
+    const next = Date.now() + BACKOFF[job.attempts]!
+    yield* db
+      .update(BrainJobTable)
+      .set({
+        state: "queued",
+        attempts: job.attempts + 1,
+        next_at: next,
+        lease_until: next + LEASE,
+        error: message,
+        updated_at: Date.now(),
+      })
+      .where(eq(BrainJobTable.id, job.id))
+      .run()
+      .pipe(Effect.orDie)
+    if (document.status === "reading") yield* setStatus(document.id, "queued")
   })
 
   const setStatus = (id: string, status: BrainSchema.DocumentStatus) =>
@@ -1152,7 +1167,7 @@ function make(input: {
   const lexical = Effect.fnUntraced(function* (
     place: Brain.Place,
     query: ReadonlyMap<string, number>,
-    options: { personal: boolean; exclude?: ReadonlySet<string> },
+    options: { personal: boolean; exclude?: ReadonlySet<string>; limit?: number },
   ) {
     if (query.size === 0) return [] as Found[]
     const terms = yield* db
@@ -1168,47 +1183,61 @@ function make(input: {
       .where(eq(BrainStateTable.repository_id, place.repository))
       .get()
       .pipe(Effect.orDie)
-    const rows = yield* db
-      .select({
-        item: BrainPostingTable.item,
-        term: BrainPostingTable.term,
-        count: BrainPostingTable.count,
-        length: BrainItemTable.length,
-        ref: BrainItemTable.ref,
-        type: BrainItemTable.type,
-        confidence: BrainItemTable.confidence,
-        visibility: BrainItemTable.visibility,
-        document: BrainItemTable.document_id,
-      })
-      .from(BrainPostingTable)
-      .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainPostingTable.item))
-      .innerJoin(BrainDocumentTable, eq(BrainDocumentTable.id, BrainItemTable.document_id))
-      .where(
-        and(
-          inArray(
-            BrainPostingTable.term,
-            terms.map((term) => term.id),
-          ),
-          eq(BrainItemTable.repository_id, place.repository),
-          eq(BrainItemTable.status, "active"),
-          inArray(BrainDocumentTable.status, [...USABLE]),
-          options.personal ? undefined : eq(BrainItemTable.visibility, "repository"),
-        ),
-      )
+    const documents = (yield* db
+      .select({ id: BrainDocumentTable.id })
+      .from(BrainDocumentTable)
+      .where(and(eq(BrainDocumentTable.repository_id, place.repository), inArray(BrainDocumentTable.status, [...USABLE])))
       .all()
+      .pipe(Effect.orDie)).map((row) => row.id)
+    if (documents.length === 0) return [] as Found[]
+    // Only what scoring needs, for every posting of the query's terms; the rest is read for the best items alone.
+    const rows = yield* db
+      .all<{ item: number; term: number; count: number; length: number }>(
+        sql`SELECT p.item AS item, p.term AS term, p.count AS count, i.length AS length
+            FROM ${BrainPostingTable} p JOIN ${BrainItemTable} i ON i.id = p.item
+            WHERE p.term IN (${sql.join(
+              terms.map((term) => sql`${term.id}`),
+              sql`, `,
+            )})
+              AND i.status = 'active'
+              AND i.document_id IN (${sql.join(
+                documents.map((id) => sql`${id}`),
+                sql`, `,
+              )})
+              ${options.personal ? sql`` : sql`AND i.visibility = 'repository'`}`,
+      )
       .pipe(Effect.orDie)
     const names = new Map(terms.map((term) => [term.id, term.term]))
-    const info = new Map(rows.map((row) => [row.item, row]))
     const ranked = BrainLexical.rankPostings({
       postings: rows.map((row) => ({ item: row.item, term: names.get(row.term)!, count: row.count, length: row.length })),
       total: totals?.items ?? 0,
       average: (totals?.length ?? 0) / Math.max(1, totals?.items ?? 0),
       frequency: new Map(terms.map((term) => [term.term, term.df])),
       query,
-    })
+    }).slice(0, options.limit ?? 300)
+    const info = new Map(
+      (yield* db
+        .select({
+          id: BrainItemTable.id,
+          ref: BrainItemTable.ref,
+          type: BrainItemTable.type,
+          confidence: BrainItemTable.confidence,
+          visibility: BrainItemTable.visibility,
+          document: BrainItemTable.document_id,
+        })
+        .from(BrainItemTable)
+        .where(
+          inArray(
+            BrainItemTable.id,
+            ranked.map((item) => item.item),
+          ),
+        )
+        .all()
+        .pipe(Effect.orDie)).map((row) => [row.id, row]),
+    )
     return ranked.flatMap((item): Found[] => {
-      const row = info.get(item.item)!
-      if (options.exclude?.has(row.ref)) return []
+      const row = info.get(item.item)
+      if (!row || options.exclude?.has(row.ref)) return []
       return [
         {
           item: item.item,
@@ -1604,7 +1633,8 @@ function make(input: {
       : ""
     const text = [head, wrapped].filter(Boolean).join("\n")
     const tokens = Token.estimate(text)
-    yield* record(card ? [card] : [], { ...request, tier: "get", tokens })
+    // Counted once, when the agent opens it; a request that renders it again counts nothing.
+    if (request.requestID) yield* record(card ? [card] : [], { ...request, tier: "get", tokens })
     return { type: "text" as const, text, tokens, id }
   })
 
