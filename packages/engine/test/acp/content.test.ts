@@ -126,7 +126,16 @@ describe("acp content conversion", () => {
           text: "context",
         },
       }),
-    ).toEqual([{ type: "text", text: "[mcp://server/context]\ncontext" }])
+    ).toEqual([{ type: "text", text: "[mcp://server/context]\ncontext", metadata: { "vector.outside": "acp" } }])
+  })
+
+  test("an embedded resource is marked as outside text, so it never counts as what the user typed", () => {
+    const [file, page] = promptContentToParts([
+      { type: "resource", resource: { uri: "file:///tmp/context.txt", mimeType: "text/plain", text: "context" } },
+      { type: "resource", resource: { uri: "https://github.com/acme/app/pull/42", text: "PR body" } },
+    ])
+    expect(file).toMatchObject({ type: "text", metadata: { "vector.outside": "file" } })
+    expect(page).toMatchObject({ type: "text", metadata: { "vector.outside": "acp" } })
   })
 
   test("resource with text includes file path", () => {

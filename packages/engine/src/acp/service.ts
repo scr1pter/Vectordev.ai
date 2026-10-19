@@ -31,6 +31,7 @@ import {
 } from "@agentclientprotocol/sdk"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
+import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import type { AssistantMessage, Message, VectorClient, SessionMessageResponse } from "@vectordevai/sdk/v2"
 import { Context, Effect, Layer, ManagedRuntime } from "effect"
@@ -820,9 +821,12 @@ const selectDefaultModel = Effect.fn("ACP.selectDefaultModel")(function* (snapsh
   return yield* new ACPError.AuthRequiredError({})
 })
 
+// Only what the user typed names a command and its arguments: a command's arguments count as their words, and an
+// embedded resource's text is not.
 function detectSlashCommand(parts: ReturnType<typeof promptContentToParts>) {
   const text = parts
     .filter((part): part is Extract<(typeof parts)[number], { type: "text" }> => part.type === "text")
+    .filter((part) => part.metadata?.[BrainSchema.OUTSIDE] === undefined)
     .map((part) => part.text)
     .join("")
     .trim()

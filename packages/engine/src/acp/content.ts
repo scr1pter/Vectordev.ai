@@ -2,6 +2,7 @@ import type { ContentBlock, ContentChunk, ResourceLink, Role } from "@agentclien
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { SessionV1 } from "@vectordevai/core/v1/session"
+import { BrainSchema } from "@vectordevai/core/brain/schema"
 
 export type PromptPart = SessionV1.TextPartInput | SessionV1.FilePartInput
 
@@ -74,6 +75,8 @@ export function contentBlockToParts(block: ContentBlock): PromptPart[] {
     case "resource_link":
       return [resourceLinkToPart(block)]
 
+    // An embedded resource is a file's or a page's text, not what the user typed, so it never vouches for memory. A
+    // local file reads like the read tool's output; anything else (a fetched page, an issue) holds what the agent saves.
     case "resource":
       if ("text" in block.resource) {
         try {
@@ -91,11 +94,14 @@ export function contentBlockToParts(block: ContentBlock): PromptPart[] {
               {
                 type: "text",
                 text: `[${filepath}${line ? `:${line}` : ""}]\n${block.resource.text}`,
+                metadata: { [BrainSchema.OUTSIDE]: "file" },
               },
             ]
           }
         } catch {}
-        return [{ type: "text", text: `[${block.resource.uri}]\n${block.resource.text}` }]
+        return [
+          { type: "text", text: `[${block.resource.uri}]\n${block.resource.text}`, metadata: { [BrainSchema.OUTSIDE]: "acp" } },
+        ]
       }
       if (block.resource.mimeType) {
         return [

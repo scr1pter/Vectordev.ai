@@ -23,9 +23,10 @@ export type Kind = typeof Kind.Type
 
 /**
  * Metadata key of a message part whose text came from outside this conversation: a transcript imported as passive
- * history, or the issue and pull request text the GitHub agent is given. A role "user" message carrying it was not
- * typed by the user, so its words vouch for no memory, and memory written in a session that has one waits for review,
- * as it does after reading the web. The value says where the text came from.
+ * history, the issue and pull request text the GitHub agent is given, a resource an editor embedded over ACP, or what
+ * was piped into `vector run`. A role "user" message carrying it was not typed by the user, so its words vouch for no
+ * memory, and memory written in a session that has one waits for review, as it does after reading the web. The value
+ * says where the text came from; "file", a local file an editor embedded, is this computer's and holds nothing.
  */
 export const OUTSIDE = "vector.outside"
 

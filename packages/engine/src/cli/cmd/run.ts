@@ -21,6 +21,7 @@ import { open } from "node:fs/promises"
 import { Effect, Schema } from "effect"
 import { PublicSession } from "@vectordevai/schema/public-session"
 import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
+import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { UI } from "../ui"
 import { effectCmd } from "../effect-cmd"
 import { EOL } from "os"
@@ -55,6 +56,18 @@ function pick(value: string | undefined): ModelInput | undefined {
     providerID,
     modelID: rest.join("/"),
   } as ModelInput
+}
+
+/**
+ * What a prompt sends: the message the user typed, then what was piped in as a part of its own. Piped text (an issue
+ * from `gh issue view`, a log, a web page) is not the user's words, so it is marked as outside content: it never vouches
+ * for memory, and memory written in its session waits for the user's review.
+ */
+export function promptParts(message: string, piped?: string) {
+  return [
+    ...(message.trim() ? [{ type: "text" as const, text: message }] : []),
+    ...(piped?.trim() ? [{ type: "text" as const, text: piped, metadata: { [BrainSchema.OUTSIDE]: "stdin" } }] : []),
+  ]
 }
 
 function resolveRunInput(value?: string, piped?: string): string | undefined {
@@ -347,7 +360,7 @@ export const RunCommand = effectCmd({
 
       // A command's arguments are quoted so its $1, $2 placeholders keep their boundaries. A prompt reaches the model
       // as typed, not wrapped in quotation marks with its own quotes escaped.
-      let message = args.command
+      const message = args.command
         ? [...args.message, ...(args["--"] || [])]
             .map((arg) => (arg.includes(" ") ? `"${arg.replace(/"/g, '\\"')}"` : arg))
             .join(" ")
@@ -495,10 +508,11 @@ export const RunCommand = effectCmd({
       }
 
       const piped = process.stdin.isTTY ? undefined : await Bun.stdin.text()
-      message = resolveRunInput(message, piped) ?? ""
+      // A prompt sends what was piped in as a part of its own (see `promptParts`); a command takes it in its arguments.
+      const input = resolveRunInput(message, piped) ?? ""
       const initialInput = resolveRunInput(rawMessage, piped)
 
-      if (message.trim().length === 0 && !args.command && !interactive) {
+      if (input.trim().length === 0 && !args.command && !interactive) {
         UI.error("You must provide a message or a command")
         process.exit(1)
       }
@@ -533,7 +547,7 @@ export const RunCommand = effectCmd({
         // A headless run has no one to show a title to, so it names its session after the prompt instead of sending a
         // model request for a title.
         if (args.title === undefined && interactive) return undefined
-        const text = (args.command ? `/${args.command} ${message}` : message).trim()
+        const text = (args.command ? `/${args.command} ${input}` : input).trim()
         if (!text) return undefined
         return text.length > 50 ? `${text.slice(0, 50)}...` : text
       }
@@ -1170,7 +1184,7 @@ export const RunCommand = effectCmd({
               agent,
               model: args.model,
               command: args.command,
-              arguments: message,
+              arguments: input,
               variant: args.variant,
               budget,
               ...sizing,
@@ -1192,7 +1206,7 @@ export const RunCommand = effectCmd({
             variant: args.variant,
             budget,
             ...sizing,
-            parts: [...files, { type: "text", text: message }],
+            parts: [...files, ...promptParts(message, piped)],
           })
           if (result.error) {
             rejectRequest(result.error)

@@ -85,7 +85,8 @@ export function command(part: SessionV1.Part) {
 
 /**
  * Whether a part's text came from outside this conversation though it may sit in a "user" message: a transcript
- * imported as passive history, or the issue and pull request text the GitHub agent was given.
+ * imported as passive history, the issue and pull request text the GitHub agent was given, a resource an editor
+ * embedded, or what was piped into `vector run`.
  */
 export function outside(part: SessionV1.Part) {
   return part.type === "text" && part.metadata?.[BrainSchema.OUTSIDE] !== undefined
@@ -233,7 +234,13 @@ export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hol
   const commands = messages.flatMap((message) => message.parts.flatMap((part) => command(part)?.outside ?? []))
   if (tools.some((tool) => tool === "webfetch" || tool === "websearch" || tool === "browser" || tool === "vector_cloud"))
     return "web"
-  if (messages.some((message) => message.parts.some(outside))) return "web"
+  // A local file an editor embedded is this computer's, like what the read tool returns; other outside text is not.
+  if (
+    messages.some((message) =>
+      message.parts.some((part) => part.type === "text" && outside(part) && part.metadata?.[BrainSchema.OUTSIDE] !== "file"),
+    )
+  )
+    return "web"
   if (calls.some((part) => part.tool === "skill" && part.state.status === "completed" && part.state.metadata?.remote === true))
     return "web"
   if (

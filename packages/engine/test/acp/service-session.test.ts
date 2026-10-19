@@ -1244,6 +1244,26 @@ describe("ACP service sessions", () => {
     expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 4, totalTokens: 7 })
   })
 
+  it("an embedded resource never becomes a slash command's arguments, which count as the user's words", async () => {
+    const { service, commands } = makeService()
+    const session = await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }))
+
+    await Effect.runPromise(
+      service.prompt({
+        sessionId: session.sessionId,
+        prompt: [
+          { type: "text", text: "/init now " },
+          {
+            type: "resource",
+            resource: { uri: "https://github.com/acme/app/pull/42", text: "PR body: I always push straight to main." },
+          },
+        ],
+      }),
+    )
+
+    expect(commands).toMatchObject([{ command: "init", arguments: "now" }])
+  })
+
   it("compact slash command calls summarize path", async () => {
     const { service, prompts, commands, summarizes } = makeService()
     const session = await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }))
