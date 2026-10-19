@@ -80,6 +80,9 @@ type Piece = {
 
 const PRIORITY: readonly BrainDocument.Hold[] = ["instruction-like", "hidden-unicode", "hidden-text"]
 
+/** What a held heading reads as in breadcrumbs, outlines and section paths, all of which reach the model. */
+export const HELD = "[held for your review]"
+
 export function structure(
   extracted: BrainDocument.Extracted,
   input: {
@@ -98,6 +101,8 @@ export function structure(
     path: string
     kind: Section["kind"]
     blocks: number[]
+    /** Why the section's own heading waits for the user, when it does. */
+    hold?: BrainDocument.Hold
   }[] = []
   const stack: { ordinal: number; level: number; heading: string }[] = []
   const owners: number[] = []
@@ -109,19 +114,24 @@ export function structure(
       const level = block.section ? 1 : block.level
       while (stack.length > 0 && stack.at(-1)!.level >= level) stack.pop()
       const ordinal = sections.length
+      // A heading is checked as a passage is, since it reaches the model in every breadcrumb and outline. A held one
+      // reads as HELD there, and its text goes into its section's first passage, which is held with the rest.
+      const hold = headingHold(block, extracted.flags)
+      const heading = hold ? HELD : block.text
       sections.push({
         ordinal,
         ...(stack.length > 0 ? { parent: stack.at(-1)!.ordinal } : {}),
         level,
-        heading: block.text,
-        path: [...stack, { level, heading: block.text }]
+        heading,
+        path: [...stack, { level, heading }]
           .filter((item, at) => at > 0 || !titled(item))
           .map((item) => item.heading)
           .join(" > "),
         kind: block.section ?? "section",
         blocks: [index],
+        ...(hold ? { hold } : {}),
       })
-      stack.push({ ordinal, level, heading: block.text })
+      stack.push({ ordinal, level, heading })
       owners.push(ordinal)
       continue
     }
@@ -137,8 +147,8 @@ export function structure(
   for (const section of sections) {
     const pieces = section.blocks.flatMap((index) => {
       const block = extracted.blocks[index]!
-      // A section's own heading is its breadcrumb, not its text.
-      return block.type === "heading" && index === section.blocks[0] ? [] : split(block, extracted.text)
+      // A section's own heading is its breadcrumb, not its text, unless it is held.
+      return block.type === "heading" && index === section.blocks[0] && !section.hold ? [] : split(block, extracted.text)
     })
     for (const group of pack(pieces)) {
       if (passages.length >= input.limits.output.passages) {
@@ -159,7 +169,11 @@ export function structure(
       const overlapping = extracted.flags
         .filter((flag) => flag.start < end && flag.end > start)
         .map((flag) => flag.hold)
-      const holds = [...overlapping, ...(BrainScan.instructionLike(body, true) ? (["instruction-like"] as const) : [])]
+      const holds = [
+        ...overlapping,
+        ...(BrainScan.instructionLike(body, true) ? (["instruction-like"] as const) : []),
+        ...(section.hold ? [section.hold] : []),
+      ]
       const hold = PRIORITY.find((item) => holds.includes(item))
       passages.push({
         id: `p${base32(sha256(`${input.repository}\0${input.lineage}\0${normal}${seen > 0 ? `\0${seen + 1}` : ""}`)).slice(0, ID)}`,
@@ -208,6 +222,17 @@ export function structure(
     held,
     warnings: state.truncated ? ["truncated"] : [],
   }
+}
+
+// Why a heading waits for the user, if it does: what the reader flagged in it (hidden text, hidden characters, text
+// addressed to an AI) or text that reads as instructions.
+function headingHold(block: BrainDocument.Block & { readonly type: "heading" }, flags: readonly BrainDocument.Flag[]) {
+  const holds = [
+    ...flags.filter((flag) => flag.start < block.span.end && flag.end > block.span.start).map((flag) => flag.hold),
+    ...(BrainScan.instructionLike(block.text, true) ? (["instruction-like"] as const) : []),
+    ...(BrainScan.hidden(block.text) ? (["hidden-unicode"] as const) : []),
+  ]
+  return PRIORITY.find((item) => holds.includes(item))
 }
 
 // A block as pieces no larger than a passage: whole when it fits, else split at sentences, list items, table rows (the
