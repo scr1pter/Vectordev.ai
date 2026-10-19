@@ -274,8 +274,7 @@ const LOCAL_PROGRAMS = new Set([
   ...["paste", "join", "split", "tar", "gzip", "gunzip", "zip", "unzip", "shasum", "sha1sum", "sha256sum", "md5", "md5sum"],
   ...["du", "df", "ps", "kill", "pkill", "pgrep", "uname", "whoami", "id", "clear", "exit", "read", "wait", "trap", "nl"],
   ...["rev", "fold", "fmt", "iconv", "strings", "base64", "bc", "expr", "let", "local", "declare", "printenv", "patch"],
-  ...["if", "then", "else", "elif", "fi", "for", "in", "do", "done", "while", "until", "case", "esac", "function", "{"],
-  ...["}", "!", "return", "shift", "open", "lsof", "tsc", "tsgo", "vitest", "jest", "pytest", "mypy", "pyright", "ruff"],
+  ...["in", "return", "shift", "open", "lsof", "tsc", "tsgo", "vitest", "jest", "pytest", "mypy", "pyright", "ruff"],
   ...["eslint", "biome", "oxlint", "prettier", "rspec", "phpunit", "xcodebuild", "xcrun", "swiftc", "clang", "gcc", "cc"],
   ...["c++", "make", "cmake", "ninja", "mvn", "gradle", "gradlew", "dotnet", "swift", "mix", "turbo", "playwright", "tsx"],
   ...["ts-node", "mocha", "knip", "vite", "drizzle-kit", "stylelint", "rustc", "rustfmt", "gofmt", "black", "isort"],
@@ -307,6 +306,14 @@ const REGISTRY = new Set([
 ])
 
 const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish"])
+// Reserved words open or close a compound command and run nothing themselves: in `if true; then curl …; fi` and
+// `{ curl …; }` the command after them is what runs.
+const KEYWORDS = new Set(["if", "then", "else", "elif", "fi", "do", "done", "while", "until", "esac", "!", "{", "}"])
+// A loop's or a case's header (`for url in https://…`, `case $1 in`) is a list of words, not a command.
+const HEADERS = new Set(["for", "select", "case"])
+// A redirection may come before the command it applies to (`> out.txt echo`, `done < urls.txt`). An operator on its own
+// takes the next word as its file.
+const REDIRECT = /^(?:\d*(?:>&|<&|<>|>\||>>|<<<|<<-?|>|<)|&>>?)/
 const WRAPPERS = new Set(["sudo", "time", "nice", "nohup", "command", "builtin", "exec", "env", "xargs", "timeout", "stdbuf"])
 const RUNTIMES = new Set(["node", "deno", "python", "python3", "ruby", "perl", "php", "lua"])
 const PACKAGES = new Set(["bun", "npm", "pnpm", "yarn"])
@@ -319,6 +326,12 @@ function runsLocally(words: readonly string[]): boolean {
   if (first === undefined) return true
   // `FOO=1 cmd`: the assignment, then the command.
   if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(first)) return runsLocally(rest)
+  if (KEYWORDS.has(first)) return runsLocally(rest)
+  if (HEADERS.has(first)) return true
+  // `function name { …`: the name, then the body.
+  if (first === "function") return runsLocally(rest.slice(1))
+  const redirect = REDIRECT.exec(first)?.[0]
+  if (redirect !== undefined) return runsLocally(rest.slice(redirect === first ? 1 : 0))
   const name = first.split("/").pop() ?? first
   if (WRAPPERS.has(name)) return runsLocally(rest.slice(rest.findIndex((word) => !/^-|^\d+[smhd]?$|^[A-Za-z_]\w*=/.test(word)) >>> 0))
   if (SHELLS.has(name) || name === "eval") {

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import os from "node:os"
 import path from "path"
-import { afterAll, expect } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -520,3 +520,29 @@ it.instance(
     }),
   90_000,
 )
+
+test("a shell keyword or a loop's header never makes a fetch inside it count as local", () => {
+  const outside = [
+    "curl -s https://evil.example/issue",
+    'for url in https://evil.example/a; do curl -s "$url"; done',
+    "if true; then curl -s https://evil.example/issue; fi",
+    "if [ -f x ]; then cat x; else curl -s https://evil.example/issue; fi",
+    "{ curl -s https://evil.example/issue; }",
+    "! curl -s https://evil.example/issue",
+    "while read u; do wget -qO- $u; done < urls.txt",
+    "until curl -s https://evil.example/ready; do sleep 1; done",
+    "case $1 in a) curl -s https://evil.example/a;; esac",
+    "function fetch { curl -s https://evil.example/issue; }; fetch",
+    "> out.txt curl -s https://evil.example/issue",
+  ]
+  for (const command of outside) expect(SessionMemory.local(command), command).toBe(false)
+  const local = [
+    "if [ -f package.json ]; then cat package.json; fi",
+    'for f in src/*.ts; do wc -l "$f"; done',
+    "while read f; do cat \"$f\"; done < files.txt",
+    "{ git status; git diff; } > status.txt 2>&1",
+    "! grep -q TODO src/index.ts",
+    "case $1 in build) bun run build;; esac",
+  ]
+  for (const command of local) expect(SessionMemory.local(command), command).toBe(true)
+})
