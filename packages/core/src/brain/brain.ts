@@ -10,6 +10,7 @@ import { Global } from "../global"
 import { Glob } from "../util/glob"
 import { Token } from "../util/token"
 import { BrainCard } from "./card"
+import { BrainCredit } from "./credit"
 import { BrainDatabase } from "./database"
 import { BrainLexical } from "./lexical"
 import { BrainParse } from "./parse"
@@ -123,6 +124,11 @@ export type Evidence =
       readonly verified: boolean
     }
   | { readonly type: "check"; readonly command: string; readonly verified: boolean }
+  /**
+   * A quote from a document's record or passage, by its id. `verified`: the quote is that passage's own words, as
+   * BrainKnowledge.quoted checks; the brain then checks it states the memory.
+   */
+  | { readonly type: "document"; readonly path: string; readonly quote: string; readonly verified: boolean }
 
 export type Proposal = {
   readonly kind: BrainSchema.LearnedKind
@@ -207,6 +213,16 @@ export type Candidate = {
   readonly confidence: number
   readonly updatedAt: number
   readonly terms: ReadonlyMap<string, number>
+  /** Proven knowledge (BrainCredit.proven): runs that cited it and passed weigh it up, already in `score`. */
+  readonly proven: number
+}
+
+/** Where a use of memory went: the request it reached, by tier, for outcome credit. */
+export type Use = {
+  readonly sessionID?: string
+  readonly requestID?: string
+  readonly tier: "recall" | "brief" | "review"
+  readonly tokens: number
 }
 
 export type Stats = {
@@ -247,10 +263,12 @@ export interface Interface {
     },
   ) => Effect.Effect<readonly Candidate[]>
   /** Counts entries as sent to a session, as recall does for what it sends. */
-  readonly used: (
-    ids: readonly string[],
-    input: { readonly sessionID?: string; readonly tier: "recall"; readonly tokens: number },
-  ) => Effect.Effect<void>
+  readonly used: (ids: readonly string[], input: Use) => Effect.Effect<void>
+  /**
+   * Proven knowledge for entries: `helpful` runs that cited them and passed (negative for one the user reverted since).
+   * The count never goes below zero, and an entry never gets `harmful` from a run, only from the user.
+   */
+  readonly credit: (ids: readonly string[], helpful: number) => Effect.Effect<void>
   readonly recall: (
     place: Place,
     input: {
@@ -260,6 +278,10 @@ export interface Interface {
       readonly personal: boolean
       readonly exclude?: ReadonlySet<string>
       readonly sessionID?: string
+      /** The request message it is for, so outcome credit can find what reached it. */
+      readonly requestID?: string
+      /** Where the use is counted: a request's recall, or a subagent's brief. */
+      readonly tier?: "recall" | "brief"
     },
   ) => Effect.Effect<Injection>
   readonly attach: (
@@ -555,8 +577,9 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
   const used = Effect.fnUntraced(function* (
     ids: readonly string[],
     sessionID: string | undefined,
-    tier: "digest" | "recall" | "attach" | "search",
+    tier: "digest" | "recall" | "attach" | "search" | "brief" | "review",
     tokens: number,
+    requestID?: string,
   ) {
     if (ids.length === 0) return
     const now = Date.now()
@@ -569,7 +592,26 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     if (!sessionID) return
     yield* db
       .insert(BrainUseTable)
-      .values(ids.map((id) => ({ session_id: sessionID, entry_id: id, tier, tokens: Math.round(tokens / ids.length), at: now })))
+      .values(
+        ids.map((id) => ({
+          session_id: sessionID,
+          entry_id: id,
+          tier,
+          tokens: Math.round(tokens / ids.length),
+          at: now,
+          request_id: requestID ?? null,
+        })),
+      )
+      .run()
+      .pipe(Effect.orDie)
+  })
+
+  const credit = Effect.fn("Brain.credit")(function* (ids: readonly string[], helpful: number) {
+    if (ids.length === 0 || helpful === 0) return
+    yield* db
+      .update(BrainEntryTable)
+      .set({ helpful: sql`max(0, ${BrainEntryTable.helpful} + ${helpful})` })
+      .where(inArray(BrainEntryTable.id, [...ids]))
       .run()
       .pipe(Effect.orDie)
   })
@@ -657,11 +699,12 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
         const relevant = pathHit || (lexical !== undefined && (lexical.matched.length >= 2 || (query.size <= 2 && lexical.matched.length >= 1)))
         if (!relevant) return []
         const recency = Math.max(0.5, 0.995 ** ((now - (row.last_used_at ?? row.updated_at)) / HOUR))
+        const proven = BrainCredit.lift({ helpful: row.helpful, harmful: row.harmful, ignored: 0 }, row)
         return [
           {
             id: row.id,
             line: line(row),
-            score: ((lexical?.score ?? 0) + (pathHit ? 5 : 0)) * row.confidence * recency,
+            score: ((lexical?.score ?? 0) + (pathHit ? 5 : 0)) * row.confidence * recency * proven,
             matched: lexical?.matched ?? [],
             path: pathHit,
             personal: row.repository_id === PERSONAL || row.private,
@@ -669,6 +712,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
             confidence: row.confidence,
             updatedAt: row.updated_at,
             terms: decode(row.terms),
+            proven,
           },
         ]
       })
@@ -684,6 +728,8 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       personal: boolean
       exclude?: ReadonlySet<string>
       sessionID?: string
+      requestID?: string
+      tier?: "recall" | "brief"
     },
   ) {
     if (input.budget <= 0) return { ids: [], tokens: 0 }
@@ -708,8 +754,9 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     yield* used(
       ordered.map((item) => item.id),
       input.sessionID,
-      "recall",
+      input.tier ?? "recall",
       tokens,
+      input.requestID,
     )
     return {
       text,
@@ -963,6 +1010,8 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
         quote: checked ? scrub(evidence.quote) : null,
         file_hash: checked ? (evidence.hash ?? null) : null,
       }
+    if (evidence.type === "document")
+      return { ...base, type: "document" as const, path: evidence.path, quote: checked ? scrub(evidence.quote) : null }
     return { ...base, type: "check" as const, command: checked ? scrub(evidence.command) : null }
   }
 
@@ -1708,6 +1757,35 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     if (!options?.force && state?.consolidated_at && now - state.consolidated_at < 6 * HOUR)
       return { skipped: true, merged: 0, promoted: 0, archived: 0, dropped: 0, stale: 0 }
     const counts = { merged: 0, archived: 0, dropped: 0, stale: 0 }
+    // Proven knowledge halves every 90 days: the counts decay by the time since the last pass, before anything reads
+    // them below. The personal scope's own pass time is its state row's.
+    const personalState = yield* db
+      .select({ at: BrainStateTable.consolidated_at })
+      .from(BrainStateTable)
+      .where(eq(BrainStateTable.repository_id, PERSONAL))
+      .get()
+      .pipe(Effect.orDie)
+    for (const [repository, since] of [
+      [place.repository, state?.consolidated_at],
+      [PERSONAL, personalState?.at],
+    ] as const) {
+      const factor = since ? BrainCredit.factor(now - since) : 1
+      if (factor < 1)
+        yield* db
+          .update(BrainEntryTable)
+          .set({
+            helpful: sql`${BrainEntryTable.helpful} * ${factor}`,
+            harmful: sql`${BrainEntryTable.harmful} * ${factor}`,
+          })
+          .where(
+            and(
+              eq(BrainEntryTable.repository_id, repository),
+              or(gt(BrainEntryTable.helpful, 0), gt(BrainEntryTable.harmful, 0)),
+            ),
+          )
+          .run()
+          .pipe(Effect.orDie)
+    }
     for (const repository of [place.repository, PERSONAL]) {
       const rows = yield* db
         .select()
@@ -1924,12 +2002,13 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       .pipe(Effect.orDie)
     yield* db.delete(BrainTombstoneTable).where(lt(BrainTombstoneTable.until, now)).run().pipe(Effect.orDie)
     yield* db.delete(BrainUseTable).where(lt(BrainUseTable.at, now - 30 * DAY)).run().pipe(Effect.orDie)
-    yield* db
-      .insert(BrainStateTable)
-      .values({ repository_id: place.repository, consolidated_at: now })
-      .onConflictDoUpdate({ target: BrainStateTable.repository_id, set: { consolidated_at: now } })
-      .run()
-      .pipe(Effect.orDie)
+    for (const repository of [place.repository, PERSONAL])
+      yield* db
+        .insert(BrainStateTable)
+        .values({ repository_id: repository, consolidated_at: now })
+        .onConflictDoUpdate({ target: BrainStateTable.repository_id, set: { consolidated_at: now } })
+        .run()
+        .pipe(Effect.orDie)
     if (counts.merged + counts.archived + counts.dropped + counts.stale + orphaned.length > 0) {
       yield* bump(place.repository)
       yield* bump(PERSONAL)
@@ -1960,7 +2039,8 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     sync,
     digest,
     candidates,
-    used: (ids, input) => used(ids, input.sessionID, input.tier, input.tokens),
+    used: (ids, input) => used(ids, input.sessionID, input.tier, input.tokens, input.requestID),
+    credit,
     recall,
     attach,
     search,

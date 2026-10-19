@@ -140,3 +140,66 @@ export function spread(
   }
   return out
 }
+
+// House vocabulary: the repository's own words for things. A glossary or acronym record says two phrases mean one
+// thing ("SLO" and "service level objective"), so a request that uses one also searches for the other, at half the
+// weight of its own words. A definition longer than a name is prose, not another name, so it never expands a query.
+
+/** One thing the repository names more than one way, each name as the terms it searches for. */
+export type Word = { readonly phrases: readonly (readonly string[])[] }
+
+/** The vocabulary a query is expanded with: terms added at this weight, at most this many per query. */
+export const VOCABULARY = { weight: 0.5, terms: 8, phrase: 4 } as const
+
+/** Words from term records' fields: the term, its aliases, and a definition short enough to be another name for it. */
+export function vocabulary(
+  records: readonly { readonly term?: unknown; readonly aliases?: unknown; readonly definition?: unknown }[],
+  terms: (text: string) => ReadonlyMap<string, number>,
+): Word[] {
+  return records.flatMap((record) => {
+    const names = [
+      record.term,
+      ...(Array.isArray(record.aliases) ? record.aliases : []),
+      record.definition,
+    ].filter((name): name is string => typeof name === "string")
+    const phrases = names
+      .map((name) => [...terms(name).keys()])
+      .filter((phrase) => phrase.length > 0 && phrase.length <= VOCABULARY.phrase)
+    const distinct = phrases.filter(
+      (phrase, index) => phrases.findIndex((other) => other.join(" ") === phrase.join(" ")) === index,
+    )
+    return distinct.length >= 2 ? [{ phrases: distinct }] : []
+  })
+}
+
+/**
+ * A query with the repository's other names for what it names: each phrase of a word whose every term the query has
+ * brings in the word's other phrases at `VOCABULARY.weight`. `phrases` are the ones brought in, so a match on a whole
+ * phrase counts as one matched term of the query (see `hits`).
+ */
+export function expand(query: ReadonlyMap<string, number>, words: readonly Word[]) {
+  const out = new Map(query)
+  const phrases: (readonly string[])[] = []
+  for (const word of words) {
+    if (!word.phrases.some((phrase) => phrase.every((term) => query.has(term)))) continue
+    for (const phrase of word.phrases) {
+      if (phrase.every((term) => query.has(term))) continue
+      const fresh = phrase.filter((term) => !out.has(term))
+      if (out.size + fresh.length - query.size > VOCABULARY.terms) continue
+      for (const term of fresh) out.set(term, VOCABULARY.weight)
+      phrases.push(phrase)
+    }
+  }
+  return { query: out, phrases }
+}
+
+/**
+ * How many of a query's own terms an item matched, where a phrase the vocabulary brought in counts as one term when the
+ * item has all of it: "service level objective" in an item answers a query for "SLO", "service level agreement" does
+ * not.
+ */
+export function hits(matched: readonly string[], query: ReadonlyMap<string, number>, phrases: readonly (readonly string[])[]) {
+  const own = matched.filter((term) => query.has(term)).length
+  const found = new Set(matched)
+  return own + phrases.filter((phrase) => phrase.length > 0 && phrase.every((term) => found.has(term))).length
+}

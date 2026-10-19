@@ -5,7 +5,7 @@ import { createHash, randomBytes } from "node:crypto"
 import { constants as fsConstants } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
-import { and, asc, desc, eq, inArray, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
 import { Context, Effect, Fiber, Layer, Queue, Scope } from "effect"
 import { makeGlobalNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
@@ -17,6 +17,7 @@ import { Global } from "../global"
 import { Ripgrep } from "../ripgrep"
 import { BrainAnchor } from "./anchor"
 import { BrainConflict } from "./conflict"
+import { BrainCredit } from "./credit"
 import { BrainDrift } from "./drift"
 import { BrainLimits } from "./document/limits"
 import { BrainSniff } from "./document/sniff"
@@ -218,6 +219,64 @@ export type Recall = Brain.Injection & {
   readonly documents: boolean
 }
 
+/** What one version of a document changed from the one before, by record kind. */
+export type Diff = BrainSchema.VersionDiff
+
+/** A step in a document's life, for its History: read, a new version, a record changed, linked or decided on. */
+export type HistoryEvent = BrainSchema.DocumentEvent
+
+/** How runs used a document's records and passages: runs that cited or opened one, and how many of them passed. */
+export type Usage = BrainSchema.DocumentUsage
+
+/** One request's run, for outcome credit. */
+export type CreditInput = {
+  readonly sessionID: string
+  /** The request message the run answered. */
+  readonly requestID: string
+  /** pass: a check went from failing to passing in it, or the judge passed it. */
+  readonly outcome: "pass" | "none"
+  /** Ids the run was given: recalled, shown by the memory tool, named by a pointer or a guard line. */
+  readonly delivered: readonly string[]
+  /** Delivered ids its answers cited as [id]. */
+  readonly cited: readonly string[]
+  /** Ids the agent opened with get. */
+  readonly fetched: readonly string[]
+  /** Files the run changed. */
+  readonly edited: readonly string[]
+}
+
+export type Credited = {
+  /** Records, passages and entries that gained credit. */
+  readonly helpful: number
+  /** Items given often and never used, counted as ignored once more. */
+  readonly ignored: number
+  /** Outcome links written from cited records to the files the run changed. */
+  readonly applied: number
+  /** The request was credited before. */
+  readonly skipped: boolean
+}
+
+/** A quote from a record or passage as evidence for a memory. */
+export type Quoted =
+  | {
+      readonly type: "found"
+      /** The quote is the passage's own words, whitespace aside. */
+      readonly verified: boolean
+      readonly document: BrainSchema.Document
+    }
+  | { readonly type: "refused"; readonly message: string }
+
+/** What a tidying pass did beside memory's own. */
+export type Consolidated = {
+  /** Records found saying the same as one in another document. */
+  readonly same: number
+  readonly drift: Drifted
+  /** Documents read again by a newer reader. */
+  readonly reread: number
+  /** Resolved review items past 180 days. */
+  readonly pruned: number
+}
+
 export type Detail = {
   readonly document: BrainSchema.Document
   readonly sections: readonly {
@@ -248,6 +307,11 @@ export type Detail = {
     readonly bytes: number
     readonly createdAt: number
   }[]
+  /** What this version changed from the one before. */
+  readonly diff?: Diff
+  /** Newest first, at most 50. */
+  readonly history: readonly HistoryEvent[]
+  readonly usage: Usage
 }
 
 /** What linking documents to code found: links made, names still waiting for their code, and names too common to link. */
@@ -447,6 +511,51 @@ export interface Interface {
   /** What needs the user's look: conflicts, drift and held content, open ones only. */
   readonly review: (place: Brain.Place) => Effect.Effect<readonly BrainSchema.ReviewItem[]>
   readonly resolve: (place: Brain.Place, id: string, resolution: Resolution) => Effect.Effect<Resolved | undefined>
+  /**
+   * Proven knowledge from how one request's run ended, once per request: what it cited or opened gains credit when it
+   * passed, what it was given often and never used fades, and records it cited are linked to the files it changed.
+   */
+  readonly credit: (place: Brain.Place, input: CreditInput) => Effect.Effect<Credited>
+  /**
+   * Requests the user reverted: what their runs cited or opened loses the credit it gained there, and records they
+   * cited count it against them. An entry is never marked harmful by a run.
+   */
+  readonly reverted: (
+    place: Brain.Place,
+    input: { readonly sessionID: string; readonly requests: readonly string[] },
+  ) => Effect.Effect<number>
+  /** A quote from a record or passage as evidence for a memory: whether it is that passage's own words. */
+  readonly quoted: (
+    place: Brain.Place,
+    input: { readonly id: string; readonly quote: string; readonly personal: boolean },
+  ) => Effect.Effect<Quoted>
+  /**
+   * Links an entry learned from a record or passage to it (derived_from), and to the records it bears on (related):
+   * one linked to a file the entry covers, or sharing half its words.
+   */
+  readonly derive: (place: Brain.Place, input: { readonly entry: BrainSchema.Entry; readonly from: string }) => Effect.Effect<number>
+  /**
+   * A subagent's brief: what bears on its task, in at most 200 tokens, for at most 4 subagents of one request. The ids
+   * are recorded against the request that launched them.
+   */
+  readonly brief: (
+    place: Brain.Place,
+    input: {
+      readonly query: string
+      readonly personal: boolean
+      readonly exclude: ReadonlySet<string>
+      readonly seeds?: readonly BrainFuse.Seed[]
+      /** The subagent's session. */
+      readonly sessionID: string
+      /** The request that launched it. */
+      readonly requestID: string
+    },
+  ) => Effect.Effect<Recall>
+  /**
+   * Tidying beside memory's own, with no model call: records that say the same across documents, credit decay, drift
+   * and waiting names, documents a newer reader reads better, and old resolved review items.
+   */
+  readonly consolidate: (place: Brain.Place) => Effect.Effect<Consolidated>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/BrainKnowledge") {}
@@ -486,6 +595,9 @@ export const POINTER = { weight: 0.6, ids: 3, tokens: 60, guard: 50 } as const
 
 /** The reader's version: documents an older reader read are read again when they can be. */
 export const EXTRACTOR = 1
+
+/** A subagent's brief: tokens, and subagents of one request that get one. */
+export const BRIEF = { tokens: 200, subagents: 4 } as const
 
 /** Statuses in which a document's passages and records are searched and recalled. */
 export const USABLE: readonly BrainSchema.DocumentStatus[] = ["searchable", "embedding", "ready", "partial"]
@@ -615,6 +727,8 @@ function make(input: {
     // Repository docs read but not linked yet, with their code spans: a scan reads dozens at once, and they are
     // linked in batches once the queue is empty, so one Ripgrep pass covers many of them.
     unlinked: new Map<string, Map<string, readonly string[]>>(),
+    // Each repository's house vocabulary, by knowledge revision and whether private documents may be read.
+    vocabulary: new Map<string, { readonly revision: number; readonly words: readonly BrainFuse.Word[] }>(),
   }
 
   const remember = (place: Brain.Place) => {
@@ -1275,12 +1389,24 @@ function make(input: {
                 })
                 .run()
           }
-          if (document.previous_id && document.previous_id !== document.id)
+          if (document.previous_id && document.previous_id !== document.id) {
             yield* tx
               .update(BrainDocumentTable)
               .set({ status: "superseded", updated_at: now })
               .where(eq(BrainDocumentTable.id, document.previous_id))
               .run()
+            yield* tx
+              .insert(BrainEventTable)
+              .values({
+                entry_id: document.id,
+                repository_id: document.repository_id,
+                at: now,
+                action: "version",
+                actor: "vector",
+                detail: versionDiff(document, structured.records, existing, records, items),
+              })
+              .run()
+          }
           return ids
         }),
       )
@@ -1569,8 +1695,62 @@ function make(input: {
       .all()
       .pipe(Effect.orDie)
     const paused = yield* pausedOf(place)
+    const lineage = versions.map((version) => version.id)
+    const refs = db.select({ ref: BrainItemTable.ref }).from(BrainItemTable).where(inArray(BrainItemTable.document_id, lineage))
+    const events = yield* db
+      .select()
+      .from(BrainEventTable)
+      .where(
+        and(
+          eq(BrainEventTable.repository_id, place.repository),
+          or(inArray(BrainEventTable.entry_id, lineage), inArray(BrainEventTable.entry_id, refs)),
+        ),
+      )
+      .orderBy(desc(BrainEventTable.at), desc(BrainEventTable.id))
+      .limit(50)
+      .all()
+      .pipe(Effect.orDie)
+    const diff = events.find((event) => event.entry_id === id && event.action === "version")?.detail
+    const usage = yield* db
+      .select({
+        runs: sql<number>`count(DISTINCT ${BrainUseTable.request_id})`,
+        passed: sql<number>`count(DISTINCT CASE WHEN ${BrainUseTable.outcome} = 'pass' THEN ${BrainUseTable.request_id} END)`,
+        reverted: sql<number>`count(DISTINCT CASE WHEN ${BrainUseTable.outcome} = 'revert' THEN ${BrainUseTable.request_id} END)`,
+      })
+      .from(BrainUseTable)
+      .where(and(eq(BrainUseTable.cited, true), inArray(BrainUseTable.entry_id, refs)))
+      .get()
+      .pipe(Effect.orDie)
+    // Each version's arrival, as the steps stored with it say nothing of the first.
+    const arrivals = versions
+      .filter((version) => !events.some((event) => event.entry_id === version.id && event.action === "version"))
+      .map(
+        (version): HistoryEvent => ({
+          at: version.created_at,
+          action: "added",
+          actor: version.origin === "agent" ? "agent" : version.origin === "repository" ? "vector" : "user",
+          detail: { version: version.version },
+        }),
+      )
+    const history = [
+      ...events.map(
+        (event): HistoryEvent => ({
+          at: event.at,
+          action: event.action,
+          actor: event.actor,
+          ...(lineage.includes(event.entry_id) ? {} : { record: event.entry_id }),
+          ...(event.detail ? { detail: event.detail } : {}),
+        }),
+      ),
+      ...arrivals,
+    ]
+      .toSorted((a, b) => b.at - a.at)
+      .slice(0, 50)
     return {
       document: { ...toDocument(row), ...(paused.has(id) ? { paused: true } : {}) },
+      ...(diff && typeof diff.previous === "string" ? { diff: diff as Diff } : {}),
+      history,
+      usage: { runs: usage?.runs ?? 0, passed: usage?.passed ?? 0, reverted: usage?.reverted ?? 0 },
       records: yield* records(place, { document: id, limit: 50, personal: options.personal }),
       counts: {
         records: recordsBy(["active", "proposed", "quarantined", "archived"]),
@@ -1651,6 +1831,44 @@ function make(input: {
     readonly visibility: BrainSchema.Visibility
     readonly document: string
   }
+
+  // The repository's house vocabulary: its glossary and acronym records in use, read again when knowledge changes.
+  const vocabularyOf = Effect.fnUntraced(function* (place: Brain.Place, personal: boolean) {
+    const revision =
+      (yield* db
+        .select({ revision: BrainStateTable.knowledge_revision })
+        .from(BrainStateTable)
+        .where(eq(BrainStateTable.repository_id, place.repository))
+        .get()
+        .pipe(Effect.orDie))?.revision ?? 0
+    const key = `${place.repository}\0${personal}`
+    const cached = state.vocabulary.get(key)
+    if (cached?.revision === revision) return cached.words
+    const rows = yield* db
+      .select({ fields: BrainRecordTable.fields })
+      .from(BrainRecordTable)
+      .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainRecordTable.item))
+      .innerJoin(BrainDocumentTable, eq(BrainDocumentTable.id, BrainRecordTable.document_id))
+      .where(
+        and(
+          eq(BrainItemTable.repository_id, place.repository),
+          eq(BrainRecordTable.kind, "term"),
+          eq(BrainItemTable.status, "active"),
+          inArray(BrainDocumentTable.status, [...USABLE]),
+          personal ? undefined : eq(BrainItemTable.visibility, "repository"),
+        ),
+      )
+      .limit(2_000)
+      .all()
+      .pipe(Effect.orDie)
+    const words = BrainFuse.vocabulary(
+      rows.map((row) => row.fields),
+      BrainLexical.terms,
+    )
+    state.vocabulary.set(key, { revision, words })
+    if (state.vocabulary.size > 64) state.vocabulary.delete(state.vocabulary.keys().next().value!)
+    return words
+  })
 
   // Items that share terms with a query, by BM25 over the stored index: only the postings of the query's own terms are
   // read, and only of active items in usable documents this request may see.
@@ -1762,6 +1980,8 @@ function make(input: {
     readonly confidence: number
     /** A record's passage. */
     readonly passage?: string
+    /** Proven knowledge: runs that cited it and passed, that cited it and were reverted, and times it went unused. */
+    readonly counts: BrainCredit.Counts
   }
 
   // Cards for items, rendered from what is stored now: active items of usable documents this request may see.
@@ -1776,6 +1996,9 @@ function make(input: {
           type: BrainItemTable.type,
           visibility: BrainItemTable.visibility,
           confidence: BrainItemTable.confidence,
+          helpful: BrainItemTable.helpful,
+          harmful: BrainItemTable.harmful,
+          ignored: BrainItemTable.ignored,
           document: BrainDocumentTable.id,
           title: BrainDocumentTable.title,
           ordinal: BrainDocumentTable.ordinal,
@@ -1847,6 +2070,7 @@ function make(input: {
           visibility: row.visibility,
           confidence: row.confidence,
           ...(row.type === "record" && row.passage ? { passage: row.passage } : {}),
+          counts: { helpful: row.helpful, harmful: row.harmful, ignored: row.ignored },
         })
       }
     }
@@ -1901,7 +2125,12 @@ function make(input: {
 
   const record = Effect.fnUntraced(function* (
     found: readonly Card[],
-    input: { sessionID?: string; requestID?: string; tier: "recall" | "get" | "search" | "pointer" | "guard"; tokens: number },
+    input: {
+      sessionID?: string
+      requestID?: string
+      tier: "recall" | "get" | "search" | "pointer" | "guard" | "brief"
+      tokens: number
+    },
   ) {
     if (found.length === 0) return
     const now = Date.now()
@@ -1940,22 +2169,29 @@ function make(input: {
       seeds?: readonly BrainFuse.Seed[]
       sessionID?: string
       requestID?: string
+      /** A budget of its own in place of the tier's, as a subagent's brief has. */
+      budget?: number
+      /** Where the use is counted. */
+      use?: "recall" | "brief"
     },
   ) {
+    const use = request.use ?? "recall"
     const has = (yield* count(place, { personal: request.personal })) > 0
     // Without documents memory recalls exactly as it always has.
     if (!has) {
       const recalled = yield* brain.recall(place, {
         query: request.query,
         files: request.files,
-        budget: Brain.recallBudget(request.tier),
+        budget: request.budget ?? Brain.recallBudget(request.tier),
         personal: request.personal,
         exclude: request.exclude,
         ...(request.sessionID ? { sessionID: request.sessionID } : {}),
+        ...(request.requestID ? { requestID: request.requestID } : {}),
+        tier: use,
       })
       return { ...recalled, cards: [], why: {}, documents: false }
     }
-    const total = budget(request.tier, { documents: true, tight: request.tight })
+    const total = request.budget ?? budget(request.tier, { documents: true, tight: request.tight })
     if (total <= 0) return { ids: [], tokens: 0, cards: [], why: {}, documents: true }
     const memory = (yield* brain.candidates(place, {
       query: request.query,
@@ -1967,9 +2203,13 @@ function make(input: {
       (path.isAbsolute(file) ? path.relative(place.root, file) : file).split(path.sep).join("/"),
     )
     const query = BrainLexical.terms([request.query, ...relative].join(" "))
-    const found = (yield* lexical(place, query, { personal: request.personal, exclude: request.exclude })).filter(
+    // The repository's other names for what the request names are searched too, at half weight.
+    const expanded = BrainFuse.expand(query, yield* vocabularyOf(place, request.personal))
+    const found = (yield* lexical(place, expanded.query, { personal: request.personal, exclude: request.exclude })).filter(
       // Below 0.6 a record is searchable but never recalled on its own.
-      (item) => BrainFuse.eligible(item.matched.length, query.size) && item.confidence >= 0.6,
+      (item) =>
+        BrainFuse.eligible(BrainFuse.hits(item.matched, query, expanded.phrases), query.size) &&
+        item.confidence >= BrainCredit.FLOOR,
     )
     // Code-anchored recall: what is linked to the files and symbols the request touches comes in with no word in
     // common with it. A greeting has no terms, so it touches nothing.
@@ -2016,7 +2256,7 @@ function make(input: {
           best,
           trust: item.origin === "agent" ? BrainFuse.TRUST.learned : BrainFuse.TRUST.user,
           freshness: 1,
-          proven: 1,
+          proven: item.proven,
           confidence: item.confidence,
         }),
         cost: Token.estimate(`${item.line}\n`),
@@ -2030,7 +2270,7 @@ function make(input: {
             best,
             trust: card.visibility === "repository" ? BrainFuse.TRUST.repository : BrainFuse.TRUST.document,
             freshness: freshness.get(ref) ?? 1,
-            proven: 1,
+            proven: BrainCredit.lift(card.counts, card),
             confidence: card.confidence,
           }),
           cost: Token.estimate(`${card.line}\n`),
@@ -2065,12 +2305,17 @@ function make(input: {
     const tokens = Token.estimate(text)
     yield* brain.used(
       ordered.ordered.map((item) => item.id),
-      { ...(request.sessionID ? { sessionID: request.sessionID } : {}), tier: "recall", tokens },
+      {
+        ...(request.sessionID ? { sessionID: request.sessionID } : {}),
+        ...(request.requestID ? { requestID: request.requestID } : {}),
+        tier: use,
+        tokens,
+      },
     )
     yield* record(documentCards, {
       ...(request.sessionID ? { sessionID: request.sessionID } : {}),
       ...(request.requestID ? { requestID: request.requestID } : {}),
-      tier: "recall",
+      tier: use,
       tokens,
     })
     const hits = new Map(found.map((item) => [item.ref, item]))
@@ -2401,10 +2646,8 @@ function make(input: {
     place: Brain.Place,
     request: { query: string; limit?: number; personal: boolean; sessionID?: string },
   ) {
-    const found = (yield* lexical(place, BrainLexical.terms(request.query), { personal: request.personal })).slice(
-      0,
-      request.limit ?? 5,
-    )
+    const expanded = BrainFuse.expand(BrainLexical.terms(request.query), yield* vocabularyOf(place, request.personal))
+    const found = (yield* lexical(place, expanded.query, { personal: request.personal })).slice(0, request.limit ?? 5)
     const shown = yield* cards(
       place,
       found.map((item) => item.ref),
@@ -2471,8 +2714,11 @@ function make(input: {
       .transaction((tx) =>
         Effect.gen(function* () {
           yield* tx.delete(BrainUseTable).where(owned(BrainUseTable.entry_id)).run()
-          // A record's history holds its text before and after a change.
-          yield* tx.delete(BrainEventTable).where(owned(BrainEventTable.entry_id)).run()
+          // A record's history holds its text before and after a change, and a version's what it changed.
+          yield* tx
+            .delete(BrainEventTable)
+            .where(or(owned(BrainEventTable.entry_id), inArray(BrainEventTable.entry_id, documents)))
+            .run()
           const items = db.select({ ref: BrainItemTable.ref }).from(BrainItemTable).where(inArray(BrainItemTable.document_id, documents))
           yield* tx.delete(BrainAnchorTable).where(inArray(BrainAnchorTable.owner, items)).run()
           yield* tx.delete(BrainPendingTable).where(inArray(BrainPendingTable.owner, items)).run()
@@ -2710,7 +2956,7 @@ function make(input: {
         .offset(offset)
         .all()
         .pipe(Effect.orDie)
-      return page(rows.slice(0, limit).map(toRecord), rows.length > limit ? offset + limit : undefined)
+      return page(yield* withRuns(rows.slice(0, limit).map(toRecord)), rows.length > limit ? offset + limit : undefined)
     }
     // Best first, among the records the agent could find by these words.
     const found = (yield* lexical(place, words, { personal: query.personal }))
@@ -2726,8 +2972,36 @@ function make(input: {
     const order = new Map(found.map((ref, index) => [ref, index]))
     const ranked = rows.toSorted((a, b) => order.get(a.record.id)! - order.get(b.record.id)!)
     return page(
-      ranked.slice(offset, offset + limit).map(toRecord),
+      yield* withRuns(ranked.slice(offset, offset + limit).map(toRecord)),
       ranked.length > offset + limit ? offset + limit : undefined,
+    )
+  })
+
+  // Records with the runs that cited or opened them in the last 30 days, and how many of those passed.
+  const withRuns = Effect.fnUntraced(function* (list: readonly BrainSchema.Record[]) {
+    if (list.length === 0) return list
+    const rows = yield* db
+      .select({
+        id: BrainUseTable.entry_id,
+        runs: sql<number>`count(DISTINCT ${BrainUseTable.request_id})`,
+        passed: sql<number>`count(DISTINCT CASE WHEN ${BrainUseTable.outcome} = 'pass' THEN ${BrainUseTable.request_id} END)`,
+      })
+      .from(BrainUseTable)
+      .where(
+        and(
+          eq(BrainUseTable.cited, true),
+          inArray(
+            BrainUseTable.entry_id,
+            list.map((record) => record.id),
+          ),
+        ),
+      )
+      .groupBy(BrainUseTable.entry_id)
+      .all()
+      .pipe(Effect.orDie)
+    const runs = new Map(rows.map((row) => [row.id, row]))
+    return list.map((record) =>
+      runs.has(record.id) ? { ...record, runs: runs.get(record.id)!.runs, passed: runs.get(record.id)!.passed } : record,
     )
   })
 
@@ -2777,7 +3051,7 @@ function make(input: {
       .all()
       .pipe(Effect.orDie)
     return {
-      record: toRecord(row),
+      record: (yield* withRuns([toRecord(row)]))[0]!,
       ...(passage
         ? {
             passage: {
@@ -2827,16 +3101,18 @@ function make(input: {
       return { type: "refused" as const, message: "That text holds what looks like a secret, so Vector does not keep it." }
     if (change.action === "make-memory") {
       const document = yield* findDocument(place, row.record.document_id)
+      // An advisory decision or fact of the user's, never a rule: rules come only from the files people write.
       const written = yield* brain.propose(place, {
         kind: MEMORY_KINDS[row.record.kind],
         text: row.record.card,
         scope: "repository",
         origin: "user",
-        evidence: { type: "user" },
+        evidence: { type: "document", path: id, quote: row.record.quote, verified: true },
         // What a private document says stays where the document may go.
         ...(document?.visibility === "private" ? { private: true } : {}),
       })
       if (written.type === "refused") return { type: "refused" as const, message: written.message }
+      yield* derive(place, { entry: written.entry, from: id })
       yield* event("made-memory", { entry: written.entry.id })
       const after = yield* recordOf(place, id, { personal: true })
       return { type: "changed" as const, record: after!.record, entry: written.entry }
@@ -2896,8 +3172,17 @@ function make(input: {
       yield* event(change.pinned ? "pinned" : "unpinned")
     }
     if (change.action === "not-applicable" || change.action === "forget") {
-      // Put away for good: reading the document again keeps it put away.
-      yield* db.update(BrainItemTable).set({ status: "archived" }).where(eq(BrainItemTable.id, row.item.id)).run().pipe(Effect.orDie)
+      // Put away for good: reading the document again keeps it put away. "Not a requirement" is the user saying Vector
+      // read it wrong, which counts against it should it come back.
+      yield* db
+        .update(BrainItemTable)
+        .set({
+          status: "archived",
+          ...(change.action === "not-applicable" ? { harmful: sql`${BrainItemTable.harmful} + 1` } : {}),
+        })
+        .where(eq(BrainItemTable.id, row.item.id))
+        .run()
+        .pipe(Effect.orDie)
       yield* db
         .insert(BrainTombstoneTable)
         .values({ repository_id: place.repository, norm_hash: itemTombstone(id), until: Number.MAX_SAFE_INTEGER })
@@ -4438,18 +4723,15 @@ function make(input: {
       text: BrainCard.clip(text, 400),
       scope: "repository",
       origin: "user",
-      evidence: { type: "user" },
+      evidence: recordRow
+        ? { type: "document", path: row.a, quote: recordRow.record.quote, verified: true }
+        : { type: "user" },
       ...(anchor ? { paths: [anchor.path] } : {}),
       ...(document?.visibility === "private" ? { private: true } : {}),
     })
     if (written.type === "refused") return { type: "refused" as const, message: written.message }
     const now = Date.now()
-    yield* db
-      .insert(BrainEdgeTable)
-      .values({ repository_id: place.repository, source: written.entry.id, target: row.a, type: "derived_from", weight: 0.9, created_at: now })
-      .onConflictDoNothing()
-      .run()
-      .pipe(Effect.orDie)
+    yield* derive(place, { entry: written.entry, from: row.a })
     if (anchor) {
       const text = yield* Effect.promise(() => fs.readFile(path.join(place.root, anchor.path), "utf8").catch(() => undefined))
       const line = anchor.line && text ? text.split("\n")[anchor.line - 1] : undefined
@@ -4466,6 +4748,502 @@ function make(input: {
         .pipe(Effect.orDie)
     }
     return { type: "written" as const, entry: written.entry }
+  })
+
+  // --- Proven knowledge -------------------------------------------------------------------------------------------
+
+  const credit = Effect.fn("BrainKnowledge.credit")(function* (place: Brain.Place, input: CreditInput) {
+    const done = yield* db
+      .select({ id: BrainEventTable.id })
+      .from(BrainEventTable)
+      .where(
+        and(
+          eq(BrainEventTable.repository_id, place.repository),
+          eq(BrainEventTable.entry_id, input.requestID),
+          eq(BrainEventTable.action, "credited"),
+        ),
+      )
+      .get()
+      .pipe(Effect.orDie)
+    if (done) return { helpful: 0, ignored: 0, applied: 0, skipped: true }
+    const delivered = new Set([...input.delivered, ...input.fetched])
+    // Only a citation of what the run was given counts: an id the model made up proves nothing.
+    const cited = new Set(input.cited.filter((id) => delivered.has(id)))
+    const used = [...new Set([...cited, ...input.fetched])]
+    const pass = input.outcome === "pass"
+    const now = Date.now()
+    const items =
+      delivered.size === 0
+        ? []
+        : yield* db
+            .select({ id: BrainItemTable.id, ref: BrainItemTable.ref, type: BrainItemTable.type })
+            .from(BrainItemTable)
+            .where(and(eq(BrainItemTable.repository_id, place.repository), inArray(BrainItemTable.ref, [...delivered])))
+            .all()
+            .pipe(Effect.orDie)
+    const refs = new Set(items.map((item) => item.ref))
+    // One row per id the run used. Its tier says how: recall for one an answer cited, get for one only opened.
+    if (used.length > 0)
+      yield* db
+        .insert(BrainUseTable)
+        .values(
+          used.map((id) => ({
+            session_id: input.sessionID,
+            entry_id: id,
+            tier: cited.has(id) ? ("recall" as const) : ("get" as const),
+            tokens: 0,
+            at: now,
+            request_id: input.requestID,
+            cited: true,
+            outcome: pass ? ("pass" as const) : null,
+          })),
+        )
+        .run()
+        .pipe(Effect.orDie)
+    const helped = items.filter((item) => used.includes(item.ref))
+    if (pass && helped.length > 0)
+      yield* db
+        .update(BrainItemTable)
+        .set({ helpful: sql`${BrainItemTable.helpful} + 1`, last_helpful_at: now })
+        .where(inArray(BrainItemTable.id, helped.map((item) => item.id)))
+        .run()
+        .pipe(Effect.orDie)
+    if (pass) yield* brain.credit(used.filter((id) => !refs.has(id)), 1)
+    // Given often and never used, here or in any run since: fading. A card that once helped is not ignored.
+    const unused = items.filter((item) => !used.includes(item.ref)).map((item) => item.id)
+    const ignored =
+      unused.length === 0
+        ? []
+        : yield* db
+            .select({ id: BrainItemTable.id })
+            .from(BrainItemTable)
+            .where(
+              and(
+                inArray(BrainItemTable.id, unused),
+                sql`${BrainItemTable.uses} >= ${BrainCredit.IGNORED_AFTER}`,
+                isNull(BrainItemTable.last_helpful_at),
+                sql`NOT EXISTS (SELECT 1 FROM ${BrainUseTable} WHERE ${BrainUseTable.entry_id} = ${BrainItemTable.ref} AND ${BrainUseTable.cited} = 1)`,
+              ),
+            )
+            .all()
+            .pipe(Effect.orDie)
+    if (ignored.length > 0)
+      yield* db
+        .update(BrainItemTable)
+        .set({ ignored: sql`${BrainItemTable.ignored} + 1` })
+        .where(inArray(BrainItemTable.id, ignored.map((item) => item.id)))
+        .run()
+        .pipe(Effect.orDie)
+    const applied = pass
+      ? yield* applyOutcome(
+          place,
+          items.filter((item) => item.type === "record" && cited.has(item.ref)).map((item) => item.ref),
+          input.edited,
+        )
+      : []
+    yield* db
+      .insert(BrainEventTable)
+      .values({
+        entry_id: input.requestID,
+        repository_id: place.repository,
+        at: now,
+        action: "credited",
+        actor: "vector",
+        detail: { session: input.sessionID, outcome: input.outcome, used, anchors: applied },
+      })
+      .run()
+      .pipe(Effect.orDie)
+    if (used.length > 0 || applied.length > 0) yield* revise(place.repository)
+    return { helpful: pass ? used.length : 0, ignored: ignored.length, applied: applied.length, skipped: false }
+  })
+
+  // Records a passing run cited are linked to the files it changed, at half weight: where the requirement was applied.
+  const applyOutcome = Effect.fnUntraced(function* (place: Brain.Place, owners: readonly string[], edited: readonly string[]) {
+    const files = [...new Set(edited.map((file) => relativeTo(place.root, file)))]
+      .filter((file) => file && !file.startsWith("..") && !path.isAbsolute(file))
+      .slice(0, 10)
+    if (owners.length === 0 || files.length === 0) return [] as { owner: string; path: string }[]
+    const now = Date.now()
+    const existing = yield* db
+      .select({ owner: BrainAnchorTable.owner, path: BrainAnchorTable.path })
+      .from(BrainAnchorTable)
+      .where(and(eq(BrainAnchorTable.repository_id, place.repository), inArray(BrainAnchorTable.owner, [...owners])))
+      .all()
+      .pipe(Effect.orDie)
+    const written: { owner: string; path: string }[] = []
+    for (const file of files) {
+      const text = yield* Effect.promise(() =>
+        fs
+          .stat(path.join(place.root, file))
+          .then((stat) => (stat.isFile() && stat.size <= FILE ? fs.readFile(path.join(place.root, file), "utf8") : undefined))
+          .catch(() => undefined),
+      )
+      if (text === undefined) continue
+      for (const owner of owners) {
+        const own = existing.filter((anchor) => anchor.owner === owner)
+        if (own.some((anchor) => anchor.path === file) || own.length >= 20) continue
+        const unlinked = yield* db
+          .select({ hash: BrainTombstoneTable.norm_hash })
+          .from(BrainTombstoneTable)
+          .where(
+            and(
+              eq(BrainTombstoneTable.repository_id, place.repository),
+              eq(BrainTombstoneTable.norm_hash, anchorTombstone(owner, file, undefined)),
+            ),
+          )
+          .get()
+          .pipe(Effect.orDie)
+        if (unlinked) continue
+        yield* db
+          .insert(BrainAnchorTable)
+          .values({
+            repository_id: place.repository,
+            owner,
+            path: file,
+            method: "outcome",
+            weight: BrainCredit.APPLIED,
+            file_hash: BrainDrift.hash(text),
+            status: "fresh",
+            origin: "outcome",
+            checked_at: now,
+            created_at: now,
+          })
+          .run()
+          .pipe(Effect.orDie)
+        existing.push({ owner, path: file })
+        written.push({ owner, path: file })
+      }
+    }
+    return written
+  })
+
+  const reverted = Effect.fn("BrainKnowledge.reverted")(function* (
+    place: Brain.Place,
+    input: { sessionID: string; requests: readonly string[] },
+  ) {
+    if (input.requests.length === 0) return 0
+    const rows = yield* db
+      .select()
+      .from(BrainUseTable)
+      .where(
+        and(
+          eq(BrainUseTable.session_id, input.sessionID),
+          inArray(BrainUseTable.request_id, [...input.requests]),
+          eq(BrainUseTable.cited, true),
+          or(isNull(BrainUseTable.outcome), ne(BrainUseTable.outcome, "revert")),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    const markers = yield* db
+      .select({ detail: BrainEventTable.detail })
+      .from(BrainEventTable)
+      .where(
+        and(
+          eq(BrainEventTable.repository_id, place.repository),
+          eq(BrainEventTable.action, "credited"),
+          inArray(BrainEventTable.entry_id, [...input.requests]),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    // Where those runs applied a record is not where it applies.
+    const applied = markers.flatMap((marker) =>
+      (Array.isArray(marker.detail?.anchors) ? (marker.detail.anchors as unknown[]) : []).flatMap((item) =>
+        item && typeof item === "object" && "owner" in item && "path" in item && typeof item.owner === "string" && typeof item.path === "string"
+          ? [{ owner: item.owner, path: item.path }]
+          : [],
+      ),
+    )
+    for (const anchor of applied)
+      yield* db
+        .delete(BrainAnchorTable)
+        .where(
+          and(
+            eq(BrainAnchorTable.repository_id, place.repository),
+            eq(BrainAnchorTable.owner, anchor.owner),
+            eq(BrainAnchorTable.path, anchor.path),
+            eq(BrainAnchorTable.origin, "outcome"),
+          ),
+        )
+        .run()
+        .pipe(Effect.orDie)
+    if (rows.length === 0) return 0
+    const items = new Map(
+      (yield* db
+        .select({ id: BrainItemTable.id, ref: BrainItemTable.ref, type: BrainItemTable.type, helpful: BrainItemTable.helpful })
+        .from(BrainItemTable)
+        .where(and(eq(BrainItemTable.repository_id, place.repository), inArray(BrainItemTable.ref, rows.map((row) => row.entry_id))))
+        .all()
+        .pipe(Effect.orDie)).map((item) => [item.ref, item]),
+    )
+    const taken = Map.groupBy(
+      rows.filter((row) => row.outcome === "pass"),
+      (row) => row.entry_id,
+    )
+    for (const [id, given] of taken) {
+      const item = items.get(id)
+      if (!item) {
+        yield* brain.credit([id], -given.length)
+        continue
+      }
+      yield* db
+        .update(BrainItemTable)
+        .set({ helpful: Math.max(0, item.helpful - given.length) })
+        .where(eq(BrainItemTable.id, item.id))
+        .run()
+        .pipe(Effect.orDie)
+    }
+    // A record a reverted answer cited counts against it; one only opened, and every memory entry, do not.
+    const harmed = Map.groupBy(
+      rows.filter((row) => row.tier === "recall" && items.get(row.entry_id)?.type === "record"),
+      (row) => row.entry_id,
+    )
+    for (const [id, cited] of harmed)
+      yield* db
+        .update(BrainItemTable)
+        .set({ harmful: sql`${BrainItemTable.harmful} + ${cited.length}` })
+        .where(eq(BrainItemTable.id, items.get(id)!.id))
+        .run()
+        .pipe(Effect.orDie)
+    yield* db
+      .update(BrainUseTable)
+      .set({ outcome: "revert" })
+      .where(inArray(BrainUseTable.id, rows.map((row) => row.id)))
+      .run()
+      .pipe(Effect.orDie)
+    yield* revise(place.repository)
+    return rows.length
+  })
+
+  // --- Learning from documents -------------------------------------------------------------------------------------
+
+  const quoted = Effect.fn("BrainKnowledge.quoted")(function* (
+    place: Brain.Place,
+    input: { id: string; quote: string; personal: boolean },
+  ) {
+    const id = input.id.trim().replace(/^\[|\]$/g, "")
+    const refused = (message: string) => ({ type: "refused" as const, message })
+    const row = yield* db
+      .select({ item: BrainItemTable, document: BrainDocumentTable })
+      .from(BrainItemTable)
+      .innerJoin(BrainDocumentTable, eq(BrainDocumentTable.id, BrainItemTable.document_id))
+      .where(and(eq(BrainItemTable.ref, id), eq(BrainItemTable.repository_id, place.repository)))
+      .get()
+      .pipe(Effect.orDie)
+    if (!row || row.item.status === "archived" || !(USABLE.includes(row.document.status) || row.document.status === "held"))
+      return refused(`No document card or passage ${id} here to quote.`)
+    if (row.item.visibility === "private" && !input.personal)
+      return refused("Documents are withheld from this session, so none of them can be quoted here.")
+    if (row.item.status !== "active" || row.document.status === "held")
+      return refused(`${id} waits for the user's review, so it is no evidence until they approve it.`)
+    const passage = yield* db
+      .select({ body: BrainPassageTable.body })
+      .from(BrainPassageTable)
+      .where(
+        row.item.type === "passage"
+          ? eq(BrainPassageTable.item, row.item.id)
+          : eq(
+              BrainPassageTable.id,
+              db.select({ id: BrainRecordTable.passage_id }).from(BrainRecordTable).where(eq(BrainRecordTable.item, row.item.id)),
+            ),
+      )
+      .get()
+      .pipe(Effect.orDie)
+    const wanted = normalSpace(input.quote)
+    // A word or two could be any passage's; a quote has to say something.
+    if (wanted.length < 12) return refused("Quote at least a few words of the passage, word for word.")
+    if (!passage || !normalSpace(BrainScan.redact(passage.body).text).includes(wanted))
+      return refused(`That quote is not in ${id}'s passage. Quote it word for word, or open it with get(${id}) first.`)
+    return {
+      type: "found" as const,
+      verified: true,
+      document: { ...toDocument(row.document), ...(row.document.hold_reason ? { hold: row.document.hold_reason } : {}) },
+    }
+  })
+
+  const derive = Effect.fn("BrainKnowledge.derive")(function* (
+    place: Brain.Place,
+    input: { entry: BrainSchema.Entry; from: string },
+  ) {
+    const now = Date.now()
+    const words = BrainLexical.terms(input.entry.text)
+    const anchored =
+      input.entry.paths.length === 0
+        ? []
+        : (yield* db
+            .select({ owner: BrainAnchorTable.owner })
+            .from(BrainAnchorTable)
+            .where(
+              and(
+                eq(BrainAnchorTable.repository_id, place.repository),
+                inArray(BrainAnchorTable.path, [...input.entry.paths]),
+                sql`${BrainAnchorTable.owner} LIKE 'r%'`,
+              ),
+            )
+            .limit(50)
+            .all()
+            .pipe(Effect.orDie)).map((row) => row.owner)
+    const found = (yield* lexical(place, words, { personal: true, limit: 20 }))
+      .filter((item) => item.type === "record")
+      .map((item) => item.ref)
+    const candidates = [...new Set([...anchored, ...found])].filter((ref) => ref !== input.from)
+    const cardsOf =
+      candidates.length === 0
+        ? []
+        : yield* db
+            .select({ id: BrainRecordTable.id, card: BrainRecordTable.card })
+            .from(BrainRecordTable)
+            .where(inArray(BrainRecordTable.id, candidates))
+            .all()
+            .pipe(Effect.orDie)
+    const related = cardsOf
+      .filter((row) => anchored.includes(row.id) || BrainLexical.similarity(BrainLexical.terms(row.card), words) >= 0.5)
+      .slice(0, 5)
+    const edges = [
+      { target: input.from, type: "derived_from" as const, weight: 0.9 },
+      ...related.map((row) => ({ target: row.id, type: "related" as const, weight: 0.5 })),
+    ]
+    yield* db
+      .insert(BrainEdgeTable)
+      .values(
+        edges.map((edge) => ({ repository_id: place.repository, source: input.entry.id, created_at: now, ...edge })),
+      )
+      .onConflictDoNothing()
+      .run()
+      .pipe(Effect.orDie)
+    return edges.length
+  })
+
+  // --- Briefs -----------------------------------------------------------------------------------------------------
+
+  const brief = Effect.fn("BrainKnowledge.brief")(function* (
+    place: Brain.Place,
+    input: {
+      query: string
+      personal: boolean
+      exclude: ReadonlySet<string>
+      seeds?: readonly BrainFuse.Seed[]
+      sessionID: string
+      requestID: string
+    },
+  ) {
+    const given = yield* db
+      .selectDistinct({ session: BrainUseTable.session_id })
+      .from(BrainUseTable)
+      .where(
+        and(
+          eq(BrainUseTable.tier, "brief"),
+          eq(BrainUseTable.request_id, input.requestID),
+          ne(BrainUseTable.session_id, input.sessionID),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    if (given.length >= BRIEF.subagents) return { ids: [], tokens: 0, cards: [], why: {}, documents: false }
+    return yield* recall(place, {
+      query: input.query,
+      files: [],
+      ...(input.seeds ? { seeds: input.seeds } : {}),
+      tier: "thorough",
+      tight: false,
+      personal: input.personal,
+      exclude: input.exclude,
+      sessionID: input.sessionID,
+      requestID: input.requestID,
+      budget: BRIEF.tokens,
+      use: "brief",
+    })
+  })
+
+  // --- Tidying ----------------------------------------------------------------------------------------------------
+
+  const consolidate = Effect.fn("BrainKnowledge.consolidate")(function* (place: Brain.Place) {
+    remember(place)
+    const now = Date.now()
+    // 1. A record another document says word for word is the same thing: linked both ways, never merged.
+    const pairs = yield* db.all<{ a: string; b: string }>(sql`
+      SELECT r1.id AS a, r2.id AS b
+      FROM ${BrainRecordTable} r1
+      JOIN ${BrainRecordTable} r2 ON r2.norm_hash = r1.norm_hash AND r1.id < r2.id
+      JOIN ${BrainItemTable} i1 ON i1.id = r1.item
+      JOIN ${BrainItemTable} i2 ON i2.id = r2.item
+      JOIN ${BrainDocumentTable} d1 ON d1.id = r1.document_id
+      JOIN ${BrainDocumentTable} d2 ON d2.id = r2.document_id
+      WHERE i1.repository_id = ${place.repository} AND i2.repository_id = ${place.repository}
+        AND i1.status = 'active' AND i2.status = 'active' AND d1.lineage != d2.lineage
+        AND NOT EXISTS (SELECT 1 FROM ${BrainEdgeTable} e WHERE e.source = r1.id AND e.type = 'same_as' AND e.target = r2.id)
+      LIMIT 500`).pipe(Effect.orDie)
+    if (pairs.length > 0)
+      yield* db
+        .insert(BrainEdgeTable)
+        .values(
+          pairs.flatMap((pair) =>
+            [
+              [pair.a, pair.b],
+              [pair.b, pair.a],
+            ].map(([source, target]) => ({
+              repository_id: place.repository,
+              source: source!,
+              target: target!,
+              type: "same_as" as const,
+              weight: 0.8,
+              created_at: now,
+            })),
+          ),
+        )
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+    // 2. Credit halves every 90 days, by the time since the last pass.
+    const last = (yield* db
+      .select({ at: BrainStateTable.credited_at })
+      .from(BrainStateTable)
+      .where(eq(BrainStateTable.repository_id, place.repository))
+      .get()
+      .pipe(Effect.orDie))?.at
+    const factor = last ? BrainCredit.factor(now - last) : 1
+    if (factor < 1)
+      yield* db
+        .update(BrainItemTable)
+        .set({
+          helpful: sql`${BrainItemTable.helpful} * ${factor}`,
+          harmful: sql`${BrainItemTable.harmful} * ${factor}`,
+          ignored: sql`${BrainItemTable.ignored} * ${factor}`,
+        })
+        .where(
+          and(
+            eq(BrainItemTable.repository_id, place.repository),
+            or(gt(BrainItemTable.helpful, 0), gt(BrainItemTable.harmful, 0), gt(BrainItemTable.ignored, 0)),
+          ),
+        )
+        .run()
+        .pipe(Effect.orDie)
+    yield* db
+      .insert(BrainStateTable)
+      .values({ repository_id: place.repository, credited_at: now })
+      .onConflictDoUpdate({ target: BrainStateTable.repository_id, set: { credited_at: now } })
+      .run()
+      .pipe(Effect.orDie)
+    // 3. Links checked against the code (at most 200 a pass) and waiting names looked for (at most 400).
+    const drifted = yield* drift(place)
+    // 4. What an older reader read is read again where the file is still there to read.
+    const reread = yield* reindex(place)
+    // 5. Resolved review items go after 180 days. A dismissed one stays, so the same difference is not raised again.
+    const pruned = yield* db
+      .delete(BrainReviewTable)
+      .where(
+        and(
+          eq(BrainReviewTable.repository_id, place.repository),
+          eq(BrainReviewTable.status, "resolved"),
+          lt(BrainReviewTable.updated_at, now - 180 * DAY),
+        ),
+      )
+      .returning({ id: BrainReviewTable.id })
+      .all()
+      .pipe(Effect.orDie)
+    if (pairs.length > 0 || factor < 1) yield* revise(place.repository)
+    return { same: pairs.length, drift: drifted, reread, pruned: pruned.length }
   })
 
   return {
@@ -4507,6 +5285,12 @@ function make(input: {
     links,
     review,
     resolve,
+    credit,
+    reverted,
+    quoted,
+    derive,
+    brief,
+    consolidate,
   }
 }
 
@@ -4624,6 +5408,44 @@ async function upTo(file: string, cap: number) {
   return fill().finally(() => handle.close())
 }
 
+/**
+ * What a new version changed from the one it replaces, by record kind: records it adds (or brings back), records whose
+ * words changed, records it no longer has, and the rest; and how many of the user's edits and pins it keeps.
+ */
+function versionDiff(
+  document: DocumentRow,
+  next: readonly BrainWorkerProtocol.Structured["records"][number][],
+  existing: ReadonlyMap<string, ItemRow>,
+  records: ReadonlyMap<string, typeof BrainRecordTable.$inferSelect>,
+  items: readonly { readonly ref: string; readonly status: BrainSchema.ItemStatus }[],
+): BrainSchema.VersionDiff {
+  // The version before: its records still in use or waiting for the user. Ones put away earlier stay out of it.
+  const before = [...existing.values()].filter(
+    (item) => item.type === "record" && item.document_id === document.previous_id && item.status !== "archived",
+  )
+  const was = new Set(before.map((item) => item.ref))
+  const archived = new Set(items.filter((item) => item.status === "archived").map((item) => item.ref))
+  const tally = (list: readonly { readonly kind: BrainSchema.RecordKind }[]) =>
+    list.reduce<Record<string, number>>((out, item) => ({ ...out, [item.kind]: (out[item.kind] ?? 0) + 1 }), {})
+  const kept = next.filter((record) => was.has(record.id))
+  const now = new Set(next.map((record) => record.id))
+  return {
+    version: document.version,
+    previous: document.previous_id ?? "",
+    added: tally(next.filter((record) => !was.has(record.id) && !archived.has(record.id))),
+    changed: tally(kept.filter((record) => records.get(record.id)?.quote_hash !== record.quoteHash)),
+    removed: tally(before.flatMap((item) => (now.has(item.ref) || !records.has(item.ref) ? [] : [records.get(item.ref)!]))),
+    unchanged: tally(kept.filter((record) => records.get(record.id)?.quote_hash === record.quoteHash)),
+    edits: kept.filter((record) => records.get(record.id)?.user_edited).length,
+    pins: kept.filter((record) => records.get(record.id)?.pinned).length,
+  }
+}
+
+/** Text with its whitespace collapsed and its case folded, as a quote is matched against a passage. */
+function normalSpace(text: string) {
+  return text.toLowerCase().replace(/\s+/g, " ").trim()
+}
+
 /** The title a document has from its file name, until its text gives a better one or the user names it. */
 function nameTitle(name: string) {
   return BrainCard.clip(BrainScan.stripHidden(path.basename(name).replace(/\.[A-Za-z0-9]{1,8}$/, "")), 80)
@@ -4635,7 +5457,7 @@ const MEMORY_KINDS: Readonly<Record<BrainSchema.RecordKind, BrainSchema.LearnedK
   constraint: "fact",
   decision: "decision",
   contract: "fact",
-  procedure: "lesson",
+  procedure: "fact",
   term: "fact",
   entity: "fact",
   fact: "fact",

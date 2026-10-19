@@ -21,6 +21,8 @@ export const BrainEntryTable = sqliteTable(
     norm_hash: text().notNull(),
     confidence: real().notNull(),
     uses: integer().notNull().default(0),
+    // Proven knowledge: runs that cited the entry and passed. The counts decay, so SQLite keeps fractions of them as
+    // REAL values in these integer columns. An entry gets `harmful` only from the user.
     helpful: integer().notNull().default(0),
     harmful: integer().notNull().default(0),
     last_used_at: integer(),
@@ -125,6 +127,8 @@ export const BrainStateTable = sqliteTable("brain_state", {
   repository_docs: integer({ mode: "boolean" }).notNull().default(true),
   keep_originals: integer({ mode: "boolean" }).notNull().default(false),
   scanned_at: integer(),
+  // When document credit last decayed, so the next pass decays it by the time since.
+  credited_at: integer(),
 })
 
 // Which entries reached which session, and through which tier. Pruned after 30 days.

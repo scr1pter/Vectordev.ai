@@ -296,6 +296,9 @@ export const Record = Schema.Struct({
   /** The document version that last changed this record's text. */
   changedVersion: Schema.optional(Schema.Finite),
   uses: Schema.Finite,
+  /** Runs in the last 30 days whose answer cited it or that opened it, and how many of them passed their checks. */
+  runs: Schema.optional(Schema.Finite),
+  passed: Schema.optional(Schema.Finite),
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
 }).annotate({ identifier: "MemoryRecord" })
@@ -323,6 +326,39 @@ export const RecordEvent = Schema.Struct({
   detail: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 }).annotate({ identifier: "MemoryRecordEvent" })
 export type RecordEvent = typeof RecordEvent.Type
+
+/** What a version of a document changed from the one before, counted by record kind. */
+export const VersionDiff = Schema.Struct({
+  version: Schema.Finite,
+  /** The version it replaced. */
+  previous: Schema.String,
+  added: Schema.Record(Schema.String, Schema.Finite),
+  changed: Schema.Record(Schema.String, Schema.Finite),
+  removed: Schema.Record(Schema.String, Schema.Finite),
+  unchanged: Schema.Record(Schema.String, Schema.Finite),
+  /** The user's edits and pins the new version kept. */
+  edits: Schema.Finite,
+  pins: Schema.Finite,
+}).annotate({ identifier: "MemoryVersionDiff" })
+export type VersionDiff = typeof VersionDiff.Type
+
+/** A step in a document's life, newest first on its History: a record id when the step is about one. */
+export const DocumentEvent = Schema.Struct({
+  at: Schema.Finite,
+  action: Schema.String,
+  actor: Schema.Literals(["user", "agent", "vector"]),
+  record: Schema.optional(Schema.String),
+  detail: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+}).annotate({ identifier: "MemoryDocumentEvent" })
+export type DocumentEvent = typeof DocumentEvent.Type
+
+/** How runs used a document in the last 30 days: runs that cited or opened one of its cards, passed, or reverted. */
+export const DocumentUsage = Schema.Struct({
+  runs: Schema.Finite,
+  passed: Schema.Finite,
+  reverted: Schema.Finite,
+}).annotate({ identifier: "MemoryDocumentUsage" })
+export type DocumentUsage = typeof DocumentUsage.Type
 
 /** A link from a record, passage or entry to the code it names. */
 export const Anchor = Schema.Struct({

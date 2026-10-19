@@ -15,6 +15,7 @@ import first from "./migration/20261018000000_brain"
 import knowledge from "./migration/20261101000000_knowledge"
 import privateMemory from "./migration/20261102000000_private_memory"
 import tombstoneTerms from "./migration/20261103000000_tombstone_terms"
+import credit from "./migration/20261104000000_credit"
 
 // brain.db, opened once per process and shared by everything that reads or writes the brain: memory entries, and the
 // documents and records Vector reads into it. One connection means one writer per process, which SQLite wants, and
@@ -42,7 +43,7 @@ export const layerFor = (file: string) =>
       yield* db.run("PRAGMA foreign_keys = ON")
       // Forgotten memory is overwritten on disk, not just unlinked from the b-tree.
       yield* db.run("PRAGMA secure_delete = ON")
-      yield* DatabaseMigration.applyOnly(db, [first, knowledge, privateMemory, tombstoneTerms])
+      yield* DatabaseMigration.applyOnly(db, [first, knowledge, privateMemory, tombstoneTerms, credit])
       // SQLite gives the -wal and -shm files the database's own mode, but on the first open they exist before this.
       if (file !== ":memory:" && process.platform !== "win32")
         yield* Effect.forEach(
