@@ -75,6 +75,10 @@ export const Flag = {
   get VECTOR_PLUGIN_META_FILE() {
     return process.env.VECTOR_PLUGIN_META_FILE
   },
+  // Asking a model to read a document for suggestions (quote-locked distillation). Off unless set.
+  get VECTOR_KNOWLEDGE_DISTILL() {
+    return truthy("VECTOR_KNOWLEDGE_DISTILL")
+  },
   get VECTOR_CLIENT() {
     return process.env.VECTOR_CLIENT ?? "cli"
   },

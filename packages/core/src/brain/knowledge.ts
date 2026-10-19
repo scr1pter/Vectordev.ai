@@ -19,7 +19,9 @@ import { UntrustedGit } from "../untrusted-git"
 import { BrainAnchor } from "./anchor"
 import { BrainConflict } from "./conflict"
 import { BrainCredit } from "./credit"
+import { BrainDistill } from "./distill"
 import { BrainDrift } from "./drift"
+import { BrainExtract } from "./extract"
 import { BrainLimits } from "./document/limits"
 import { BrainSniff } from "./document/sniff"
 import { BrainFuse } from "./fuse"
@@ -180,6 +182,33 @@ export type RecordChange = {
 export type RecordChanged =
   | { readonly type: "changed"; readonly record: BrainSchema.Record; readonly entry?: BrainSchema.Entry }
   | { readonly type: "refused"; readonly message: string }
+
+/** A document as a model may read it for suggestions: its sections in use, or why it may not be read so yet. */
+export type Distillable =
+  | { readonly type: "source"; readonly document: BrainSchema.Document; readonly sections: readonly BrainDistill.Section[] }
+  | { readonly type: "refused"; readonly reason: "held" | "not-ready"; readonly message: string }
+
+/** One run of a model over a document, as its History keeps it: what was spent, and what was dropped. */
+export type DistillRun = {
+  /** "provider/model". */
+  readonly model: string
+  /** The hidden helper session the request ran in. */
+  readonly session: string
+  readonly tokens: {
+    readonly input: number
+    readonly output: number
+    readonly reasoning: number
+    readonly cacheRead: number
+    readonly cacheWrite: number
+  }
+  readonly cost: number
+  readonly costKind: "free" | "priced" | "plan" | "unknown"
+  readonly dropped: BrainDistill.Dropped
+  readonly error?: string
+}
+
+/** The suggestions kept for the user, and how many said what a record of the document already says. */
+export type Distilled = { readonly records: readonly BrainSchema.Record[]; readonly duplicate: number }
 
 /** One page of a document as the user reads it: its passages, with the spans its records were read from. */
 export type PageView = {
@@ -407,19 +436,31 @@ export interface Interface {
   readonly reindex: (place: Brain.Place, id?: string) => Effect.Effect<number>
   /**
    * The user's decision on a held document, passage or record, or a new title or visibility for a document. pause
-   * holds a document's reading where it is, and resume lets it go on.
+   * holds a document's reading where it is, and resume lets it go on; keep-suggestions puts every record a model
+   * suggested for the document in use.
    */
   readonly update: (
     place: Brain.Place,
     id: string,
     change: {
-      readonly action?: "approve" | "reject" | "pause" | "resume"
+      readonly action?: "approve" | "reject" | "pause" | "resume" | "keep-suggestions"
       readonly title?: string
       readonly visibility?: BrainSchema.Visibility
     },
   ) => Effect.Effect<"updated" | "not-found">
   /** A page of records, filtered and searched, for the document page and Settings. */
   readonly records: (place: Brain.Place, query: RecordQuery) => Effect.Effect<RecordPage>
+  /** A document's sections and passages in use, with how many records the rules found in each; held text stays out. */
+  readonly distillable: (place: Brain.Place, id: string) => Effect.Effect<Distillable | undefined>
+  /**
+   * Suggestions that held their quotes, kept as proposed records the user reviews, and the run on the document's
+   * History. One that says what a record of the document already says, or that the user rejected before, is skipped.
+   */
+  readonly distilled: (
+    place: Brain.Place,
+    id: string,
+    input: { readonly records: readonly BrainDistill.Locked[]; readonly run: DistillRun },
+  ) => Effect.Effect<Distilled | undefined>
   /** One record with its passage, links, conflicts and history. */
   readonly record: (
     place: Brain.Place,
@@ -1317,7 +1358,14 @@ function make(input: {
     ]
     const counts = new Map(structured.records.map((record) => [record.kind, 0]))
     for (const record of structured.records) counts.set(record.kind, (counts.get(record.kind) ?? 0) + 1)
-    const gone = [...existing.values()].filter((item) => !refs.includes(item.ref))
+    // A record a model suggested stays while the new text still says its quote, at the passage that says it now.
+    const moved = [...records.values()].flatMap((record) => {
+      if (record.origin !== "distilled" || existing.get(record.id)?.status === "archived") return []
+      const passage = structured.passages.find((item) => !item.hold && item.body.includes(record.quote))
+      return passage ? [{ record, passage, start: passage.start + passage.body.indexOf(record.quote) }] : []
+    })
+    const kept = new Set(moved.map((item) => item.record.id))
+    const gone = [...existing.values()].filter((item) => !refs.includes(item.ref) && !kept.has(item.ref))
     // Rows and their ids, written in one transaction; the keyword index follows in batches.
     const ids = yield* db
       .transaction((tx) =>
@@ -1434,6 +1482,25 @@ function make(input: {
                   detail: { before: previous.card, after: record.card, version: document.version },
                 })
                 .run()
+          }
+          for (const item of moved) {
+            yield* tx
+              .update(BrainItemTable)
+              .set({ document_id: document.id, visibility: document.visibility })
+              .where(eq(BrainItemTable.id, item.record.item))
+              .run()
+            yield* tx
+              .update(BrainRecordTable)
+              .set({
+                document_id: document.id,
+                passage_id: item.passage.id,
+                section_id: sectionOf(item.passage.section),
+                page: item.passage.page ?? null,
+                span_start: item.start,
+                span_end: item.start + item.record.quote.length,
+              })
+              .where(eq(BrainRecordTable.id, item.record.id))
+              .run()
           }
           if (document.previous_id && document.previous_id !== document.id) {
             yield* tx
@@ -3050,7 +3117,11 @@ function make(input: {
   const update = Effect.fn("BrainKnowledge.update")(function* (
     place: Brain.Place,
     id: string,
-    change: { action?: "approve" | "reject" | "pause" | "resume"; title?: string; visibility?: BrainSchema.Visibility },
+    change: {
+      action?: "approve" | "reject" | "pause" | "resume" | "keep-suggestions"
+      title?: string
+      visibility?: BrainSchema.Visibility
+    },
   ) {
     const now = Date.now()
     if (id.startsWith("d")) {
@@ -3058,6 +3129,41 @@ function make(input: {
       if (!row) return "not-found" as const
       if (change.action === "reject") {
         yield* forget(place, id, { tombstone: true })
+        return "updated" as const
+      }
+      if (change.action === "keep-suggestions") {
+        const kept = yield* db
+          .update(BrainItemTable)
+          .set({ status: "active" })
+          .where(
+            and(
+              eq(BrainItemTable.status, "proposed"),
+              inArray(
+                BrainItemTable.id,
+                db
+                  .select({ item: BrainRecordTable.item })
+                  .from(BrainRecordTable)
+                  .where(and(eq(BrainRecordTable.document_id, id), eq(BrainRecordTable.origin, "distilled"))),
+              ),
+            ),
+          )
+          .returning({ ref: BrainItemTable.ref })
+          .all()
+          .pipe(Effect.orDie)
+        if (kept.length > 0)
+          yield* db
+            .insert(BrainEventTable)
+            .values({
+              entry_id: id,
+              repository_id: place.repository,
+              at: now,
+              action: "kept-suggestions",
+              actor: "user",
+              detail: { count: kept.length },
+            })
+            .run()
+            .pipe(Effect.orDie)
+        yield* revise(place.repository)
         return "updated" as const
       }
       // A read already under way finishes; what waits to be read waits until the user resumes it.
@@ -3227,6 +3333,202 @@ function make(input: {
       yield* withRuns(ranked.slice(offset, offset + limit).map(toRecord)),
       ranked.length > offset + limit ? offset + limit : undefined,
     )
+  })
+
+  // --- Suggestions from a model -------------------------------------------------------------------------------------
+
+  const distillable = Effect.fn("BrainKnowledge.distillable")(function* (place: Brain.Place, id: string) {
+    const row = yield* findDocument(place, id)
+    if (!row || row.status === "superseded") return undefined
+    if (row.status === "held")
+      return {
+        type: "refused" as const,
+        reason: "held" as const,
+        message: "This document waits for your review. Approve it before a model reads it.",
+      }
+    if (!USABLE.includes(row.status))
+      return { type: "refused" as const, reason: "not-ready" as const, message: "Vector has not finished reading this document yet." }
+    const sections = yield* db
+      .select({ id: BrainSectionTable.id, ordinal: BrainSectionTable.ordinal, path: BrainSectionTable.path })
+      .from(BrainSectionTable)
+      .where(eq(BrainSectionTable.document_id, id))
+      .orderBy(asc(BrainSectionTable.ordinal))
+      .all()
+      .pipe(Effect.orDie)
+    // Only passages in use: a held one never reaches a model, whoever asks.
+    const passages = yield* db
+      .select({
+        id: BrainPassageTable.id,
+        section: BrainPassageTable.section_id,
+        body: BrainPassageTable.body,
+        tokens: BrainPassageTable.tokens,
+        page: BrainPassageTable.page,
+        start: BrainPassageTable.span_start,
+      })
+      .from(BrainPassageTable)
+      .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainPassageTable.item))
+      .where(and(eq(BrainPassageTable.document_id, id), eq(BrainItemTable.status, "active")))
+      .orderBy(asc(BrainPassageTable.ordinal))
+      .all()
+      .pipe(Effect.orDie)
+    const found = yield* db
+      .select({ section: BrainRecordTable.section_id, count: sql<number>`count(*)` })
+      .from(BrainRecordTable)
+      .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainRecordTable.item))
+      .where(and(eq(BrainRecordTable.document_id, id), ne(BrainItemTable.status, "archived")))
+      .groupBy(BrainRecordTable.section_id)
+      .all()
+      .pipe(Effect.orDie)
+    const counts = new Map(found.map((item) => [item.section, item.count]))
+    const bySection = Map.groupBy(passages, (passage) => passage.section)
+    return {
+      type: "source" as const,
+      document: toDocument(row),
+      sections: sections.map(
+        (section): BrainDistill.Section => ({
+          id: section.id,
+          ordinal: section.ordinal,
+          path: section.path,
+          records: counts.get(section.id) ?? 0,
+          passages: (bySection.get(section.id) ?? []).map((passage) => ({
+            id: passage.id,
+            body: passage.body,
+            tokens: passage.tokens,
+            ...(passage.page === null ? {} : { page: passage.page }),
+            start: passage.start,
+          })),
+        }),
+      ),
+    }
+  })
+
+  const distilled = Effect.fn("BrainKnowledge.distilled")(function* (
+    place: Brain.Place,
+    id: string,
+    input: { readonly records: readonly BrainDistill.Locked[]; readonly run: DistillRun },
+  ) {
+    const document = yield* findDocument(place, id)
+    if (!document) return undefined
+    const now = Date.now()
+    const known = yield* db
+      .select({ kind: BrainRecordTable.kind, hash: BrainRecordTable.norm_hash, id: BrainRecordTable.id })
+      .from(BrainRecordTable)
+      .where(eq(BrainRecordTable.document_id, id))
+      .all()
+      .pipe(Effect.orDie)
+    const rejected = new Set(
+      (yield* db
+        .select({ hash: BrainTombstoneTable.norm_hash })
+        .from(BrainTombstoneTable)
+        .where(eq(BrainTombstoneTable.repository_id, place.repository))
+        .all()
+        .pipe(Effect.orDie)).map((row) => row.hash),
+    )
+    const said = new Set(known.map((record) => `${record.kind}\0${record.hash}`))
+    const ids = new Set(known.map((record) => record.id))
+    // A suggestion's id comes from the lineage, its kind and its quote, so asking again proposes nothing twice.
+    const fresh = input.records
+      .map((record) => {
+        const hash = BrainStructure.normHash(record.quote)
+        const ref = `r${BrainStructure.base32(BrainStructure.sha256(`${place.repository}\0${document.lineage}\0distilled\0${record.kind}\0${hash}`)).slice(0, BrainStructure.ID)}`
+        return { record, hash, ref }
+      })
+      .filter((item) => !said.has(`${item.record.kind}\0${item.hash}`) && !ids.has(item.ref) && !rejected.has(itemTombstone(item.ref)))
+    const paths = new Map(
+      (yield* db
+        .select({ id: BrainSectionTable.id, path: BrainSectionTable.path })
+        .from(BrainSectionTable)
+        .where(eq(BrainSectionTable.document_id, id))
+        .all()
+        .pipe(Effect.orDie)).map((section) => [section.id, section.path]),
+    )
+    const terms = (item: (typeof fresh)[number]) =>
+      merge(BrainLexical.terms(item.record.text), BrainLexical.terms(`${document.title} ${paths.get(item.record.section) ?? ""}`), 1)
+    const items = yield* db
+      .transaction((tx) =>
+        Effect.forEach(fresh, (item) =>
+          Effect.gen(function* () {
+            const inserted = yield* tx
+              .insert(BrainItemTable)
+              .values({
+                repository_id: place.repository,
+                type: "record",
+                ref: item.ref,
+                document_id: id,
+                visibility: document.visibility,
+                status: "proposed",
+                hold_reason: null,
+                length: [...terms(item).values()].reduce((sum, count) => sum + count, 0),
+                confidence: BrainDistill.TRUST,
+              })
+              .returning({ id: BrainItemTable.id })
+              .get()
+            const subject = BrainExtract.subjectOf(item.record.text)
+            yield* tx
+              .insert(BrainRecordTable)
+              .values({
+                id: item.ref,
+                item: inserted!.id,
+                document_id: id,
+                passage_id: item.record.passage,
+                section_id: item.record.section,
+                kind: item.record.kind,
+                key: `distilled|${item.record.kind}|${subject}|${item.hash.slice(0, 12)}`,
+                subject,
+                card: item.record.text,
+                quote: item.record.quote,
+                quote_hash: item.hash,
+                fields: item.record.fields,
+                polarity: BrainLexical.polarity(item.record.quote),
+                rule: "distilled",
+                origin: "distilled",
+                page: item.record.page ?? null,
+                span_start: item.record.start,
+                span_end: item.record.end,
+                norm_hash: item.hash,
+                created_at: now,
+                updated_at: now,
+              })
+              .run()
+            return { item, id: inserted!.id }
+          }),
+        ),
+      )
+      .pipe(Effect.orDie)
+    // Found by its words once the user keeps it; a proposed record never reaches the agent meanwhile.
+    for (const row of items) yield* index(place.repository, row.id, terms(row.item))
+    yield* db
+      .insert(BrainEventTable)
+      .values({
+        entry_id: id,
+        repository_id: place.repository,
+        at: now,
+        action: "distilled",
+        actor: "user",
+        detail: {
+          model: input.run.model,
+          session: input.run.session,
+          kept: items.length,
+          duplicate: input.records.length - items.length,
+          dropped: input.run.dropped,
+          tokens: input.run.tokens,
+          cost: input.run.cost,
+          costKind: input.run.costKind,
+          ...(input.run.error ? { error: input.run.error } : {}),
+        },
+      })
+      .run()
+      .pipe(Effect.orDie)
+    yield* totals(place.repository)
+    const rows =
+      items.length === 0
+        ? []
+        : yield* recordQuery()
+            .where(inArray(BrainRecordTable.id, items.map((row) => row.item.ref)))
+            .orderBy(asc(BrainRecordTable.span_start))
+            .all()
+            .pipe(Effect.orDie)
+    return { records: rows.map(toRecord), duplicate: input.records.length - items.length }
   })
 
   // Records with the runs that cited or opened them in the last 30 days, and how many of those passed.
@@ -5897,6 +6199,8 @@ function make(input: {
     sources,
     worker: () => worker.status(),
     records,
+    distillable,
+    distilled,
     record: recordOf,
     changeRecord,
     page: pageOf,
@@ -6048,9 +6352,14 @@ function versionDiff(
   records: ReadonlyMap<string, typeof BrainRecordTable.$inferSelect>,
   items: readonly { readonly ref: string; readonly status: BrainSchema.ItemStatus }[],
 ): BrainSchema.VersionDiff {
-  // The version before: its records still in use or waiting for the user. Ones put away earlier stay out of it.
+  // The version before: its records still in use or waiting for the user. Ones put away earlier stay out of it, and so
+  // do a model's suggestions, which follow their quotes rather than the rules.
   const before = [...existing.values()].filter(
-    (item) => item.type === "record" && item.document_id === document.previous_id && item.status !== "archived",
+    (item) =>
+      item.type === "record" &&
+      item.document_id === document.previous_id &&
+      item.status !== "archived" &&
+      records.get(item.ref)?.origin !== "distilled",
   )
   const was = new Set(before.map((item) => item.ref))
   const archived = new Set(items.filter((item) => item.status === "archived").map((item) => item.ref))
