@@ -6,6 +6,8 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { Effect } from "effect"
 import { afterEach, describe, expect } from "bun:test"
+import { rm, symlink } from "node:fs/promises"
+import { pathToFileURL } from "node:url"
 import path from "path"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
@@ -213,6 +215,45 @@ describe("tool.memory documents", () => {
       )
       expect(held.output).toContain("for the user's review")
       expect(held.metadata.hold).toBe("web")
+    }),
+  )
+
+  it.instance("refuses a link in the repository to a file outside it, unless the user attached that file", () =>
+    Effect.gen(function* () {
+      const dir = (yield* TestInstance).directory
+      const fs = yield* FSUtil.Service
+      const outside = path.join(path.dirname(dir), `${path.basename(dir)}-outside.md`)
+      yield* fs.writeWithDirs(
+        outside,
+        "# Private\n\nThe vault combination is 31-41-59 and the safehouse is on Elm Street.\n",
+      )
+      yield* fs.writeWithDirs(path.join(dir, "docs", "readme.md"), "# Docs")
+      yield* Effect.promise(() => symlink(outside, path.join(dir, "docs", "notes.md")))
+      const run = yield* memory
+      const sessionID = SessionID.make("ses_documents_link")
+      const linked = yield* run(
+        { action: "add", file: "docs/notes.md" },
+        history({ sessionID, said: "Keep the notes." }),
+        sessionID,
+      )
+      expect(linked.output).toBe("Vector keeps files from this repository or attached to this conversation.")
+      const knowledge = yield* BrainKnowledge.Service
+      const place = yield* (yield* Instruction.Service).place()
+      expect(yield* knowledge.documents(place, { personal: true })).toEqual([])
+      // The user attaching that same file is their choice to make.
+      const attached = history({ sessionID, said: "Keep the notes I attached." })
+      attached[0]!.parts.push({
+        id: PartID.make(id("prt")),
+        messageID: attached[0]!.info.id,
+        sessionID,
+        type: "file",
+        mime: "text/markdown",
+        filename: "notes.md",
+        url: pathToFileURL(path.join(dir, "docs", "notes.md")).href,
+      })
+      const kept = yield* run({ action: "add", file: "docs/notes.md" }, attached, sessionID)
+      expect(kept.output).toContain("Kept")
+      yield* Effect.promise(() => rm(outside, { force: true }))
     }),
   )
 

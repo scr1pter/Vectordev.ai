@@ -7,6 +7,7 @@ import path from "node:path"
 import { and, asc, eq, inArray, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
 import { Context, Effect, Fiber, Layer, Queue, Scope } from "effect"
 import { makeGlobalNode } from "../effect/app-node"
+import { FSUtil } from "../fs-util"
 import { Token } from "../util/token"
 import { Brain } from "./brain"
 import { BrainCard } from "./card"
@@ -57,7 +58,12 @@ import type { BrainWorkerProtocol } from "./worker/protocol"
 export type Origin = BrainSchema.DocumentOrigin
 
 export type AddInput = { readonly origin: Origin; readonly sessionID?: string; readonly hold?: BrainSchema.Hold } & (
-  | { readonly type: "path"; readonly path: string }
+  | {
+      readonly type: "path"
+      readonly path: string
+      /** The user attached this file to the conversation, so it may be anywhere on this computer. */
+      readonly attached?: boolean
+    }
   | { readonly type: "bytes"; readonly name: string; readonly bytes: Uint8Array; readonly mime?: string }
   | { readonly type: "text"; readonly name: string; readonly text: string }
 )
@@ -68,6 +74,7 @@ export type Refusal =
   | "guest"
   | "forgotten"
   | "not-found"
+  | "outside"
   | "busy"
 
 export type AddResult =
@@ -510,11 +517,14 @@ function make(input: {
     const real = await fs.realpath(absolute).catch(() => undefined)
     const stat = real ? await fs.lstat(real).catch(() => undefined) : undefined
     if (!real || !stat?.isFile()) return refuse("not-found", `There is no file at ${request.path}.`)
+    if (BrainSniff.SECRET_FILE.test(real.replace(/\\/g, "/"))) return refuse("secret", BrainSniff.MESSAGES.secret)
+    const root = await fs.realpath(place.root).catch(() => place.root)
+    const outside = await outsideOf(request, absolute, FSUtil.contains(root, real))
+    if (outside) return outside
     if (stat.size > BrainLimits.LIMITS.worker.bytes.pdf)
       return refuse("too-large", "This file is over 64 MB, the most Vector reads.")
     const bytes = new Uint8Array(await fs.readFile(real))
-    const inside = path.relative(place.root, real)
-    const relative = inside && !inside.startsWith("..") && !path.isAbsolute(inside) ? inside.split(path.sep).join("/") : undefined
+    const relative = FSUtil.contains(root, real) ? path.relative(root, real).split(path.sep).join("/") : undefined
     return {
       type: "file" as const,
       name: path.basename(real),
@@ -523,6 +533,22 @@ function make(input: {
       lineage: request.origin === "repository" && relative ? relative : lineageOf(path.basename(real)),
       source: request.origin === "repository" && relative ? relative : real,
     }
+  }
+
+  // Why a file may not be read from where it really is, if it may not. A file the user chose (attached to the
+  // conversation or named on the command line) can be anywhere. The agent keeps files of this repository by where they
+  // really are, so a link it found or made cannot reach the rest of the computer; and a repository doc is a file of the
+  // repository's own, never a link, since a repository a user trusts can still ship one to any file.
+  async function outsideOf(request: AddInput & { readonly type: "path" }, absolute: string, inside: boolean) {
+    if (request.attached || request.origin === "chat" || request.origin === "cli") return undefined
+    const link = request.origin === "repository" && (await fs.lstat(absolute).catch(() => undefined))?.isSymbolicLink()
+    if (!link && inside) return undefined
+    return refuse(
+      "outside",
+      link
+        ? `${request.path} is a link, and Vector reads a repository's own docs only.`
+        : `${request.path} is outside this repository. Vector keeps files from this repository or ones the user attached.`,
+    )
   }
 
   // --- Reading in the background ----------------------------------------------------------------------------------
@@ -1933,9 +1959,13 @@ function make(input: {
         !BrainSniff.SECRET_FILE.test(file) &&
         !mirrored.has(file),
     )
+    // A tracked link is not one of the repository's docs, wherever it points.
     const sized = yield* Effect.promise(() =>
       Promise.all(
-        wanted.map(async (file) => ({ file, size: (await fs.stat(path.join(place.root, file)).catch(() => undefined))?.size })),
+        wanted.map(async (file) => {
+          const stat = await fs.lstat(path.join(place.root, file)).catch(() => undefined)
+          return { file, size: stat?.isFile() ? stat.size : undefined }
+        }),
       ),
     )
     const chosen = sized

@@ -98,6 +98,61 @@ describe("BrainKnowledge.scan", () => {
     expect(result.recall.text ?? "").toBe("")
   })
 
+  test("a tracked link is never read as a doc, wherever it points", async () => {
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          const outside = path.join(path.dirname(setup.root), "outside-notes.txt")
+          yield* Effect.promise(async () => {
+            await fs.writeFile(outside, "The private ledger codename is zebrafinch and the vault opens at dawn.\n")
+            await fs.mkdir(path.join(setup.root, "docs"), { recursive: true })
+            await fs.symlink(outside, path.join(setup.root, "docs", "notes.md"))
+            await fs.symlink("../README.md", path.join(setup.root, "docs", "readme.md"))
+          })
+          track(setup.root, ["README.md", "docs/notes.md", "docs/readme.md"])
+          const queued = yield* setup.knowledge.scan(setup.place, { force: true })
+          const documents = yield* setup.knowledge.documents(setup.place, { personal: true })
+          yield* Effect.forEach(documents, (document) =>
+            setup.knowledge.wait(setup.place, document.id, "searchable", 10_000),
+          )
+          return {
+            queued,
+            sources: documents.map((document) => document.sourcePath),
+            found: yield* setup.knowledge.search(setup.place, { query: "ledger codename zebrafinch", personal: true }),
+          }
+        }),
+      { files: { "README.md": FILES["README.md"] } },
+    )
+    expect(result.queued).toBe(1)
+    expect(result.sources).toEqual(["README.md"])
+    expect(JSON.stringify(result.found)).not.toContain("zebrafinch")
+  })
+
+  test("a doc under a directory swapped for a link out of the repository is not read", async () => {
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          const elsewhere = path.join(path.dirname(setup.root), "elsewhere")
+          track(setup.root, ["README.md", "docs/guide.md"])
+          yield* Effect.promise(async () => {
+            await fs.mkdir(elsewhere, { recursive: true })
+            await fs.writeFile(
+              path.join(elsewhere, "guide.md"),
+              "# Guide\n\nThe vault opens at dawn, codename zebrafinch.",
+            )
+            await fs.rm(path.join(setup.root, "docs"), { recursive: true })
+            await fs.symlink(elsewhere, path.join(setup.root, "docs"))
+          })
+          yield* setup.knowledge.scan(setup.place, { force: true })
+          return (yield* setup.knowledge.documents(setup.place, { personal: true })).map(
+            (document) => document.sourcePath,
+          )
+        }),
+      { files: { "README.md": FILES["README.md"], "docs/guide.md": FILES["docs/guide.md"] } },
+    )
+    expect(result).toEqual(["README.md"])
+  })
+
   test("with repository docs off, nothing is read", async () => {
     const result = await withKnowledge(
       (setup) =>

@@ -128,6 +128,42 @@ describe("BrainKnowledge.add", () => {
     expect(result!.sourcePath).toEndWith(path.join("specs", "auth.md"))
   })
 
+  test("the agent keeps a file by where it really is: a link out of the repository is refused unless the user attached it", async () => {
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          const outside = path.join(path.dirname(setup.root), "outside-notes.md")
+          yield* Effect.promise(async () => {
+            await fs.writeFile(
+              outside,
+              "# Notes\n\nThe private ledger codename is zebrafinch and the vault opens at dawn.",
+            )
+            await fs.writeFile(path.join(path.dirname(setup.root), ".env"), "TOKEN=abc")
+            await fs.mkdir(path.join(setup.root, "docs"), { recursive: true })
+            await fs.symlink(outside, path.join(setup.root, "docs", "notes.md"))
+            await fs.symlink("../../.env", path.join(setup.root, "docs", "settings.md"))
+          })
+          const add = (input: Parameters<typeof setup.knowledge.add>[1]) => setup.knowledge.add(setup.place, input)
+          return {
+            link: yield* add({ type: "path", path: "docs/notes.md", origin: "agent" }),
+            absolute: yield* add({ type: "path", path: outside, origin: "agent" }),
+            secret: yield* add({ type: "path", path: "docs/settings.md", origin: "agent", attached: true }),
+            searched: yield* setup.knowledge.search(setup.place, {
+              query: "ledger codename zebrafinch",
+              personal: true,
+            }),
+            attached: yield* add({ type: "path", path: "docs/notes.md", origin: "agent", attached: true }),
+          }
+        }),
+      {},
+    )
+    expect(result.link).toMatchObject({ type: "refused", reason: "outside" })
+    expect(result.absolute).toMatchObject({ type: "refused", reason: "outside" })
+    expect(result.secret).toMatchObject({ type: "refused", reason: "secret" })
+    expect(JSON.stringify(result.searched)).not.toContain("zebrafinch")
+    expect(result.attached).toMatchObject({ type: "queued" })
+  })
+
   test("more than 20 documents a minute are refused", async () => {
     const result = await withKnowledge((setup) =>
       Effect.gen(function* () {

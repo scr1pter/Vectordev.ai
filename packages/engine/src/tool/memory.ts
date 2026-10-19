@@ -305,14 +305,17 @@ function keepable(file: string, root: string, messages: readonly SessionV1.WithP
     return { type: "text" as const, name: `${first.slice(0, 60)}.md`, text: pasted }
   }
   const target = path.resolve(root, file)
-  const attached = messages.some((message) =>
-    message.parts.some(
-      (part) => part.type === "file" && part.url.startsWith("file:") && attachedPath(part.url) === target,
-    ),
+  const attached = messages.some(
+    (message) =>
+      message.info.role === "user" &&
+      message.parts.some(
+        (part) => part.type === "file" && part.url.startsWith("file:") && attachedPath(part.url) === target,
+      ),
   )
-  if (!FSUtil.contains(root, target) && !attached)
+  // Where the file really is: a link inside the working tree can point anywhere on the computer.
+  if (!attached && !FSUtil.contains(FSUtil.realpath(root), FSUtil.realpath(target)))
     return "Vector keeps files from this repository or attached to this conversation."
-  return { type: "path" as const, path: target }
+  return { type: "path" as const, path: target, ...(attached ? { attached: true } : {}) }
 }
 
 function attachedPath(url: string) {
