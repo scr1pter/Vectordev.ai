@@ -6247,7 +6247,7 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["active", "review", "archived", "all"]
+              "enum": ["active", "review", "archived", "all", "learned"]
             },
             "required": false
           },
@@ -6292,7 +6292,7 @@
             }
           }
         },
-        "description": "Rules, saved preferences and what Vector learned for the repository at `directory` and for the user, with counts.",
+        "description": "Rules, saved preferences and what Vector learned for the repository at `directory` and for the user, with counts. `filter=learned` lists what Vector put in use on its own, newest first.",
         "summary": "List memory",
         "x-codeSamples": [
           {
@@ -6543,7 +6543,7 @@
             }
           }
         },
-        "description": "Edit, pin or unpin, approve or reject a held entry, archive or restore.",
+        "description": "Edit, pin or unpin, approve or reject a held entry, archive or restore. `undo` takes back what Vector learned: it is archived as your decision and Vector does not learn it again.",
         "summary": "Change a memory entry",
         "requestBody": {
           "content": {
@@ -6559,7 +6559,7 @@
                   },
                   "action": {
                     "type": "string",
-                    "enum": ["approve", "reject", "archive", "restore"]
+                    "enum": ["approve", "reject", "archive", "restore", "undo"]
                   }
                 },
                 "additionalProperties": false
@@ -6790,7 +6790,7 @@
             }
           }
         },
-        "description": "Merge duplicates, confirm or drop proposals, archive what goes unused and mark stale entries.",
+        "description": "Merge duplicates, drop what waited for review too long, archive what goes unused and mark stale entries.",
         "summary": "Tidy memory now",
         "x-codeSamples": [
           {
@@ -30098,7 +30098,17 @@
           },
           "hold": {
             "type": "string",
-            "enum": ["web", "mcp", "subagent", "untrusted-repository", "guest", "instruction-like", "hidden-unicode"]
+            "enum": [
+              "web",
+              "mcp",
+              "subagent",
+              "untrusted-repository",
+              "guest",
+              "instruction-like",
+              "hidden-unicode",
+              "hidden-text",
+              "suggested"
+            ]
           },
           "source": {
             "type": "object",
@@ -30221,7 +30231,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["message", "file", "check", "user", "file-item"]
+            "enum": ["message", "file", "check", "user", "file-item", "document"]
           },
           "path": {
             "type": "string"

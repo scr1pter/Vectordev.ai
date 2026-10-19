@@ -11,7 +11,8 @@ const root = "/memory"
 export const MemoryListQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
   scope: Schema.optional(BrainSchema.Scope),
-  filter: Schema.optional(Schema.Literals(["active", "review", "archived", "all"])),
+  // learned: what Vector put in use on its own, newest first, for Recently learned.
+  filter: Schema.optional(Schema.Literals(["active", "review", "archived", "all", "learned"])),
   query: Schema.optional(Schema.String),
 })
 
@@ -53,7 +54,7 @@ export const MemoryCreatePayload = Schema.Struct({
 export const MemoryUpdatePayload = Schema.Struct({
   text: Schema.optional(Schema.String),
   pinned: Schema.optional(Schema.Boolean),
-  action: Schema.optional(Schema.Literals(["approve", "reject", "archive", "restore"])),
+  action: Schema.optional(Schema.Literals(["approve", "reject", "archive", "restore", "undo"])),
 })
 
 export const MemoryErasePayload = Schema.Struct({
@@ -102,7 +103,7 @@ export const MemoryApi = HttpApi.make("memory")
             identifier: "memory.list",
             summary: "List memory",
             description:
-              "Rules, saved preferences and what Vector learned for the repository at `directory` and for the user, with counts.",
+              "Rules, saved preferences and what Vector learned for the repository at `directory` and for the user, with counts. `filter=learned` lists what Vector put in use on its own, newest first.",
           }),
         ),
         HttpApiEndpoint.get("get", `${root}/:memoryID`, {
@@ -139,7 +140,8 @@ export const MemoryApi = HttpApi.make("memory")
           OpenApi.annotations({
             identifier: "memory.update",
             summary: "Change a memory entry",
-            description: "Edit, pin or unpin, approve or reject a held entry, archive or restore.",
+            description:
+              "Edit, pin or unpin, approve or reject a held entry, archive or restore. `undo` takes back what Vector learned: it is archived as your decision and Vector does not learn it again.",
           }),
         ),
         HttpApiEndpoint.delete("remove", `${root}/:memoryID`, {
@@ -174,7 +176,7 @@ export const MemoryApi = HttpApi.make("memory")
           OpenApi.annotations({
             identifier: "memory.tidy",
             summary: "Tidy memory now",
-            description: "Merge duplicates, confirm or drop proposals, archive what goes unused and mark stale entries.",
+            description: "Merge duplicates, drop what waited for review too long, archive what goes unused and mark stale entries.",
           }),
         ),
         HttpApiEndpoint.get("settings", `${root}/settings`, {

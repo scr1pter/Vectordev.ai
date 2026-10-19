@@ -3639,14 +3639,14 @@ export class Memory extends HeyApiClient {
   /**
    * List memory
    *
-   * Rules, saved preferences and what Vector learned for the repository at `directory` and for the user, with counts.
+   * Rules, saved preferences and what Vector learned for the repository at `directory` and for the user, with counts. `filter=learned` lists what Vector put in use on its own, newest first.
    */
   public list<ThrowOnError extends boolean = false>(
     parameters?: {
       directory?: string
       workspace?: string
       scope?: "repository" | "personal"
-      filter?: "active" | "review" | "archived" | "all"
+      filter?: "active" | "review" | "archived" | "all" | "learned"
       query?: string
     },
     options?: Options<never, ThrowOnError>,
@@ -3780,7 +3780,7 @@ export class Memory extends HeyApiClient {
   /**
    * Change a memory entry
    *
-   * Edit, pin or unpin, approve or reject a held entry, archive or restore.
+   * Edit, pin or unpin, approve or reject a held entry, archive or restore. `undo` takes back what Vector learned: it is archived as your decision and Vector does not learn it again.
    */
   public update<ThrowOnError extends boolean = false>(
     parameters: {
@@ -3789,7 +3789,7 @@ export class Memory extends HeyApiClient {
       workspace?: string
       text?: string
       pinned?: boolean
-      action?: "approve" | "reject" | "archive" | "restore"
+      action?: "approve" | "reject" | "archive" | "restore" | "undo"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3860,7 +3860,7 @@ export class Memory extends HeyApiClient {
   /**
    * Tidy memory now
    *
-   * Merge duplicates, confirm or drop proposals, archive what goes unused and mark stale entries.
+   * Merge duplicates, drop what waited for review too long, archive what goes unused and mark stale entries.
    */
   public tidy<ThrowOnError extends boolean = false>(
     parameters?: {

@@ -2874,7 +2874,16 @@ export type MemoryEntry = {
   confidence: number
   uses: number
   stale: boolean
-  hold?: "web" | "mcp" | "subagent" | "untrusted-repository" | "guest" | "instruction-like" | "hidden-unicode"
+  hold?:
+    | "web"
+    | "mcp"
+    | "subagent"
+    | "untrusted-repository"
+    | "guest"
+    | "instruction-like"
+    | "hidden-unicode"
+    | "hidden-text"
+    | "suggested"
   source?: {
     file: string
     line?: number
@@ -2908,7 +2917,7 @@ export type MemoryList = {
 }
 
 export type MemoryEvidence = {
-  type: "message" | "file" | "check" | "user" | "file-item"
+  type: "message" | "file" | "check" | "user" | "file-item" | "document"
   path?: string
   quote?: string
   command?: string
@@ -11513,7 +11522,7 @@ export type MemoryListData = {
     directory?: string
     workspace?: string
     scope?: "repository" | "personal"
-    filter?: "active" | "review" | "archived" | "all"
+    filter?: "active" | "review" | "archived" | "all" | "learned"
     query?: string
   }
   url: "/memory"
@@ -11655,7 +11664,7 @@ export type MemoryUpdateData = {
   body?: {
     text?: string
     pinned?: boolean
-    action?: "approve" | "reject" | "archive" | "restore"
+    action?: "approve" | "reject" | "archive" | "restore" | "undo"
   }
   path: {
     /**

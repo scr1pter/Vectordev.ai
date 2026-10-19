@@ -624,6 +624,13 @@ const scenarios: Scenario[] = [
     check(typeof body.stats === "object", "memory list should return counts")
   }),
   http.protected
+    .get("/memory", "memory.list.learned")
+    .at((ctx) => ({ path: "/memory?filter=learned", headers: ctx.headers() }))
+    .json(200, (body) => {
+      object(body)
+      check(Array.isArray(body.entries), "memory list should return what Vector learned on its own")
+    }),
+  http.protected
     .post("/memory", "memory.create")
     .mutating()
     .at((ctx) => ({
@@ -662,6 +669,22 @@ const scenarios: Scenario[] = [
       body: { pinned: true },
     }))
     .json(400, object, "status"),
+  http.protected
+    .patch("/memory/{memoryID}", "memory.update.undo")
+    .mutating()
+    .at((ctx) => ({
+      path: route("/memory/{memoryID}", { memoryID: "m0none" }),
+      headers: ctx.headers(),
+      body: { action: "undo" },
+    }))
+    .json(
+      400,
+      (body) => {
+        object(body)
+        check(body.name === "MemoryError", "undo should reach the memory handler, not fail decoding")
+      },
+      "status",
+    ),
   http.protected
     .delete("/memory/{memoryID}", "memory.remove")
     .mutating()

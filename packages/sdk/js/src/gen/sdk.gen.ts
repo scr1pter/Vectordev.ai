@@ -2139,7 +2139,7 @@ export class Memory extends HeyApiClient {
   /**
    * List memory
    *
-   * Rules, saved preferences and what Vector learned for the repository at `directory` and for the user, with counts.
+   * Rules, saved preferences and what Vector learned for the repository at `directory` and for the user, with counts. `filter=learned` lists what Vector put in use on its own, newest first.
    */
   public list<ThrowOnError extends boolean = false>(options?: Options<MemoryListData, ThrowOnError>) {
     return (options?.client ?? this.client).get<MemoryListResponses, MemoryListErrors, ThrowOnError>({
@@ -2191,7 +2191,7 @@ export class Memory extends HeyApiClient {
   /**
    * Change a memory entry
    *
-   * Edit, pin or unpin, approve or reject a held entry, archive or restore.
+   * Edit, pin or unpin, approve or reject a held entry, archive or restore. `undo` takes back what Vector learned: it is archived as your decision and Vector does not learn it again.
    */
   public update<ThrowOnError extends boolean = false>(options: Options<MemoryUpdateData, ThrowOnError>) {
     return (options.client ?? this.client).patch<MemoryUpdateResponses, MemoryUpdateErrors, ThrowOnError>({
@@ -2223,7 +2223,7 @@ export class Memory extends HeyApiClient {
   /**
    * Tidy memory now
    *
-   * Merge duplicates, confirm or drop proposals, archive what goes unused and mark stale entries.
+   * Merge duplicates, drop what waited for review too long, archive what goes unused and mark stale entries.
    */
   public tidy<ThrowOnError extends boolean = false>(options?: Options<MemoryTidyData, ThrowOnError>) {
     return (options?.client ?? this.client).post<MemoryTidyResponses, MemoryTidyErrors, ThrowOnError>({

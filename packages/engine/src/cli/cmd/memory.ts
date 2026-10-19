@@ -26,6 +26,7 @@ export const MemoryCommand = cmd({
       .command(MemoryUnpinCommand)
       .command(MemoryApproveCommand)
       .command(MemoryRejectCommand)
+      .command(MemoryUndoCommand)
       .command(MemoryForgetCommand)
       .command(MemoryTidyCommand)
       .command(MemoryEraseCommand)
@@ -52,15 +53,23 @@ export const MemoryListCommand = effectCmd({
       .option("review", { describe: "only what waits for your review", type: "boolean", default: false })
       .option("archived", { describe: "only archived and replaced entries", type: "boolean", default: false })
       .option("all", { describe: "every entry, whatever its state", type: "boolean", default: false })
+      .option("learned", { describe: "what Vector put in use on its own, newest first", type: "boolean", default: false })
       .option("json", { describe: "print JSON", type: "boolean", default: false }),
   handler: Effect.fn("Cli.memory.list")(function* (args) {
     const memory = yield* where
     const entries = yield* memory.brain.list(memory.place, {
-      filter: args.all ? "all" : args.review ? "review" : args.archived ? "archived" : "active",
+      filter: args.all ? "all" : args.learned ? "learned" : args.review ? "review" : args.archived ? "archived" : "active",
       ...(args.personal ? { scope: "personal" as const } : {}),
     })
     if (args.json) return void process.stdout.write(`${JSON.stringify(entries, null, 2)}${EOL}`)
-    if (entries.length === 0) return UI.println(args.review ? "Nothing waits for your review." : "Nothing in memory yet.")
+    if (entries.length === 0)
+      return UI.println(
+        args.review
+          ? "Nothing waits for your review."
+          : args.learned
+            ? "Vector has not learned anything on its own yet."
+            : "Nothing in memory yet.",
+      )
     for (const entry of entries) UI.println(line(entry))
     const stats = yield* memory.brain.stats(memory.place)
     UI.empty()
@@ -165,6 +174,12 @@ export const MemoryRejectCommand = simple(
   { action: "reject" },
   "Rejected",
 )
+export const MemoryUndoCommand = simple(
+  "undo",
+  "take back what Vector learned; it will not learn it again",
+  { action: "undo" },
+  "Undid",
+)
 
 const change = Effect.fnUntraced(function* (id: string, update: Brain.Change, done: string) {
   const memory = yield* where
@@ -189,7 +204,7 @@ export const MemoryForgetCommand = effectCmd({
 
 export const MemoryTidyCommand = effectCmd({
   command: "tidy",
-  describe: "merge duplicates, confirm or drop proposals, archive what goes unused",
+  describe: "merge duplicates, drop what waited too long for review, archive what goes unused",
   handler: Effect.fn("Cli.memory.tidy")(function* () {
     const memory = yield* where
     const report = yield* memory.brain.consolidate(memory.place, { force: true })

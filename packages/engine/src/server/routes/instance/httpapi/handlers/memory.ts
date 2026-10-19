@@ -15,7 +15,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
     const instruction = yield* Instruction.Service
 
     const list = Effect.fn("MemoryHttpApi.list")(function* (ctx: {
-      query: { scope?: "repository" | "personal"; filter?: "active" | "review" | "archived" | "all"; query?: string }
+      query: { scope?: "repository" | "personal"; filter?: Brain.Filter; query?: string }
     }) {
       const place = yield* instruction.place()
       const entries = yield* brain.list(place, {
@@ -53,7 +53,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
 
     const update = Effect.fn("MemoryHttpApi.update")(function* (ctx: {
       params: { memoryID: string }
-      payload: { text?: string; pinned?: boolean; action?: "approve" | "reject" | "archive" | "restore" }
+      payload: Brain.Change
     }) {
       const result = yield* brain.update(yield* instruction.place(), ctx.params.memoryID, ctx.payload, "user")
       if (!result) return yield* missing(ctx.params.memoryID)
