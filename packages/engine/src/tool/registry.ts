@@ -24,6 +24,7 @@ import { EscalateTool } from "./escalate"
 import { SkillTool } from "./skill"
 import { MemoryTool } from "./memory"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { Global } from "@vectordevai/core/global"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { Git } from "@/git"
@@ -501,6 +502,7 @@ export const node = LayerNode.make({
     LSP.node,
     Instruction.node,
     Brain.node,
+    BrainKnowledge.node,
     FreeModelGuests.node,
     Git.node,
     FSUtil.node,

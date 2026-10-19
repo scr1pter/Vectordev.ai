@@ -29,6 +29,75 @@ export function withheld(id: string) {
   return `[${id}] (personal memory)`
 }
 
+/**
+ * Metadata key of the text part that marks an attachment for Vector to keep as a document: `{ mode, part }`, where
+ * `part` is the attached file part's id (or `filename` its name). "keep" sends the file too; "instead" keeps it in memory
+ * in place of sending it, so the model gets its outline and cards rather than its pages. A marker has no text of its
+ * own, so it costs nothing on the request.
+ */
+export const REMEMBER = "vector.memory.remember"
+
+/**
+ * Metadata key of what document knowledge a part stands for, by id, so the transcript never keeps a document's words:
+ * the outline of a document kept from an attachment (`document`, `part`), or the cards and passages a memory tool
+ * result showed (`cards`, `get`). Each request renders them again from the brain, so a forgotten document is gone from
+ * old sessions too, and a private one stays out where private documents may not go.
+ */
+export const KNOWLEDGE = "vector.memory.knowledge"
+
+/** How a memory tool result stands in for a document card or passage; each request renders it again. */
+export function document(id: string) {
+  return `[${id}] (document)`
+}
+
+/** The attachments a message marked for Vector to keep, with their file parts. */
+export function remember(message: SessionV1.WithParts) {
+  return message.parts.flatMap((part) => {
+    if (part.type !== "text") return []
+    const value = part.metadata?.[REMEMBER]
+    if (!value || typeof value !== "object" || !("mode" in value)) return []
+    const mode = value.mode === "instead" ? ("instead" as const) : value.mode === "keep" ? ("keep" as const) : undefined
+    const id = "part" in value && typeof value.part === "string" ? value.part : undefined
+    const name = "filename" in value && typeof value.filename === "string" ? value.filename : undefined
+    const file = message.parts.find(
+      (item): item is SessionV1.FilePart =>
+        item.type === "file" && (id ? item.id === id : name !== undefined && item.filename === name),
+    )
+    return mode && file ? [{ mode, file, marker: part.id }] : []
+  })
+}
+
+/** What document knowledge a part stands for, when it does. */
+export function knowledge(part: SessionV1.Part) {
+  const value =
+    part.type === "text" && part.synthetic
+      ? part.metadata?.[KNOWLEDGE]
+      : part.type === "tool" && part.tool === "memory" && part.state.status === "completed"
+        ? part.state.metadata?.[KNOWLEDGE]
+        : undefined
+  if (!value || typeof value !== "object") return undefined
+  const strings = (list: unknown) =>
+    Array.isArray(list) ? list.filter((id: unknown): id is string => typeof id === "string") : []
+  const gets = "get" in value && Array.isArray(value.get) ? value.get : []
+  return {
+    document: "document" in value && typeof value.document === "string" ? value.document : undefined,
+    part: "part" in value && typeof value.part === "string" ? value.part : undefined,
+    cards: "cards" in value ? strings(value.cards) : [],
+    get: (gets as unknown[]).flatMap((item) =>
+      item && typeof item === "object" && "id" in item && typeof item.id === "string"
+        ? [
+            {
+              id: item.id,
+              ...("part" in item && typeof item.part === "string" ? { part: item.part } : {}),
+              budget: "budget" in item && typeof item.budget === "number" ? item.budget : 600,
+            },
+          ]
+        : [],
+    ),
+    tokens: "tokens" in value && typeof value.tokens === "number" ? value.tokens : 0,
+  }
+}
+
 // Tools whose output is written by Vector or by the user's own repository. Anything else (web fetch and search, the
 // browser, Vector Cloud logs, MCP servers, a subagent's report of its own work) brings in content from outside.
 const LOCAL_TOOLS = new Set([
@@ -126,13 +195,24 @@ export function recall(part: SessionV1.Part) {
     ids: strings(value.ids),
     personal: "personal" in value ? strings(value.personal) : [],
     newest: "newest" in value && value.newest === true,
+    /** Which of `ids` are document cards, which the saved text never holds. */
+    cards: "cards" in value ? strings(value.cards) : [],
   }
 }
 
-/** The memory already in this conversation: recalled into a message, or attached to a read result. */
+/**
+ * The memory already in this conversation: recalled into a message, attached to a read result, or a document card or
+ * passage the memory tool showed.
+ */
 export function injected(messages: readonly SessionV1.WithParts[]) {
   const recalled = messages.flatMap((message) => message.parts.flatMap((part) => recall(part)?.ids ?? []))
-  return new Set([...recalled, ...attachedMemory([...messages])])
+  const shown = messages.flatMap((message) =>
+    message.parts.flatMap((part) => {
+      const known = knowledge(part)
+      return known ? [...known.cards, ...known.get.map((item) => item.id)] : []
+    }),
+  )
+  return new Set([...recalled, ...shown, ...attachedMemory([...messages])])
 }
 
 /** Whether the message already carries its recall, so a later step of the same request never adds another. */

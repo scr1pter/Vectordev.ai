@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto"
 import path from "path"
 import { Effect, Schema } from "effect"
+import { fileURLToPath } from "url"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { SessionV1 } from "@vectordevai/core/v1/session"
 import { SessionID } from "@vectordevai/schema/session-id"
 import { Git } from "@/git"
 import { Session } from "@/session/session"
@@ -12,6 +15,10 @@ import { Instruction } from "../session/instruction"
 import { SessionMemory } from "../session/memory"
 import * as Tool from "./tool"
 import DESCRIPTION from "./memory.txt"
+import DOCUMENTS from "./memory-documents.txt"
+
+/** The line the definition gains while the repository has documents a request may draw on. */
+export { DOCUMENTS }
 
 // Every Work request carries this definition, so it stays small: a search reads `text`, and an entry about a file takes
 // the cited file as its path scope instead of a parameter of its own.
@@ -38,16 +45,24 @@ type Metadata = {
   learned?: { scope: BrainSchema.Scope; text?: string }
   /** Personal entries this result stands in for; the transcript keeps their ids, never their words. */
   [SessionMemory.PERSONAL]?: string[]
+  /** Document cards and passages this result stands for, rendered again for every request. */
+  [SessionMemory.KNOWLEDGE]?: {
+    cards?: string[]
+    get?: { id: string; part?: string; budget: number }[]
+    tokens?: number
+    document?: string
+  }
 }
 
 export const MemoryTool = Tool.define<
   typeof Parameters,
   Metadata,
-  Brain.Service | Instruction.Service | FreeModelGuests.Service | Git.Service | Session.Service
+  Brain.Service | BrainKnowledge.Service | Instruction.Service | FreeModelGuests.Service | Git.Service | Session.Service
 >(
   "memory",
   Effect.gen(function* () {
     const brain = yield* Brain.Service
+    const knowledge = yield* BrainKnowledge.Service
     const instruction = yield* Instruction.Service
     const guests = yield* FreeModelGuests.Service
     const git = yield* Git.Service
@@ -70,13 +85,59 @@ export const MemoryTool = Tool.define<
               personal,
               sessionID: ctx.sessionID,
             })
-            // Personal entries are saved as ids; each request fills their lines in while personal memory is allowed.
+            const cards = params.text
+              ? yield* knowledge.search(place, { query: params.text, personal, sessionID: ctx.sessionID })
+              : []
+            // Personal entries and document cards are saved as ids; each request fills their lines in where allowed.
             return {
               title: params.text ? `Memory: ${params.text}` : "Memory",
-              output: found.length
-                ? found.map((entry) => (entry.scope === "personal" ? SessionMemory.withheld(entry.id) : describe(entry))).join("\n")
-                : "Nothing in memory matches. Search with other words, or carry on without it.",
-              metadata: { action: "search", result: `${found.length}`, ...withheld(found) },
+              output:
+                found.length || cards.length
+                  ? [
+                      ...found.map((entry) => (entry.scope === "personal" ? SessionMemory.withheld(entry.id) : describe(entry))),
+                      ...cards.map((card) => SessionMemory.document(card.id)),
+                    ].join("\n")
+                  : "Nothing in memory matches. Search with other words, or carry on without it.",
+              metadata: {
+                action: "search",
+                result: `${found.length + cards.length}`,
+                ...withheld(found),
+                ...(cards.length ? { [SessionMemory.KNOWLEDGE]: { cards: cards.map((card) => card.id) } } : {}),
+              },
+            }
+          }
+
+          // A record, passage or document: its text is rendered for each request, never kept in the transcript.
+          if (params.action === "get" && params.id && DOCUMENT_ID.test(params.id)) {
+            const tier = (ctx.extra?.taskSize as { tier?: BrainKnowledge.Tier } | undefined)?.tier ?? "standard"
+            const since = SessionMemory.since(ctx.messages)
+            const read = ctx.messages
+              .filter((message) => message.info.time.created >= since)
+              .flatMap((message) => message.parts)
+              .reduce((sum, part) => sum + (SessionMemory.knowledge(part)?.tokens ?? 0), 0)
+            const budget = BrainKnowledge.READS[tier] - read
+            if (budget <= 0) return refused("get", "The document budget for this request is used.")
+            const got = yield* knowledge.get(place, {
+              id: params.id,
+              ...(params.text ? { part: params.text } : {}),
+              budget,
+              personal,
+              sessionID: ctx.sessionID,
+              requestID: ctx.messageID,
+            })
+            if (!got) return refused("get", `No document card, passage or page ${params.id}${params.text ? ` ${params.text}` : ""} here.`)
+            if (got.type !== "text") return { title: `Memory ${got.id}`, output: got.text, metadata: { action: "get", id: got.id } }
+            return {
+              title: `Memory ${got.id}`,
+              output: SessionMemory.document(got.id),
+              metadata: {
+                action: "get",
+                id: got.id,
+                [SessionMemory.KNOWLEDGE]: {
+                  get: [{ id: params.id, ...(params.text ? { part: params.text } : {}), budget }],
+                  tokens: got.tokens,
+                },
+              },
             }
           }
 
@@ -142,6 +203,44 @@ export const MemoryTool = Tool.define<
             }
           }
 
+          // A file kept as a document: one in this working tree or attached to this conversation, or "message", the long
+          // text the user pasted in this request. It is in use at once unless the session took in outside content, and
+          // the user can forget it in Settings > Memory.
+          if (params.action === "add" && !params.text && params.file) {
+            if (guest) return refused("add", "A session an invited guest is in cannot keep documents.")
+            const since = SessionMemory.since(ctx.messages)
+            const kept = ctx.messages
+              .filter((message) => message.info.time.created >= since)
+              .flatMap((message) => message.parts)
+              .filter((part) => SessionMemory.knowledge(part)?.document !== undefined).length
+            if ((yield* brain.written(ctx.sessionID, since)) + kept >= Brain.LIMIT.perMessage)
+              return refused("add", "That is enough memory writes for one request; keep the rest in a later one.")
+            const file = keepable(params.file, place.root, ctx.messages)
+            if (typeof file === "string") return refused("add", file)
+            const result = yield* knowledge.add(place, {
+              ...file,
+              origin: "agent",
+              sessionID: ctx.sessionID,
+              ...(hold ? { hold } : {}),
+            })
+            if (result.type === "refused") return refused("add", result.message)
+            const document =
+              result.type === "unchanged"
+                ? result.document
+                : ((yield* knowledge.wait(place, result.document.id, "searchable", 10_000)) ?? result.document)
+            return {
+              title: `Kept ${document.title}`,
+              output: keptLine(document, result.type),
+              metadata: {
+                action: "add",
+                result: result.type,
+                id: document.id,
+                ...(document.hold ? { hold: document.hold } : {}),
+                [SessionMemory.KNOWLEDGE]: { document: document.id },
+              },
+            }
+          }
+
           if (!params.text) return refused(params.action, "Give the text to remember.")
           if (params.action === "update" && !params.id) return refused("update", "Say which memory to update, by id.")
           if (params.file && SECRET_FILE.test(params.file.replace(/\\/g, "/")))
@@ -191,6 +290,49 @@ export const MemoryTool = Tool.define<
     }
   }),
 )
+
+const DOCUMENT_ID = /^[rpd][0-9a-z]{4,}$/
+
+// What the agent may keep as a document: the user's pasted text, or a file in this working tree or attached here.
+function keepable(file: string, root: string, messages: readonly SessionV1.WithParts[]) {
+  if (file === "message") {
+    const pasted = SessionMemory.request(messages)
+      .flatMap((message) => message.parts)
+      .flatMap((part) => (part.type === "text" && !part.synthetic && !part.ignored && !SessionMemory.outside(part) ? [part.text] : []))
+      .toSorted((a, b) => b.length - a.length)[0]
+    if (!pasted || pasted.length < 400) return "There is no long text in the user's message to keep."
+    const first = pasted.split("\n").find((line) => line.trim())?.replace(/^#+\s*/, "").trim() ?? "Pasted text"
+    return { type: "text" as const, name: `${first.slice(0, 60)}.md`, text: pasted }
+  }
+  const target = path.resolve(root, file)
+  const attached = messages.some((message) =>
+    message.parts.some(
+      (part) => part.type === "file" && part.url.startsWith("file:") && attachedPath(part.url) === target,
+    ),
+  )
+  if (!FSUtil.contains(root, target) && !attached)
+    return "Vector keeps files from this repository or attached to this conversation."
+  return { type: "path" as const, path: target }
+}
+
+function attachedPath(url: string) {
+  try {
+    return path.resolve(fileURLToPath(url))
+  } catch {
+    return undefined
+  }
+}
+
+function keptLine(document: BrainSchema.Document, result: "queued" | "version" | "unchanged") {
+  const name = `"${document.title}" as document [${document.id}]`
+  if (result === "unchanged") return `Already kept as [${document.id}] ("${document.title}").`
+  if (document.status === "held")
+    return `Kept ${name} for the user's review (${holdReason(document.hold)}). It is not used until they approve it.`
+  if (document.status === "failed") return `Vector could not read ${document.name}: ${document.error ?? "it could not be read"}.`
+  if (document.status === "queued" || document.status === "reading")
+    return `Reading ${name}; its cards come in once it is read.`
+  return `Kept ${name}${result === "version" ? `, replacing version ${document.version - 1}` : ""}: ${document.stats.records} records from ${document.stats.sections} sections, searchable now. Its cards come in when they bear on a request, and get(${document.id}) shows its outline. The user can forget it in Settings > Memory.`
+}
 
 // Files whose lines are secrets, never evidence.
 const SECRET_FILE =
