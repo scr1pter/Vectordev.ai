@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import path from "node:path"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { TaskSize } from "@vectordevai/core/task-size"
 import { brainBudgetRows, brainCommandRows, documentCommandRows, knowledgeEval } from "../src/data/docs-content"
 import { docsMoved, docsNav } from "../src/data/docs-nav"
 
@@ -76,6 +77,30 @@ test("the budgets the brain page gives are the ones recall uses", () => {
   expect(brain).toContain(`up to about ${Brain.BUDGET.attach} tokens of memory about that file`)
   expect(brain).toContain(`up to ${BrainKnowledge.BRIEF.tokens} tokens of the cards and memory`)
   expect(brain).toContain(`for up to ${words[BrainKnowledge.BRIEF.subagents]} subagents a request`)
+})
+
+// "hi" and "ok" cost nothing only when nothing waits on them; the page says when they are sized as work instead.
+test("the page sizes a greeting or a bare acknowledgement as TaskSize does", () => {
+  expect(brain).toContain(
+    'A greeting or a bare acknowledgement, such as "hi" or "ok", is sized Chat unless work is waiting on you: one that answers a question the agent asked, follows a run that did not finish, or approves a plan from Plan mode is sized as the work it carries on.',
+  )
+  for (const text of ["hi", "ok"]) expect(TaskSize.classify({ text }).tier).toBe("chat")
+  for (const text of ["hi", "ok"]) expect(TaskSize.classify({ text, open: true, previous: "standard" }).tier).not.toBe("chat")
+  expect(TaskSize.classify({ text: "ok", plan: true, previous: "standard" }).tier).not.toBe("chat")
+  expect(TaskSize.classify({ text: "hi", plan: true, previous: "standard" }).tier).toBe("chat")
+})
+
+// Only `vector review` reads the brain's requirements; the desktop's Vectorscope does not yet, and the page says so.
+test("the page gives linked requirements to the terminal's Vectorscope review only, with the next CLI release", async () => {
+  const review = await Bun.file(path.join(repo, "packages/engine/src/cli/cmd/review.ts")).text()
+  const desktop = await Bun.file(path.join(repo, "packages/app/src/features/pull-requests/ai-review.ts")).text()
+  expect(review).toContain("ReviewContext.requirements(")
+  expect(desktop).not.toMatch(/ReviewContext|requirements/)
+  expect(brain).toContain(
+    'With the next CLI release, a <a href="/docs/vectorscope">Vectorscope</a> review you run in the terminal with <code>vector review</code> gets the requirements',
+  )
+  expect(brain).toContain("Vectorscope reviews in the desktop app do not get them yet.")
+  expect(brain).not.toMatch(/(?<!run in the terminal with <code>vector review<\/code> )gets the requirements/)
 })
 
 test("every terminal command the pages list is one the CLI has", async () => {

@@ -43,8 +43,10 @@ export const prerender = true
             {brainBudgetRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
           </dl>
           <p>
-            A greeting or a bare acknowledgement, such as "hi" or "ok", is sized Chat: it carries no memory, no memory
-            instructions and no memory tool, so it costs no extra tokens. Reading a file brings in up to about 200
+            A greeting or a bare acknowledgement, such as "hi" or "ok", is sized Chat unless work is waiting on you: one
+            that answers a question the agent asked, follows a run that did not finish, or approves a plan from Plan
+            mode is sized as the work it carries on. A Chat request carries no memory, no memory instructions and no
+            memory tool, so it costs no extra tokens. Reading a file brings in up to about 200
             tokens of memory about that file, and the agent can search memory and open an entry with its memory tool
             when it decides to look. When a run nears its spend limit, a repository with documents recalls half as much.
           </p>
@@ -75,11 +77,12 @@ export const prerender = true
           <h2 id="subagents-and-review">Subagents and Vectorscope</h2>
           <p>
             A subagent started by a Thorough request begins with up to 200 tokens of the cards and memory that bear on
-            its task, for up to four subagents a request, and none for smaller requests. A
-            <a href="/docs/vectorscope">Vectorscope</a> review gets the requirements, constraints, contracts and
-            decisions linked to the changed files, with any drift, in at most 300 tokens: private documents only when
-            the review model may not train on prompts, never in a review posted to a pull request, and never content
-            that waits for your review.
+            its task, for up to four subagents a request, and none for smaller requests. With the next CLI release, a
+            <a href="/docs/vectorscope">Vectorscope</a> review you run in the terminal with <code>vector review</code>
+            gets the requirements, constraints, contracts and decisions linked to the changed files, with any drift, in
+            at most 300 tokens: private documents only when the review model may not train on prompts, never in a
+            review posted to a pull request, and never content that waits for your review. Vectorscope reviews in the
+            desktop app do not get them yet.
           </p>
 
           <h2 id="settings">Settings → Memory</h2>
