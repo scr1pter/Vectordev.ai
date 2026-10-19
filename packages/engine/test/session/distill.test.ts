@@ -342,7 +342,7 @@ it.instance(
       expect(sent[0]!.max_tokens ?? sent[0]!.max_completion_tokens).toBe(4_000)
       // The quick lane: the helper's own instructions, no repository context.
       expect(body).not.toContain("<env>")
-      expect(body).toContain("copied exactly")
+      expect(body).toContain("copied word for word")
 
       expect(result.records.map((record) => record.quote)).toEqual([VERBATIM.quote])
       expect(result.records[0]).toMatchObject({ origin: "distilled", status: "proposed", kind: "requirement" })

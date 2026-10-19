@@ -5,7 +5,7 @@ Find what the sections state that matters when writing or changing code: require
 </task>
 
 <rules>
-- Every record has a quote: one sentence, list item or table row copied exactly from the sections, at most 300 characters. Copy it character for character. Do not fix spelling, shorten, join two sentences or translate it.
+- Every record has a quote: one sentence, list item or table row copied word for word from the sections, at most 300 characters. Copy it character for character. Do not fix spelling, shorten, join two sentences or translate it.
 - A record whose quote is not word for word in the sections is discarded, so never write a quote from memory or paraphrase one.
 - text is the record in at most 180 characters, using only the quote's own words. A shortened quote is a good text. Never add a word, number or name the quote does not have, and never drop a "not", "never" or "only" it applies.
 - kind is one of requirement, constraint, decision, contract, procedure, term, entity, fact or question.

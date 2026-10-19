@@ -216,7 +216,7 @@ export const SCHEMA = {
           },
           quote: {
             type: "string",
-            description: `The sentence or list item it comes from, copied exactly from the document, at most ${LIMIT.quote} characters.`,
+            description: `The sentence or list item it comes from, copied word for word from the document, at most ${LIMIT.quote} characters.`,
           },
           fields: {
             type: "object",
