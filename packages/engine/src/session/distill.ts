@@ -99,7 +99,7 @@ const layer = Layer.effect(
     const plan = Effect.fnUntraced(function* (place: Brain.Place, input: Input) {
       const enabled = Flag.VECTOR_KNOWLEDGE_DISTILL
       const guest = yield* guests.marked(input.sessionID)
-      const off = BrainDistill.refusal({ enabled, guest, model: { providerID: "" }, urls: [] })
+      const off = BrainDistill.refusal({ enabled, guest })
       if (off) return refuse(off.reason, off.message)
       const chosen = input.model?.trim()
         ? Provider.parseModel(input.model.trim())

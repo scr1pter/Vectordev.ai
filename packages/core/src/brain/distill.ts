@@ -98,8 +98,9 @@ export type Refusal = "off" | "guest" | "may-train" | "zen"
 export function refusal(input: {
   readonly enabled: boolean
   readonly guest: boolean
-  readonly model: Pick<FreeModelChoice, "freeModel"> & { readonly providerID: string }
-  readonly urls: readonly string[]
+  /** The model, with its provider's base URLs; before one is chosen only the flag and the session are checked. */
+  readonly model?: Pick<FreeModelChoice, "freeModel"> & { readonly providerID: string }
+  readonly urls?: readonly string[]
 }): { readonly reason: Refusal; readonly message: string } | undefined {
   if (!input.enabled)
     return {
@@ -108,12 +109,13 @@ export function refusal(input: {
     }
   if (input.guest)
     return { reason: "guest", message: "Only the owner can ask a model to read a document, never a session a guest is in." }
+  if (!input.model) return undefined
   if (freeModelMayTrain(input.model))
     return {
       reason: "may-train",
       message: "Documents are withheld from models that may train on prompts. Choose a private model to find more in it.",
     }
-  if (zen(input.model.providerID, input.urls))
+  if (zen(input.model.providerID, input.urls ?? []))
     return { reason: "zen", message: "The Zen gateway is off in Vector. Choose another model to find more in this document." }
   return undefined
 }
