@@ -2,11 +2,13 @@
 // stays honest. Every word here is shown to the user: it says "repository", never the other word.
 
 import type {
+  MemoryAnchor,
   MemoryDocument,
   MemoryDocumentDetail,
   MemoryDocumentList,
   MemoryDocumentPage,
   MemoryRecord,
+  MemoryReviewItem,
 } from "@vectordevai/sdk/v2/client"
 
 export type DocumentStatus = MemoryDocument["status"]
@@ -284,16 +286,16 @@ export function heldLabel(held: readonly { hold?: DocumentHold }[], paged: boole
   ].join(" ")
 }
 
-/** The tab's one-line summary. */
-export function documentsSummary(list: Pick<MemoryDocumentList, "documents" | "indexing">) {
+/** The tab's one-line summary. `waiting` is the review list's count, when the engine gave one. */
+export function documentsSummary(list: Pick<MemoryDocumentList, "documents" | "indexing">, waiting?: number) {
   const shown = list.documents.filter((document) => document.status !== "superseded")
   if (shown.length === 0) return "No documents yet"
   const busy = shown.filter((document) => statusTone(document) === "busy").length
-  const waiting = needsLookCount(shown)
+  const looks = waiting ?? needsLookCount(shown)
   return [
     count(shown.length, "document"),
     ...(busy > 0 ? [`${busy} being read`] : []),
-    ...(waiting > 0 ? [`${waiting} to look at`] : []),
+    ...(looks > 0 ? [`${looks} to look at`] : []),
     "only the parts a request needs are sent",
   ].join(" · ")
 }
@@ -602,4 +604,160 @@ function extension(name: string) {
 
 function clamp(value: number, length: number) {
   return Math.min(Math.max(0, value), length)
+}
+
+// --- Code links and what needs a look ------------------------------------------------------------------------------
+
+export type AnchorMethod = MemoryAnchor["method"]
+
+/** How a record is linked to a file, as "the code … it". */
+export function anchorMethodLabel(method: AnchorMethod) {
+  if (method === "definition") return "defines it"
+  if (method === "use") return "uses it"
+  if (method === "route") return "serves the route"
+  if (method === "env") return "reads the variable"
+  if (method === "constant") return "sets the value"
+  if (method === "path") return "is the file it names"
+  if (method === "user") return "linked by you"
+  return "changed in a run that used it"
+}
+
+export function anchorStatusLabel(status: MemoryAnchor["status"]) {
+  if (status === "fresh") return "unchanged since Vector linked it"
+  if (status === "drifted") return "changed since Vector linked it"
+  return "gone from the code"
+}
+
+/** One link, in one line: where, what it names, how and whether the code still says it. */
+export function anchorLine(anchor: MemoryAnchor) {
+  const where = `${anchor.path}${anchor.line ? `:${anchor.line}` : ""}`
+  const value = anchor.value ? ` (${anchor.value.raw})` : ""
+  return [`${where}${anchor.symbol ? ` ${anchor.symbol}` : ""}`, `${anchorMethodLabel(anchor.method)}${value}`, anchorStatusLabel(anchor.status)].join(
+    " · ",
+  )
+}
+
+/** The words of a record that named the code, marked within its text. */
+export function evidence(text: string, symbol: string | undefined) {
+  const name = symbol?.replace(/^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) /, "")
+  const at = name ? text.indexOf(name) : -1
+  if (!name || at < 0) return [{ text, mark: false }]
+  return [
+    ...(at > 0 ? [{ text: text.slice(0, at), mark: false }] : []),
+    { text: name, mark: true },
+    ...(at + name.length < text.length ? [{ text: text.slice(at + name.length), mark: false }] : []),
+  ]
+}
+
+/** A document's links by record, in the order its records are listed; a link to a passage stands on its own. */
+export function codeLinks(anchors: readonly MemoryAnchor[], records: readonly Pick<MemoryRecord, "id" | "kind" | "card">[]) {
+  const known = new Map(records.map((record) => [record.id, record]))
+  const owners = [...new Set(anchors.map((anchor) => anchor.owner))]
+  return owners
+    .map((owner) => ({
+      owner,
+      record: known.get(owner),
+      anchors: anchors
+        .filter((anchor) => anchor.owner === owner)
+        .toSorted((a, b) => b.weight - a.weight || a.path.localeCompare(b.path)),
+    }))
+    .toSorted((a, b) => Number(!a.record) - Number(!b.record))
+}
+
+export type ReviewAction = {
+  readonly action: "dismiss" | "keep-document" | "keep-code" | "keep" | "approve" | "reject"
+  readonly winner?: string
+  readonly label: string
+  /** What the page says once the engine took the decision. */
+  readonly done: string
+}
+
+export type ReviewRow = {
+  readonly id: string
+  readonly kind: MemoryReviewItem["kind"]
+  readonly title: string
+  readonly text: string
+  /** The document to open for it, when there is one. */
+  readonly document?: string
+  readonly actions: readonly ReviewAction[]
+}
+
+const CONFLICTS: Readonly<Record<string, string>> = {
+  value: "They give different values",
+  modality: "One requires what the other forbids",
+  polarity: "One says the opposite of the other",
+  endpoint: "They give the same endpoint another method or status",
+}
+
+const DISMISS: ReviewAction = { action: "dismiss", label: "Dismiss", done: "Dismissed. It stays dismissed while both sides say the same." }
+
+/** Each item that needs a look, worded for the page, with the decisions it takes. Vector never settles one itself. */
+export function reviewRows(items: readonly MemoryReviewItem[]): ReviewRow[] {
+  return items.map((item) => {
+    const detail = item.detail
+    const word = (value: unknown) => (typeof value === "string" ? value : typeof value === "number" ? String(value) : "")
+    if (item.kind === "drift") {
+      const where = `${word(detail.path)}${detail.line ? `:${word(detail.line)}` : ""}`
+      const text =
+        detail.type === "value"
+          ? `The document says ${word(detail.document)}; the code says ${word(detail.code)} (${where}).`
+          : detail.type === "missing"
+            ? `The code it is linked to is gone: ${where}${detail.symbol ? ` (${word(detail.symbol)})` : ""}.`
+            : `The code it is linked to changed: ${where}${detail.symbol ? ` (${word(detail.symbol)})` : ""}.`
+      return {
+        id: item.id,
+        kind: item.kind,
+        title: `Linked code drifted from [${item.a}]`,
+        text,
+        actions: [
+          { action: "keep-document", label: "The document is right", done: "Noted. The code is yours to change." },
+          {
+            action: "keep-code",
+            label: "The code is right",
+            done: "Saved as a decision of yours, and the link now takes the code as it is.",
+          },
+          DISMISS,
+        ],
+      }
+    }
+    if (item.kind === "conflict") {
+      const side = (value: unknown) => {
+        const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+        return { id: word(record.id), title: word(record.title) || "Memory", text: word(record.text) }
+      }
+      const a = side(detail.a)
+      const b = side(detail.b)
+      const said = detail.said && typeof detail.said === "object" ? (detail.said as Record<string, unknown>) : {}
+      const prefer = word(detail.prefer)
+      return {
+        id: item.id,
+        kind: item.kind,
+        title: `${a.title} and ${b.title} disagree`,
+        text: `${CONFLICTS[word(detail.type)] ?? "They disagree"}: “${word(said.a) || a.text}” against “${word(said.b) || b.text}”.${prefer ? ` Vector would go by ${prefer === a.id ? a.title : b.title}, but it is your call.` : ""}`,
+        actions: [
+          { action: "keep", winner: a.id, label: `Keep ${a.title}`, done: `Kept ${a.title}. The other side is put away; you can restore it.` },
+          { action: "keep", winner: b.id, label: `Keep ${b.title}`, done: `Kept ${b.title}. The other side is put away; you can restore it.` },
+          DISMISS,
+        ],
+      }
+    }
+    const hold = typeof detail.hold === "string" ? (detail.hold as DocumentHold) : undefined
+    const whole = detail.type === "document"
+    const title = word(detail.title) || "A document"
+    return {
+      id: item.id,
+      kind: item.kind,
+      title,
+      text: whole
+        ? `The whole document is held for your review: ${documentHoldLabel(hold)}.`
+        : `${detail.type === "record" ? "A record" : "A passage"} is held for your review: ${documentHoldLabel(hold)}.${detail.text ? ` “${word(detail.text).slice(0, 200)}”` : ""}`,
+      ...(typeof detail.document === "string" ? { document: detail.document } : {}),
+      actions: [
+        { action: "approve", label: "Approve", done: "Approved. Vector uses it now." },
+        whole
+          ? { action: "reject", label: "Reject", done: forgottenLabel(title) }
+          : { action: "reject", label: "Reject", done: "Rejected. It stays out, also after a reindex." },
+      ],
+    }
+  })
 }

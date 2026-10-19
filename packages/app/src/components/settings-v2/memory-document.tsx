@@ -4,7 +4,10 @@ import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import {
   FORGET,
   RECORD_KINDS,
+  anchorLine,
   approvable,
+  codeLinks,
+  evidence,
   documentHoldLabel,
   documentMeta,
   forgottenLabel,
@@ -27,7 +30,7 @@ import {
   type RecordKind,
 } from "./memory-documents-model"
 
-type View = "learned" | "outline" | "pages"
+type View = "learned" | "outline" | "pages" | "links"
 
 // One document as Vector read it: what it learned (records by kind, each editable), its outline with pages, and its
 // pages as extracted text with the records marked. The app never renders the original file; it shows what was read.
@@ -206,6 +209,7 @@ export function MemoryDocumentPage(props: {
                       ["learned", "Learned"],
                       ["outline", "Outline"],
                       ["pages", "Pages"],
+                      ["links", "Code links"],
                     ] as const
                   }
                 >
@@ -428,6 +432,67 @@ export function MemoryDocumentPage(props: {
               </div>
             </Show>
 
+            <Show when={view() === "links"}>
+              <div class="settings-memory-list" data-component="settings-memory-code-links">
+                <Show
+                  when={current().anchors.length > 0}
+                  fallback={
+                    <p class="settings-memory-empty">
+                      Nothing in it is linked to this repository's code yet. Vector links a record when the code
+                      defines, uses or serves what it names; link one yourself with Link to file… under Learned.
+                    </p>
+                  }
+                >
+                  <For each={codeLinks(current().anchors, records())}>
+                    {(group) => (
+                      <article class="settings-memory-row">
+                        <div class="settings-memory-row-head">
+                          <Show when={group.record}>
+                            {(record) => (
+                              <span class="settings-memory-kind-badge" data-kind={record().kind}>
+                                {recordKindLabel(record().kind)}
+                              </span>
+                            )}
+                          </Show>
+                          <span class="settings-memory-id">{group.owner}</span>
+                        </div>
+                        <Show when={group.record}>
+                          {(record) => (
+                            <p class="settings-memory-text">
+                              <For each={evidence(record().card, group.anchors[0]?.symbol)}>
+                                {(span) => (span.mark ? <mark>{span.text}</mark> : <>{span.text}</>)}
+                              </For>
+                            </p>
+                          )}
+                        </Show>
+                        <For each={group.anchors}>
+                          {(anchor) => (
+                            <div class="settings-memory-actions">
+                              <span class="settings-memory-meta">{anchorLine(anchor)}</span>
+                              <Show when={group.record}>
+                                <ButtonV2
+                                  size="small"
+                                  variant="ghost"
+                                  onClick={() =>
+                                    change(
+                                      (client) => client.memory.records.update({ recordID: group.owner, unlink: anchor.id }),
+                                      "Unlinked. Vector does not link it there again.",
+                                    )
+                                  }
+                                >
+                                  Unlink
+                                </ButtonV2>
+                              </Show>
+                            </div>
+                          )}
+                        </For>
+                      </article>
+                    )}
+                  </For>
+                </Show>
+              </div>
+            </Show>
+
             <ForgetDocument
               title={current().document.title}
               documentID={props.documentID}
@@ -451,6 +516,9 @@ function RecordCard(props: {
 }) {
   const [editing, setEditing] = createSignal(false)
   const [draft, setDraft] = createSignal("")
+  const [linking, setLinking] = createSignal(false)
+  const [file, setFile] = createSignal("")
+  const [symbol, setSymbol] = createSignal("")
   const update = (
     patch: { text?: string; pinned?: boolean; action?: "not-applicable" | "forget" | "restore" | "make-memory" },
     done: string,
@@ -579,6 +647,11 @@ function RecordCard(props: {
               Forget
             </ButtonV2>
           </Show>
+          <Show when={active() && !linking()}>
+            <ButtonV2 size="small" variant="ghost" onClick={() => setLinking(true)}>
+              Link to file…
+            </ButtonV2>
+          </Show>
           <Show when={props.record.status === "archived"}>
             <ButtonV2
               size="small"
@@ -591,6 +664,46 @@ function RecordCard(props: {
           </Show>
         </Show>
       </div>
+      <Show when={linking()}>
+        <div class="settings-memory-actions" data-component="settings-memory-link-file">
+          <input
+            class="settings-memory-page-input"
+            aria-label="File in this repository"
+            placeholder="src/auth/session.ts"
+            value={file()}
+            onInput={(event) => setFile(event.currentTarget.value)}
+          />
+          <input
+            class="settings-memory-page-input"
+            aria-label="Symbol in the file (optional)"
+            placeholder="refreshTokenTtl"
+            value={symbol()}
+            onInput={(event) => setSymbol(event.currentTarget.value)}
+          />
+          <ButtonV2
+            size="small"
+            disabled={!file().trim()}
+            onClick={async () => {
+              if (
+                await props.change(
+                  (client) =>
+                    client.memory.records.update({
+                      recordID: props.record.id,
+                      link: { path: file().trim(), ...(symbol().trim() ? { symbol: symbol().trim() } : {}) },
+                    }),
+                  "Linked. Opening or editing that file now brings this record up.",
+                )
+              )
+                setLinking(false)
+            }}
+          >
+            Link
+          </ButtonV2>
+          <ButtonV2 size="small" variant="ghost" onClick={() => setLinking(false)}>
+            Cancel
+          </ButtonV2>
+        </div>
+      </Show>
     </article>
   )
 }

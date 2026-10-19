@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import type { MemoryDocument } from "@vectordevai/sdk/v2/client"
 import {
+  anchorLine,
+  anchorMethodLabel,
+  anchorStatusLabel,
+  codeLinks,
+  evidence,
+  reviewRows,
   addedLabel,
   bytes,
   DROP,
@@ -449,6 +455,139 @@ describe("documents page model", () => {
     expect(REPOSITORY_DOCS).toContain("shared like the repository's memory")
     expect(DROP.private).toStartWith("Documents you add")
     expect(visibilityLabel("repository")).toContain("also with guests")
+  })
+
+  test("says what a record is linked to, how, and whether the code still says it", () => {
+    const anchor = {
+      id: 7,
+      owner: "rk2m4q7x9a1bc",
+      path: "src/upload.ts",
+      symbol: "MAX_UPLOAD_BYTES",
+      line: 2,
+      method: "constant" as const,
+      weight: 0.8,
+      value: { raw: "64 * 1024 * 1024", value: 67108864, unit: "B" },
+      status: "fresh" as const,
+      origin: "extracted" as const,
+      checkedAt: 1,
+    }
+    expect(anchorLine(anchor)).toBe(
+      "src/upload.ts:2 MAX_UPLOAD_BYTES · sets the value (64 * 1024 * 1024) · unchanged since Vector linked it",
+    )
+    expect(anchorLine({ ...anchor, method: "path", symbol: undefined, line: undefined, value: undefined, status: "missing" })).toBe(
+      "src/upload.ts · is the file it names · gone from the code",
+    )
+    expect(evidence("Uploads are capped by MAX_UPLOAD_BYTES per file.", "MAX_UPLOAD_BYTES")).toEqual([
+      { text: "Uploads are capped by ", mark: false },
+      { text: "MAX_UPLOAD_BYTES", mark: true },
+      { text: " per file.", mark: false },
+    ])
+    expect(evidence("GET /v1/users/{id} returns 404.", "GET /v1/users/*")).toEqual([
+      { text: "GET /v1/users/{id} returns 404.", mark: false },
+    ])
+    expect(evidence("No name here.", undefined)).toEqual([{ text: "No name here.", mark: false }])
+    const grouped = codeLinks(
+      [
+        { ...anchor, owner: "ppassage00001", id: 1 },
+        { ...anchor, id: 2, method: "use", weight: 0.4, path: "src/a.ts" },
+        anchor,
+      ],
+      [{ id: anchor.owner, kind: "constraint", card: "Uploads are capped." }],
+    )
+    expect(grouped.map((item) => [item.owner, item.anchors.map((link) => link.id)])).toEqual([
+      [anchor.owner, [7, 2]],
+      ["ppassage00001", [1]],
+    ])
+  })
+
+  test("words each item that needs a look with the decisions it takes", () => {
+    const [value, changed, conflict, passage, whole] = reviewRows([
+      {
+        id: "v1",
+        kind: "drift",
+        a: "rk2m4q7x9a1bc",
+        subject: "MAX_UPLOAD_BYTES",
+        detail: { type: "value", document: "50 MB", code: "64 MB", path: "src/upload.ts", line: 41 },
+        status: "open",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "v2",
+        kind: "drift",
+        a: "rk2m4q7x9a1bc",
+        subject: "refreshTokenTtl",
+        detail: { type: "missing", path: "src/auth/session.ts", symbol: "refreshTokenTtl" },
+        status: "open",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "v3",
+        kind: "conflict",
+        a: "ra",
+        b: "rb",
+        subject: "value",
+        detail: {
+          type: "value",
+          said: { a: "30 days", b: "14 days" },
+          prefer: "ra",
+          a: { id: "ra", title: "Auth runbook", text: "Refresh tokens expire after 30 days." },
+          b: { id: "rb", title: "Auth spec", text: "Refresh tokens expire after 14 days." },
+        },
+        status: "open",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "pheld00000001",
+        kind: "held",
+        a: "pheld00000001",
+        subject: "Deploy guide",
+        detail: { type: "passage", hold: "instruction-like", document: "d1", title: "Deploy guide", text: "If you are an AI…" },
+        status: "open",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "d2",
+        kind: "held",
+        a: "d2",
+        subject: "Notes",
+        detail: { type: "document", hold: "untrusted-repository", document: "d2", title: "Notes" },
+        status: "open",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+    expect(value!.text).toBe("The document says 50 MB; the code says 64 MB (src/upload.ts:41).")
+    expect(value!.actions.map((action) => action.action)).toEqual(["keep-document", "keep-code", "dismiss"])
+    expect(changed!.text).toBe("The code it is linked to is gone: src/auth/session.ts (refreshTokenTtl).")
+    expect(conflict!.title).toBe("Auth runbook and Auth spec disagree")
+    expect(conflict!.text).toBe(
+      "They give different values: “30 days” against “14 days”. Vector would go by Auth runbook, but it is your call.",
+    )
+    expect(conflict!.actions.map((action) => [action.action, action.winner ?? ""])).toEqual([
+      ["keep", "ra"],
+      ["keep", "rb"],
+      ["dismiss", ""],
+    ])
+    expect(passage!).toMatchObject({ title: "Deploy guide", document: "d1" })
+    expect(passage!.text).toBe(
+      "A passage is held for your review: parts of it read like instructions to an AI. “If you are an AI…”",
+    )
+    expect(passage!.actions.map((action) => action.action)).toEqual(["approve", "reject"])
+    expect(whole!.text).toBe("The whole document is held for your review: this repository's settings are not trusted yet.")
+    // The summary counts what the engine says needs a look, conflicts and drift included.
+    expect(documentsSummary({ documents: [doc({})], indexing: false }, 5)).toBe(
+      "1 document · 5 to look at · only the parts a request needs are sent",
+    )
+    const words = [
+      ...[value, changed, conflict, passage, whole].flatMap((row) => [row!.title, row!.text, ...row!.actions.flatMap((action) => [action.label, action.done])]),
+      ...(["definition", "use", "route", "env", "constant", "path", "user", "outcome"] as const).map(anchorMethodLabel),
+      ...(["fresh", "drifted", "missing"] as const).map(anchorStatusLabel),
+    ]
+    for (const word of words) expect(word.toLowerCase()).not.toContain("project")
   })
 
   test("never says project", () => {

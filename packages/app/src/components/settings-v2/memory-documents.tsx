@@ -31,6 +31,7 @@ import {
   reindexable,
   replaceable,
   resumable,
+  reviewRows,
   statusLabel,
   statusTone,
   steps,
@@ -64,6 +65,21 @@ export function SettingsMemoryDocuments(props: { client: () => VectorClient | un
     },
     (input) => input.client.memory.documents.list().then((result) => documentList(result.data)),
   )
+
+  // What needs a look across the repository's documents, rules and memory: conflicts, drift and held content. An
+  // engine without the list leaves the page to what the documents themselves say.
+  const [review] = createResource(
+    () => {
+      const client = props.client()
+      return client ? { client, version: version() } : false
+    },
+    (input) =>
+      input.client.memory.review
+        .list()
+        .then((result) => (Array.isArray(result.data) ? reviewRows(result.data) : undefined))
+        .catch(() => undefined),
+  )
+  const looks = () => review.latest?.length ?? needsLookCount(shown())
 
   // While anything is read or the search model downloads, ask again every two seconds; stop once all is idle.
   createEffect(() => {
@@ -152,7 +168,7 @@ export function SettingsMemoryDocuments(props: { client: () => VectorClient | un
                     when={list.latest}
                     fallback={list.loading ? "Reading documents…" : "Documents are not available."}
                   >
-                    {(current) => <>{documentsSummary(current())}</>}
+                    {(current) => <>{documentsSummary(current(), review.latest?.length)}</>}
                   </Show>
                 </p>
               </div>
@@ -262,20 +278,62 @@ export function SettingsMemoryDocuments(props: { client: () => VectorClient | un
             </div>
           </div>
 
-          <Show when={needsLookCount(shown()) > 0}>
+          <Show when={looks() > 0}>
             <div class="settings-v2-card settings-v2-card--wide" data-component="settings-memory-needs-look">
               <div class="settings-v2-card-head">
                 <div class="settings-v2-card-copy">
                   <h3 class="settings-v2-card-title">
-                    Needs a look <span class="settings-memory-count">{needsLookCount(shown())}</span>
+                    Needs a look <span class="settings-memory-count">{looks()}</span>
                   </h3>
                   <p class="settings-v2-card-description">
-                    Held parts are never searched, recalled or shown to the agent until you approve them.
+                    Held parts are never searched, recalled or shown to the agent until you approve them. Where
+                    documents, rules and memory disagree, or code drifted from what a document says, Vector never
+                    decides for you.
                   </p>
                 </div>
               </div>
               <div class="settings-memory-list">
-                <For each={needsLook(shown())}>
+                <For each={review.latest ?? []}>
+                  {(row) => (
+                    <div class="settings-memory-row is-waiting" data-component="settings-memory-review" data-kind={row.kind}>
+                      <div class="settings-memory-row-head">
+                        <span class="settings-memory-doc-title">{row.title}</span>
+                      </div>
+                      <p class="settings-memory-hold">{row.text}</p>
+                      <div class="settings-memory-actions">
+                        <For each={row.actions}>
+                          {(choice) => (
+                            <ButtonV2
+                              size="small"
+                              variant={choice.action === "dismiss" || choice.action === "reject" ? "ghost" : "outline"}
+                              onClick={() =>
+                                void change(
+                                  (client) =>
+                                    client.memory.review.resolve({
+                                      itemID: row.id,
+                                      action: choice.action,
+                                      ...(choice.winner ? { winner: choice.winner } : {}),
+                                    }),
+                                  choice.done,
+                                )
+                              }
+                            >
+                              {choice.label}
+                            </ButtonV2>
+                          )}
+                        </For>
+                        <Show when={row.document}>
+                          {(document) => (
+                            <ButtonV2 size="small" variant="ghost" onClick={() => setOpen(document())}>
+                              Open
+                            </ButtonV2>
+                          )}
+                        </Show>
+                      </div>
+                    </div>
+                  )}
+                </For>
+                <For each={review.latest ? [] : needsLook(shown())}>
                   {(item) => (
                     <div class="settings-memory-row is-waiting">
                       <div class="settings-memory-row-head">
