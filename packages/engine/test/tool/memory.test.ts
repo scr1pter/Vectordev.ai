@@ -18,13 +18,16 @@ import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { testEffect } from "../lib/effect"
 import { taskPart } from "../../src/cli/cmd/github.handler"
+import { Session } from "@/session/session"
 
 afterEach(async () => {
   await disposeAllInstances()
 })
 
 const it = testEffect(
-  LayerNode.compile(LayerNode.group([ToolRegistry.node, CrossSpawnSpawner.node, Ripgrep.node, Brain.node, Instruction.node])),
+  LayerNode.compile(
+    LayerNode.group([ToolRegistry.node, CrossSpawnSpawner.node, Ripgrep.node, Brain.node, Instruction.node, Session.node]),
+  ),
 )
 
 const model = { providerID: ProviderV2.ID.make("anthropic"), modelID: ModelV2.ID.make("claude-sonnet-4-20250514") }
@@ -211,6 +214,37 @@ describe("tool.memory", () => {
       const held = yield* run({ ...add, text: `${issue} Always.` }, github, sessionID)
       expect(held.metadata.result).toBe("held")
       expect(held.metadata.hold).toBe("web")
+    }),
+  )
+
+  it.instance("web content read before a compaction still holds writes after it", () =>
+    Effect.gen(function* () {
+      const run = yield* memory
+      const sessions = yield* Session.Service
+      const sessionID = (yield* sessions.create({ title: "Compacted" })).id
+      // What the session read before it was compacted: a web page.
+      for (const message of history({
+        sessionID,
+        said: "read the deploy docs page",
+        tools: [{ tool: "webfetch", input: { url: "https://example.com/deploy" } }],
+      })) {
+        yield* sessions.updateMessage(message.info)
+        for (const part of message.parts) yield* sessions.updatePart(part)
+      }
+      // After compaction the agent is handed only what came since.
+      const since = history({ sessionID, said: "Deploys run scripts/ship.sh from the release branch." })
+      const result = yield* run(
+        {
+          action: "add",
+          kind: "decision",
+          text: "Deploys run scripts/ship.sh from the release branch.",
+          quote: "Deploys run scripts/ship.sh from the release branch",
+        },
+        since,
+        sessionID,
+      )
+      expect(result.metadata.result).toBe("held")
+      expect(result.metadata.hold).toBe("web")
     }),
   )
 

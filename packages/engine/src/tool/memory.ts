@@ -7,6 +7,7 @@ import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { SessionID } from "@vectordevai/schema/session-id"
 import { Git } from "@/git"
+import { Session } from "@/session/session"
 import { Instruction } from "../session/instruction"
 import { SessionMemory } from "../session/memory"
 import * as Tool from "./tool"
@@ -37,7 +38,7 @@ type Metadata = {
 export const MemoryTool = Tool.define<
   typeof Parameters,
   Metadata,
-  Brain.Service | Instruction.Service | FreeModelGuests.Service | Git.Service
+  Brain.Service | Instruction.Service | FreeModelGuests.Service | Git.Service | Session.Service
 >(
   "memory",
   Effect.gen(function* () {
@@ -45,6 +46,7 @@ export const MemoryTool = Tool.define<
     const instruction = yield* Instruction.Service
     const guests = yield* FreeModelGuests.Service
     const git = yield* Git.Service
+    const sessions = yield* Session.Service
 
     return {
       description: DESCRIPTION,
@@ -98,8 +100,17 @@ export const MemoryTool = Tool.define<
             }
           }
 
-          // Writes: what the session took in decides whether they wait for the user.
-          const hold = guest ? "guest" : place.held ? "untrusted-repository" : SessionMemory.taint(ctx.messages)
+          // Writes: what the session took in decides whether they wait for the user. Once a session is compacted the
+          // agent gets a summary instead of the messages before it, but the summary carries whatever they brought in,
+          // so the whole session counts.
+          const history = yield* sessions
+            .messages({ sessionID: SessionID.make(ctx.sessionID) })
+            .pipe(Effect.catch(() => Effect.succeed([])))
+          const hold = guest
+            ? "guest"
+            : place.held
+              ? "untrusted-repository"
+              : SessionMemory.taint([...history, ...ctx.messages])
 
           // An entry the agent may not see here is one it may not change either.
           const target = params.id && params.action !== "add" ? yield* brain.get(place, params.id, { personal }) : undefined
