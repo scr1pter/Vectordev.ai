@@ -1470,6 +1470,10 @@ const layer = Layer.effect(
           ]
         }
 
+        if (part.type === "text" && part.metadata)
+          return [
+            { ...part, metadata: SessionMemory.admitted(part.metadata), messageID: info.id, sessionID: input.sessionID },
+          ]
         return [{ ...part, messageID: info.id, sessionID: input.sessionID }]
       })
 

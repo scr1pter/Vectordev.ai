@@ -45,6 +45,17 @@ export const REMEMBER = "vector.memory.remember"
  */
 export const KNOWLEDGE = "vector.memory.knowledge"
 
+/**
+ * A client's part metadata without the keys only the engine writes. Recall, document knowledge and personal ids record
+ * what a request was given; a client's copy of them would skip recall for its request, or pass off ids it was never
+ * shown as delivered (and so as verified citations).
+ */
+export function admitted(metadata: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(metadata).filter(([key]) => key !== RECALL && key !== KNOWLEDGE && key !== PERSONAL),
+  )
+}
+
 /** How a memory tool result stands in for a document card or passage; each request renders it again. */
 export function document(id: string) {
   return `[${id}] (document)`
