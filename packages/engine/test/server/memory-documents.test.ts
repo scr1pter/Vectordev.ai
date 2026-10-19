@@ -95,7 +95,7 @@ const get = async (directory: string, route: string) => {
   expect(response.status).toBe(200)
   return (await response.json()) as any
 }
-const upload = (directory: string, name: string, bytes: Uint8Array | string, fields: Record<string, string> = {}) => {
+const upload = (directory: string, name: string, bytes: Uint8Array<ArrayBuffer> | string, fields: Record<string, string> = {}) => {
   const form = new FormData()
   form.set("file", new File([bytes], name))
   for (const [key, value] of Object.entries(fields)) form.set(key, value)
@@ -198,7 +198,7 @@ describe("memory document routes", () => {
     const result = (await created.json()) as { type: string; document: { id: string; title: string } }
     expect(result).toMatchObject({ type: "queued", document: { title: "The auth spec", origin: "upload", visibility: "private" } })
     const id = result.document.id
-    expect(await searchable(tmp.path, id)).toMatchObject({ status: "searchable", stored: false })
+    expect(await searchable(tmp.path, id)).toMatchObject({ status: "searchable", stored: false, title: "The auth spec" })
 
     const list = await get(tmp.path, "/memory/documents")
     expect(list).toMatchObject({

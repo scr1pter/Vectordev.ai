@@ -140,6 +140,30 @@ describe("BrainKnowledge records", () => {
   })
 })
 
+describe("BrainKnowledge titles", () => {
+  test("a title the user gives while a document waits to be read stays theirs", async () => {
+    const gate = Promise.withResolvers<void>()
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          const named = yield* setup.knowledge.add(setup.place, text("Auth spec.md", SPEC_V1))
+          const plain = yield* setup.knowledge.add(setup.place, text("Limits.md", SPEC_V2))
+          if (named.type === "refused" || plain.type === "refused") throw new Error("not added")
+          yield* setup.knowledge.update(setup.place, named.document.id, { title: "Login rules" })
+          gate.resolve()
+          return {
+            named: yield* setup.knowledge.wait(setup.place, named.document.id, "searchable", 20_000),
+            plain: yield* setup.knowledge.wait(setup.place, plain.document.id, "searchable", 20_000),
+          }
+        }),
+      { worker: countingWorker([], gate.promise) },
+    )
+    expect(result.named?.title).toBe("Login rules")
+    // Without a name from the user, the document's own heading is its title.
+    expect(result.plain?.title).toBe("Auth spec")
+  })
+})
+
 describe("BrainKnowledge pages", () => {
   test("a page shows its passages and the spans its records were read from", async () => {
     const bytes = pdf({

@@ -634,7 +634,7 @@ function make(input: {
       previous_id: previous?.id ?? null,
       ordinal,
       name: BrainCard.clip(BrainScan.stripHidden(path.basename(file.name)), 120),
-      title: BrainCard.clip(BrainScan.stripHidden(path.basename(file.name).replace(/\.[A-Za-z0-9]{1,8}$/, "")), 80),
+      title: nameTitle(file.name),
       format: sniffed.format,
       origin: request.origin,
       // Private unless it is the repository's own doc, which the agent can read anyway.
@@ -1214,11 +1214,22 @@ function make(input: {
         .pipe(Effect.orDie)
     yield* frequencies(document.repository_id, [...new Set([...before, ...termIds.values()])])
     const held = items.filter((item) => item.status === "quarantined" && item.type === "passage").length
+    // The title as it is now: the user may have named the document while it was read.
+    const current = yield* db
+      .select({ title: BrainDocumentTable.title })
+      .from(BrainDocumentTable)
+      .where(eq(BrainDocumentTable.id, document.id))
+      .get()
+      .pipe(Effect.orDie)
+    const title = current?.title ?? document.title
     yield* db
       .update(BrainDocumentTable)
       .set({
-        // A document read again keeps the title it has, which may be the user's.
-        title: document.status === "queued" || document.status === "reading" ? BrainCard.clip(structured.title, 80) || document.title : document.title,
+        // A new document takes the title its text gives, unless the user named it; one read again keeps its title.
+        title:
+          (document.status === "queued" || document.status === "reading") && title === nameTitle(document.name)
+            ? BrainCard.clip(structured.title, 80) || title
+            : title,
         pages: structured.pages ?? null,
         unread: [...structured.unread],
         warnings: [...structured.warnings],
@@ -2997,6 +3008,11 @@ const EXTENSIONS: Readonly<Record<BrainSchema.Format, string>> = {
   yaml: "yaml",
   openapi: "json",
   text: "txt",
+}
+
+/** The title a document has from its file name, until its text gives a better one or the user names it. */
+function nameTitle(name: string) {
+  return BrainCard.clip(BrainScan.stripHidden(path.basename(name).replace(/\.[A-Za-z0-9]{1,8}$/, "")), 80)
 }
 
 /** Where a kept original lives: named by its hash, with its format's extension. */
