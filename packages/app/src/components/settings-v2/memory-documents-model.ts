@@ -706,9 +706,12 @@ function clamp(value: number, length: number) {
 
 // --- Finding more with a model -------------------------------------------------------------------------------------
 
-/** What the estimate sheet says first: how a model is used here, and what is kept of what it says. */
+/**
+ * What the estimate sheet says first: how a model is used here, and what is kept of what it says. The sheet asks the
+ * default model, which the estimate names; only the terminal's --model picks another.
+ */
 export const DISTILL =
-  "A model you choose reads the sections where Vector's rules found little. Each suggestion must quote the document word for word or it is dropped, and what is kept waits here for you to keep or drop. Not for models that may train on prompts."
+  "Your default model reads the sections where Vector's rules found little. Each suggestion must quote the document word for word or it is dropped, and what is kept waits here for you to keep or drop. Not for models that may train on prompts."
 
 /** The estimate, before anything is sent: what would go, to which model, and what it may cost. */
 export function distillEstimateLabel(estimate: MemoryDistillEstimate) {

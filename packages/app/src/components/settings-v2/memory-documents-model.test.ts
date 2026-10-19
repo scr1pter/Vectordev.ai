@@ -685,6 +685,9 @@ describe("documents page model", () => {
     expect(distillEstimateLabel(estimate)).toBe(
       "Vector would send 3 sections (about 12,000 tokens) to anthropic/claude-sonnet-4, with up to 4,000 tokens back. About $0.04 to $0.10 at catalog rates.",
     )
+    // The document page offers no choice of model: it asks the default one, which the estimate names.
+    expect(DISTILL).toStartWith("Your default model reads the sections where Vector's rules found little.")
+    expect(DISTILL).not.toMatch(/you choose/i)
     expect(distillCostLabel({ costKind: "free" })).toBe("The model is free.")
     expect(distillCostLabel({ costKind: "unknown" })).toBe("The model has no listed price, so Vector cannot estimate what it costs.")
     expect(distillCostLabel({ costKind: "priced", lowUsd: 0.0012, highUsd: 0.004 })).toBe("About $0.0012 to $0.0040 at catalog rates.")
