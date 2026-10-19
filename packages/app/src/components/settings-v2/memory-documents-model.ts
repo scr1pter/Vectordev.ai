@@ -328,6 +328,14 @@ export function reindexable(document: Pick<MemoryDocument, "status" | "stored" |
   return document.status !== "superseded" && (document.stored || !!document.sourcePath)
 }
 
+/**
+ * Replacing reads another file as a document's next version, matched by its name. A repository doc is the file in the
+ * repository, so it changes when that file does, never from here.
+ */
+export function replaceable(document: Pick<MemoryDocument, "status" | "origin">) {
+  return document.status !== "superseded" && document.origin !== "repository"
+}
+
 export function approvable(document: Pick<MemoryDocument, "status">) {
   return document.status === "held"
 }

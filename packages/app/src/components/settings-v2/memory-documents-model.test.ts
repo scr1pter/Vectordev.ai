@@ -30,6 +30,7 @@ import {
   refusal,
   refusalLabel,
   reindexable,
+  replaceable,
   resumable,
   statusLabel,
   statusTone,
@@ -310,6 +311,10 @@ describe("documents page model", () => {
     expect(reindexable({ status: "ready", stored: true })).toBe(true)
     expect(reindexable({ status: "ready", stored: false, sourcePath: "/repo/docs/a.md" })).toBe(true)
     expect(reindexable({ status: "superseded", stored: true })).toBe(false)
+    expect(replaceable({ status: "ready", origin: "upload" })).toBe(true)
+    expect(replaceable({ status: "ready", origin: "chat" })).toBe(true)
+    expect(replaceable({ status: "ready", origin: "repository" })).toBe(false)
+    expect(replaceable({ status: "superseded", origin: "upload" })).toBe(false)
   })
 
   test("refuses what the engine would refuse, before sending it", () => {

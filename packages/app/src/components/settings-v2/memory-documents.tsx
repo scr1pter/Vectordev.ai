@@ -29,6 +29,7 @@ import {
   refusalLabel,
   refusal,
   reindexable,
+  replaceable,
   resumable,
   statusLabel,
   statusTone,
@@ -500,7 +501,9 @@ function DocumentRow(props: {
                 >
                   Reindex
                 </MenuV2.Item>
-                <MenuV2.Item onSelect={props.onReplace}>Replace…</MenuV2.Item>
+                <Show when={replaceable(props.document)}>
+                  <MenuV2.Item onSelect={props.onReplace}>Replace…</MenuV2.Item>
+                </Show>
                 <MenuV2.Separator />
                 <MenuV2.Item onSelect={() => setConfirming(true)}>Forget…</MenuV2.Item>
               </MenuV2.Content>
