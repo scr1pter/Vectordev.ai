@@ -145,6 +145,7 @@ export type Refusal =
   | "user-entry"
   | "not-found"
   | "limit"
+  | "put-away"
 
 export type WriteResult =
   | {
@@ -1003,6 +1004,18 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       return refuse(
         "file-entry",
         `${previous.id} comes from ${previous.source_file ? path.basename(previous.source_file) : "a file"}; ask the user to edit that file.`,
+      )
+    // A replacement puts its words in use, so replacing what was put away would bring it back. As with the same words
+    // again, the agent may do that only for what it or tidying put away; what was replaced points to its replacement.
+    if (agent && previous?.status === "superseded")
+      return refuse(
+        "put-away",
+        `${previous.id} was replaced${previous.superseded_by ? ` by ${previous.superseded_by}` : ""}; change that one instead.`,
+      )
+    if (agent && previous?.status === "archived" && (yield* archivedBy(previous.id)) === "user")
+      return refuse(
+        "put-away",
+        `${previous.id} was put away. Only the user can bring it back, in Settings > Memory; ask them if it applies again.`,
       )
     // A replacement keeps the scope of what it replaces, and only the user's words change what the user wrote.
     if (previous?.scope === "personal" && !own)

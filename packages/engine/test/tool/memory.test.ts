@@ -454,6 +454,66 @@ describe("tool.memory", () => {
     }),
   )
 
+  it.instance("the agent can neither update nor forget an entry that is not in use", () =>
+    Effect.gen(function* () {
+      const brain = yield* Brain.Service
+      const place = yield* (yield* Instruction.Service).place()
+      const learned = yield* brain.propose(place, {
+        kind: "decision",
+        text: "Hotfixes go out from the hotfix branch.",
+        scope: "repository",
+        origin: "agent",
+        sessionID: "ses_memory_learn",
+        evidence: { type: "message", quote: "Hotfixes go out from the hotfix branch", verified: true },
+      })
+      const waiting = yield* brain.propose(place, {
+        kind: "decision",
+        text: "Release notes are written in docs/releases.",
+        scope: "repository",
+        origin: "agent",
+        sessionID: "ses_memory_learn",
+      })
+      if (learned.type === "refused" || waiting.type === "refused") throw new Error("setup")
+      expect(waiting.entry.status).toBe("proposed")
+      yield* brain.update(place, learned.entry.id, { action: "archive" }, "user")
+      const run = yield* memory
+      const sessionID = SessionID.make("ses_memory_inactive")
+      const messages = history({
+        sessionID,
+        said: "Do hotfixes go out from the hotfix branch? Release notes are written in docs/releases.",
+      })
+      const update = yield* run(
+        {
+          action: "update",
+          id: learned.entry.id,
+          kind: "decision",
+          text: "Hotfixes go out from the hotfix branch.",
+          quote: "hotfixes go out from the hotfix branch",
+        },
+        messages,
+        sessionID,
+      )
+      expect(update.metadata.result).toBe("refused")
+      expect(update.output).toContain("Only the user can bring it back")
+      const forget = yield* run({ action: "forget", id: learned.entry.id }, messages, sessionID)
+      expect(forget.metadata.result).toBe("refused")
+      const pending = yield* run(
+        {
+          action: "update",
+          id: waiting.entry.id,
+          kind: "decision",
+          text: "Release notes are written in docs/releases.",
+          quote: "release notes are written in docs/releases",
+        },
+        messages,
+        sessionID,
+      )
+      expect(pending.metadata.result).toBe("refused")
+      expect(pending.output).toContain("waits for the user's review")
+      expect((yield* brain.list(place, {})).map((entry) => entry.text)).toEqual([])
+    }),
+  )
+
   it.instance("personal memory stays out of the tool for a model that may train on prompts", () =>
     Effect.gen(function* () {
       const brain = yield* Brain.Service

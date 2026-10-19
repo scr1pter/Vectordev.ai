@@ -840,6 +840,47 @@ describe("Brain evidence", () => {
     expect(result?.active).toContain(result?.learned)
   })
 
+  test("replacing an entry the user put away does not bring it back, the user's own or the agent's", async () => {
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const write = (text: string, origin: "user" | "agent", supersedes?: string) =>
+          brain.propose(place, {
+            kind: "decision",
+            text,
+            scope: "repository",
+            origin,
+            ...(origin === "agent" ? { sessionID: "ses_replace" } : {}),
+            ...(supersedes ? { supersedes } : {}),
+            evidence: origin === "user" ? { type: "user" } : { type: "message", quote: text.replace(/\.$/, ""), verified: true },
+          })
+        const learned = yield* write("Hotfixes go out from the hotfix branch.", "agent")
+        const mine = yield* write("Releases are cut from the develop branch.", "user")
+        const tidied = yield* write("Staging resets every Monday.", "agent")
+        if (learned.type === "refused" || mine.type === "refused" || tidied.type === "refused") return undefined
+        yield* brain.update(place, learned.entry.id, { action: "archive" }, "user")
+        yield* brain.update(place, mine.entry.id, { action: "archive" }, "user")
+        yield* brain.update(place, tidied.entry.id, { action: "archive" }, "agent")
+        const learnedBack = yield* write("Hotfixes go out from the hotfix branch.", "agent", learned.entry.id)
+        const mineBack = yield* write("Releases are cut from the develop branch.", "agent", mine.entry.id)
+        // What the agent put away itself it may bring back in new words.
+        const tidiedBack = yield* write("Staging resets every Monday morning.", "agent", tidied.entry.id)
+        // An entry already replaced points to its replacement.
+        const replaced = yield* write("Staging resets every Monday at 6.", "agent", tidied.entry.id)
+        const active = (yield* brain.list(place, {})).map((entry) => entry.text)
+        return { learnedBack, mineBack, tidiedBack, replaced, active }
+      }),
+    )
+    expect(result?.learnedBack).toMatchObject({ type: "refused", reason: "put-away" })
+    expect(result?.learnedBack.type === "refused" ? result.learnedBack.message : "").toContain("Only the user can bring it back")
+    expect(result?.mineBack).toMatchObject({ type: "refused", reason: "put-away" })
+    expect(result?.tidiedBack.type).toBe("superseded")
+    expect(result?.replaced).toMatchObject({ type: "refused", reason: "put-away" })
+    expect(result?.replaced.type === "refused" ? result.replaced.message : "").toContain(
+      result?.tidiedBack.type === "refused" ? "-" : `replaced by ${result?.tidiedBack.entry.id}`,
+    )
+    expect(result?.active).toEqual(["Staging resets every Monday morning."])
+  })
+
   test("the agent cannot put away or replace what the user wrote without the user's own words", async () => {
     const result = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {

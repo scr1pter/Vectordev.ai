@@ -115,6 +115,10 @@ export const MemoryTool = Tool.define<
           // An entry the agent may not see here is one it may not change either.
           const target = params.id && params.action !== "add" ? yield* brain.get(place, params.id, { personal }) : undefined
           if (params.id && params.action !== "add" && !target) return refused(params.action, `No memory ${params.id} here.`)
+          // The agent changes only what is in use. What was put away, replaced or waits for review is the user's to
+          // bring back or decide on, so neither an update nor a forget may touch it.
+          const unused = target ? inactive(target.entry) : undefined
+          if (unused) return refused(params.action, unused)
 
           if (params.action === "forget") {
             if (!params.id) return refused("forget", "Say which memory to forget, by id.")
@@ -255,6 +259,16 @@ function written(result: Exclude<Brain.WriteResult, { type: "refused" }>, replac
   if (result.type === "proposed")
     return `Saved ${id} as a proposal, not in use yet: its evidence did not check out (the user's own words, a line on the default branch, or a check that went from failing to passing has to say all of what the memory says, the same way round). The user can approve it in Settings > Memory.${related}`
   return `Saved ${id} for the user's review (${holdReason(result.entry.hold)}). It is not used until they approve it.${related}`
+}
+
+// Why the agent may not change an entry that is not in use, or nothing when it is.
+function inactive(entry: BrainSchema.Entry) {
+  if (entry.status === "active") return undefined
+  if (entry.status === "archived")
+    return `${entry.id} was put away. Only the user can bring it back, in Settings > Memory; ask them if it applies again.`
+  if (entry.status === "superseded")
+    return `${entry.id} was replaced${entry.supersededBy ? ` by ${entry.supersededBy}` : ""}; change that one instead.`
+  return `${entry.id} waits for the user's review, so only they can change it, in Settings > Memory.`
 }
 
 function withheld(entries: readonly BrainSchema.Entry[]) {
