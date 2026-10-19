@@ -444,6 +444,13 @@ describe("documents page model", () => {
     )
   })
 
+  test("says repository docs are shared like the repository's memory, and only documents the user adds are private", () => {
+    expect(REPOSITORY_DOCS).toContain("not private")
+    expect(REPOSITORY_DOCS).toContain("shared like the repository's memory")
+    expect(DROP.private).toStartWith("Documents you add")
+    expect(visibilityLabel("repository")).toContain("also with guests")
+  })
+
   test("never says project", () => {
     const words = [
       FORGET,

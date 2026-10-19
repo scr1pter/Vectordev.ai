@@ -120,3 +120,23 @@ cliIt.concurrent(
     }),
   180_000,
 )
+
+cliIt.concurrent(
+  "repo-docs on says the repository's docs are shared like its memory, not private",
+  (fixture) =>
+    Effect.gen(function* () {
+      const repo = yield* repository(fixture, {})
+      const shown = yield* fixture.vector.spawn(["memory", "repo-docs", "on"], {
+        cwd: repo.root,
+        env: { VECTOR_AGENT_DB: path.join(fixture.home, "vector.db") },
+        timeoutMs: 60_000,
+      })
+      fixture.vector.expectExit(shown, 0, "vector memory repo-docs on")
+      expect(shown.stderr).toContain("not private")
+      expect(shown.stderr).toContain("shared like the repository's memory")
+      const help = yield* fixture.vector.spawn(["memory", "repo-docs", "--help"], { cwd: repo.root, timeoutMs: 60_000 })
+      fixture.vector.expectExit(help, 0, "vector memory repo-docs --help")
+      expect(`${help.stdout}${help.stderr}`.replace(/\s+/g, " ")).toContain("shared like its memory, not private")
+    }),
+  120_000,
+)

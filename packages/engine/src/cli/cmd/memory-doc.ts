@@ -333,7 +333,7 @@ export const MemoryDocRejectCommand = decide("reject", "forget a document, or pu
 // `vector memory repo-docs on|off`: whether Vector reads the repository's own docs (READMEs, docs/, ADRs, API specs).
 export const MemoryRepoDocsCommand = effectCmd({
   command: "repo-docs [state]",
-  describe: "see or set whether Vector reads this repository's own docs",
+  describe: "see or set whether Vector reads this repository's own docs, which are shared like its memory, not private",
   builder: (yargs) => yargs.positional("state", { choices: ["on", "off"] as const }),
   handler: Effect.fn("Cli.memory.repoDocs")(function* (args) {
     const memory = yield* where
@@ -342,7 +342,7 @@ export const MemoryRepoDocsCommand = effectCmd({
       : yield* memory.knowledge.settings(memory.place)
     UI.println(
       settings.repositoryDocs
-        ? "Vector reads this repository's docs (READMEs, docs/, decision records and API specs)."
+        ? "Vector reads this repository's docs (READMEs, docs/, decision records and API specs). Unlike documents you add, they are not private: they are shared like the repository's memory, with invited guests and with models that may train on prompts."
         : "Vector does not read this repository's docs.",
     )
   }),

@@ -547,7 +547,7 @@ export function pageList(pages: readonly number[]) {
 }
 
 export const REPOSITORY_DOCS =
-  "Vector reads this repository's READMEs, docs folder, decision records and API specs, in repositories you trust. Turning it off forgets what it read of them."
+  "Vector reads this repository's READMEs, docs folder, decision records and API specs, in repositories you trust. Turning it off forgets what it read of them. Unlike documents you add, these are not private: they are shared like the repository's memory, with invited guests and with models that may train on prompts."
 
 export const KEEP_ORIGINALS =
   "Keep a copy of each file you add on this computer, so Vector can read it again with a better reader. The copy is the file as you added it, secrets included; turning this off deletes the copies."
@@ -558,7 +558,7 @@ export const DROP = {
   over: "Drop to add",
   formats: "PDF, Word, PowerPoint, Excel, Markdown, HTML, OpenAPI, JSON, YAML, CSV and text, up to 64 MB each",
   private:
-    "Documents are read on this computer and stay private: kept from invited guests and from models that may train on prompts.",
+    "Documents you add are read on this computer and stay private: kept from invited guests and from models that may train on prompts.",
 }
 
 export function bytes(size: number) {
