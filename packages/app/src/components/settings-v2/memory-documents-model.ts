@@ -464,9 +464,89 @@ export function notApplicableLabel(kind: RecordKind) {
   return `Not ${/^[aeiou]/.test(label) ? "an" : "a"} ${label}`
 }
 
-export function recordUsage(record: Pick<MemoryRecord, "uses">) {
+/**
+ * "Used in 4 runs · 3 passed" once answers cited the record or the agent opened it (runs whose checks went green
+ * passed); before that, how many requests it was brought into.
+ */
+export function recordUsage(record: Pick<MemoryRecord, "uses" | "runs" | "passed">) {
+  if (record.runs) return `Used in ${count(record.runs, "run")} · ${(record.passed ?? 0).toLocaleString()} passed`
   if (!record.uses) return "Not used yet"
   return `Used in ${count(record.uses, "run")}`
+}
+
+/** What a new version changed: "+1 requirement, 2 changed, 1 removed, 9 unchanged; your 1 edit and 1 pin are kept." */
+export function versionDiffLabel(diff: NonNullable<MemoryDocumentDetail["diff"]>) {
+  const total = (kinds: Record<string, number>) => Object.values(kinds).reduce((sum, n) => sum + n, 0)
+  const added = RECORD_KINDS.flatMap((kind) =>
+    (diff.added[kind] ?? 0) > 0 ? [`+${count(diff.added[kind]!, recordKindLabel(kind).toLowerCase())}`] : [],
+  )
+  const parts = [
+    ...added,
+    ...(total(diff.changed) ? [`${total(diff.changed).toLocaleString()} changed`] : []),
+    ...(total(diff.removed) ? [`${total(diff.removed).toLocaleString()} removed`] : []),
+    ...(total(diff.unchanged) ? [`${total(diff.unchanged).toLocaleString()} unchanged`] : []),
+  ]
+  const kept = [
+    ...(diff.edits ? [count(diff.edits, "edit")] : []),
+    ...(diff.pins ? [count(diff.pins, "pin")] : []),
+  ]
+  const changes = parts.length ? parts.join(", ") : "nothing Vector learned changed"
+  const yours = kept.length ? `; your ${kept.join(" and ")} ${diff.edits + diff.pins === 1 ? "is" : "are"} kept` : ""
+  return `Version ${diff.version}: ${changes}${yours}.`
+}
+
+/** "Used in 4 runs · 3 passed · 1 undone", for the last 30 days, or that no run has used it. */
+export function usageLabel(usage: MemoryDocumentDetail["usage"]) {
+  if (!usage.runs) return "No run has cited or opened its cards in the last 30 days."
+  return [
+    `Used in ${count(usage.runs, "run")} in the last 30 days`,
+    `${usage.passed.toLocaleString()} passed their checks`,
+    ...(usage.reverted ? [`${usage.reverted.toLocaleString()} undone`] : []),
+  ].join(" · ")
+}
+
+/** One step of a document's History, as a sentence. */
+export function historyLine(event: MemoryDocumentDetail["history"][number]) {
+  const detail = event.detail ?? {}
+  const text = (value: unknown) => (typeof value === "string" ? value : "")
+  const path = text(detail.path)
+  const version = typeof detail.version === "number" ? detail.version : undefined
+  if (event.action === "added")
+    return event.actor === "agent"
+      ? "Kept by the agent"
+      : event.actor === "vector"
+        ? "Read from the repository"
+        : `Added${version && version > 1 ? ` as version ${version}` : ""}`
+  if (event.action === "version")
+    return typeof detail.version === "number" && typeof detail.previous === "string"
+      ? versionDiffLabel(detail as NonNullable<MemoryDocumentDetail["diff"]>)
+      : "A new version replaced the one before"
+  if (event.action === "changed")
+    return `Changed in version ${version ?? "?"}: “${text(detail.before)}” became “${text(detail.after)}”`
+  if (event.action === "linked")
+    return event.actor === "vector"
+      ? `Linked to ${path} when the code landed`
+      : `You linked it to ${path}${detail.symbol ? ` ${text(detail.symbol)}` : ""}`
+  if (event.action === "unlinked") return `You unlinked ${path}`
+  if (event.action === "edited") return "You edited its card"
+  if (event.action === "pinned") return "You pinned it"
+  if (event.action === "unpinned") return "You unpinned it"
+  if (event.action === "kind") return `You made it ${recordArticle(text(detail.after))}`
+  if (event.action === "not-applicable") return "You said it is not what Vector called it"
+  if (event.action === "forget") return "You set it aside"
+  if (event.action === "restored") return "You brought it back"
+  if (event.action === "made-memory") return "You made it a memory"
+  return event.action
+}
+
+/** When a step happened, as a short date. */
+export function historyDate(at: number) {
+  return new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })
+}
+
+function recordArticle(kind: string) {
+  const label = RECORD_KINDS.includes(kind as RecordKind) ? recordKindLabel(kind as RecordKind).toLowerCase() : kind
+  return `${/^[aeiou]/.test(label) ? "an" : "a"} ${label}`
 }
 
 /** Where a record comes from in its document. */

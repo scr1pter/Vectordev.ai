@@ -13,6 +13,8 @@ import {
   forgottenLabel,
   heldLabel,
   highlight,
+  historyDate,
+  historyLine,
   kindCounts,
   notApplicableLabel,
   outlineRows,
@@ -25,12 +27,14 @@ import {
   statusLabel,
   statusTone,
   steps,
+  usageLabel,
+  versionDiffLabel,
   visibilityLabel,
   warningLabel,
   type RecordKind,
 } from "./memory-documents-model"
 
-type View = "learned" | "outline" | "pages" | "links"
+type View = "learned" | "outline" | "pages" | "links" | "history"
 
 // One document as Vector read it: what it learned (records by kind, each editable), its outline with pages, and its
 // pages as extracted text with the records marked. The app never renders the original file; it shows what was read.
@@ -148,6 +152,9 @@ export function MemoryDocumentPage(props: {
                 </h3>
                 <p class="settings-v2-card-description">{documentMeta(current().document)}</p>
                 <p class="settings-v2-card-description">{visibilityLabel(current().document.visibility)}</p>
+                <Show when={current().diff}>
+                  {(diff) => <p class="settings-v2-card-description">{versionDiffLabel(diff())}</p>}
+                </Show>
               </div>
             </div>
             <div class="settings-v2-card-body">
@@ -210,6 +217,7 @@ export function MemoryDocumentPage(props: {
                       ["outline", "Outline"],
                       ["pages", "Pages"],
                       ["links", "Code links"],
+                      ["history", "History"],
                     ] as const
                   }
                 >
@@ -428,6 +436,30 @@ export function MemoryDocumentPage(props: {
                       </Show>
                     </>
                   )}
+                </Show>
+              </div>
+            </Show>
+
+            <Show when={view() === "history"}>
+              <div class="settings-memory-list" data-component="settings-memory-history">
+                <p class="settings-memory-meta">{usageLabel(current().usage)}</p>
+                <Show
+                  when={current().history.length > 0}
+                  fallback={<p class="settings-memory-empty">Nothing has happened to it yet.</p>}
+                >
+                  <For each={current().history}>
+                    {(event) => (
+                      <div class="settings-memory-row">
+                        <div class="settings-memory-row-head">
+                          <span class="settings-memory-tag">{historyDate(event.at)}</span>
+                          <span>{historyLine(event)}</span>
+                          <Show when={event.record}>
+                            <span class="settings-memory-id">{event.record}</span>
+                          </Show>
+                        </div>
+                      </div>
+                    )}
+                  </For>
                 </Show>
               </div>
             </Show>

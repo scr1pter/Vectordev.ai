@@ -6,7 +6,10 @@ import {
   anchorStatusLabel,
   codeLinks,
   evidence,
+  historyLine,
   reviewRows,
+  usageLabel,
+  versionDiffLabel,
   addedLabel,
   bytes,
   DROP,
@@ -399,6 +402,9 @@ describe("documents page model", () => {
     expect(recordUsage({ uses: 0 })).toBe("Not used yet")
     expect(recordUsage({ uses: 1 })).toBe("Used in 1 run")
     expect(recordUsage({ uses: 4 })).toBe("Used in 4 runs")
+    // Once answers cited it, or the agent opened it, the runs that did and how many passed their checks.
+    expect(recordUsage({ uses: 9, runs: 4, passed: 3 })).toBe("Used in 4 runs · 3 passed")
+    expect(recordUsage({ uses: 2, runs: 1, passed: 0 })).toBe("Used in 1 run · 0 passed")
     expect(recordStatusLabel({ status: "active", pinned: true, userEdited: true })).toBe("Pinned · Edited by you")
     expect(recordStatusLabel({ status: "active", pinned: false, userEdited: false })).toBe("")
     expect(
@@ -586,6 +592,56 @@ describe("documents page model", () => {
       ...[value, changed, conflict, passage, whole].flatMap((row) => [row!.title, row!.text, ...row!.actions.flatMap((action) => [action.label, action.done])]),
       ...(["definition", "use", "route", "env", "constant", "path", "user", "outcome"] as const).map(anchorMethodLabel),
       ...(["fresh", "drifted", "missing"] as const).map(anchorStatusLabel),
+    ]
+    for (const word of words) expect(word.toLowerCase()).not.toContain("project")
+  })
+
+  test("a new version says what it changed and keeps what the user did; History tells each step", () => {
+    const diff = {
+      version: 2,
+      previous: "dprevious",
+      added: { requirement: 4, constraint: 1 },
+      changed: { requirement: 1, constraint: 1 },
+      removed: { term: 1 },
+      unchanged: { contract: 27 },
+      edits: 3,
+      pins: 2,
+    }
+    expect(versionDiffLabel(diff)).toBe(
+      "Version 2: +4 requirements, +1 constraint, 2 changed, 1 removed, 27 unchanged; your 3 edits and 2 pins are kept.",
+    )
+    expect(versionDiffLabel({ ...diff, added: {}, changed: {}, removed: {}, unchanged: {}, edits: 1, pins: 0 })).toBe(
+      "Version 2: nothing Vector learned changed; your 1 edit is kept.",
+    )
+    const at = Date.UTC(2026, 9, 21)
+    expect(historyLine({ at, action: "version", actor: "vector", detail: diff })).toBe(versionDiffLabel(diff))
+    expect(historyLine({ at, action: "added", actor: "user", detail: { version: 1 } })).toBe("Added")
+    expect(historyLine({ at, action: "added", actor: "agent", detail: { version: 1 } })).toBe("Kept by the agent")
+    expect(historyLine({ at, action: "added", actor: "vector", detail: { version: 1 } })).toBe("Read from the repository")
+    expect(
+      historyLine({ at, action: "changed", actor: "vector", record: "r1", detail: { version: 2, before: "30 s", after: "60 s" } }),
+    ).toBe("Changed in version 2: “30 s” became “60 s”")
+    expect(
+      historyLine({ at, action: "linked", actor: "vector", record: "r1", detail: { path: "src/billing/invoice.ts", added: true } }),
+    ).toBe("Linked to src/billing/invoice.ts when the code landed")
+    expect(historyLine({ at, action: "linked", actor: "user", record: "r1", detail: { path: "src/a.ts", symbol: "run" } })).toBe(
+      "You linked it to src/a.ts run",
+    )
+    expect(historyLine({ at, action: "pinned", actor: "user", record: "r1" })).toBe("You pinned it")
+    expect(historyLine({ at, action: "made-memory", actor: "user", record: "r1" })).toBe("You made it a memory")
+    expect(historyLine({ at, action: "kind", actor: "user", record: "r1", detail: { after: "constraint" } })).toBe(
+      "You made it a constraint",
+    )
+    expect(usageLabel({ runs: 4, passed: 3, reverted: 1 })).toBe(
+      "Used in 4 runs in the last 30 days · 3 passed their checks · 1 undone",
+    )
+    expect(usageLabel({ runs: 0, passed: 0, reverted: 0 })).toBe("No run has cited or opened its cards in the last 30 days.")
+    const words = [
+      versionDiffLabel(diff),
+      usageLabel({ runs: 4, passed: 3, reverted: 1 }),
+      ...["added", "version", "changed", "linked", "unlinked", "edited", "pinned", "unpinned", "not-applicable", "forget", "restored", "made-memory"].flatMap((action) =>
+        (["user", "agent", "vector"] as const).map((actor) => historyLine({ at, action, actor, detail: { path: "a.ts", version: 2 } })),
+      ),
     ]
     for (const word of words) expect(word.toLowerCase()).not.toContain("project")
   })
