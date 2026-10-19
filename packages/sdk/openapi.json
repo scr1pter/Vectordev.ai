@@ -7607,7 +7607,7 @@
                   },
                   "action": {
                     "type": "string",
-                    "enum": ["approve", "reject", "reindex", "pause", "resume"]
+                    "enum": ["approve", "reject", "reindex", "pause", "resume", "keep-suggestions"]
                   }
                 },
                 "additionalProperties": false
@@ -7868,6 +7868,203 @@
           {
             "lang": "js",
             "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.file({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/memory/documents/{documentID}/distill": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.documents.distill.estimate",
+        "parameters": [
+          {
+            "name": "documentID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A document's id, such as d4k2q7m3x"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "maxTokens",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What finding more with a model would send and may cost",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDistillEstimate"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "The sections a model would read for suggestions, the tokens sent, the output cap and, for a priced model, the cost at catalog rates; or why it would be refused. Nothing is sent.",
+        "summary": "Estimate finding more with a model",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.distill.estimate({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "tags": ["memory"],
+        "operationId": "memory.documents.distill",
+        "parameters": [
+          {
+            "name": "documentID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "description": "A document's id, such as d4k2q7m3x"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The suggestions kept for review, and what the request spent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryDistillResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Off unless VECTOR_KNOWLEDGE_DISTILL is set. A model reads the document's sections where Vector's rules found little, in a hidden helper session, and each suggestion is kept only if its quote is the document's own words. Kept suggestions wait as proposed records. Refused for a session a guest is in, a model that may train on prompts and the Zen gateway.",
+        "summary": "Find more with a model",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "maxTokens": {
+                    "type": "integer",
+                    "minimum": 1000,
+                    "maximum": 30000
+                  },
+                  "sessionID": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.distill({\n  ...\n})"
           }
         ]
       }
@@ -32737,6 +32934,9 @@
           },
           "usage": {
             "$ref": "#/components/schemas/MemoryDocumentUsage"
+          },
+          "distill": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -32842,6 +33042,120 @@
           }
         },
         "required": ["document", "page", "pages", "unread", "passages"],
+        "additionalProperties": false
+      },
+      "MemoryDistillEstimate": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "refused": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "enum": ["off", "guest", "may-train", "zen", "no-model", "not-found", "held", "not-ready", "nothing"]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["reason", "message"],
+            "additionalProperties": false
+          },
+          "sections": {
+            "type": "number"
+          },
+          "input": {
+            "type": "number"
+          },
+          "output": {
+            "type": "number"
+          },
+          "costKind": {
+            "$ref": "#/components/schemas/CostKind"
+          },
+          "lowUsd": {
+            "type": "number"
+          },
+          "highUsd": {
+            "type": "number"
+          }
+        },
+        "required": ["enabled", "sections", "input", "output"],
+        "additionalProperties": false
+      },
+      "MemoryDistillResult": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "sessionID": {
+            "type": "string"
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryRecord"
+            }
+          },
+          "duplicate": {
+            "type": "number"
+          },
+          "dropped": {
+            "type": "object",
+            "properties": {
+              "invalid": {
+                "type": "number"
+              },
+              "quote": {
+                "type": "number"
+              },
+              "scan": {
+                "type": "number"
+              }
+            },
+            "required": ["invalid", "quote", "scan"],
+            "additionalProperties": false
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cacheRead": {
+                "type": "number"
+              },
+              "cacheWrite": {
+                "type": "number"
+              }
+            },
+            "required": ["input", "output", "reasoning", "cacheRead", "cacheWrite"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "number"
+          },
+          "costKind": {
+            "$ref": "#/components/schemas/CostKind"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": ["model", "sessionID", "records", "duplicate", "dropped", "tokens", "cost", "costKind"],
         "additionalProperties": false
       },
       "MemoryPassage": {

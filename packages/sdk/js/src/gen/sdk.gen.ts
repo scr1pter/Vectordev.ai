@@ -216,6 +216,12 @@ import type {
   MemoryCreateData,
   MemoryCreateErrors,
   MemoryCreateResponses,
+  MemoryDocumentsDistillData,
+  MemoryDocumentsDistillErrors,
+  MemoryDocumentsDistillEstimateData,
+  MemoryDocumentsDistillEstimateErrors,
+  MemoryDocumentsDistillEstimateResponses,
+  MemoryDocumentsDistillResponses,
   MemoryDocumentsFileData,
   MemoryDocumentsFileErrors,
   MemoryDocumentsFileResponses,
@@ -2186,6 +2192,23 @@ export class Settings extends HeyApiClient {
   }
 }
 
+export class Distill extends HeyApiClient {
+  /**
+   * Estimate finding more with a model
+   *
+   * The sections a model would read for suggestions, the tokens sent, the output cap and, for a priced model, the cost at catalog rates; or why it would be refused. Nothing is sent.
+   */
+  public estimate<ThrowOnError extends boolean = false>(
+    options: Options<MemoryDocumentsDistillEstimateData, ThrowOnError>,
+  ) {
+    return (options.client ?? this.client).get<
+      MemoryDocumentsDistillEstimateResponses,
+      MemoryDocumentsDistillEstimateErrors,
+      ThrowOnError
+    >({ url: "/memory/documents/{documentID}/distill", ...options })
+  }
+}
+
 export class Documents extends HeyApiClient {
   /**
    * List documents
@@ -2343,6 +2366,31 @@ export class Documents extends HeyApiClient {
       url: "/memory/documents/{documentID}/file",
       ...options,
     })
+  }
+
+  /**
+   * Find more with a model
+   *
+   * Off unless VECTOR_KNOWLEDGE_DISTILL is set. A model reads the document's sections where Vector's rules found little, in a hidden helper session, and each suggestion is kept only if its quote is the document's own words. Kept suggestions wait as proposed records. Refused for a session a guest is in, a model that may train on prompts and the Zen gateway.
+   */
+  public distill<ThrowOnError extends boolean = false>(options: Options<MemoryDocumentsDistillData, ThrowOnError>) {
+    return (options.client ?? this.client).post<
+      MemoryDocumentsDistillResponses,
+      MemoryDocumentsDistillErrors,
+      ThrowOnError
+    >({
+      url: "/memory/documents/{documentID}/distill",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  }
+
+  private _distill?: Distill
+  get distill2(): Distill {
+    return (this._distill ??= new Distill({ client: this.client }))
   }
 }
 

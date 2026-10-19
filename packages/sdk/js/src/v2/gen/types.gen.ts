@@ -3240,6 +3240,7 @@ export type MemoryDocumentDetail = {
   diff?: MemoryVersionDiff
   history: Array<MemoryDocumentEvent>
   usage: MemoryDocumentUsage
+  distill?: boolean
 }
 
 export type MemoryDocumentPage = {
@@ -3279,6 +3280,43 @@ export type MemoryDocumentPage = {
       page?: number
     }>
   }>
+}
+
+export type MemoryDistillEstimate = {
+  enabled: boolean
+  model?: string
+  refused?: {
+    reason: "off" | "guest" | "may-train" | "zen" | "no-model" | "not-found" | "held" | "not-ready" | "nothing"
+    message: string
+  }
+  sections: number
+  input: number
+  output: number
+  costKind?: CostKind
+  lowUsd?: number
+  highUsd?: number
+}
+
+export type MemoryDistillResult = {
+  model: string
+  sessionID: string
+  records: Array<MemoryRecord>
+  duplicate: number
+  dropped: {
+    invalid: number
+    quote: number
+    scan: number
+  }
+  tokens: {
+    input: number
+    output: number
+    reasoning: number
+    cacheRead: number
+    cacheWrite: number
+  }
+  cost: number
+  costKind: CostKind
+  error?: string
 }
 
 export type MemoryPassage = {
@@ -12513,7 +12551,7 @@ export type MemoryDocumentsUpdateData = {
   body?: {
     title?: string
     visibility?: "private" | "repository"
-    action?: "approve" | "reject" | "reindex" | "pause" | "resume"
+    action?: "approve" | "reject" | "reindex" | "pause" | "resume" | "keep-suggestions"
   }
   path: {
     /**
@@ -12627,6 +12665,88 @@ export type MemoryDocumentsFileResponses = {
 }
 
 export type MemoryDocumentsFileResponse = MemoryDocumentsFileResponses[keyof MemoryDocumentsFileResponses]
+
+export type MemoryDocumentsDistillEstimateData = {
+  body?: never
+  path: {
+    /**
+     * A document's id, such as d4k2q7m3x
+     */
+    documentID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    model?: string
+    maxTokens?: string
+  }
+  url: "/memory/documents/{documentID}/distill"
+}
+
+export type MemoryDocumentsDistillEstimateErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryDocumentsDistillEstimateError =
+  MemoryDocumentsDistillEstimateErrors[keyof MemoryDocumentsDistillEstimateErrors]
+
+export type MemoryDocumentsDistillEstimateResponses = {
+  /**
+   * What finding more with a model would send and may cost
+   */
+  200: MemoryDistillEstimate
+}
+
+export type MemoryDocumentsDistillEstimateResponse =
+  MemoryDocumentsDistillEstimateResponses[keyof MemoryDocumentsDistillEstimateResponses]
+
+export type MemoryDocumentsDistillData = {
+  body?: {
+    model?: string
+    maxTokens?: number
+    sessionID?: string
+  }
+  path: {
+    /**
+     * A document's id, such as d4k2q7m3x
+     */
+    documentID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/documents/{documentID}/distill"
+}
+
+export type MemoryDocumentsDistillErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryDocumentsDistillError = MemoryDocumentsDistillErrors[keyof MemoryDocumentsDistillErrors]
+
+export type MemoryDocumentsDistillResponses = {
+  /**
+   * The suggestions kept for review, and what the request spent
+   */
+  200: MemoryDistillResult
+}
+
+export type MemoryDocumentsDistillResponse = MemoryDocumentsDistillResponses[keyof MemoryDocumentsDistillResponses]
 
 export type MemoryRecordsListData = {
   body?: never
