@@ -334,7 +334,7 @@ function turns(text: string) {
   return words.flatMap((word, index) => {
     if (!NEGATION.has(word) && !EMPHASIS.has(word)) return []
     const window = words
-      .slice(index + 1)
+      .slice(index + 1, index + 30)
       .filter((later) => later.length >= 3 && !NEGATION.has(later) && !EMPHASIS.has(later) && !STOP_TERMS.has(later) && !PROSE_TERMS.has(later))
       .map(stem)
       .filter((later) => !STOP_TERMS.has(later) && !PROSE_TERMS.has(later))
