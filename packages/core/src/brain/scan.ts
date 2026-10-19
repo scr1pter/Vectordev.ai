@@ -36,7 +36,8 @@ function assigned(text: string) {
     if (/(?:pass|pwd)$/i.test(name) && !/(?:^|[_.-])(?:pass|pwd)$/i.test(name) && !/pass(?:word|wd|phrase|code)$/i.test(name))
       return match
     const bare = value.replace(/^["']|["']$/g, "").trim()
-    if (!bare || PLACEHOLDER.test(bare)) return match
+    // A type in a signature or schema ("token: String!)", "password: string;") names no value.
+    if (!bare || PLACEHOLDER.test(bare) || PLACEHOLDER.test(bare.replace(/^\[+|[!?)\]}:,.]+$/g, ""))) return match
     const code = separator === "=" || quote !== "" || value !== bare || /[_.-]|[A-Z]/.test(name)
     const password = /(?:pass(?:word|wd|phrase|code)?|pwd)$/i.test(name)
     if (!code && !password && !(bare.length >= 8 && /[\d$#@!%^&*]/.test(bare))) return match
@@ -240,6 +241,22 @@ const INSTRUCTION_LIKE = [
   /[A-Za-z0-9+/]{120,}={0,2}/,
 ]
 
-export function instructionLike(text: string) {
-  return INSTRUCTION_LIKE.some((pattern) => pattern.test(text))
+// Text in a document that speaks to an AI reading it rather than to the document's readers: a planted turn of a
+// conversation, a role tag, a new task. Documents are checked with these as well, memory writes with the list above.
+const ADDRESSED = [
+  /\bif you are an? (?:ai|assistant|language model|llm|large language model|chatbot|agent)\b/i,
+  /\b(?:ai|llm) (?:agents?|assistants?|models?) (?:reading|processing|summari[sz]ing) this\b/i,
+  /\bto (?:the|any) (?:ai|llm|assistant|language model) (?:reading|processing) this\b/i,
+  /<\/?system>/i,
+  /^\s*assistant\s*:/im,
+  /\byou must now\b/i,
+  /\bnew task\s*:/i,
+]
+
+/** Whether text reads as instructions to the agent. A document's text is also checked for text addressed to an AI. */
+export function instructionLike(text: string, document = false) {
+  return (
+    INSTRUCTION_LIKE.some((pattern) => pattern.test(text)) ||
+    (document && ADDRESSED.some((pattern) => pattern.test(text)))
+  )
 }
