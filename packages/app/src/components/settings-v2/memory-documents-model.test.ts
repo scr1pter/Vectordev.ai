@@ -38,6 +38,13 @@ import {
   recordUsage,
   refusal,
   refusalLabel,
+  DISTILL,
+  distillCostLabel,
+  distilledLabel,
+  distillEstimateLabel,
+  suggestedBy,
+  suggestion,
+  suggestionsLabel,
   reindexable,
   replaceable,
   resumable,
@@ -662,5 +669,84 @@ describe("documents page model", () => {
     ]
     expect(words.length).toBeGreaterThan(40)
     for (const word of words) expect(word.toLowerCase()).not.toContain("project")
+  })
+
+  test("finding more with a model says what goes, what it may cost, and what is kept, and never more", () => {
+    const estimate = {
+      enabled: true,
+      model: "anthropic/claude-sonnet-4",
+      sections: 3,
+      input: 12_431,
+      output: 4_000,
+      costKind: "priced" as const,
+      lowUsd: 0.0398,
+      highUsd: 0.0973,
+    }
+    expect(distillEstimateLabel(estimate)).toBe(
+      "Vector would send 3 sections (about 12,000 tokens) to anthropic/claude-sonnet-4, with up to 4,000 tokens back. About $0.04 to $0.10 at catalog rates.",
+    )
+    expect(distillCostLabel({ costKind: "free" })).toBe("The model is free.")
+    expect(distillCostLabel({ costKind: "unknown" })).toBe("The model has no listed price, so Vector cannot estimate what it costs.")
+    expect(distillCostLabel({ costKind: "priced", lowUsd: 0.0012, highUsd: 0.004 })).toBe("About $0.0012 to $0.0040 at catalog rates.")
+    // A refusal says why in the engine's words, and nothing is sent.
+    expect(
+      distillEstimateLabel({
+        enabled: true,
+        refused: { reason: "may-train", message: "Documents are withheld from models that may train on prompts." },
+        sections: 0,
+        input: 0,
+        output: 4_000,
+      }),
+    ).toBe("Documents are withheld from models that may train on prompts.")
+    const record = { origin: "distilled" as const, status: "proposed" as const }
+    expect(
+      distilledLabel({
+        model: "lmstudio/test-model",
+        records: [record, record] as never,
+        dropped: { invalid: 0, quote: 1, scan: 0 },
+      }),
+    ).toBe("2 suggestions from lmstudio/test-model, waiting below for you to keep or drop. Dropped 1 suggestion that did not hold up against the document.")
+    expect(distilledLabel({ model: "m", records: [], dropped: { invalid: 0, quote: 0, scan: 0 } })).toBe(
+      "No suggestions from m held their quotes.",
+    )
+    expect(suggestionsLabel(12, "m")).toBe("12 suggestions from m")
+    expect(suggestion(record)).toBe(true)
+    expect(suggestion({ origin: "extracted", status: "proposed" })).toBe(false)
+    expect(suggestion({ origin: "distilled", status: "active" })).toBe(false)
+    expect(recordStatusLabel({ ...record, hold: undefined, userEdited: false, pinned: false })).toBe(
+      "Suggested by a model: keep it or drop it",
+    )
+    const history = [
+      {
+        at: 2,
+        action: "distilled",
+        actor: "user" as const,
+        detail: { model: "lmstudio/test-model", kept: 2, tokens: { input: 1_400, output: 160 }, cost: 0.0042, costKind: "priced" },
+      },
+      { at: 1, action: "kept-suggestions", actor: "user" as const, detail: { count: 2 } },
+    ]
+    expect(suggestedBy(history)).toBe("lmstudio/test-model")
+    expect(history.map(historyLine)).toEqual([
+      "You asked lmstudio/test-model to find more: 2 suggestions kept (1,560 tokens, $0.0042)",
+      "You kept 2 suggestions from a model",
+    ])
+    const [row] = reviewRows([
+      {
+        id: "r1",
+        kind: "held",
+        a: "r1",
+        subject: "Billing",
+        detail: { type: "record", document: "d1", title: "Billing", text: "Refunds are approved by a support lead", suggested: true },
+        status: "open",
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    ])
+    expect(row!.text).toBe("A model suggested a record from it. Keep it if the document says so. “Refunds are approved by a support lead”")
+    expect(row!.actions.map((action) => action.label)).toEqual(["Keep", "Drop"])
+    for (const word of [DISTILL, distillEstimateLabel(estimate), row!.text, ...history.map(historyLine)]) {
+      expect(word.toLowerCase()).not.toContain("project")
+      expect(word.toLowerCase()).not.toContain("exactly")
+    }
   })
 })

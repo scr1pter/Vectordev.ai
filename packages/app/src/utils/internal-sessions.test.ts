@@ -38,6 +38,7 @@ describe("helperLabel", () => {
     expect(helperLabel("codespace.autocomplete")).toBe("Autocomplete")
     expect(helperLabel("swarm.planner")).toBe("Swarm planner")
     expect(helperLabel("browser-agent.planner")).toBe("Browser Agent planner")
+    expect(helperLabel("brain.distill")).toBe("Document suggestions")
     expect(helperLabel("something.new")).toBe("Vector helper")
   })
 })

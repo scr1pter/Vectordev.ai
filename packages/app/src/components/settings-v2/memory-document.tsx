@@ -1,12 +1,15 @@
-import type { MemoryAnchor, MemoryRecord, VectorClient } from "@vectordevai/sdk/v2/client"
+import type { MemoryAnchor, MemoryDistillEstimate, MemoryRecord, VectorClient } from "@vectordevai/sdk/v2/client"
 import { For, Show, createMemo, createResource, createSignal } from "solid-js"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import {
+  DISTILL,
   FORGET,
   RECORD_KINDS,
   anchorLine,
   approvable,
   codeLinks,
+  distilledLabel,
+  distillEstimateLabel,
   evidence,
   documentHoldLabel,
   documentMeta,
@@ -27,6 +30,9 @@ import {
   statusLabel,
   statusTone,
   steps,
+  suggestedBy,
+  suggestion,
+  suggestionsLabel,
   usageLabel,
   versionDiffLabel,
   visibilityLabel,
@@ -82,6 +88,20 @@ export function MemoryDocumentPage(props: {
         .page({ documentID: props.documentID, page: String(input.page) })
         .then((result) => result.data),
   )
+
+  // What a model suggested for the document and the user has not looked at yet.
+  const [held] = createResource(
+    () => {
+      const client = props.client()
+      return client ? { client, version: version() } : false
+    },
+    (input) =>
+      input.client.memory.records
+        .list({ document: props.documentID, status: "held", limit: "100" })
+        .then((result) => result.data),
+  )
+  const suggested = createMemo(() => (held.latest?.records ?? []).filter(suggestion))
+  const [reviewing, setReviewing] = createSignal(false)
 
   const records = createMemo(() => {
     const first = kind() ? filtered.latest : detail.latest?.records
@@ -249,6 +269,55 @@ export function MemoryDocumentPage(props: {
 
             <Show when={view() === "learned"}>
               <p class="settings-memory-meta settings-memory-pad">{kindCounts(current().document.stats.kinds)}</p>
+              <Show when={current().distill}>
+                <FindMore
+                  client={props.client}
+                  documentID={props.documentID}
+                  onDone={(message) => {
+                    say(message)
+                    setReviewing(true)
+                    setExtra({ records: [] })
+                    refresh()
+                  }}
+                  onError={(message) => {
+                    setNotice("")
+                    setError(message)
+                  }}
+                />
+              </Show>
+              <Show when={suggested().length > 0}>
+                <div class="settings-memory-list" data-component="settings-memory-suggestions">
+                  <div class="settings-memory-row is-waiting">
+                    <div class="settings-memory-row-head">
+                      <span>{suggestionsLabel(suggested().length, suggestedBy(current().history))}</span>
+                    </div>
+                    <div class="settings-memory-actions">
+                      <ButtonV2
+                        size="small"
+                        variant="outline"
+                        icon="check"
+                        onClick={() =>
+                          change(
+                            (client) =>
+                              client.memory.documents.update({ documentID: props.documentID, action: "keep-suggestions" }),
+                            "Kept. Vector uses them now.",
+                          )
+                        }
+                      >
+                        Keep all
+                      </ButtonV2>
+                      <ButtonV2 size="small" variant="ghost" onClick={() => setReviewing(!reviewing())}>
+                        {reviewing() ? "Hide" : "Review"}
+                      </ButtonV2>
+                    </div>
+                  </div>
+                  <Show when={reviewing()}>
+                    <For each={suggested()}>
+                      {(record) => <RecordCard record={record} anchors={anchors(record.id)} change={change} />}
+                    </For>
+                  </Show>
+                </div>
+              </Show>
               <div class="settings-memory-segments settings-memory-kinds" role="tablist" aria-label="Kind of record">
                 <button
                   type="button"
@@ -627,6 +696,33 @@ function RecordCard(props: {
             </>
           }
         >
+          <Show when={suggestion(props.record)}>
+            <ButtonV2
+              size="small"
+              variant="outline"
+              icon="check"
+              onClick={() =>
+                props.change(
+                  (client) => client.memory.review.resolve({ itemID: props.record.id, action: "approve" }),
+                  "Kept. Vector uses it now.",
+                )
+              }
+            >
+              Keep
+            </ButtonV2>
+            <ButtonV2
+              size="small"
+              variant="ghost"
+              onClick={() =>
+                props.change(
+                  (client) => client.memory.review.resolve({ itemID: props.record.id, action: "reject" }),
+                  "Dropped. A model's suggestion of it is not proposed again.",
+                )
+              }
+            >
+              Drop
+            </ButtonV2>
+          </Show>
           <Show when={props.record.status !== "archived"}>
             <ButtonV2
               size="small"
@@ -737,6 +833,68 @@ function RecordCard(props: {
         </div>
       </Show>
     </article>
+  )
+}
+
+// "Find more with a model…": the estimate first, then the request only when the user sends it. Whatever the model
+// suggests that holds its quotes comes back as suggestions on this page.
+function FindMore(props: {
+  client: () => VectorClient | undefined
+  documentID: string
+  onDone: (message: string) => void
+  onError: (message: string) => void
+}) {
+  const [estimate, setEstimate] = createSignal<MemoryDistillEstimate>()
+  const [busy, setBusy] = createSignal(false)
+  const ask = async () => {
+    const client = props.client()
+    if (!client) return
+    setBusy(true)
+    const result = await client.memory.distill
+      .estimate({ documentID: props.documentID })
+      .catch((cause: unknown) => ({ error: cause, data: undefined }))
+    setBusy(false)
+    if (!result.data) return props.onError(refusal(result.error).message ?? "Vector could not work out what this would send. Try again.")
+    setEstimate(result.data)
+  }
+  const send = async () => {
+    const client = props.client()
+    if (!client) return
+    setBusy(true)
+    const result = await client.memory.distill
+      .run({ documentID: props.documentID })
+      .catch((cause: unknown) => ({ error: cause, data: undefined }))
+    setBusy(false)
+    setEstimate(undefined)
+    if (!result.data) return props.onError(refusal(result.error).message ?? "Vector could not ask the model. Try again.")
+    props.onDone(distilledLabel(result.data))
+  }
+  return (
+    <div class="settings-memory-actions settings-memory-pad" data-component="settings-memory-find-more">
+      <Show
+        when={estimate()}
+        fallback={
+          <ButtonV2 size="small" variant="outline" disabled={busy()} onClick={() => void ask()}>
+            Find more with a model…
+          </ButtonV2>
+        }
+      >
+        {(current) => (
+          <div class="settings-memory-row">
+            <p class="settings-memory-meta">{DISTILL}</p>
+            <p class="settings-memory-text">{distillEstimateLabel(current())}</p>
+            <div class="settings-memory-actions">
+              <ButtonV2 size="small" disabled={busy() || !!current().refused} onClick={() => void send()}>
+                {busy() ? "Asking the model…" : "Send"}
+              </ButtonV2>
+              <ButtonV2 size="small" variant="ghost" disabled={busy()} onClick={() => setEstimate(undefined)}>
+                Cancel
+              </ButtonV2>
+            </div>
+          </div>
+        )}
+      </Show>
+    </div>
   )
 }
 

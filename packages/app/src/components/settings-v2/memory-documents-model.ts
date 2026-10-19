@@ -3,6 +3,8 @@
 
 import type {
   MemoryAnchor,
+  MemoryDistillEstimate,
+  MemoryDistillResult,
   MemoryDocument,
   MemoryDocumentDetail,
   MemoryDocumentList,
@@ -536,7 +538,20 @@ export function historyLine(event: MemoryDocumentDetail["history"][number]) {
   if (event.action === "forget") return "You set it aside"
   if (event.action === "restored") return "You brought it back"
   if (event.action === "made-memory") return "You made it a memory"
+  if (event.action === "distilled") return distilledLine(detail)
+  if (event.action === "kept-suggestions")
+    return `You kept ${typeof detail.count === "number" ? count(detail.count, "suggestion") : "the suggestions"} from a model`
   return event.action
+}
+
+// A run of a model over the document, on its History: what it kept and what the request spent.
+function distilledLine(detail: Record<string, unknown>) {
+  const model = typeof detail.model === "string" ? detail.model : "a model"
+  const kept = typeof detail.kept === "number" ? detail.kept : 0
+  const used = detail.tokens && typeof detail.tokens === "object" ? (detail.tokens as Record<string, unknown>) : {}
+  const spent = [used.input, used.output].reduce<number>((sum, value) => sum + (typeof value === "number" ? value : 0), 0)
+  const cost = typeof detail.cost === "number" && detail.costKind === "priced" ? `, ${usd(detail.cost)}` : ""
+  return `You asked ${model} to find more: ${kept === 0 ? "no suggestions" : count(kept, "suggestion")} kept (${spent.toLocaleString("en-US")} tokens${cost})`
 }
 
 /** When a step happened, as a short date. */
@@ -554,7 +569,10 @@ export function recordPlace(record: Pick<MemoryRecord, "page" | "section">) {
   return [...(record.page ? [`p.${record.page}`] : []), ...(record.section ? [record.section] : [])].join(" · ")
 }
 
-export function recordStatusLabel(record: Pick<MemoryRecord, "status" | "hold" | "userEdited" | "pinned">) {
+export function recordStatusLabel(
+  record: Pick<MemoryRecord, "status" | "hold" | "userEdited" | "pinned"> & Partial<Pick<MemoryRecord, "origin">>,
+) {
+  if (record.origin === "distilled" && record.status === "proposed") return "Suggested by a model: keep it or drop it"
   if (record.status === "quarantined" || record.status === "proposed")
     return `Held for your review: ${documentHoldLabel(record.hold)}`
   if (record.status === "archived") return "Not used: you set it aside"
@@ -684,6 +702,58 @@ function extension(name: string) {
 
 function clamp(value: number, length: number) {
   return Math.min(Math.max(0, value), length)
+}
+
+// --- Finding more with a model -------------------------------------------------------------------------------------
+
+/** What the estimate sheet says first: how a model is used here, and what is kept of what it says. */
+export const DISTILL =
+  "A model you choose reads the sections where Vector's rules found little. Each suggestion must quote the document word for word or it is dropped, and what is kept waits here for you to keep or drop. Not for models that may train on prompts."
+
+/** The estimate, before anything is sent: what would go, to which model, and what it may cost. */
+export function distillEstimateLabel(estimate: MemoryDistillEstimate) {
+  if (estimate.refused) return estimate.refused.message
+  return `Vector would send ${count(estimate.sections, "section")} (about ${tokens(estimate.input)} tokens) to ${estimate.model ?? "the model"}, with up to ${tokens(estimate.output)} tokens back. ${distillCostLabel(estimate)}`
+}
+
+/** What a request may cost: at catalog rates for a priced model, and said plainly when there is no price. */
+export function distillCostLabel(estimate: Pick<MemoryDistillEstimate, "costKind" | "lowUsd" | "highUsd">) {
+  if (estimate.costKind === "free") return "The model is free."
+  if (estimate.costKind === "plan") return "Your plan covers the model."
+  if (estimate.lowUsd === undefined || estimate.highUsd === undefined)
+    return "The model has no listed price, so Vector cannot estimate what it costs."
+  return `About ${usd(estimate.lowUsd)} to ${usd(estimate.highUsd)} at catalog rates.`
+}
+
+/** What the page says once the model answered. */
+export function distilledLabel(result: Pick<MemoryDistillResult, "records" | "model" | "dropped" | "error">) {
+  const dropped = result.dropped.quote + result.dropped.scan + result.dropped.invalid
+  const head =
+    result.records.length === 0
+      ? `No suggestions from ${result.model} held their quotes.`
+      : `${suggestionsLabel(result.records.length, result.model)}, waiting below for you to keep or drop.`
+  const away = dropped > 0 ? ` Dropped ${count(dropped, "suggestion")} that did not hold up against the document.` : ""
+  return `${head}${away}${result.error ? ` ${result.error}` : ""}`
+}
+
+/** "12 suggestions from <model>". */
+export function suggestionsLabel(n: number, model: string | undefined) {
+  return `${count(n, "suggestion")}${model ? ` from ${model}` : ""}`
+}
+
+/** The model of the latest run over the document, from its History. */
+export function suggestedBy(history: MemoryDocumentDetail["history"]) {
+  const model = history.find((event) => event.action === "distilled")?.detail?.model
+  return typeof model === "string" ? model : undefined
+}
+
+/** A record a model suggested that waits for the user. */
+export function suggestion(record: Pick<MemoryRecord, "origin" | "status">) {
+  return record.origin === "distilled" && record.status === "proposed"
+}
+
+function usd(value: number) {
+  return `$${value < 0.01 ? value.toFixed(4) : value.toFixed(2)}`
 }
 
 // --- Code links and what needs a look ------------------------------------------------------------------------------
@@ -821,9 +891,21 @@ export function reviewRows(items: readonly MemoryReviewItem[]): ReviewRow[] {
         ],
       }
     }
+    const title = word(detail.title) || "A document"
+    if (detail.suggested === true)
+      return {
+        id: item.id,
+        kind: item.kind,
+        title,
+        text: `A model suggested a record from it. Keep it if the document says so.${detail.text ? ` “${word(detail.text).slice(0, 200)}”` : ""}`,
+        ...(typeof detail.document === "string" ? { document: detail.document } : {}),
+        actions: [
+          { action: "approve", label: "Keep", done: "Kept. Vector uses it now." },
+          { action: "reject", label: "Drop", done: "Dropped. A model's suggestion of it is not proposed again." },
+        ],
+      }
     const hold = typeof detail.hold === "string" ? (detail.hold as DocumentHold) : undefined
     const whole = detail.type === "document"
-    const title = word(detail.title) || "A document"
     return {
       id: item.id,
       kind: item.kind,

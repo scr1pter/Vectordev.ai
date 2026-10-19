@@ -1,5 +1,5 @@
 // Sessions Vector runs for its own helpers: Vectorscope reviews and their double-check, inline edit, autocomplete,
-// the browser agent and swarm planners. The engine marks them with `internal` (the helper's name) and leaves them out
+// the browser agent, swarm planners and a model finding more in a document. The engine marks them with `internal` (the helper's name) and leaves them out
 // of session lists. They must stay out of everything the user navigates — lists, search, tabs, notifications — while
 // their spend still counts, towards the session that launched them when there is one.
 export const REVIEW_SESSION_TITLE_PREFIX = "Vectorscope review · "
@@ -24,6 +24,7 @@ const HELPER_LABELS: Record<string, string> = {
   "codespace.autocomplete": "Autocomplete",
   "browser-agent": "Browser Agent planner",
   swarm: "Swarm planner",
+  "brain.distill": "Document suggestions",
 }
 
 // What the user calls the helper behind a session's `internal` name, e.g. "vectorscope.verify" is part of a
