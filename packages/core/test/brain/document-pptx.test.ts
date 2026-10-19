@@ -56,6 +56,7 @@ describe("BrainDocument PowerPoint", () => {
     const structured = BrainStructure.structure(extracted, {
       repository: "r",
       lineage: "deck",
+      document: "d1",
       limits: BrainLimits.LIMITS.worker,
     })
     expect(structured.sections.map((section) => [section.kind, section.heading])).toEqual([

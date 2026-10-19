@@ -17,9 +17,9 @@ describe("BrainExtract keys", () => {
     expect(v2.get(uploads.key)!.quoteHash).toBe(uploads.quoteHash)
   })
 
-  test("ids are 'r' and six base32 characters from the repository, lineage and key, never the section", async () => {
+  test("ids are 'r' and twelve base32 characters from the repository, lineage and key, never the section", async () => {
     const one = (await learn(SPEC_V1, "auth-spec.md")).records
-    expect(one.every((record) => /^r[0-9a-hjkmnp-tv-z]{6}$/.test(record.id))).toBe(true)
+    expect(one.every((record) => /^r[0-9a-hjkmnp-tv-z]{12}$/.test(record.id))).toBe(true)
     expect(new Set(one.map((record) => record.id)).size).toBe(one.length)
     const moved = (await learn(SPEC_V1.replace("## 2 Limits", "## 9 Appendix > Limits"), "auth-spec.md")).records
     expect(moved.map((record) => record.id)).toEqual(one.map((record) => record.id))

@@ -51,7 +51,7 @@ export const RULES = [
 export type Rule = (typeof RULES)[number]
 
 export type Record = {
-  /** "r" and 6 base32 characters of the hash of the repository, the lineage and the key. */
+  /** "r" and 12 base32 characters of the hash of the repository, the lineage and the key. */
   readonly id: string
   /** kind "|" subject, with "#2" and on for a second record of the same subject in one document. */
   readonly key: string
@@ -1271,7 +1271,7 @@ function assemble(
     const ordinal = ordinals.get(`${base}\0${quoteHash}`)!
     const key = ordinal > 1 ? `${base}#${ordinal}` : base
     return {
-      id: `r${BrainStructure.base32(BrainStructure.sha256(`${input.repository}\0${input.lineage}\0${key}`)).slice(0, 6)}`,
+      id: `r${BrainStructure.base32(BrainStructure.sha256(`${input.repository}\0${input.lineage}\0${key}`)).slice(0, BrainStructure.ID)}`,
       key,
       kind: candidate.kind,
       subject,

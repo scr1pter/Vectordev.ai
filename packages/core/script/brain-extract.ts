@@ -21,7 +21,12 @@ if (extracted.type === "refused") {
   console.error(`${name}: ${extracted.message}`)
   process.exit(1)
 }
-const place = { repository: "dry-run", lineage: name.toLowerCase(), limits: BrainLimits.LIMITS.worker }
+const place = {
+  repository: "dry-run",
+  lineage: name.toLowerCase(),
+  document: "dry-run",
+  limits: BrainLimits.LIMITS.worker,
+}
 const structured = BrainStructure.structure(extracted, place)
 const extraction = BrainExtract.extract(extracted, structured, place)
 const warnings = [...new Set([...extracted.warnings, ...structured.warnings, ...extraction.warnings])]

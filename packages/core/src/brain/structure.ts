@@ -11,14 +11,22 @@ import type { BrainSchema } from "./schema"
 // own) and passages are runs of blocks inside one section, sized for retrieval: about 320 tokens, at least 120 unless the
 // section ends first, never more than 480 (a table or code block stays whole up to 600). Each passage carries a
 // breadcrumb ("Auth spec > 3 Limits > 3.2 Retries (p.12)") and a content-addressed id, so an unchanged passage keeps
-// its id, its keyword postings and its credit across a reindex or a new version.
+// its id, its keyword postings and its credit across a reindex or a new version. Ids are 60 bits wide, since one table
+// holds every repository's rows and a content-addressed id cannot be drawn again when two collide.
 
 export const TARGET = 320
 export const MINIMUM = 120
 export const MAXIMUM = 480
 export const WHOLE = 600
+/** Base32 characters in a passage's, a section's or a record's id after its letter: 60 bits. */
+export const ID = 12
 
 export type Section = {
+  /**
+   * "s" and 12 base32 characters of the hash of the document's id and the section's ordinal: sections are numbered
+   * within their document, so the id names the document too. Passages and records name their section by ordinal.
+   */
+  readonly id: string
   readonly ordinal: number
   readonly parent?: number
   /** 0 for the text before the first heading. */
@@ -35,7 +43,7 @@ export type Section = {
 }
 
 export type Passage = {
-  /** "p" and 7 base32 characters of the hash of the repository, the lineage and the passage's normalised text. */
+  /** "p" and 12 base32 characters of the hash of the repository, the lineage and the passage's normalised text. */
   readonly id: string
   readonly section: number
   readonly ordinal: number
@@ -74,7 +82,13 @@ const PRIORITY: readonly BrainDocument.Hold[] = ["instruction-like", "hidden-uni
 
 export function structure(
   extracted: BrainDocument.Extracted,
-  input: { readonly repository: string; readonly lineage: string; readonly limits: BrainLimits.Limits },
+  input: {
+    readonly repository: string
+    readonly lineage: string
+    /** The id of the document version being read. */
+    readonly document: string
+    readonly limits: BrainLimits.Limits
+  },
 ): Structured {
   const sections: {
     ordinal: number
@@ -148,7 +162,7 @@ export function structure(
       const holds = [...overlapping, ...(BrainScan.instructionLike(body, true) ? (["instruction-like"] as const) : [])]
       const hold = PRIORITY.find((item) => holds.includes(item))
       passages.push({
-        id: `p${base32(sha256(`${input.repository}\0${input.lineage}\0${normal}${seen > 0 ? `\0${seen + 1}` : ""}`)).slice(0, 7)}`,
+        id: `p${base32(sha256(`${input.repository}\0${input.lineage}\0${normal}${seen > 0 ? `\0${seen + 1}` : ""}`)).slice(0, ID)}`,
         section: section.ordinal,
         ordinal: passages.length,
         ...(page === undefined ? {} : { page }),
@@ -175,6 +189,7 @@ export function structure(
       const start = blocks[0]?.span.start ?? 0
       const end = blocks.at(-1)?.span.end ?? start
       return {
+        id: `s${base32(sha256(`${input.document}\0${section.ordinal}`)).slice(0, ID)}`,
         ordinal: section.ordinal,
         ...(section.parent === undefined ? {} : { parent: section.parent }),
         level: section.level,

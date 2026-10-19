@@ -10,7 +10,12 @@ import { BrainStructure } from "@vectordevai/core/brain/structure"
 export async function learn(
   content: string | Uint8Array,
   name = "doc.md",
-  options: { readonly repository?: string; readonly lineage?: string; readonly limits?: BrainLimits.Limits } = {},
+  options: {
+    readonly repository?: string
+    readonly lineage?: string
+    readonly document?: string
+    readonly limits?: BrainLimits.Limits
+  } = {},
 ) {
   const limits = options.limits ?? BrainLimits.LIMITS.worker
   const extracted = await BrainDocument.read(
@@ -18,7 +23,12 @@ export async function learn(
     limits,
   )
   if (extracted.type === "refused") throw new Error(`${name} was refused: ${extracted.message}`)
-  const place = { repository: options.repository ?? "repo", lineage: options.lineage ?? name.toLowerCase(), limits }
+  const place = {
+    repository: options.repository ?? "repo",
+    lineage: options.lineage ?? name.toLowerCase(),
+    document: options.document ?? `d-${name.toLowerCase()}`,
+    limits,
+  }
   const structured = BrainStructure.structure(extracted, place)
   return { extracted, structured, ...BrainExtract.extract(extracted, structured, place) }
 }

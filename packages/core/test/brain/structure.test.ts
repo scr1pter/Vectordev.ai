@@ -130,11 +130,22 @@ describe("BrainStructure", () => {
     const first = (await learn(SPEC_V1, "auth-spec.md")).structured.passages
     const again = (await learn(`${SPEC_V1}\n## 9 New\n\nA new section.`, "auth-spec.md")).structured.passages
     for (const passage of first) expect(again.find((other) => other.body === passage.body)?.id).toBe(passage.id)
-    expect(first.every((passage) => /^p[0-9a-hjkmnp-tv-z]{7}$/.test(passage.id))).toBe(true)
+    expect(first.every((passage) => /^p[0-9a-hjkmnp-tv-z]{12}$/.test(passage.id))).toBe(true)
     const repeated = (await learn("# A\n\nSame words here.\n\n# B\n\nSame words here.")).structured.passages
     expect(new Set(repeated.map((passage) => passage.id)).size).toBe(2)
     const other = (await learn(SPEC_V1, "other.md")).structured.passages
     expect(other.some((passage) => first.some((same) => same.id === passage.id))).toBe(false)
+  })
+
+  test("section ids name their document, so two documents never share one", async () => {
+    const one = (await learn(SPEC_V1, "auth-spec.md", { document: "d1" })).structured.sections
+    const again = (await learn(SPEC_V1, "auth-spec.md", { document: "d1" })).structured.sections
+    const other = (await learn(SPEC_V1, "auth-spec.md", { document: "d2" })).structured.sections
+    expect(one.length).toBeGreaterThan(1)
+    expect(one.every((section) => /^s[0-9a-hjkmnp-tv-z]{12}$/.test(section.id))).toBe(true)
+    expect(new Set(one.map((section) => section.id)).size).toBe(one.length)
+    expect(again.map((section) => section.id)).toEqual(one.map((section) => section.id))
+    expect(other.some((section) => one.some((same) => same.id === section.id))).toBe(false)
   })
 
   test("a flagged block holds its passage, and more than 5% held holds the document", async () => {
