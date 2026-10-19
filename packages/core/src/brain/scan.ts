@@ -18,9 +18,10 @@ export function stripHidden(text: string) {
 }
 
 // `password = hunter2`, `DATABASE_PASSWORD='correct horse battery staple'`, `"token": "…"`: a value given to a
-// secret-sounding name. Group 1 is a quote around the name, 2 the name, 3 `:` or `=`, 4 the value.
+// secret-sounding name. Group 1 is a quote around the name, 2 the name, 3 `:` or `=`, 4 the value. The name's prefix is
+// bounded, so a long run of name characters costs a fixed amount at each place a match is tried, not the rest of it.
 const ASSIGNED =
-  /(["']?)\b([\w.-]*?(?:password|passwd|passphrase|passcode|pass|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|private[_-]?key))\1\s*([:=])\s*("[^"\n]*"|'[^'\n]*'|[^\s"',;]+)/gi
+  /(["']?)\b([\w.-]{0,128}?(?:password|passwd|passphrase|passcode|pass|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|private[_-]?key))\1\s*([:=])\s*("[^"\n]*"|'[^'\n]*'|[^\s"',;]+)/gi
 
 // What stands where a secret would in code and configuration: an environment variable, a template slot, a type, a
 // mask. None of them is the secret.
@@ -50,7 +51,7 @@ function assigned(text: string) {
 const SECRET_SHAPES = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
-  /\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:[^\s/@]+@[^\s]+/gi,
+  /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:[^\s/@]+@[^\s]+/gi,
   /\bAIza[0-9A-Za-z_-]{35}\b/g,
   /\b(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,}\b/g,
   /\bnpm_[A-Za-z0-9]{36}\b/g,
@@ -74,7 +75,7 @@ const SPOKEN =
 // Words after "the password is" that say something about it rather than give it: "is stored in 1Password", "is
 // required", "is the same as staging".
 const NOT_A_VALUE =
-  /^(?:stored|kept|saved|managed|set|read|loaded|in|on|at|from|the|a|an|not|never|no|required|needed|optional|rotated|generated|available|provided|configured|defined|found|written|shared|sent|changed|hashed|encrypted|missing|empty|wrong|invalid|expired|only|always|usually|also|still|now|then|same|different|unknown|too|of|for|to|under|via|by|injected|passed|fetched|pulled|created|reset|entered|typed|asked|prompted|validated|checked|verified|used|mandatory|long|short|strong|weak|secure|insecure|private|public|secret|random|unique|complex|simple|easy|hard|good|bad|fine|ok|okay|old|new|current|default|temporary|temp|personal|common|known|obvious|visible|hidden|plain|plaintext|cleartext|masked|blank|null|none|nothing|something|here|there|below|above|this|that|it|what|which|whatever|see|ask|check|case|its|their|your|my|our|his|her|\[redacted\])$/i
+  /^(?:stored|kept|saved|managed|set|read|loaded|in|on|at|from|the|a|an|not|never|no|required|needed|optional|rotated|generated|available|provided|configured|defined|found|written|shared|sent|changed|hashed|encrypted|missing|empty|wrong|valid|invalid|incorrect|accepted|rejected|allowed|denied|enabled|disabled|active|inactive|expired|only|always|usually|also|still|now|then|same|different|unknown|too|of|for|to|under|via|by|injected|passed|fetched|pulled|created|reset|entered|typed|asked|prompted|validated|checked|verified|used|mandatory|long|short|strong|weak|secure|insecure|private|public|secret|random|unique|complex|simple|easy|hard|good|bad|fine|ok|okay|old|new|current|default|temporary|temp|personal|common|known|obvious|visible|hidden|plain|plaintext|cleartext|masked|blank|null|none|nothing|something|here|there|below|above|this|that|it|what|which|whatever|see|ask|check|case|its|their|your|my|our|his|her|\[redacted\])$/i
 
 // Words that describe a password rather than give it: "is case-sensitive", "is rotating", "is configurable".
 const DESCRIBES = /(?:ed|able|ible|ive|ly|ing|ful|less|ous)$/i
@@ -84,9 +85,11 @@ const DESCRIBES = /(?:ed|able|ible|ive|ly|ing|ful|less|ous)$/i
 const PASSWORD_LIKE = /\d|[!@#$%^&*_+=~?<>|\\]|[a-z][A-Z]/
 
 // A username and password pair: "login: admin / hunter2hunter2", "credentials are deploy/s3cret!", "basic auth is
-// admin:Tr0ub4dor&3x". The password has a letter and a digit or symbol, so "localhost:3000" is not one.
+// admin:Tr0ub4dor&3x". The password has a letter and a digit or symbol, so "localhost:3000" is not one. An endpoint is
+// not a pair: an HTTP method is not a username, and after a spaced "/" a path ("Login: POST /v1/session") is not a
+// password.
 const LOGIN =
-  /\b((?:login|logins|credentials?|creds|basic auth)\s*(?::|=|\bis\b|\bare\b))\s*["']?[^\s"'/:]+\s*[/:]\s*(?!\/)(?=[^\s"',;]*[A-Za-z])(?=[^\s"',;]*[\d!@#$%^&*_+=~?])[^\s"',;]+/gi
+  /\b((?:login|logins|credentials?|creds|basic auth)\s*(?::|=|\bis\b|\bare\b))\s*["']?(?!(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)\b)[^\s"'/:]+(?:\s*:\s*|\/|\s+\/\s*(?![^\s"',;]*\/)|\/\s+(?![^\s"',;]*\/))(?!\/)(?=[^\s"',;]*[A-Za-z])(?=[^\s"',;]*[\d!@#$%^&*_+=~?])[^\s"',;]+/gi
 
 // Words that name a password, a login or a code. A password-like value in the same sentence is that secret, wherever it
 // sits: "the staging admin's password, Tr0ub4dor&3x, is in the seed script", "log in to staging as admin with
@@ -176,7 +179,8 @@ export function credential(text: string) {
 
 // A long run of mixed letters and digits with no word in it is a key far more often than it is prose or a path. A path
 // or identifier ("migration/20261015_add_review_helpers") is made of words, so two word segments rule a match out.
-const OPAQUE = /\b(?=[A-Za-z0-9_\-+/]*\d)(?=[A-Za-z0-9_\-+/]*[A-Za-z])[A-Za-z0-9_\-+/]{32,}={0,2}/g
+// Whether a run has a digit and a letter is checked once it is matched, so each run is read once.
+const OPAQUE = /\b[A-Za-z0-9_\-+/]{32,}={0,2}/g
 
 // A run of hex is a commit or a checksum more often than a key, unless a secret-sounding word is right beside it.
 const HEX = /\b[0-9a-f]{32,}\b/gi
@@ -192,7 +196,7 @@ function keyed(text: string) {
 }
 
 function opaque(match: string) {
-  if (/^[0-9a-f]{40}$/i.test(match)) return false
+  if (!/\d/.test(match) || !/[A-Za-z]/.test(match) || /^[0-9a-f]{40}$/i.test(match)) return false
   if (match.split(/[/_\-.+]+/).filter((segment) => /^[a-z]{4,}$/i.test(segment)).length >= 2) return false
   return entropy(match) >= 3.5
 }

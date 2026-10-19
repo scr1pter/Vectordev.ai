@@ -22,10 +22,24 @@ describe("BrainScan", () => {
     const safe = [
       "Run bun test from packages/engine/test/session; migration/20261015171500_classify_early_review_helpers ran.",
       "The commit 8e22ed0c7f2a6b1d4c3e5f7a9b0c1d2e3f4a5b6c fixed it.",
+      // A spec's endpoint and its rules about passwords are not secrets.
+      "Login: POST /v1/session with email/password returns a JWT.",
+      "The reset link for a forgotten password is valid for 30 min.",
       "the token: validate it before use",
       "Use the deployment password manager, never a file.",
     ]
     for (const text of safe) expect(BrainScan.redact(text, {}).text).toBe(text)
+  })
+
+  test("scanning takes time in proportion to the text, however its runs of name characters repeat", () => {
+    // Each of these took time growing with the square of its length: 48 KB of "a." took about 9 seconds.
+    for (const unit of ["a.", "a-", "1-", "pass.", "aa1-"]) {
+      const text = unit.repeat(Math.floor(48_000 / unit.length))
+      const started = performance.now()
+      BrainScan.redact(text, {})
+      BrainScan.credential(text)
+      expect(performance.now() - started, unit).toBeLessThan(1_000)
+    }
   })
 
   test("redacts secrets written in plain words, webhooks and AWS secret keys, and leaves talk about secrets alone", () => {
