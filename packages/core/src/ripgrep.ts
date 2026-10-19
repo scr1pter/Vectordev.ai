@@ -19,16 +19,19 @@ const ERROR_BYTES = 8 * 1024
 const MAX_RECORD_BYTES = 64 * 1024
 const MAX_SUBMATCHES = 100
 
+// Ripgrep gives text that is not valid UTF-8 (a Latin-1 line, a file name in another encoding) as base64 `bytes`.
+const RawText = Schema.Union([Schema.Struct({ text: Schema.String }), Schema.Struct({ bytes: Schema.String })])
+
 const RawMatch = Schema.Struct({
   type: Schema.Literal("match"),
   data: Schema.Struct({
-    path: Schema.Struct({ text: Schema.String }),
-    lines: Schema.Struct({ text: Schema.String }),
+    path: RawText,
+    lines: RawText,
     line_number: PositiveInt,
     absolute_offset: NonNegativeInt,
     submatches: Schema.Array(
       Schema.Struct({
-        match: Schema.Struct({ text: Schema.String }),
+        match: RawText,
         start: NonNegativeInt,
         end: NonNegativeInt,
       }),
@@ -36,7 +39,16 @@ const RawMatch = Schema.Struct({
   }),
 })
 
-type RawMatchData = (typeof RawMatch.Type)["data"]
+type RawMatchData = {
+  readonly path: string
+  readonly lines: string
+  readonly line_number: number
+  readonly absolute_offset: number
+  readonly submatches: readonly { readonly text: string; readonly start: number; readonly end: number }[]
+}
+
+// Bytes read as UTF-8 the way a file read as UTF-8 is, each bad sequence a replacement character.
+const decoded = (raw: typeof RawText.Type) => ("text" in raw ? raw.text : Buffer.from(raw.bytes, "base64").toString("utf8"))
 
 export class Error extends Schema.TaggedErrorClass<Error>()("Ripgrep.Error", {
   message: Schema.String,
@@ -75,6 +87,8 @@ export interface GrepInput {
   readonly files?: readonly string[]
   readonly include?: string
   readonly limit: number
+  /** At most this many matching lines from each file. */
+  readonly maxCount?: number
   readonly signal?: AbortSignal
 }
 
@@ -173,6 +187,7 @@ const layer = Layer.effect(
           "--hidden",
           "--no-messages",
           ...(input.include ? [`--glob=${input.include}`] : []),
+          ...(input.maxCount ? [`--max-count=${input.maxCount}`] : []),
           "--glob=!**/.git/**",
           "--",
           input.pattern,
@@ -190,11 +205,21 @@ const layer = Layer.effect(
               if (!json || typeof json !== "object" || !("type" in json) || json.type !== "match")
                 return Effect.succeed(undefined)
               return Schema.decodeUnknownEffect(RawMatch)(json).pipe(
-                Effect.map((match) => ({
-                  ...match.data,
-                  path: { text: match.data.path.text.replace(/^\.[\\/]/, "") },
-                  submatches: match.data.submatches.slice(0, MAX_SUBMATCHES),
-                })),
+                Effect.map((match): RawMatchData | undefined => {
+                  // A file name that is not UTF-8 cannot be given back as a path to open, so only its match is left out.
+                  if (!("text" in match.data.path)) return undefined
+                  return {
+                    path: match.data.path.text.replace(/^\.[\\/]/, ""),
+                    lines: decoded(match.data.lines),
+                    line_number: match.data.line_number,
+                    absolute_offset: match.data.absolute_offset,
+                    submatches: match.data.submatches.slice(0, MAX_SUBMATCHES).map((submatch) => ({
+                      text: decoded(submatch.match),
+                      start: submatch.start,
+                      end: submatch.end,
+                    })),
+                  }
+                }),
                 Effect.mapError((cause) => failure("Invalid ripgrep match output", cause)),
               )
             }),
@@ -202,7 +227,7 @@ const layer = Layer.effect(
       }).pipe(
         Effect.map((result) =>
           result.items.map((match) => {
-            const relative = match.path.text
+            const relative = match.path
               .replace(/^(?:\.[\\/])+/u, "")
               .replace(/^[\\/]+/u, "")
               .replaceAll("\\", "/")
@@ -213,12 +238,8 @@ const layer = Layer.effect(
               }),
               line: match.line_number,
               offset: match.absolute_offset,
-              text: match.lines.text.length > 2_000 ? match.lines.text.slice(0, 2_000) + "..." : match.lines.text,
-              submatches: match.submatches.map((submatch) => ({
-                text: submatch.match.text,
-                start: submatch.start,
-                end: submatch.end,
-              })),
+              text: match.lines.length > 2_000 ? match.lines.slice(0, 2_000) + "..." : match.lines,
+              submatches: match.submatches.map((submatch) => ({ ...submatch })),
             })
           }),
         ),

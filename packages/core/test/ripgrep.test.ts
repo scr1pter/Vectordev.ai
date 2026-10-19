@@ -123,4 +123,31 @@ describe("Ripgrep", () => {
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
     ),
   )
+
+  it.live("reads a line that is not UTF-8 and leaves out only a file name that is not", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          // "café needle" in Latin-1: the é is the single byte 0xe9.
+          yield* Effect.promise(() =>
+            fs.writeFile(path.join(tmp.path, "legacy.ts"), Buffer.from([...Buffer.from("// caf"), 0xe9, ...Buffer.from(" needle\n")])),
+          )
+          yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, "plain.ts"), "const needle = 1\n"))
+          // Some file systems (APFS) refuse a name that is not UTF-8; where one can be made, it is searched too.
+          yield* Effect.promise(() =>
+            fs
+              .writeFile(Buffer.concat([Buffer.from(tmp.path + path.sep + "odd"), Buffer.from([0xff]), Buffer.from(".ts")]), "needle\n")
+              .catch(() => undefined),
+          )
+          const ripgrep = yield* Ripgrep.Service
+          const matches = yield* ripgrep.grep({ cwd: tmp.path, pattern: "needle", limit: 10 })
+          expect(matches.map((match) => match.entry.path).toSorted()).toEqual(["legacy.ts", "plain.ts"].map((name) => RelativePath.make(name)))
+          const legacy = matches.find((match) => match.entry.path === "legacy.ts")!
+          expect(legacy.text).toBe("// caf\uFFFD needle\n")
+          expect(legacy.submatches.map((submatch) => submatch.text)).toEqual(["needle"])
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
 })
