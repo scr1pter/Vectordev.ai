@@ -261,6 +261,9 @@ for (const item of targets) {
       const versionOutput = await $`${binaryPath} --version`.text()
       console.log(`Smoke test passed: ${versionOutput.trim()}`)
       await $`${process.execPath} script/verify-local-plugin.ts ${binaryPath}`
+      // The brain's reader must start from the bundled source as an eval worker, or documents are read on the main
+      // thread under tighter limits.
+      await $`${process.execPath} script/verify-brain-worker.ts ${binaryPath}`
     } catch (e) {
       console.error(`Smoke test failed for ${name}:`, e)
       process.exit(1)
