@@ -255,15 +255,15 @@ describe("BrainKnowledge.add", () => {
         (a) =>
           Effect.gen(function* () {
             yield* a.knowledge.add(place, text("big.md", "# Big\n\nUploads MUST stop at 50 MB per file."))
-            const second = path.join(root, "second.md")
-            yield* Effect.promise(() => fs.writeFile(second, "# Second\n\nRetries MUST stop after 3 tries."))
+            const edited = path.join(root, "second.md")
+            yield* Effect.promise(() => fs.writeFile(edited, "# Second\n\nRetries MUST stop after 3 tries."))
             const upload = yield* a.knowledge.add(
               place,
-              options.changed ? { type: "path", path: second, origin: "cli" } : text("second.md", "# Second\n\nRetries MUST stop after 3 tries."),
+              options.changed ? { type: "path", path: edited, origin: "cli" } : text("second.md", "# Second\n\nRetries MUST stop after 3 tries."),
             )
             if (upload.type === "refused") throw new Error(upload.message)
             // A file edited after it was added: the next process cannot read the bytes it was added with.
-            if (options.changed) yield* Effect.promise(() => fs.writeFile(second, "# Second\n\nRetries MUST stop after 5 tries."))
+            if (options.changed) yield* Effect.promise(() => fs.writeFile(edited, "# Second\n\nRetries MUST stop after 5 tries."))
             yield* a.db
               .update(BrainJobTable)
               .set({ lease_until: Date.now() - expire })
@@ -285,6 +285,8 @@ describe("BrainKnowledge.add", () => {
         { file, dir: tmp.path, worker: countingWorker(first, gate.promise), owner: "a" },
       ),
     )
+    // The other process did read: its own document, and only that.
+    expect(second).toHaveLength(1)
     return { ...result, first, second }
   }
 
