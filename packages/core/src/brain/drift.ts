@@ -77,7 +77,8 @@ export function unit(identifier: string, comment?: string) {
     if (words.includes("mb") || words.includes("mib")) return "MB"
     if (words.includes("gb") || words.includes("gib")) return "GB"
     if (words.some((word) => word === "ms" || word === "millis" || word === "milliseconds")) return "ms"
-    if (words.some((word) => word === "minutes" || word === "minute" || word === "mins") || last === "min") return "min"
+    // `min` alone is as often a minimum (PASSWORD_MIN, RETRY_DELAY_MIN) as minutes, so only a comment can say minutes.
+    if (words.some((word) => word === "minutes" || word === "minute" || word === "mins")) return "min"
     if (words.some((word) => word === "hours" || word === "hour" || word === "hrs")) return "h"
     if (words.some((word) => word === "days" || word === "day")) return "d"
     if (
@@ -89,9 +90,11 @@ export function unit(identifier: string, comment?: string) {
     return undefined
   })()
   if (named) return named
-  const said = comment?.match(
-    /\b(ms|milliseconds?|secs?|seconds?|s|mins?|minutes?|h|hours?|days?|KiB|MiB|GiB|KB|MB|GB|bytes?|B)\b/,
-  )?.[1]
+  // A comment's unit is the one next to the value, the comment's first word: `30 // seconds`, `30 // in seconds`, never
+  // one further on (`5 // then wait 30 seconds`).
+  const said = comment
+    ?.trim()
+    .match(/^(?:in\s+)?(ms|milliseconds?|secs?|seconds?|s|mins?|minutes?|h|hours?|days?|KiB|MiB|GiB|KB|MB|GB|bytes?|B)\b/)?.[1]
   if (!said) return undefined
   return SAID.find(([pattern]) => pattern.test(said))?.[1] ?? said
 }

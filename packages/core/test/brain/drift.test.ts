@@ -68,6 +68,15 @@ describe("BrainDrift", () => {
     // "items" is not milliseconds.
     expect(BrainDrift.unit("MAX_ITEMS")).toBeUndefined()
     expect(BrainDrift.unit("LIMIT", "seconds")).toBe("s")
+    // MIN is a minimum as often as minutes: only a comment says which.
+    expect(BrainDrift.unit("PASSWORD_MIN")).toBeUndefined()
+    expect(BrainDrift.unit("RETRY_DELAY_MIN")).toBeUndefined()
+    expect(BrainDrift.unit("RETRY_DELAY_MIN", "minutes")).toBe("min")
+    expect(BrainDrift.unit("IDLE_MINS")).toBe("min")
+    // A comment's unit is the one next to the value.
+    expect(BrainDrift.unit("LIMIT", "in seconds")).toBe("s")
+    expect(BrainDrift.unit("MAX_RETRIES", "then wait 30 seconds")).toBeUndefined()
+    expect(BrainAnchor.value("const MAX_RETRIES = 5 // then wait 30 seconds", "MAX_RETRIES")).toBeUndefined()
     expect(BrainAnchor.value("export const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;", "MAX_UPLOAD_BYTES")).toEqual({
       raw: "64 * 1024 * 1024",
       value: 67_108_864,
