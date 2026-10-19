@@ -8,7 +8,10 @@
 // tool on a file in a temporary project, sends one prompt over the HTTP API the app uses, and fails unless the turn
 // finishes cleanly. It runs the turn twice: once through a bundled provider SDK, and once through an SDK the engine
 // installs into its package cache, which Node must import from the package's real entry file rather than its
-// directory. It uses node: APIs only and must run under node, never bun:
+// directory. A third turn has the model keep a generated PDF as a document through the memory tool, which reads it in
+// the brain's background reader: an eval worker started from the source the bundle carries, so the turn fails if the
+// worker cannot start under Node and reading falls back to the main thread. It uses node: APIs only and must run under
+// node, never bun:
 //
 //   bun script/build-node.ts && node script/smoke-node-bundle.ts [path/to/node.js]
 
@@ -28,6 +31,10 @@ const MODEL = "smoke-model"
 const NPM_PROVIDER = "smoke-npm"
 const NPM_PACKAGE = "smoke-ai-provider"
 const REPLY = "The notes file holds the smoke marker."
+const KEEP = "Keep spec.pdf from this repository as a document for the next tasks."
+const KEPT = "The spec is kept."
+const WORKER_STARTED = "brain reader started in a worker thread"
+const WORKER_FALLBACK = "brain reader runs on the main thread"
 const START_TIMEOUT = 60_000
 const TURN_TIMEOUT = 120_000
 const BUN_MISSING = /Bun is not defined/
@@ -49,6 +56,7 @@ async function smoke(bundle: string) {
   const marker = `smoke-marker-${randomBytes(6).toString("hex")}`
   await mkdir(project, { recursive: true })
   await writeFile(notes, `${marker}\n`)
+  await writeFile(path.join(project, "spec.pdf"), specPdf())
   const model = await startFakeModel(notes)
   try {
     const engine = await startEngine(bundle, root, model.url)
@@ -56,6 +64,7 @@ async function smoke(bundle: string) {
       .then(async (failures) => [
         ...failures,
         ...(await runTurn(engine, project, marker, NPM_PROVIDER)).map((failure) => `${NPM_PACKAGE}: ${failure}`),
+        ...(await runTurn(engine, project, marker, PROVIDER, KEEP)).map((failure) => `document: ${failure}`),
       ])
       .catch((error) => [`the turn could not run: ${String(error)}`])
       .finally(engine.stop)
@@ -64,10 +73,12 @@ async function smoke(bundle: string) {
       ...turn,
       ...modelFailures(model.requests, marker),
       ...(BUN_MISSING.test(logs) ? ["engine output or logs mention 'Bun is not defined'"] : []),
+      ...(logs.includes(WORKER_STARTED) ? [] : ["the brain's background reader never started in a worker thread"]),
+      ...(logs.includes(WORKER_FALLBACK) ? ["the brain's background reader fell back to the main thread"] : []),
     ]
     if (failures.length === 0) {
       console.log(
-        `node bundle smoke passed on node ${process.version}: Read tool completed and the model replied, with a bundled and a cached provider SDK`,
+        `node bundle smoke passed on node ${process.version}: Read tool completed and the model replied, with a bundled and a cached provider SDK, and a PDF was kept as a document through the brain's eval worker`,
       )
       return
     }
@@ -257,6 +268,7 @@ async function runTurn(
   project: string,
   marker: string,
   providerID: string,
+  text = "Read notes.txt and tell me what it says.",
 ) {
   const request = (route: string, init?: { method?: string; body?: unknown; signal?: AbortSignal }) =>
     fetch(new URL(route, engine.url), {
@@ -289,7 +301,8 @@ async function runTurn(
     body: {
       agent: "build",
       model: { providerID, modelID: MODEL },
-      parts: [{ type: "text", text: "Read notes.txt and tell me what it says." }],
+      ...(text === KEEP ? { size: "light" } : {}),
+      parts: [{ type: "text", text }],
     },
   })
   const timer = setTimeout(() => abort.abort(), TURN_TIMEOUT)
@@ -298,7 +311,57 @@ async function runTurn(
     abort.abort()
   })
   const messages: Message[] = await json(`/session/${sessionID}/message`)
-  return [...outcome, ...messageFailures(messages, marker)]
+  return [...outcome, ...(text === KEEP ? keptFailures(messages) : messageFailures(messages, marker))]
+}
+
+// The memory tool kept the PDF: read, structured and searchable, with the records its two sentences give.
+function keptFailures(messages: Message[]) {
+  const parts = messages.filter((message) => message.info.role === "assistant").flatMap((message) => message.parts)
+  const kept = parts.find((part) => part.type === "tool" && part.tool === "memory")
+  if (!kept) return ["the memory tool never ran"]
+  if (kept.state?.status !== "completed") return [`memory tool ended ${kept.state?.status}: ${kept.state?.error ?? ""}`]
+  const output = kept.state.output ?? ""
+  return output.includes("searchable now") && /\b[1-9]\d* records\b/.test(output)
+    ? []
+    : [`the PDF was not kept as a searchable document: ${JSON.stringify(output)}`]
+}
+
+// A one-page PDF with a title and two sentences of spec, written here so no binary fixture is committed.
+function specPdf() {
+  const lines = [
+    { text: "Auth spec", size: 20, font: "F2", y: 740 },
+    { text: "1 Sessions", size: 14, font: "F2", y: 700 },
+    { text: "Refresh tokens expire after 14 days.", size: 11, font: "F1", y: 680 },
+    { text: "Clients MUST retry at most 3 times after a 429 response.", size: 11, font: "F1", y: 664 },
+  ]
+  const content = lines.map((line) => `BT /${line.font} ${line.size} Tf 72 ${line.y} Td (${line.text}) Tj ET`).join("\n")
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>",
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+  ]
+  const body = objects.reduce(
+    (out, object, index) => ({
+      text: `${out.text}${index + 1} 0 obj\n${object}\nendobj\n`,
+      offsets: [...out.offsets, out.text.length],
+    }),
+    { text: "%PDF-1.4\n", offsets: [] as number[] },
+  )
+  const xref = [
+    "xref",
+    `0 ${objects.length + 1}`,
+    "0000000000 65535 f ",
+    ...body.offsets.map((at) => `${String(at).padStart(10, "0")} 00000 n `),
+    "trailer",
+    `<< /Size ${objects.length + 1} /Root 1 0 R >>`,
+    "startxref",
+    `${body.text.length}`,
+    "%%EOF",
+  ].join("\n")
+  return `${body.text}${xref}\n`
 }
 
 type Part = {
@@ -417,10 +480,13 @@ async function handleModelRequest(req: IncomingMessage, res: ServerResponse, not
   }
   const body: ChatRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"))
   requests.push(body)
+  // The document turn asks to keep the PDF: the model calls the memory tool once, then answers.
+  const keeping = JSON.stringify(body.messages ?? []).includes(KEEP)
+  const tool = keeping ? "memory" : "read"
   const call =
-    body.tools?.some((tool) => tool.function?.name === "read") &&
-    !body.messages?.some((message) => message.role === "tool")
-  const args = JSON.stringify({ filePath: notes })
+    body.tools?.some((item) => item.function?.name === tool) && !body.messages?.some((message) => message.role === "tool")
+  const reply = keeping ? KEPT : REPLY
+  const args = JSON.stringify(keeping ? { action: "add", file: "spec.pdf" } : { filePath: notes })
   const finish = call ? "tool_calls" : "stop"
   const usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
   if (body.stream !== true) {
@@ -428,9 +494,9 @@ async function handleModelRequest(req: IncomingMessage, res: ServerResponse, not
       ? {
           role: "assistant",
           content: null,
-          tool_calls: [{ id: "call_smoke_read", type: "function", function: { name: "read", arguments: args } }],
+          tool_calls: [{ id: `call_smoke_${tool}`, type: "function", function: { name: tool, arguments: args } }],
         }
-      : { role: "assistant", content: REPLY }
+      : { role: "assistant", content: reply }
     res.writeHead(200, { "content-type": "application/json" })
     res.end(
       JSON.stringify({
@@ -458,12 +524,12 @@ async function handleModelRequest(req: IncomingMessage, res: ServerResponse, not
     ? [
         {
           tool_calls: [
-            { index: 0, id: "call_smoke_read", type: "function", function: { name: "read", arguments: "" } },
+            { index: 0, id: `call_smoke_${tool}`, type: "function", function: { name: tool, arguments: "" } },
           ],
         },
         { tool_calls: [{ index: 0, function: { arguments: args } }] },
       ]
-    : [{ content: REPLY }]
+    : [{ content: reply }]
   res.write(chunk({ delta: { role: "assistant" } }))
   for (const delta of deltas) res.write(chunk({ delta }))
   res.write(chunk({ delta: {}, finish_reason: finish }, usage))

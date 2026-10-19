@@ -220,11 +220,16 @@ function make(bundled: string | undefined, options: Options) {
     }).pipe(
       Effect.catch((message: string) => {
         fallBack(`Vector's background reader could not start here: ${message}`)
-        return Effect.succeed(undefined)
+        return Effect.logWarning("brain reader runs on the main thread", { reason: state.reason }).pipe(
+          Effect.as(undefined),
+        )
       }),
     )
     state.starting = undefined
-    if (worker && state.mode === "worker") state.worker = worker
+    if (worker && state.mode === "worker") {
+      state.worker = worker
+      yield* Effect.logInfo("brain reader started in a worker thread", { source: bundled === undefined ? "file" : "bundle" })
+    }
     return state.mode === "worker" ? worker : undefined
   })
 
