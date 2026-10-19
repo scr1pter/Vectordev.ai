@@ -1,13 +1,15 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
 import { DEFAULT_REVIEW_CONFIG } from "../packages/core/src/review/types"
-import { DEFAULT_SPEND_POLICY } from "../packages/desktop/src/main/spend-limits"
-import { publishedDesktopVersion, release199 } from "../packages/web/src/data/vector-releases"
+import { publishedDesktopVersion } from "../packages/web/src/data/vector-releases"
 import summary from "../docs/benchmarks/vector-efficiency-2026-10/summary.json"
 
 const root = path.join(import.meta.dir, "..")
 const page = await Bun.file(path.join(root, "packages/web/src/pages/investors.astro")).text()
-const section = (pattern: RegExp) => page.match(pattern)?.[0] ?? ""
+const markup = page.slice(0, page.indexOf("<style"))
+const section = (pattern: RegExp) => markup.match(pattern)?.[0] ?? ""
+const milestone = (title: string) =>
+  section(new RegExp(`<div class="ip-milestone[^"]*">\\s*<span class="ip-stage[^"]*">[^<]+</span>\\s*<h3>${title}</h3>\\s*<p>[^<]*</p>`))
 
 // The page quotes one benchmark: the integrated HTTP cells of the checked-in efficiency archive, Vector on the Messages
 // API against Claude Code, priced at the same rates.
@@ -29,243 +31,141 @@ const scenarios = Array.from(new Set(summary.cells.map((item) => item.scenario))
       (session) => cell("vector", scenario, session)?.requests === cell("claude-code", scenario, session)?.requests,
     ),
 )
-const pair = (scenario: string, session: number) => ({
-  vector: cell("vector", scenario, session)?.costUsd ?? 0,
-  claude: cell("claude-code", scenario, session)?.costUsd ?? 0,
-})
-const saving = (costs: { vector: number; claude: number }) => Math.round((1 - costs.vector / costs.claude) * 100)
+const saving = (scenario: string, session: number) =>
+  Math.round((1 - (cell("vector", scenario, session)?.costUsd ?? 0) / (cell("claude-code", scenario, session)?.costUsd ?? 1)) * 100)
 const range = (session: number) => {
-  const savings = scenarios.map((scenario) => saving(pair(scenario, session)))
+  const savings = scenarios.map((scenario) => saving(scenario, session))
   if (Math.min(...savings) === Math.max(...savings)) return `${savings[0]}%`
   return `${Math.min(...savings)}–${Math.max(...savings)}%`
 }
 
-test("the investor page gives the default spend caps that ship, and only for scheduled agents", () => {
-  // Parallel agents are checked against the interactive policy, which ships with no caps. If either default changes,
-  // the stage line that describes them must change with it.
-  expect(DEFAULT_SPEND_POLICY.interactive).toEqual({})
-  expect(page).toContain(
-    `scheduled agents stop at $${DEFAULT_SPEND_POLICY.unattended.perRun?.usd} a run and $${DEFAULT_SPEND_POLICY.unattended.perDay?.usd} a day by default`,
-  )
-  expect(page).not.toMatch(/parallel agents[^.]*stop at \$/i)
+test("the one-pager stays one page", () => {
+  // Visible words outside the collapsed sources list. The page is read in a couple of minutes; grow it only by
+  // cutting something else.
+  const text = markup
+    .slice(markup.indexOf("<div class=\"ip-page\">"))
+    .replace(/<details[\s\S]*?<\/details>/g, "")
+    .replace(/<[^>]+>/g, " ")
+  expect(text.split(/\s+/).filter((word) => /\w/.test(word)).length).toBeLessThan(750)
+  expect(markup).not.toMatch(/<table/)
 })
 
-test("the investor page says interactive spend caps shipped in desktop 1.99.108 and stay off until set", () => {
-  // The Run Guard shipped in desktop 1.99.108, and the interactive policy still ships with no caps, so the page calls
-  // them opt-in. A default interactive cap, or a rollback of the published desktop version, makes these lines untrue.
-  expect(Bun.semver.order(publishedDesktopVersion, "1.99.108")).toBeGreaterThanOrEqual(0)
-  expect(release199.find((release) => release.version === "1.99.108")?.summary).toContain(
-    "The Run Guard caps what one run spends: set it in Settings, Spend limits.",
+test("the investor page quotes the efficiency archive's first- and second-session results against Claude Code", () => {
+  expect(scenarios).toEqual(["solo-fix", "delegate-explore", "delegate-general"])
+  expect(markup).toContain(
+    `<strong class="ip-num">${range(1)}</strong><span>less modelled spend than Claude Code in a first session, offline*</span>`,
   )
-  expect(page).toContain(
-    "<strong>Spend caps are opt-in.</strong> Desktop 1.99.108 holds interactive runs to a live cap only once you set one",
+  expect(markup).toContain(`a second session, run as a new process, came out ${range(2)} lower`)
+  // The saving comes from what each agent sends: the archived first request of a new session, rounded to thousands.
+  const thousands = (tokens: number) => `${Math.round(tokens / 1000)}K`
+  expect(markup).toContain(
+    `<strong class="ip-num">${thousands(cell("vector", "solo-fix", 1)?.firstPrimaryInputTokens ?? 0)}</strong><span>tokens in Vector's first request, against about ${thousands(cell("claude-code", "solo-fix", 1)?.firstPrimaryInputTokens ?? 0)} for Claude Code, offline*</span>`,
   )
-  // Spend limits are moving to one overall limit, so the page names no per-repository budget.
-  expect(page).not.toContain("budget.run")
-  // The Run Guard can overshoot by one step for each running agent, not one step in all.
-  const notes = release199.find((release) => release.version === "1.99.108")?.summary ?? ""
-  expect(notes).toContain("within one step for each agent running")
-  expect(page).toContain("the Run Guard stops a run at your cap, within one step for each agent running")
-  expect(page).not.toMatch(/within one step of a cap/)
-  // WSL servers and the 1.99.99 CLI do not have these controls yet.
-  expect(notes).toContain("project trust, the Run Guard, loop pauses and the new subagent controls do not apply yet")
-  expect(page).toContain(
-    "on a Windows WSL server and in the 1.99.99 CLI the Run Guard, repository trust and the new subagent controls do not apply yet",
-  )
+  // Only spend is quoted: the archive's wall time and memory, where Claude Code wins, stay out, and so does Codex.
+  expect(markup).not.toMatch(/MiB|peak memory|wall[- ]time|faster|Codex [^,]*cheaper/i)
 })
 
-test("the investor page counts and names the built-in subagents that ship", async () => {
+test("the benchmark footnote keeps its caveats", () => {
+  const method = markup.match(/<strong>\* Benchmark method\.<\/strong>([^<]*)<\/p>/)?.[1] ?? ""
+  ;[
+    "docs/benchmarks/vector-efficiency-2026-10",
+    "an 11 October 2026 revision (commit 6f7f3c2ea)",
+    "Claude Code 2.1.215",
+    "identical scripted tool steps against a local fake model server",
+    "the same number of model requests",
+    "Medians of three repetitions",
+    "$3 per million input tokens, $3.75 cache write, $0.30 cache read, $15 output",
+    "characters ÷ 4",
+    "not the quality of answers",
+    "does not show that Vector is cheaper than other agents in general",
+  ].forEach((caveat) => expect(method).toContain(caveat))
+})
+
+test("the investor page counts the built-in subagents that ship and describes Vectorscope's verify pass", async () => {
   const agents = (await Bun.file(path.join(root, "packages/engine/src/agent/agent.ts")).text())
     .split(/\n\s+name: "/)
     .slice(1)
   const subagents = agents
     .filter((agent) => agent.includes('mode: "subagent"'))
     .map((agent) => agent.slice(0, agent.indexOf('"')))
-  expect(subagents).toContain("general")
-  expect(page).toContain(`${subagents.length} built in: ${subagents.join(", ")};`)
-})
-
-test("the investor page quotes the efficiency archive's first- and second-session ranges against Claude Code", () => {
-  expect(scenarios).toEqual(["solo-fix", "delegate-explore", "delegate-general"])
-  expect(page).not.toContain('id: "long-loop"')
-  const first = range(1)
-  const second = range(2)
-  expect(page).toContain(
-    `<strong class="ip-num">${first}</strong><span>less modelled spend than Claude Code in a first session, offline*</span>`,
-  )
-  expect(page).toContain(
-    `<h2 id="bench-title"><span class="ip-big ip-num">${first}</span> less modelled spend than Claude Code in a first session*</h2>`,
-  )
-  expect(page).toContain(`<b class="ip-num">${second}</b> less in a second session, with the simulated cache warm.`)
-  // The bars are drawn from these costs, so each row must carry the archived medians for both sessions.
-  expect(
-    Array.from(
-      page.matchAll(
-        /\{ id: "([\w-]+)", label: "[^"]+", first: \{ vector: ([\d.]+), claude: ([\d.]+) \}, second: \{ vector: ([\d.]+), claude: ([\d.]+) \} \}/g,
-      ),
-      (match) => match.slice(1),
-    ),
-  ).toEqual(
-    scenarios.map((scenario) => [
-      scenario,
-      ...[1, 2].flatMap((session) => [String(pair(scenario, session).vector), String(pair(scenario, session).claude)]),
-    ]),
-  )
-  const requests = scenarios.map((scenario) => cell("vector", scenario, 1)?.requests ?? 0)
-  expect(page).toContain(`${Math.min(...requests)} to ${Math.max(...requests)} in the scripted tasks above`)
-  const thousands = (tokens: number) => (Math.round(tokens / 1000) * 1000).toLocaleString("en-US")
-  // The archived revision predates desktop 1.99.108 and the shipped first request differs from it, so the size is
-  // given as the archived run's, in the past tense.
-  expect(page).toContain(
-    `in the archived run, Vector's first request in a new session was about ${thousands(cell("vector", "solo-fix", 1)?.firstPrimaryInputTokens ?? 0)} tokens, Claude Code's about ${thousands(cell("claude-code", "solo-fix", 1)?.firstPrimaryInputTokens ?? 0)}.`,
-  )
-  // Modelled offline spend is not a bill anyone pays today, and the uncommitted 17 October run is not quoted.
-  expect(page).not.toMatch(/bills[^.]*today|own keys today/)
-  expect(page).not.toContain("vector-footprint-2026-10-17")
-})
-
-test("the benchmark footnote keeps its caveats, and the benchmark names no other agent or timing", () => {
-  const method = page.match(/<strong>\* Benchmark method\.<\/strong>([^<]*)<\/p>/)?.[1] ?? ""
-  const caveats = [
-    "docs/benchmarks/vector-efficiency-2026-10",
-    "Claude Code 2.1.215",
-    "identical scripted tool steps against a local fake model server",
-    "the same number of model requests",
-    "$3 per million input tokens, $3.75 cache write, $0.30 cache read, $15 output",
-    "characters ÷ 4",
-    "simulated cache is fresh at the start of a repetition",
-    "not the quality of answers",
-    "does not show that Vector is cheaper than other agents in general",
-  ]
-  caveats.forEach((caveat) => expect(method).toContain(caveat))
-  // The figures are from an 11 October revision that desktop 1.99.108 includes, not a measurement of the release, the
-  // cache carries across tasks, and the left-out task is named.
-  expect(method).toContain("an 11 October 2026 revision (commit 6f7f3c2ea)")
-  expect(method).toContain(
-    "Desktop 1.99.108 includes this revision plus later changes; this archive does not measure the release itself.",
-  )
-  expect(method).toContain("so only the bug-fix task's first session starts with an empty cache")
-  expect(method).toContain("its script reads a file that does not exist")
-  expect(method).not.toContain("which desktop 1.99.108 includes")
-  const bench = section(/<section class="ip-section ip-bench"[\s\S]*?<\/section>/)
-  expect(bench).toContain("Claude Code 2.1.215")
-  expect(bench).not.toContain("Codex")
-  expect(method).not.toContain("Codex")
-  // Only spend is quoted: the archive's wall time and memory, where Claude Code wins, stay out.
-  expect(page).not.toMatch(/MiB|peak memory|wall[- ]time|faster/i)
-  // The comparison grid names no Codex price beside Vector's free workspace.
-  expect(page).not.toMatch(/\$20\/mo/)
-  expect(page).toContain('["y", "@codex review, on paid plans"]')
-})
-
-test("the investor page describes Vectorscope's default verify pass", () => {
+  const words = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"]
+  expect(milestone("Subagent system")).toContain(`${words[subagents.length]} built-in subagents`)
+  ;["explore", "review", "security", "migration"].forEach((name) => expect(subagents).toContain(name))
   expect(DEFAULT_REVIEW_CONFIG.verify).toBe("blocking")
-  expect(page).toContain("verify pass that re-checks blocking findings")
+  expect(milestone("Vectorscope")).toContain("verify pass that re-checks blocking findings")
 })
+
+test("every technology carries its status, and only the shipped ones say Today", () => {
+  const items = Array.from(
+    markup.matchAll(/<div class="ip-milestone[^"]*">\s*<span class="ip-stage[^"]*">([^<]+)<\/span>\s*<h3>([^<]+)<\/h3>/g),
+    (match) => [match[2], match[1]],
+  )
+  expect(items.length).toBe(markup.match(/<div class="ip-milestone/g)?.length)
+  expect(Object.fromEntries(items)).toEqual({
+    "Vector Brain": "In development · 1.99.110",
+    "Tokenomics engine": "Today",
+    "Subagent system": "Today",
+    Vectorscope: "Today",
+    "Vector Velocity": "In development",
+    "Vector Cloud": "Today · desktop",
+    "Vector Codium": "Built in, not on sale",
+  })
+  // The software factory inside Vector Cloud is a plan, and many more cloud services are an intent.
+  expect(milestone("Vector Cloud")).toContain("The software factory, issue to reviewed preview in the cloud, is planned.")
+  expect(markup).toContain("many more cloud services of its own (intent)")
+  expect(markup).not.toMatch(/next release/i)
+})
+
+// When desktop 1.99.110 is published the brain is live, so its status changes.
+test.skipIf(Bun.semver.order(publishedDesktopVersion, "1.99.110") < 0)(
+  "once desktop 1.99.110 is published, Vector Brain no longer says it is in development",
+  async () => {
+    // If the brain slipped past 1.99.110, keep the label and move the version in it instead.
+    expect(await Bun.file(path.join(root, "packages/core/src/brain/brain.ts")).exists()).toBe(true)
+    expect(milestone("Vector Brain")).not.toContain("In development")
+    expect(markup).not.toContain("in development for desktop 1.99.110")
+  },
+)
 
 test("the investor page gives Vector Velocity one status, one size, 550B parameters, and no active size, base or provider", () => {
-  expect(page.match(/<span class="ip-stage">In development<\/span>\s*<h3>Vector Velocity<\/h3>/g)).toHaveLength(2)
-  expect(page).toContain('<b class="ip-num">550B</b> parameters</p>')
-  expect(page).toContain("Vector · 550B parameters · <span")
-  expect(page).toContain("A 550B-parameter model for computer use")
-  // Nothing on the page says how many parameters run per token, Velocity's or the four's.
-  expect(page).not.toMatch(
-    /\bactive (?:per token|param\w*)|parameters active|\bactivated\b|under \d+B|\d+B (?:active|per token|for every token)|parameters (?:per|for every) token|>Qwen3-Coder-480B-A35B<|"Qwen3-Coder-480B-A35B"/i,
+  const velocity = milestone("Vector Velocity")
+  expect(velocity).toContain("A 550B-parameter model built for Vector's own loop")
+  expect(velocity).toContain("designed to cost significantly less to run than other very large coding models")
+  expect(velocity).toContain("No weights or benchmarks yet")
+  expect(velocity).not.toMatch(/\b(?:built on|based on|base model|fine-tun\w*|distill\w*)\b|\bGPUs?\b|\bcompute\b|credits|Nebius/i)
+  expect(markup).not.toMatch(
+    /\bactive (?:per token|param\w*)|parameters active|\bactivated\b|under \d+B|\d+B (?:active|per token|for every token)|parameters (?:per|for every) token|total parameters|\d+B total|billion parameters/i,
   )
-  expect(page).not.toMatch(/total parameters|\d+B total|billion parameters|\bover \d{3}B?\b|no work has started|Not started/i)
-  const velocity = [
-    section(/<div class="ip-vcard">[\s\S]*?<\/ul>/),
-    section(/<tr class="ip-four-v">[\s\S]*?<\/tr>/),
-    section(/<span class="ip-stage">In development<\/span>\s*<h3>Vector Velocity<\/h3>\s*<p>[^<]*<\/p>/),
-  ]
-  velocity.forEach((part) => {
-    expect(part).not.toBe("")
-    expect(part).not.toMatch(/\b(?:built on|based on|base model|fine-tun\w*|distill\w*)\b|\bGPUs?\b|\bcompute\b|credits/i)
-  })
-  expect(page).toContain("Work has started; there are no weights or benchmarks yet")
-  expect(page).toContain(
-    "specialised for agentic computer use, agentic workflows and Vector's own harness, plus other coding and developer-tool tasks",
-  )
-  // The neutral harness and the own model are one argument: any model runs, and Velocity is one more choice.
-  expect(page).toContain("Vector runs any model the developer picks.")
-  // The picker already has free and local models, so Velocity is compared only with the very large coding models.
-  expect(page).toContain(
-    "one more choice in the picker, designed to cost significantly less to run than other very large coding models",
-  )
-  expect(page).not.toMatch(/price lowest|lowest[- ]priced|cheapest/i)
-  // Codium steps count as unpriced on the dollar meter, so Velocity is not said to sell on it.
-  expect(page).not.toMatch(/on that meter|already has the meter/i)
+  expect(new Set(Array.from(markup.matchAll(/(\d+)B-parameter/g), (match) => match[1]))).toEqual(new Set(["550"]))
+  expect(markup).not.toMatch(/Velocity (is|costs|runs) (significantly )?(cheaper|less)/i)
 })
 
 test("the README gives Vector Velocity the investor page's status and size, and no active size", async () => {
-  // The landing page is held to the same status, size and four models in packages/web/test/landing-copy.test.ts; this
-  // test holds the README to the investor page.
   const readme = (await Bun.file(path.join(root, "README.md")).text()).match(/\*\*Vector Velocity\*\*[^\n]*/)?.[0] ?? ""
   expect(readme).toContain("**Vector Velocity** (In development): Vector's own 550B-parameter model")
   expect(readme).toContain("there are no weights or benchmarks yet")
   expect(readme).not.toMatch(/Planned|No work on it has started|active|under \d+B|\d+B\+|\d+ billion|total parameters|\d+B total/i)
-  expect(page).toContain('<b class="ip-num">550B</b> parameters')
 })
 
-test("the investor page compares Velocity with one set of four models, by the agents they ship with", () => {
-  const large = Array.from(page.matchAll(/\{ name: "([^"]+)", maker: "[^"]+", weights/g), (match) => match[1])
-  expect(large).toEqual(["Qwen3-Coder-480B", "Composer 2.5", "SWE-2", "Kimi K2.7 Code"])
-  expect(page).toContain("Four very large coding models, and the agents they ship with")
-  expect(page).not.toMatch(/four largest|21–35B|Four very large coding models run/)
-  // There are no weights, so the page can only say what Velocity is designed to do.
-  expect(page).toContain("Designed to cost significantly less to run than all four")
-  expect(page).toContain("That is a design goal; with no weights yet, nothing is measured.")
-  expect(page).not.toMatch(/Velocity (is|costs|runs) (significantly )?(cheaper|less)/i)
+test("the brain is labelled wherever the page opens with it", () => {
+  // The lede is what investors read first, so the brain's status sits in it too, not only in its card.
+  expect(markup).toContain("and, in development for desktop 1.99.110, a brain that learns each repository it works in")
+  expect(page).toContain("a brain that learns each repository and a model of its own, both in development")
 })
 
-test("the investor page says Vector runs three outside agents and answers the platform-risk question", () => {
-  expect(page).not.toMatch(/every (lab's|vendor's) agent|any vendor's agents/i)
-  expect(page).toContain("its own lean agent beside Claude Code, Codex and Cursor Agent")
-  expect(page).toContain("<h3>And if a lab cuts Vector off?</h3>")
-  // The external-agents docs are the source for how the outside CLIs run.
-  expect(page).toContain("It runs each vendor's own CLI, installed and signed in by the developer")
-})
-
-test("the investor page labels every roadmap item and every revenue line that does not exist yet", () => {
-  const roadmap = section(/<section class="ip-section" aria-labelledby="roadmap-title">[\s\S]*?<\/section>/)
-  const labels = Array.from(
-    roadmap.matchAll(/<div class="ip-milestone[^"]*">\s*<span class="ip-stage[^"]*">([^<]+)<\/span>/g),
-    (match) => match[1],
-  )
-  expect(labels).toHaveLength(roadmap.match(/<div class="ip-milestone/g)?.length ?? 0)
-  expect(new Set(labels)).toEqual(new Set(["Built in, not on sale", "In development", "Planned", "Intent"]))
-  expect(roadmap).toMatch(/<span class="ip-stage ip-intent">Intent<\/span>\s*<h3>Many more cloud services<\/h3>/)
-  expect(roadmap).toContain("Vector intends to build many more cloud services of its own")
-  // Codium ships in desktop 1.99.108 with sales switched on server-side once payments are connected, so no desktop
-  // release opens them.
-  expect(release199.find((release) => release.version === "1.99.108")?.summary).toContain(
-    "Vector Codium is built in for when sales open",
-  )
-  expect(roadmap).toMatch(/<span class="ip-stage">Built in, not on sale<\/span>\s*<h3>Vector Codium<\/h3>/)
-  expect(page).not.toMatch(/next release/i)
-  // Vector Cloud's Vercel and Supabase controls shipped; only the software factory in it is planned.
-  expect(roadmap).toMatch(/<span class="ip-stage">Planned<\/span>\s*<h3>The software factory, in Vector Cloud<\/h3>/)
-  expect(page).not.toMatch(/Vector Cloud\s*(·|\()\s*planned/i)
-  // Issue-to-PR runs on a GitHub Actions runner, not in the desktop app.
-  expect(page).toContain("and issue-to-PR in the repository's GitHub Actions")
-  // The flywheel uses the roadmap's labels, in the same order; Why invest states the edge instead of repeating them.
-  ;[
-    "<b>Free workspace · Today</b>",
-    "<b>Codium credits · Built in, not on sale</b>",
-    "<b>Vector Velocity · In development</b>",
-    "<b>Cloud software factory · Planned</b>",
-    "many more cloud services of Vector's own (intent)",
-  ].forEach((line) => expect(page).toContain(line))
-  ;["$10", "$50", "$100", "$200"].forEach((price) => expect(page).toContain(`<b>${price}</b>`))
-  expect(page).not.toMatch(/markup/i)
+test("the investor page names the outside agents Vector runs and the business it plans", () => {
+  expect(markup).not.toMatch(/every (lab's|vendor's) agent|any vendor's agents/i)
+  expect(markup).toContain("its own lean agent beside Claude Code, Codex and Cursor Agent")
+  ;["$10", "$50", "$100", "$200"].forEach((price) => expect(markup).toContain(`<b>${price}</b>`))
+  expect(markup).not.toMatch(/markup/i)
 })
 
 test("the investor page keeps to the owner's wording and disclosure rules", () => {
-  expect(page).not.toMatch(/\bexactly\b|never exceeds|absolute privacy|no matter which model/i)
-  expect(page).not.toMatch(/\bprojects?\b/i)
+  expect(markup).not.toMatch(/\bexactly\b|never exceeds|absolute privacy|no matter which model/i)
+  expect(markup).not.toMatch(/\bprojects?\b/i)
   // Any privacy line must hold after free models that may train on prompts arrive.
-  expect(page).toContain("Vector itself never trains on prompts or code")
-  expect(page).not.toMatch(/No-training free models|prompts are not used for training/)
+  expect(markup).toContain("Vector itself never trains on prompts or code")
+  expect(markup).not.toMatch(/No-training free models|prompts are not used for training/)
   // No contact address, team, traction or raise figures.
-  expect(page).not.toMatch(/mailto:|@vectordev\.ai|\bARR\b|\bMRR\b|pre-money|founder/i)
+  expect(markup).not.toMatch(/mailto:|@vectordev\.ai|\bARR\b|\bMRR\b|pre-money|founder/i)
 })
