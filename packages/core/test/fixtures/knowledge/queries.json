@@ -457,5 +457,87 @@
       "query": "write a haiku about autumn leaves",
       "seeds": []
     }
+  ],
+  "hops": [
+    {
+      "query": "add a discount line before paying",
+      "seeds": [
+        {
+          "path": "src/checkout/cart.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "createInvoice MUST store every amount in integer cents."
+    },
+    {
+      "query": "let support staff undo a purchase from this screen",
+      "seeds": [
+        {
+          "path": "src/admin/support.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "issueRefund MUST name the invoice it reverses."
+    },
+    {
+      "query": "schedule this job hourly instead of nightly",
+      "seeds": [
+        {
+          "path": "src/jobs/nightly.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "reindexAll MUST run in the background."
+    },
+    {
+      "query": "add a captcha to registration",
+      "seeds": [
+        {
+          "path": "src/account/signup.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "hashPassword MUST use a salt of its own for every account."
+    },
+    {
+      "query": "warn people sooner when space gets low",
+      "seeds": [
+        {
+          "path": "src/alerts/disk.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "sendEmail MUST retry at most 3 times."
+    },
+    {
+      "query": "crop pictures to a square first",
+      "seeds": [
+        {
+          "path": "src/media/avatar.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "storeObject MUST write to the bucket that UPLOAD_BUCKET names."
+    },
+    {
+      "query": "add a column for the region to this report",
+      "seeds": [
+        {
+          "path": "src/reports/monthly.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "computeTax MUST round half to even."
+    },
+    {
+      "query": "reject requests from banned clients here",
+      "seeds": [
+        {
+          "path": "src/gateway/guard.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "rotateRefreshToken MUST invalidate the previous token at once."
+    }
   ]
 }
