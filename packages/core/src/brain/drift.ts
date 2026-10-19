@@ -139,6 +139,9 @@ export function lineHash(line: string) {
   return hash(line.trim())
 }
 
+/** Characters of a line a link can point at: a longer one (minified or generated code) is never looked at. */
+export const LINE = 4_096
+
 /**
  * Where a link's line is in a file's new text, and whether it still says the same: `fresh` at the line its hash is
  * found on (the nearest one, for a line found twice), `drifted` where the name is still defined (or, for a use, still
@@ -159,7 +162,7 @@ export function recheck(
   }
   // A link to a file and nothing in it holds while the file is there.
   if (anchor.method === "path" || !anchor.symbol) return { status: "fresh" }
-  const still = nearest(lines.flatMap((line, index) => (matches(line) ? [index] : [])))
+  const still = nearest(lines.flatMap((line, index) => (line.length <= LINE && matches(line) ? [index] : [])))
   if (still === undefined) return { status: "missing" }
   // A name only used still means what it did wherever it is used; a definition that reads differently may not.
   return { status: anchor.method === "use" ? "fresh" : "drifted", line: still + 1 }

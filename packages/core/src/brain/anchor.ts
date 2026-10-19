@@ -42,6 +42,8 @@ export const LIMIT = {
   /** Anchors one record or passage keeps, and names it waits for. */
   perOwner: 20,
   pending: 50,
+  /** Characters of a line a link can point at: a longer one (minified or generated code) is never looked at. */
+  line: BrainDrift.LINE,
 } as const
 
 /** A name a document gives: `text` is an identifier, a repository path, a route shape (`/v1/users/*`) or an env name. */
@@ -150,10 +152,12 @@ export function skipped(file: string) {
  * environment variable, or only uses it.
  */
 export function classify(line: string, name: string, file = ""): "definition" | "env" | "use" {
+  if (!line.includes(name)) return "use"
   const word = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  // `\s+(?:\*\s*)?` and not `\s+\*?\s*`: two runs of spaces next to each other backtrack with the square of a line's length.
   if (
     new RegExp(
-      `\\b(?:function|class|interface|type|enum|const|let|var|def|fn|struct|trait|func|impl|module|object|record|protocol|typedef)\\s+\\*?\\s*${word}\\b|\\bfunc\\s+\\([^)]*\\)\\s*${word}\\b|\\b${word}\\s*[:=]\\s*(?:async\\s*)?(?:function\\b|\\(|\\{)`,
+      `\\b(?:function|class|interface|type|enum|const|let|var|def|fn|struct|trait|func|impl|module|object|record|protocol|typedef)\\s+(?:\\*\\s*)?${word}\\b|\\bfunc\\s+\\([^)]*\\)\\s*${word}\\b|\\b${word}\\s*[:=]\\s*(?:async\\s*)?(?:function\\b|\\(|\\{)`,
     ).test(line)
   )
     return "definition"

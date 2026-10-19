@@ -130,6 +130,31 @@ describe("BrainDrift", () => {
     expect(result.after.some((item) => item.subject === "refreshTokenTtl")).toBe(false)
   }, 30_000)
 
+  test("a 500 KB line never stalls the check, and a line that long is never a link's line", async () => {
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          yield* added(setup, text("Limits.md", SPEC))
+          yield* write(
+            setup,
+            "src/auth/session.ts",
+            `const${" ".repeat(500_000)}x\nexport const refreshTokenTtl = (days: number, leeway = 0) => days * 86_400 + leeway\n`,
+          )
+          const started = performance.now()
+          yield* setup.knowledge.drift(setup.place, { force: true })
+          const ms = performance.now() - started
+          const changed = yield* anchorFor(setup, "refreshTokenTtl")
+          yield* write(setup, "src/auth/session.ts", `export const refreshTokenTtl = 1 // ${"x".repeat(5_000)}\n`)
+          yield* setup.knowledge.drift(setup.place, { force: true })
+          return { ms, changed, long: yield* anchorFor(setup, "refreshTokenTtl") }
+        }),
+      { files: CODE, git: true },
+    )
+    expect(result.changed).toMatchObject({ line: 2, status: "drifted" })
+    expect(result.ms).toBeLessThan(2_000)
+    expect(result.long.status).toBe("missing")
+  }, 30_000)
+
   test("50 MB in the document against 64 * 1024 * 1024 in the code opens a value drift, which the user settles", async () => {
     const result = await withKnowledge(
       (setup) =>

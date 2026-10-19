@@ -3441,9 +3441,10 @@ function make(input: {
     const symbol = target.symbol?.trim() || undefined
     const lines = text.split("\n")
     const at = symbol
-      ? [lines.findIndex((line) => BrainAnchor.classify(line, symbol, file) === "definition"), lines.findIndex((line) => line.includes(symbol))].find(
-          (index) => index >= 0,
-        )
+      ? [
+          lines.findIndex((line) => line.length <= BrainAnchor.LIMIT.line && BrainAnchor.classify(line, symbol, file) === "definition"),
+          lines.findIndex((line) => line.length <= BrainAnchor.LIMIT.line && line.includes(symbol)),
+        ].find((index) => index >= 0)
       : undefined
     const now = Date.now()
     yield* db

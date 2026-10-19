@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm"
 import { Effect } from "effect"
 import { BrainAnchor } from "@vectordevai/core/brain/anchor"
 import { BrainAnchorTable, BrainEventTable, BrainPendingTable } from "@vectordevai/core/brain/sql"
+import { tmpdir } from "../fixture/tmpdir"
 import { added, text, withKnowledge, type Setup } from "./fixture/knowledge"
 
 // Links from documents to code, found with Ripgrep in a real (temporary) git working tree: definitions, uses, routes,
@@ -92,7 +93,47 @@ describe("BrainAnchor.names", () => {
     expect(BrainAnchor.classify("const url = process.env.DATABASE_URL", "DATABASE_URL")).toBe("env")
     expect(BrainAnchor.classify('url = os.getenv("DATABASE_URL")', "DATABASE_URL")).toBe("env")
     expect(BrainAnchor.classify("return refreshTokenTtl(days)", "refreshTokenTtl")).toBe("use")
+    expect(BrainAnchor.classify("function *refreshTokens() {", "refreshTokens")).toBe("definition")
+    expect(BrainAnchor.classify("function * refreshTokens() {", "refreshTokens")).toBe("definition")
   })
+
+  // A pattern that backtracks takes about a second on these lines here (and minutes on a 500 KB one, below).
+  test("the definition check stays quick on a long run of spaces", () => {
+    const started = performance.now()
+    expect(BrainAnchor.classify(`const${" ".repeat(50_000)}x = refreshTokenTtl`, "refreshTokenTtl")).toBe("use")
+    expect(BrainAnchor.classify(`function${" ".repeat(50_000)}*${" ".repeat(50_000)}x(refreshTokenTtl)`, "refreshTokenTtl")).toBe("use")
+    expect(performance.now() - started).toBeLessThan(200)
+  })
+
+  // On a 500 KB line, in a child process that is stopped if it takes too long. V8 (Electron and Node) backtracks on
+  // runs of spaces as Bun's regex interpreter does.
+  test.skipIf(!Bun.which("node"))("the definition check stays quick on a 500 KB line in V8", async () => {
+    await using tmp = await tmpdir()
+    const built = await Bun.build({
+      entrypoints: [path.join(import.meta.dir, "../../src/brain/anchor.ts")],
+      target: "node",
+      format: "esm",
+    })
+    await Bun.write(path.join(tmp.path, "anchor.mjs"), built.outputs[0]!)
+    await Bun.write(
+      path.join(tmp.path, "time.mjs"),
+      [
+        'import { classify } from "./anchor.mjs"',
+        "const started = performance.now()",
+        'const kind = classify("const" + " ".repeat(500_000) + "x = refreshTokenTtl", "refreshTokenTtl")',
+        "console.log(JSON.stringify({ kind, ms: performance.now() - started }))",
+      ].join("\n"),
+    )
+    const child = Bun.spawn([Bun.which("node")!, path.join(tmp.path, "time.mjs")], { stdout: "pipe", stderr: "pipe" })
+    // A pattern that backtracks takes minutes on this line; it is stopped long before.
+    const timer = setTimeout(() => child.kill("SIGKILL"), 10_000)
+    const out = await new Response(child.stdout).text()
+    clearTimeout(timer)
+    expect(await child.exited).toBe(0)
+    const timed = JSON.parse(out)
+    expect(timed.kind).toBe("use")
+    expect(timed.ms).toBeLessThan(500)
+  }, 20_000)
 
   test("routes of each framework normalise to the document's shape", () => {
     const name = { kind: "route" as const, text: "/v1/users/*", method: "GET" }
