@@ -235,7 +235,8 @@ describe("BrainKnowledge suggestions", () => {
         const again = yield* setup.knowledge.distilled(setup.place, document!.id, { records, run })
         const recalled = yield* setup.knowledge.search(setup.place, { query: "refunds support lead", personal: true })
         const detail = yield* setup.knowledge.document(setup.place, document!.id, { personal: true })
-        return { first, after, again, recalled, detail }
+        const review = yield* setup.knowledge.review(setup.place)
+        return { first, after, again, recalled, detail, review }
       }),
     )
     if (result.after?.type !== "source") throw new Error("not distillable")
@@ -246,6 +247,11 @@ describe("BrainKnowledge suggestions", () => {
     expect(result.first?.records[0]).toMatchObject({ origin: "distilled", status: "proposed", confidence: 0.7 })
     expect(result.again).toMatchObject({ records: [], duplicate: 1 })
     expect(result.recalled.map((card) => card.id)).not.toContain(result.first!.records[0]!.id)
+    // "Needs a look" lists it as a suggestion to keep or drop.
+    expect(result.review.find((item) => item.id === result.first!.records[0]!.id)?.detail).toMatchObject({
+      type: "record",
+      suggested: true,
+    })
     // Each run is on the History, newest first, with what it spent.
     const events = result.detail!.history.filter((item) => item.action === "distilled")
     expect(events.map((event) => event.detail?.kept)).toEqual([0, 1])

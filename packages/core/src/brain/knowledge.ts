@@ -5481,7 +5481,15 @@ function make(input: {
       .all()
       .pipe(Effect.orDie)
     const held = yield* db
-      .select({ item: BrainItemTable, document: BrainDocumentTable, body: BrainPassageTable.body, page: BrainPassageTable.page, card: BrainRecordTable.card, passage: BrainRecordTable.passage_id })
+      .select({
+        item: BrainItemTable,
+        document: BrainDocumentTable,
+        body: BrainPassageTable.body,
+        page: BrainPassageTable.page,
+        card: BrainRecordTable.card,
+        passage: BrainRecordTable.passage_id,
+        origin: BrainRecordTable.origin,
+      })
       .from(BrainItemTable)
       .innerJoin(BrainDocumentTable, eq(BrainDocumentTable.id, BrainItemTable.document_id))
       .leftJoin(BrainPassageTable, eq(BrainPassageTable.item, BrainItemTable.id))
@@ -5551,6 +5559,8 @@ function make(input: {
               title: row.document.title,
               ...(row.page === null || row.page === undefined ? {} : { page: row.page }),
               text: BrainCard.clip((row.item.type === "passage" ? row.body : row.card) ?? "", 240),
+              // A model's suggestion waits because the user has not looked at it yet, not for where it came from.
+              ...(row.origin === "distilled" ? { suggested: true } : {}),
             },
             status: "open",
             createdAt: row.document.created_at,
