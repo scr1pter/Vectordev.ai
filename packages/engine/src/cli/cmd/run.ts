@@ -70,6 +70,15 @@ export function promptParts(message: string, piped?: string) {
   ]
 }
 
+/**
+ * What a command sends: piped text goes first, as a message of its own marked as outside content (see `promptParts`),
+ * and the command's arguments are only what the user typed. Memory takes a command's arguments as the user's own words,
+ * so text piped into `vector run --command` must never become part of them.
+ */
+export function commandInput(message: string, piped?: string) {
+  return { arguments: message, before: promptParts("", piped) }
+}
+
 function resolveRunInput(value?: string, piped?: string): string | undefined {
   if (!value) {
     return piped
@@ -508,7 +517,8 @@ export const RunCommand = effectCmd({
       }
 
       const piped = process.stdin.isTTY ? undefined : await Bun.stdin.text()
-      // A prompt sends what was piped in as a part of its own (see `promptParts`); a command takes it in its arguments.
+      // A prompt sends what was piped in as a part of its own (see `promptParts`), and a command as a message before it
+      // (see `commandInput`).
       const input = resolveRunInput(message, piped) ?? ""
       const initialInput = resolveRunInput(rawMessage, piped)
 
@@ -547,7 +557,7 @@ export const RunCommand = effectCmd({
         // A headless run has no one to show a title to, so it names its session after the prompt instead of sending a
         // model request for a title.
         if (args.title === undefined && interactive) return undefined
-        const text = (args.command ? `/${args.command} ${input}` : input).trim()
+        const text = (args.command ? `/${args.command} ${message}` : input).trim()
         if (!text) return undefined
         return text.length > 50 ? `${text.slice(0, 50)}...` : text
       }
@@ -1179,12 +1189,20 @@ export const RunCommand = effectCmd({
           }
 
           if (args.command) {
+            const sent = commandInput(message, piped)
+            if (sent.before.length > 0) {
+              const saved = await client.session.prompt({ sessionID, agent, noReply: true, parts: sent.before })
+              if (saved.error) {
+                rejectRequest(saved.error)
+                return
+              }
+            }
             const result = await client.session.command({
               sessionID,
               agent,
               model: args.model,
               command: args.command,
-              arguments: input,
+              arguments: sent.arguments,
               variant: args.variant,
               budget,
               ...sizing,
