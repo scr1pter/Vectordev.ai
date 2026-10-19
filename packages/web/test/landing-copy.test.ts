@@ -60,7 +60,7 @@ test("Vector Velocity is in development and branded by one size, 550B parameters
 test("what is not live when the page ships is labelled, and what ships with it is not", () => {
   // Free models on Vector's shared allowance, with may-train models labelled and a one-time question, ship in desktop
   // 1.99.109 with this page.
-  expect(lander).toContain("Sign in to Vector and its free models run on Vector's shared allowance")
+  expect(lander).toContain("Sign in to Vector and its free models are provided by Vector at no cost to you")
   expect(lander).not.toMatch(/connect a free OpenRouter account|your own OpenRouter account/i)
   expect(lander).toContain("sent only after you accept that once")
   expect(page).toContain("May train on your prompts")

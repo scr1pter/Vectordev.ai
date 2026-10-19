@@ -28,7 +28,7 @@ describe("vector run's notice for a free model labelled May train on your prompt
 
   test("names the model, where it runs and its label, then the disclaimer", () => {
     expect(freeModelRunNotice(providers, { providerID: "vector", modelID: laguna.id })).toBe(
-      `Free models inside of Vector: Poolside: Laguna S 2.1 · Shared Vector allowance · May train on your prompts${EOL}${FREE_MODEL_TRAINING_DISCLAIMER}`,
+      `Free models inside of Vector: Poolside: Laguna S 2.1 · Provided by Vector · May train on your prompts${EOL}${FREE_MODEL_TRAINING_DISCLAIMER}`,
     )
     expect(freeModelRunNotice(providers, { providerID: "openrouter", modelID: laguna.id })).toContain(
       "Your OpenRouter account · May train on your prompts",

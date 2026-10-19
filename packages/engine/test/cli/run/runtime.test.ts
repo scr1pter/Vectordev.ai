@@ -205,7 +205,7 @@ describe("run interactive runtime", () => {
         return
       }
       expect(notices).toHaveLength(1)
-      expect(notices[0]).toContain("Maker Free · Shared Vector allowance · May train on your prompts")
+      expect(notices[0]).toContain("Maker Free · Provided by Vector · May train on your prompts")
       expect(notices[0]).toContain("Vector itself never trains on your prompts.")
       expect(order.indexOf(notices[0])).toBeLessThan(order.indexOf("request"))
     })

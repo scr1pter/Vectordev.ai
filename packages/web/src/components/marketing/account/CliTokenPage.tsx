@@ -209,8 +209,8 @@ export function CliTokenPage() {
               <code>vector</code> — start the agent in any repository
             </li>
             <li>
-              Signed in, <code>vector models</code> lists the Free models inside of Vector, on Vector's shared
-              allowance. Connect your own provider with <code>vector auth login</code>
+              Signed in, <code>vector models</code> lists the Free models inside of Vector, provided by Vector at no
+              cost to you. Connect your own provider with <code>vector auth login</code>
             </li>
           </ol>
         )}

@@ -61,7 +61,7 @@ export const FREE_MODELS_SIGN_IN = "Sign in to Vector to use free models."
 /** The same, where the way to sign in is the terminal: the TUI, the CLI and an engine without the desktop app. */
 export const FREE_MODELS_SIGN_IN_TERMINAL = "Sign in to Vector to use free models: run vector login."
 export const FREE_MODELS_SHARED_COPY =
-  "Free models run on Vector's shared allowance at no cost to you, within a daily limit for each account. Requests pass through vectordev.ai to OpenRouter, and OpenRouter and the model's provider process your prompts."
+  "Free models are provided by Vector at no cost to you, within a daily limit for each account. Requests pass through vectordev.ai to OpenRouter, and OpenRouter and the model's provider process your prompts."
 /** What to do when the shared allowance is used up or unavailable: the user's own provider keys, not one provider. */
 export const FREE_MODELS_OWN_KEYS =
   "To keep working now, choose a model from another provider you've connected, or add your own provider key in Settings → Providers."
@@ -74,7 +74,7 @@ export const FREE_MODELS_UNAVAILABLE = `${FREE_MODELS_TITLE} are temporarily una
  * notice says what else to do instead of asking them to connect one.
  */
 export const FREE_MODEL_RESUME_UNAVAILABLE =
-  "This turn can continue only on an OpenRouter account already connected to Vector that lists the same free model. Wait for the shared allowance to reset, or choose another model."
+  "This turn can continue only on an OpenRouter account already connected to Vector that lists the same free model. Wait until free models provided by Vector are available again, or choose another model."
 /** Describes connecting OpenRouter in its own connect flow, which the free-model flow never offers. */
 export const OPENROUTER_ACCOUNT_COPY =
   "Use your own free OpenRouter account: up to 50 requests a day, subject to availability. No payment or credits needed. Keep automatic top-ups, default or enforced account plugins, and external provider keys disabled."
@@ -90,7 +90,7 @@ export function freeModelName(model: Pick<FreeModelChoice, "name">) {
 
 export function freeModelSource(model: Pick<FreeModelChoice, "id" | "freeModel">) {
   if (model.freeModel?.source === "openrouter") return "Your OpenRouter account"
-  if (model.freeModel?.source === "shared") return "Shared Vector allowance"
+  if (model.freeModel?.source === "shared") return "Provided by Vector"
   return undefined
 }
 
@@ -196,10 +196,10 @@ export function freeModelsLimitNotice(error: unknown): FreeModelsLimitNotice | u
 }
 
 export function freeModelsLimitTitle(limit: FreeModelsLimitNotice) {
-  if (limit.reason === "user_daily") return `You've used today's shared allowance for ${FREE_MODELS_TITLE}`
-  if (limit.reason === "user_minute") return "Give the shared free models a moment"
-  if (limit.reason === "shared_daily") return "Today's shared free model allowance is used up"
-  return "Shared free models are temporarily unavailable"
+  if (limit.reason === "user_daily") return `You've reached today's limit for ${FREE_MODELS_TITLE}`
+  if (limit.reason === "user_minute") return "Give the free models provided by Vector a moment"
+  if (limit.reason === "shared_daily") return "Free models provided by Vector have reached today's limit"
+  return "Free models provided by Vector are temporarily unavailable"
 }
 
 export function freeModelsResetLabel(limit: FreeModelsLimitNotice, locale?: string) {
@@ -211,5 +211,5 @@ export function freeModelsLimitMessage(
   limit: FreeModelsLimitNotice,
   options: { locale?: string; terminal?: boolean } = {},
 ) {
-  return `${freeModelsLimitTitle(limit)}. The shared allowance is expected to reset at ${freeModelsResetLabel(limit, options.locale)}. ${options.terminal ? FREE_MODELS_OWN_KEYS_TERMINAL : FREE_MODELS_OWN_KEYS}`
+  return `${freeModelsLimitTitle(limit)}. Free models provided by Vector are expected to be available again at ${freeModelsResetLabel(limit, options.locale)}. ${options.terminal ? FREE_MODELS_OWN_KEYS_TERMINAL : FREE_MODELS_OWN_KEYS}`
 }

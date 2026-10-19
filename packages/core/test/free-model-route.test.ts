@@ -200,7 +200,7 @@ test("native shared requests reject oversized UTF-8 context before contacting th
       reason: {
         _tag: "InvalidRequest",
         message:
-          "Context too large for the shared free allowance. Compact this conversation, or use a model from a provider you've connected with your own key.",
+          "Context too large for free models provided by Vector. Compact this conversation, or use a model from a provider you've connected with your own key.",
       },
     },
   })

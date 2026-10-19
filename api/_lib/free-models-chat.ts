@@ -50,7 +50,7 @@ export function freeModelLimit(reason: FreeModelLimitReason, resetAt: number): F
     reason,
     resetAt,
     // Clients from 1.99.109 write their own notice from reason and resetAt; this is for any other reader.
-    message: `${freeModelsLimitTitle({ reason, resetAt })}. The shared allowance is expected to reset at ${RESET.format(resetAt)}. Until then, use a model from a provider you've connected with your own key.`,
+    message: `${freeModelsLimitTitle({ reason, resetAt })}. Free models provided by Vector are expected to be available again at ${RESET.format(resetAt)}. Until then, use a model from a provider you've connected with your own key.`,
   }
 }
 
@@ -246,14 +246,18 @@ export async function handleFreeModelsChat(
       throw new ApiError(
         503,
         "FREE_MODELS_LIMITS_UNAVAILABLE",
-        "The shared free allowance could not be verified. Try again later.",
+        "Limits for free models provided by Vector could not be checked. Try again later.",
       )
     const quota = decoded.value.data.free_model_daily_requests
     if (
       ![quota.remaining, quota.used, quota.limit].every((n) => Number.isSafeInteger(n) && n >= 0) ||
       quota.remaining > quota.limit
     )
-      throw new ApiError(503, "FREE_MODELS_LIMITS_UNAVAILABLE", "The shared free allowance could not be verified.")
+      throw new ApiError(
+        503,
+        "FREE_MODELS_LIMITS_UNAVAILABLE",
+        "Limits for free models provided by Vector could not be checked. Try again later.",
+      )
     if (!quota.remaining) throw new Limit(freeModelLimit("shared_daily", nextDay(now)))
     await enforceFreeLimit(request, response, {
       scope: `free-models-daily:${Math.floor(now / 86400000)}`,
