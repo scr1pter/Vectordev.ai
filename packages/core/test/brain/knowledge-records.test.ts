@@ -3,11 +3,9 @@ import { execFileSync } from "node:child_process"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Effect } from "effect"
-import { BrainWorker } from "@vectordevai/core/brain/worker/host"
 import { SPEC_V1, SPEC_V2 } from "./fixture/documents"
-import { added, countingWorker, placeFor, services, text, withKnowledge } from "./fixture/knowledge"
+import { added, countingWorker, text, withKnowledge } from "./fixture/knowledge"
 import { lines, pdf } from "./fixture/pdf"
-import { tmpdir } from "../fixture/tmpdir"
 
 // What the app's document page and the CLI read: records page by page, one record with its history, the user's edits
 // and decisions on records, a page of a PDF with the spans its records came from, and the settings for kept originals.
@@ -221,7 +219,12 @@ describe("BrainKnowledge versions, pausing and path mode", () => {
     const result = await withKnowledge(
       (setup) =>
         Effect.gen(function* () {
-          yield* Effect.promise(() => fs.symlink(path.join(setup.root, "spec.md"), path.join(setup.root, "link.md")))
+          yield* Effect.promise(async () => {
+            await fs.symlink(path.join(setup.root, "spec.md"), path.join(setup.root, "link.md"))
+            await fs.mkdir(path.join(setup.dir, "elsewhere"))
+            await fs.writeFile(path.join(setup.dir, "elsewhere", "plan.md"), "# Plan\n\nThe vault opens at dawn.")
+            await fs.symlink(path.join(setup.dir, "elsewhere"), path.join(setup.root, "linked"))
+          })
           execFileSync("mkfifo", [path.join(setup.root, "pipe.md")])
           const add = (file: string) =>
             setup.knowledge.add(setup.place, { type: "path", path: file, origin: "upload", links: false })
@@ -231,6 +234,14 @@ describe("BrainKnowledge versions, pausing and path mode", () => {
             folder: yield* add("docs"),
             file: yield* add("spec.md"),
             followed: yield* setup.knowledge.add(setup.place, { type: "path", path: "link.md", origin: "cli" }),
+            // A repository path that leads out through a linked folder is not a repository file, even from a chat.
+            escaped: yield* setup.knowledge.add(setup.place, {
+              type: "path",
+              path: "linked/plan.md",
+              origin: "chat",
+              attached: false,
+              links: false,
+            }),
           }
         }),
       { files: { "spec.md": SPEC_V1, "docs/readme.md": "# Docs" } },
@@ -241,43 +252,36 @@ describe("BrainKnowledge versions, pausing and path mode", () => {
     expect(result.file).toMatchObject({ type: "queued" })
     // A link the user names on the command line is opened, like any program opens one.
     expect(result.followed).toMatchObject({ type: "unchanged" })
+    expect(result.escaped).toMatchObject({ type: "refused", reason: "outside" })
   })
 })
 
 describe("BrainKnowledge kept originals", () => {
   test("a repository that keeps originals keeps each file privately, reads it again from the copy, and deletes it when told", async () => {
-    await using tmp = await tmpdir()
-    const root = path.join(tmp.path, "repo")
-    await fs.mkdir(root, { recursive: true })
     const bytes = new TextEncoder().encode(SPEC_V1)
-    const folder = path.join(tmp.path, "brain", "documents")
-    const result = await Effect.runPromise(
-      services(
-        placeFor(root),
-        (setup) =>
-          Effect.gen(function* () {
-            const before = yield* setup.knowledge.settings(setup.place)
-            const off = yield* added(setup, { type: "bytes", name: "Off.md", bytes: new TextEncoder().encode(SPEC_V2), origin: "upload" })
-            const settings = yield* setup.knowledge.configure(setup.place, { keepOriginals: true })
-            const { document } = yield* added(setup, { type: "bytes", name: "Auth spec.md", bytes, origin: "upload" })
-            const original = yield* setup.knowledge.original(setup.place, document!.id)
-            const files = yield* Effect.promise(() => fs.readdir(folder))
-            const modes = yield* Effect.promise(async () => ({
-              folder: (await fs.stat(folder)).mode & 0o777,
-              file: (await fs.stat(path.join(folder, files[0]!))).mode & 0o777,
-            }))
-            // An upload has no file to read again but its copy.
-            const reread = yield* setup.knowledge.reindex(setup.place, document!.id)
-            yield* setup.knowledge.wait(setup.place, document!.id, "searchable", 20_000)
-            yield* setup.knowledge.configure(setup.place, { keepOriginals: false })
-            const after = yield* Effect.promise(() => fs.readdir(folder))
-            const [listed] = (yield* setup.knowledge.documents(setup.place, { personal: true })).filter(
-              (item) => item.id === document!.id,
-            )
-            return { before, settings, off: off.document, document, original, files, modes, reread, after, listed }
-          }),
-        { file: path.join(tmp.path, "brain", "brain.db"), dir: tmp.path, worker: BrainWorker.layerInline },
-      ),
+    const result = await withKnowledge((setup) =>
+      Effect.gen(function* () {
+        const folder = path.join(setup.dir, "data", "brain", "documents")
+        const before = yield* setup.knowledge.settings(setup.place)
+        const off = yield* added(setup, { type: "bytes", name: "Off.md", bytes: new TextEncoder().encode(SPEC_V2), origin: "upload" })
+        const settings = yield* setup.knowledge.configure(setup.place, { keepOriginals: true })
+        const { document } = yield* added(setup, { type: "bytes", name: "Auth spec.md", bytes, origin: "upload" })
+        const original = yield* setup.knowledge.original(setup.place, document!.id)
+        const files = yield* Effect.promise(() => fs.readdir(folder))
+        const modes = yield* Effect.promise(async () => ({
+          folder: (await fs.stat(folder)).mode & 0o777,
+          file: (await fs.stat(path.join(folder, files[0]!))).mode & 0o777,
+        }))
+        // An upload has no file to read again but its copy.
+        const reread = yield* setup.knowledge.reindex(setup.place, document!.id)
+        yield* setup.knowledge.wait(setup.place, document!.id, "searchable", 20_000)
+        yield* setup.knowledge.configure(setup.place, { keepOriginals: false })
+        const after = yield* Effect.promise(() => fs.readdir(folder))
+        const [listed] = (yield* setup.knowledge.documents(setup.place, { personal: true })).filter(
+          (item) => item.id === document!.id,
+        )
+        return { before, settings, off: off.document, document, original, files, modes, reread, after, listed }
+      }),
     )
     expect(result.before).toEqual({ repositoryDocs: true, keepOriginals: false })
     expect(result.settings.keepOriginals).toBe(true)

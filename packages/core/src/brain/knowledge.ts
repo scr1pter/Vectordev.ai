@@ -13,11 +13,13 @@ import { Token } from "../util/token"
 import { Brain } from "./brain"
 import { BrainCard } from "./card"
 import { BrainDatabase } from "./database"
+import { Global } from "../global"
 import { BrainLimits } from "./document/limits"
 import { BrainSniff } from "./document/sniff"
 import { BrainFuse } from "./fuse"
 import { BrainLexical } from "./lexical"
 import { BrainPack } from "./pack"
+import { BrainPaths } from "./paths"
 import { BrainScan } from "./scan"
 import type { BrainSchema } from "./schema"
 import {
@@ -71,7 +73,10 @@ export type AddInput = {
   | {
       readonly type: "path"
       readonly path: string
-      /** The user attached this file to the conversation, so it may be anywhere on this computer. */
+      /**
+       * true: the user attached or chose this file, so it may be anywhere on this computer. false: it must really be in
+       * the repository, whoever adds it. Unset, a chat attachment or a file named on the command line may be anywhere.
+       */
       readonly attached?: boolean
       /** false: a path that is itself a link is refused, as the app's path mode refuses one (it names files, not links). */
       readonly links?: false
@@ -168,6 +173,8 @@ export type PageView = {
   readonly passages: readonly {
     readonly id: string
     readonly section: string
+    /** The page it starts on: one before this page runs onto it. */
+    readonly page?: number
     readonly text: string
     /** Why the passage waits for the user's review; held text is never sent to a model. */
     readonly hold?: BrainSchema.Hold
@@ -454,6 +461,7 @@ export const layerWith = (options: Options = {}) =>
     Service,
     Effect.gen(function* () {
       const database = yield* BrainDatabase.Service
+      const global = yield* Global.Service
       const brain = yield* Brain.Service
       const worker = yield* BrainWorker.Service
       const scope = yield* Effect.scope
@@ -465,8 +473,7 @@ export const layerWith = (options: Options = {}) =>
         scope,
         wakeup,
         owner: options.owner,
-        // Kept originals sit beside brain.db; a brain in memory keeps none.
-        ...(database.file === ":memory:" ? {} : { originals: path.join(path.dirname(database.file), "documents") }),
+        originals: path.join(BrainPaths.directory(global.data), "documents"),
       })
     }),
   )
@@ -476,7 +483,7 @@ export const layer = layerWith()
 export const node = makeGlobalNode({
   service: Service,
   layer,
-  deps: [BrainDatabase.node, Brain.node, BrainWorker.node],
+  deps: [BrainDatabase.node, Global.node, Brain.node, BrainWorker.node],
 })
 
 function make(input: {
@@ -486,7 +493,8 @@ function make(input: {
   readonly scope: Scope.Scope
   readonly wakeup: Queue.Queue<void>
   readonly owner?: string
-  readonly originals?: string
+  /** Where kept originals live: `<data>/brain/documents`. */
+  readonly originals: string
 }): Interface {
   const db = input.db
   const brain = input.brain
@@ -911,17 +919,17 @@ function make(input: {
 
   // The kept copy of a document's file, if there is one and it is still those bytes.
   async function keptCopy(document: DocumentRow) {
-    if (!document.stored || !input.originals) return undefined
+    if (!document.stored) return undefined
     const bytes = await fs.readFile(originalPath(input.originals, document.content_hash, document.format)).catch(() => undefined)
     if (!bytes || createHash("sha256").update(bytes).digest("hex") !== document.content_hash) return undefined
     return new Uint8Array(bytes)
   }
 
-  // A copy of an added file, when the repository keeps originals and there is room: 0600 in a 0700 folder beside
-  // brain.db, named by its hash, so documents of the same bytes share one.
+  // A copy of an added file, when the repository keeps originals and there is room: 0600 in a 0700 folder in the brain's
+  // own folder, named by its hash, so documents of the same bytes share one.
   const keep = Effect.fnUntraced(function* (place: Brain.Place, file: File, hash: string, format: BrainSchema.Format) {
     const folder = input.originals
-    if (!folder || !(yield* settings(place)).keepOriginals) return false
+    if (!(yield* settings(place)).keepOriginals) return false
     const total = yield* db
       .select({ bytes: sql<number | null>`sum(${BrainDocumentTable.bytes})` })
       .from(BrainDocumentTable)
@@ -942,7 +950,7 @@ function make(input: {
   // Kept copies no document still keeps are deleted.
   const dropCopies = Effect.fnUntraced(function* (copies: readonly { hash: string; format: BrainSchema.Format }[]) {
     const folder = input.originals
-    if (!folder || copies.length === 0) return
+    if (copies.length === 0) return
     const still = new Set(
       (yield* db
         .select({ hash: BrainDocumentTable.content_hash })
@@ -2563,31 +2571,31 @@ function make(input: {
     const row = yield* findDocument(place, id)
     if (!row || (row.visibility === "private" && !options.personal) || row.pages === null) return undefined
     if (!Number.isSafeInteger(number) || number < 1 || number > row.pages) return undefined
-    // A passage is filed under the page it starts on; one that runs onto this page is here too when a record of this
-    // page was read from it.
-    const passages = yield* db
-      .select({ passage: BrainPassageTable, item: BrainItemTable, path: BrainSectionTable.path })
+    // A passage is filed under the page it starts on, and runs on until the next one starts: the page shows the
+    // passages that start on it and the one before them, which may run onto it.
+    const starts = yield* db
+      .select({ id: BrainPassageTable.id, page: BrainPassageTable.page })
       .from(BrainPassageTable)
-      .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainPassageTable.item))
-      .leftJoin(BrainSectionTable, eq(BrainSectionTable.id, BrainPassageTable.section_id))
-      .where(
-        and(
-          eq(BrainPassageTable.document_id, id),
-          or(
-            eq(BrainPassageTable.page, number),
-            inArray(
-              BrainPassageTable.id,
-              db
-                .select({ id: BrainRecordTable.passage_id })
-                .from(BrainRecordTable)
-                .where(and(eq(BrainRecordTable.document_id, id), eq(BrainRecordTable.page, number))),
-            ),
-          ),
-        ),
-      )
+      .where(eq(BrainPassageTable.document_id, id))
       .orderBy(asc(BrainPassageTable.ordinal))
       .all()
       .pipe(Effect.orDie)
+    const before = starts.findLastIndex((item) => item.page !== null && item.page < number)
+    const shown = starts.filter(
+      (item, index) => item.page === number || (index === before && (starts[index + 1]?.page ?? number) >= number),
+    )
+    const passages =
+      shown.length === 0
+        ? []
+        : yield* db
+            .select({ passage: BrainPassageTable, item: BrainItemTable, path: BrainSectionTable.path })
+            .from(BrainPassageTable)
+            .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainPassageTable.item))
+            .leftJoin(BrainSectionTable, eq(BrainSectionTable.id, BrainPassageTable.section_id))
+            .where(inArray(BrainPassageTable.id, shown.map((item) => item.id)))
+            .orderBy(asc(BrainPassageTable.ordinal))
+            .all()
+            .pipe(Effect.orDie)
     const spans =
       passages.length === 0
         ? []
@@ -2618,6 +2626,7 @@ function make(input: {
       passages: passages.map((item) => ({
         id: item.passage.id,
         section: item.path ?? "",
+        ...(item.passage.page === null ? {} : { page: item.passage.page }),
         text: item.passage.body,
         ...(item.item.status !== "active" && item.item.hold_reason ? { hold: item.item.hold_reason } : {}),
         // Each record's quote where it sits in its passage's text.
@@ -2944,7 +2953,7 @@ export async function read(place: Brain.Place, request: AddInput): Promise<Read>
 // really are, so a link it found or made cannot reach the rest of the computer; and a repository doc is a file of the
 // repository's own, never a link, since a repository a user trusts can still ship one to any file.
 async function outsideOf(request: AddInput & { readonly type: "path" }, absolute: string, inside: boolean) {
-  if (request.attached || request.origin === "chat" || request.origin === "cli") return undefined
+  if (request.attached ?? (request.origin === "chat" || request.origin === "cli")) return undefined
   const link = request.origin === "repository" && (await fs.lstat(absolute).catch(() => undefined))?.isSymbolicLink()
   if (!link && inside) return undefined
   return refuse(
