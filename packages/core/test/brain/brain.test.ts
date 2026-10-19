@@ -1334,6 +1334,32 @@ describe("Brain secrets", () => {
     expect(result.webhook.type === "refused" ? "" : result.webhook.entry.text).not.toContain("hooks.slack.com")
     expect(result.recall.text ?? "").not.toContain("Tr0ub4dor")
   })
+
+  test("more secret shapes are refused for the agent or kept without their value", async () => {
+    const texts = [
+      ["The staging admin password is swordfish.", "swordfish"],
+      ["export DATABASE_PASSWORD='correct horse battery staple' before running the seed.", "horse battery"],
+      ["DB login is admin and the pass is Hunter2!x for staging only.", "Hunter2!x"],
+      ["The deploy key for the bot is 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b in CI settings.", "9f86d0818"],
+    ] as const
+    const result = await run({}, ({ brain, place }) =>
+      Effect.forEach(texts, ([text], index) =>
+        brain.propose(place, {
+          kind: "fact",
+          text,
+          scope: "repository",
+          origin: "agent",
+          sessionID: `ses_shapes_${index}`,
+          evidence: { type: "message", quote: text, verified: true },
+        }),
+      ),
+    )
+    for (const [index, item] of result.entries()) {
+      if (item.type === "refused") continue
+      expect(item.entry.text).not.toContain(texts[index]![1])
+    }
+    expect(result.slice(0, 3).map((item) => item.type)).toEqual(["refused", "refused", "refused"])
+  })
 })
 
 describe("Brain files", () => {

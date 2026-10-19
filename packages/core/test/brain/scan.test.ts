@@ -60,6 +60,40 @@ describe("BrainScan", () => {
     }
   })
 
+  test("a password in any word, a value given to a secret's name, and a key beside its name are secrets", () => {
+    const secrets = [
+      ["The staging admin password is swordfish.", "swordfish"],
+      ["export DATABASE_PASSWORD='correct horse battery staple' before running the seed.", "horse battery"],
+      ["DB login is admin and the pass is Hunter2!x for staging only.", "Hunter2!x"],
+      ["The deploy key for the bot is 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b in CI settings.", "9f86d0818"],
+      ["Service account private_key_id a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0 for the staging bucket.", "a1b2c3d4e5"],
+      ["password: correcthorsebatterystaple", "correcthorse"],
+      ['The config has "token": "plainwordsecret" for the bot.', "plainwordsecret"],
+      ["PGPASSWORD=s3cr3tpass psql -h db", "s3cr3tpass"],
+    ] as const
+    for (const [text, secret] of secrets) {
+      const out = BrainScan.redact(text, {})
+      expect(out.text).not.toContain(secret)
+    }
+    // The agent never saves a line that gives a password or a secret's value, even redacted.
+    for (const text of [secrets[0][0], secrets[1][0], secrets[2][0], secrets[5][0], secrets[6][0], secrets[7][0]])
+      expect(BrainScan.credential(text)).toBe(true)
+    const talk = [
+      "the token: validate it before use",
+      "The password is case-sensitive and rotates monthly.",
+      "The password is required for the admin login.",
+      "The API client takes apiKey: string and baseURL: string.",
+      "Set DATABASE_PASSWORD=$DATABASE_PASSWORD in the shell first.",
+      "The commit 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b fixed the build.",
+      "Use bypass: true only in the local fixture.",
+      "The token is short-lived",
+    ]
+    for (const text of talk) {
+      expect(BrainScan.redact(text, {}).text).toBe(text)
+      expect(BrainScan.credential(text)).toBe(false)
+    }
+  })
+
   test("redacts the value of a secret environment variable wherever it appears", () => {
     const out = BrainScan.redact("Staging uses abcd1234efgh5678 as its key.", { STAGING_TOKEN: "abcd1234efgh5678" })
     expect(out.text).toBe("Staging uses [redacted] as its key.")
