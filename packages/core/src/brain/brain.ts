@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto"
 import { chmodSync, mkdirSync } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
-import { and, asc, desc, eq, inArray, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
 import { EffectDrizzleSqlite } from "@vectordevai/effect-drizzle-sqlite"
 import { layer } from "#sqlite"
 import { Context, Effect, Layer } from "effect"
@@ -1571,6 +1571,8 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       counts.archived += yield* capacity(repository)
     }
     // 4. An entry whose cited file changed so the quote is gone is stale: kept out of automatic tiers until re-checked.
+    //    Every entry in use is checked against its newest cited line on every tidy. The capacity cap keeps that to a
+    //    few hundred entries, and each cited file is read once.
     const cited = yield* db
       .select({ entry: BrainEvidenceTable.entry_id, path: BrainEvidenceTable.path, quote: BrainEvidenceTable.quote, stale: BrainEntryTable.stale })
       .from(BrainEvidenceTable)
@@ -1580,16 +1582,19 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
           eq(BrainEvidenceTable.type, "file"),
           eq(BrainEntryTable.repository_id, place.repository),
           eq(BrainEntryTable.status, "active"),
+          isNotNull(BrainEvidenceTable.path),
+          isNotNull(BrainEvidenceTable.quote),
         ),
       )
-      .limit(50)
+      .orderBy(asc(BrainEvidenceTable.id))
       .all()
       .pipe(Effect.orDie)
-    for (const item of cited) {
-      if (!item.path || !item.quote) continue
-      const target = path.resolve(place.root, item.path)
-      const content = yield* Effect.promise(() => fs.readFile(target, "utf8").catch(() => undefined))
-      const stale = content === undefined || !normalise(content).includes(normalise(item.quote))
+    const contents = new Map<string, string>()
+    for (const item of new Map(cited.map((row) => [row.entry, row])).values()) {
+      const target = path.resolve(place.root, item.path!)
+      if (!contents.has(target)) contents.set(target, normalise(yield* Effect.promise(() => fs.readFile(target, "utf8").catch(() => ""))))
+      const content = contents.get(target)
+      const stale = !content || !content.includes(normalise(item.quote!))
       if (stale === item.stale) continue
       if (stale) counts.stale++
       yield* db.update(BrainEntryTable).set({ stale }).where(eq(BrainEntryTable.id, item.entry)).run().pipe(Effect.orDie)

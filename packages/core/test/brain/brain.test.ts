@@ -566,6 +566,37 @@ describe("Brain consolidation", () => {
     expect(result.active.filter((entry) => entry.text.startsWith("Release builds"))).toHaveLength(1)
     expect(result.active.find((entry) => entry.text.startsWith("Auth tokens"))?.stale).toBe(true)
   })
+
+  test("every cited entry is checked for stale code, not only the first fifty", async () => {
+    const files = Object.fromEntries(
+      Array.from({ length: 70 }, (_, i) => [`src/mod${i}.ts`, `// module${i} reads its limit from config entry limit${i}\n`]),
+    )
+    const result = await run(files, ({ brain, place, root }) =>
+      Effect.gen(function* () {
+        for (let i = 0; i < 70; i++)
+          yield* brain.propose(place, {
+            kind: "fact",
+            text: `module${i} reads its limit from config entry limit${i}`,
+            scope: "repository",
+            origin: "agent",
+            sessionID: `ses_stale_${i}`,
+            evidence: { type: "file", path: `src/mod${i}.ts`, quote: `module${i} reads its limit from config entry limit${i}`, verified: true },
+          })
+        yield* Effect.promise(() =>
+          Promise.all(Array.from({ length: 70 }, (_, i) => fs.writeFile(path.join(root, "src", `mod${i}.ts`), "// rewritten\n"))),
+        )
+        const first = yield* brain.consolidate(place, { force: true })
+        const second = yield* brain.consolidate(place, { force: true })
+        const active = yield* brain.list(place, {})
+        const recalled = yield* brain.recall(place, { query: "module65 limit65 config", budget: 500, personal: false })
+        return { first, second, active, recalled }
+      }),
+    )
+    expect(result.first.stale).toBe(70)
+    expect(result.second.stale).toBe(0)
+    expect(result.active.filter((entry) => entry.stale)).toHaveLength(70)
+    expect(result.recalled.text ?? "").not.toContain("module65")
+  })
 })
 
 describe("Brain evidence", () => {
