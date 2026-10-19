@@ -59,7 +59,7 @@ export type Extracted = {
   readonly title: string
   readonly format: BrainSchema.Format
   readonly pages?: number
-  /** Pages with no text layer. */
+  /** Pages with no text layer, or that pdf.js could not read. */
   readonly unread: readonly number[]
   readonly text: string
   readonly blocks: readonly Block[]

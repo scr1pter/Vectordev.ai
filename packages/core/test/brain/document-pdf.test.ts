@@ -202,3 +202,63 @@ describe("BrainDocument PDF", () => {
     expect(result.type).toBe("refused")
   })
 })
+
+describe("BrainDocument PDF from a hostile file", () => {
+  const body = lines([
+    "Uploads are limited to 50 MB per file in every region.",
+    "Larger files are refused by the service.",
+    "Retries back off for a minute before trying again.",
+    "The worker resumes the upload where it stopped.",
+  ])
+  const timed = async (bytes: Uint8Array, limits = BrainLimits.LIMITS.inline) => {
+    const started = performance.now()
+    const result = await BrainDocument.read({ name: "hostile.pdf", bytes }, limits)
+    return { result, elapsed: performance.now() - started }
+  }
+
+  test("a page a billion points wide or a run stretched far past its page reads at once", async () => {
+    const wide = await timed(
+      pdf({ pages: [{ media: [0, 0, 1e9, 792], runs: [...body, { text: "Far right of the page", x: 9e8, y: 700 }] }] }),
+    )
+    expect(wide.elapsed).toBeLessThan(5_000)
+    expect(wide.result.type).toBe("extracted")
+    for (const stretch of [8e7, 1e12]) {
+      const stretched = await timed(
+        pdf({ pages: [{ runs: [...body, { text: "Stretched words", x: 72, y: 600, stretch }] }] }),
+      )
+      expect(stretched.elapsed).toBeLessThan(5_000)
+      expect(stretched.result.type).toBe("extracted")
+      if (stretched.result.type === "extracted") expect(stretched.result.text).toContain("Uploads are limited")
+    }
+  }, 30_000)
+
+  test("a page tree that lists itself leaves the pages it cannot reach unread instead of failing", async () => {
+    const result = await BrainDocument.read(
+      { name: "loop.pdf", bytes: pdf({ loop: true, pages: [{ runs: body }] }) },
+      BrainLimits.LIMITS.worker,
+    )
+    expect(result).toMatchObject({ type: "extracted", unread: [2] })
+    if (result.type === "extracted") expect(result.text).toContain("Uploads are limited")
+  })
+
+  test("streams that inflate past the cap are refused before pdf.js expands them", async () => {
+    const limits = { ...BrainLimits.LIMITS.inline, streams: 1024 * 1024 }
+    expect((await timed(pdf({ pages: [{ runs: body, padding: 2 * 1024 * 1024 }] }), limits)).result).toMatchObject({
+      type: "refused",
+      reason: "too-large",
+    })
+    expect((await timed(pdf({ pages: [{ runs: body, padding: 512 * 1024 }] }), limits)).result.type).toBe("extracted")
+    // A stream inflated twice over is a bomb's shape, whatever its first stage inflates to.
+    const twice = new TextDecoder("latin1")
+      .decode(pdf({ pages: [{ runs: body }] }))
+      .replace("/Filter /FlateDecode", "/Filter [/FlateDecode /FlateDecode]")
+    expect(
+      (
+        await timed(
+          Uint8Array.from(twice, (char) => char.charCodeAt(0)),
+          limits,
+        )
+      ).result,
+    ).toMatchObject({ type: "refused", reason: "invalid" })
+  })
+})

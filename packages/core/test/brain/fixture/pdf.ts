@@ -2,6 +2,8 @@
 // pages, metadata, a JavaScript open action and an encryption dictionary. Every fixture is generated here, so no binary
 // document is committed.
 
+import { zlibSync } from "fflate"
+
 export type Font = "regular" | "bold" | "mono"
 
 export type Run = {
@@ -11,6 +13,8 @@ export type Run = {
   readonly y: number
   readonly size?: number
   readonly font?: Font
+  /** Stretches the run sideways by this factor through its text matrix. */
+  readonly stretch?: number
 }
 
 export type Page = {
@@ -21,6 +25,10 @@ export type Page = {
   readonly ocr?: readonly Run[]
   /** A crop box narrower than the 612 × 792 page, so text between the two is printed but never shown. */
   readonly crop?: readonly [number, number, number, number]
+  /** A media box other than 612 × 792. */
+  readonly media?: readonly [number, number, number, number]
+  /** A second, Flate-compressed content stream that inflates to this many bytes of spaces. */
+  readonly padding?: number
 }
 
 export type Options = {
@@ -31,6 +39,8 @@ export type Options = {
   readonly javascript?: string
   /** A standard security handler whose user password is not empty, so a reader without the password cannot open it. */
   readonly encrypted?: boolean
+  /** The page tree lists itself among its kids after the pages, so walking it never ends. */
+  readonly loop?: boolean
 }
 
 const FONTS = { regular: "F1", bold: "F2", mono: "F3" } as const
@@ -39,9 +49,9 @@ export function pdf(options: Options) {
   const objects: string[] = []
   const add = (body: string) => objects.push(body)
   const pageCount = options.pages.length
-  // 1 catalog, 2 pages, 3-5 fonts, 6 image, then each page and its content, then outline items, then info.
+  // 1 catalog, 2 pages, 3-5 fonts, 6 image, then each page, its content and its padding, then outline items, then info.
   const firstPage = 7
-  const outlineRoot = firstPage + pageCount * 2
+  const outlineRoot = firstPage + pageCount * 3
   const outlineItems = options.outline ?? []
   const info = outlineRoot + (outlineItems.length > 0 ? 1 + outlineItems.length : 0)
   const encrypt = info + 1
@@ -55,7 +65,7 @@ export function pdf(options: Options) {
   ]
   add(`<< ${catalog.filter(Boolean).join(" ")} >>`)
   add(
-    `<< /Type /Pages /Count ${pageCount} /Kids [${options.pages.map((_, index) => `${firstPage + index * 2} 0 R`).join(" ")}] >>`,
+    `<< /Type /Pages /Count ${pageCount + (options.loop ? 1 : 0)} /Kids [${options.pages.map((_, index) => `${firstPage + index * 3} 0 R`).join(" ")}${options.loop ? " 2 0 R" : ""}] >>`,
   )
   add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
   add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
@@ -68,18 +78,19 @@ export function pdf(options: Options) {
   )
   for (const [index, page] of options.pages.entries()) {
     add(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]${page.crop ? ` /CropBox [${page.crop.join(" ")}]` : ""} /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> /XObject << /Im1 6 0 R >> >> /Contents ${firstPage + index * 2 + 1} 0 R >>`,
+      `<< /Type /Page /Parent 2 0 R /MediaBox [${(page.media ?? [0, 0, 612, 792]).join(" ")}]${page.crop ? ` /CropBox [${page.crop.join(" ")}]` : ""} /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> /XObject << /Im1 6 0 R >> >> /Contents [${firstPage + index * 3 + 1} 0 R ${firstPage + index * 3 + 2} 0 R] >>`,
     )
     const image = page.image || page.ocr ? ["q 500 0 0 700 56 46 cm /Im1 Do Q"] : []
     const runs = (page.runs ?? []).map(
       (run) =>
-        `BT /${FONTS[run.font ?? "regular"]} ${run.size ?? 11} Tf 1 0 0 1 ${run.x} ${run.y} Tm (${escape(run.text)}) Tj ET`,
+        `BT /${FONTS[run.font ?? "regular"]} ${run.size ?? 11} Tf ${run.stretch ?? 1} 0 0 1 ${run.x} ${run.y} Tm (${escape(run.text)}) Tj ET`,
     )
     const ocr = (page.ocr ?? []).map(
       (run) =>
         `BT 3 Tr /${FONTS[run.font ?? "regular"]} ${run.size ?? 11} Tf 1 0 0 1 ${run.x} ${run.y} Tm (${escape(run.text)}) Tj ET`,
     )
     add(stream("<<", [...image, ...runs, ...ocr].join("\n")))
+    add(stream("<< /Filter /FlateDecode", deflated(new Uint8Array(page.padding ?? 1).fill(0x20))))
   }
   if (outlineItems.length > 0) {
     add(
@@ -91,7 +102,7 @@ export function pdf(options: Options) {
         index < outlineItems.length - 1 ? `/Next ${outlineRoot + index + 2} 0 R` : "",
       ]
       add(
-        `<< /Title (${escape(item.title)}) /Parent ${outlineRoot} 0 R /Dest [${firstPage + (item.page - 1) * 2} 0 R /XYZ 0 792 0] ${links.filter(Boolean).join(" ")} >>`,
+        `<< /Title (${escape(item.title)}) /Parent ${outlineRoot} 0 R /Dest [${firstPage + (item.page - 1) * 3} 0 R /XYZ 0 792 0] ${links.filter(Boolean).join(" ")} >>`,
       )
     }
   }
@@ -117,6 +128,10 @@ export function pdf(options: Options) {
   ]
   const file = `${header}${body}${table.join("\n")}\ntrailer\n<< ${trailer.filter(Boolean).join(" ")} >>\nstartxref\n${xref}\n%%EOF\n`
   return Uint8Array.from(file, (char) => char.charCodeAt(0) & 0xff)
+}
+
+function deflated(bytes: Uint8Array) {
+  return Array.from(zlibSync(bytes, { level: 9 }), (byte) => String.fromCharCode(byte)).join("")
 }
 
 function stream(dictionary: string, data: string) {

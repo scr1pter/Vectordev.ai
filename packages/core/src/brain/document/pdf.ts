@@ -1,8 +1,9 @@
 export * as BrainPdf from "./pdf"
 
+import { Inflate } from "fflate"
 import { getDocumentProxy } from "unpdf"
 import type { BrainSchema } from "../schema"
-import { refuse, type BrainLimits } from "./limits"
+import { budget, refuse, type BrainLimits } from "./limits"
 import type { Draft, Read, ReadRefusal } from "./read"
 import { BrainText } from "./text"
 
@@ -12,6 +13,8 @@ import { BrainText } from "./text"
 // baselines, hyphenated words joined, running headers and footers dropped, two columns read one after the other,
 // headings from the outline or from size, weight and numbering, lists from bullets and indents, tables from aligned
 // gaps, code from monospace runs. Text too small to read (under 2 pt) or outside the page is dropped and flagged.
+// Every coordinate comes from the file, so each is clamped to its page before any size is worked out from it, and a
+// page pdf.js cannot read is listed as unread rather than failing the document.
 
 const OPTIONS = {
   disableFontFace: true,
@@ -25,6 +28,8 @@ const OPTIONS = {
   isOffscreenCanvasSupported: false,
   isImageDecoderSupported: false,
   useWasm: false,
+  // Pictures are never read, and a bigger one is not decoded while a page's fonts are resolved.
+  maxImageSize: 1_000_000,
 }
 
 type Document = Awaited<ReturnType<typeof getDocumentProxy>>
@@ -64,6 +69,14 @@ type Heading = { readonly title: string; readonly page: number; readonly level: 
 const SCANNED = 25
 
 export async function read(bytes: Uint8Array, limits: BrainLimits.Limits): Promise<Read | ReadRefusal> {
+  const inflated = expands(bytes, limits.streams)
+  if (inflated !== "ok")
+    return inflated === "chained"
+      ? refuse(
+          "invalid",
+          "This PDF compresses its contents twice over, which no ordinary PDF does, so it was not read.",
+        )
+      : refuse("too-large", "This PDF expands to more than Vector reads safely, so it was not read.")
   // pdf.js takes ownership of the buffer it is given, so it gets a copy.
   const opened = await getDocumentProxy(bytes.slice(), OPTIONS).then(
     (document) => ({ document }),
@@ -79,7 +92,38 @@ export async function read(bytes: Uint8Array, limits: BrainLimits.Limits): Promi
           "This file is password protected. Vector doesn't ask for document passwords; add an unprotected copy.",
         )
       : refuse("invalid", "This PDF is damaged and could not be read.")
-  return extract(opened.document, limits).finally(() => opened.document.loadingTask.destroy())
+  return extract(opened.document, limits)
+    .catch(() => refuse("invalid", "This PDF is damaged and could not be read."))
+    .finally(() => opened.document.loadingTask.destroy())
+}
+
+// pdf.js inflates a content stream, a font or an object stream whole before it reads one, so a small file can expand to
+// gigabytes. Each Flate stream other than a picture (which pdf.js decodes only up to its stated size, and not at all
+// past `maxImageSize`) is inflated here first, counting bytes and keeping none, and the file is refused once the
+// total passes the cap. A stream compressed twice with Flate is a bomb's shape and is refused outright.
+function expands(bytes: Uint8Array, cap: number): "ok" | "over" | "chained" {
+  const text = new TextDecoder("latin1").decode(bytes)
+  const total = budget(cap)
+  for (const match of text.matchAll(/(?<!end)stream\r?\n/g)) {
+    const dictionary = text.slice(Math.max(0, text.lastIndexOf(" obj", match.index), match.index - 4_096), match.index)
+    const filters = dictionary.match(/\/FlateDecode\b/g)?.length ?? 0
+    if (filters > 1) return "chained"
+    if (filters === 0 || /\/Subtype\s*\/Image\b/.test(dictionary)) continue
+    const start = match.index + match[0].length
+    const end = text.indexOf("endstream", start)
+    const data = bytes.subarray(start, end < 0 ? bytes.length : end)
+    // The zlib header is skipped, as pdf.js tolerates a damaged one.
+    const inflater = new Inflate((chunk) => {
+      total.take(chunk.length)
+    })
+    // fflate reports a corrupt stream by throwing; pdf.js then reads what it can of it, which is no more.
+    try {
+      for (let at = 2; at < data.length && !total.over; at += 65_536)
+        inflater.push(data.subarray(at, at + 65_536), at + 65_536 >= data.length)
+    } catch {}
+    if (total.over) return "over"
+  }
+  return "ok"
 }
 
 async function extract(document: Document, limits: BrainLimits.Limits): Promise<Read> {
@@ -96,14 +140,20 @@ async function extract(document: Document, limits: BrainLimits.Limits): Promise<
   const links: string[] = []
   const state = { chars: 0 }
   for (let number = 1; number <= count; number++) {
-    const page = await document.getPage(number)
-    const content = await page.getTextContent()
-    const [left, bottom, right, top] = page.view as [number, number, number, number]
+    const page = await document.getPage(number).catch(() => undefined)
+    const content = await page?.getTextContent().catch(() => undefined)
+    const [left, bottom, right, top] = (page?.view ?? []) as number[]
+    if (!page || !content || ![left, bottom, right, top].every((edge) => Number.isFinite(edge))) {
+      unread.push(number)
+      pages.push([])
+      page?.cleanup()
+      continue
+    }
     const items = content.items.flatMap((item) => ("str" in item && item.str.trim() ? [item] : []))
     const kept = items.filter((item) => {
       const [, , c, d, x, y] = item.transform as number[]
       const size = Math.hypot(c!, d!)
-      return size >= 2 && x! <= right && x! + item.width >= left && y! >= bottom && y! <= top
+      return size >= 2 && x! <= right! && x! + item.width >= left! && y! >= bottom! && y! <= top!
     })
     const visible = kept.reduce((sum, item) => sum + item.str.replace(/\s/g, "").length, 0)
     if (visible < SCANNED) {
@@ -130,9 +180,9 @@ async function extract(document: Document, limits: BrainLimits.Limits): Promise<
       return [
         {
           text: item.str.slice(0, Math.max(0, budget.left + item.str.length)),
-          x: x!,
+          x: Math.max(left!, x!),
           y: y!,
-          end: x! + item.width,
+          end: Math.min(right!, x! + item.width),
           size: Math.hypot(c!, d!),
           bold: weight.get(item.fontName) ?? false,
           mono: content.styles[item.fontName]?.fontFamily === "monospace",
@@ -140,7 +190,7 @@ async function extract(document: Document, limits: BrainLimits.Limits): Promise<
       ]
     })
     if (budget.left <= 0) warnings.add("truncated")
-    const lines = baselines(placed, number, top, bottom)
+    const lines = baselines(placed, number, top!, bottom!)
     // Each dropped run flags the line nearest it, so the passage it was hidden in is held.
     const shown = new Set(kept)
     for (const item of items.filter((item) => !shown.has(item))) {
@@ -322,6 +372,8 @@ function pageNumber(line: Line) {
   return margin && /^(?:page\s+)?(?:\d{1,4}|[ivxlc]{1,7})(?:\s*(?:of|\/)\s*\d{1,4})?$/i.test(line.text.trim())
 }
 
+const GUTTER = 200
+
 // Two columns: a vertical band in the middle of the text that almost no line crosses, with prose-width text on both
 // sides of it. Each run of two-column lines is read left column first; a line across the band (a title, a figure
 // caption) ends the run.
@@ -332,7 +384,8 @@ function columns(lines: readonly Line[]): Line[] {
   const width = right - left
   if (width < 200) return [...lines]
   const covers = (line: Line, x: number) => line.cells.some((cell) => cell.x - 2 < x && x < cell.end + 2)
-  const candidates = Array.from({ length: Math.floor((0.4 * width) / 2) }, (_, index) => left + 0.3 * width + index * 2)
+  // The middle 40% of the text is tried at a fixed number of points, however wide the file says its page is.
+  const candidates = Array.from({ length: GUTTER }, (_, index) => left + 0.3 * width + (index * 0.4 * width) / GUTTER)
   const gutter = candidates
     .map((x) => ({
       x,
@@ -381,6 +434,9 @@ function columns(lines: readonly Line[]): Line[] {
   flush()
   return out
 }
+
+/** The most spaces a code line is indented by, however far right the file sets it. */
+const INDENT = 64
 
 const BULLET = /^(?:[•◦▪‣·●○■□➢►–—*-]|\(?(?:\d{1,3}|[a-z]|[ivx]{1,5})[.)])\s+/i
 const NUMBERED = /^\d+(?:\.\d+)*\s+\p{Lu}/u
@@ -463,7 +519,8 @@ function layout(
         type: "code",
         text: group
           .map(
-            (other) => `${" ".repeat(Math.max(0, Math.round((other.x - indent) / (0.6 * other.size))))}${other.text}`,
+            (other) =>
+              `${" ".repeat(Math.min(INDENT, Math.max(0, Math.round((other.x - indent) / (0.6 * other.size)))))}${other.text}`,
           )
           .join("\n"),
         ...hidden(group),

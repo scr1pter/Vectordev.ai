@@ -15,6 +15,8 @@ export type Limits = {
     readonly csv: number
     readonly text: number
   }
+  /** Bytes a PDF's compressed streams may inflate to in all, pictures aside. */
+  readonly streams: number
   /** PDF pages read; the rest are left out and the document says it was truncated. */
   readonly pages: number
   readonly pageChars: number
@@ -55,6 +57,7 @@ export type Limits = {
 
 const worker: Limits = {
   bytes: { pdf: 64 * MB, office: 64 * MB, csv: 32 * MB, text: 10 * MB },
+  streams: 256 * MB,
   pages: 1_000,
   pageChars: 50_000,
   chars: 4_000_000,
@@ -81,6 +84,7 @@ export const LIMITS = {
   inline: {
     ...worker,
     bytes: { pdf: 20 * MB, office: 10 * MB, csv: 10 * MB, text: 10 * MB },
+    streams: 64 * MB,
     pages: 300,
     yield: true,
   } satisfies Limits,
