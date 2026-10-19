@@ -3114,6 +3114,8 @@ export type MemoryRecord = {
   page?: number
   changedVersion?: number
   uses: number
+  runs?: number
+  passed?: number
   createdAt: number
   updatedAt: number
 }
@@ -3139,6 +3141,41 @@ export type MemoryAnchor = {
   status: "fresh" | "drifted" | "missing"
   origin: "extracted" | "user" | "outcome"
   checkedAt: number
+}
+
+export type MemoryVersionDiff = {
+  version: number
+  previous: string
+  added: {
+    [key: string]: number
+  }
+  changed: {
+    [key: string]: number
+  }
+  removed: {
+    [key: string]: number
+  }
+  unchanged: {
+    [key: string]: number
+  }
+  edits: number
+  pins: number
+}
+
+export type MemoryDocumentEvent = {
+  at: number
+  action: string
+  actor: "user" | "agent" | "vector"
+  record?: string
+  detail?: {
+    [key: string]: unknown
+  }
+}
+
+export type MemoryDocumentUsage = {
+  runs: number
+  passed: number
+  reverted: number
 }
 
 export type MemoryDocumentDetail = {
@@ -3200,6 +3237,9 @@ export type MemoryDocumentDetail = {
     bytes: number
     createdAt: number
   }>
+  diff?: MemoryVersionDiff
+  history: Array<MemoryDocumentEvent>
+  usage: MemoryDocumentUsage
 }
 
 export type MemoryDocumentPage = {

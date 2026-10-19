@@ -32391,6 +32391,12 @@
           "uses": {
             "type": "number"
           },
+          "runs": {
+            "type": "number"
+          },
+          "passed": {
+            "type": "number"
+          },
           "createdAt": {
             "type": "number"
           },
@@ -32489,6 +32495,88 @@
           }
         },
         "required": ["id", "owner", "path", "method", "weight", "status", "origin", "checkedAt"],
+        "additionalProperties": false
+      },
+      "MemoryVersionDiff": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number"
+          },
+          "previous": {
+            "type": "string"
+          },
+          "added": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "changed": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "removed": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "unchanged": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "edits": {
+            "type": "number"
+          },
+          "pins": {
+            "type": "number"
+          }
+        },
+        "required": ["version", "previous", "added", "changed", "removed", "unchanged", "edits", "pins"],
+        "additionalProperties": false
+      },
+      "MemoryDocumentEvent": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "number"
+          },
+          "action": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string",
+            "enum": ["user", "agent", "vector"]
+          },
+          "record": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "object"
+          }
+        },
+        "required": ["at", "action", "actor"],
+        "additionalProperties": false
+      },
+      "MemoryDocumentUsage": {
+        "type": "object",
+        "properties": {
+          "runs": {
+            "type": "number"
+          },
+          "passed": {
+            "type": "number"
+          },
+          "reverted": {
+            "type": "number"
+          }
+        },
+        "required": ["runs", "passed", "reverted"],
         "additionalProperties": false
       },
       "MemoryDocumentDetail": {
@@ -32637,9 +32725,32 @@
               "required": ["id", "version", "status", "bytes", "createdAt"],
               "additionalProperties": false
             }
+          },
+          "diff": {
+            "$ref": "#/components/schemas/MemoryVersionDiff"
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryDocumentEvent"
+            }
+          },
+          "usage": {
+            "$ref": "#/components/schemas/MemoryDocumentUsage"
           }
         },
-        "required": ["document", "outline", "counts", "records", "anchors", "held", "warnings", "versions"],
+        "required": [
+          "document",
+          "outline",
+          "counts",
+          "records",
+          "anchors",
+          "held",
+          "warnings",
+          "versions",
+          "history",
+          "usage"
+        ],
         "additionalProperties": false
       },
       "MemoryDocumentPage": {
