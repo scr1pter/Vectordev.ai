@@ -1,10 +1,9 @@
-import { execFile } from "node:child_process"
 import { createHash } from "node:crypto"
 import { mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises"
 import { join, relative, resolve } from "node:path"
-import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { BrainCode } from "@vectordevai/core/brain/code"
 import { BrainLexical } from "@vectordevai/core/brain/lexical"
+import { UntrustedGit } from "@vectordevai/core/untrusted-git"
 
 // A lexical + structural index: BM25 over identifiers and path segments, an
 // import graph, a symbol table, and git co-change counts. There are no
@@ -307,17 +306,11 @@ async function gitCoChange(root: string, known: ReadonlySet<string>, previous: R
   return { head, coChange: history.pairs, commits: history.commits }
 }
 
+// A missing git binary, a detached worktree and a plain directory all just mean
+// there is no history signal to add, so every failure resolves to no output. The
+// repository's own git config never gets to run a program here.
 function git(cwd: string, args: string[]) {
-  // A missing git binary, a detached worktree and a plain directory all just mean
-  // there is no history signal to add, so every failure resolves to no output.
-  return new Promise<string>((resolveOutput) =>
-    execFile(
-      "git",
-      args,
-      { cwd, env: untrustedChildEnvironment(), timeout: 8_000, maxBuffer: 16 * 1024 * 1024 },
-      (error, stdout) => resolveOutput(error ? "" : stdout),
-    ),
-  )
+  return UntrustedGit.run(cwd, args, { timeout: 8_000, maxBuffer: 16 * 1024 * 1024 })
 }
 
 type PersistedFile = Omit<IndexedFile, "tokens"> & { tokens: string }

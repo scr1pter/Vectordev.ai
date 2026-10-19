@@ -1,6 +1,5 @@
 export * as BrainKnowledge from "./knowledge"
 
-import { execFile } from "node:child_process"
 import { createHash, randomBytes } from "node:crypto"
 import { constants as fsConstants } from "node:fs"
 import fs from "node:fs/promises"
@@ -10,13 +9,13 @@ import { Context, Effect, Fiber, Layer, Queue, Scope } from "effect"
 import { makeGlobalNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
 import { Token } from "../util/token"
-import { untrustedChildEnvironment } from "../child-environment"
 import { Brain } from "./brain"
 import { BrainCard } from "./card"
 import { BrainCode } from "./code"
 import { BrainDatabase } from "./database"
 import { Global } from "../global"
 import { Ripgrep } from "../ripgrep"
+import { UntrustedGit } from "../untrusted-git"
 import { BrainAnchor } from "./anchor"
 import { BrainConflict } from "./conflict"
 import { BrainCredit } from "./credit"
@@ -3872,13 +3871,21 @@ function make(input: {
       .where(eq(BrainStateTable.repository_id, place.repository))
       .get()
       .pipe(Effect.orDie)
-    const head = (yield* Effect.promise(() => git(place.root, ["rev-parse", "HEAD"]))).trim()
+    const head = (yield* Effect.promise(() => UntrustedGit.run(place.root, ["rev-parse", "HEAD"]))).trim()
     // History changes only with a commit; a file that arrives may have some already.
     const history =
       head && (head !== current?.head || arrived.length > 0)
         ? BrainCode.coChange(
             yield* Effect.promise(() =>
-              git(place.root, ["log", "--no-merges", "--format=%H", "--name-only", "--relative", "-n", String(BrainCode.LIMIT.commits)]),
+              UntrustedGit.run(place.root, [
+                "log",
+                "--no-merges",
+                "--format=%H",
+                "--name-only",
+                "--relative",
+                "-n",
+                String(BrainCode.LIMIT.commits),
+              ]),
             ),
             (file) => (files.paths.has(file) ? file : undefined),
           ).pairs
@@ -6082,12 +6089,8 @@ function cut(text: string, tokens: number) {
 }
 
 // The files git tracks in a working tree, or none when it is not a repository or git is missing.
-function trackedFiles(root: string) {
-  return new Promise<string[]>((resolve) =>
-    execFile("git", ["ls-files", "-z"], { cwd: root, timeout: 10_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) =>
-      resolve(error ? [] : stdout.split("\0").filter(Boolean)),
-    ),
-  )
+async function trackedFiles(root: string) {
+  return (await UntrustedGit.run(root, ["ls-files", "-z"])).split("\0").filter(Boolean)
 }
 
 function toDocument(row: DocumentRow): BrainSchema.Document {
@@ -6210,18 +6213,6 @@ function toReview(item: typeof BrainReviewTable.$inferSelect): BrainSchema.Revie
   }
 }
 
-// A git command's output in a working tree, or "" when git is missing, it is not a repository, or the command fails.
-function git(root: string, args: readonly string[]) {
-  return new Promise<string>((resolve) =>
-    execFile(
-      "git",
-      [...args],
-      { cwd: root, env: untrustedChildEnvironment(), timeout: 10_000, maxBuffer: 64 * 1024 * 1024 },
-      (error, stdout) => resolve(error ? "" : stdout),
-    ),
-  )
-}
-
 // The size and time of each regular file no larger than code is read at, 256 at a time.
 async function statFiles(root: string, files: readonly string[]) {
   const out: { path: string; bytes: number; mtime: number }[] = []
@@ -6249,13 +6240,10 @@ async function readFiles<T extends { readonly path: string }>(root: string, file
 
 // The files of a working tree that git knows or would add (tracked, and untracked ones it does not ignore), or none
 // outside a git working tree.
-function workingFiles(root: string) {
-  return new Promise<string[]>((resolve) =>
-    execFile(
-      "git",
-      ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-      { cwd: root, timeout: 10_000, maxBuffer: 64 * 1024 * 1024 },
-      (error, stdout) => resolve(error ? [] : [...new Set(stdout.split("\0").filter(Boolean))]),
+async function workingFiles(root: string) {
+  return [
+    ...new Set(
+      (await UntrustedGit.run(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"])).split("\0").filter(Boolean),
     ),
-  )
+  ]
 }

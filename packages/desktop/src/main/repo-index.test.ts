@@ -281,6 +281,36 @@ describe("repo index git co-change", () => {
     expect(beta!.reasons.some((reason) => reason.startsWith("changed alongside src/alpha.ts in 1"))).toBe(true)
     expect(rankFiles(index, "computeTariff", { coChange: false }).some((file) => file.path === "src/beta.ts")).toBe(false)
   })
+
+  test.skipIf(process.platform === "win32")("never runs a signature program the repository's config names", async () => {
+    const root = await fixture({
+      "src/alpha.ts": `export const alpha = 1\n`,
+      "src/beta.ts": `export const beta = 2\n`,
+    })
+    await git(root, ["init", "-q"])
+    await git(root, ["add", "-A"])
+    const tree = (await Bun.$`git write-tree`.cwd(root).text()).trim()
+    // A signed commit: with log.showSignature on, `git log` hands its signature to gpg.program.
+    const object = `tree ${tree}\nauthor T <t@example.com> 1700000000 +0000\ncommitter T <t@example.com> 1700000000 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEEplaceholder\n -----END PGP SIGNATURE-----\n\ninitial\n`
+    const commit = (await Bun.$`git hash-object -t commit -w --stdin < ${new Response(object)}`.cwd(root).text()).trim()
+    await git(root, ["update-ref", "HEAD", commit])
+    const ran = join(root, "..", `${root.split("/").at(-1)}-ran.txt`)
+    scratch.push(ran)
+    const hook = join(root, "..", `${root.split("/").at(-1)}-hook.sh`)
+    scratch.push(hook)
+    await writeFile(hook, `#!/bin/sh\necho ran >> "${ran}"\nexit 0\n`, { mode: 0o755 })
+    await git(root, ["config", "log.showSignature", "true"])
+    await git(root, ["config", "gpg.program", hook])
+    await git(root, ["config", "core.fsmonitor", hook])
+    // Plain git does run it, so the repository is set up to.
+    await Bun.$`git log -n 1`.cwd(root).quiet()
+    expect(await Bun.file(ran).exists()).toBe(true)
+    await rm(ran)
+
+    const index = await buildIndex(root)
+    expect(index.coChange.get("src/alpha.ts")?.get("src/beta.ts")).toBe(1)
+    expect(await Bun.file(ran).exists()).toBe(false)
+  })
 })
 
 describe("repo index languages", () => {

@@ -1,0 +1,130 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { execFileSync } from "node:child_process"
+import fs from "node:fs/promises"
+import path from "node:path"
+import { Effect } from "effect"
+import { UntrustedGit } from "@vectordevai/core/untrusted-git"
+import { tmpdir } from "../fixture/tmpdir"
+import { withKnowledge } from "./fixture/knowledge"
+
+// A repository that arrives with its own .git (an archive, a shared folder) can name programs in .git/config that git
+// runs on reads. The brain reads such repositories on its own after every run, held or not, so none of them may run.
+
+const SECRET = "placeholder-not-a-real-key"
+
+const git = (root: string, ...args: string[]) =>
+  execFileSync("git", args, { cwd: root, env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1" }, encoding: "utf8" })
+
+// A commit that carries a signature, which `git log` hands to gpg.program when log.showSignature is on.
+function signedCommit(root: string) {
+  git(root, "add", "-A")
+  const tree = git(root, "write-tree").trim()
+  const object = [
+    `tree ${tree}`,
+    "author Test <test@example.com> 1700000000 +0000",
+    "committer Test <test@example.com> 1700000000 +0000",
+    "gpgsig -----BEGIN PGP SIGNATURE-----",
+    " ",
+    " iQEzBAABCAAdFiEEplaceholder",
+    " -----END PGP SIGNATURE-----",
+    "",
+    "Add the service",
+    "",
+  ].join("\n")
+  const commit = execFileSync("git", ["hash-object", "-t", "commit", "-w", "--stdin"], { cwd: root, input: object, encoding: "utf8" }).trim()
+  git(root, "update-ref", "HEAD", commit)
+}
+
+// The repository's config names one program for every hook it can: it notes that it ran, and what it was given.
+async function plant(root: string) {
+  const hook = path.join(path.dirname(root), "hook.sh")
+  const ran = path.join(path.dirname(root), "ran.txt")
+  await fs.writeFile(hook, `#!/bin/sh\necho "ran key=$VECTOR_CREDENTIAL_KEY" >> "${ran}"\nexit 0\n`, { mode: 0o755 })
+  const hooks = path.join(path.dirname(root), "hooks")
+  await fs.mkdir(hooks, { recursive: true })
+  for (const name of ["post-index-change", "post-checkout", "reference-transaction"])
+    await fs.copyFile(hook, path.join(hooks, name)).then(() => fs.chmod(path.join(hooks, name), 0o755))
+  git(root, "config", "core.fsmonitor", hook)
+  git(root, "config", "log.showSignature", "true")
+  git(root, "config", "gpg.program", hook)
+  git(root, "config", "core.hooksPath", hooks)
+  return { ran: () => fs.readFile(ran, "utf8").catch(() => ""), reset: () => fs.rm(ran, { force: true }) }
+}
+
+const previous = process.env.VECTOR_CREDENTIAL_KEY
+beforeEach(() => {
+  process.env.VECTOR_CREDENTIAL_KEY = SECRET
+})
+afterEach(() => {
+  if (previous === undefined) delete process.env.VECTOR_CREDENTIAL_KEY
+  else process.env.VECTOR_CREDENTIAL_KEY = previous
+})
+
+describe.skipIf(process.platform === "win32")("the brain's git calls", () => {
+  test("never run a program a held repository's own git config names", async () => {
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          signedCommit(setup.root)
+          const planted = yield* Effect.promise(() => plant(setup.root))
+          // Plain git runs the planted program and hands it the secret, so the repository is set up to.
+          execFileSync("git", ["ls-files"], { cwd: setup.root, env: { ...process.env } })
+          execFileSync("git", ["log", "--format=%H", "--name-only", "-n", "1"], { cwd: setup.root, env: { ...process.env } })
+          const control = yield* Effect.promise(planted.ran)
+          yield* Effect.promise(planted.reset)
+          yield* setup.knowledge.add(setup.place, {
+            type: "text",
+            name: "auth.md",
+            text: "# Auth\n\nThe `refreshTokenTtl` MUST be 14 days.",
+            origin: "upload",
+          })
+          const scanned = yield* setup.knowledge.scan(setup.place, { force: true })
+          const indexed = yield* setup.knowledge.code(setup.place)
+          yield* setup.knowledge.drift(setup.place, { force: true })
+          yield* setup.knowledge.link(setup.place)
+          return { control, scanned, indexed, ran: yield* Effect.promise(planted.ran) }
+        }),
+      {
+        git: true,
+        held: true,
+        files: {
+          "README.md": "# Service\n\nThe service MUST round money to integer cents.",
+          "src/auth/session.ts": "export const refreshTokenTtl = 14 * 24 * 60 * 60\n",
+        },
+      },
+    )
+    expect(result.control).toContain(`ran key=${SECRET}`)
+    // The brain still read the repository: its docs and its code.
+    expect(result.scanned).toBe(1)
+    expect(result.indexed.files).toBeGreaterThan(0)
+    expect(result.ran).toBe("")
+  })
+})
+
+describe.skipIf(process.platform === "win32")("UntrustedGit.run", () => {
+  test("reads history and the file list without running the repository's programs", async () => {
+    await using tmp = await tmpdir()
+    const root = path.join(tmp.path, "repo")
+    await fs.mkdir(path.join(root, "src"), { recursive: true })
+    await fs.writeFile(path.join(root, "src", "a.ts"), "export const a = 1\n")
+    git(root, "init", "-q")
+    signedCommit(root)
+    const planted = await plant(root)
+    const files = await UntrustedGit.run(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+    const log = await UntrustedGit.run(root, ["log", "--no-merges", "--format=%H", "--name-only", "-n", "5"])
+    expect(files.split("\0").filter(Boolean)).toEqual(["src/a.ts"])
+    expect(log).toContain("src/a.ts")
+    expect(await planted.ran()).toBe("")
+  })
+
+  test("gives git an environment without Vector's secrets", async () => {
+    await using tmp = await tmpdir()
+    // An alias of Vector's own prints what a program git starts would be given.
+    const env = await UntrustedGit.run(tmp.path, [
+      "-c",
+      'alias.environment=!echo "key=${VECTOR_CREDENTIAL_KEY-unset} lazy=$GIT_NO_LAZY_FETCH"',
+      "environment",
+    ])
+    expect(env.trim()).toBe("key=unset lazy=1")
+  })
+})
