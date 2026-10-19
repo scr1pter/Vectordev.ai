@@ -54,6 +54,17 @@ const createEmbeddedWebUIBundle = async () => {
 }
 
 const embeddedFileMap = skipEmbedWebUi ? null : await createEmbeddedWebUIBundle()
+// The brain's background reader as one module of source: core's worker/entry.ts bundled for Node, carried as the
+// virtual module brain-worker.gen.ts and started as an eval worker. ESM, because pdf.js inside it uses import.meta and
+// Node runs an eval worker with module syntax as a module.
+const brainWorker = await Bun.build({
+  entrypoints: [path.join(dir, "../core/src/brain/worker/entry.ts")],
+  target: "node",
+  format: "esm",
+  minify: true,
+})
+if (!brainWorker.success) throw new AggregateError(brainWorker.logs, "The brain worker bundle failed to build")
+const brainWorkerModule = `export default ${JSON.stringify(await brainWorker.outputs[0]!.text())}`
 
 const allTargets: {
   os: string
@@ -217,8 +228,17 @@ for (const item of targets) {
       execArgv: [`--user-agent=vector/${Script.version}`, "--use-system-ca", "--"],
       windows: {},
     },
-    files: embeddedFileMap ? { "vector-web-ui.gen.ts": embeddedFileMap } : {},
-    entrypoints: ["./src/index.ts", parserWorker, workerPath, ...(embeddedFileMap ? ["vector-web-ui.gen.ts"] : [])],
+    files: {
+      ...(embeddedFileMap ? { "vector-web-ui.gen.ts": embeddedFileMap } : {}),
+      "brain-worker.gen.ts": brainWorkerModule,
+    },
+    entrypoints: [
+      "./src/index.ts",
+      parserWorker,
+      workerPath,
+      ...(embeddedFileMap ? ["vector-web-ui.gen.ts"] : []),
+      "brain-worker.gen.ts",
+    ],
     define: {
       FFF_LIBC: JSON.stringify(item.abi === "musl" ? "musl" : "gnu"),
       VECTOR_VERSION: `'${Script.version}'`,

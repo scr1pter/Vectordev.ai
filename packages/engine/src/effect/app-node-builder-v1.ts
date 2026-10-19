@@ -10,6 +10,8 @@ import { Auth } from "@/auth"
 import { Teams } from "@vectordevai/core/teams"
 import { VectorTeams } from "@/teams"
 import { makeGlobalNode, makeLocationNode } from "@vectordevai/core/effect/app-node"
+import { BrainWorker } from "@vectordevai/core/brain/worker/host"
+import { BrainWorkerSource } from "@/brain/worker-source"
 
 const bootstrapReplacement = [InstanceStore.bootstrapNode, InstanceBootstrap.node] as const
 const searchCredentials = makeLocationNode({
@@ -59,6 +61,8 @@ export function build<A, E>(root: LayerNode.Node<A, E, any>, replacements: Layer
       [WebSearchTool.credentialsNode, searchCredentials],
       [FreeModels.credentialsNode, freeModelCredentials],
       [Teams.node, VectorTeams.node],
+      // The engine's builds carry the background reader's source.
+      [BrainWorker.sourceNode, BrainWorkerSource.node],
     ]),
   )
 }
