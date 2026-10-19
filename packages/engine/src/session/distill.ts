@@ -128,6 +128,15 @@ const layer = Layer.effect(
           "nothing",
           "Vector's rules already found records throughout this document, so there is nothing for a model to read.",
         )
+      // Suggestions come back through a tool, and the whole request has to fit the model's context.
+      const name = `${model.providerID}/${model.id}`
+      if (!model.capabilities.toolcall)
+        return refuse("no-model", `${name} cannot answer through a tool, which suggestions need. Choose another model.`)
+      if (model.limit.context > 0 && model.limit.context < picked.tokens + BrainDistill.OVERHEAD + BrainDistill.LIMIT.output)
+        return refuse(
+          "no-model",
+          `${name} cannot hold this request. Choose a model with a larger context, or send less with a lower token limit.`,
+        )
       const signIn = yield* auth.get(model.providerID).pipe(Effect.catch(() => Effect.succeed(undefined)))
       const costKind = SpendGuard.costKindOf({
         free: isFreeModel(model),
@@ -139,7 +148,7 @@ const layer = Layer.effect(
       return {
         type: "plan" as const,
         model,
-        name: `${model.providerID}/${model.id}`,
+        name,
         document: source.document,
         picked,
         costKind,

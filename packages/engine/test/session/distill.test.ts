@@ -227,7 +227,12 @@ const providerConfig = (url: string): Partial<ConfigV1.Info> => ({
       id: "lmstudio",
       env: [],
       npm: "@ai-sdk/openai-compatible",
-      models: { "test-model": model("test-model") },
+      models: {
+        "test-model": model("test-model"),
+        // Answers only in text, and holds too little: neither can return suggestions.
+        "no-tools": { ...model("no-tools"), tool_call: false },
+        small: { ...model("small"), limit: { context: 2_000, output: 1_000 } },
+      },
       options: { apiKey: "test-key", baseURL: url },
     },
     // The Zen gateway configured under a name of the user's own; nothing must ever be sent to it.
@@ -373,7 +378,7 @@ it.instance(
 )
 
 it.instance(
-  "the flag defaults off, and a guest's session, a model that may train and the Zen gateway are refused before anything is sent",
+  "the flag defaults off; a guest's session, a model that may train, the Zen gateway and a model that cannot answer are refused before anything is sent",
   () =>
     Effect.gen(function* () {
       const { llm, place, document, distill } = yield* setup()
@@ -397,6 +402,14 @@ it.instance(
       expect(yield* distill.run(place, { document, model: "gateway/big-model" })).toMatchObject({
         type: "refused",
         reason: "zen",
+      })
+      expect(yield* distill.run(place, { document, model: "lmstudio/no-tools" })).toMatchObject({
+        type: "refused",
+        reason: "no-model",
+      })
+      expect(yield* distill.run(place, { document, model: "lmstudio/small" })).toMatchObject({
+        type: "refused",
+        reason: "no-model",
       })
       expect(yield* requests(llm)).toHaveLength(0)
       // Nothing was recorded either.
