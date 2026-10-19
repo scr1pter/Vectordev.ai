@@ -36,7 +36,9 @@ import {
   BrainCodeSymbolTable,
   BrainDocumentTable,
   BrainEdgeTable,
+  BrainEntryTable,
   BrainEventTable,
+  BrainEvidenceTable,
   BrainItemTable,
   BrainJobTable,
   BrainPassageTable,
@@ -2933,6 +2935,43 @@ function make(input: {
             .where(or(owned(BrainEventTable.entry_id), inArray(BrainEventTable.entry_id, documents)))
             .run()
           const items = db.select({ ref: BrainItemTable.ref }).from(BrainItemTable).where(inArray(BrainItemTable.document_id, documents))
+          // Memory learned from the document stays, in its own words, but what it quoted goes: an entry derived from
+          // one of its records or passages loses that evidence, and its history says the document was forgotten.
+          const quoting = and(eq(BrainEvidenceTable.type, "document"), inArray(BrainEvidenceTable.path, items))
+          const derived = [
+            ...new Set(
+              [
+                ...(yield* tx
+                  .select({ entry: BrainEdgeTable.source })
+                  .from(BrainEdgeTable)
+                  .where(and(eq(BrainEdgeTable.type, "derived_from"), inArray(BrainEdgeTable.target, items)))
+                  .all()),
+                ...(yield* tx.select({ entry: BrainEvidenceTable.entry_id }).from(BrainEvidenceTable).where(quoting).all()),
+              ].map((row) => row.entry),
+            ),
+          ]
+          yield* tx.delete(BrainEvidenceTable).where(quoting).run()
+          for (const batch of chunks(derived, 500)) {
+            const entries = yield* tx
+              .select({ id: BrainEntryTable.id, repository: BrainEntryTable.repository_id })
+              .from(BrainEntryTable)
+              .where(inArray(BrainEntryTable.id, batch))
+              .all()
+            if (entries.length > 0)
+              yield* tx
+                .insert(BrainEventTable)
+                .values(
+                  entries.map((entry) => ({
+                    entry_id: entry.id,
+                    repository_id: entry.repository,
+                    at: now,
+                    action: "evidence-forgotten",
+                    actor: "user" as const,
+                    detail: { reason: "document-forgotten" },
+                  })),
+                )
+                .run()
+          }
           yield* tx.delete(BrainAnchorTable).where(inArray(BrainAnchorTable.owner, items)).run()
           yield* tx.delete(BrainPendingTable).where(inArray(BrainPendingTable.owner, items)).run()
           yield* tx.delete(BrainEdgeTable).where(or(inArray(BrainEdgeTable.source, items), inArray(BrainEdgeTable.target, items))).run()

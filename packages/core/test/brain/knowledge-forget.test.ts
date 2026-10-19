@@ -79,6 +79,42 @@ describe("BrainKnowledge.remove", () => {
     expect(result.again).toBe("not-found")
   })
 
+  test("memory learned from a forgotten document keeps its words, loses the quote, and says so in its history", async () => {
+    const result = await withKnowledge((setup) =>
+      Effect.gen(function* () {
+        const { document } = yield* added(setup, text("Auth spec.md", SPEC_V1))
+        const record = (yield* setup.knowledge.records(setup.place, { query: "retry 429", personal: true })).records[0]!
+        const learned = yield* setup.brain.propose(setup.place, {
+          kind: "lesson",
+          text: "Client retry changes need the retry tests run after a 429 change.",
+          scope: "repository",
+          origin: "agent",
+          evidence: { type: "document", path: record.id, quote: record.quote, verified: true },
+        })
+        if (learned.type === "refused") throw new Error(learned.message)
+        yield* setup.knowledge.derive(setup.place, { entry: learned.entry, from: record.id })
+        const before = yield* setup.brain.get(setup.place, learned.entry.id, { personal: true })
+        yield* setup.knowledge.remove(setup.place, document!.id)
+        return {
+          record,
+          before,
+          after: yield* setup.brain.get(setup.place, learned.entry.id, { personal: true }),
+          history: yield* setup.db.all<{ action: string }>(
+            sql`SELECT action FROM brain_event WHERE entry_id = ${learned.entry.id} ORDER BY id`,
+          ),
+          quotes: yield* setup.db.all(sql`SELECT quote FROM brain_evidence WHERE quote = ${record.quote}`),
+          edges: yield* setup.db.all(sql`SELECT source FROM brain_edge WHERE source = ${learned.entry.id}`),
+        }
+      }),
+    )
+    expect(result.before?.evidence).toContainEqual(expect.objectContaining({ type: "document", path: result.record.id }))
+    expect(result.after?.entry).toMatchObject({ status: "active", text: "Client retry changes need the retry tests run after a 429 change." })
+    expect(result.after?.evidence.filter((item) => item.type === "document")).toEqual([])
+    expect(result.quotes).toEqual([])
+    expect(result.edges).toEqual([])
+    expect(result.history.map((event) => event.action)).toContain("evidence-forgotten")
+  })
+
   test("a forgotten document is not added back by a chat or the agent, but the user can add it again", async () => {
     const result = await withKnowledge((setup) =>
       Effect.gen(function* () {
