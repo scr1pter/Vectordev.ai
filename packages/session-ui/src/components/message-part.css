@@ -1513,3 +1513,12 @@ body:not([data-new-layout]) {
     color: var(--text-weak);
   }
 }
+
+/* A memory tool call that learned something: one tool row, "Learned <text>", with Undo beside it. */
+[data-component="tool-trigger"][data-memory-learned] {
+  min-height: 32px;
+}
+
+[data-component="tool-trigger"][data-memory-learned="undone"] [data-slot="basic-tool-tool-subtitle"] {
+  text-decoration: line-through;
+}
