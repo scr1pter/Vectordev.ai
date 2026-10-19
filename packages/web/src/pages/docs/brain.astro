@@ -34,8 +34,8 @@ export const prerender = true
 
           <h2 id="requests">What a request carries</h2>
           <p>
-            A request carries your rules, the start of <code>MEMORY.md</code> (about 800 tokens of it), the entries you
-            pinned (about 300 tokens) and one line saying what else the brain holds. That part stays the same through a
+            Every request but a greeting carries your rules, the start of <code>MEMORY.md</code> (about 800 tokens of
+            it), the entries you pinned (about 300 tokens) and one line saying what else the brain holds. That part stays the same through a
             session, so the provider's prompt cache can reuse it. Then each request message recalls only what bears on
             it, within a budget set by the request's size, and recalls nothing when nothing does:
           </p>
