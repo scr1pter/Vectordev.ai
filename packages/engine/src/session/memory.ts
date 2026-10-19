@@ -221,7 +221,8 @@ export function touched(messages: readonly SessionV1.WithParts[], file: string, 
 
 /**
  * Why memory learned in this conversation has to wait for the user: it read the web (with a web tool, a shell command
- * that is not a local one, or a slash command whose snippets reached outside or whose skill came from the web), holds
+ * that is not a local one, a skill pulled from a skills URL, or a slash command whose snippets reached outside or whose
+ * skill came from the web), holds
  * text from outside (an imported transcript, an issue or pull request), used the browser or Vector Cloud, ran an MCP
  * tool or an MCP server's prompt, or took a subagent's report. Memory poisoning works by planting text the agent later
  * saves as its own, so once outside content is in the history, every write is held for review.
@@ -233,6 +234,8 @@ export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hol
   if (tools.some((tool) => tool === "webfetch" || tool === "websearch" || tool === "browser" || tool === "vector_cloud"))
     return "web"
   if (messages.some((message) => message.parts.some(outside))) return "web"
+  if (calls.some((part) => part.tool === "skill" && part.state.status === "completed" && part.state.metadata?.remote === true))
+    return "web"
   if (
     commands.includes("web") ||
     calls.some(

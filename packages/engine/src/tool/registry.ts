@@ -24,6 +24,7 @@ import { EscalateTool } from "./escalate"
 import { SkillTool } from "./skill"
 import { MemoryTool } from "./memory"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { Global } from "@vectordevai/core/global"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { Git } from "@/git"
 import * as Tool from "./tool"
@@ -514,6 +515,7 @@ export const node = LayerNode.make({
     Ripgrep.node,
     SpendGuard.node,
     TaskManager.node,
+    Global.node,
   ],
 })
 

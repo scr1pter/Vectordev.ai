@@ -1,6 +1,7 @@
 import path from "path"
 import { Effect, Schema } from "effect"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
+import { Global } from "@vectordevai/core/global"
 import { Skill } from "../skill"
 import * as Tool from "./tool"
 import DESCRIPTION from "./skill.txt"
@@ -14,6 +15,7 @@ export const SkillTool = Tool.define(
   Effect.gen(function* () {
     const skill = yield* Skill.Service
     const ripgrep = yield* Ripgrep.Service
+    const global = yield* Global.Service
 
     return {
       description: DESCRIPTION,
@@ -62,6 +64,9 @@ export const SkillTool = Tool.define(
             metadata: {
               name: info.name,
               dir,
+              // A skill pulled from a skills URL is someone else's text, as a slash command of it is: memory written
+              // after it waits for review.
+              remote: info.location.startsWith(path.join(global.cache, "skills") + path.sep),
             },
           }
         }).pipe(Effect.orDie),
