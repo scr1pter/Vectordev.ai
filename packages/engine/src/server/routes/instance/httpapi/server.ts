@@ -61,6 +61,7 @@ import { EventV2 } from "@vectordevai/core/event"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { Npm } from "@vectordevai/core/npm"
 import { PermissionSaved } from "@vectordevai/core/permission/saved"
@@ -240,6 +241,7 @@ const app = LayerNode.group([
   FreeModels.node,
   FreeModelGuests.node,
   Brain.node,
+  BrainKnowledge.node,
   Provider.node,
   ProviderAuth.node,
   Agent.node,

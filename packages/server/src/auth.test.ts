@@ -40,6 +40,27 @@ describe("server authentication", () => {
       expect(ServerAuth.isOwnerOnlyRoute(method!, route!)).toBe(true)
   })
 
+  test("documents and what Vector read from them are the owner's own too", () => {
+    for (const [method, route] of [
+      ["GET", "/memory/documents"],
+      ["POST", "/memory/documents"],
+      ["POST", "/memory/documents/path"],
+      ["POST", "/memory/documents/text"],
+      ["POST", "/memory/documents/probe"],
+      ["GET", "/memory/documents/:documentID"],
+      ["PATCH", "/memory/documents/:documentID"],
+      ["DELETE", "/memory/documents/:documentID"],
+      ["GET", "/memory/documents/:documentID/pages/:page"],
+      ["GET", "/memory/documents/:documentID/file"],
+      ["GET", "/memory/records"],
+      ["GET", "/memory/records/:recordID"],
+      ["PATCH", "/memory/records/:recordID"],
+      ["GET", "/memory/knowledge"],
+      ["PATCH", "/memory/settings"],
+    ])
+      expect(ServerAuth.isOwnerOnlyRoute(method!, route!)).toBe(true)
+  })
+
   test("host commands and permission answers require the server owner", () => {
     expect(ServerAuth.isOwnerOnlyRoute("POST", "/pty")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRoute("GET", "/pty/:ptyID/connect-token")).toBe(true)

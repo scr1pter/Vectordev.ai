@@ -1,18 +1,47 @@
-import { Effect } from "effect"
+import path from "path"
+import { Effect, Stream } from "effect"
+import { HttpServerRequest, HttpServerResponse, type Multipart } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Instruction } from "@/session/instruction"
 import { InstanceHttpApi } from "../api"
-import { MemoryApiError } from "../groups/memory"
+import { MemoryApiError, MemoryTooLargeError, TEXT_BYTES, UPLOAD_BYTES } from "../groups/memory"
 
-const refused = (message: string) => new MemoryApiError({ name: "MemoryError", data: { code: "refused", message } })
-const missing = (id: string) =>
-  new MemoryApiError({ name: "MemoryError", data: { code: "not-found", message: `No memory ${id} here.` } })
+const refused = (message: string, reason?: string, document?: BrainSchema.Document) =>
+  new MemoryApiError({
+    name: "MemoryError",
+    data: { code: "refused", message, ...(reason ? { reason } : {}), ...(document ? { document } : {}) },
+  })
+const missing = (id: string, message = `No memory ${id} here.`) =>
+  new MemoryApiError({ name: "MemoryError", data: { code: "not-found", message } })
+const tooLarge = (message: string) => new MemoryTooLargeError({ name: "MemoryTooLargeError", data: { message } })
+
+type Form = {
+  readonly fields: ReadonlyMap<string, string>
+  readonly files: readonly { readonly name: string; readonly mime: string; readonly bytes: Uint8Array }[]
+}
+
+// A limit the form parser reached. A file's own content stream reports it as an internal error whose cause is the
+// parser's ReachedLimit, so both shapes count.
+function overLimit(error: Multipart.MultipartError) {
+  const cause = error.reason.cause
+  return (
+    error.reason._tag === "FileTooLarge" ||
+    error.reason._tag === "BodyTooLarge" ||
+    (typeof cause === "object" && cause !== null && "_tag" in cause && cause._tag === "ReachedLimit")
+  )
+}
+
+/** A file over 1 MB, or a PDF over 20 pages, costs less remembered than sent with a message. */
+const REMEMBER_INSTEAD = { bytes: 1024 * 1024, pages: 20 }
 
 export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (handlers) =>
   Effect.gen(function* () {
     const brain = yield* Brain.Service
     const instruction = yield* Instruction.Service
+    const knowledge = yield* BrainKnowledge.Service
 
     const list = Effect.fn("MemoryHttpApi.list")(function* (ctx: {
       query: { scope?: "repository" | "personal"; filter?: Brain.Filter; query?: string }
@@ -85,13 +114,288 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       }
     })
 
-    const settings = Effect.fn("MemoryHttpApi.settings")(function* () {
-      return { learning: yield* brain.learning() }
+    const settingsOf = Effect.fnUntraced(function* (place: Brain.Place) {
+      return { learning: yield* brain.learning(), ...(yield* knowledge.settings(place)) }
     })
 
-    const configure = Effect.fn("MemoryHttpApi.configure")(function* (ctx: { payload: { learning: boolean } }) {
-      yield* brain.setLearning(ctx.payload.learning)
-      return { learning: yield* brain.learning() }
+    const settings = Effect.fn("MemoryHttpApi.settings")(function* () {
+      return yield* settingsOf(yield* instruction.place())
+    })
+
+    const configure = Effect.fn("MemoryHttpApi.configure")(function* (ctx: {
+      payload: { learning?: boolean; repositoryDocs?: boolean; keepOriginals?: boolean }
+    }) {
+      const place = yield* instruction.place()
+      if (ctx.payload.learning !== undefined) yield* brain.setLearning(ctx.payload.learning)
+      if (ctx.payload.repositoryDocs !== undefined || ctx.payload.keepOriginals !== undefined)
+        yield* knowledge.configure(place, {
+          ...(ctx.payload.repositoryDocs === undefined ? {} : { repositoryDocs: ctx.payload.repositoryDocs }),
+          ...(ctx.payload.keepOriginals === undefined ? {} : { keepOriginals: ctx.payload.keepOriginals }),
+        })
+      return yield* settingsOf(place)
+    })
+
+    // --- Documents ------------------------------------------------------------------------------------------------
+
+    const documents = Effect.fn("MemoryHttpApi.documents")(function* () {
+      const place = yield* instruction.place()
+      const worker = yield* knowledge.worker()
+      return {
+        documents: yield* knowledge.documents(place, { personal: true }),
+        // The local search model arrives with semantic search; until then search is by keywords.
+        model: { state: "absent" as const },
+        settings: yield* settingsOf(place),
+        limits: {
+          upload: UPLOAD_BYTES,
+          text: TEXT_BYTES,
+          documents: BrainKnowledge.LIMIT.documents,
+          repository: BrainKnowledge.LIMIT.repository,
+          perMinute: BrainKnowledge.LIMIT.perMinute,
+        },
+        indexing: yield* knowledge.indexing(place),
+        worker: { mode: worker.mode, ...(worker.reason ? { reason: worker.reason } : {}), threads: worker.threads },
+      }
+    })
+
+    // What an add came to, as the routes answer it; a title the user gave is the document's.
+    const added = Effect.fnUntraced(function* (place: Brain.Place, result: BrainKnowledge.AddResult, title?: string) {
+      if (result.type === "refused") return yield* refused(result.message, result.reason, result.document)
+      const named = title?.trim()
+      if (named) yield* knowledge.update(place, result.document.id, { title: named })
+      const document = named
+        ? ((yield* knowledge.document(place, result.document.id, { personal: true }))?.document ?? result.document)
+        : result.document
+      return { type: result.type, document, ...(result.previous ? { previous: result.previous } : {}) }
+    })
+
+    // One file in multipart form data, held in memory and never written to disk: the stream stops at 64 MB.
+    const upload = Effect.fn("MemoryHttpApi.upload")(function* (ctx: {
+      payload: Stream.Stream<Multipart.Part, Multipart.MultipartError>
+    }) {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const length = Number(request.headers["content-length"])
+      if (Number.isFinite(length) && length > UPLOAD_BYTES + 1024 * 1024)
+        return yield* tooLarge("This file is over 64 MB, the most Vector reads.")
+      const form = yield* Stream.runFoldEffect(
+        ctx.payload,
+        (): Form => ({ fields: new Map(), files: [] }),
+        (form: Form, part: Multipart.Part): Effect.Effect<Form, Multipart.MultipartError> =>
+          part._tag === "Field"
+            ? Effect.succeed({ ...form, fields: new Map([...form.fields, [part.key, part.value]]) })
+            : part.contentEffect.pipe(
+                Effect.map((bytes) => ({
+                  ...form,
+                  files: [...form.files, { name: part.name, mime: part.contentType, bytes }],
+                })),
+              ),
+      ).pipe(
+        Effect.mapError((error) =>
+          overLimit(error)
+            ? tooLarge("This file is over 64 MB, the most Vector reads.")
+            : refused("Vector could not read this upload. Send one file as multipart form data.", "invalid"),
+        ),
+      )
+      const file = form.files[0]
+      if (form.files.length !== 1 || !file)
+        return yield* refused("Send exactly one file, in the field named file.", "invalid")
+      if (file.bytes.length > UPLOAD_BYTES) return yield* tooLarge("This file is over 64 MB, the most Vector reads.")
+      const origin = form.fields.get("origin") === "chat" ? ("chat" as const) : ("upload" as const)
+      const sessionID = form.fields.get("sessionID")
+      const place = yield* instruction.place()
+      const result = yield* knowledge.add(place, {
+        type: "bytes",
+        name: file.name,
+        bytes: file.bytes,
+        ...(file.mime ? { mime: file.mime } : {}),
+        origin,
+        ...(sessionID ? { sessionID } : {}),
+        replace: form.fields.get("replace") === "true",
+      })
+      return yield* added(place, result, form.fields.get("title"))
+    })
+
+    // A file on this computer, by path: the owner chose it (an absolute path) or it is the repository's own (a path
+    // relative to it, which must stay inside it). Either way a regular file, never a link.
+    const addPath = Effect.fn("MemoryHttpApi.addPath")(function* (ctx: {
+      payload: { path: string; origin?: "upload" | "chat"; sessionID?: string; title?: string; replace?: boolean }
+    }) {
+      const place = yield* instruction.place()
+      const result = yield* knowledge.add(place, {
+        type: "path",
+        path: ctx.payload.path,
+        origin: ctx.payload.origin ?? "upload",
+        attached: path.isAbsolute(ctx.payload.path),
+        links: false,
+        replace: ctx.payload.replace ?? false,
+        ...(ctx.payload.sessionID ? { sessionID: ctx.payload.sessionID } : {}),
+      })
+      return yield* added(place, result, ctx.payload.title)
+    })
+
+    const addText = Effect.fn("MemoryHttpApi.addText")(function* (ctx: {
+      payload: { name: string; text: string; sessionID?: string; replace?: boolean }
+    }) {
+      if (new TextEncoder().encode(ctx.payload.text).length > TEXT_BYTES)
+        return yield* tooLarge("Pasted text can be at most 2 MB. Save it as a file and add the file.")
+      if (!ctx.payload.name.trim()) return yield* refused("Give the text a name.", "invalid")
+      const place = yield* instruction.place()
+      const result = yield* knowledge.add(place, {
+        type: "text",
+        name: ctx.payload.name.trim(),
+        text: ctx.payload.text,
+        origin: "upload",
+        replace: ctx.payload.replace ?? false,
+        ...(ctx.payload.sessionID ? { sessionID: ctx.payload.sessionID } : {}),
+      })
+      return yield* added(place, result)
+    })
+
+    const probe = Effect.fn("MemoryHttpApi.probe")(function* (ctx: { payload: { path: string } }) {
+      const place = yield* instruction.place()
+      const file = yield* Effect.promise(() =>
+        BrainKnowledge.read(place, {
+          type: "path",
+          path: ctx.payload.path,
+          origin: "upload",
+          attached: path.isAbsolute(ctx.payload.path),
+          links: false,
+        }),
+      )
+      if (file.type === "refused") return yield* refused(file.message, file.reason)
+      const probed = yield* knowledge
+        .probe({ name: file.name, bytes: file.bytes })
+        .pipe(Effect.catch((error) => Effect.fail(refused(`Vector could not read this file: ${error.message}`, "invalid"))))
+      if ("type" in probed) return yield* refused(probed.message, probed.reason)
+      const large =
+        file.bytes.length > REMEMBER_INSTEAD.bytes || (probed.format === "pdf" && (probed.pages ?? 0) > REMEMBER_INSTEAD.pages)
+      return {
+        format: probed.format,
+        ...(probed.pages === undefined ? {} : { pages: probed.pages }),
+        tokens: probed.tokens,
+        suggest: large ? ("remember-instead" as const) : ("none" as const),
+      }
+    })
+
+    const document = Effect.fn("MemoryHttpApi.document")(function* (ctx: { params: { documentID: string } }) {
+      const detail = yield* knowledge.document(yield* instruction.place(), ctx.params.documentID, { personal: true })
+      if (!detail) return yield* missing(ctx.params.documentID, `No document ${ctx.params.documentID} here.`)
+      return {
+        document: detail.document,
+        outline: detail.sections,
+        counts: detail.counts,
+        records: detail.records,
+        anchors: detail.anchors,
+        held: detail.held,
+        warnings: detail.document.warnings,
+        versions: detail.versions,
+      }
+    })
+
+    const updateDocument = Effect.fn("MemoryHttpApi.updateDocument")(function* (ctx: {
+      params: { documentID: string }
+      payload: {
+        title?: string
+        visibility?: BrainSchema.Visibility
+        action?: "approve" | "reject" | "reindex" | "pause" | "resume"
+      }
+    }) {
+      const place = yield* instruction.place()
+      const id = ctx.params.documentID
+      const before = yield* knowledge.document(place, id, { personal: true })
+      if (!before) return yield* missing(id, `No document ${id} here.`)
+      const action = ctx.payload.action === "reindex" ? undefined : ctx.payload.action
+      if (action || ctx.payload.title?.trim() || ctx.payload.visibility)
+        yield* knowledge.update(place, id, {
+          ...(action ? { action } : {}),
+          ...(ctx.payload.title?.trim() ? { title: ctx.payload.title.trim() } : {}),
+          ...(ctx.payload.visibility ? { visibility: ctx.payload.visibility } : {}),
+        })
+      if (ctx.payload.action === "reindex" && (yield* knowledge.reindex(place, id)) === 0)
+        return yield* refused(
+          "Vector cannot read this document again now: it is being read, or its file changed or is gone and no copy was kept.",
+          "not-found",
+        )
+      return (yield* knowledge.document(place, id, { personal: true }))?.document ?? before.document
+    })
+
+    const removeDocument = Effect.fn("MemoryHttpApi.removeDocument")(function* (ctx: { params: { documentID: string } }) {
+      const result = yield* knowledge.remove(yield* instruction.place(), ctx.params.documentID)
+      if (result === "not-found") return yield* missing(ctx.params.documentID, `No document ${ctx.params.documentID} here.`)
+      return true
+    })
+
+    const documentPage = Effect.fn("MemoryHttpApi.documentPage")(function* (ctx: {
+      params: { documentID: string; page: string }
+    }) {
+      const number = /^\d{1,6}$/.test(ctx.params.page) ? Number(ctx.params.page) : Number.NaN
+      const page = Number.isNaN(number)
+        ? undefined
+        : yield* knowledge.page(yield* instruction.place(), ctx.params.documentID, number, { personal: true })
+      if (!page) return yield* missing(ctx.params.documentID, `No page ${ctx.params.page} in document ${ctx.params.documentID}.`)
+      return page
+    })
+
+    // The original as a download only, never something a browser renders: a PDF or HTML file from anywhere could
+    // carry script.
+    const documentFile = Effect.fn("MemoryHttpApi.documentFile")(function* (ctx: { params: { documentID: string } }) {
+      const original = yield* knowledge.original(yield* instruction.place(), ctx.params.documentID)
+      if (!original)
+        return yield* missing(ctx.params.documentID, `Vector keeps no copy of document ${ctx.params.documentID}'s file.`)
+      const ascii = original.name.replace(/[^A-Za-z0-9._ -]/g, "_")
+      return HttpServerResponse.uint8Array(original.bytes, {
+        contentType: "application/octet-stream",
+        headers: {
+          "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(original.name)}`,
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "sandbox",
+          "cache-control": "no-store",
+        },
+      })
+    })
+
+    // --- Records --------------------------------------------------------------------------------------------------
+
+    const records = Effect.fn("MemoryHttpApi.records")(function* (ctx: {
+      query: {
+        kind?: BrainSchema.RecordKind
+        document?: string
+        query?: string
+        status?: "active" | "held" | "archived" | "all"
+        cursor?: string
+        limit?: number
+      }
+    }) {
+      return yield* knowledge.records(yield* instruction.place(), {
+        ...(ctx.query.kind ? { kind: ctx.query.kind } : {}),
+        ...(ctx.query.document ? { document: ctx.query.document } : {}),
+        ...(ctx.query.query ? { query: ctx.query.query } : {}),
+        ...(ctx.query.status ? { status: ctx.query.status } : {}),
+        ...(ctx.query.cursor ? { cursor: ctx.query.cursor } : {}),
+        ...(ctx.query.limit ? { limit: ctx.query.limit } : {}),
+        personal: true,
+      })
+    })
+
+    const record = Effect.fn("MemoryHttpApi.record")(function* (ctx: { params: { recordID: string } }) {
+      const detail = yield* knowledge.record(yield* instruction.place(), ctx.params.recordID, { personal: true })
+      if (!detail) return yield* missing(ctx.params.recordID, `No record ${ctx.params.recordID} here.`)
+      return detail
+    })
+
+    const updateRecord = Effect.fn("MemoryHttpApi.updateRecord")(function* (ctx: {
+      params: { recordID: string }
+      payload: BrainKnowledge.RecordChange
+    }) {
+      const result = yield* knowledge.changeRecord(yield* instruction.place(), ctx.params.recordID, ctx.payload)
+      if (!result) return yield* missing(ctx.params.recordID, `No record ${ctx.params.recordID} here.`)
+      if (result.type === "refused") return yield* refused(result.message)
+      return { record: result.record, ...(result.entry ? { entry: result.entry } : {}) }
+    })
+
+    const cited = Effect.fn("MemoryHttpApi.knowledge")(function* (ctx: { query: { ids: string } }) {
+      const ids = ctx.query.ids.split(",").map((id) => id.trim()).filter(Boolean)
+      if (ids.length > BrainKnowledge.LIMIT.cards) return yield* refused("Ask for at most 50 ids at a time.", "limit")
+      return yield* knowledge.cards(yield* instruction.place(), ids, { personal: true })
     })
 
     return handlers
@@ -104,5 +408,19 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       .handle("tidy", tidy)
       .handle("settings", settings)
       .handle("configure", configure)
+      .handle("documents", documents)
+      .handle("upload", upload)
+      .handle("addPath", addPath)
+      .handle("addText", addText)
+      .handle("probe", probe)
+      .handle("document", document)
+      .handle("updateDocument", updateDocument)
+      .handle("removeDocument", removeDocument)
+      .handle("documentPage", documentPage)
+      .handle("documentFile", documentFile)
+      .handle("records", records)
+      .handle("record", record)
+      .handle("updateRecord", updateRecord)
+      .handle("knowledge", cited)
   }),
 )

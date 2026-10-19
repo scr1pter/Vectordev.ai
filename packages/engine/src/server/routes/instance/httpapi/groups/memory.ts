@@ -1,5 +1,6 @@
 import { Schema } from "effect"
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
+import { Multipart } from "effect/unstable/http"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
@@ -63,10 +64,16 @@ export const MemoryErasePayload = Schema.Struct({
 
 export const MemorySettings = Schema.Struct({
   learning: Schema.Boolean,
+  /** Whether the repository's tracked docs are read. */
+  repositoryDocs: Schema.Boolean,
+  /** Whether a copy of each added file is kept. The copy is not redacted. */
+  keepOriginals: Schema.Boolean,
 }).annotate({ identifier: "MemorySettings" })
 
 export const MemorySettingsPayload = Schema.Struct({
-  learning: Schema.Boolean,
+  learning: Schema.optional(Schema.Boolean),
+  repositoryDocs: Schema.optional(Schema.Boolean),
+  keepOriginals: Schema.optional(Schema.Boolean),
 })
 
 export const MemoryTidy = Schema.Struct({
@@ -83,12 +90,229 @@ export class MemoryApiError extends Schema.ErrorClass<MemoryApiError>("MemoryErr
     data: Schema.Struct({
       code: Schema.Literals(["refused", "not-found"]),
       message: Schema.String,
+      /** Why a document was refused, such as "unsupported", "secret" or "version". */
+      reason: Schema.optional(Schema.String),
+      /** For "version": the document the file would replace, so the user can be asked. */
+      document: Schema.optional(BrainSchema.Document),
     }),
   },
   { httpApiStatus: 400 },
 ) {}
 
+export class MemoryTooLargeError extends Schema.ErrorClass<MemoryTooLargeError>("MemoryTooLargeError")(
+  {
+    name: Schema.Literal("MemoryTooLargeError"),
+    data: Schema.Struct({ message: Schema.String }),
+  },
+  { httpApiStatus: 413 },
+) {}
+
 const MemoryID = Schema.String.annotate({ description: "A memory entry's short id, such as m4k2q" })
+const DocumentID = Schema.String.annotate({ description: "A document's id, such as d4k2q7m3x" })
+const RecordID = Schema.String.annotate({ description: "A record's id, such as r4k2q7m3x9ab" })
+
+/** The most an upload may hold: the most Vector reads of any document. */
+export const UPLOAD_BYTES = 64 * 1024 * 1024
+/** The most pasted text a document may be. */
+export const TEXT_BYTES = 2 * 1024 * 1024
+
+export const MemoryDocumentLimits = Schema.Struct({
+  /** Bytes of one upload. */
+  upload: Schema.Finite,
+  /** Bytes of pasted text. */
+  text: Schema.Finite,
+  /** Uploaded and chat documents per repository, and the repository's own docs beside them. */
+  documents: Schema.Finite,
+  repository: Schema.Finite,
+  /** Documents added per minute. */
+  perMinute: Schema.Finite,
+}).annotate({ identifier: "MemoryDocumentLimits" })
+
+export const MemoryWorker = Schema.Struct({
+  /** in-process: documents are read on the main thread under tighter limits, for `reason`. */
+  mode: Schema.Literals(["worker", "in-process"]),
+  reason: Schema.optional(Schema.String),
+  threads: Schema.Finite,
+}).annotate({ identifier: "MemoryWorker" })
+
+export const MemoryDocumentList = Schema.Struct({
+  documents: Schema.Array(BrainSchema.Document),
+  model: BrainSchema.ModelStatus,
+  settings: MemorySettings,
+  limits: MemoryDocumentLimits,
+  /** Something is being read or waits to be: poll again in a couple of seconds. */
+  indexing: Schema.Boolean,
+  worker: MemoryWorker,
+}).annotate({ identifier: "MemoryDocumentList" })
+
+export const MemoryDocumentResult = Schema.Struct({
+  /** queued: new; version: the next version of a document here, which it replaces; unchanged: these bytes are here. */
+  type: Schema.Literals(["queued", "unchanged", "version"]),
+  document: BrainSchema.Document,
+  previous: Schema.optional(Schema.String),
+}).annotate({ identifier: "MemoryDocumentResult" })
+
+const DocumentOriginField = Schema.optional(Schema.Literals(["upload", "chat"]))
+
+export const MemoryDocumentUploadPayload = Schema.Struct({
+  file: Multipart.SingleFileSchema,
+  origin: DocumentOriginField,
+  sessionID: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
+  /** "true" reads a file of the same name as a document here as its next version; otherwise that is refused first. */
+  replace: Schema.optional(Schema.Literals(["true", "false"])),
+}).pipe(
+  HttpApiSchema.asMultipartStream({
+    maxParts: 5,
+    maxFileSize: UPLOAD_BYTES,
+    maxTotalSize: UPLOAD_BYTES + 1024 * 1024,
+    maxFieldSize: 16 * 1024,
+  }),
+)
+
+export const MemoryDocumentPathPayload = Schema.Struct({
+  /** A file the user chose, as an absolute path, or a file of the repository, relative to it. Never a link. */
+  path: Schema.String,
+  origin: DocumentOriginField,
+  sessionID: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
+  replace: Schema.optional(Schema.Boolean),
+})
+
+export const MemoryDocumentTextPayload = Schema.Struct({
+  name: Schema.String,
+  text: Schema.String,
+  sessionID: Schema.optional(Schema.String),
+  replace: Schema.optional(Schema.Boolean),
+})
+
+export const MemoryDocumentProbePayload = Schema.Struct({ path: Schema.String })
+
+export const MemoryDocumentProbe = Schema.Struct({
+  format: BrainSchema.Format,
+  pages: Schema.optional(Schema.Finite),
+  /** About what sending the document whole would cost. */
+  tokens: Schema.Finite,
+  /** remember-instead: a PDF over 20 pages or a file over 1 MB, which costs less remembered than sent. */
+  suggest: Schema.Literals(["remember-instead", "none"]),
+}).annotate({ identifier: "MemoryDocumentProbe" })
+
+export const MemoryRecordPage = Schema.Struct({
+  records: Schema.Array(BrainSchema.Record),
+  /** Pass as `cursor` for the next page; absent on the last. */
+  cursor: Schema.optional(Schema.String),
+}).annotate({ identifier: "MemoryRecordPage" })
+
+export const MemoryDocumentDetail = Schema.Struct({
+  document: BrainSchema.Document,
+  /** Sections, at most 200. */
+  outline: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      heading: Schema.String,
+      path: Schema.String,
+      level: Schema.Finite,
+      pageStart: Schema.optional(Schema.Finite),
+      pageEnd: Schema.optional(Schema.Finite),
+    }),
+  ),
+  counts: Schema.Struct({
+    records: Schema.Finite,
+    active: Schema.Finite,
+    held: Schema.Finite,
+    archived: Schema.Finite,
+    passages: Schema.Finite,
+  }),
+  /** The first 50 records in document order; GET /memory/records with `document` and `cursor` gives the rest. */
+  records: MemoryRecordPage,
+  /** At most 100. */
+  anchors: Schema.Array(BrainSchema.Anchor),
+  /** Passages and records held for the user's review, at most 50. */
+  held: Schema.Array(Schema.Struct({ id: Schema.String, hold: BrainSchema.Hold, page: Schema.optional(Schema.Finite) })),
+  warnings: Schema.Array(BrainSchema.DocumentWarning),
+  versions: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      version: Schema.Finite,
+      status: BrainSchema.DocumentStatus,
+      bytes: Schema.Finite,
+      createdAt: Schema.Finite,
+    }),
+  ),
+}).annotate({ identifier: "MemoryDocumentDetail" })
+
+export const MemoryDocumentUpdatePayload = Schema.Struct({
+  title: Schema.optional(Schema.String),
+  visibility: Schema.optional(BrainSchema.Visibility),
+  /** reject forgets a held document; reindex reads it again; pause and resume hold and continue its reading. */
+  action: Schema.optional(Schema.Literals(["approve", "reject", "reindex", "pause", "resume"])),
+})
+
+export const MemoryDocumentPage = Schema.Struct({
+  document: Schema.String,
+  page: Schema.Finite,
+  pages: Schema.Finite,
+  /** The page is a scanned image with no text, so Vector read nothing on it. */
+  unread: Schema.Boolean,
+  passages: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      section: Schema.String,
+      /** The page the passage starts on; one that starts before this page runs onto it. */
+      page: Schema.optional(Schema.Finite),
+      /** Plain text; never render it as markup. */
+      text: Schema.String,
+      hold: Schema.optional(BrainSchema.Hold),
+      /** Where each record's quote sits in `text`. */
+      records: Schema.Array(
+        Schema.Struct({
+          id: Schema.String,
+          kind: BrainSchema.RecordKind,
+          start: Schema.Finite,
+          end: Schema.Finite,
+          page: Schema.optional(Schema.Finite),
+        }),
+      ),
+    }),
+  ),
+}).annotate({ identifier: "MemoryDocumentPage" })
+
+export const MemoryRecordQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  kind: Schema.optional(BrainSchema.RecordKind),
+  document: Schema.optional(Schema.String),
+  query: Schema.optional(Schema.String),
+  status: Schema.optional(Schema.Literals(["active", "held", "archived", "all"])),
+  cursor: Schema.optional(Schema.String),
+  limit: Schema.optional(Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 100 }))),
+})
+
+export const MemoryRecordDetail = Schema.Struct({
+  record: BrainSchema.Record,
+  passage: Schema.optional(BrainSchema.Passage),
+  anchors: Schema.Array(BrainSchema.Anchor),
+  conflicts: Schema.Array(BrainSchema.ReviewItem),
+  history: Schema.Array(BrainSchema.RecordEvent),
+}).annotate({ identifier: "MemoryRecordDetail" })
+
+export const MemoryRecordUpdatePayload = Schema.Struct({
+  text: Schema.optional(Schema.String),
+  kind: Schema.optional(BrainSchema.RecordKind),
+  pinned: Schema.optional(Schema.Boolean),
+  action: Schema.optional(Schema.Literals(["not-applicable", "forget", "restore", "make-memory"])),
+})
+
+export const MemoryRecordResult = Schema.Struct({
+  record: BrainSchema.Record,
+  /** The memory entry `make-memory` saved. */
+  entry: Schema.optional(BrainSchema.Entry),
+}).annotate({ identifier: "MemoryRecordResult" })
+
+export const MemoryKnowledgeQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  /** Record, passage and document ids, comma-separated, at most 50. */
+  ids: Schema.String,
+})
 
 // Memory is the owner's own: every route is owner-only (ServerAuth), and a guest never reads it.
 export const MemoryApi = HttpApi.make("memory")
@@ -197,7 +421,183 @@ export const MemoryApi = HttpApi.make("memory")
           OpenApi.annotations({
             identifier: "memory.settings.update",
             summary: "Change memory settings",
-            description: "Turn Vector's learning on or off. Memory already saved stays until you erase it.",
+            description:
+              "Turn Vector's learning on or off, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.",
+          }),
+        ),
+        HttpApiEndpoint.get("documents", `${root}/documents`, {
+          query: WorkspaceRoutingQuery,
+          success: described(MemoryDocumentList, "The repository's documents, with settings, limits and progress"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.documents.list",
+            summary: "List documents",
+            description:
+              "Documents Vector keeps for the repository at `directory`: uploads, attachments, what the agent kept and the repository's own docs. Poll every couple of seconds while `indexing` is true.",
+          }),
+        ),
+        HttpApiEndpoint.post("upload", `${root}/documents`, {
+          query: WorkspaceRoutingQuery,
+          payload: MemoryDocumentUploadPayload,
+          success: described(MemoryDocumentResult, "The document, queued to be read"),
+          error: [MemoryApiError, MemoryTooLargeError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.documents.upload",
+            summary: "Upload a document",
+            description:
+              "Upload one file (at most 64 MB) as multipart form data. It is read on this computer into sections, passages and records. A file of the same name as a document here is refused with reason `version` unless `replace` is `true`.",
+          }),
+        ),
+        HttpApiEndpoint.post("addPath", `${root}/documents/path`, {
+          query: WorkspaceRoutingQuery,
+          payload: MemoryDocumentPathPayload,
+          success: described(MemoryDocumentResult, "The document, queued to be read"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.documents.path",
+            summary: "Add a document by path",
+            description:
+              "Add a file on the computer the engine runs on: an absolute path the user chose, or a path inside the repository. Only regular files are read, never a link, and a repository path must not lead out of it.",
+          }),
+        ),
+        HttpApiEndpoint.post("addText", `${root}/documents/text`, {
+          query: WorkspaceRoutingQuery,
+          payload: MemoryDocumentTextPayload,
+          success: described(MemoryDocumentResult, "The document, queued to be read"),
+          error: [MemoryApiError, MemoryTooLargeError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.documents.text",
+            summary: "Add pasted text as a document",
+            description: "Keep pasted text (at most 2 MB) as a Markdown document named `name`.",
+          }),
+        ),
+        HttpApiEndpoint.post("probe", `${root}/documents/probe`, {
+          query: WorkspaceRoutingQuery,
+          payload: MemoryDocumentProbePayload,
+          success: described(MemoryDocumentProbe, "The file's format, pages and size in tokens"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.documents.probe",
+            summary: "Probe a document",
+            description:
+              "Read a file by path only for its format, pages and size in tokens, storing nothing, so the composer can suggest remembering it instead of sending it.",
+          }),
+        ),
+        HttpApiEndpoint.get("document", `${root}/documents/:documentID`, {
+          params: { documentID: DocumentID },
+          query: WorkspaceRoutingQuery,
+          success: described(MemoryDocumentDetail, "One document with its outline, first records and versions"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.documents.get",
+            summary: "Get a document",
+            description: "One document: its outline, counts, first records, code links, held passages, warnings and versions.",
+          }),
+        ),
+        HttpApiEndpoint.patch("updateDocument", `${root}/documents/:documentID`, {
+          params: { documentID: DocumentID },
+          query: WorkspaceRoutingQuery,
+          payload: MemoryDocumentUpdatePayload,
+          success: described(BrainSchema.Document, "The document after the change"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.documents.update",
+            summary: "Change a document",
+            description:
+              "Rename it, change who may see it, approve or reject a held document, read it again, or pause and resume its reading.",
+          }),
+        ),
+        HttpApiEndpoint.delete("removeDocument", `${root}/documents/:documentID`, {
+          params: { documentID: DocumentID },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Boolean, "The document was forgotten"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.documents.remove",
+            summary: "Forget a document",
+            description:
+              "Forget a document and every version of it: its records, passages, links and kept copy. Vector does not keep it again on its own; you can always add it again.",
+          }),
+        ),
+        HttpApiEndpoint.get("documentPage", `${root}/documents/:documentID/pages/:page`, {
+          params: { documentID: DocumentID, page: Schema.String.annotate({ description: "A page number, from 1" }) },
+          query: WorkspaceRoutingQuery,
+          success: described(MemoryDocumentPage, "The page's text with the spans its records came from"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.documents.page",
+            summary: "Read a page of a document",
+            description: "The text Vector read from one page of a paged document, with where each record's quote sits.",
+          }),
+        ),
+        HttpApiEndpoint.get("documentFile", `${root}/documents/:documentID/file`, {
+          params: { documentID: DocumentID },
+          query: WorkspaceRoutingQuery,
+          success: Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "application/octet-stream" })),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.documents.file",
+            summary: "Download a document's original",
+            description:
+              "The original file as it was added, as an attachment, only while the repository keeps originals. The copy is not redacted.",
+          }),
+        ),
+        HttpApiEndpoint.get("records", `${root}/records`, {
+          query: MemoryRecordQuery,
+          success: described(MemoryRecordPage, "A page of records"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.records.list",
+            summary: "List records",
+            description:
+              "Records Vector read from documents, in document order, or best first for `query`. Filter by `kind`, `document` and `status` (archived records are left out unless asked for); pass `cursor` for the next page.",
+          }),
+        ),
+        HttpApiEndpoint.get("record", `${root}/records/:recordID`, {
+          params: { recordID: RecordID },
+          query: WorkspaceRoutingQuery,
+          success: described(MemoryRecordDetail, "One record with its passage, links, conflicts and history"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.records.get",
+            summary: "Get a record",
+            description: "One record: the passage it came from, the code it is linked to, what it conflicts with and how it changed.",
+          }),
+        ),
+        HttpApiEndpoint.patch("updateRecord", `${root}/records/:recordID`, {
+          params: { recordID: RecordID },
+          query: WorkspaceRoutingQuery,
+          payload: MemoryRecordUpdatePayload,
+          success: described(MemoryRecordResult, "The record after the change"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.records.update",
+            summary: "Change a record",
+            description:
+              "Edit a record's text or kind, pin it, say it is not what Vector called it, forget or restore it, or save it as a memory entry. Edits and decisions hold when the document is read again.",
+          }),
+        ),
+        HttpApiEndpoint.get("knowledge", `${root}/knowledge`, {
+          query: MemoryKnowledgeQuery,
+          success: described(Schema.Array(BrainSchema.Card), "Cards for the ids that are still there"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.knowledge",
+            summary: "Resolve citations",
+            description:
+              "The cards for record, passage and document ids an answer cited, for citation chips. Ids that are gone or held are left out.",
           }),
         ),
       )

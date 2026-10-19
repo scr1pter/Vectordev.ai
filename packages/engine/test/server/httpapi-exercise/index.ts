@@ -707,7 +707,100 @@ const scenarios: Scenario[] = [
     .json(200, (body) => {
       object(body)
       check(body.learning === true, "memory settings should keep learning on")
+      check(typeof body.repositoryDocs === "boolean", "memory settings should say whether repository docs are read")
+      check(body.keepOriginals === false, "originals are not kept unless the user turns it on")
     }),
+  http.protected.get("/memory/documents", "memory.documents.list").json(200, (body) => {
+    object(body)
+    check(Array.isArray(body.documents), "documents list should return documents")
+    check(typeof body.indexing === "boolean", "documents list should say whether anything is being read")
+    check(body.limits?.upload === 64 * 1024 * 1024, "documents list should give the upload limit")
+  }),
+  // The upload takes multipart form data only; memory-documents.test.ts sends real files.
+  http.protected
+    .post("/memory/documents", "memory.documents.upload")
+    .mutating()
+    .at((ctx) => ({ path: "/memory/documents", headers: ctx.headers(), body: { file: "not a file" } }))
+    .status(415, undefined, "none"),
+  http.protected
+    .post("/memory/documents/path", "memory.documents.path")
+    .mutating()
+    .at((ctx) => ({ path: "/memory/documents/path", headers: ctx.headers(), body: { path: "missing.md" } }))
+    .json(400, (body) => {
+      object(body)
+      check(body.data?.reason === "not-found", "a missing file should be refused as not found")
+    }),
+  http.protected
+    .post("/memory/documents/text", "memory.documents.text")
+    .mutating()
+    .at((ctx) => ({
+      path: "/memory/documents/text",
+      headers: ctx.headers(),
+      body: { name: "HTTP API notes", text: "# Notes\n\nReleases MUST go out on Thursdays." },
+    }))
+    .json(
+      200,
+      (body) => {
+        object(body)
+        check(body.type === "queued", "pasted text should be queued as a document")
+        check(body.document?.visibility === "private", "pasted text is private")
+      },
+      "status",
+    ),
+  http.protected
+    .post("/memory/documents/probe", "memory.documents.probe")
+    .at((ctx) => ({ path: "/memory/documents/probe", headers: ctx.headers(), body: { path: "missing.md" } }))
+    .json(400, object, "status"),
+  http.protected
+    .get("/memory/documents/{documentID}", "memory.documents.get")
+    .at((ctx) => ({ path: route("/memory/documents/{documentID}", { documentID: "dnone" }), headers: ctx.headers() }))
+    .json(400, object, "status"),
+  http.protected
+    .patch("/memory/documents/{documentID}", "memory.documents.update")
+    .mutating()
+    .at((ctx) => ({
+      path: route("/memory/documents/{documentID}", { documentID: "dnone" }),
+      headers: ctx.headers(),
+      body: { action: "pause" },
+    }))
+    .json(400, object, "status"),
+  http.protected
+    .delete("/memory/documents/{documentID}", "memory.documents.remove")
+    .mutating()
+    .at((ctx) => ({ path: route("/memory/documents/{documentID}", { documentID: "dnone" }), headers: ctx.headers() }))
+    .json(400, object, "status"),
+  http.protected
+    .get("/memory/documents/{documentID}/pages/{page}", "memory.documents.page")
+    .at((ctx) => ({
+      path: route("/memory/documents/{documentID}/pages/{page}", { documentID: "dnone", page: "1" }),
+      headers: ctx.headers(),
+    }))
+    .json(400, object, "status"),
+  http.protected
+    .get("/memory/documents/{documentID}/file", "memory.documents.file")
+    .at((ctx) => ({ path: route("/memory/documents/{documentID}/file", { documentID: "dnone" }), headers: ctx.headers() }))
+    .json(400, object, "status"),
+  http.protected.get("/memory/records", "memory.records.list").json(200, (body) => {
+    object(body)
+    check(Array.isArray(body.records), "records list should return records")
+  }),
+  http.protected
+    .get("/memory/records/{recordID}", "memory.records.get")
+    .at((ctx) => ({ path: route("/memory/records/{recordID}", { recordID: "rnone" }), headers: ctx.headers() }))
+    .json(400, object, "status"),
+  http.protected
+    .patch("/memory/records/{recordID}", "memory.records.update")
+    .mutating()
+    .at((ctx) => ({
+      path: route("/memory/records/{recordID}", { recordID: "rnone" }),
+      headers: ctx.headers(),
+      body: { action: "not-applicable" },
+    }))
+    .json(400, object, "status"),
+  http.protected
+    .get("/memory/knowledge", "memory.knowledge")
+    .at((ctx) => ({ path: "/memory/knowledge?ids=rnone,dnone", headers: ctx.headers() }))
+    .json(200, (body) => check(Array.isArray(body) && body.length === 0, "ids nothing holds give no cards")),
   http.protected.get("/experimental/workspace/adapter", "experimental.workspace.adapter.list").json(200, array),
   http.protected.get("/experimental/workspace", "experimental.workspace.list").json(200, array),
   http.protected.get("/experimental/workspace/status", "experimental.workspace.status").json(200, array),
