@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { Part } from "@vectordevai/sdk/v2"
 import {
   KNOWLEDGE,
+  LINKS,
   PERSONAL,
   RECALL,
   UNVERIFIED,
@@ -117,6 +118,26 @@ describe("knowledge citations", () => {
     expect([...delivered(parts)].toSorted()).toEqual(
       [entry, record, "m9z8y7", document, failure, second, "m7w6v5", passage].toSorted(),
     )
+  })
+
+  test("counts what a read pointed at and what an edit's spec guard named", () => {
+    const tool = (name: string, metadata: Record<string, unknown>) =>
+      ({
+        ...base,
+        id: `prt_${name}`,
+        type: "tool",
+        callID: `call_${name}`,
+        tool: name,
+        state: { status: "completed", input: {}, output: "", title: name, metadata, time: { start: 0, end: 1 } },
+      }) as Part
+    const parts = [
+      tool("read", { loaded: [`knowledge:${record}`], [LINKS]: [{ mode: "pointer", file: "src/a.ts", ids: [record] }] }),
+      tool("edit", { [LINKS]: [{ mode: "guard", file: "src/a.ts", ids: [second] }] }),
+      tool("apply_patch", { [LINKS]: [{ mode: "guard", file: "src/b.ts", ids: ["not-an-id"] }] }),
+      // Another tool's metadata gave the model none of it.
+      tool("bash", { [LINKS]: [{ mode: "guard", file: "src/c.ts", ids: [passage] }] }),
+    ]
+    expect([...delivered(parts)].toSorted()).toEqual([record, second].toSorted())
   })
 
   test("ignores knowledge metadata a user could type on a part that is not synthetic", () => {

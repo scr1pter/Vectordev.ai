@@ -56,6 +56,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   promptOps: TaskPromptOps
   // The request's size this step, for the escalate tool; absent where sizing does not apply.
   taskSize?: TaskSizeContext
+  // Whether the owner's personal memory and private documents may go to this step's model: no guest is in the
+  // session and the model does not train on prompts. Absent, they stay out.
+  personal?: boolean
 }) {
   const tools: Record<string, AITool> = {}
   const run = yield* EffectBridge.make()
@@ -76,6 +79,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       model: input.model,
       // Whether the model may train on prompts, for tools that keep the owner's personal memory away from such a model.
       mayTrain: freeModelMayTrain(input.model),
+      personal: input.personal === true,
       invokedAgents: input.invokedAgents,
       promptOps: input.promptOps,
       ...(input.taskSize ? { taskSize: input.taskSize } : {}),

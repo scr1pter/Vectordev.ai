@@ -15,12 +15,43 @@ import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import { collectBoundedResponseBody } from "@vectordevai/core/tool/http-body"
 import { containsPath } from "@/project/instance-context"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { BrainPaths } from "@vectordevai/core/brain/paths"
 import { Project } from "@vectordevai/core/project"
 import type { MessageID } from "./schema"
 
 /** Memory entries attached to a read result are recorded in its `loaded` metadata as `memory:<id>,<id>`. */
 export const MEMORY_LOADED = "memory:"
+
+/** Document cards a read pointed at are recorded in its `loaded` metadata as `knowledge:<id>,<id>`. */
+export const KNOWLEDGE_LOADED = "knowledge:"
+
+/**
+ * Metadata key of the code-link lines a tool result carries: `{ mode, file, ids }[]`. A read points at what is linked
+ * to the file it read; an edit, write or patch names the requirements linked to a file it changed (the spec guard).
+ * The output holds a placeholder for each line, which every request renders again from the brain, so a forgotten
+ * document is gone from old results too, and a private one stays out where private documents may not go.
+ */
+export const LINKS = "vector.memory.links"
+
+export type Link = { readonly mode: "pointer" | "guard"; readonly file: string; readonly ids: readonly string[] }
+
+/** The placeholder a code-link line is saved as. */
+export function linked(mode: Link["mode"], file: string) {
+  return mode === "pointer" ? `[documents linked to ${file}]` : `[requirements linked to ${file}]`
+}
+
+/**
+ * Who a tool call's code-link lines are for: whether personal memory and private documents may go to its model, the
+ * request's size (Chat gets none, and the spec guard is for Standard and Thorough work), and the ids the conversation
+ * already has.
+ */
+export type Asking = {
+  readonly sessionID: string
+  readonly personal: boolean
+  readonly tier?: "chat" | "light" | "standard" | "thorough"
+  readonly exclude: ReadonlySet<string>
+}
 
 function extract(messages: SessionV1.WithParts[]) {
   const paths = new Set<string>()
@@ -53,16 +84,25 @@ export function attachedMemory(messages: SessionV1.WithParts[]) {
 
 export interface Interface {
   readonly clear: (messageID: MessageID) => Effect.Effect<void>
+  /** The spec guard for files a tool changed: once per file per request, never for Chat or Light requests. */
+  readonly guard: (
+    messages: SessionV1.WithParts[],
+    files: readonly string[],
+    messageID: MessageID,
+    asking: Asking,
+  ) => Effect.Effect<{ readonly text?: string; readonly links: readonly Link[] }>
   /** Where this instance's requests run, as the brain needs it: the repository, its rules and memory files, trust. */
   readonly place: () => Effect.Effect<Brain.Place>
   readonly systemPaths: () => Effect.Effect<Set<string>, FSUtil.Error>
   readonly system: () => Effect.Effect<string[], FSUtil.Error>
   readonly find: (dir: string) => Effect.Effect<string | undefined, FSUtil.Error>
+  /** Instruction files near a file, the memory about it, and with `asking`, the line naming what is linked to it. */
   readonly resolve: (
     messages: SessionV1.WithParts[],
     filepath: string,
     messageID: MessageID,
-  ) => Effect.Effect<{ filepath: string; content: string }[], FSUtil.Error>
+    asking?: Asking,
+  ) => Effect.Effect<{ filepath: string; content: string; link?: Link }[], FSUtil.Error>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/Instruction") {}
@@ -70,7 +110,13 @@ export class Service extends Context.Service<Service, Interface>()("@vector/Inst
 const layer: Layer.Layer<
   Service,
   never,
-  FSUtil.Service | Config.Service | Global.Service | HttpClient.HttpClient | RuntimeFlags.Service | Brain.Service
+  | FSUtil.Service
+  | Config.Service
+  | Global.Service
+  | HttpClient.HttpClient
+  | RuntimeFlags.Service
+  | Brain.Service
+  | BrainKnowledge.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -79,6 +125,7 @@ const layer: Layer.Layer<
     const global = yield* Global.Service
     const flags = yield* RuntimeFlags.Service
     const brain = yield* Brain.Service
+    const knowledge = yield* BrainKnowledge.Service
     const http = HttpClient.filterStatusOk(withTransientReadRetry(yield* HttpClient.HttpClient))
     const globalFiles = [
       path.join(global.config, "AGENTS.md"),
@@ -268,10 +315,11 @@ const layer: Layer.Layer<
       messages: SessionV1.WithParts[],
       filepath: string,
       messageID: MessageID,
+      asking?: Asking,
     ) {
       const sys = yield* systemPaths()
       const already = extract(messages)
-      const results: { filepath: string; content: string }[] = []
+      const results: { filepath: string; content: string; link?: Link }[] = []
       const s = yield* InstanceState.get(state)
       const root = path.resolve(yield* InstanceState.directory)
 
@@ -323,10 +371,67 @@ const layer: Layer.Layer<
         results.push({ filepath: `${MEMORY_LOADED}${attached.ids.join(",")}`, content: attached.text })
       }
 
+      // Documents linked to the file, in one line, once per file per request (T4).
+      if (asking && asking.tier !== "chat") {
+        const brainPlace = yield* place()
+        const file = relativeFile(brainPlace.root, target)
+        if (!claimed.has(`${KNOWLEDGE_LOADED}${file}`) && !linkedSince(messages, "pointer").has(file)) {
+          const pointer = yield* knowledge.pointers(brainPlace, {
+            file,
+            personal: asking.personal,
+            exclude: asking.exclude,
+            sessionID: asking.sessionID,
+            ...(requestOf(messages) ? { requestID: requestOf(messages)! } : {}),
+          })
+          if (pointer.text) {
+            claimed.add(`${KNOWLEDGE_LOADED}${file}`)
+            s.claims.set(messageID, claimed)
+            results.push({
+              filepath: `${KNOWLEDGE_LOADED}${pointer.ids.join(",")}`,
+              content: linked("pointer", file),
+              link: { mode: "pointer", file, ids: pointer.ids },
+            })
+          }
+        }
+      }
+
       return results
     })
 
-    return Service.of({ clear, place, systemPaths, system, find, resolve })
+    const guard = Effect.fn("Instruction.guard")(function* (
+      messages: SessionV1.WithParts[],
+      files: readonly string[],
+      messageID: MessageID,
+      asking: Asking,
+    ) {
+      // The guard is for work that changes what a requirement covers; a quick change gets on without it.
+      if (asking.tier === "chat" || asking.tier === "light") return { links: [] }
+      const brainPlace = yield* place()
+      const s = yield* InstanceState.get(state)
+      const claimed = s.claims.get(messageID) ?? new Set<string>()
+      const done = linkedSince(messages, "guard")
+      const links = yield* Effect.forEach([...new Set(files.map((file) => relativeFile(brainPlace.root, file)))], (file) =>
+        Effect.gen(function* () {
+          if (done.has(file) || claimed.has(`guard:${file}`)) return []
+          // A requirement the conversation already has is still named: the guard asks for a check, not a read.
+          const line = yield* knowledge.guard(brainPlace, {
+            file,
+            personal: asking.personal,
+            exclude: new Set(),
+            sessionID: asking.sessionID,
+            ...(requestOf(messages) ? { requestID: requestOf(messages)! } : {}),
+          })
+          if (!line.text) return []
+          claimed.add(`guard:${file}`)
+          return [{ mode: "guard" as const, file, ids: line.ids }]
+        }),
+      ).pipe(Effect.map((found) => found.flat()))
+      s.claims.set(messageID, claimed)
+      if (links.length === 0) return { links }
+      return { text: links.map((item) => linked("guard", item.file)).join("\n"), links }
+    })
+
+    return Service.of({ clear, guard, place, systemPaths, system, find, resolve })
   }),
 )
 
@@ -334,10 +439,42 @@ export function loaded(messages: SessionV1.WithParts[]) {
   return extract(messages)
 }
 
+/** The code-link lines a tool result carries. */
+export function links(part: SessionV1.Part): Link[] {
+  if (part.type !== "tool" || part.state.status !== "completed") return []
+  const value = part.state.metadata?.[LINKS]
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item: unknown) => {
+    if (!item || typeof item !== "object" || !("file" in item) || typeof item.file !== "string") return []
+    const mode = "mode" in item && item.mode === "guard" ? ("guard" as const) : ("pointer" as const)
+    const ids = "ids" in item && Array.isArray(item.ids) ? item.ids.filter((id: unknown): id is string => typeof id === "string") : []
+    return ids.length > 0 ? [{ mode, file: item.file, ids }] : []
+  })
+}
+
+// The request a tool call answers starts at the last user message: what it was given since then, it was given once.
+function linkedSince(messages: readonly SessionV1.WithParts[], mode: Link["mode"]) {
+  const start = messages.findLastIndex((message) => message.info.role === "user")
+  return new Set(
+    messages
+      .slice(Math.max(0, start))
+      .flatMap((message) => message.parts.flatMap((part) => links(part).filter((item) => item.mode === mode)))
+      .map((item) => item.file),
+  )
+}
+
+function requestOf(messages: readonly SessionV1.WithParts[]) {
+  return messages.findLast((message) => message.info.role === "user")?.info.id
+}
+
+function relativeFile(root: string, file: string) {
+  return (path.isAbsolute(file) ? path.relative(root, file) : file).split(path.sep).join("/").replace(/^\.\//, "")
+}
+
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Config.node, FSUtil.node, Global.node, RuntimeFlags.node, httpClient, Brain.node],
+  deps: [Config.node, FSUtil.node, Global.node, RuntimeFlags.node, httpClient, Brain.node, BrainKnowledge.node],
 })
 
 export * as Instruction from "./instruction"

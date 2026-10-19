@@ -251,7 +251,7 @@ const LEARNED = [
 const DOCUMENTS = [
   {
     name: "Auth spec.md",
-    text: "# Auth spec\n\n## 1 Login\n\nThe login button label MUST read Sign in.\nLogin sessions MUST expire after 14 days without use.\n\n## 2 Tokens\n\nRefresh tokens MUST rotate on every use of a login session.\n",
+    text: "# Auth spec\n\n## 1 Login\n\nThe login button label MUST read Sign in.\nLogin sessions MUST expire after 14 days without use.\n\n## 2 Tokens\n\nRefresh tokens MUST rotate on every use of a login session, in `rotateRefreshToken`.\n",
   },
   {
     name: "Billing spec.md",
@@ -372,7 +372,9 @@ it.instance(
       expect(report.added.large).toBeLessThan(legacy / 5)
 
       // With documents: a greeting still costs nothing, and the rest stays inside the one budget that memory and
-      // documents share, beside a line in the digest and one in the tool.
+      // documents share, beside a line in the digest and one in the tool. The spec is linked to code the working tree
+      // is changing, so code-anchored recall competes for the same budget too.
+      yield* fs.writeWithDirs(path.join(dir, "src", "auth", "session.ts"), "export function rotateRefreshToken() {}\n")
       const knowledge = yield* BrainKnowledge.Service
       for (const document of DOCUMENTS) {
         const added = yield* knowledge.add(place, { type: "text", name: document.name, text: document.text, origin: "upload" })
@@ -406,7 +408,12 @@ it.instance(
       const toolDelta = documentReport.toolTokens - report.toolTokens
       expect(documentReport.added.light).toBeLessThanOrEqual(documentReport.digestTokens + 300 + toolDelta)
       expect(documentReport.added.large).toBeLessThanOrEqual(documentReport.digestTokens + 900 + toolDelta)
+      // The link was made, and a greeting or a bare acknowledgement still touches none of it.
+      expect(documentRecall("large")).toContain("in rotateRefreshToken.")
+      expect(docs.hi).not.toContain("rotateRefreshToken")
+      expect(docs.ok).not.toContain("rotateRefreshToken")
     }),
+  { git: true },
   60_000,
 )
 

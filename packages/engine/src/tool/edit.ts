@@ -19,6 +19,8 @@ import { assertExternalDirectoryEffect } from "./external-directory"
 import { assertOwnedPath } from "./owned-path"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import * as Bom from "@/util/bom"
+import { Instruction } from "../session/instruction"
+import { SessionMemory } from "../session/memory"
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -63,6 +65,7 @@ export const EditTool = Tool.define(
     const afs = yield* FSUtil.Service
     const format = yield* Format.Service
     const events = yield* EventV2Bridge.Service
+    const instruction = yield* Instruction.Service
 
     return {
       description: DESCRIPTION,
@@ -211,12 +214,15 @@ export const EditTool = Tool.define(
           const normalizedFilePath = FSUtil.normalizePath(filePath)
           const block = LSP.Diagnostic.report(filePath, diagnostics[normalizedFilePath] ?? [])
           if (block) output += `\n\nLSP errors detected in this file, please fix:\n${block}`
+          const guarded = yield* instruction.guard(ctx.messages, [filePath], ctx.messageID, SessionMemory.linking(ctx))
+          if (guarded.text) output += `\n\n${guarded.text}`
 
           return {
             metadata: {
               diagnostics,
               diff,
               filediff,
+              ...(guarded.links.length ? { [Instruction.LINKS]: guarded.links } : {}),
             },
             title: `${path.relative(instance.worktree, filePath)}`,
             output,

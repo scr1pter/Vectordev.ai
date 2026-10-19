@@ -15,6 +15,8 @@ import DESCRIPTION from "./apply_patch.txt"
 import { FileSystem } from "@vectordevai/core/filesystem"
 import { Format } from "../format"
 import * as Bom from "@/util/bom"
+import { Instruction } from "../session/instruction"
+import { SessionMemory } from "../session/memory"
 
 export const Parameters = Schema.Struct({
   patchText: Schema.String.annotate({ description: "The full patch text that describes all changes to be made" }),
@@ -27,6 +29,7 @@ export const ApplyPatchTool = Tool.define(
     const afs = yield* FSUtil.Service
     const format = yield* Format.Service
     const events = yield* EventV2Bridge.Service
+    const instruction = yield* Instruction.Service
 
     const run = Effect.fn("ApplyPatchTool.execute")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
@@ -299,6 +302,12 @@ export const ApplyPatchTool = Tool.define(
         const rel = path.relative(instance.worktree, target).replaceAll("\\", "/")
         output += `\n\nLSP errors detected in ${rel}, please fix:\n${block}`
       }
+      const guarded = yield* instruction.guard(
+        ctx.messages,
+        fileChanges.flatMap((change) => (change.type === "delete" ? [] : [change.movePath ?? change.filePath])),
+        ctx.messageID,
+        SessionMemory.linking(ctx),
+      )
 
       return {
         title: output,
@@ -306,8 +315,9 @@ export const ApplyPatchTool = Tool.define(
           diff: totalDiff,
           files,
           diagnostics,
+          ...(guarded.links.length ? { [Instruction.LINKS]: guarded.links } : {}),
         },
-        output,
+        output: guarded.text ? `${output}\n\n${guarded.text}` : output,
       }
     })
 

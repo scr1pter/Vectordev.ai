@@ -9,6 +9,7 @@ import DESCRIPTION from "./read.txt"
 import { InstanceState } from "@/effect/instance-state"
 import { assertExternalDirectoryEffect, readPatterns } from "./external-directory"
 import { Instruction } from "../session/instruction"
+import { SessionMemory } from "../session/memory"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { isPdfAttachment, sniffAttachmentMime } from "@/util/media"
 
@@ -67,6 +68,8 @@ type Metadata = {
   fingerprint?: string
   // This result points back to an earlier read instead of holding the content.
   pointer?: boolean
+  // Documents linked to the file, which the output names by a placeholder.
+  [Instruction.LINKS]?: Instruction.Link[]
 }
 
 export const ReadTool = Tool.define<
@@ -305,7 +308,9 @@ export const ReadTool = Tool.define<
         }
       }
 
-      const loaded = yield* instruction.resolve(ctx.messages, filepath, ctx.messageID)
+      const loaded = yield* instruction.resolve(ctx.messages, filepath, ctx.messageID, SessionMemory.linking(ctx))
+      // Lines naming what is linked to the file are saved as placeholders, rendered for each request.
+      const links = loaded.flatMap((item) => (item.link ? [item.link] : []))
       const sample = yield* readSample(filepath, Number(stat.size), SAMPLE_BYTES)
 
       const mime = sniffAttachmentMime(sample, FSUtil.mimeType(filepath))
@@ -321,6 +326,7 @@ export const ReadTool = Tool.define<
             preview: msg,
             truncated: false,
             loaded: loaded.map((item) => item.filepath),
+            ...(links.length ? { [Instruction.LINKS]: links } : {}),
           },
           attachments: [
             {
@@ -426,6 +432,7 @@ export const ReadTool = Tool.define<
           preview: file.raw.slice(0, 20).join("\n"),
           truncated,
           loaded: loaded.map((item) => item.filepath),
+          ...(links.length ? { [Instruction.LINKS]: links } : {}),
           display: {
             type: "file" as const,
             path: filepath,

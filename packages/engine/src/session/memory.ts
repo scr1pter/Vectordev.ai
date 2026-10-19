@@ -3,9 +3,11 @@ export * as SessionMemory from "./memory"
 import path from "path"
 import { fileURLToPath } from "url"
 import { SessionV1 } from "@vectordevai/core/v1/session"
+import { BrainAnchor } from "@vectordevai/core/brain/anchor"
+import { BrainFuse } from "@vectordevai/core/brain/fuse"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { FSUtil } from "@vectordevai/core/fs-util"
-import { attachedMemory } from "./instruction"
+import { attachedMemory, links, type Asking } from "./instruction"
 
 // What the session runtime and the memory tool read from a conversation to use and to grow Vector's memory: the user's
 // own words (evidence for what they said), the checks that went from failing to passing (evidence for a lesson), the
@@ -236,18 +238,87 @@ export function recall(part: SessionV1.Part) {
 }
 
 /**
- * The memory already in this conversation: recalled into a message, attached to a read result, or a document card or
- * passage the memory tool showed.
+ * The memory already in this conversation: recalled into a message, attached to a read result, a document card or
+ * passage the memory tool showed, or a card a code-link line named.
  */
 export function injected(messages: readonly SessionV1.WithParts[]) {
   const recalled = messages.flatMap((message) => message.parts.flatMap((part) => recall(part)?.ids ?? []))
   const shown = messages.flatMap((message) =>
     message.parts.flatMap((part) => {
       const known = knowledge(part)
-      return known ? [...known.cards, ...known.get.map((item) => item.id)] : []
+      return [...(known ? [...known.cards, ...known.get.map((item) => item.id)] : []), ...links(part).flatMap((item) => item.ids)]
     }),
   )
   return new Set([...recalled, ...shown, ...attachedMemory([...messages])])
+}
+
+/** Who a tool call's code-link lines are for, from what the session runtime told the tool. */
+export function linking(ctx: {
+  readonly sessionID: string
+  readonly extra?: { readonly [key: string]: unknown }
+  readonly messages: readonly SessionV1.WithParts[]
+}): Asking {
+  const size = ctx.extra?.taskSize
+  const tier =
+    size && typeof size === "object" && "tier" in size && typeof size.tier === "string" ? size.tier : undefined
+  return {
+    sessionID: ctx.sessionID,
+    // Without the runtime's word that personal memory may go to this model, private documents stay out.
+    personal: ctx.extra?.personal === true,
+    ...(tier === "chat" || tier === "light" || tier === "standard" || tier === "thorough" ? { tier } : {}),
+    exclude: injected(ctx.messages),
+  }
+}
+
+/** Messages the working set is read from. */
+const WORKING = 20
+
+/**
+ * What a request is working on, for recall to bring in what is linked to it: files the last 20 messages edited, wrote,
+ * patched, attached or read, files and symbols the request names, and the working tree's changed files. At most
+ * `BrainFuse.SEEDS`, strongest first; a file touched several ways counts the strongest way.
+ */
+export function workingSet(messages: readonly SessionV1.WithParts[], root: string, changed: readonly string[] = []) {
+  const relative = (file: string) =>
+    (path.isAbsolute(file) ? path.relative(root, file) : file).split(path.sep).join("/").replace(/^\.\//, "")
+  const recent = messages.slice(-WORKING)
+  const touched = recent.flatMap((message) =>
+    message.parts.flatMap((part): BrainFuse.Seed[] => {
+      if (part.type === "file" && part.url.startsWith("file:"))
+        return files({ ...message, parts: [part] }).map((file) => ({ path: relative(file), weight: BrainFuse.SEED.attached }))
+      if (part.type !== "tool") return []
+      const input = part.state.input
+      if ((part.tool === "edit" || part.tool === "write") && typeof input.filePath === "string")
+        return [{ path: relative(input.filePath), weight: BrainFuse.SEED.edited }]
+      if (part.tool === "read" && typeof input.filePath === "string")
+        return [{ path: relative(input.filePath), weight: BrainFuse.SEED.read }]
+      if (part.tool === "apply_patch" && typeof input.patchText === "string")
+        return [...input.patchText.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((match) => ({
+          path: relative(match[1]!.trim()),
+          weight: BrainFuse.SEED.edited,
+        }))
+      return []
+    }),
+  )
+  const asked = request(messages).flatMap((message) =>
+    BrainAnchor.names({ text: typed(message) }).flatMap((name): BrainFuse.Seed[] => {
+      if (name.kind === "path") return [{ path: relative(name.text), weight: BrainFuse.SEED.attached }]
+      if (name.kind === "symbol" || name.kind === "env") return [{ symbol: name.text, weight: BrainFuse.SEED.symbol }]
+      return []
+    }),
+  )
+  const seeds: BrainFuse.Seed[] = [
+    ...touched,
+    ...asked,
+    ...changed.map((file) => ({ path: relative(file), weight: BrainFuse.SEED.changed })),
+  ]
+  const strongest = new Map<string, BrainFuse.Seed>()
+  // Newest first, so a cap keeps what the request touched last.
+  for (const seed of seeds.toReversed()) {
+    const key = seed.path !== undefined ? `path:${seed.path}` : `symbol:${seed.symbol}`
+    if ((strongest.get(key)?.weight ?? 0) < seed.weight) strongest.set(key, seed)
+  }
+  return [...strongest.values()].toSorted((a, b) => b.weight - a.weight).slice(0, BrainFuse.SEEDS)
 }
 
 /** Whether the message already carries its recall, so a later step of the same request never adds another. */

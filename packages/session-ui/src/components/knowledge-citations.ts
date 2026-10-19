@@ -10,6 +10,8 @@ import type { Part as PartType } from "@vectordevai/sdk/v2"
 export const RECALL = "vector.memory.recall"
 export const KNOWLEDGE = "vector.memory.knowledge"
 export const PERSONAL = "vector.memory.personal"
+/** The code-link lines a read or an edit carried: `{ mode, file, ids }[]`. */
+export const LINKS = "vector.memory.links"
 
 // Ids by kind, in the brain's Crockford base32: memory entries (m, 5 or 13), file entries (f, 6), records (r, 12),
 // passages (p, 12) and documents (d, 8). Exact lengths keep words such as "[demand]" from reading as an id.
@@ -52,16 +54,24 @@ export function delivered(parts: readonly PartType[]) {
       }
       if (part.type !== "tool" || part.state.status !== "completed") return []
       const metadata = part.state.metadata
-      // A read that pointed at linked documents names them in its `loaded` list.
+      // A read that pointed at linked documents, and an edit that named the requirements linked to the file it
+      // changed, name their ids.
+      const linked = (Array.isArray(metadata?.[LINKS]) ? (metadata[LINKS] as unknown[]) : []).flatMap((item) =>
+        item && typeof item === "object" && "ids" in item ? strings(item.ids).filter((id) => BARE.test(id)) : [],
+      )
       if (part.tool === "read")
-        return strings(metadata?.loaded).flatMap((item) =>
-          item.startsWith("knowledge:")
-            ? item
-                .slice("knowledge:".length)
-                .split(",")
-                .filter((id) => BARE.test(id))
-            : [],
-        )
+        return [
+          ...linked,
+          ...strings(metadata?.loaded).flatMap((item) =>
+            item.startsWith("knowledge:")
+              ? item
+                  .slice("knowledge:".length)
+                  .split(",")
+                  .filter((id) => BARE.test(id))
+              : [],
+          ),
+        ]
+      if (part.tool === "edit" || part.tool === "write" || part.tool === "apply_patch") return linked
       if (part.tool !== "memory") return []
       return [
         ...knowledgeOf(metadata),

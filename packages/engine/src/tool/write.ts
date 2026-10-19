@@ -15,6 +15,8 @@ import { trimDiff } from "./edit"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { assertOwnedPath } from "./owned-path"
 import * as Bom from "@/util/bom"
+import { Instruction } from "../session/instruction"
+import { SessionMemory } from "../session/memory"
 
 const MAX_PROJECT_DIAGNOSTICS_FILES = 5
 
@@ -32,6 +34,7 @@ export const WriteTool = Tool.define(
     const fs = yield* FSUtil.Service
     const events = yield* EventV2Bridge.Service
     const format = yield* Format.Service
+    const instruction = yield* Instruction.Service
 
     return {
       description: DESCRIPTION,
@@ -96,14 +99,16 @@ export const WriteTool = Tool.define(
             output += `\n\nLSP errors detected in other files:\n${block}`
           }
 
+          const guarded = yield* instruction.guard(ctx.messages, [filepath], ctx.messageID, SessionMemory.linking(ctx))
           return {
             title: path.relative(instance.worktree, filepath),
             metadata: {
               diagnostics,
               filepath,
               exists: exists,
+              ...(guarded.links.length ? { [Instruction.LINKS]: guarded.links } : {}),
             },
-            output,
+            output: guarded.text ? `${output}\n\n${guarded.text}` : output,
           }
         }).pipe(Effect.orDie),
     }

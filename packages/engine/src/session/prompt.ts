@@ -73,6 +73,7 @@ import { SessionReminders } from "./reminders"
 import { SessionMemory } from "./memory"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { Git } from "@/git"
 import { DOCUMENTS as MEMORY_DOCUMENTS } from "@/tool/memory"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { SessionTools } from "./tools"
@@ -198,6 +199,7 @@ const layer = Layer.effect(
     const brain = yield* Brain.Service
     const knowledge = yield* BrainKnowledge.Service
     const guests = yield* FreeModelGuests.Service
+    const git = yield* Git.Service
     const { db } = database
     const backgroundTasks = yield* InstanceState.make(
       Effect.fnUntraced(function* () {
@@ -1974,6 +1976,7 @@ const layer = Layer.effect(
             invokedAgents,
             messages: msgs,
             promptOps,
+            personal,
             ...(build
               ? { taskSize: { tier: build.tier, capped: SessionTaskSize.capped(build.result) } }
               : recoverable
@@ -2189,10 +2192,15 @@ const layer = Layer.effect(
         yield* instruction
           .place()
           .pipe(Effect.flatMap((place) => brain.consolidate(place)), Effect.ignore, Effect.forkIn(background.scope))
-        // The repository's tracked docs are read beside it, at most every 10 minutes per repository.
+        // The repository's tracked docs are read beside it, and what documents are linked to is checked against the
+        // code, each at most every 10 minutes per repository.
         yield* instruction
           .place()
-          .pipe(Effect.flatMap((place) => knowledge.scan(place)), Effect.ignore, Effect.forkIn(background.scope))
+          .pipe(
+            Effect.flatMap((place) => knowledge.scan(place).pipe(Effect.andThen(knowledge.drift(place)))),
+            Effect.ignore,
+            Effect.forkIn(background.scope),
+          )
       }
       return yield* lastAssistant(sessionID)
     })
@@ -2211,9 +2219,17 @@ const layer = Layer.effect(
       if (recallsTried.size > MAX_INSTRUCTION_SNAPSHOTS * 4) recallsTried.delete(recallsTried.values().next().value!)
       const query = SessionMemory.asked(message)
       if (!query) return input.msgs
-      const result = yield* knowledge.recall(yield* instruction.place(), {
+      const place = yield* instruction.place()
+      // What the request touches seeds recall over code links: the files of the last messages and the working tree's
+      // changes, read once for the request.
+      const changed = yield* git.status(place.root).pipe(
+        Effect.map((items) => items.flatMap((item) => (item.status === "deleted" ? [] : [item.file]))),
+        Effect.catchCause(() => Effect.succeed([] as string[])),
+      )
+      const result = yield* knowledge.recall(place, {
         query,
         files: SessionMemory.files(message),
+        seeds: SessionMemory.workingSet(input.msgs, place.root, changed),
         tier: input.tier,
         // Once Run Guard has warned, document context is halved.
         tight: (yield* guard.snapshot(input.sessionID))?.warned === true,
@@ -2268,8 +2284,29 @@ const layer = Layer.effect(
       })
       const kept = msgs.flatMap((message) => SessionMemory.remember(message))
       const toolPersonal = personal ? parts.flatMap((part) => SessionMemory.personal(part)) : []
-      if (recalls.length === 0 && known.length === 0 && kept.length === 0 && toolPersonal.length === 0) return msgs
+      const codeLinks = parts.flatMap((part) => Instruction.links(part))
+      if (
+        recalls.length === 0 &&
+        known.length === 0 &&
+        kept.length === 0 &&
+        toolPersonal.length === 0 &&
+        codeLinks.length === 0
+      )
+        return msgs
       const place = yield* instruction.place()
+      // A read's pointer and an edit's spec guard, each rendered again from the ids it named.
+      const linkKey = (link: Instruction.Link) => `${link.mode}\0${link.file}\0${link.ids.join(",")}`
+      const linkLines = new Map(
+        yield* Effect.forEach([...new Map(codeLinks.map((link) => [linkKey(link), link])).values()], (link) =>
+          (link.mode === "pointer" ? knowledge.pointers : knowledge.guard)(place, {
+            file: link.file,
+            ids: link.ids,
+            personal,
+            exclude: new Set(),
+            sessionID,
+          }).pipe(Effect.map((line) => [linkKey(link), line.text ?? ""] as const)),
+        ),
+      )
       const entries = [...new Set([...recalls.flatMap((recall) => recall.ids), ...toolPersonal])]
       const memory = entries.length ? yield* brain.lines(place, entries, { personal }) : new Map<string, string>()
       const cardIds = [...new Set([...recalls.flatMap((recall) => recall.cards), ...known.flatMap((item) => item.cards)])]
@@ -2315,7 +2352,8 @@ const layer = Layer.effect(
             return [{ ...part, text: outlines.get(value.document) ?? part.text }]
           if (part.type !== "tool" || part.state.status !== "completed") return [part]
           const withheld = personal ? SessionMemory.personal(part) : []
-          if (withheld.length === 0 && !value) return [part]
+          const own = Instruction.links(part)
+          if (withheld.length === 0 && !value && own.length === 0) return [part]
           const filled = withheld.reduce(
             (text, id) =>
               text.replaceAll(SessionMemory.withheld(id), memory.get(id)?.replace(/^- /, "") ?? SessionMemory.withheld(id)),
@@ -2334,7 +2372,11 @@ const layer = Layer.effect(
                 ] as const,
             ),
           ].reduce((text, [placeholder, line]) => text.replace(placeholder, line), filled)
-          return [{ ...part, state: { ...part.state, output: rendered } }]
+          const output = own.reduce(
+            (text, link) => text.replace(Instruction.linked(link.mode, link.file), linkLines.get(linkKey(link)) ?? ""),
+            rendered,
+          )
+          return [{ ...part, state: { ...part.state, output } }]
         }),
       }))
     })
@@ -3084,6 +3126,7 @@ export const node = LayerNode.make({
     Brain.node,
     BrainKnowledge.node,
     FreeModelGuests.node,
+    Git.node,
   ],
 })
 
