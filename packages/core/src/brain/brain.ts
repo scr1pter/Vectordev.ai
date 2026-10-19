@@ -19,6 +19,9 @@ import { BrainScan } from "./scan"
 import type { BrainSchema } from "./schema"
 import {
   BrainAnchorTable,
+  BrainCodeFileTable,
+  BrainCodeLiteralTable,
+  BrainCodeSymbolTable,
   BrainDocumentTable,
   BrainEdgeTable,
   BrainEntryTable,
@@ -1684,6 +1687,9 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
               BrainEdgeTable,
               BrainJobTable,
               BrainReviewTable,
+              BrainCodeFileTable,
+              BrainCodeSymbolTable,
+              BrainCodeLiteralTable,
             ],
             (table) =>
               tx
@@ -1694,7 +1700,13 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
           )
           yield* tx
             .update(BrainStateTable)
-            .set({ knowledge_revision: sql`${BrainStateTable.knowledge_revision} + 1`, items: 0, item_length_sum: 0 })
+            .set({
+              knowledge_revision: sql`${BrainStateTable.knowledge_revision} + 1`,
+              items: 0,
+              item_length_sum: 0,
+              code_revision: sql`${BrainStateTable.code_revision} + 1`,
+              code_head: null,
+            })
             .where(repositories ? inArray(BrainStateTable.repository_id, repositories) : undefined)
             .run()
         }),

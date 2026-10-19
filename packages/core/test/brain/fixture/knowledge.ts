@@ -34,6 +34,8 @@ export async function withKnowledge<A, E>(
     readonly git?: boolean
     /** Ripgrep patterns links were looked for with, as they are run. */
     readonly greps?: string[]
+    /** How code links reach records in recall. */
+    readonly graph?: BrainKnowledge.Options["graph"]
   } = {},
 ) {
   await using tmp = await tmpdir()
@@ -51,6 +53,7 @@ export async function withKnowledge<A, E>(
       dir: tmp.path,
       worker: options.worker ?? BrainWorker.layerInline,
       ...(options.greps ? { greps: options.greps } : {}),
+      ...(options.graph ? { graph: options.graph } : {}),
     }),
   )
 }
@@ -77,6 +80,7 @@ export function services<A, E>(
     readonly worker: Layer.Layer<BrainWorker.Service>
     readonly owner?: string
     readonly greps?: string[]
+    readonly graph?: BrainKnowledge.Options["graph"]
   },
 ) {
   const greps = options.greps
@@ -92,7 +96,10 @@ export function services<A, E>(
         }),
       ).pipe(Layer.provide(LayerNode.compile(Ripgrep.node)))
     : LayerNode.compile(Ripgrep.node)
-  const layer = BrainKnowledge.layerWith({ ...(options.owner ? { owner: options.owner } : {}) }).pipe(
+  const layer = BrainKnowledge.layerWith({
+    ...(options.owner ? { owner: options.owner } : {}),
+    ...(options.graph ? { graph: options.graph } : {}),
+  }).pipe(
     Layer.provide(ripgrep),
     Layer.provideMerge(Brain.layer),
     Layer.provideMerge(options.worker),

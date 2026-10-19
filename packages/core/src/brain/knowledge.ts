@@ -10,8 +10,10 @@ import { Context, Effect, Fiber, Layer, Queue, Scope } from "effect"
 import { makeGlobalNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
 import { Token } from "../util/token"
+import { untrustedChildEnvironment } from "../child-environment"
 import { Brain } from "./brain"
 import { BrainCard } from "./card"
+import { BrainCode } from "./code"
 import { BrainDatabase } from "./database"
 import { Global } from "../global"
 import { Ripgrep } from "../ripgrep"
@@ -22,6 +24,7 @@ import { BrainDrift } from "./drift"
 import { BrainLimits } from "./document/limits"
 import { BrainSniff } from "./document/sniff"
 import { BrainFuse } from "./fuse"
+import { BrainGraph } from "./graph"
 import { BrainLexical } from "./lexical"
 import { BrainPack } from "./pack"
 import { BrainPaths } from "./paths"
@@ -29,6 +32,9 @@ import { BrainScan } from "./scan"
 import type { BrainSchema } from "./schema"
 import {
   BrainAnchorTable,
+  BrainCodeFileTable,
+  BrainCodeLiteralTable,
+  BrainCodeSymbolTable,
   BrainDocumentTable,
   BrainEdgeTable,
   BrainEventTable,
@@ -317,6 +323,15 @@ export type Detail = {
 /** What linking documents to code found: links made, names still waiting for their code, and names too common to link. */
 export type Linked = { readonly anchors: number; readonly pending: number; readonly common: readonly string[] }
 
+/** What a pass of the code index did: files it holds, files it parsed, found unchanged and removed, and its time. */
+export type Indexed = {
+  readonly files: number
+  readonly parsed: number
+  readonly reused: number
+  readonly removed: number
+  readonly ms: number
+}
+
 /** What a drift pass did: links checked, found drifted or missing, values that disagree, and waiting names it linked. */
 export type Drifted = {
   readonly checked: number
@@ -502,6 +517,11 @@ export interface Interface {
   readonly link: (place: Brain.Place, input?: { readonly document?: string }) => Effect.Effect<Linked>
   /** Checks links against the code, at most every 10 minutes per repository unless forced, and links waiting names. */
   readonly drift: (place: Brain.Place, options?: { readonly force?: boolean }) => Effect.Effect<Drifted>
+  /**
+   * Reads what changed in the working tree's code into the code index, which links to code and the code graph are made
+   * from: nothing outside a git working tree, and a file whose size and time are unchanged is not read again.
+   */
+  readonly code: (place: Brain.Place) => Effect.Effect<Indexed>
   /** What is linked to a file: records and passages by their links, memory by the paths it covers. */
   readonly links: (
     place: Brain.Place,
@@ -635,6 +655,13 @@ const CONFLICT_ENTRIES = 500
 const CONFLICT_RECORDS = 2_000
 /** Neighbours one activation pass reads. */
 const ACTIVATION_ITEMS = 2_000
+/**
+ * The code index: files a repository has at most, files and bytes one pass reads (the rest wait for the next), files
+ * history ties together, and the files a term record's name ties it to.
+ */
+const CODE = { files: 20_000, parse: 5_000, bytes: 64 * 1024 * 1024, term: 200 } as const
+/** Files a symbol the request names is looked for in. */
+const DEFINITIONS = 5
 /** Characters of the outline card for a just-attached document, about 120 tokens. */
 const OUTLINE = 480
 
@@ -654,12 +681,26 @@ const NOT_REPOSITORY_DOCS = [
 ]
 
 type DocumentRow = typeof BrainDocumentTable.$inferSelect
+/** A repository's code graph as recall walks it, with what it needs to say why it reached something. */
+type CodeGraph = {
+  readonly key: string
+  readonly graph: BrainGraph.Graph
+  /** Each owner's links to code. */
+  readonly anchors: ReadonlyMap<string, readonly { readonly path: string; readonly method: BrainAnchor.Method; readonly weight: number }[]>
+  /** The symbol nodes links give for each name. */
+  readonly symbols: ReadonlyMap<string, readonly string[]>
+}
 type File = { readonly name: string; readonly bytes: Uint8Array; readonly mime?: string }
 type ItemRow = typeof BrainItemTable.$inferSelect
 
 export type Options = {
   /** Who leases jobs from this process; tests give two services on one file different owners. */
   readonly owner?: string
+  /**
+   * How code links reach records: personalized PageRank over the code graph (the default), or the spreading
+   * activation it replaced, kept so the eval can compare the two.
+   */
+  readonly graph?: "pagerank" | "activation"
 }
 
 export const layerWith = (options: Options = {}) =>
@@ -681,6 +722,7 @@ export const layerWith = (options: Options = {}) =>
         scope,
         wakeup,
         owner: options.owner,
+        graph: options.graph ?? "pagerank",
         originals: BrainPaths.documents(global.data),
       })
     }),
@@ -702,6 +744,7 @@ function make(input: {
   readonly scope: Scope.Scope
   readonly wakeup: Queue.Queue<void>
   readonly owner?: string
+  readonly graph: "pagerank" | "activation"
   /** Where kept originals live: `<data>/brain/documents`. */
   readonly originals: string
 }): Interface {
@@ -729,6 +772,8 @@ function make(input: {
     unlinked: new Map<string, Map<string, readonly string[]>>(),
     // Each repository's house vocabulary, by knowledge revision and whether private documents may be read.
     vocabulary: new Map<string, { readonly revision: number; readonly words: readonly BrainFuse.Word[] }>(),
+    // Each repository's code graph, by knowledge and code revision.
+    graphs: new Map<string, CodeGraph>(),
   }
 
   const remember = (place: Brain.Place) => {
@@ -2212,13 +2257,13 @@ function make(input: {
         item.confidence >= BrainCredit.FLOOR,
     )
     // Code-anchored recall: what is linked to the files and symbols the request touches comes in with no word in
-    // common with it. A greeting has no terms, so it touches nothing.
+    // common with it, through the code graph. A greeting has no terms, so it touches nothing.
     const graph =
       query.size > 0 && (request.seeds?.length ?? 0) > 0
-        ? yield* activated(place, request.seeds!)
+        ? yield* (input.graph === "activation" ? activated(place, request.seeds!) : ranked(place, request.seeds!))
         : new Map<string, { readonly value: number; readonly why: string }>()
     const active = [...graph]
-      .filter(([ref, item]) => item.value >= BrainFuse.ACTIVATED && !request.exclude.has(ref))
+      .filter(([ref]) => !request.exclude.has(ref))
       .toSorted((a, b) => b[1].value - a[1].value || a[0].localeCompare(b[0]))
       .slice(0, BrainFuse.DEPTH)
       .map(([ref]) => ref)
@@ -2342,8 +2387,176 @@ function make(input: {
     }
   })
 
+  // Records and passages the code graph reaches from the files and symbols a request touches, by personalized PageRank:
+  // those it reaches with at least BrainGraph.MASS, each with its mass against the most any of them has, and why it was
+  // reached (its link to the file the walk reached most).
+  const ranked = Effect.fnUntraced(function* (place: Brain.Place, seeds: readonly BrainFuse.Seed[]) {
+    const own = seeds
+      .slice(0, BrainFuse.SEEDS)
+      .map((seed) => (seed.path ? { ...seed, path: relativeTo(place.root, seed.path) } : seed))
+    const built = yield* graphOf(place)
+    const named = [...new Set(own.flatMap((seed) => (seed.symbol ? [seed.symbol] : [])))]
+    const defined =
+      named.length === 0
+        ? []
+        : yield* db
+            .select({ path: BrainCodeSymbolTable.path, name: BrainCodeSymbolTable.name })
+            .from(BrainCodeSymbolTable)
+            .where(and(eq(BrainCodeSymbolTable.repository_id, place.repository), inArray(BrainCodeSymbolTable.name, named)))
+            .orderBy(desc(BrainCodeSymbolTable.exported), asc(BrainCodeSymbolTable.path), asc(BrainCodeSymbolTable.line))
+            .all()
+            .pipe(Effect.orDie)
+    const start = new Map<string, number>()
+    const raise = (node: string, weight: number) => start.set(node, Math.max(start.get(node) ?? 0, weight))
+    for (const seed of own) {
+      if (seed.path) raise(`F:${seed.path}`, seed.weight)
+      if (!seed.symbol) continue
+      // A symbol the request names starts the walk where links give it, and in the files that define it.
+      for (const node of built.symbols.get(seed.symbol) ?? []) raise(node, seed.weight)
+      for (const file of [...new Set(defined.filter((row) => row.name === seed.symbol).map((row) => row.path))].slice(0, DEFINITIONS))
+        raise(`F:${file}`, seed.weight)
+    }
+    const mass = BrainGraph.rank(built.graph, start)
+    const reached = [...mass].filter(([id, value]) => !/^[FSX]:/.test(id) && value >= BrainGraph.MASS)
+    const best = Math.max(0, ...reached.map(([, value]) => value))
+    return new Map(
+      reached.map(([id, value]) => {
+        const anchor = (built.anchors.get(id) ?? []).toSorted(
+          (a, b) => (mass.get(`F:${b.path}`) ?? 0) - (mass.get(`F:${a.path}`) ?? 0) || b.weight - a.weight,
+        )[0]
+        return [id, { value: value / best, why: anchor ? `anchor:${anchor.path}:${anchor.method}` : "near" }] as const
+      }),
+    )
+  })
+
+  // A repository's code graph, built once per knowledge and code revision: code links both ways at their weight and
+  // freshness (to the file, and to the symbol a link names), imports, co-change, records to their passages and
+  // passages to their sections, term records from the files their name is in, and the edges between records and memory.
+  // Only what is in use is in it, so a record put away takes no walk's mass.
+  const graphOf = Effect.fnUntraced(function* (place: Brain.Place) {
+    const revision = yield* db
+      .select({ knowledge: BrainStateTable.knowledge_revision, code: BrainStateTable.code_revision })
+      .from(BrainStateTable)
+      .where(eq(BrainStateTable.repository_id, place.repository))
+      .get()
+      .pipe(Effect.orDie)
+    const key = `${revision?.knowledge ?? 0}:${revision?.code ?? 0}`
+    const cached = state.graphs.get(place.repository)
+    if (cached?.key === key) return cached
+    const anchors = yield* db
+      .select({
+        owner: BrainAnchorTable.owner,
+        path: BrainAnchorTable.path,
+        symbol: BrainAnchorTable.symbol,
+        method: BrainAnchorTable.method,
+        weight: BrainAnchorTable.weight,
+        status: BrainAnchorTable.status,
+      })
+      .from(BrainAnchorTable)
+      .leftJoin(BrainItemTable, eq(BrainItemTable.ref, BrainAnchorTable.owner))
+      .where(
+        and(
+          eq(BrainAnchorTable.repository_id, place.repository),
+          or(isNull(BrainItemTable.id), eq(BrainItemTable.status, "active")),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    const records = yield* db
+      .select({ id: BrainRecordTable.id, passage: BrainRecordTable.passage_id, kind: BrainRecordTable.kind })
+      .from(BrainRecordTable)
+      .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainRecordTable.item))
+      .where(and(eq(BrainItemTable.repository_id, place.repository), eq(BrainItemTable.status, "active")))
+      .all()
+      .pipe(Effect.orDie)
+    const terms = records.some((record) => record.kind === "term")
+      ? yield* db
+          .select({ id: BrainRecordTable.id, fields: BrainRecordTable.fields })
+          .from(BrainRecordTable)
+          .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainRecordTable.item))
+          .where(
+            and(
+              eq(BrainItemTable.repository_id, place.repository),
+              eq(BrainItemTable.status, "active"),
+              eq(BrainRecordTable.kind, "term"),
+            ),
+          )
+          .all()
+          .pipe(Effect.orDie)
+      : []
+    const passages = yield* db
+      .select({ id: BrainPassageTable.id, section: BrainPassageTable.section_id })
+      .from(BrainPassageTable)
+      .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainPassageTable.item))
+      .where(and(eq(BrainItemTable.repository_id, place.repository), eq(BrainItemTable.status, "active")))
+      .all()
+      .pipe(Effect.orDie)
+    const edges = yield* db
+      .select({ source: BrainEdgeTable.source, target: BrainEdgeTable.target, weight: BrainEdgeTable.weight })
+      .from(BrainEdgeTable)
+      .where(eq(BrainEdgeTable.repository_id, place.repository))
+      .all()
+      .pipe(Effect.orDie)
+    const code = yield* db
+      .select({ path: BrainCodeFileTable.path, dependencies: BrainCodeFileTable.dependencies, coChange: BrainCodeFileTable.co_change })
+      .from(BrainCodeFileTable)
+      .where(eq(BrainCodeFileTable.repository_id, place.repository))
+      .all()
+      .pipe(Effect.orDie)
+    const links: BrainGraph.Edge[] = []
+    const both = (a: string, b: string, weight: number, back = weight) =>
+      links.push({ source: a, target: b, weight }, { source: b, target: a, weight: back })
+    const owners = new Map<string, { path: string; method: BrainAnchor.Method; weight: number }[]>()
+    const symbols = new Map<string, Set<string>>()
+    for (const anchor of anchors) {
+      const weight = anchor.weight * BrainFuse.FRESHNESS[anchor.status]
+      both(anchor.owner, `F:${anchor.path}`, weight)
+      owners.set(anchor.owner, [...(owners.get(anchor.owner) ?? []), { path: anchor.path, method: anchor.method, weight: anchor.weight }])
+      if (!anchor.symbol) continue
+      const node = `S:${anchor.path}#${anchor.symbol}`
+      both(anchor.owner, node, weight)
+      links.push({ source: node, target: `F:${anchor.path}`, weight: BrainGraph.WEIGHT.contains })
+      symbols.set(anchor.symbol, (symbols.get(anchor.symbol) ?? new Set()).add(node))
+    }
+    for (const record of records) both(record.id, record.passage, BrainGraph.WEIGHT.contains)
+    for (const passage of passages) both(passage.id, `X:${passage.section}`, BrainGraph.WEIGHT.section)
+    for (const edge of edges) both(edge.source, edge.target, edge.weight)
+    for (const file of code) {
+      for (const dependency of file.dependencies)
+        both(`F:${file.path}`, `F:${dependency}`, BrainGraph.WEIGHT.imports, BrainGraph.WEIGHT.imported)
+      const strongest = Math.max(0, ...Object.values(file.coChange))
+      for (const [other, count] of Object.entries(file.coChange))
+        links.push({ source: `F:${file.path}`, target: `F:${other}`, weight: (BrainGraph.WEIGHT.coChange * count) / strongest })
+    }
+    // A term a file's path names (src/billing/… and the glossary's "billing") is what that file is about.
+    const named = new Map<string, string[]>()
+    if (terms.length > 0)
+      for (const file of code)
+        for (const word of new Set(file.path.toLowerCase().split(/[/._-]/))) {
+          if (word.length < 3) continue
+          const own = named.get(word) ?? []
+          own.push(file.path)
+          named.set(word, own)
+        }
+    for (const term of terms) {
+      const word = typeof term.fields.term === "string" ? term.fields.term.toLowerCase() : ""
+      const files = named.get(word) ?? []
+      if (files.length <= CODE.term)
+        for (const file of files) links.push({ source: `F:${file}`, target: term.id, weight: BrainGraph.WEIGHT.defines })
+    }
+    const built = {
+      key,
+      graph: BrainGraph.build(links),
+      anchors: owners,
+      symbols: new Map([...symbols].map(([name, nodes]) => [name, [...nodes]])),
+    }
+    state.graphs.set(place.repository, built)
+    return built
+  })
+
   // Records and passages linked to the files and symbols a request touches, by spreading activation over their links
-  // and one hop to their neighbours, each with why it was reached.
+  // and one hop to their neighbours, those at least BrainFuse.ACTIVATED, each with why it was reached. The code graph
+  // replaced it in recall; the eval still compares the two.
   const activated = Effect.fnUntraced(function* (place: Brain.Place, seeds: readonly BrainFuse.Seed[]) {
     const own = seeds
       .slice(0, BrainFuse.SEEDS)
@@ -2425,6 +2638,7 @@ function make(input: {
       own,
     )
     for (const [id, value] of spread) {
+      if (value < BrainFuse.ACTIVATED) continue
       const anchor = anchors
         .filter((item) => item.owner === id)
         .toSorted((a, b) => b.weight - a.weight)[0]
@@ -3583,6 +3797,214 @@ function make(input: {
     return results.filter((result) => result.type === "queued" || result.type === "version").length
   })
 
+  // --- The code index -----------------------------------------------------------------------------------------------
+
+  // The working tree's code in the code tables: what each file declares, imports and gives as literals, which files its
+  // imports are, and which files history changed with it. A file whose size and time are unchanged is not read, and one
+  // whose hash is unchanged is not parsed. Imports are resolved again when files come or go, and history is read again
+  // after a commit or when files arrive. A pass reads at most CODE.parse files and CODE.bytes; the rest wait for the next.
+  const indexCode = Effect.fn("BrainKnowledge.code")(function* (place: Brain.Place, listed: readonly string[]) {
+    const started = Date.now()
+    const candidates = listed
+      .filter(
+        (file) => BrainCode.language(file) !== undefined && !BrainCode.excluded(file) && !BrainSniff.SECRET_FILE.test(file),
+      )
+      .slice(0, CODE.files)
+    // Outside a git working tree there is nothing to read, and what was read before stays as it was.
+    if (candidates.length === 0) return { files: 0, parsed: 0, reused: 0, removed: 0, ms: Date.now() - started }
+    const known = new Map(
+      (yield* db
+        .select()
+        .from(BrainCodeFileTable)
+        .where(eq(BrainCodeFileTable.repository_id, place.repository))
+        .all()
+        .pipe(Effect.orDie)).map((row) => [row.path, row]),
+    )
+    const present = yield* Effect.promise(() => statFiles(place.root, candidates))
+    const changed = present.filter((file) => {
+      const row = known.get(file.path)
+      return !row || row.bytes !== file.bytes || row.mtime !== file.mtime
+    })
+    const due: typeof changed = []
+    const taken = { bytes: 0 }
+    for (const file of changed) {
+      if (due.length >= CODE.parse) break
+      if (taken.bytes + file.bytes > CODE.bytes) continue
+      due.push(file)
+      taken.bytes += file.bytes
+    }
+    const read = yield* Effect.promise(() => readFiles(place.root, due))
+    const parsed = read.map((file) => {
+      const hash = BrainDrift.hash(file.text)
+      if (known.get(file.path)?.content_hash === hash) return { ...file, hash, code: undefined }
+      const language = BrainCode.language(file.path)!
+      const declared = BrainCode.symbols(file.text, language)
+      return {
+        ...file,
+        hash,
+        code: {
+          language,
+          declared,
+          imports: BrainCode.imports(file.text, language),
+          // Other documents never stand for the code, even when they show some.
+          literals: BrainAnchor.skipped(file.path) ? [] : BrainCode.literals(file.text, declared),
+          lines: file.text.split("\n"),
+        },
+      }
+    })
+    const here = new Set(present.map((file) => file.path))
+    const removed = [...known.keys()].filter((file) => !here.has(file))
+    const arrived = parsed.filter((file) => !known.has(file.path))
+    const kept = [...new Set([...[...known.keys()].filter((file) => here.has(file)), ...arrived.map((file) => file.path)])].toSorted()
+    const byPath = new Map(parsed.map((file) => [file.path, file]))
+    const importsOf = (file: string) => byPath.get(file)?.code?.imports ?? known.get(file)?.imports ?? []
+    const languageOf = (file: string) => byPath.get(file)?.code?.language ?? known.get(file)?.language ?? "text"
+    // Which file an import names depends on which files there are, so a file coming or going resolves every import again.
+    const files = BrainCode.lookup(kept)
+    const resolved = new Map(
+      (removed.length > 0 || arrived.length > 0 ? kept : parsed.flatMap((file) => (file.code ? [file.path] : []))).map(
+        (file) => [file, BrainCode.dependencies(file, importsOf(file), languageOf(file), files)] as const,
+      ),
+    )
+    const current = yield* db
+      .select({ head: BrainStateTable.code_head })
+      .from(BrainStateTable)
+      .where(eq(BrainStateTable.repository_id, place.repository))
+      .get()
+      .pipe(Effect.orDie)
+    const head = (yield* Effect.promise(() => git(place.root, ["rev-parse", "HEAD"]))).trim()
+    // History changes only with a commit; a file that arrives may have some already.
+    const history =
+      head && (head !== current?.head || arrived.length > 0)
+        ? BrainCode.coChange(
+            yield* Effect.promise(() =>
+              git(place.root, ["log", "--no-merges", "--format=%H", "--name-only", "--relative", "-n", String(BrainCode.LIMIT.commits)]),
+            ),
+            (file) => (files.paths.has(file) ? file : undefined),
+          ).pairs
+        : undefined
+    const now = Date.now()
+    const rows = kept.flatMap((file) => {
+      const before = known.get(file)
+      const fresh = byPath.get(file)
+      const dependencies = resolved.get(file) ?? before?.dependencies ?? []
+      const coChange = history ? Object.fromEntries(history.get(file) ?? []) : (before?.co_change ?? {})
+      const row = {
+        repository_id: place.repository,
+        path: file,
+        content_hash: fresh?.hash ?? before!.content_hash,
+        bytes: fresh?.bytes ?? before!.bytes,
+        mtime: fresh?.mtime ?? before!.mtime,
+        language: languageOf(file),
+        imports: importsOf(file),
+        dependencies,
+        co_change: coChange,
+        synced_at: now,
+      }
+      const same =
+        before !== undefined &&
+        !fresh &&
+        JSON.stringify(before.dependencies) === JSON.stringify(dependencies) &&
+        JSON.stringify(before.co_change) === JSON.stringify(coChange)
+      return same ? [] : [row]
+    })
+    const rewritten = parsed.flatMap((file) => (file.code ? [file] : []))
+    const gone = new Set(removed)
+    yield* Effect.forEach(
+      chunks([...removed, ...rewritten.map((file) => file.path)], 500),
+      (batch) =>
+        db
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              const where = (table: typeof BrainCodeSymbolTable | typeof BrainCodeLiteralTable) =>
+                and(eq(table.repository_id, place.repository), inArray(table.path, batch))
+              yield* tx.delete(BrainCodeSymbolTable).where(where(BrainCodeSymbolTable)).run()
+              yield* tx.delete(BrainCodeLiteralTable).where(where(BrainCodeLiteralTable)).run()
+              const away = batch.filter((file) => gone.has(file))
+              if (away.length > 0)
+                yield* tx
+                  .delete(BrainCodeFileTable)
+                  .where(and(eq(BrainCodeFileTable.repository_id, place.repository), inArray(BrainCodeFileTable.path, away)))
+                  .run()
+            }),
+          )
+          .pipe(Effect.orDie),
+      { discard: true },
+    )
+    yield* Effect.forEach(
+      chunks(rows, 500),
+      (batch) =>
+        db
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              yield* tx
+                .insert(BrainCodeFileTable)
+                .values(batch)
+                .onConflictDoUpdate({
+                  target: [BrainCodeFileTable.repository_id, BrainCodeFileTable.path],
+                  set: {
+                    content_hash: sql`excluded.content_hash`,
+                    bytes: sql`excluded.bytes`,
+                    mtime: sql`excluded.mtime`,
+                    language: sql`excluded.language`,
+                    imports: sql`excluded.imports`,
+                    dependencies: sql`excluded.dependencies`,
+                    co_change: sql`excluded.co_change`,
+                    synced_at: sql`excluded.synced_at`,
+                  },
+                })
+                .run()
+              const fresh = batch.flatMap((row) => {
+                const file = byPath.get(row.path)
+                return file?.code ? [{ path: row.path, code: file.code }] : []
+              })
+              const symbols = fresh.flatMap((file) =>
+                file.code.declared.map((symbol) => ({
+                  repository_id: place.repository,
+                  path: file.path,
+                  name: symbol.name,
+                  kind: symbol.kind,
+                  line: symbol.line,
+                  exported: symbol.exported,
+                  signature_hash: BrainDrift.lineHash(file.code.lines[symbol.line - 1] ?? ""),
+                })),
+              )
+              const literals = fresh.flatMap((file) =>
+                file.code.literals.map((literal) => ({
+                  repository_id: place.repository,
+                  path: file.path,
+                  kind: literal.kind,
+                  value: literal.value,
+                  method: literal.method ?? null,
+                  line: literal.line,
+                })),
+              )
+              for (const part of chunks(symbols, 500)) yield* tx.insert(BrainCodeSymbolTable).values(part).run()
+              for (const part of chunks(literals, 500)) yield* tx.insert(BrainCodeLiteralTable).values(part).run()
+            }),
+          )
+          .pipe(Effect.orDie),
+      { discard: true },
+    )
+    if (rows.length > 0 || removed.length > 0 || (head && head !== current?.head))
+      yield* db
+        .insert(BrainStateTable)
+        .values({ repository_id: place.repository, code_revision: 1, code_head: head || null })
+        .onConflictDoUpdate({
+          target: BrainStateTable.repository_id,
+          set: { code_revision: sql`${BrainStateTable.code_revision} + 1`, code_head: head || null },
+        })
+        .run()
+        .pipe(Effect.orDie)
+    return {
+      files: kept.length,
+      parsed: rewritten.length,
+      reused: present.length - read.length,
+      removed: removed.length,
+      ms: Date.now() - started,
+    }
+  })
+
   // --- Links to code ----------------------------------------------------------------------------------------------
 
   type Owner = {
@@ -3595,18 +4017,20 @@ function make(input: {
 
   type Hit = { readonly path: string; readonly line: number; readonly text: string; readonly method: BrainAnchor.Method }
 
-  // Where each name is in the working tree: one Ripgrep pass for the identifiers, one for the routes, and the file list
-  // for paths. A name looked up and found nowhere is pending; one too common to narrow anything down links nothing; one
-  // past the pass's cap is not looked up at all, so it is neither.
+  // Where each name is in the working tree. Identifiers are looked for in one Ripgrep pass, which finds where they are
+  // defined and used; routes, environment variables and constants are looked up in the code index, which holds what
+  // each file registers, reads and gives a value; paths are in the file list. A name looked up and found nowhere is
+  // pending; one too common to narrow anything down links nothing; one past the pass's cap is not looked up at all.
   const locate = Effect.fnUntraced(function* (
     place: Brain.Place,
     files: readonly string[],
     names: readonly BrainAnchor.Name[],
   ) {
     const found = new Map<string, { readonly common: boolean; readonly hits: readonly Hit[] }>()
-    const identifiers = [
-      ...new Set(names.flatMap((name) => (name.kind === "symbol" || name.kind === "env" ? [name.text] : []))),
-    ].slice(0, BrainAnchor.LIMIT.identifiers)
+    const identifiers = [...new Set(names.flatMap((name) => (name.kind === "symbol" ? [name.text] : [])))].slice(
+      0,
+      BrainAnchor.LIMIT.identifiers,
+    )
     const lines = new Map<string, { path: string; line: number; text: string }[]>()
     for (const pattern of BrainAnchor.patterns(identifiers)) {
       const matches = yield* input.ripgrep
@@ -3621,8 +4045,30 @@ function make(input: {
         }
       }
     }
+    const values = [...new Set(names.flatMap((name) => (name.kind === "path" ? [] : [name.text])))]
+    const literals = (yield* Effect.forEach(chunks(values, 500), (batch) =>
+      db
+        .select()
+        .from(BrainCodeLiteralTable)
+        .where(and(eq(BrainCodeLiteralTable.repository_id, place.repository), inArray(BrainCodeLiteralTable.value, batch)))
+        .all()
+        .pipe(Effect.orDie),
+    ))
+      .flat()
+      .filter((literal) => !BrainAnchor.skipped(literal.path))
+      .toSorted((a, b) => a.path.localeCompare(b.path) || a.line - b.line)
+    // A constant's value is checked from the line that gives it.
+    const constantLines = new Map(
+      yield* Effect.promise(() =>
+        Promise.all(
+          [...new Set(literals.filter((literal) => literal.kind === "constant").map((literal) => literal.path))].map(
+            async (file) => [file, (await fs.readFile(path.join(place.root, file), "utf8").catch(() => "")).split("\n")] as const,
+          ),
+        ),
+      ),
+    )
     for (const name of names) {
-      if ((name.kind !== "symbol" && name.kind !== "env") || !identifiers.includes(name.text)) continue
+      if (name.kind !== "symbol" || !identifiers.includes(name.text)) continue
       const hits = (lines.get(name.text) ?? []).map((hit) => ({
         ...hit,
         method: BrainAnchor.classify(hit.text, name.text, hit.path) as BrainAnchor.Method,
@@ -3638,29 +4084,75 @@ function make(input: {
         const own = hits.filter((hit) => hit.path === file && hit.method === "use")
         return own.length >= 2 && !defined.has(file) ? [own[0]!] : []
       })
+      const definitions = hits.filter((hit) => hit.method === "definition")
+      const given = literals
+        .filter((literal) => literal.kind === "constant" && literal.value === name.text)
+        .filter((literal) => !definitions.some((hit) => hit.path === literal.path && hit.line === literal.line))
+        .map((literal) => ({
+          path: literal.path,
+          line: literal.line,
+          text: constantLines.get(literal.path)?.[literal.line - 1] ?? "",
+          method: "definition" as const,
+        }))
+      found.set(nameKey(name), {
+        common: false,
+        hits: [...definitions, ...given, ...hits.filter((hit) => hit.method === "env"), ...uses].slice(
+          0,
+          BrainAnchor.LIMIT.perName,
+        ),
+      })
+    }
+    // An environment variable is where the code reads it, and where it declares a name for it. A name a record gives
+    // as one is often a constant too (the reader takes any SCREAMING_SNAKE code span for a variable), so the text it
+    // is quoted in still has it searched for as an identifier.
+    const variables = new Set(names.flatMap((name) => (name.kind === "env" ? [name.text] : [])))
+    const declared =
+      variables.size === 0
+        ? []
+        : yield* db
+            .select({ path: BrainCodeSymbolTable.path, name: BrainCodeSymbolTable.name, line: BrainCodeSymbolTable.line })
+            .from(BrainCodeSymbolTable)
+            .where(
+              and(
+                eq(BrainCodeSymbolTable.repository_id, place.repository),
+                inArray(BrainCodeSymbolTable.name, [...variables]),
+              ),
+            )
+            .orderBy(asc(BrainCodeSymbolTable.path), asc(BrainCodeSymbolTable.line))
+            .all()
+            .pipe(Effect.orDie)
+    for (const name of names.filter((item) => item.kind === "env")) {
+      const definitions = declared.filter((symbol) => symbol.name === name.text && !BrainAnchor.skipped(symbol.path))
+      const reads = literals.filter(
+        (literal) =>
+          literal.kind === "env" &&
+          literal.value === name.text &&
+          !definitions.some((symbol) => symbol.path === literal.path && symbol.line === literal.line),
+      )
+      if (new Set([...definitions, ...reads].map((item) => item.path)).size > BrainAnchor.LIMIT.common) {
+        found.set(nameKey(name), { common: true, hits: [] })
+        continue
+      }
       found.set(nameKey(name), {
         common: false,
         hits: [
-          ...hits.filter((hit) => hit.method === "definition"),
-          ...hits.filter((hit) => hit.method === "env"),
-          ...uses,
+          ...definitions.map((symbol) => ({ path: symbol.path, line: symbol.line, text: "", method: "definition" as const })),
+          ...reads.map((literal) => ({ path: literal.path, line: literal.line, text: "", method: "env" as const })),
         ].slice(0, BrainAnchor.LIMIT.perName),
       })
     }
-    const routes = names.filter((name) => name.kind === "route")
-    const pattern = BrainAnchor.routePattern(routes.map((name) => name.text))
-    const registered = pattern
-      ? (yield* input.ripgrep
-          .grep({ cwd: place.root, pattern, limit: BrainAnchor.LIMIT.hits })
-          .pipe(Effect.catch(() => Effect.succeed([])))).filter((match) => !BrainAnchor.skipped(match.entry.path))
-      : []
-    for (const name of routes)
+    for (const name of names.filter((item) => item.kind === "route"))
       found.set(nameKey(name), {
         common: false,
-        hits: registered
-          .filter((match) => BrainAnchor.registers(match.text, name))
+        hits: literals
+          .filter(
+            (literal) =>
+              literal.kind === "route" &&
+              literal.value === name.text &&
+              (!name.method || !literal.method || literal.method === name.method),
+          )
           .slice(0, BrainAnchor.LIMIT.perName)
-          .map((match) => ({ path: match.entry.path, line: match.line, text: match.text.replace(/\r?\n$/, ""), method: "route" as const })),
+          .map((literal) => ({ path: literal.path, line: literal.line, text: "", method: "route" as const })),
       })
     const tracked = new Set(files)
     for (const name of names.filter((item) => item.kind === "path")) {
@@ -3856,6 +4348,8 @@ function make(input: {
     const files = yield* Effect.promise(() => workingFiles(place.root))
     // Outside a git working tree there are no ignore rules to keep Ripgrep out of dependencies and build output.
     if (files.length === 0) return { anchors: 0, pending: 0, common: [] as string[] }
+    // Routes, environment reads and constants are looked up in the code index, so it follows the working tree first.
+    yield* indexCode(place, files)
     const result = yield* linkOwners(place, yield* ownersOf(documents, code), files, { replace: true })
     yield* countLinked(documents)
     return { anchors: result.anchors, pending: result.pending, common: result.common }
@@ -4089,6 +4583,10 @@ function make(input: {
     if (!options?.force && last !== undefined && now - last < DRIFT_EVERY) return counts
     state.drifts.set(place.repository, now)
     remember(place)
+    const files = yield* Effect.promise(() => workingFiles(place.root))
+    // The code index follows the working tree first: waiting names are looked up in it, and the code graph reads it. A
+    // repository with no documents has nothing linked to its code, so its code is never read.
+    if ((yield* count(place, { personal: true })) > 0) yield* indexCode(place, files)
     const anchors = yield* db
       .select()
       .from(BrainAnchorTable)
@@ -4212,7 +4710,7 @@ function make(input: {
             .pipe(Effect.orDie)
       }
     }
-    counts.linked = yield* resolvePending(place, yield* Effect.promise(() => workingFiles(place.root)))
+    counts.linked = yield* resolvePending(place, files)
     if (counts.checked > 0 || counts.linked > 0) yield* revise(place.repository)
     return counts
   })
@@ -5282,6 +5780,8 @@ function make(input: {
     guard: (place, request) => pointed(place, request, "guard"),
     link,
     drift,
+    code: (place) =>
+      Effect.promise(() => workingFiles(place.root)).pipe(Effect.flatMap((files) => indexCode(place, files))),
     links,
     review,
     resolve,
@@ -5708,6 +6208,43 @@ function toReview(item: typeof BrainReviewTable.$inferSelect): BrainSchema.Revie
     createdAt: item.created_at,
     updatedAt: item.updated_at,
   }
+}
+
+// A git command's output in a working tree, or "" when git is missing, it is not a repository, or the command fails.
+function git(root: string, args: readonly string[]) {
+  return new Promise<string>((resolve) =>
+    execFile(
+      "git",
+      [...args],
+      { cwd: root, env: untrustedChildEnvironment(), timeout: 10_000, maxBuffer: 64 * 1024 * 1024 },
+      (error, stdout) => resolve(error ? "" : stdout),
+    ),
+  )
+}
+
+// The size and time of each regular file no larger than code is read at, 256 at a time.
+async function statFiles(root: string, files: readonly string[]) {
+  const out: { path: string; bytes: number; mtime: number }[] = []
+  for (const batch of chunks(files, 256)) {
+    const stats = await Promise.all(batch.map((file) => fs.lstat(path.join(root, file)).catch(() => undefined)))
+    stats.forEach((stat, at) => {
+      if (stat?.isFile() && stat.size <= BrainCode.LIMIT.bytes)
+        out.push({ path: batch[at]!, bytes: stat.size, mtime: Math.trunc(stat.mtimeMs) })
+    })
+  }
+  return out
+}
+
+// Files' text, 64 at a time; one that cannot be read as it was listed is left out.
+async function readFiles<T extends { readonly path: string }>(root: string, files: readonly T[]) {
+  const out: (T & { text: string })[] = []
+  for (const batch of chunks(files, 64)) {
+    const texts = await Promise.all(batch.map((file) => fs.readFile(path.join(root, file.path), "utf8").catch(() => undefined)))
+    texts.forEach((text, at) => {
+      if (text !== undefined) out.push({ ...batch[at]!, text })
+    })
+  }
+  return out
 }
 
 // The files of a working tree that git knows or would add (tracked, and untracked ones it does not ignore), or none

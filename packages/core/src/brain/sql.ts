@@ -1,4 +1,5 @@
 import { blob, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
+import type { BrainCode } from "./code"
 import type { BrainSchema } from "./schema"
 
 // brain.db, a SQLite file of its own beside vector.db: erasing all memory deletes one folder, session repair, export
@@ -129,6 +130,10 @@ export const BrainStateTable = sqliteTable("brain_state", {
   scanned_at: integer(),
   // When document credit last decayed, so the next pass decays it by the time since.
   credited_at: integer(),
+  // The code index keeps a revision of its own, so a change of code rebuilds the code graph and nothing else, and the
+  // commit history was last read at, so co-change is read again only after a commit.
+  code_revision: integer().notNull().default(0),
+  code_head: text(),
 })
 
 // Which entries reached which session, and through which tier. Pruned after 30 days.
@@ -454,4 +459,63 @@ export const BrainReviewTable = sqliteTable(
     updated_at: integer().notNull(),
   },
   (table) => [index("brain_review_repository_idx").on(table.repository_id, table.status)],
+)
+
+// The repository's code as Vector last read it, for the code graph and for finding what a document names. Each file
+// keeps its size, time and hash, so an unchanged file is never read again; what it imports as written, which files
+// those are (resolved again when files come and go), and the files history changed with it.
+export const BrainCodeFileTable = sqliteTable(
+  "brain_code_file",
+  {
+    repository_id: text().notNull(),
+    path: text().notNull(),
+    content_hash: text().notNull(),
+    bytes: integer().notNull(),
+    mtime: integer().notNull(),
+    language: text().$type<BrainCode.Language>().notNull(),
+    imports: text({ mode: "json" }).$type<string[]>().notNull(),
+    dependencies: text({ mode: "json" }).$type<string[]>().notNull(),
+    co_change: text({ mode: "json" }).$type<Record<string, number>>().notNull(),
+    synced_at: integer().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.repository_id, table.path] })],
+)
+
+// What each file declares. `signature_hash` is the hash of the declaring line, so a changed signature is a different
+// row without the file being read again.
+export const BrainCodeSymbolTable = sqliteTable(
+  "brain_code_symbol",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    repository_id: text().notNull(),
+    path: text().notNull(),
+    name: text().notNull(),
+    kind: text().$type<BrainCode.SymbolKind>().notNull(),
+    line: integer().notNull(),
+    exported: integer({ mode: "boolean" }).notNull(),
+    signature_hash: text().notNull(),
+  },
+  (table) => [
+    index("brain_code_symbol_name_idx").on(table.repository_id, table.name),
+    index("brain_code_symbol_path_idx").on(table.repository_id, table.path),
+  ],
+)
+
+// Routes each file registers, environment variables it reads and constants it gives a value: looked up by value, so
+// a document naming POST /v1/invoices or SMTP_HOST is linked without searching the working tree.
+export const BrainCodeLiteralTable = sqliteTable(
+  "brain_code_literal",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    repository_id: text().notNull(),
+    path: text().notNull(),
+    kind: text().$type<BrainCode.Literal["kind"]>().notNull(),
+    value: text().notNull(),
+    method: text(),
+    line: integer().notNull(),
+  },
+  (table) => [
+    index("brain_code_literal_value_idx").on(table.repository_id, table.value),
+    index("brain_code_literal_path_idx").on(table.repository_id, table.path),
+  ],
 )

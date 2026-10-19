@@ -12,6 +12,9 @@ import { BrainDatabase } from "@vectordevai/core/brain/database"
 import first from "@vectordevai/core/brain/migration/20261018000000_brain"
 import {
   BrainAnchorTable,
+  BrainCodeFileTable,
+  BrainCodeLiteralTable,
+  BrainCodeSymbolTable,
   BrainDocumentTable,
   BrainEdgeTable,
   BrainEntryTable,
@@ -57,9 +60,12 @@ const TABLES: readonly SQLiteTable[] = [
   BrainVectorTable,
   BrainJobTable,
   BrainReviewTable,
+  BrainCodeFileTable,
+  BrainCodeSymbolTable,
+  BrainCodeLiteralTable,
 ]
 
-// The knowledge tables, which only documents fill.
+// The knowledge tables, which only documents and the code they are linked to fill.
 const KNOWLEDGE: readonly SQLiteTable[] = [
   BrainDocumentTable,
   BrainSectionTable,
@@ -74,6 +80,9 @@ const KNOWLEDGE: readonly SQLiteTable[] = [
   BrainVectorTable,
   BrainJobTable,
   BrainReviewTable,
+  BrainCodeFileTable,
+  BrainCodeSymbolTable,
+  BrainCodeLiteralTable,
 ]
 
 const place = (repository: string, root: string): Brain.Place => ({ repository, root, sources: [], held: false })
@@ -139,6 +148,7 @@ describe("Brain knowledge migration", () => {
       { id: "20261102000000_private_memory" },
       { id: "20261103000000_tombstone_terms" },
       { id: "20261104000000_credit" },
+      { id: "20261120000000_code" },
     ])
     // What was learned before private memory existed is not private.
     expect(entries).toEqual([{ id: "m1a2b3", private: 0 }])
@@ -261,8 +271,8 @@ describe("Brain knowledge migration", () => {
 })
 
 // One row in every knowledge table for a repository: a document with a section, a passage and a record (two items),
-// a term and its posting, a code link, a pending identifier, an edge, a vector, a job and a review item; plus the use of
-// both items, and the state a reading leaves.
+// a term and its posting, a code link, a pending identifier, an edge, a vector, a job and a review item, and a code
+// file with a symbol and a literal; plus the use of both items, and the state a reading leaves.
 function seed(db: BrainDatabase.Database, repository: string, item: number) {
   return Effect.gen(function* () {
     const document = `d${repository}`
@@ -457,6 +467,37 @@ function seed(db: BrainDatabase.Database, repository: string, item: number) {
         created_at: now,
         updated_at: now,
       })
+      .run()
+    yield* db
+      .insert(BrainCodeFileTable)
+      .values({
+        repository_id: repository,
+        path: "src/retry.ts",
+        content_hash: "hash",
+        bytes: 40,
+        mtime: now,
+        language: "typescript",
+        imports: [],
+        dependencies: [],
+        co_change: {},
+        synced_at: now,
+      })
+      .run()
+    yield* db
+      .insert(BrainCodeSymbolTable)
+      .values({
+        repository_id: repository,
+        path: "src/retry.ts",
+        name: "retryBudget",
+        kind: "constant",
+        line: 1,
+        exported: true,
+        signature_hash: "hash",
+      })
+      .run()
+    yield* db
+      .insert(BrainCodeLiteralTable)
+      .values({ repository_id: repository, path: "src/retry.ts", kind: "env", value: "RETRY_LIMIT", line: 1 })
       .run()
     yield* db
       .insert(BrainUseTable)
