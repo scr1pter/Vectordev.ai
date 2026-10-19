@@ -1,31 +1,24 @@
 import { execFile } from "node:child_process"
 import { createHash } from "node:crypto"
 import { mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises"
-import { dirname, extname, join, normalize, relative, resolve } from "node:path"
+import { join, relative, resolve } from "node:path"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
+import { BrainCode } from "@vectordevai/core/brain/code"
 import { BrainLexical } from "@vectordevai/core/brain/lexical"
 
 // A lexical + structural index: BM25 over identifiers and path segments, an
 // import graph, a symbol table, and git co-change counts. There are no
 // embeddings and no model of meaning here; a token that never appears in a file
-// can never retrieve it.
+// can never retrieve it. Files are read by BrainCode, the same symbol and import
+// parsers the brain's code graph uses.
 
 const INDEX_VERSION = 1
 const MAX_INDEXED_FILES = 20_000
-const MAX_SOURCE_BYTES = 768 * 1024
 const MAX_TOTAL_BYTES = 128 * 1024 * 1024
 // Every distinct term costs roughly fourteen bytes in the persisted cache, so a
 // twenty-thousand file monorepo would write hundreds of megabytes without a cap.
 const MAX_TERMS_PER_FILE = 192
 const MAX_IDENTIFIERS_SCANNED = 200_000
-const MAX_SYMBOLS_PER_FILE = 400
-const MAX_IMPORTS_PER_FILE = 200
-const MAX_DEPENDENCIES_PER_FILE = 256
-const CO_CHANGE_COMMITS = 400
-// A thousand-file refactor commit says nothing about which files belong
-// together, so wide commits are dropped rather than diluting every pair.
-const CO_CHANGE_MAX_COMMIT_FILES = 32
-const CO_CHANGE_MAX_NEIGHBOURS = 16
 
 // The tokenizer (BrainLexical) is shared with Vector's brain, so a request reads the same way when it ranks files and
 // when it ranks memory.
@@ -45,66 +38,20 @@ const SECOND_HOP_DAMPING = 0.35
 const CO_CHANGE_DAMPING = 0.18
 const EXPANSION_FLOOR = 0.01
 
-// Mirrors the exclusion set in context-budget.ts. The two must stay in sync or
-// the pack and the ranking would disagree about what the project contains.
-// The trailing entries are additions: "out" alone holds 199MB of bundled
-// electron-vite output in this repository, and a bundle re-states every symbol
-// its sources declare, so indexing it buries the sources it was built from.
-const EXCLUDED_DIRECTORIES = new Set([
-  ".git",
-  ".hg",
-  ".svn",
-  ".cache",
-  ".next",
-  ".nuxt",
-  ".turbo",
-  ".vercel",
-  "build",
-  "coverage",
-  "dist",
-  "node_modules",
-  "target",
-  "vendor",
-  ".dart_tool",
-  ".gradle",
-  ".mypy_cache",
-  ".output",
-  ".parcel-cache",
-  ".pytest_cache",
-  ".svelte-kit",
-  ".tox",
-  ".venv",
-  "__pycache__",
-  "bower_components",
-  "out",
-  "venv",
-])
+// BrainCode.EXCLUDED mirrors the exclusion set in context-budget.ts. The two
+// must stay in sync or the pack and the ranking would disagree about what the
+// project contains.
 
-export type SymbolKind =
-  | "function"
-  | "method"
-  | "class"
-  | "interface"
-  | "type"
-  | "enum"
-  | "constant"
-  | "struct"
-  | "trait"
-  | "module"
+export type SymbolKind = BrainCode.SymbolKind
 
-export type IndexedSymbol = {
-  name: string
-  kind: SymbolKind
-  line: number
-  exported: boolean
-}
+export type IndexedSymbol = BrainCode.Declaration
 
 export type IndexedFile = {
   path: string
   bytes: number
   modifiedAt: number
   estimatedTokens: number
-  language: Language
+  language: BrainCode.Language
   imports: string[]
   dependencies: string[]
   symbols: IndexedSymbol[]
@@ -152,284 +99,7 @@ export type RankOptions = {
   coChange?: boolean
 }
 
-type Language =
-  | "typescript"
-  | "markup"
-  | "python"
-  | "go"
-  | "rust"
-  | "java"
-  | "ruby"
-  | "php"
-  | "c"
-  | "css"
-  | "text"
-
-const LANGUAGE_BY_EXTENSION = new Map<string, Language>([
-  [".ts", "typescript"],
-  [".tsx", "typescript"],
-  [".js", "typescript"],
-  [".jsx", "typescript"],
-  [".mjs", "typescript"],
-  [".cjs", "typescript"],
-  [".mts", "typescript"],
-  [".cts", "typescript"],
-  [".vue", "markup"],
-  [".svelte", "markup"],
-  [".astro", "markup"],
-  [".html", "markup"],
-  [".py", "python"],
-  [".pyi", "python"],
-  [".go", "go"],
-  [".rs", "rust"],
-  [".java", "java"],
-  [".kt", "java"],
-  [".kts", "java"],
-  [".rb", "ruby"],
-  [".php", "php"],
-  [".c", "c"],
-  [".cc", "c"],
-  [".cpp", "c"],
-  [".cxx", "c"],
-  [".h", "c"],
-  [".hpp", "c"],
-  [".m", "c"],
-  [".mm", "c"],
-  [".cs", "java"],
-  [".swift", "typescript"],
-  [".css", "css"],
-  [".scss", "css"],
-  [".sass", "css"],
-  [".less", "css"],
-  [".md", "text"],
-  [".mdx", "text"],
-  [".json", "text"],
-  [".yaml", "text"],
-  [".yml", "text"],
-  [".toml", "text"],
-  [".sql", "text"],
-  [".sh", "text"],
-])
-
-const EXTRA_INDEXED_FILENAMES = new Set(["Dockerfile", "Makefile", "Procfile"])
-
-const FILE_EXTENSIONS = [
-  ".ts",
-  ".tsx",
-  ".d.ts",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-  ".py",
-  ".go",
-  ".rs",
-  ".java",
-  ".kt",
-  ".rb",
-  ".php",
-  ".c",
-  ".cc",
-  ".cpp",
-  ".h",
-  ".hpp",
-  ".css",
-  ".scss",
-  ".vue",
-  ".svelte",
-  ".astro",
-  ".json",
-]
-
-const INDEX_FILENAMES = [
-  "index.ts",
-  "index.tsx",
-  "index.js",
-  "index.jsx",
-  "__init__.py",
-  "mod.rs",
-  "lib.rs",
-  "index.php",
-]
-
-
-const RESERVED_SYMBOL_NAMES = new Set([
-  "case",
-  "catch",
-  "class",
-  "const",
-  "default",
-  "do",
-  "else",
-  "enum",
-  "for",
-  "function",
-  "if",
-  "return",
-  "switch",
-  "throw",
-  "try",
-  "typeof",
-  "var",
-  "while",
-  "with",
-])
-
-type SymbolRule = {
-  pattern: RegExp
-  kind: SymbolKind
-  name: number
-  exported?: number
-  exportedWhenBlank?: boolean
-  exportedWhenCapitalised?: boolean
-}
-
-const TYPESCRIPT_SYMBOLS: SymbolRule[] = [
-  {
-    pattern: /^[ \t]*(export\s+)?(?:declare\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/gm,
-    kind: "function",
-    name: 2,
-    exported: 1,
-  },
-  {
-    pattern: /^[ \t]*(export\s+)?(?:declare\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)/gm,
-    kind: "class",
-    name: 2,
-    exported: 1,
-  },
-  {
-    pattern: /^[ \t]*(export\s+)?(?:declare\s+)?interface\s+([A-Za-z_$][\w$]*)/gm,
-    kind: "interface",
-    name: 2,
-    exported: 1,
-  },
-  {
-    pattern: /^[ \t]*(export\s+)?(?:declare\s+)?type\s+([A-Za-z_$][\w$]*)\s*[=<]/gm,
-    kind: "type",
-    name: 2,
-    exported: 1,
-  },
-  {
-    pattern: /^[ \t]*(export\s+)?(?:declare\s+)?(?:const\s+)?enum\s+([A-Za-z_$][\w$]*)/gm,
-    kind: "enum",
-    name: 2,
-    exported: 1,
-  },
-  {
-    pattern: /^[ \t]*(export\s+)?(?:declare\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)/gm,
-    kind: "constant",
-    name: 2,
-    exported: 1,
-  },
-  {
-    pattern:
-      /^[ \t]{2,}(?:(?:public|private|protected|static|readonly|override|async)\s+)*([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*[:{]/gm,
-    kind: "method",
-    name: 1,
-  },
-]
-
-const SYMBOL_RULES: Record<Language, SymbolRule[]> = {
-  typescript: TYPESCRIPT_SYMBOLS,
-  markup: TYPESCRIPT_SYMBOLS,
-  python: [
-    { pattern: /^([ \t]*)(?:async\s+)?def\s+([A-Za-z_]\w*)/gm, kind: "function", name: 2, exportedWhenBlank: true },
-    { pattern: /^([ \t]*)class\s+([A-Za-z_]\w*)/gm, kind: "class", name: 2, exportedWhenBlank: true },
-    { pattern: /^()([A-Z_][A-Z0-9_]{2,})\s*(?::[^=]+)?=/gm, kind: "constant", name: 2, exportedWhenBlank: true },
-  ],
-  go: [
-    {
-      pattern: /^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)/gm,
-      kind: "function",
-      name: 1,
-      exportedWhenCapitalised: true,
-    },
-    { pattern: /^type\s+([A-Za-z_]\w*)\s+struct\b/gm, kind: "struct", name: 1, exportedWhenCapitalised: true },
-    { pattern: /^type\s+([A-Za-z_]\w*)\s+interface\b/gm, kind: "interface", name: 1, exportedWhenCapitalised: true },
-    { pattern: /^type\s+([A-Za-z_]\w*)\s+(?!struct\b|interface\b)/gm, kind: "type", name: 1, exportedWhenCapitalised: true },
-    { pattern: /^(?:var|const)\s+([A-Za-z_]\w*)/gm, kind: "constant", name: 1, exportedWhenCapitalised: true },
-  ],
-  rust: [
-    { pattern: /^[ \t]*(pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_]\w*)/gm, kind: "function", name: 2, exported: 1 },
-    { pattern: /^[ \t]*(pub(?:\([^)]*\))?\s+)?struct\s+([A-Za-z_]\w*)/gm, kind: "struct", name: 2, exported: 1 },
-    { pattern: /^[ \t]*(pub(?:\([^)]*\))?\s+)?trait\s+([A-Za-z_]\w*)/gm, kind: "trait", name: 2, exported: 1 },
-    { pattern: /^[ \t]*(pub(?:\([^)]*\))?\s+)?enum\s+([A-Za-z_]\w*)/gm, kind: "enum", name: 2, exported: 1 },
-    { pattern: /^[ \t]*(pub(?:\([^)]*\))?\s+)?type\s+([A-Za-z_]\w*)/gm, kind: "type", name: 2, exported: 1 },
-    { pattern: /^[ \t]*(pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)/gm, kind: "module", name: 2, exported: 1 },
-    { pattern: /^[ \t]*(pub(?:\([^)]*\))?\s+)?(?:static|const)\s+([A-Za-z_]\w*)/gm, kind: "constant", name: 2, exported: 1 },
-  ],
-  java: [
-    {
-      pattern: /^[ \t]*(public\s+)?(?:static\s+|final\s+|abstract\s+|sealed\s+)*(?:class|interface|enum|record)\s+([A-Za-z_]\w*)/gm,
-      kind: "class",
-      name: 2,
-      exported: 1,
-    },
-    {
-      pattern:
-        /^[ \t]+(public\s+|protected\s+)?(?:static\s+|final\s+|synchronized\s+|abstract\s+)*[\w.<>,\[\]]+\s+([A-Za-z_]\w*)\s*\([^()]*\)\s*[{;]/gm,
-      kind: "method",
-      name: 2,
-      exported: 1,
-    },
-  ],
-  ruby: [
-    { pattern: /^[ \t]*def\s+(?:self\.)?([A-Za-z_]\w*[?!=]?)/gm, kind: "function", name: 1 },
-    { pattern: /^[ \t]*class\s+([A-Z][\w:]*)/gm, kind: "class", name: 1, exportedWhenCapitalised: true },
-    { pattern: /^[ \t]*module\s+([A-Z][\w:]*)/gm, kind: "module", name: 1, exportedWhenCapitalised: true },
-  ],
-  php: [
-    {
-      pattern: /^[ \t]*(?:(public|private|protected)\s+)?(?:static\s+)?function\s+([A-Za-z_]\w*)/gm,
-      kind: "function",
-      name: 2,
-    },
-    { pattern: /^[ \t]*(?:abstract\s+|final\s+)?class\s+([A-Za-z_]\w*)/gm, kind: "class", name: 1 },
-    { pattern: /^[ \t]*interface\s+([A-Za-z_]\w*)/gm, kind: "interface", name: 1 },
-    { pattern: /^[ \t]*trait\s+([A-Za-z_]\w*)/gm, kind: "trait", name: 1 },
-  ],
-  c: [
-    { pattern: /^[ \t]*(?:typedef\s+)?(?:struct|union)\s+([A-Za-z_]\w*)/gm, kind: "struct", name: 1 },
-    { pattern: /^[ \t]*(?:typedef\s+)?enum\s+([A-Za-z_]\w*)/gm, kind: "enum", name: 1 },
-    { pattern: /^[ \t]*class\s+([A-Za-z_]\w*)/gm, kind: "class", name: 1 },
-    { pattern: /^[A-Za-z_][\w\s*&:<>,]*?\b([A-Za-z_]\w*)\s*\([^;()]*\)\s*\{/gm, kind: "function", name: 1 },
-    { pattern: /^[ \t]*#define\s+([A-Z_][A-Z0-9_]*)/gm, kind: "constant", name: 1 },
-  ],
-  css: [{ pattern: /^[ \t]*(?:\.|#)([A-Za-z][\w-]{2,})/gm, kind: "constant", name: 1 }],
-  text: [{ pattern: /^#{1,4}\s+([A-Za-z][\w -]{2,})/gm, kind: "module", name: 1 }],
-}
-
-const TYPESCRIPT_IMPORTS = [
-  /(?:^|[\s;}])(?:import|export)\s[^;'"]{0,240}?from\s*["']([^"']+)["']/g,
-  /(?:^|[\s;=(,])import\s*\(\s*["']([^"']+)["']\s*\)/g,
-  /(?:^|[\s;=(,])require\s*\(\s*["']([^"']+)["']\s*\)/g,
-  /^[ \t]*import\s+["']([^"']+)["']/gm,
-]
-
-const IMPORT_PATTERNS: Record<Language, RegExp[]> = {
-  typescript: TYPESCRIPT_IMPORTS,
-  markup: [...TYPESCRIPT_IMPORTS, /(?:src|href)\s*=\s*["']([^"'#?]+)["']/g, /@import\s+["']([^"']+)["']/g],
-  python: [/^[ \t]*from\s+([.\w]+)\s+import\s/gm, /^[ \t]*import\s+([.\w]+)/gm],
-  go: [],
-  rust: [/^[ \t]*(?:pub\s+)?mod\s+([A-Za-z_]\w*)\s*;/gm, /^[ \t]*(?:pub\s+)?use\s+([\w:]+)/gm],
-  java: [/^[ \t]*import\s+(?:static\s+)?([\w.]+)\s*;/gm],
-  ruby: [/^[ \t]*require(?:_relative)?\s*\(?\s*["']([^"']+)["']/gm],
-  php: [
-    /^[ \t]*use\s+([\w\\]+)/gm,
-    /(?:require|include)(?:_once)?\s*\(?\s*["']([^"']+)["']/g,
-  ],
-  c: [/^[ \t]*#\s*include\s*[<"]([^>"]+)[>"]/gm],
-  css: [/@import\s+(?:url\()?\s*["']?([^"')\s;]+)/g],
-  text: [],
-}
-
 const EXPLICIT_PATH_PATTERN = /[A-Za-z0-9_@./-]+\.[A-Za-z0-9]{1,8}/g
-
-type PathLookup = {
-  paths: Set<string>
-  byStem: Map<string, string[]>
-  byDirectory: Map<string, string[]>
-}
 
 const memory = new Map<string, RepoIndex>()
 
@@ -476,14 +146,8 @@ async function indexProject(projectPath: string, options: IndexOptions, force: b
     stats.bytesRead += candidate.bytes
   }
 
-  const lookup = buildLookup(files)
-  for (const file of files) {
-    file.dependencies = [
-      ...new Set(file.imports.flatMap((specifier) => resolveSpecifier(file.path, specifier, file.language, lookup))),
-    ]
-      .filter((dependency) => dependency !== file.path)
-      .slice(0, MAX_DEPENDENCIES_PER_FILE)
-  }
+  const lookup = BrainCode.lookup(files.map((file) => file.path))
+  for (const file of files) file.dependencies = BrainCode.dependencies(file.path, file.imports, file.language, lookup)
 
   const repository =
     options.coChange === false
@@ -520,13 +184,13 @@ async function listCandidates(root: string) {
       // Dirent.isDirectory() is false for symlinked directories, which keeps the
       // walk from following a link back into a directory it already visited.
       if (entry.isDirectory()) {
-        if (!EXCLUDED_DIRECTORIES.has(entry.name)) await visit(fullPath)
+        if (!BrainCode.EXCLUDED.has(entry.name)) await visit(fullPath)
         continue
       }
       if (!entry.isFile()) continue
-      if (!LANGUAGE_BY_EXTENSION.has(extname(entry.name).toLowerCase()) && !EXTRA_INDEXED_FILENAMES.has(entry.name)) continue
+      if (!BrainCode.language(entry.name)) continue
       const info = await stat(fullPath).catch(() => undefined)
-      if (!info || info.size > MAX_SOURCE_BYTES) continue
+      if (!info || info.size > BrainCode.LIMIT.bytes) continue
       output.push({ path: slash(relative(root, fullPath)), bytes: info.size, modifiedAt: info.mtimeMs })
     }
   }
@@ -535,8 +199,8 @@ async function listCandidates(root: string) {
 }
 
 function parseFile(candidate: FileCandidate, text: string): IndexedFile {
-  const language = LANGUAGE_BY_EXTENSION.get(extname(candidate.path).toLowerCase()) ?? "text"
-  const symbols = extractSymbols(text, language)
+  const language = BrainCode.language(candidate.path) ?? "text"
+  const symbols = BrainCode.symbols(text, language)
   const terms = extractTerms(text, candidate.path, symbols)
   return {
     path: candidate.path,
@@ -544,7 +208,7 @@ function parseFile(candidate: FileCandidate, text: string): IndexedFile {
     modifiedAt: candidate.modifiedAt,
     estimatedTokens: Math.max(1, Math.ceil((text.length || candidate.bytes) / 4)),
     language,
-    imports: extractImports(text, language),
+    imports: BrainCode.imports(text, language),
     dependencies: [],
     symbols,
     tokens: terms.tokens,
@@ -554,72 +218,6 @@ function parseFile(candidate: FileCandidate, text: string): IndexedFile {
 
 function slash(path: string) {
   return path.replaceAll("\\", "/")
-}
-
-function lineOffsets(text: string) {
-  const offsets = [0]
-  for (let index = text.indexOf("\n"); index !== -1; index = text.indexOf("\n", index + 1)) offsets.push(index + 1)
-  return offsets
-}
-
-function lineAt(offsets: number[], position: number) {
-  let low = 0
-  let high = offsets.length - 1
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2)
-    if (offsets[mid]! <= position) {
-      low = mid
-      continue
-    }
-    high = mid - 1
-  }
-  return low + 1
-}
-
-function extractSymbols(text: string, language: Language) {
-  const offsets = lineOffsets(text)
-  const found = new Map<string, IndexedSymbol>()
-  for (const rule of SYMBOL_RULES[language]) {
-    for (const match of text.matchAll(rule.pattern)) {
-      if (found.size >= MAX_SYMBOLS_PER_FILE) break
-      const name = match[rule.name]
-      if (!name || name.length < 2 || RESERVED_SYMBOL_NAMES.has(name)) continue
-      const key = `${rule.kind}:${name}`
-      if (found.has(key)) continue
-      found.set(key, {
-        name,
-        kind: rule.kind,
-        line: lineAt(offsets, match.index ?? 0),
-        exported: rule.exportedWhenCapitalised
-          ? /^[A-Z]/.test(name)
-          : rule.exportedWhenBlank
-            ? !match[rule.exported ?? 1]
-            : Boolean(rule.exported && match[rule.exported]),
-      })
-    }
-  }
-  return [...found.values()].sort((left, right) => left.line - right.line)
-}
-
-function extractImports(text: string, language: Language) {
-  const imports = new Set<string>()
-  // Go groups its imports in a parenthesised block whose entries are bare
-  // strings, so the block has to be isolated before the strings inside it can be
-  // told apart from any other quoted literal in the file.
-  if (language === "go") {
-    for (const block of text.matchAll(/^import\s*\(([\s\S]*?)^\)/gm)) {
-      for (const entry of block[1]!.matchAll(/"([^"]+)"/g)) imports.add(entry[1]!)
-    }
-    for (const single of text.matchAll(/^import\s+(?:[\w.]+\s+)?"([^"]+)"/gm)) imports.add(single[1]!)
-    return [...imports].slice(0, MAX_IMPORTS_PER_FILE)
-  }
-  for (const pattern of IMPORT_PATTERNS[language]) {
-    for (const match of text.matchAll(pattern)) {
-      const value = match[1]?.trim()
-      if (value) imports.add(value)
-    }
-  }
-  return [...imports].slice(0, MAX_IMPORTS_PER_FILE)
 }
 
 function extractTerms(text: string, path: string, symbols: IndexedSymbol[]) {
@@ -685,94 +283,7 @@ function extractTerms(text: string, path: string, symbols: IndexedSymbol[]) {
   return { tokens: new Map(kept), tokenCount }
 }
 
-function buildLookup(files: IndexedFile[]): PathLookup {
-  const byStem = new Map<string, string[]>()
-  const byDirectory = new Map<string, string[]>()
-  for (const file of files) {
-    const name = file.path.split("/").at(-1)!
-    const stem = name.slice(0, name.length - extname(name).length).toLowerCase()
-    byStem.set(stem, [...(byStem.get(stem) ?? []), file.path])
-    const directory = dirname(file.path).split("/").at(-1)!.toLowerCase()
-    byDirectory.set(directory, [...(byDirectory.get(directory) ?? []), file.path])
-  }
-  return { paths: new Set(files.map((file) => file.path)), byStem, byDirectory }
-}
-
-function resolveSpecifier(fromPath: string, specifier: string, language: Language, lookup: PathLookup) {
-  const normalised = language === "python" && specifier.startsWith(".") ? pythonSpecifier(specifier) : specifier
-  // A relative attempt runs first for every language because `require_relative`,
-  // `#include "util.h"` and a sibling Python module all name a neighbouring file
-  // without any leading dot to mark them as relative.
-  if (!normalised.includes("::") && !normalised.includes("\\")) {
-    const direct = matchFile(slash(normalize(join(dirname(fromPath), normalised))).replace(/^\.\//, ""), lookup)
-    if (direct.length) return direct
-  }
-  if (normalised.startsWith(".")) return []
-
-  const segments = specifierSegments(normalised, language)
-  if (!segments.length) return []
-  // Go names a package directory; the other languages name a module path whose
-  // trailing segments may be items inside the module rather than files.
-  const attempts =
-    language === "go"
-      ? [segments.slice(-3), segments.slice(-2), segments.slice(-1)]
-      : [segments, segments.slice(0, -1), segments.slice(0, -2)]
-  for (const attempt of attempts) {
-    if (!attempt.length) continue
-    const matched = matchSuffix(attempt, lookup)
-    if (matched.length) return matched
-  }
-  return []
-}
-
-function pythonSpecifier(specifier: string) {
-  const level = specifier.match(/^\.+/)![0].length
-  const rest = specifier.slice(level).replaceAll(".", "/")
-  return `${"../".repeat(level - 1)}./${rest}`
-}
-
-function specifierSegments(specifier: string, language: Language) {
-  if (language === "rust") return specifier.replace(/^(?:crate|self|super)::/, "").split("::").filter(Boolean)
-  if (language === "php") return specifier.split(/[\\/]/).filter(Boolean)
-  if (language === "python" || language === "java") return specifier.split(".").filter(Boolean)
-  return specifier.split("/").filter(Boolean)
-}
-
-function matchFile(base: string, lookup: PathLookup) {
-  if (!base || base.startsWith("..")) return []
-  if (lookup.paths.has(base)) return [base]
-  const direct = FILE_EXTENSIONS.map((extension) => `${base}${extension}`).find((candidate) => lookup.paths.has(candidate))
-  if (direct) return [direct]
-  const indexed = INDEX_FILENAMES.map((name) => `${base}/${name}`).find((candidate) => lookup.paths.has(candidate))
-  return indexed ? [indexed] : []
-}
-
-function matchSuffix(segments: string[], lookup: PathLookup) {
-  // A C include carries its extension inside the last segment; a dotted module
-  // path never does, so stripping an extension that is not there is a no-op.
-  const parts = [...segments.slice(0, -1), segments.at(-1)!.replace(/\.[A-Za-z0-9]{1,5}$/, "")]
-  const stem = parts.at(-1)!.toLowerCase()
-  const files = lookup.byStem.get(stem) ?? []
-  const directories = lookup.byDirectory.get(stem) ?? []
-  // A namespace prefix rarely maps onto a directory one for one, so the longest
-  // suffix that exists on disk wins and a bare module name is the last resort.
-  for (let start = 0; start < parts.length; start += 1) {
-    const suffix = parts.slice(start).join("/").toLowerCase()
-    const matched = files.filter((path) => {
-      const withoutExtension = path.slice(0, path.length - extname(path).length).toLowerCase()
-      return withoutExtension === suffix || withoutExtension.endsWith(`/${suffix}`)
-    })
-    if (matched.length) return matched.slice(0, 8)
-    const inDirectory = directories.filter((path) => {
-      const parent = dirname(path).toLowerCase()
-      return parent === suffix || parent.endsWith(`/${suffix}`)
-    })
-    if (inDirectory.length) return inDirectory.slice(0, 8)
-  }
-  return []
-}
-
-async function gitCoChange(root: string, known: Set<string>, previous: RepoIndex | undefined) {
+async function gitCoChange(root: string, known: ReadonlySet<string>, previous: RepoIndex | undefined) {
   const revision = (await git(root, ["rev-parse", "--show-toplevel", "HEAD"])).split("\n")
   const topLevel = revision[0]?.trim()
   const head = revision[1]?.trim() ?? ""
@@ -786,45 +297,14 @@ async function gitCoChange(root: string, known: Set<string>, previous: RepoIndex
   // symlinks too or every path it reports would fall outside the index.
   const realRoot = await realpath(root).catch(() => root)
 
-  const log = await git(root, ["log", "--no-merges", "--format=%H", "--name-only", "-n", String(CO_CHANGE_COMMITS)])
-  const pairs = new Map<string, Map<string, number>>()
-  let commits = 0
-  const record = (files: string[]) => {
-    if (files.length < 2 || files.length > CO_CHANGE_MAX_COMMIT_FILES) return
-    commits += 1
-    for (const left of files) {
-      for (const right of files) {
-        if (left === right) continue
-        const neighbours = pairs.get(left) ?? new Map<string, number>()
-        neighbours.set(right, (neighbours.get(right) ?? 0) + 1)
-        pairs.set(left, neighbours)
-      }
-    }
-  }
-
-  let current: string[] = []
-  for (const line of log.split("\n")) {
-    const value = line.trim()
-    if (!value) continue
-    if (/^[0-9a-f]{40}$/.test(value)) {
-      record(current)
-      current = []
-      continue
-    }
-    // git reports paths from the repository root, which is not the project root
-    // when Vector has a subdirectory of a larger repository open.
+  const log = await git(root, ["log", "--no-merges", "--format=%H", "--name-only", "-n", String(BrainCode.LIMIT.commits)])
+  // git reports paths from the repository root, which is not the project root
+  // when Vector has a subdirectory of a larger repository open.
+  const history = BrainCode.coChange(log, (value) => {
     const candidate = slash(relative(realRoot, join(topLevel, value)))
-    if (known.has(candidate)) current.push(candidate)
-  }
-  record(current)
-
-  const coChange = new Map(
-    [...pairs].map(([path, neighbours]) => [
-      path,
-      new Map([...neighbours].sort((left, right) => right[1] - left[1]).slice(0, CO_CHANGE_MAX_NEIGHBOURS)),
-    ]),
-  )
-  return { head, coChange, commits }
+    return known.has(candidate) ? candidate : undefined
+  })
+  return { head, coChange: history.pairs, commits: history.commits }
 }
 
 function git(cwd: string, args: string[]) {
