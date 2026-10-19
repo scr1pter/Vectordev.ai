@@ -210,4 +210,33 @@ describe("BrainKnowledge.recall", () => {
     expect(result.same).toBe(result.before!)
     expect(result.other).toContain("Session spec")
   })
+
+  test("a record's card stands for its passage, which the agent opens with get", async () => {
+    const result = await withKnowledge((setup) =>
+      Effect.gen(function* () {
+        yield* added(setup, text("Billing spec.md", "# Billing spec\n\n## 1 Money\n\nInvoices MUST be issued in integer cents.\n"))
+        return yield* setup.knowledge.recall(setup.place, ask("use the billing spec for invoices"))
+      }),
+    )
+    expect(result.text).toContain("requirement · Billing spec §1: Invoices MUST be issued in integer cents.")
+    expect(result.cards.every((id) => id.startsWith("r"))).toBe(true)
+  })
+
+  test("an attached document's outline is wrapped as Vector's, with the headings under its title", async () => {
+    const result = await withKnowledge((setup) =>
+      Effect.gen(function* () {
+        const { document } = yield* added(setup, text("Auth spec.md", SPEC_V1))
+        return {
+          id: document!.id,
+          shown: yield* setup.knowledge.outline(setup.place, document!.id, { personal: true }),
+          withheld: yield* setup.knowledge.outline(setup.place, document!.id, { personal: false }),
+        }
+      }),
+    )
+    expect(result.shown).toStartWith(`<vector_document id="${result.id}">\n`)
+    expect(result.shown).toEndWith("\n</vector_document>")
+    expect(result.shown).toContain("Outline: 1 Sessions · 2 Limits · 3 Endpoints · Glossary")
+    expect(Token.estimate(result.shown!)).toBeLessThanOrEqual(130)
+    expect(result.withheld).toBeUndefined()
+  })
 })
