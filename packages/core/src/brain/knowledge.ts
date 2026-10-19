@@ -2,9 +2,10 @@ export * as BrainKnowledge from "./knowledge"
 
 import { execFile } from "node:child_process"
 import { createHash, randomBytes } from "node:crypto"
+import { constants as fsConstants } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
-import { and, asc, eq, inArray, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
 import { Context, Effect, Fiber, Layer, Queue, Scope } from "effect"
 import { makeGlobalNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
@@ -57,12 +58,23 @@ import type { BrainWorkerProtocol } from "./worker/protocol"
 
 export type Origin = BrainSchema.DocumentOrigin
 
-export type AddInput = { readonly origin: Origin; readonly sessionID?: string; readonly hold?: BrainSchema.Hold } & (
+export type AddInput = {
+  readonly origin: Origin
+  readonly sessionID?: string
+  readonly hold?: BrainSchema.Hold
+  /**
+   * false: a file of the same name as a document here is refused with reason "version" (and that document) rather than
+   * read as its next version, so the user can be asked first. Anything else reads it as the next version.
+   */
+  readonly replace?: boolean
+} & (
   | {
       readonly type: "path"
       readonly path: string
       /** The user attached this file to the conversation, so it may be anywhere on this computer. */
       readonly attached?: boolean
+      /** false: a path that is itself a link is refused, as the app's path mode refuses one (it names files, not links). */
+      readonly links?: false
     }
   | { readonly type: "bytes"; readonly name: string; readonly bytes: Uint8Array; readonly mime?: string }
   | { readonly type: "text"; readonly name: string; readonly text: string }
@@ -76,6 +88,7 @@ export type Refusal =
   | "not-found"
   | "outside"
   | "busy"
+  | "version"
 
 export type AddResult =
   | {
@@ -84,7 +97,93 @@ export type AddResult =
       readonly document: BrainSchema.Document
       readonly previous?: string
     }
+  | {
+      readonly type: "refused"
+      readonly reason: Refusal
+      readonly message: string
+      /** For "version": the document this file would replace. */
+      readonly document?: BrainSchema.Document
+    }
+
+/** A file as `read` finds it, checked and ready to sniff, or why it may not be read. */
+export type Read =
+  | (File & { readonly type: "file"; readonly lineage: string; readonly source?: string })
   | { readonly type: "refused"; readonly reason: Refusal; readonly message: string }
+
+/** The repository's document settings. */
+export type Settings = {
+  /** Whether the repository's tracked docs are read. */
+  readonly repositoryDocs: boolean
+  /** Whether a copy of each added file is kept, so it can be read again and downloaded. It is not redacted. */
+  readonly keepOriginals: boolean
+}
+
+export type RecordQuery = {
+  readonly kind?: BrainSchema.RecordKind
+  readonly document?: string
+  /** Keywords: the records that match, best first. */
+  readonly query?: string
+  /** held: waiting for the user; all: archived ones too. Without it, every record but archived ones. */
+  readonly status?: "active" | "held" | "archived" | "all"
+  /** From the page before. */
+  readonly cursor?: string
+  readonly limit?: number
+  readonly personal: boolean
+}
+
+export type RecordPage = { readonly records: readonly BrainSchema.Record[]; readonly cursor?: string }
+
+export type RecordDetail = {
+  readonly record: BrainSchema.Record
+  readonly passage?: BrainSchema.Passage
+  readonly anchors: readonly BrainSchema.Anchor[]
+  readonly conflicts: readonly BrainSchema.ReviewItem[]
+  readonly history: readonly BrainSchema.RecordEvent[]
+}
+
+export type RecordChange = {
+  readonly text?: string
+  readonly kind?: BrainSchema.RecordKind
+  readonly pinned?: boolean
+  /**
+   * - not-applicable: the user says it is not what Vector called it (not a requirement, say); put away for good.
+   * - forget: put away for good; reading the document again does not bring it back.
+   * - restore: back in use after either.
+   * - make-memory: saved as a memory entry of the user's, as private as its document.
+   */
+  readonly action?: "not-applicable" | "forget" | "restore" | "make-memory"
+}
+
+export type RecordChanged =
+  | { readonly type: "changed"; readonly record: BrainSchema.Record; readonly entry?: BrainSchema.Entry }
+  | { readonly type: "refused"; readonly message: string }
+
+/** One page of a document as the user reads it: its passages, with the spans its records were read from. */
+export type PageView = {
+  readonly document: string
+  readonly page: number
+  readonly pages: number
+  /** The page has no text layer (a scanned image), so nothing on it was read. */
+  readonly unread: boolean
+  readonly passages: readonly {
+    readonly id: string
+    readonly section: string
+    readonly text: string
+    /** Why the passage waits for the user's review; held text is never sent to a model. */
+    readonly hold?: BrainSchema.Hold
+    readonly records: readonly {
+      readonly id: string
+      readonly kind: BrainSchema.RecordKind
+      readonly start: number
+      readonly end: number
+      /** The page the record was read on, which can be the one before for a passage that runs onto this page. */
+      readonly page?: number
+    }[]
+  }[]
+}
+
+/** The original file as it was added, kept only while the repository keeps originals. */
+export type Original = { readonly name: string; readonly bytes: Uint8Array; readonly format: BrainSchema.Format }
 
 export type Tier = "chat" | "light" | "standard" | "thorough"
 
@@ -113,6 +212,25 @@ export type Detail = {
     readonly pageEnd?: number
   }[]
   readonly held: readonly { readonly id: string; readonly hold: BrainSchema.Hold; readonly page?: number }[]
+  /** The first records, in document order, and where the next page starts. */
+  readonly records: RecordPage
+  readonly counts: {
+    readonly records: number
+    readonly active: number
+    readonly held: number
+    readonly archived: number
+    readonly passages: number
+  }
+  /** Code its records and passages are linked to. */
+  readonly anchors: readonly BrainSchema.Anchor[]
+  /** Every version of the document, newest first. */
+  readonly versions: readonly {
+    readonly id: string
+    readonly version: number
+    readonly status: BrainSchema.DocumentStatus
+    readonly bytes: number
+    readonly createdAt: number
+  }[]
 }
 
 export interface Interface {
@@ -148,16 +266,53 @@ export interface Interface {
   readonly remove: (place: Brain.Place, id: string) => Effect.Effect<"removed" | "not-found">
   /** Reads documents again (one, or all a newer reader would read better) from the files they came from. */
   readonly reindex: (place: Brain.Place, id?: string) => Effect.Effect<number>
-  /** The user's decision on a held document, passage or record, or a new title or visibility for a document. */
+  /**
+   * The user's decision on a held document, passage or record, or a new title or visibility for a document. pause
+   * holds a document's reading where it is, and resume lets it go on.
+   */
   readonly update: (
     place: Brain.Place,
     id: string,
     change: {
-      readonly action?: "approve" | "reject"
+      readonly action?: "approve" | "reject" | "pause" | "resume"
       readonly title?: string
       readonly visibility?: BrainSchema.Visibility
     },
   ) => Effect.Effect<"updated" | "not-found">
+  /** A page of records, filtered and searched, for the document page and Settings. */
+  readonly records: (place: Brain.Place, query: RecordQuery) => Effect.Effect<RecordPage>
+  /** One record with its passage, links, conflicts and history. */
+  readonly record: (
+    place: Brain.Place,
+    id: string,
+    options: { readonly personal: boolean },
+  ) => Effect.Effect<RecordDetail | undefined>
+  /** The user's edit of a record, or their decision on it. */
+  readonly changeRecord: (
+    place: Brain.Place,
+    id: string,
+    change: RecordChange,
+  ) => Effect.Effect<RecordChanged | undefined>
+  /** One page of a paged document, as the user reads it. */
+  readonly page: (
+    place: Brain.Place,
+    id: string,
+    page: number,
+    options: { readonly personal: boolean },
+  ) => Effect.Effect<PageView | undefined>
+  /** The kept copy of a document's file, when the repository keeps originals and it is still the file it was. */
+  readonly original: (place: Brain.Place, id: string) => Effect.Effect<Original | undefined>
+  /** Cards by id (records, passages and documents) for citation chips; ids nothing holds, or held ones, are left out. */
+  readonly cards: (
+    place: Brain.Place,
+    ids: readonly string[],
+    options: { readonly personal: boolean },
+  ) => Effect.Effect<readonly BrainSchema.Card[]>
+  /** Whether anything of the repository's is being read or waits to be. */
+  readonly indexing: (place: Brain.Place) => Effect.Effect<boolean>
+  readonly settings: (place: Brain.Place) => Effect.Effect<Settings>
+  /** Turning repository docs off forgets them; turning originals off deletes the kept copies. */
+  readonly configure: (place: Brain.Place, change: Partial<Settings>) => Effect.Effect<Settings>
   /** Documents a request could draw on: usable, and visible to it. */
   readonly count: (place: Brain.Place, options: { readonly personal: boolean }) => Effect.Effect<number>
   /** The digest's line about the repository's documents, or nothing without any. */
@@ -231,6 +386,12 @@ export const LIMIT = {
   repositoryTotal: 16 * 1024 * 1024,
   /** Rows written in one transaction, so a store never holds brain.db for long. */
   batch: 5_000,
+  /** Kept originals, across every repository. */
+  originals: 2 * 1024 * 1024 * 1024,
+  /** A page of records. */
+  records: 100,
+  /** Ids one citation lookup resolves. */
+  cards: 50,
 } as const
 
 /** Tokens `get` returns, by what it opens. */
@@ -297,7 +458,16 @@ export const layerWith = (options: Options = {}) =>
       const worker = yield* BrainWorker.Service
       const scope = yield* Effect.scope
       const wakeup = yield* Queue.sliding<void>(1)
-      return make({ db: database.db, brain, worker, scope, wakeup, owner: options.owner })
+      return make({
+        db: database.db,
+        brain,
+        worker,
+        scope,
+        wakeup,
+        owner: options.owner,
+        // Kept originals sit beside brain.db; a brain in memory keeps none.
+        ...(database.file === ":memory:" ? {} : { originals: path.join(path.dirname(database.file), "documents") }),
+      })
     }),
   )
 
@@ -316,6 +486,7 @@ function make(input: {
   readonly scope: Scope.Scope
   readonly wakeup: Queue.Queue<void>
   readonly owner?: string
+  readonly originals?: string
 }): Interface {
   const db = input.db
   const brain = input.brain
@@ -351,7 +522,7 @@ function make(input: {
   const add = Effect.fn("BrainKnowledge.add")(function* (place: Brain.Place, request: AddInput) {
     if (request.hold === "guest") return refuse("guest", "A session an invited guest is in cannot add documents.")
     state.roots.set(place.repository, place.root)
-    const file = yield* Effect.promise(() => bytesOf(place, request))
+    const file = yield* Effect.promise(() => read(place, request))
     if (file.type === "refused") return file
     const status = yield* worker.status()
     const limits = BrainLimits.LIMITS[status.mode === "worker" ? "worker" : "inline"]
@@ -427,6 +598,16 @@ function make(input: {
         Effect.orDie,
         Effect.map((rows) => rows.at(-1)),
       )
+    // Asked first: a new version replaces what the user did to the old one's records only when they say so.
+    if (previous && request.replace === false)
+      return {
+        ...refuse(
+          "version",
+          `${previous.name} is already document ${previous.ordinal} (v${previous.version}, added ${new Date(previous.created_at).toISOString().slice(0, 10)}). Add it again with replace to read this file as its next version.`,
+        ),
+        document: toDocument(previous),
+      }
+    const stored = yield* keep(place, file, hash, sniffed.format)
     const ordinal =
       ((yield* db
         .select({ ordinal: sql<number | null>`max(${BrainDocumentTable.ordinal})` })
@@ -455,7 +636,7 @@ function make(input: {
       pages: null,
       unread: [],
       source_path: file.source ?? null,
-      stored: false,
+      stored,
       status: "queued" as const,
       hold_reason: hold ?? null,
       stats: EMPTY_STATS,
@@ -500,66 +681,6 @@ function make(input: {
       ...(previous ? { previous: previous.id } : {}),
     }
   })
-
-  // The file's bytes and where they came from, or why it cannot be added.
-  async function bytesOf(
-    place: Brain.Place,
-    request: AddInput,
-  ): Promise<(File & { readonly type: "file"; readonly lineage: string; readonly source?: string }) | ReturnType<typeof refuse>> {
-    if (request.type === "text")
-      return {
-        type: "file" as const,
-        name: /\.[A-Za-z0-9]{1,8}$/.test(request.name) ? request.name : `${request.name}.md`,
-        bytes: new TextEncoder().encode(request.text),
-        lineage: lineageOf(request.name),
-      }
-    if (request.type === "bytes")
-      return {
-        type: "file" as const,
-        name: request.name,
-        bytes: request.bytes,
-        ...(request.mime ? { mime: request.mime } : {}),
-        lineage: lineageOf(request.name),
-      }
-    const absolute = path.resolve(place.root, request.path)
-    if (BrainSniff.SECRET_FILE.test(absolute.replace(/\\/g, "/"))) return refuse("secret", BrainSniff.MESSAGES.secret)
-    // A regular file only, found where it really is, and checked for size before a byte is read.
-    const real = await fs.realpath(absolute).catch(() => undefined)
-    const stat = real ? await fs.lstat(real).catch(() => undefined) : undefined
-    if (!real || !stat?.isFile()) return refuse("not-found", `There is no file at ${request.path}.`)
-    if (BrainSniff.SECRET_FILE.test(real.replace(/\\/g, "/"))) return refuse("secret", BrainSniff.MESSAGES.secret)
-    const root = await fs.realpath(place.root).catch(() => place.root)
-    const outside = await outsideOf(request, absolute, FSUtil.contains(root, real))
-    if (outside) return outside
-    if (stat.size > BrainLimits.LIMITS.worker.bytes.pdf)
-      return refuse("too-large", "This file is over 64 MB, the most Vector reads.")
-    const bytes = new Uint8Array(await fs.readFile(real))
-    const relative = FSUtil.contains(root, real) ? path.relative(root, real).split(path.sep).join("/") : undefined
-    return {
-      type: "file" as const,
-      name: path.basename(real),
-      bytes,
-      // A repository doc is the same document in every worktree, so it is known by its path in the repository.
-      lineage: request.origin === "repository" && relative ? relative : lineageOf(path.basename(real)),
-      source: request.origin === "repository" && relative ? relative : real,
-    }
-  }
-
-  // Why a file may not be read from where it really is, if it may not. A file the user chose (attached to the
-  // conversation or named on the command line) can be anywhere. The agent keeps files of this repository by where they
-  // really are, so a link it found or made cannot reach the rest of the computer; and a repository doc is a file of the
-  // repository's own, never a link, since a repository a user trusts can still ship one to any file.
-  async function outsideOf(request: AddInput & { readonly type: "path" }, absolute: string, inside: boolean) {
-    if (request.attached || request.origin === "chat" || request.origin === "cli") return undefined
-    const link = request.origin === "repository" && (await fs.lstat(absolute).catch(() => undefined))?.isSymbolicLink()
-    if (!link && inside) return undefined
-    return refuse(
-      "outside",
-      link
-        ? `${request.path} is a link, and Vector reads a repository's own docs only.`
-        : `${request.path} is outside this repository. Vector keeps files from this repository or ones the user attached.`,
-    )
-  }
 
   // --- Reading in the background ----------------------------------------------------------------------------------
 
@@ -770,20 +891,74 @@ function make(input: {
     yield* revise(document.repository_id)
   })
 
-  // A document's bytes again, from the file it came from, only if they are still the bytes it was added with.
+  // A document's bytes again, from the file it came from or its kept copy, only if they are still the bytes it was
+  // added with.
   async function reread(document: DocumentRow): Promise<File | undefined> {
-    if (!document.source_path) return undefined
     const root = state.roots.get(document.repository_id)
-    const file = path.isAbsolute(document.source_path)
-      ? document.source_path
-      : root
-        ? path.join(root, document.source_path)
-        : undefined
-    if (!file) return undefined
-    const bytes = await fs.readFile(file).catch(() => undefined)
-    if (!bytes || createHash("sha256").update(bytes).digest("hex") !== document.content_hash) return undefined
-    return { name: path.basename(file), bytes: new Uint8Array(bytes) }
+    const file = !document.source_path
+      ? undefined
+      : path.isAbsolute(document.source_path)
+        ? document.source_path
+        : root
+          ? path.join(root, document.source_path)
+          : undefined
+    const bytes = file ? await fs.readFile(file).catch(() => undefined) : undefined
+    if (bytes && createHash("sha256").update(bytes).digest("hex") === document.content_hash)
+      return { name: path.basename(file!), bytes: new Uint8Array(bytes) }
+    const kept = await keptCopy(document)
+    return kept ? { name: document.name, bytes: kept } : undefined
   }
+
+  // The kept copy of a document's file, if there is one and it is still those bytes.
+  async function keptCopy(document: DocumentRow) {
+    if (!document.stored || !input.originals) return undefined
+    const bytes = await fs.readFile(originalPath(input.originals, document.content_hash, document.format)).catch(() => undefined)
+    if (!bytes || createHash("sha256").update(bytes).digest("hex") !== document.content_hash) return undefined
+    return new Uint8Array(bytes)
+  }
+
+  // A copy of an added file, when the repository keeps originals and there is room: 0600 in a 0700 folder beside
+  // brain.db, named by its hash, so documents of the same bytes share one.
+  const keep = Effect.fnUntraced(function* (place: Brain.Place, file: File, hash: string, format: BrainSchema.Format) {
+    const folder = input.originals
+    if (!folder || !(yield* settings(place)).keepOriginals) return false
+    const total = yield* db
+      .select({ bytes: sql<number | null>`sum(${BrainDocumentTable.bytes})` })
+      .from(BrainDocumentTable)
+      .where(eq(BrainDocumentTable.stored, true))
+      .get()
+      .pipe(Effect.orDie)
+    if ((total?.bytes ?? 0) + file.bytes.length > LIMIT.originals) return false
+    return yield* Effect.promise(async () => {
+      await fs.mkdir(folder, { recursive: true, mode: 0o700 })
+      if (process.platform !== "win32") await fs.chmod(folder, 0o700)
+      return fs
+        .writeFile(originalPath(folder, hash, format), file.bytes, { mode: 0o600, flag: "wx" })
+        .then(() => true)
+        .catch((error: NodeJS.ErrnoException) => error.code === "EEXIST")
+    }).pipe(Effect.catchCause(() => Effect.succeed(false)))
+  })
+
+  // Kept copies no document still keeps are deleted.
+  const dropCopies = Effect.fnUntraced(function* (copies: readonly { hash: string; format: BrainSchema.Format }[]) {
+    const folder = input.originals
+    if (!folder || copies.length === 0) return
+    const still = new Set(
+      (yield* db
+        .select({ hash: BrainDocumentTable.content_hash })
+        .from(BrainDocumentTable)
+        .where(and(eq(BrainDocumentTable.stored, true), inArray(BrainDocumentTable.content_hash, copies.map((copy) => copy.hash))))
+        .all()
+        .pipe(Effect.orDie)).map((row) => row.hash),
+    )
+    yield* Effect.promise(() =>
+      Promise.all(
+        copies
+          .filter((copy) => !still.has(copy.hash))
+          .map((copy) => fs.rm(originalPath(folder, copy.hash, copy.format), { force: true }).catch(() => undefined)),
+      ),
+    )
+  })
 
   // --- Storing ----------------------------------------------------------------------------------------------------
 
@@ -847,8 +1022,13 @@ function make(input: {
       ...structured.records.map((record) => ({
         ref: record.id,
         type: "record" as const,
-        // Indexed under the same breadcrumb as its passage, so naming the document or section finds the record first.
-        terms: merge(BrainLexical.terms(record.card), BrainLexical.terms(`${structured.title} ${paths.get(record.section) ?? ""}`), 1),
+        // Indexed under the same breadcrumb as its passage, so naming the document or section finds the record first,
+        // and by the user's own wording of it once they edited it.
+        terms: merge(
+          BrainLexical.terms(records.get(record.id)?.user_edited ? records.get(record.id)!.card : record.card),
+          BrainLexical.terms(`${structured.title} ${paths.get(record.section) ?? ""}`),
+          1,
+        ),
         confidence: record.confidence,
         ...status(record.id, record.hold),
       })),
@@ -1149,7 +1329,19 @@ function make(input: {
       .orderBy(asc(BrainDocumentTable.ordinal))
       .all()
       .pipe(Effect.orDie)
-    return rows.map(toDocument)
+    const paused = yield* pausedOf(place)
+    return rows.map((row) => ({ ...toDocument(row), ...(paused.has(row.id) ? { paused: true } : {}) }))
+  })
+
+  // Documents whose reading the user paused.
+  const pausedOf = Effect.fnUntraced(function* (place: Brain.Place) {
+    const rows = yield* db
+      .select({ document: BrainJobTable.document_id })
+      .from(BrainJobTable)
+      .where(and(eq(BrainJobTable.repository_id, place.repository), eq(BrainJobTable.state, "paused")))
+      .all()
+      .pipe(Effect.orDie)
+    return new Set(rows.flatMap((row) => (row.document ? [row.document] : [])))
   })
 
   const findDocument = Effect.fnUntraced(function* (place: Brain.Place, id: string) {
@@ -1184,8 +1376,58 @@ function make(input: {
       .limit(50)
       .all()
       .pipe(Effect.orDie)
+    const counts = yield* db
+      .select({ type: BrainItemTable.type, status: BrainItemTable.status, count: sql<number>`count(*)` })
+      .from(BrainItemTable)
+      .where(eq(BrainItemTable.document_id, id))
+      .groupBy(BrainItemTable.type, BrainItemTable.status)
+      .all()
+      .pipe(Effect.orDie)
+    const recordsBy = (statuses: readonly BrainSchema.ItemStatus[]) =>
+      counts
+        .filter((item) => item.type === "record" && statuses.includes(item.status))
+        .reduce((sum, item) => sum + item.count, 0)
+    const anchors = yield* db
+      .select()
+      .from(BrainAnchorTable)
+      .where(
+        and(
+          eq(BrainAnchorTable.repository_id, place.repository),
+          inArray(
+            BrainAnchorTable.owner,
+            db.select({ ref: BrainItemTable.ref }).from(BrainItemTable).where(eq(BrainItemTable.document_id, id)),
+          ),
+        ),
+      )
+      .limit(100)
+      .all()
+      .pipe(Effect.orDie)
+    const versions = yield* db
+      .select()
+      .from(BrainDocumentTable)
+      .where(and(eq(BrainDocumentTable.repository_id, place.repository), eq(BrainDocumentTable.lineage, row.lineage)))
+      .orderBy(desc(BrainDocumentTable.version))
+      .all()
+      .pipe(Effect.orDie)
+    const paused = yield* pausedOf(place)
     return {
-      document: toDocument(row),
+      document: { ...toDocument(row), ...(paused.has(id) ? { paused: true } : {}) },
+      records: yield* records(place, { document: id, limit: 50, personal: options.personal }),
+      counts: {
+        records: recordsBy(["active", "proposed", "quarantined", "archived"]),
+        active: recordsBy(["active"]),
+        held: recordsBy(["proposed", "quarantined"]),
+        archived: recordsBy(["archived"]),
+        passages: counts.filter((item) => item.type === "passage").reduce((sum, item) => sum + item.count, 0),
+      },
+      anchors: anchors.map(toAnchor),
+      versions: versions.map((version) => ({
+        id: version.id,
+        version: version.version,
+        status: version.status,
+        bytes: version.bytes,
+        createdAt: version.created_at,
+      })),
       sections: sections.map((section) => ({
         id: section.id,
         heading: section.heading,
@@ -1833,7 +2075,12 @@ function make(input: {
     const row = yield* findDocument(place, id)
     if (!row) return "not-found" as const
     const versions = yield* db
-      .select({ id: BrainDocumentTable.id, hash: BrainDocumentTable.content_hash })
+      .select({
+        id: BrainDocumentTable.id,
+        hash: BrainDocumentTable.content_hash,
+        stored: BrainDocumentTable.stored,
+        format: BrainDocumentTable.format,
+      })
       .from(BrainDocumentTable)
       .where(and(eq(BrainDocumentTable.repository_id, place.repository), eq(BrainDocumentTable.lineage, row.lineage)))
       .all()
@@ -1887,6 +2134,7 @@ function make(input: {
       )
       .pipe(Effect.orDie)
     documents.forEach((document) => state.pending.delete(document))
+    yield* dropCopies(versions.filter((version) => version.stored))
     forgetCards(refs.map((item) => item.ref))
     yield* frequencies(place.repository, [...terms])
     yield* totals(place.repository)
@@ -1940,7 +2188,7 @@ function make(input: {
   const update = Effect.fn("BrainKnowledge.update")(function* (
     place: Brain.Place,
     id: string,
-    change: { action?: "approve" | "reject"; title?: string; visibility?: BrainSchema.Visibility },
+    change: { action?: "approve" | "reject" | "pause" | "resume"; title?: string; visibility?: BrainSchema.Visibility },
   ) {
     const now = Date.now()
     if (id.startsWith("d")) {
@@ -1949,6 +2197,17 @@ function make(input: {
       if (change.action === "reject") {
         yield* forget(place, id, { tombstone: true })
         return "updated" as const
+      }
+      // A read already under way finishes; what waits to be read waits until the user resumes it.
+      if (change.action === "pause" || change.action === "resume") {
+        const pause = change.action === "pause"
+        yield* db
+          .update(BrainJobTable)
+          .set({ state: pause ? "paused" : "queued", updated_at: now, ...(pause ? {} : { next_at: now }) })
+          .where(and(eq(BrainJobTable.document_id, id), eq(BrainJobTable.state, pause ? "queued" : "paused")))
+          .run()
+          .pipe(Effect.orDie)
+        if (!pause) yield* drain()
       }
       yield* db
         .update(BrainDocumentTable)
@@ -2017,6 +2276,489 @@ function make(input: {
       documents: rows.map((row) => ({ ...toDocument(row), ...(row.hold_reason ? { hold: row.hold_reason } : {}) })),
       missing: ids.filter((id) => !found.has(owners.get(id) ?? id)),
     }
+  })
+
+  // --- Records, pages and originals, as the user reads them --------------------------------------------------------
+
+  const recordQuery = () =>
+    db
+      .select({ record: BrainRecordTable, item: BrainItemTable, path: BrainSectionTable.path })
+      .from(BrainRecordTable)
+      .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainRecordTable.item))
+      .innerJoin(BrainDocumentTable, eq(BrainDocumentTable.id, BrainRecordTable.document_id))
+      .leftJoin(BrainSectionTable, eq(BrainSectionTable.id, BrainRecordTable.section_id))
+
+  const records = Effect.fn("BrainKnowledge.records")(function* (place: Brain.Place, query: RecordQuery) {
+    const limit = Math.max(1, Math.min(Math.floor(query.limit ?? 50), LIMIT.records))
+    const offset = /^\d{1,9}$/.test(query.cursor ?? "") ? Number(query.cursor) : 0
+    const filters = and(
+      eq(BrainItemTable.repository_id, place.repository),
+      ne(BrainDocumentTable.status, "superseded"),
+      query.personal ? undefined : eq(BrainItemTable.visibility, "repository"),
+      query.kind ? eq(BrainRecordTable.kind, query.kind) : undefined,
+      query.document ? eq(BrainRecordTable.document_id, query.document) : undefined,
+      query.status === "all"
+        ? undefined
+        : query.status === "held"
+          ? inArray(BrainItemTable.status, ["proposed", "quarantined"])
+          : query.status
+            ? eq(BrainItemTable.status, query.status)
+            : ne(BrainItemTable.status, "archived"),
+    )
+    const words = query.query?.trim() ? BrainLexical.terms(query.query) : undefined
+    if (!words) {
+      // Document order: by document, then where in it each record was read.
+      const rows = yield* recordQuery()
+        .where(filters)
+        .orderBy(asc(BrainDocumentTable.ordinal), asc(BrainRecordTable.span_start), asc(BrainRecordTable.id))
+        .limit(limit + 1)
+        .offset(offset)
+        .all()
+        .pipe(Effect.orDie)
+      return page(rows.slice(0, limit).map(toRecord), rows.length > limit ? offset + limit : undefined)
+    }
+    // Best first, among the records the agent could find by these words.
+    const found = (yield* lexical(place, words, { personal: query.personal }))
+      .filter((item) => item.type === "record")
+      .map((item) => item.ref)
+    const rows =
+      found.length === 0
+        ? []
+        : yield* recordQuery()
+            .where(and(filters, inArray(BrainRecordTable.id, found)))
+            .all()
+            .pipe(Effect.orDie)
+    const order = new Map(found.map((ref, index) => [ref, index]))
+    const ranked = rows.toSorted((a, b) => order.get(a.record.id)! - order.get(b.record.id)!)
+    return page(
+      ranked.slice(offset, offset + limit).map(toRecord),
+      ranked.length > offset + limit ? offset + limit : undefined,
+    )
+  })
+
+  const recordOf = Effect.fn("BrainKnowledge.record")(function* (
+    place: Brain.Place,
+    id: string,
+    options: { personal: boolean },
+  ) {
+    const row = yield* recordQuery()
+      .where(and(eq(BrainRecordTable.id, id), eq(BrainItemTable.repository_id, place.repository)))
+      .get()
+      .pipe(Effect.orDie)
+    if (!row || (row.item.visibility === "private" && !options.personal)) return undefined
+    const passage = yield* db
+      .select({ passage: BrainPassageTable, path: BrainSectionTable.path, title: BrainDocumentTable.title })
+      .from(BrainPassageTable)
+      .innerJoin(BrainDocumentTable, eq(BrainDocumentTable.id, BrainPassageTable.document_id))
+      .leftJoin(BrainSectionTable, eq(BrainSectionTable.id, BrainPassageTable.section_id))
+      .where(eq(BrainPassageTable.id, row.record.passage_id))
+      .get()
+      .pipe(Effect.orDie)
+    const anchors = yield* db
+      .select()
+      .from(BrainAnchorTable)
+      .where(and(eq(BrainAnchorTable.repository_id, place.repository), eq(BrainAnchorTable.owner, id)))
+      .limit(100)
+      .all()
+      .pipe(Effect.orDie)
+    const conflicts = yield* db
+      .select()
+      .from(BrainReviewTable)
+      .where(
+        and(
+          eq(BrainReviewTable.repository_id, place.repository),
+          eq(BrainReviewTable.kind, "conflict"),
+          or(eq(BrainReviewTable.a, id), eq(BrainReviewTable.b, id)),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    const history = yield* db
+      .select()
+      .from(BrainEventTable)
+      .where(and(eq(BrainEventTable.repository_id, place.repository), eq(BrainEventTable.entry_id, id)))
+      .orderBy(desc(BrainEventTable.at), desc(BrainEventTable.id))
+      .limit(50)
+      .all()
+      .pipe(Effect.orDie)
+    return {
+      record: toRecord(row),
+      ...(passage
+        ? {
+            passage: {
+              id: passage.passage.id,
+              document: passage.passage.document_id,
+              section: passage.path ?? "",
+              ...(passage.passage.page === null ? {} : { page: passage.passage.page }),
+              header: passage.passage.header,
+              text: passage.passage.body,
+              tokens: passage.passage.tokens,
+            },
+          }
+        : {}),
+      anchors: anchors.map(toAnchor),
+      conflicts: conflicts.map(
+        (item): BrainSchema.ReviewItem => ({
+          id: item.id,
+          kind: item.kind,
+          a: item.a,
+          ...(item.b ? { b: item.b } : {}),
+          subject: item.subject,
+          detail: item.detail,
+          status: item.status,
+          ...(item.winner ? { winner: item.winner } : {}),
+          createdAt: item.created_at,
+          updatedAt: item.updated_at,
+        }),
+      ),
+      history: history.map(
+        (event): BrainSchema.RecordEvent => ({
+          at: event.at,
+          action: event.action,
+          actor: event.actor,
+          ...(event.detail ? { detail: event.detail } : {}),
+        }),
+      ),
+    }
+  })
+
+  const changeRecord = Effect.fn("BrainKnowledge.changeRecord")(function* (
+    place: Brain.Place,
+    id: string,
+    change: RecordChange,
+  ) {
+    const row = yield* recordQuery()
+      .where(and(eq(BrainRecordTable.id, id), eq(BrainItemTable.repository_id, place.repository)))
+      .get()
+      .pipe(Effect.orDie)
+    if (!row) return undefined
+    const now = Date.now()
+    const event = (action: string, detail?: Record<string, unknown>) =>
+      db
+        .insert(BrainEventTable)
+        .values({ entry_id: id, repository_id: place.repository, at: now, action, actor: "user", detail: detail ?? null })
+        .run()
+        .pipe(Effect.orDie)
+    const text = change.text === undefined ? undefined : BrainCard.clip(BrainScan.stripHidden(change.text).replace(/\s+/g, " ").trim(), 600)
+    if (text !== undefined && !text) return { type: "refused" as const, message: "A record needs some text." }
+    if (text !== undefined && BrainScan.redact(text).text !== text)
+      return { type: "refused" as const, message: "That text holds what looks like a secret, so Vector does not keep it." }
+    if (change.action === "make-memory") {
+      const document = yield* findDocument(place, row.record.document_id)
+      const written = yield* brain.propose(place, {
+        kind: MEMORY_KINDS[row.record.kind],
+        text: row.record.card,
+        scope: "repository",
+        origin: "user",
+        evidence: { type: "user" },
+        // What a private document says stays where the document may go.
+        ...(document?.visibility === "private" ? { private: true } : {}),
+      })
+      if (written.type === "refused") return { type: "refused" as const, message: written.message }
+      yield* event("made-memory", { entry: written.entry.id })
+      const after = yield* recordOf(place, id, { personal: true })
+      return { type: "changed" as const, record: after!.record, entry: written.entry }
+    }
+    if (text !== undefined && text !== row.record.card) {
+      yield* db
+        .update(BrainRecordTable)
+        .set({ card: text, user_edited: true, updated_at: now })
+        .where(eq(BrainRecordTable.id, id))
+        .run()
+        .pipe(Effect.orDie)
+      yield* event("edited", { before: row.record.card, after: text })
+      // Found by the words the user gave it, under its document and section as before.
+      const document = yield* findDocument(place, row.record.document_id)
+      yield* index(place.repository, row.item.id, merge(BrainLexical.terms(text), BrainLexical.terms(`${document?.title ?? ""} ${row.path ?? ""}`), 1))
+      forgetCards([id])
+    }
+    if (change.kind && change.kind !== row.record.kind) {
+      yield* db.update(BrainRecordTable).set({ kind: change.kind, updated_at: now }).where(eq(BrainRecordTable.id, id)).run().pipe(Effect.orDie)
+      yield* event("kind", { before: row.record.kind, after: change.kind })
+      forgetCards([id])
+    }
+    if (change.pinned !== undefined && change.pinned !== row.record.pinned) {
+      yield* db.update(BrainRecordTable).set({ pinned: change.pinned, updated_at: now }).where(eq(BrainRecordTable.id, id)).run().pipe(Effect.orDie)
+      yield* event(change.pinned ? "pinned" : "unpinned")
+    }
+    if (change.action === "not-applicable" || change.action === "forget") {
+      // Put away for good: reading the document again keeps it put away.
+      yield* db.update(BrainItemTable).set({ status: "archived" }).where(eq(BrainItemTable.id, row.item.id)).run().pipe(Effect.orDie)
+      yield* db
+        .insert(BrainTombstoneTable)
+        .values({ repository_id: place.repository, norm_hash: itemTombstone(id), until: Number.MAX_SAFE_INTEGER })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* event(change.action)
+      yield* totals(place.repository)
+      forgetCards([id])
+    }
+    if (change.action === "restore" && row.item.status === "archived") {
+      yield* db.update(BrainItemTable).set({ status: "active" }).where(eq(BrainItemTable.id, row.item.id)).run().pipe(Effect.orDie)
+      yield* db
+        .delete(BrainTombstoneTable)
+        .where(and(eq(BrainTombstoneTable.repository_id, place.repository), eq(BrainTombstoneTable.norm_hash, itemTombstone(id))))
+        .run()
+        .pipe(Effect.orDie)
+      yield* event("restored")
+      // A record put away when a new version dropped it has no postings left; it is found by its words again.
+      const document = yield* findDocument(place, row.record.document_id)
+      const card = text ?? row.record.card
+      yield* index(place.repository, row.item.id, merge(BrainLexical.terms(card), BrainLexical.terms(`${document?.title ?? ""} ${row.path ?? ""}`), 1))
+    }
+    yield* revise(place.repository)
+    const after = yield* recordOf(place, id, { personal: true })
+    return { type: "changed" as const, record: after!.record }
+  })
+
+  // One item's keyword postings, written again from its terms; the repository's counts follow.
+  const index = Effect.fnUntraced(function* (repository: string, item: number, terms: ReadonlyMap<string, number>) {
+    const before = (yield* db
+      .select({ term: BrainPostingTable.term })
+      .from(BrainPostingTable)
+      .where(eq(BrainPostingTable.item, item))
+      .all()
+      .pipe(Effect.orDie)).map((row) => row.term)
+    yield* db.delete(BrainPostingTable).where(eq(BrainPostingTable.item, item)).run().pipe(Effect.orDie)
+    const words = [...terms.keys()]
+    if (words.length > 0)
+      yield* db
+        .insert(BrainTermTable)
+        .values(words.map((term) => ({ repository_id: repository, term })))
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+    const ids =
+      words.length === 0
+        ? []
+        : yield* db
+            .select({ id: BrainTermTable.id, term: BrainTermTable.term })
+            .from(BrainTermTable)
+            .where(and(eq(BrainTermTable.repository_id, repository), inArray(BrainTermTable.term, words)))
+            .all()
+            .pipe(Effect.orDie)
+    if (ids.length > 0)
+      yield* db
+        .insert(BrainPostingTable)
+        .values(ids.map((row) => ({ term: row.id, item, count: terms.get(row.term)! })))
+        .run()
+        .pipe(Effect.orDie)
+    yield* db
+      .update(BrainItemTable)
+      .set({ length: [...terms.values()].reduce((sum, count) => sum + count, 0) })
+      .where(eq(BrainItemTable.id, item))
+      .run()
+      .pipe(Effect.orDie)
+    yield* frequencies(repository, [...new Set([...before, ...ids.map((row) => row.id)])])
+    yield* totals(repository)
+  })
+
+  const pageOf = Effect.fn("BrainKnowledge.page")(function* (
+    place: Brain.Place,
+    id: string,
+    number: number,
+    options: { personal: boolean },
+  ) {
+    const row = yield* findDocument(place, id)
+    if (!row || (row.visibility === "private" && !options.personal) || row.pages === null) return undefined
+    if (!Number.isSafeInteger(number) || number < 1 || number > row.pages) return undefined
+    // A passage is filed under the page it starts on; one that runs onto this page is here too when a record of this
+    // page was read from it.
+    const passages = yield* db
+      .select({ passage: BrainPassageTable, item: BrainItemTable, path: BrainSectionTable.path })
+      .from(BrainPassageTable)
+      .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainPassageTable.item))
+      .leftJoin(BrainSectionTable, eq(BrainSectionTable.id, BrainPassageTable.section_id))
+      .where(
+        and(
+          eq(BrainPassageTable.document_id, id),
+          or(
+            eq(BrainPassageTable.page, number),
+            inArray(
+              BrainPassageTable.id,
+              db
+                .select({ id: BrainRecordTable.passage_id })
+                .from(BrainRecordTable)
+                .where(and(eq(BrainRecordTable.document_id, id), eq(BrainRecordTable.page, number))),
+            ),
+          ),
+        ),
+      )
+      .orderBy(asc(BrainPassageTable.ordinal))
+      .all()
+      .pipe(Effect.orDie)
+    const spans =
+      passages.length === 0
+        ? []
+        : yield* db
+            .select({
+              id: BrainRecordTable.id,
+              kind: BrainRecordTable.kind,
+              quote: BrainRecordTable.quote,
+              passage: BrainRecordTable.passage_id,
+              page: BrainRecordTable.page,
+            })
+            .from(BrainRecordTable)
+            .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainRecordTable.item))
+            .where(
+              and(
+                inArray(BrainRecordTable.passage_id, passages.map((item) => item.passage.id)),
+                ne(BrainItemTable.status, "archived"),
+              ),
+            )
+            .orderBy(asc(BrainRecordTable.span_start))
+            .all()
+            .pipe(Effect.orDie)
+    return {
+      document: id,
+      page: number,
+      pages: row.pages,
+      unread: row.unread.includes(number),
+      passages: passages.map((item) => ({
+        id: item.passage.id,
+        section: item.path ?? "",
+        text: item.passage.body,
+        ...(item.item.status !== "active" && item.item.hold_reason ? { hold: item.item.hold_reason } : {}),
+        // Each record's quote where it sits in its passage's text.
+        records: spans
+          .filter((span) => span.passage === item.passage.id)
+          .flatMap((span) => {
+            const start = span.quote ? item.passage.body.indexOf(span.quote) : -1
+            return start < 0
+              ? []
+              : [{ id: span.id, kind: span.kind, start, end: start + span.quote.length, ...(span.page === null ? {} : { page: span.page }) }]
+          }),
+      })),
+    }
+  })
+
+  const original = Effect.fn("BrainKnowledge.original")(function* (place: Brain.Place, id: string) {
+    const row = yield* findDocument(place, id)
+    if (!row) return undefined
+    const bytes = yield* Effect.promise(() => keptCopy(row))
+    return bytes ? { name: row.name, bytes, format: row.format } : undefined
+  })
+
+  const cardsFor = Effect.fn("BrainKnowledge.cards")(function* (
+    place: Brain.Place,
+    ids: readonly string[],
+    options: { personal: boolean },
+  ) {
+    const wanted = [...new Set(ids.map((id) => id.trim()).filter(Boolean))].slice(0, LIMIT.cards)
+    const shown = yield* cards(
+      place,
+      wanted.filter((id) => !id.startsWith("d")),
+      options.personal,
+    )
+    const documents = wanted.filter((id) => id.startsWith("d"))
+    const rows =
+      documents.length === 0
+        ? []
+        : yield* db
+            .select()
+            .from(BrainDocumentTable)
+            .where(
+              and(
+                eq(BrainDocumentTable.repository_id, place.repository),
+                inArray(BrainDocumentTable.id, documents),
+                inArray(BrainDocumentTable.status, [...USABLE]),
+                visibility(options.personal),
+              ),
+            )
+            .all()
+            .pipe(Effect.orDie)
+    const found = new Map(rows.map((row) => [row.id, row]))
+    return wanted.flatMap((id): BrainSchema.Card[] => {
+      const document = found.get(id)
+      if (document)
+        return [
+          {
+            id,
+            kind: "document",
+            document: id,
+            title: document.title,
+            text: `${document.format}${document.pages ? `, ${document.pages} pages` : ""}, ${document.stats.records} records`,
+          },
+        ]
+      const card = shown.get(id)
+      if (!card) return []
+      return [
+        {
+          id,
+          kind: card.kind,
+          document: card.document,
+          title: card.title,
+          ...(card.page === undefined ? {} : { page: card.page }),
+          ...(card.path ? { section: card.path } : {}),
+          text: card.text,
+        },
+      ]
+    })
+  })
+
+  const indexing = Effect.fn("BrainKnowledge.indexing")(function* (place: Brain.Place) {
+    const job = yield* db
+      .select({ id: BrainJobTable.id })
+      .from(BrainJobTable)
+      .where(and(eq(BrainJobTable.repository_id, place.repository), inArray(BrainJobTable.state, ["queued", "running"])))
+      .get()
+      .pipe(Effect.orDie)
+    return job !== undefined
+  })
+
+  const settings = Effect.fn("BrainKnowledge.settings")(function* (place: Brain.Place) {
+    const row = yield* db
+      .select({ repositoryDocs: BrainStateTable.repository_docs, keepOriginals: BrainStateTable.keep_originals })
+      .from(BrainStateTable)
+      .where(eq(BrainStateTable.repository_id, place.repository))
+      .get()
+      .pipe(Effect.orDie)
+    return { repositoryDocs: row?.repositoryDocs ?? true, keepOriginals: row?.keepOriginals ?? false }
+  })
+
+  const configure = Effect.fn("BrainKnowledge.configure")(function* (place: Brain.Place, change: Partial<Settings>) {
+    state.roots.set(place.repository, place.root)
+    const before = yield* settings(place)
+    const after = { ...before, ...change }
+    yield* db
+      .insert(BrainStateTable)
+      .values({ repository_id: place.repository, repository_docs: after.repositoryDocs, keep_originals: after.keepOriginals })
+      .onConflictDoUpdate({
+        target: BrainStateTable.repository_id,
+        set: { repository_docs: after.repositoryDocs, keep_originals: after.keepOriginals },
+      })
+      .run()
+      .pipe(Effect.orDie)
+    if (before.repositoryDocs && !after.repositoryDocs) {
+      // Off means Vector does not read them: what it read of them goes, and may come back when they are on again.
+      const docs = yield* db
+        .select({ id: BrainDocumentTable.id })
+        .from(BrainDocumentTable)
+        .where(
+          and(
+            eq(BrainDocumentTable.repository_id, place.repository),
+            eq(BrainDocumentTable.origin, "repository"),
+            ne(BrainDocumentTable.status, "superseded"),
+          ),
+        )
+        .all()
+        .pipe(Effect.orDie)
+      yield* Effect.forEach(docs, (doc) => forget(place, doc.id, { tombstone: false }), { discard: true })
+    }
+    if (!before.repositoryDocs && after.repositoryDocs) yield* scan(place, { force: true })
+    if (before.keepOriginals && !after.keepOriginals) {
+      // The copies are not redacted, so turning this off deletes them.
+      const kept = yield* db
+        .update(BrainDocumentTable)
+        .set({ stored: false })
+        .where(and(eq(BrainDocumentTable.repository_id, place.repository), eq(BrainDocumentTable.stored, true)))
+        .returning({ hash: BrainDocumentTable.content_hash, format: BrainDocumentTable.format })
+        .all()
+        .pipe(Effect.orDie)
+      yield* dropCopies(kept)
+    }
+    return after
   })
 
   // --- The repository's own docs ----------------------------------------------------------------------------------
@@ -2109,6 +2851,15 @@ function make(input: {
     scan,
     sources,
     worker: () => worker.status(),
+    records,
+    record: recordOf,
+    changeRecord,
+    page: pageOf,
+    original,
+    cards: cardsFor,
+    indexing,
+    settings,
+    configure,
   }
 }
 
@@ -2136,6 +2887,171 @@ const EMPTY_STATS: BrainSchema.DocumentStats = {
   held: 0,
   linked: 0,
   embedded: 0,
+}
+
+/**
+ * A file's bytes and where they came from, or why it may not be read. A path is read from where it really is: a regular
+ * file, checked for secret names and size before a byte is read, and inside the repository unless the user chose it.
+ */
+export async function read(place: Brain.Place, request: AddInput): Promise<Read> {
+  if (request.type === "text")
+    return {
+      type: "file" as const,
+      name: /\.[A-Za-z0-9]{1,8}$/.test(request.name) ? request.name : `${request.name}.md`,
+      bytes: new TextEncoder().encode(request.text),
+      lineage: lineageOf(request.name),
+    }
+  if (request.type === "bytes")
+    return {
+      type: "file" as const,
+      name: request.name,
+      bytes: request.bytes,
+      ...(request.mime ? { mime: request.mime } : {}),
+      lineage: lineageOf(request.name),
+    }
+  const absolute = path.resolve(place.root, request.path)
+  if (BrainSniff.SECRET_FILE.test(absolute.replace(/\\/g, "/"))) return refuse("secret", BrainSniff.MESSAGES.secret)
+  const own = await fs.lstat(absolute).catch(() => undefined)
+  if (!own) return refuse("not-found", `There is no file at ${request.path}.`)
+  if (own.isSymbolicLink() && request.links === false)
+    return refuse("unsupported", `${request.path} is a link. Add the file it points to.`)
+  // A regular file only, found where it really is: never a folder, a device or a pipe, which could block a read.
+  const real = await fs.realpath(absolute).catch(() => undefined)
+  const stat = real ? await fs.lstat(real).catch(() => undefined) : undefined
+  if (!real || !stat?.isFile()) return refuse("not-found", `${request.path} is not a file Vector can read.`)
+  if (BrainSniff.SECRET_FILE.test(real.replace(/\\/g, "/"))) return refuse("secret", BrainSniff.MESSAGES.secret)
+  const root = await fs.realpath(place.root).catch(() => place.root)
+  const outside = await outsideOf(request, absolute, FSUtil.contains(root, real))
+  if (outside) return outside
+  const cap = BrainLimits.LIMITS.worker.bytes.pdf
+  if (stat.size > cap) return refuse("too-large", "This file is over 64 MB, the most Vector reads.")
+  const bytes = await upTo(real, cap)
+  if (bytes === "too-large") return refuse("too-large", "This file is over 64 MB, the most Vector reads.")
+  if (!bytes) return refuse("not-found", `${request.path} is not a file Vector can read.`)
+  const relative = FSUtil.contains(root, real) ? path.relative(root, real).split(path.sep).join("/") : undefined
+  return {
+    type: "file" as const,
+    name: path.basename(real),
+    bytes,
+    // A repository doc is the same document in every worktree, so it is known by its path in the repository.
+    lineage: request.origin === "repository" && relative ? relative : lineageOf(path.basename(real)),
+    source: request.origin === "repository" && relative ? relative : real,
+  }
+}
+
+// Why a file may not be read from where it really is, if it may not. A file the user chose (attached to the
+// conversation or named on the command line) can be anywhere. The agent keeps files of this repository by where they
+// really are, so a link it found or made cannot reach the rest of the computer; and a repository doc is a file of the
+// repository's own, never a link, since a repository a user trusts can still ship one to any file.
+async function outsideOf(request: AddInput & { readonly type: "path" }, absolute: string, inside: boolean) {
+  if (request.attached || request.origin === "chat" || request.origin === "cli") return undefined
+  const link = request.origin === "repository" && (await fs.lstat(absolute).catch(() => undefined))?.isSymbolicLink()
+  if (!link && inside) return undefined
+  return refuse(
+    "outside",
+    link
+      ? `${request.path} is a link, and Vector reads a repository's own docs only.`
+      : `${request.path} is outside this repository. Vector keeps files from this repository or ones the user attached.`,
+  )
+}
+
+// At most `cap` bytes of a regular file, read from what was opened: a file swapped for a link or a pipe after it was
+// checked is not opened, and one that grew past the cap is refused rather than read whole.
+async function upTo(file: string, cap: number) {
+  const handle = await fs
+    .open(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0))
+    .catch(() => undefined)
+  if (!handle) return undefined
+  const fill = async () => {
+    if (!(await handle.stat()).isFile()) return undefined
+    const buffer = new Uint8Array(cap + 1)
+    let length = 0
+    for (;;) {
+      const chunk = await handle.read(buffer, length, buffer.length - length, null)
+      if (chunk.bytesRead === 0) return buffer.slice(0, length)
+      length += chunk.bytesRead
+      if (length > cap) return "too-large" as const
+    }
+  }
+  return fill().finally(() => handle.close())
+}
+
+const EXTENSIONS: Readonly<Record<BrainSchema.Format, string>> = {
+  pdf: "pdf",
+  docx: "docx",
+  pptx: "pptx",
+  xlsx: "xlsx",
+  csv: "csv",
+  markdown: "md",
+  html: "html",
+  json: "json",
+  yaml: "yaml",
+  openapi: "json",
+  text: "txt",
+}
+
+/** Where a kept original lives: named by its hash, with its format's extension. */
+function originalPath(folder: string, hash: string, format: BrainSchema.Format) {
+  return path.join(folder, `${hash}.${EXTENSIONS[format]}`)
+}
+
+/** The memory kind a record becomes when the user saves it as memory. */
+const MEMORY_KINDS: Readonly<Record<BrainSchema.RecordKind, BrainSchema.LearnedKind>> = {
+  requirement: "fact",
+  constraint: "fact",
+  decision: "decision",
+  contract: "fact",
+  procedure: "lesson",
+  term: "fact",
+  entity: "fact",
+  fact: "fact",
+  question: "fact",
+}
+
+function page(records: readonly BrainSchema.Record[], next: number | undefined): RecordPage {
+  return { records, ...(next === undefined ? {} : { cursor: String(next) }) }
+}
+
+function toRecord(row: {
+  readonly record: typeof BrainRecordTable.$inferSelect
+  readonly item: ItemRow
+  readonly path: string | null
+}): BrainSchema.Record {
+  return {
+    id: row.record.id,
+    document: row.record.document_id,
+    passage: row.record.passage_id,
+    section: row.path ?? "",
+    kind: row.record.kind,
+    subject: row.record.subject,
+    card: row.record.card,
+    quote: row.record.quote,
+    fields: row.record.fields,
+    status: row.item.status,
+    ...(row.item.status !== "active" && row.item.hold_reason ? { hold: row.item.hold_reason } : {}),
+    confidence: row.item.confidence,
+    origin: row.record.origin,
+    userEdited: row.record.user_edited,
+    pinned: row.record.pinned,
+    ...(row.record.page === null ? {} : { page: row.record.page }),
+    ...(row.record.changed_version === null ? {} : { changedVersion: row.record.changed_version }),
+    uses: row.item.uses,
+    createdAt: row.record.created_at,
+    updatedAt: row.record.updated_at,
+  }
+}
+
+function toAnchor(row: typeof BrainAnchorTable.$inferSelect): BrainSchema.Anchor {
+  return {
+    owner: row.owner,
+    path: row.path,
+    ...(row.symbol ? { symbol: row.symbol } : {}),
+    ...(row.line === null ? {} : { line: row.line }),
+    method: row.method,
+    status: row.status,
+    origin: row.origin,
+    checkedAt: row.checked_at,
+  }
 }
 
 function refuse(reason: Refusal, message: string) {

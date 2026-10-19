@@ -255,6 +255,8 @@ export const Document = Schema.Struct({
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
   indexedAt: Schema.optional(Schema.Finite),
+  /** The user paused its reading; it goes on when they resume it. */
+  paused: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "MemoryDocument" })
 export type Document = typeof Document.Type
 
@@ -302,7 +304,8 @@ export type Record = typeof Record.Type
 /** One line of document knowledge as search and citations show it: a record's card, or a passage's opening. */
 export const Card = Schema.Struct({
   id: Schema.String,
-  kind: Schema.Literals([...RecordKind.literals, "passage"]),
+  /** document: a whole document, cited by its id. */
+  kind: Schema.Literals([...RecordKind.literals, "passage", "document"]),
   document: Schema.String,
   /** The document's title. */
   title: Schema.String,
@@ -311,6 +314,28 @@ export const Card = Schema.Struct({
   text: Schema.String,
 }).annotate({ identifier: "MemoryCard" })
 export type Card = typeof Card.Type
+
+/** A change to a record: Vector reading a new version of it, or the user's edit or decision. */
+export const RecordEvent = Schema.Struct({
+  at: Schema.Finite,
+  action: Schema.String,
+  actor: Schema.Literals(["user", "agent", "vector"]),
+  detail: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+}).annotate({ identifier: "MemoryRecordEvent" })
+export type RecordEvent = typeof RecordEvent.Type
+
+/** A link from a record, passage or entry to the code it names. */
+export const Anchor = Schema.Struct({
+  owner: Schema.String,
+  path: Schema.String,
+  symbol: Schema.optional(Schema.String),
+  line: Schema.optional(Schema.Finite),
+  method: Schema.Literals(["path", "definition", "use", "route", "env", "constant", "user", "outcome"]),
+  status: Schema.Literals(["fresh", "drifted", "missing"]),
+  origin: Schema.Literals(["extracted", "user", "outcome"]),
+  checkedAt: Schema.Finite,
+}).annotate({ identifier: "MemoryAnchor" })
+export type Anchor = typeof Anchor.Type
 
 /**
  * - conflict: two records, or a record and an entry or rule, disagree. Never resolved automatically.

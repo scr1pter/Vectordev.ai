@@ -165,4 +165,28 @@ describe("BrainKnowledge.scan", () => {
     )
     expect(result).toBe(0)
   })
+
+  test("turning repository docs off forgets them, and turning them on reads them again", async () => {
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          track(setup.root, ["README.md"])
+          yield* setup.knowledge.scan(setup.place)
+          const upload = yield* setup.knowledge.add(setup.place, { type: "text", name: "Notes.md", text: "# Notes\n\nUploads MUST stay private.", origin: "upload" })
+          const off = yield* setup.knowledge.configure(setup.place, { repositoryDocs: false })
+          const without = (yield* setup.knowledge.documents(setup.place, { personal: true })).map((document) => document.origin)
+          const scanned = yield* setup.knowledge.scan(setup.place, { force: true })
+          const on = yield* setup.knowledge.configure(setup.place, { repositoryDocs: true })
+          const back = (yield* setup.knowledge.documents(setup.place, { personal: true })).map((document) => document.origin)
+          return { upload: upload.type, off, without, scanned, on, back }
+        }),
+      { files: { "README.md": FILES["README.md"] } },
+    )
+    expect(result.upload).toBe("queued")
+    expect(result.off).toEqual({ repositoryDocs: false, keepOriginals: false })
+    expect(result.without).toEqual(["upload"])
+    expect(result.scanned).toBe(0)
+    expect(result.on.repositoryDocs).toBe(true)
+    expect(result.back.toSorted()).toEqual(["repository", "upload"])
+  })
 })
