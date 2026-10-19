@@ -11,6 +11,7 @@ import {
   rejectable,
   savedNotice,
   summary,
+  UNDONE,
   usage,
 } from "./memory-model"
 
@@ -79,12 +80,15 @@ describe("memory page model", () => {
       "guest",
       "instruction-like",
       "hidden-unicode",
+      "hidden-text",
+      "suggested",
       undefined,
     ] as const)
       expect(holdLabel(hold).length).toBeGreaterThan(20)
-    // Sessions agreeing no longer confirm a proposal, and a fetching command holds memory like the web does.
+    // Only an earlier version left proposals, and they wait for the user; a fetching command holds memory like the web.
+    expect(holdLabel(undefined)).toContain("An earlier version")
     expect(holdLabel(undefined)).toContain("once you approve it")
-    expect(holdLabel(undefined)).not.toContain("another session confirms")
+    expect(holdLabel(undefined)).not.toContain("later session")
     expect(holdLabel("web")).toContain("reaches outside this computer")
     expect(holdLabel("mcp")).toContain("an MCP server's prompt")
     expect(kindLabel("failure")).toBe("Past failure")
@@ -104,13 +108,19 @@ describe("memory page model", () => {
 
   test("never says project", () => {
     const strings = [
-      ...["web", "mcp", "subagent", "untrusted-repository", "guest", "instruction-like", "hidden-unicode"].map((hold) =>
-        holdLabel(hold as never),
+      ...["web", "mcp", "subagent", "untrusted-repository", "guest", "instruction-like", "hidden-unicode", "hidden-text", "suggested"].map(
+        (hold) => holdLabel(hold as never),
       ),
+      UNDONE,
       summary({ active: 1, review: 1, archived: 1, digestTokens: 1 }),
       originLabel({ origin: "file", scope: "repository", source: { file: "/repo/BRAIN.md" } }),
     ]
     for (const text of strings) expect(text.toLowerCase()).not.toContain("project")
+  })
+
+  test("after Undo, says Vector will not learn it again and where to bring it back", () => {
+    expect(UNDONE).toContain("will not learn it again")
+    expect(UNDONE).toContain("restore it from Archived")
   })
 
   test("after adding, says what the engine kept rather than what was typed", () => {

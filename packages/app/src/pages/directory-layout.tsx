@@ -5,7 +5,7 @@ import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { type Accessor, createEffect, createMemo, createResource, onCleanup, type ParentProps, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { LocalProvider } from "@/context/local"
-import { SDKProvider } from "@/context/sdk"
+import { SDKProvider, useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { decode64 } from "@/utils/base64"
 import { Schema } from "effect"
@@ -24,6 +24,7 @@ export function DirectoryDataProvider(
   const navigate = useNavigate()
   const params = useParams()
   const sync = useSync()
+  const sdk = useSDK()
   const serverSync = useServerSync()
   const directory = () => (typeof props.directory === "function" ? props.directory() : props.directory)
   const slug = createMemo(() => base64Encode(directory()))
@@ -65,6 +66,15 @@ export function DirectoryDataProvider(
           directory={directory}
           onNavigateToSession={(sessionID: string) => navigate(href(sessionID))}
           onSessionHref={href}
+          // Undo on a "Learned" line in the session: the same change as Undo in Settings > Memory.
+          onMemoryUndo={(memoryID: string) =>
+            sdk()
+              .client.memory.update({ memoryID, action: "undo" })
+              .then(
+                () => true,
+                () => false,
+              )
+          }
         >
           <LocalProvider>{props.children}</LocalProvider>
         </DataProvider>

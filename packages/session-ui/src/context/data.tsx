@@ -50,6 +50,9 @@ export type NavigateToSessionFn = (sessionID: string) => void
 
 export type SessionHrefFn = (sessionID: string) => string
 
+/** Takes back a memory entry the agent learned, as the user; resolves to whether that worked. */
+export type MemoryUndoFn = (memoryID: string) => Promise<boolean>
+
 export const { use: useData, provider: DataProvider } = createSimpleContext({
   name: "Data",
   init: (props: {
@@ -57,6 +60,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
     directory: string
     onNavigateToSession?: NavigateToSessionFn
     onSessionHref?: SessionHrefFn
+    onMemoryUndo?: MemoryUndoFn
   }) => {
     return {
       get store() {
@@ -67,6 +71,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
       },
       navigateToSession: props.onNavigateToSession,
       sessionHref: props.onSessionHref,
+      undoMemory: props.onMemoryUndo,
     }
   },
 })

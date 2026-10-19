@@ -65,6 +65,8 @@ import { animate } from "motion"
 import { useLocation } from "@solidjs/router"
 import { attached, inline, kind } from "./message-file"
 import { readPartText } from "./message-part-text"
+import { memoryLearned } from "./memory-learned"
+import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 
 async function writeClipboard(text: string): Promise<boolean> {
   const body = typeof document === "undefined" ? undefined : document.body
@@ -2599,3 +2601,51 @@ ToolRegistry.register({
     return <BasicTool icon="brain" status={props.status} trigger={trigger()} hideDetails />
   },
 })
+
+// What the agent learned on its own shows as one line with Undo, so the user sees it go into use and can take it back
+// where they are. Every other memory call (a search, a write held for review) shows as any tool call does.
+ToolRegistry.register({
+  name: "memory",
+  render(props) {
+    const learned = createMemo(() => (props.status === "completed" ? memoryLearned(props.metadata) : undefined))
+    return (
+      <Show when={learned()} fallback={<GenericTool {...props} />}>
+        {(item) => <MemoryLearned id={item().id} text={item().text} />}
+      </Show>
+    )
+  },
+})
+
+function MemoryLearned(props: { id: string; text?: string }) {
+  const data = useData()
+  const i18n = useI18n()
+  const [state, setState] = createSignal<"learned" | "undoing" | "undone" | "failed">("learned")
+  const undo = async () => {
+    if (!data.undoMemory || state() === "undoing" || state() === "undone") return
+    setState("undoing")
+    setState((await data.undoMemory(props.id)) ? "undone" : "failed")
+  }
+  return (
+    <div data-component="tool-trigger" data-memory-learned={state()}>
+      <div data-slot="basic-tool-tool-trigger-content">
+        <div data-slot="basic-tool-tool-info">
+          <div data-slot="basic-tool-tool-info-structured">
+            <div data-slot="basic-tool-tool-info-main">
+              <span data-slot="basic-tool-tool-title">
+                {i18n.t(state() === "undone" ? "ui.tool.memory.undone" : "ui.tool.memory.learned")}
+              </span>
+              <span data-slot="basic-tool-tool-subtitle">{props.text ?? i18n.t("ui.tool.memory.personal")}</span>
+            </div>
+            <Show when={data.undoMemory && state() !== "undone"}>
+              <span data-slot="basic-tool-tool-action">
+                <ButtonV2 size="small" variant="ghost" disabled={state() === "undoing"} onClick={undo}>
+                  {i18n.t(state() === "failed" ? "ui.tool.memory.retry" : "ui.tool.memory.undo")}
+                </ButtonV2>
+              </span>
+            </Show>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

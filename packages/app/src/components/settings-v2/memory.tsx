@@ -9,6 +9,7 @@ import { LocalMemoryPanel } from "@/features/memory/local-memory-panel"
 import {
   MEMORY_FILTERS,
   MEMORY_KINDS,
+  RECENT,
   approvable,
   editable,
   fileLabel,
@@ -20,6 +21,7 @@ import {
   rejectable,
   savedNotice,
   summary,
+  UNDONE,
   usage,
   type MemoryEntryView,
   type MemoryFiles,
@@ -64,6 +66,15 @@ export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirect
       input.client.memory
         .list({ scope: input.scope, filter: input.filter, ...(input.query ? { query: input.query } : {}) })
         .then((result) => result.data),
+  )
+  // What Vector put in use on its own, in this repository and about the user, newest first.
+  const [learned] = createResource(
+    () => {
+      const current = client()
+      if (!current) return false
+      return { client: current, version: version() }
+    },
+    (input) => input.client.memory.list({ filter: "learned" }).then((result) => result.data),
   )
   const [settings, { mutate: setSettings }] = createResource(
     () => client() ?? false,
@@ -128,9 +139,11 @@ export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirect
             <div class="settings-v2-row-copy">
               <div class="settings-v2-row-title">Let Vector learn as it works</div>
               <div class="settings-v2-row-description">
-                Vector saves a short lesson, decision or preference when you state one, when a fix makes a failing check
-                pass, or when a lasting decision is made, each with its evidence. It never writes rules: only you do.
-                Memory learned in a session that read web pages, ran MCP tools or had a guest waits for your review.
+                Vector saves a short lesson, decision or preference as it works, when you state one, when a fix makes a
+                failing check pass, or when a lasting decision is made, and uses it from the next request. Each one is
+                listed under Recently learned, where one click undoes it. It never writes rules: only you do. What it
+                learns in a session that read web pages or other outside content, ran MCP tools, or had a guest or a
+                subagent in it waits for your review instead.
               </div>
             </div>
             <div class="settings-v2-row-control settings-v2-row-control--compact">
@@ -154,6 +167,8 @@ export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirect
           </Show>
         </div>
       </div>
+
+      <RecentlyLearned entries={learned.latest?.entries ?? []} act={act} />
 
       <div class="settings-v2-card settings-v2-card--wide">
         <div class="settings-memory-toolbar">
@@ -261,6 +276,68 @@ export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirect
 
       <EraseCard scope={scope()} repository={!!directory()} act={act} />
     </section>
+  )
+}
+
+function RecentlyLearned(props: {
+  entries: readonly MemoryEntryView[]
+  act: (run: (current: VectorClient) => Promise<{ error?: unknown }>, done: string) => Promise<void>
+}) {
+  const [all, setAll] = createSignal(false)
+  const shown = () => (all() ? props.entries : props.entries.slice(0, RECENT))
+  return (
+    <div class="settings-v2-card settings-v2-card--wide" data-component="settings-memory-learned">
+      <div class="settings-v2-card-head">
+        <div class="settings-v2-card-copy">
+          <h3 class="settings-v2-card-title">Recently learned</h3>
+          <p class="settings-v2-card-description">
+            What Vector put in use on its own, newest first. Undo takes one back, and Vector does not learn it again.
+          </p>
+        </div>
+      </div>
+      <div class="settings-v2-card-body">
+        <Show
+          when={props.entries.length > 0}
+          fallback={<p class="settings-memory-empty">Vector has not learned anything on its own yet.</p>}
+        >
+          <div class="settings-memory-list">
+            <For each={shown()}>
+              {(entry) => (
+                <article class="settings-memory-row" data-component="settings-memory-learned-entry">
+                  <div class="settings-memory-row-head">
+                    <span class="settings-memory-kind-badge" data-kind={entry.kind}>
+                      {kindLabel(entry.kind)}
+                    </span>
+                    <Show when={entry.scope === "personal"}>
+                      <span class="settings-memory-tag">Every repository</span>
+                    </Show>
+                    <span class="settings-memory-id">{entry.id}</span>
+                  </div>
+                  <p class="settings-memory-text">{entry.text}</p>
+                  <div class="settings-memory-actions">
+                    <ButtonV2
+                      size="small"
+                      variant="ghost"
+                      icon="reset"
+                      onClick={() =>
+                        props.act((current) => current.memory.update({ memoryID: entry.id, action: "undo" }), UNDONE)
+                      }
+                    >
+                      Undo
+                    </ButtonV2>
+                  </div>
+                </article>
+              )}
+            </For>
+          </div>
+          <Show when={props.entries.length > shown().length}>
+            <ButtonV2 size="small" variant="ghost" onClick={() => setAll(true)}>
+              Show all {props.entries.length}
+            </ButtonV2>
+          </Show>
+        </Show>
+      </div>
+    </div>
   )
 }
 
@@ -490,8 +567,9 @@ function EraseCard(props: {
         <div class="settings-v2-card-copy">
           <h3 class="settings-v2-card-title">Tidy and erase</h3>
           <p class="settings-v2-card-description">
-            Vector tidies its memory on its own every few hours, with no model call: it merges duplicates, confirms what
-            two sessions agree on, and archives what goes unused. Erasing never touches files you or your team wrote.
+            Vector tidies its memory on its own every few hours, with no model call: it merges duplicates, archives what
+            goes unused, and drops what waited for your review for 30 days. Erasing never touches files you or your team
+            wrote.
           </p>
         </div>
       </div>

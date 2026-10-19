@@ -10,6 +10,8 @@ export type MemoryHold =
   | "guest"
   | "instruction-like"
   | "hidden-unicode"
+  | "hidden-text"
+  | "suggested"
 
 export type MemoryEntryView = {
   id: string
@@ -87,7 +89,9 @@ export function holdLabel(hold: MemoryHold | undefined) {
   if (hold === "untrusted-repository") return "This repository's settings are not trusted yet, so its memory waits."
   if (hold === "instruction-like") return "It reads like an instruction to the agent, so it waits for you."
   if (hold === "hidden-unicode") return "It contains hidden characters. Fix the file to use it."
-  return "Vector could not check its evidence. It is used once you approve it, or once Vector checks it in a later session."
+  if (hold === "hidden-text") return "It has text a reader of the document would not see, so it waits for you."
+  if (hold === "suggested") return "Vector offered to keep it without you asking, so it waits for you."
+  return "An earlier version of Vector held this because it could not check its evidence. It is used once you approve it."
 }
 
 /**
@@ -136,6 +140,12 @@ export function approvable(entry: Pick<MemoryEntryView, "status" | "origin" | "h
 export function rejectable(entry: Pick<MemoryEntryView, "status" | "origin">) {
   return (entry.status === "proposed" || entry.status === "quarantined") && editable(entry)
 }
+
+/** How many of Recently learned show before "Show all". */
+export const RECENT = 8
+
+/** What the page says once the user undoes something Vector learned. */
+export const UNDONE = "Undone. Vector will not learn it again; restore it from Archived to bring it back."
 
 export function summary(stats: { active: number; review: number; archived: number; digestTokens: number }) {
   return [

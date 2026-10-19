@@ -1,0 +1,30 @@
+import { describe, expect, test } from "bun:test"
+import { memoryLearned } from "./memory-learned"
+
+describe("memoryLearned", () => {
+  test("reads what the agent put in use, with its words for a repository entry", () => {
+    expect(
+      memoryLearned({
+        action: "add",
+        result: "added",
+        id: "m4k2q",
+        learned: { scope: "repository", text: "Run the engine tests from packages/engine." },
+      }),
+    ).toEqual({ id: "m4k2q", text: "Run the engine tests from packages/engine." })
+  })
+
+  test("a personal entry comes without its words", () => {
+    expect(memoryLearned({ action: "add", result: "added", id: "m4k2q", learned: { scope: "personal" } })).toEqual({
+      id: "m4k2q",
+      text: undefined,
+    })
+  })
+
+  test("a held write, a search, a refusal and words memory already had are not something learned", () => {
+    expect(memoryLearned({ action: "add", result: "held", id: "m4k2q", hold: "web" })).toBeUndefined()
+    expect(memoryLearned({ action: "search", result: "2" })).toBeUndefined()
+    expect(memoryLearned({ action: "add", result: "refused" })).toBeUndefined()
+    expect(memoryLearned({ action: "add", result: "merged", id: "m4k2q" })).toBeUndefined()
+    expect(memoryLearned(undefined)).toBeUndefined()
+  })
+})
