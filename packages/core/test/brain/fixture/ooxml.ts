@@ -3,7 +3,7 @@
 
 import { Deflate, strToU8, zipSync } from "fflate"
 
-const W =
+export const W =
   'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
 const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
@@ -145,6 +145,10 @@ export function docx(input: {
 // --- PowerPoint -------------------------------------------------------------------------------------------------------
 
 export type Slide = {
+  /** Shapes written as XML, after the others. */
+  readonly shapes?: readonly string[]
+  /** The slide's own background, as the XML inside p:bg. */
+  readonly background?: string
   readonly title?: string
   readonly bullets?: readonly (string | { readonly text: string; readonly level: number })[]
   readonly text?: readonly string[]
@@ -169,7 +173,14 @@ function drawing(text: string, level = 0, bullet?: "none") {
  * A .pptx. Slides are stored under file names in reverse order, so a reader that takes the order from
  * presentation.xml, not from the names, reads them as given.
  */
-export function pptx(slides: readonly Slide[], options: { readonly title?: string } = {}) {
+export function pptx(
+  slides: readonly Slide[],
+  options: {
+    readonly title?: string
+    /** Gives every slide a layout and a master, the master with this background (the XML inside p:bg). */
+    readonly master?: string
+  } = {},
+) {
   const files: Record<string, string> = {
     "[Content_Types].xml": TYPES,
     "_rels/.rels": rels([{ id: "rId1", type: "officeDocument", target: "ppt/presentation.xml" }]),
@@ -206,6 +217,7 @@ export function pptx(slides: readonly Slide[], options: { readonly title?: strin
           ]
         : []),
       ...(slide.footer ? [shape("ftr", [drawing(slide.footer)])] : []),
+      ...(slide.shapes ?? []),
       ...(slide.table
         ? [
             `<p:graphicFrame><a:graphic><a:graphicData><a:tbl>${slide.table.map((row) => `<a:tr>${row.map((cell) => `<a:tc><a:txBody>${drawing(cell)}</a:txBody></a:tc>`).join("")}</a:tr>`).join("")}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`,
@@ -213,13 +225,23 @@ export function pptx(slides: readonly Slide[], options: { readonly title?: strin
         : []),
     ].join("")
     files[`ppt/slides/slide${file}.xml`] =
-      `<?xml version="1.0" encoding="UTF-8"?><p:sld ${P}${slide.hidden ? ' show="0"' : ""}><p:cSld><p:spTree>${body}</p:spTree></p:cSld></p:sld>`
-    files[`ppt/slides/_rels/slide${file}.xml.rels`] = rels(
-      slide.notes ? [{ id: "rN", type: "notesSlide", target: `../notesSlides/notesSlide${file}.xml` }] : [],
-    )
+      `<?xml version="1.0" encoding="UTF-8"?><p:sld ${P}${slide.hidden ? ' show="0"' : ""}><p:cSld>${slide.background ? `<p:bg>${slide.background}</p:bg>` : ""}<p:spTree>${body}</p:spTree></p:cSld></p:sld>`
+    files[`ppt/slides/_rels/slide${file}.xml.rels`] = rels([
+      ...(slide.notes ? [{ id: "rN", type: "notesSlide", target: `../notesSlides/notesSlide${file}.xml` }] : []),
+      ...(options.master ? [{ id: "rL", type: "slideLayout", target: "../slideLayouts/slideLayout1.xml" }] : []),
+    ])
     if (slide.notes)
       files[`ppt/notesSlides/notesSlide${file}.xml`] =
         `<?xml version="1.0" encoding="UTF-8"?><p:notes ${P}><p:cSld><p:spTree>${shape("sldImg", [])}${shape("body", [drawing(slide.notes, 0, "none")])}${shape("sldNum", [drawing(String(file))])}</p:spTree></p:cSld></p:notes>`
+  }
+  if (options.master) {
+    files["ppt/slideLayouts/slideLayout1.xml"] =
+      `<?xml version="1.0" encoding="UTF-8"?><p:sldLayout ${P}><p:cSld><p:spTree/></p:cSld></p:sldLayout>`
+    files["ppt/slideLayouts/_rels/slideLayout1.xml.rels"] = rels([
+      { id: "rM", type: "slideMaster", target: "../slideMasters/slideMaster1.xml" },
+    ])
+    files["ppt/slideMasters/slideMaster1.xml"] =
+      `<?xml version="1.0" encoding="UTF-8"?><p:sldMaster ${P}><p:cSld><p:bg>${options.master}</p:bg><p:spTree/></p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2"/></p:sldMaster>`
   }
   return zip(files)
 }
@@ -236,6 +258,8 @@ export type Sheet = {
   )[])[]
   readonly hidden?: boolean
   readonly hiddenRows?: readonly number[]
+  /** Columns the sheet hides, from 1. */
+  readonly hiddenColumns?: readonly number[]
 }
 
 /** A .xlsx: strings shared, numbers as values, booleans typed, formulas with their cached value. */
@@ -269,7 +293,7 @@ export function xlsx(sheets: readonly Sheet[]) {
       })
       .join("")
     files[`xl/worksheets/sheet${index + 1}.xml`] =
-      `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rows}</sheetData></worksheet>`
+      `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${sheet.hiddenColumns ? `<cols>${sheet.hiddenColumns.map((column) => `<col min="${column}" max="${column}" hidden="1"/>`).join("")}</cols>` : ""}<sheetData>${rows}</sheetData></worksheet>`
   }
   files["xl/sharedStrings.xml"] =
     `<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${strings.length}">${strings.map((text) => `<si><t>${escape(text)}</t></si>`).join("")}</sst>`

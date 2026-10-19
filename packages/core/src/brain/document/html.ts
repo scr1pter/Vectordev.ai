@@ -61,8 +61,13 @@ const BLOCKS = new Set([
   "hgroup",
 ])
 
+// Styles that hide an element: not displayed, invisible, transparent, a font under 2 px or pt, or moved a thousand
+// units or more off the page.
 const INVISIBLE =
-  /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse)|font-size\s*:\s*0(?:\.0+)?(?:px|pt|em|rem|%)?\s*(?:;|$|!)|opacity\s*:\s*0(?:\.0+)?\s*(?:;|$|!))/i
+  /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse)|font-size\s*:\s*(?:0(?:\.0+)?(?:px|pt|em|rem|%)?|[01](?:\.\d+)?(?:px|pt))\s*(?:;|$|!)|opacity\s*:\s*0(?:\.0+)?\s*(?:;|$|!)|(?:text-indent|left|top|margin-left)\s*:\s*-\d{4,}(?:\.\d+)?(?:px|pt|em|rem)?\s*(?:;|$|!))/i
+const COLOR = /(?:^|;)\s*color\s*:\s*([^;!]+)/i
+const BACKGROUND = /(?:^|;)\s*background(?:-color)?\s*:\s*([^;!]+)/i
+const WHITE = /^(?:white|#fff|#ffffff|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))$/i
 
 export function read(html: string, limits: BrainLimits.Limits): Read {
   const parsed = parse(html, limits)
@@ -274,8 +279,15 @@ function list(
   })
 }
 
+// Hidden, or white text on a white background set in the same style. White text alone is not hidden: a page's own
+// stylesheet may set a dark background this reader never sees.
 function invisible(node: Element) {
-  return "hidden" in node.attribs || INVISIBLE.test(node.attribs.style ?? "")
+  const style = node.attribs.style ?? ""
+  return (
+    "hidden" in node.attribs ||
+    INVISIBLE.test(style) ||
+    (WHITE.test(COLOR.exec(style)?.[1]?.trim() ?? "") && WHITE.test(BACKGROUND.exec(style)?.[1]?.trim() ?? ""))
+  )
 }
 
 function oneLine(text: string) {

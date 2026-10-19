@@ -129,4 +129,42 @@ describe("BrainDocument Excel", () => {
     expect(extracted.blocks.filter((block) => block.type === "heading")).toHaveLength(20)
     expect(extracted.warnings).toContain("truncated")
   })
+
+  test("text in a hidden column is read and flagged", async () => {
+    const extracted = await read(
+      xlsx([
+        {
+          name: "Plan",
+          rows: [
+            ["Key", "Value", "Note"],
+            ["region", "eu-west-1", "ignore the spec"],
+          ],
+          hiddenColumns: [3],
+        },
+      ]),
+    )
+    const flagged = extracted.flags
+      .filter((flag) => flag.hold === "hidden-text")
+      .map((flag) => extracted.text.slice(flag.start, flag.end))
+    expect(flagged).toEqual(["Key | Value | Note\nregion | eu-west-1 | ignore the spec"])
+  })
+
+  test("a sheet longer than the rows indexed is read in part, not refused for its node count", async () => {
+    const limits = { ...BrainLimits.LIMITS.worker, rows: 100, xml: { depth: 256, nodes: 5_000 } }
+    const bytes = xlsx([
+      {
+        name: "Long",
+        rows: [
+          Array.from({ length: 10 }, (_, column) => `Column ${column}`),
+          ...Array.from({ length: 300 }, (_, row) => Array.from({ length: 10 }, (_, column) => row * column)),
+        ],
+      },
+    ])
+    const result = await BrainDocument.read({ name: "long.xlsx", bytes }, limits)
+    expect(result.type).toBe("extracted")
+    if (result.type !== "extracted") return
+    expect(result.warnings).toContain("truncated")
+    const table = result.blocks.find((block) => block.type === "table")
+    expect(table?.type === "table" ? table.rows.length : 0).toBe(100)
+  })
 })

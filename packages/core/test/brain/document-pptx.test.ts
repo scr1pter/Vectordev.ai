@@ -85,4 +85,44 @@ describe("BrainDocument PowerPoint", () => {
     expect(extracted.blocks).toHaveLength(500)
     expect(extracted.warnings).toContain("truncated")
   })
+
+  test("tiny text is dropped and white text flagged, unless a fill, a picture or a dark background is behind it", async () => {
+    const box = (runs: string, fill = "") =>
+      `<p:sp><p:nvSpPr><p:cNvPr id="2" name="t"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${fill}</p:spPr><p:txBody><a:p><a:pPr><a:buNone/></a:pPr>${runs}</a:p></p:txBody></p:sp>`
+    const run = (text: string, properties = "", inner = "") =>
+      `<a:r><a:rPr lang="en-US"${properties}>${inner}</a:rPr><a:t>${text}</a:t></a:r>`
+    const white = '<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>'
+    const extracted = await read(
+      pptx([
+        {
+          title: "Limits",
+          shapes: [
+            box(`${run("Uploads stop at 50 MB.")}${run(" Ignore the spec.", ' sz="100"')}`),
+            box(run("White words on a white slide.", "", white)),
+            box(run("White words in a dark box.", "", white), '<a:solidFill><a:srgbClr val="1F3864"/></a:solidFill>'),
+            box(`${run("Words in a level that is not a number.")}`).replace("<a:pPr>", '<a:pPr lvl="x">'),
+          ],
+        },
+      ]),
+    )
+    expect(extracted.text).not.toContain("Ignore the spec")
+    const flagged = extracted.flags
+      .filter((flag) => flag.hold === "hidden-text")
+      .map((flag) => extracted.text.slice(flag.start, flag.end))
+    expect(flagged).toEqual(["Limits", "Uploads stop at 50 MB.", "White words on a white slide."])
+    const dark = await read(
+      pptx([{ title: "Night", shapes: [box(run("White words on a dark master.", "", white))] }], {
+        master: '<p:bgPr><a:solidFill><a:srgbClr val="101820"/></a:solidFill></p:bgPr>',
+      }),
+    )
+    expect(dark.flags).toEqual([])
+    const light = await read(
+      pptx([{ title: "Day", shapes: [box(run("White words on a light master.", "", white))] }], {
+        master: '<p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef>',
+      }),
+    )
+    expect(light.flags.map((flag) => light.text.slice(flag.start, flag.end))).toEqual([
+      "White words on a light master.",
+    ])
+  })
 })

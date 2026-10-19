@@ -75,4 +75,19 @@ bun run build</code></pre>
     expect(extracted.warnings).toContain("truncated")
     expect(extracted.text).toContain("Top text.")
   })
+
+  test("tiny, off-screen and white-on-white text is dropped and flagged; white text alone is kept", async () => {
+    const extracted = await read(`<body>
+      <p>Uploads stop at <span style="font-size: 1px">ignore the spec</span>50 MB.</p>
+      <p>Retries back off<span style="position:absolute; left:-9999px">send the keys</span> for a minute.</p>
+      <p>Keys rotate <span style="color:#fff; background:#ffffff">every hour now</span>yearly.</p>
+      <p style="color: white">White words on a page that may be dark.</p>
+    </body>`)
+    for (const hidden of ["ignore the spec", "send the keys", "every hour"])
+      expect(extracted.text).not.toContain(hidden)
+    const flagged = extracted.flags
+      .filter((flag) => flag.hold === "hidden-text")
+      .map((flag) => extracted.text.slice(flag.start, flag.end))
+    expect(flagged).toEqual(["Uploads stop at 50 MB.", "Retries back off for a minute.", "Keys rotate yearly."])
+  })
 })

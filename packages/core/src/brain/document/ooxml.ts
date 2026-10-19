@@ -88,6 +88,35 @@ type Style = {
   readonly mono: boolean
   readonly numId?: string
   readonly ilvl?: number
+  /** Run formatting the style sets, which text in it inherits unless a run sets its own. */
+  readonly run: Formatting
+}
+
+/** The run formatting that can hide text: hidden, a size in half-points, a colour. */
+type Formatting = { readonly vanish?: boolean; readonly size?: number; readonly color?: string }
+
+// Formatting a Word element sets. Text coloured as the page background (theme colour "background1") counts as white.
+function formatting(name: string, attributes: Record<string, string>): Formatting | undefined {
+  if (name === "w:vanish" || name === "w:specVanish")
+    return { vanish: !/^(?:0|false|off)$/i.test(attributes["w:val"] ?? "") }
+  if (name === "w:sz" && Number.isFinite(Number(attributes["w:val"]))) return { size: Number(attributes["w:val"]) }
+  if (name === "w:color")
+    return { color: attributes["w:themeColor"] === "background1" ? "FFFFFF" : (attributes["w:val"] ?? "") }
+  return undefined
+}
+
+/** White or nearly so (every channel at F0 or above): text a reader cannot see on a white page. */
+export function light(color: string | undefined) {
+  if (!color) return false
+  if (/^white$/i.test(color)) return true
+  const channels = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color)
+  return !!channels && channels.slice(1).every((channel) => Number.parseInt(channel, 16) >= 0xf0)
+}
+
+/** A list level from the file: a whole number from 0 to 8, or 0 when the file gives anything else. */
+function depth(value: string | undefined) {
+  const level = Number(value ?? 0)
+  return Number.isInteger(level) && level >= 0 ? Math.min(level, 8) : 0
 }
 
 const MONO = /courier|consolas|menlo|monaco|mono|lucida console|source code|fira code|inconsolata/i
@@ -110,6 +139,8 @@ const SKIP = new Set([
 
 function docx(archive: Archive, limits: BrainLimits.Limits, counters: Counters): Result | "breach" | "invalid" {
   const styles = new Map<string, Style>()
+  // What every run starts from (docDefaults), and the paragraph style a paragraph naming none is in.
+  const base = { run: {} as Formatting, paragraph: undefined as string | undefined }
   const styled = xml(archive, "word/styles.xml", limits, counters, (events) => {
     const current = {
       id: "",
@@ -119,9 +150,13 @@ function docx(archive: Archive, limits: BrainLimits.Limits, counters: Counters):
       mono: false,
       numId: undefined as string | undefined,
       ilvl: undefined as number | undefined,
+      run: {} as Formatting,
     }
+    const state = { defaults: false, style: false }
     events.open = (name, attributes) => {
-      if (name === "w:style")
+      if (name === "w:rPrDefault") state.defaults = true
+      if (name === "w:style") {
+        state.style = true
         Object.assign(current, {
           id: attributes["w:styleId"] ?? "",
           name: "",
@@ -130,15 +165,24 @@ function docx(archive: Archive, limits: BrainLimits.Limits, counters: Counters):
           mono: false,
           numId: undefined,
           ilvl: undefined,
+          run: {},
         })
+        if (attributes["w:type"] === "paragraph" && /^(?:1|true|on)$/i.test(attributes["w:default"] ?? ""))
+          base.paragraph = attributes["w:styleId"]
+      }
+      const set = formatting(name, attributes)
+      if (set && state.defaults) base.run = { ...base.run, ...set }
+      if (set && state.style) current.run = { ...current.run, ...set }
       if (name === "w:name") current.name = attributes["w:val"] ?? ""
       if (name === "w:basedOn") current.basedOn = attributes["w:val"]
       if (name === "w:outlineLvl") current.outline = Number(attributes["w:val"])
       if (name === "w:rFonts" && MONO.test(attributes["w:ascii"] ?? attributes["w:hAnsi"] ?? "")) current.mono = true
       if (name === "w:numId") current.numId = attributes["w:val"]
-      if (name === "w:ilvl") current.ilvl = Number(attributes["w:val"])
+      if (name === "w:ilvl") current.ilvl = depth(attributes["w:val"])
     }
     events.close = (name) => {
+      if (name === "w:rPrDefault") state.defaults = false
+      if (name === "w:style") state.style = false
       if (name === "w:style" && current.id) styles.set(current.id, { ...current })
     }
   })
@@ -158,13 +202,14 @@ function docx(archive: Archive, limits: BrainLimits.Limits, counters: Counters):
           mono: style.mono || parent.mono,
           numId: style.numId ?? parent.numId,
           ilvl: style.ilvl ?? parent.ilvl,
+          run: { ...parent.run, ...style.run },
         }
       : style
   }
-  const body = words(archive, "word/document.xml", limits, counters, resolved, formats)
+  const body = words(archive, "word/document.xml", limits, counters, resolved, formats, base)
   if (body === "breach" || body === "invalid") return body
   const notes = archive.entries.has("word/footnotes.xml")
-    ? words(archive, "word/footnotes.xml", limits, counters, resolved, formats)
+    ? words(archive, "word/footnotes.xml", limits, counters, resolved, formats, base)
     : undefined
   if (notes === "breach") return notes
   // Where a footnote prints is not recorded in the file, so footnotes carry no page.
@@ -190,10 +235,15 @@ type Paragraph = {
   run: string
   dropped: boolean
   white: boolean
+  /** A fill or highlight behind the paragraph, so white text in it can be read. */
+  shaded: boolean
   chars: number
   mono: number
   page: number
 }
+
+// Table styles that only draw lines; any other may fill a header row, where white text is ordinary.
+const PLAIN_TABLE = /^(?:TableGrid|TableNormal|NormalTable)$/i
 
 function words(
   archive: Archive,
@@ -202,17 +252,34 @@ function words(
   counters: Counters,
   style: (id: string | undefined) => Style | undefined,
   formats: ReadonlyMap<string, ReadonlyMap<number, string>>,
+  base: { readonly run: Formatting; readonly paragraph?: string },
 ) {
   const drafts: Draft[] = []
   const state = {
     page: 1,
     paragraphs: [] as Paragraph[],
-    run: { vanish: false, white: false, mono: false },
+    run: { own: {} as Formatting, style: undefined as string | undefined, mono: false, shaded: false, open: false },
     skip: 0,
     /** Hidden text in a paragraph with nothing else in it, which flags the block after it. */
     carry: false,
-    tables: [] as { rows: string[][]; row: string[] | undefined; cell: string[] | undefined; hidden: boolean }[],
+    tables: [] as {
+      rows: string[][]
+      row: string[] | undefined
+      cell: string[] | undefined
+      hidden: boolean
+      /** A fill on the table or its cell, or a table style that may fill rows. */
+      shaded: boolean
+      cellShaded: boolean
+    }[],
   }
+  // A run's formatting is the document's defaults, then its paragraph's style, then its own style, then what it sets
+  // itself, each over the one before (a style takes in the styles it is based on).
+  const effective = (paragraph: Paragraph): Formatting => ({
+    ...base.run,
+    ...style(paragraph.style ?? base.paragraph)?.run,
+    ...style(state.run.style)?.run,
+    ...state.run.own,
+  })
   // Consecutive list items are one list, and consecutive code lines one block, gathered here until the run ends.
   const run = {
     list: undefined as
@@ -256,8 +323,8 @@ function words(
   }
   const finish = (paragraph: Paragraph) => {
     const text = paragraph.text.replace(/[ \t]+/g, " ").trim()
-    const hidden = paragraph.dropped || paragraph.white
     const table = state.tables.at(-1)
+    const hidden = paragraph.dropped || paragraph.white
     if (table?.cell) {
       if (text) table.cell.push(text)
       if (hidden) table.hidden = true
@@ -316,24 +383,39 @@ function words(
           run: "",
           dropped: false,
           white: false,
+          shaded: false,
           chars: 0,
           mono: 0,
           page: state.page,
         })
-      if (name === "w:r") state.run = { vanish: false, white: false, mono: false }
+      if (name === "w:r") state.run = { own: {}, style: undefined, mono: false, shaded: false, open: true }
       if (name === "w:pStyle" && paragraph) paragraph.style = attributes["w:val"]
       if (name === "w:outlineLvl" && paragraph) paragraph.outline = Number(attributes["w:val"])
       if (name === "w:numId" && paragraph) paragraph.numId = attributes["w:val"]
-      if (name === "w:ilvl" && paragraph) paragraph.ilvl = Number(attributes["w:val"])
-      if ((name === "w:vanish" || name === "w:specVanish") && !/^(?:0|false|off)$/i.test(attributes["w:val"] ?? ""))
-        state.run.vanish = true
-      // Under 2 pt (sizes are in half-points) is unreadable, the same rule as for PDF text.
-      if (name === "w:sz" && Number(attributes["w:val"]) < 4) state.run.vanish = true
-      if (name === "w:color" && /^(?:ffffff|white)$/i.test(attributes["w:val"] ?? "")) state.run.white = true
+      if (name === "w:ilvl" && paragraph) paragraph.ilvl = depth(attributes["w:val"])
+      const set = formatting(name, attributes)
+      if (set) state.run.own = { ...state.run.own, ...set }
       if (name === "w:rFonts" && MONO.test(attributes["w:ascii"] ?? attributes["w:hAnsi"] ?? "")) state.run.mono = true
+      if (name === "w:rStyle") state.run.style = attributes["w:val"]
       if (name === "w:rStyle" && (style(attributes["w:val"])?.mono || /code|verbatim/i.test(attributes["w:val"] ?? "")))
         state.run.mono = true
-      if (paragraph && (name === "w:tab" || name === "w:br" || name === "w:cr") && !state.run.vanish) {
+      // A fill or a highlight behind text, on the run, its paragraph, its cell or its table.
+      const backed =
+        (name === "w:shd" && !/^(?:auto|)$/i.test(attributes["w:fill"] ?? "") && !light(attributes["w:fill"])) ||
+        (name === "w:highlight" && !/^(?:none|white)$/i.test(attributes["w:val"] ?? "none"))
+      const outer = state.tables.at(-1)
+      if (backed && state.run.open) state.run.shaded = true
+      else if (backed && paragraph) paragraph.shaded = true
+      else if (backed && outer?.cell) outer.cellShaded = true
+      else if (backed && outer) outer.shaded = true
+      if (name === "w:tblStyle" && outer && !PLAIN_TABLE.test(attributes["w:val"] ?? "")) outer.shaded = true
+      // A tab outside a run is a tab stop in the paragraph's properties, not text.
+      if (
+        paragraph &&
+        state.run.open &&
+        (name === "w:tab" || name === "w:br" || name === "w:cr") &&
+        !hides(effective(paragraph))
+      ) {
         if (name === "w:br" && attributes["w:type"] === "page") state.page++
         paragraph.text += name === "w:tab" ? "\t" : "\n"
       }
@@ -343,19 +425,30 @@ function words(
         // A break before any of a paragraph's text means the paragraph starts on the new page.
         if (paragraph && !paragraph.text.trim()) paragraph.page = state.page
       }
-      if (name === "w:tbl") state.tables.push({ rows: [], row: undefined, cell: undefined, hidden: false })
+      if (name === "w:tbl")
+        state.tables.push({
+          rows: [],
+          row: undefined,
+          cell: undefined,
+          hidden: false,
+          shaded: false,
+          cellShaded: false,
+        })
       const table = state.tables.at(-1)
       if (name === "w:tr" && table) table.row = []
-      if (name === "w:tc" && table) table.cell = []
+      if (name === "w:tc" && table) Object.assign(table, { cell: [], cellShaded: false })
     }
     events.text = (text, open) => {
       const paragraph = state.paragraphs.at(-1)
       if (state.skip > 0 || !paragraph || open !== "w:t") return
-      if (state.run.vanish) {
+      const format = effective(paragraph)
+      if (hides(format)) {
         if (text.trim()) paragraph.dropped = true
         return
       }
-      if (state.run.white && text.trim()) paragraph.white = true
+      const table = state.tables.at(-1)
+      const backed = state.run.shaded || paragraph.shaded || table?.shaded === true || table?.cellShaded === true
+      if (light(format.color) && !backed && text.trim()) paragraph.white = true
       paragraph.text += text
       paragraph.chars += text.trim().length
       if (state.run.mono) {
@@ -369,6 +462,7 @@ function words(
         return
       }
       const paragraph = state.paragraphs.at(-1)
+      if (name === "w:r") state.run.open = false
       if (name === "w:r" && paragraph && paragraph.run) {
         paragraph.code.push(paragraph.run)
         paragraph.run = ""
@@ -410,6 +504,11 @@ function words(
   return { drafts, pages: state.page }
 }
 
+// Text that is hidden, or under 2 pt (sizes are in half-points) and so unreadable, the same rule as for PDF text.
+function hides(format: Formatting) {
+  return format.vanish === true || (format.size !== undefined && format.size < 4)
+}
+
 function numbering(archive: Archive, limits: BrainLimits.Limits, counters: Counters) {
   const abstract = new Map<string, Map<number, string>>()
   const nums = new Map<string, string>()
@@ -420,7 +519,7 @@ function numbering(archive: Archive, limits: BrainLimits.Limits, counters: Count
         state.abstract = attributes["w:abstractNumId"] ?? ""
         abstract.set(state.abstract, new Map())
       }
-      if (name === "w:lvl") state.level = Number(attributes["w:ilvl"] ?? 0)
+      if (name === "w:lvl") state.level = depth(attributes["w:ilvl"])
       if (name === "w:numFmt" && state.abstract)
         abstract.get(state.abstract)?.set(state.level, attributes["w:val"] ?? "bullet")
       if (name === "w:num") state.num = attributes["w:numId"] ?? ""
@@ -454,6 +553,23 @@ function pptx(archive: Archive, limits: BrainLimits.Limits, counters: Counters):
   const links: string[] = []
   const warnings = new Set<BrainSchema.DocumentWarning>(relations.external ? ["external-links"] : [])
   if (slides.length > limits.slides) warnings.add("truncated")
+  // Layouts and masters are shared by many slides, so each is read once.
+  const backdrops = new Map<string, Backdrop | undefined | "breach">()
+  const masters = new Map<string, string | undefined | "breach">()
+  const backdrop = (path: string | undefined | "breach") => {
+    if (path === "breach") return path
+    if (!path || !/^ppt\/slide(?:Layout|Master)s\/[^/]+\.xml$/.test(path)) return undefined
+    if (!backdrops.has(path)) backdrops.set(path, background(archive, path, limits, counters))
+    return backdrops.get(path)
+  }
+  const master = (layout: string | undefined) => {
+    if (!layout) return undefined
+    if (!masters.has(layout)) {
+      const found = rels(archive, layout.replace(/([^/]+)$/, "_rels/$1.rels"), limits, counters)
+      masters.set(layout, found === "breach" ? found : target(found, "/slideMaster"))
+    }
+    return masters.get(layout)
+  }
   for (const [index, path] of slides.slice(0, limits.slides).entries()) {
     const number = index + 1
     const slide = shapes(archive, path, limits, counters, "slide")
@@ -469,6 +585,11 @@ function pptx(archive: Archive, limits: BrainLimits.Limits, counters: Counters):
         ? shapes(archive, notesTarget, limits, counters, "notes")
         : undefined
     if (notes === "breach") return notes
+    // White text is hidden on a light slide; on a dark or pictured one, or over a picture, it is ordinary.
+    const layout = target(slideRels, "/slideLayout")
+    const behind = slide.backdrop ?? backdrop(layout) ?? backdrop(master(layout))
+    if (behind === "breach") return behind
+    const white = !slide.picture && behind !== "dark" ? slide.white : new Set<Draft>()
     const hidden = slide.hidden ? { hidden: true } : {}
     drafts.push({
       type: "heading",
@@ -477,8 +598,16 @@ function pptx(archive: Archive, limits: BrainLimits.Limits, counters: Counters):
       section: "slide",
       page: number,
       ...hidden,
+      ...(slide.dropped ? { hidden: true } : {}),
     })
-    drafts.push(...slide.drafts.map((draft) => ({ ...draft, page: number, ...hidden })))
+    drafts.push(
+      ...slide.drafts.map((draft) => ({
+        ...draft,
+        page: number,
+        ...hidden,
+        ...(white.has(draft) ? { hidden: true } : {}),
+      })),
+    )
     const spoken = notes
       ? notes.drafts
           .map((draft) =>
@@ -501,20 +630,80 @@ function pptx(archive: Archive, limits: BrainLimits.Limits, counters: Counters):
   }
 }
 
+type Backdrop = "dark" | "light"
+
+/** The internal target of a part's relationship of a type, such as a slide's layout. */
+function target(
+  relations: { readonly targets: ReadonlyMap<string, string>; readonly types: ReadonlyMap<string, string> },
+  type: string,
+) {
+  const id = [...relations.types].find(([, value]) => value.endsWith(type))?.[0]
+  return id ? relations.targets.get(id) : undefined
+}
+
+// What a slide, layout or master puts behind its text: a background of a dark colour, a picture, a gradient or a
+// pattern, or a colour map that turns the background dark, is "dark"; a light colour is "light"; nothing set is
+// undefined, so the part it is based on decides.
+function backed(tracker: { inside: boolean; backdrop?: Backdrop }, name: string, attributes: Record<string, string>) {
+  if ((name === "p:clrMap" || name === "a:overrideClrMapping") && /^dk/.test(attributes.bg1 ?? ""))
+    tracker.backdrop = "dark"
+  if (!tracker.inside || tracker.backdrop) return
+  if (name === "a:blipFill" || name === "a:gradFill" || name === "a:pattFill") tracker.backdrop = "dark"
+  if (name === "a:srgbClr" || name === "a:prstClr") tracker.backdrop = light(attributes.val) ? "light" : "dark"
+  if (name === "a:schemeClr") tracker.backdrop = /^(?:bg|lt)[12]$/.test(attributes.val ?? "") ? "light" : "dark"
+}
+
+function background(archive: Archive, path: string, limits: BrainLimits.Limits, counters: Counters) {
+  const tracker = { inside: false, backdrop: undefined as Backdrop | undefined }
+  const parsed = xml(archive, path, limits, counters, (events) => {
+    events.open = (name, attributes) => {
+      if (name === "p:bg") tracker.inside = true
+      backed(tracker, name, attributes)
+    }
+    events.close = (name) => {
+      if (name === "p:bg") tracker.inside = false
+    }
+  })
+  return parsed === "breach" ? parsed : tracker.backdrop
+}
+
 // The text frames of a slide or its notes: the title placeholder's text, then each other frame's paragraphs (bulleted
-// ones as lists) and tables. Date, footer, slide-number and slide-image placeholders are left out.
+// ones as lists) and tables. Date, footer, slide-number and slide-image placeholders are left out. Text under 2 pt is
+// dropped and flags its block and the slide; white text in a frame with no fill of its own is noted, for the caller to
+// flag when the slide behind it is light.
 function shapes(archive: Archive, path: string, limits: BrainLimits.Limits, counters: Counters, of: "slide" | "notes") {
   const drafts: Draft[] = []
+  const white = new Set<Draft>()
+  const tracker = { inside: false, backdrop: undefined as Backdrop | undefined }
   const state = {
     title: "",
     hidden: false,
+    dropped: false,
+    picture: false,
     placeholder: undefined as string | undefined,
-    paragraph: undefined as { text: string; level: number; bullet: boolean | undefined; ordered: boolean } | undefined,
-    list: undefined as { ordered: boolean; items: { text: string; depth: number }[] } | undefined,
+    /** The shape's own fill, and whether the properties being read are its outline's. */
+    shape: { filled: false, properties: false, outline: false },
+    run: { tiny: false, white: false, properties: false, fill: false },
+    paragraph: undefined as
+      | { text: string; level: number; bullet: boolean | undefined; ordered: boolean; dropped: boolean; white: boolean }
+      | undefined,
+    list: undefined as
+      | { ordered: boolean; items: { text: string; depth: number }[]; dropped: boolean; white: boolean }
+      | undefined,
     table: undefined as { rows: string[][]; row: string[] | undefined; cell: string | undefined } | undefined,
+  }
+  const push = (draft: Draft, flags: { readonly dropped: boolean; readonly white: boolean }) => {
+    const out = flags.dropped ? { ...draft, hidden: true } : draft
+    drafts.push(out)
+    if (flags.white) white.add(out)
+  }
+  const flush = () => {
+    if (state.list) push({ type: "list", ordered: state.list.ordered, items: state.list.items }, state.list)
+    state.list = undefined
   }
   const add = (paragraph: NonNullable<typeof state.paragraph>) => {
     const text = paragraph.text.replace(/[ \t]+/g, " ").trim()
+    if (paragraph.dropped) state.dropped = true
     if (!text) return
     if (state.table?.cell !== undefined) {
       state.table.cell = `${state.table.cell} ${text}`.trim()
@@ -526,19 +715,51 @@ function shapes(archive: Archive, path: string, limits: BrainLimits.Limits, coun
     }
     if (["dt", "ftr", "sldNum", "sldImg", "hdr"].includes(state.placeholder ?? "")) return
     const bullet = paragraph.bullet ?? (of === "slide" && ["body", "obj", ""].includes(state.placeholder ?? "-"))
-    if (bullet && state.list?.ordered === paragraph.ordered)
-      return state.list.items.push({ text, depth: paragraph.level })
-    if (state.list) drafts.push({ type: "list", ordered: state.list.ordered, items: state.list.items })
-    state.list = bullet ? { ordered: paragraph.ordered, items: [{ text, depth: paragraph.level }] } : undefined
-    if (!bullet) drafts.push({ type: "paragraph", text })
+    if (bullet && state.list?.ordered === paragraph.ordered) {
+      state.list.items.push({ text, depth: paragraph.level })
+      state.list.dropped ||= paragraph.dropped
+      state.list.white ||= paragraph.white
+      return
+    }
+    flush()
+    if (bullet)
+      state.list = {
+        ordered: paragraph.ordered,
+        items: [{ text, depth: paragraph.level }],
+        dropped: paragraph.dropped,
+        white: paragraph.white,
+      }
+    else push({ type: "paragraph", text }, paragraph)
   }
   const parsed = xml(archive, path, limits, counters, (events) => {
     events.open = (name, attributes) => {
       if (name === "p:sld" && attributes.show === "0") state.hidden = true
-      if (name === "p:sp") state.placeholder = undefined
+      if (name === "p:bg") tracker.inside = true
+      backed(tracker, name, attributes)
+      if (name === "p:pic") state.picture = true
+      if (name === "p:sp") {
+        state.placeholder = undefined
+        state.shape = { filled: false, properties: false, outline: false }
+      }
+      if (name === "p:spPr") state.shape.properties = true
+      if (name === "a:ln") state.shape.outline = true
+      if (
+        state.shape.properties &&
+        !state.shape.outline &&
+        (name === "a:solidFill" || name === "a:gradFill" || name === "a:blipFill" || name === "a:pattFill")
+      )
+        state.shape.filled = true
+      if (name === "a:fillRef" && attributes.idx !== "0") state.shape.filled = true
+      if (name === "a:r" || name === "a:fld") state.run = { tiny: false, white: false, properties: false, fill: false }
+      // Sizes are in hundredths of a point: under 2 pt is unreadable, the same rule as for PDF and Word text.
+      if (name === "a:rPr") Object.assign(state.run, { properties: true, tiny: Number(attributes.sz) < 200 })
+      if (name === "a:solidFill" && state.run.properties) state.run.fill = true
+      if (state.run.fill && (name === "a:srgbClr" || name === "a:prstClr")) state.run.white = light(attributes.val)
+      if (state.run.fill && name === "a:schemeClr") state.run.white = /^(?:bg1|lt1)$/.test(attributes.val ?? "")
       if (name === "p:ph") state.placeholder = attributes.type ?? ""
-      if (name === "a:p") state.paragraph = { text: "", level: 0, bullet: undefined, ordered: false }
-      if (name === "a:pPr" && state.paragraph) state.paragraph.level = Number(attributes.lvl ?? 0)
+      if (name === "a:p")
+        state.paragraph = { text: "", level: 0, bullet: undefined, ordered: false, dropped: false, white: false }
+      if (name === "a:pPr" && state.paragraph) state.paragraph.level = depth(attributes.lvl)
       if (name === "a:buNone" && state.paragraph) state.paragraph.bullet = false
       if (name === "a:buChar" && state.paragraph) state.paragraph.bullet = true
       if (name === "a:buAutoNum" && state.paragraph) Object.assign(state.paragraph, { bullet: true, ordered: true })
@@ -548,9 +769,20 @@ function shapes(archive: Archive, path: string, limits: BrainLimits.Limits, coun
       if (name === "a:tc" && state.table) state.table.cell = ""
     }
     events.text = (text, open) => {
-      if (open === "a:t" && state.paragraph) state.paragraph.text += text
+      if (open !== "a:t" || !state.paragraph) return
+      if (state.run.tiny) {
+        if (text.trim()) state.paragraph.dropped = true
+        return
+      }
+      state.paragraph.text += text
+      if (state.run.white && !state.shape.filled && !state.table && text.trim()) state.paragraph.white = true
     }
     events.close = (name) => {
+      if (name === "p:bg") tracker.inside = false
+      if (name === "p:spPr") state.shape.properties = false
+      if (name === "a:ln") state.shape.outline = false
+      if (name === "a:rPr") state.run.properties = false
+      if (name === "a:solidFill") state.run.fill = false
       if (name === "a:p" && state.paragraph) {
         add(state.paragraph)
         state.paragraph = undefined
@@ -565,8 +797,7 @@ function shapes(archive: Archive, path: string, limits: BrainLimits.Limits, coun
         state.table.row = undefined
       }
       if (name === "a:tbl" && state.table) {
-        if (state.list) drafts.push({ type: "list", ordered: state.list.ordered, items: state.list.items })
-        state.list = undefined
+        flush()
         if (state.table.rows.length > 0)
           drafts.push({ type: "table", header: state.table.rows[0]!, rows: state.table.rows.slice(1), confidence: 1 })
         state.table = undefined
@@ -574,8 +805,16 @@ function shapes(archive: Archive, path: string, limits: BrainLimits.Limits, coun
     }
   })
   if (parsed === "breach") return parsed
-  if (state.list) drafts.push({ type: "list", ordered: state.list.ordered, items: state.list.items })
-  return { title: state.title, hidden: state.hidden, drafts }
+  flush()
+  return {
+    title: state.title,
+    hidden: state.hidden,
+    dropped: state.dropped,
+    picture: state.picture,
+    backdrop: tracker.backdrop,
+    white,
+    drafts,
+  }
 }
 
 // --- Excel ----------------------------------------------------------------------------------------------------------
@@ -628,10 +867,18 @@ function xlsx(archive: Archive, limits: BrainLimits.Limits, counters: Counters):
       value: "",
       inline: "",
       hiddenRows: false,
+      /** Column ranges the sheet hides, from 0, and whether any cell in one has text. */
+      hiddenColumns: [] as { from: number; to: number }[],
+      hiddenCells: false,
       extra: 0,
     }
     const parsed = xml(archive, path, limits, counters, (events) => {
+      // Rows past the ones indexed are only counted, so their nodes are not held against the file's node cap: a sheet
+      // longer than that is read in part, not refused.
+      events.free = () => rows.length >= limits.rows + 1
       events.open = (name, attributes) => {
+        if (name === "col" && /^(?:1|true)$/.test(attributes.hidden ?? ""))
+          state.hiddenColumns.push({ from: Number(attributes.min) - 1, to: Number(attributes.max) - 1 })
         if (name === "row") {
           state.row = { number: Number(attributes.r ?? rows.length + 1), cells: [] }
           if (attributes.hidden === "1" || attributes.hidden === "true") state.hiddenRows = true
@@ -661,6 +908,11 @@ function xlsx(archive: Archive, limits: BrainLimits.Limits, counters: Counters):
                     : "FALSE"
                   : state.value
           state.row.cells[state.column] = value.slice(0, limits.cell)
+          if (
+            value.trim() &&
+            state.hiddenColumns.some((range) => range.from <= state.column && state.column <= range.to)
+          )
+            state.hiddenCells = true
         }
         if (name === "row" && state.row) {
           const cells = Array.from(state.row.cells, (cell) => cell ?? "")
@@ -674,7 +926,7 @@ function xlsx(archive: Archive, limits: BrainLimits.Limits, counters: Counters):
     })
     if (parsed === "breach") return parsed
     if (state.extra > 0 || rows.length > limits.rows) warnings.add("truncated")
-    const hidden = sheet.hidden || state.hiddenRows ? { hidden: true } : {}
+    const hidden = sheet.hidden || state.hiddenRows || state.hiddenCells ? { hidden: true } : {}
     drafts.push({
       type: "heading",
       level: 1,
@@ -763,6 +1015,8 @@ type Events = {
   open?: (name: string, attributes: Record<string, string>) => void
   text?: (text: string, open: string | undefined) => void
   close?: (name: string) => void
+  /** While this says so, elements are not counted against the node cap (their depth still is checked). */
+  free?: () => boolean
 }
 
 /**
@@ -789,7 +1043,7 @@ function xml(
     {
       onopentag(name, attributes) {
         stack.push(name)
-        if (stack.length > limits.xml.depth || !counters.nodes.take(1)) state.breach = true
+        if (stack.length > limits.xml.depth || (!events.free?.() && !counters.nodes.take(1))) state.breach = true
         if (!state.breach) events.open?.(name, attributes)
       },
       ontext(text) {
