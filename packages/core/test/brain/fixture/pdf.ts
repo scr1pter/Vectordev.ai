@@ -2,7 +2,7 @@
 // pages, metadata, a JavaScript open action and an encryption dictionary. Every fixture is generated here, so no binary
 // document is committed.
 
-import { zlibSync } from "fflate"
+import { Zlib } from "fflate"
 
 export type Font = "regular" | "bold" | "mono"
 
@@ -29,6 +29,12 @@ export type Page = {
   readonly media?: readonly [number, number, number, number]
   /** A second, Flate-compressed content stream that inflates to this many bytes of spaces. */
   readonly padding?: number
+  /** The padding stream's dictionary entries before its length; "/Filter /FlateDecode" unless given. */
+  readonly filter?: string
+  /** What follows the padding stream's `stream` keyword; a line feed unless given. */
+  readonly breaks?: string
+  /** The text and its padding as one Flate stream, the page's only content stream. */
+  readonly packed?: boolean
 }
 
 export type Options = {
@@ -78,7 +84,7 @@ export function pdf(options: Options) {
   )
   for (const [index, page] of options.pages.entries()) {
     add(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [${(page.media ?? [0, 0, 612, 792]).join(" ")}]${page.crop ? ` /CropBox [${page.crop.join(" ")}]` : ""} /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> /XObject << /Im1 6 0 R >> >> /Contents [${firstPage + index * 3 + 1} 0 R ${firstPage + index * 3 + 2} 0 R] >>`,
+      `<< /Type /Page /Parent 2 0 R /MediaBox [${(page.media ?? [0, 0, 612, 792]).join(" ")}]${page.crop ? ` /CropBox [${page.crop.join(" ")}]` : ""} /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> /XObject << /Im1 6 0 R >> >> /Contents ${page.packed ? `${firstPage + index * 3 + 2} 0 R` : `[${firstPage + index * 3 + 1} 0 R ${firstPage + index * 3 + 2} 0 R]`} >>`,
     )
     const image = page.image || page.ocr ? ["q 500 0 0 700 56 46 cm /Im1 Do Q"] : []
     const runs = (page.runs ?? []).map(
@@ -89,8 +95,15 @@ export function pdf(options: Options) {
       (run) =>
         `BT 3 Tr /${FONTS[run.font ?? "regular"]} ${run.size ?? 11} Tf 1 0 0 1 ${run.x} ${run.y} Tm (${escape(run.text)}) Tj ET`,
     )
-    add(stream("<<", [...image, ...runs, ...ocr].join("\n")))
-    add(stream("<< /Filter /FlateDecode", deflated(new Uint8Array(page.padding ?? 1).fill(0x20))))
+    const text = [...image, ...runs, ...ocr].join("\n")
+    add(stream("<<", page.packed ? "" : text))
+    add(
+      stream(
+        `<< ${page.filter ?? "/Filter /FlateDecode"}`,
+        deflated(page.packed ? `${text}\n` : "", page.padding ?? 1),
+        page.breaks,
+      ),
+    )
   }
   if (outlineItems.length > 0) {
     add(
@@ -130,12 +143,22 @@ export function pdf(options: Options) {
   return Uint8Array.from(file, (char) => char.charCodeAt(0) & 0xff)
 }
 
-function deflated(bytes: Uint8Array) {
-  return Array.from(zlibSync(bytes, { level: 9 }), (byte) => String.fromCharCode(byte)).join("")
+// Text followed by this many spaces, compressed a megabyte at a time, so a fixture that inflates to gigabytes never
+// holds them.
+function deflated(head: string, spaces: number) {
+  const chunks: string[] = []
+  const zlib = new Zlib({ level: 6 }, (chunk) => {
+    chunks.push(Array.from(chunk, (byte) => String.fromCharCode(byte)).join(""))
+  })
+  zlib.push(Uint8Array.from(head, (char) => char.charCodeAt(0) & 0xff))
+  const block = new Uint8Array(1024 * 1024).fill(0x20)
+  for (let left = spaces; left > 0; left -= block.length) zlib.push(block.subarray(0, Math.min(block.length, left)))
+  zlib.push(new Uint8Array(0), true)
+  return chunks.join("")
 }
 
-function stream(dictionary: string, data: string) {
-  return `${dictionary} /Length ${data.length} >>\nstream\n${data}\nendstream`
+function stream(dictionary: string, data: string, breaks = "\n") {
+  return `${dictionary} /Length ${data.length} >>\nstream${breaks}${data}\nendstream`
 }
 
 // PDF string escaping, plus the WinAnsi codes for the few typographic characters the fixtures use.

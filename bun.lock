@@ -847,6 +847,7 @@
     "@tanstack/solid-virtual@3.13.28": "patches/@tanstack%2Fsolid-virtual@3.13.28.patch",
     "solid-js@1.9.10": "patches/solid-js@1.9.10.patch",
     "follow-redirects@1.16.0": "patches/follow-redirects@1.16.0.patch",
+    "unpdf@1.9.0": "patches/unpdf@1.9.0.patch",
     "@ai-sdk/google@3.0.73": "patches/@ai-sdk%2Fgoogle@3.0.73.patch",
     "@ai-sdk/xai@3.0.82": "patches/@ai-sdk%2Fxai@3.0.82.patch",
     "@tanstack/virtual-core@3.17.0": "patches/@tanstack%2Fvirtual-core@3.17.0.patch",

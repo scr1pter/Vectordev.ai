@@ -241,24 +241,54 @@ describe("BrainDocument PDF from a hostile file", () => {
     if (result.type === "extracted") expect(result.text).toContain("Uploads are limited")
   })
 
-  test("streams that inflate past the cap are refused before pdf.js expands them", async () => {
+  test("streams that inflate past the cap are refused, and ones under it are read", async () => {
     const limits = { ...BrainLimits.LIMITS.inline, streams: 1024 * 1024 }
     expect((await timed(pdf({ pages: [{ runs: body, padding: 2 * 1024 * 1024 }] }), limits)).result).toMatchObject({
       type: "refused",
       reason: "too-large",
     })
     expect((await timed(pdf({ pages: [{ runs: body, padding: 512 * 1024 }] }), limits)).result.type).toBe("extracted")
-    // A stream inflated twice over is a bomb's shape, whatever its first stage inflates to.
-    const twice = new TextDecoder("latin1")
-      .decode(pdf({ pages: [{ runs: body }] }))
-      .replace("/Filter /FlateDecode", "/Filter [/FlateDecode /FlateDecode]")
-    expect(
-      (
-        await timed(
-          Uint8Array.from(twice, (char) => char.charCodeAt(0)),
-          limits,
-        )
-      ).result,
-    ).toMatchObject({ type: "refused", reason: "invalid" })
+  })
+
+  // pdf.js reads a filter by its short name, decodes a content stream whatever its other entries say, takes any line
+  // break after `stream` and parses a dictionary of any length, so none of these may get past the count.
+  test.each([
+    ["/Filter /FlateDecode", {}],
+    ["/Filter [/FlateDecode]", { filter: "/Filter [/FlateDecode]" }],
+    ["/Filter /Fl", { filter: "/Filter /Fl" }],
+    ["/Subtype /Image", { filter: "/Subtype /Image /Filter /FlateDecode" }],
+    ["a carriage return after `stream`", { breaks: "\r" }],
+    ["a space after `stream`", { breaks: " \n" }],
+    ["5,000 characters before /Length", { filter: `/Filter /FlateDecode /Junk (${"a".repeat(5_000)})` }],
+    ["the text in the same, only content stream", { packed: true }],
+  ] as const)(
+    "200 MB of padding with %s is refused at the cap",
+    async (_, page) => {
+      const bytes = pdf({ pages: [{ runs: body, padding: 200 * 1024 * 1024, ...page }] })
+      expect(bytes.length).toBeLessThan(1024 * 1024)
+      const read = await timed(bytes)
+      expect(read.result).toMatchObject({ type: "refused", reason: "too-large" })
+      expect(read.elapsed).toBeLessThan(10_000)
+    },
+    60_000,
+  )
+
+  test("a content stream in a picture's or Brotli's compression is read as empty, since neither is counted", async () => {
+    const { brotliCompressSync } = await import("node:zlib")
+    const hidden = "BT /F1 11 Tf 1 0 0 1 72 400 Tm (Words packed with Brotli are shown only once decoded) Tj ET"
+    const file = new TextDecoder("latin1").decode(pdf({ pages: [{ runs: body }] }))
+    const brotli = Array.from(brotliCompressSync(hidden), (byte) => String.fromCharCode(byte)).join("")
+    // The page's first content stream, which holds its text, is swapped for the Brotli one; the cross-reference table
+    // is then off by the difference, which pdf.js repairs by scanning the file.
+    const swapped = file.replace(
+      /<< \/Length (\d+) >>\nstream\n([\s\S]*?)\nendstream/,
+      () => `<< /Filter /BrotliDecode /Length ${brotli.length} >>\nstream\n${brotli}\nendstream`,
+    )
+    const result = await BrainDocument.read(
+      { name: "brotli.pdf", bytes: Uint8Array.from(swapped, (char) => char.charCodeAt(0)) },
+      BrainLimits.LIMITS.inline,
+    )
+    expect(result.type).toBe("extracted")
+    if (result.type === "extracted") expect(result.text).not.toContain("Brotli")
   })
 })

@@ -9,11 +9,13 @@ import { lines, pdf } from "./fixture/pdf"
 
 const ENTRY = path.join(import.meta.dir, "../../src/brain/worker/entry.ts")
 
-const bundle = async () => {
-  const result = await Bun.build({ entrypoints: [ENTRY], target: "node", format: "esm", minify: true })
-  if (!result.success) throw new Error(result.logs.join("\n"))
-  return result.outputs[0]!.text()
-}
+// Built once: a second Bun.build in the same process can fail to read the files the first one read.
+const built: { source?: Promise<string> } = {}
+const bundle = () =>
+  (built.source ??= Bun.build({ entrypoints: [ENTRY], target: "node", format: "esm", minify: true }).then((result) => {
+    if (!result.success) throw new Error(result.logs.join("\n"))
+    return result.outputs[0]!.text()
+  }))
 
 const run = <A, E>(
   source: string | undefined,
@@ -86,6 +88,26 @@ describe("BrainWorker", () => {
     expect(result.read.structured.pages).toBe(1)
     expect(result.read.structured.records.map((record) => record.kind)).toContain("requirement")
     expect(result.read.structured.passages[0]?.body).toContain("Refresh tokens expire after 14 days.")
+  }, 60_000)
+
+  // Decoded streams live outside the heap, where the worker's resource limits never reach (and Bun has none), so the
+  // bundled reader has to stop such a file itself.
+  test("a small PDF that inflates to 600 MB is refused inside the eval worker", async () => {
+    const source = await bundle()
+    const bomb = pdf({
+      pages: [
+        {
+          runs: lines(["Clients MUST retry at most 3 times after a 429 response."]),
+          padding: 600e6,
+          filter: "/Filter /Fl",
+        },
+      ],
+    })
+    expect(bomb.length).toBeLessThan(1024 * 1024)
+    const started = performance.now()
+    const result = await run(source, {}, (worker) => worker.extract({ ...input, name: "bomb.pdf", bytes: bomb }))
+    expect(result).toMatchObject({ type: "refused", reason: "too-large" })
+    expect(performance.now() - started).toBeLessThan(15_000)
   }, 60_000)
 
   test("from source under Bun the worker starts from its own file", async () => {

@@ -1,7 +1,7 @@
 export * as BrainPdf from "./pdf"
 
-import { Inflate } from "fflate"
 import { getDocumentProxy } from "unpdf"
+import { DecodeStream, Parser, StreamsSequenceStream } from "unpdf/pdfjs"
 import type { BrainSchema } from "../schema"
 import { budget, refuse, type BrainLimits } from "./limits"
 import type { Draft, Read, ReadRefusal } from "./read"
@@ -28,8 +28,8 @@ const OPTIONS = {
   isOffscreenCanvasSupported: false,
   isImageDecoderSupported: false,
   useWasm: false,
-  // Pictures are never read, and a bigger one is not decoded while a page's fonts are resolved.
-  maxImageSize: 1_000_000,
+  // Pictures are never read: every one is left out while a page's fonts are resolved, so none is decoded.
+  maxImageSize: 0,
 }
 
 type Document = Awaited<ReturnType<typeof getDocumentProxy>>
@@ -68,15 +68,27 @@ type Heading = { readonly title: string; readonly page: number; readonly level: 
 /** Fewer visible characters than this on a page means it has no text layer: a scan. */
 const SCANNED = 25
 
-export async function read(bytes: Uint8Array, limits: BrainLimits.Limits): Promise<Read | ReadRefusal> {
-  const inflated = expands(bytes, limits.streams)
-  if (inflated !== "ok")
-    return inflated === "chained"
-      ? refuse(
-          "invalid",
-          "This PDF compresses its contents twice over, which no ordinary PDF does, so it was not read.",
-        )
-      : refuse("too-large", "This PDF expands to more than Vector reads safely, so it was not read.")
+const TOO_LARGE = "This PDF expands to more than Vector reads safely, so it was not read."
+
+/** One PDF at a time, since the decoders count against the read under way (see `decoding`). */
+const queue = { tail: Promise.resolve() as Promise<unknown> }
+
+export function read(bytes: Uint8Array, limits: BrainLimits.Limits): Promise<Read | ReadRefusal> {
+  const turn = queue.tail.then(() => readOne(bytes, limits))
+  queue.tail = turn.catch(() => undefined)
+  return turn
+}
+
+async function readOne(bytes: Uint8Array, limits: BrainLimits.Limits): Promise<Read | ReadRefusal> {
+  const decoded = budget(limits.streams)
+  decoding.budget = decoded
+  const result = await open(bytes, limits, decoded).finally(() => {
+    decoding.budget = undefined
+  })
+  return decoded.over ? refuse("too-large", TOO_LARGE) : result
+}
+
+async function open(bytes: Uint8Array, limits: BrainLimits.Limits, decoded: BrainLimits.Budget) {
   // pdf.js takes ownership of the buffer it is given, so it gets a copy.
   const opened = await getDocumentProxy(bytes.slice(), OPTIONS).then(
     (document) => ({ document }),
@@ -92,41 +104,67 @@ export async function read(bytes: Uint8Array, limits: BrainLimits.Limits): Promi
           "This file is password protected. Vector doesn't ask for document passwords; add an unprotected copy.",
         )
       : refuse("invalid", "This PDF is damaged and could not be read.")
-  return extract(opened.document, limits)
+  return extract(opened.document, limits, decoded)
     .catch(() => refuse("invalid", "This PDF is damaged and could not be read."))
     .finally(() => opened.document.loadingTask.destroy())
 }
 
-// pdf.js inflates a content stream, a font or an object stream whole before it reads one, so a small file can expand to
-// gigabytes. Each Flate stream other than a picture (which pdf.js decodes only up to its stated size, and not at all
-// past `maxImageSize`) is inflated here first, counting bytes and keeping none, and the file is refused once the
-// total passes the cap. A stream compressed twice with Flate is a bomb's shape and is refused outright.
-function expands(bytes: Uint8Array, cap: number): "ok" | "over" | "chained" {
-  const text = new TextDecoder("latin1").decode(bytes)
-  const total = budget(cap)
-  for (const match of text.matchAll(/(?<!end)stream\r?\n/g)) {
-    const dictionary = text.slice(Math.max(0, text.lastIndexOf(" obj", match.index), match.index - 4_096), match.index)
-    const filters = dictionary.match(/\/FlateDecode\b/g)?.length ?? 0
-    if (filters > 1) return "chained"
-    if (filters === 0 || /\/Subtype\s*\/Image\b/.test(dictionary)) continue
-    const start = match.index + match[0].length
-    const end = text.indexOf("endstream", start)
-    const data = bytes.subarray(start, end < 0 ? bytes.length : end)
-    // The zlib header is skipped, as pdf.js tolerates a damaged one.
-    const inflater = new Inflate((chunk) => {
-      total.take(chunk.length)
-    })
-    // fflate reports a corrupt stream by throwing; pdf.js then reads what it can of it, which is no more.
-    try {
-      for (let at = 2; at < data.length && !total.over; at += 65_536)
-        inflater.push(data.subarray(at, at + 65_536), at + 65_536 >= data.length)
-    } catch {}
-    if (total.over) return "over"
+// pdf.js decodes a content stream, a font or an object stream whole before it reads one, so a small file can ask for
+// gigabytes, and those bytes live outside the JavaScript heap where no worker limit reaches them. Whatever the file
+// says about its streams, every decoder that grows (Flate, LZW, run length, the two ASCII ones, predictors and
+// decryption) grows its buffer through `DecodeStream.ensureBuffer`, so the growth is counted there against the PDF
+// being read, and past `limits.streams` growing throws and the read is refused. A page's contents joined into one
+// stream are not counted again, since each part already was.
+const decoding: { budget?: BrainLimits.Budget } = {}
+
+const ensureBuffer = DecodeStream.prototype.ensureBuffer
+DecodeStream.prototype.ensureBuffer = function (this: DecodeStream, requested: number) {
+  const held = this.buffer.byteLength
+  if (requested > held && decoding.budget && !(this instanceof StreamsSequenceStream)) {
+    // pdf.js grows to its minimum doubled until the request fits.
+    const minimum = Math.max(1, this.minBufferLength)
+    const size = minimum * 2 ** Math.max(0, Math.ceil(Math.log2(requested / minimum)))
+    if (!decoding.budget.take(size - held)) throw new RangeError(TOO_LARGE)
   }
-  return "ok"
+  return ensureBuffer.call(this, requested)
 }
 
-async function extract(document: Document, limits: BrainLimits.Limits): Promise<Read> {
+// pdf.js would first inflate a Flate or Brotli stream through the platform's DecompressionStream, gathering all of its
+// output before anything could count it. Declining that sends every stream through the counted decoders instead.
+DecodeStream.prototype.asyncGetBytesFromDecompressionStream = async function (this: DecodeStream) {
+  this.stream.reset()
+  return {
+    decompressed: null,
+    compressed: (this.stream.isAsync && (await this.stream.asyncGetBytes())) || this.stream.getBytes(),
+  }
+}
+
+// These decoders build their whole output in buffers of their own, which the count above never sees, and every one
+// of them but Brotli exists for pictures, which are never read. A stream filtered by one is read as empty.
+const UNCOUNTED = new Set([
+  "DCT",
+  "DCTDecode",
+  "JPX",
+  "JPXDecode",
+  "JBIG2Decode",
+  "CCF",
+  "CCITTFaxDecode",
+  "BrotliDecode",
+])
+const makeFilter = Parser.prototype.makeFilter
+Parser.prototype.makeFilter = function (
+  this: Parser,
+  stream: unknown,
+  name: string,
+  length: number | null,
+  params: unknown,
+  cipher?: unknown,
+) {
+  // pdf.js reads a stream it is told is empty as no bytes at all.
+  return makeFilter.call(this, stream, name, UNCOUNTED.has(name) ? 0 : length, params, cipher)
+}
+
+async function extract(document: Document, limits: BrainLimits.Limits, decoded: BrainLimits.Budget): Promise<Read> {
   const warnings = new Set<BrainSchema.DocumentWarning>()
   const meta = await document.getMetadata().catch(() => undefined)
   const info: Record<string, unknown> =
@@ -139,7 +177,8 @@ async function extract(document: Document, limits: BrainLimits.Limits): Promise<
   const unread: number[] = []
   const links: string[] = []
   const state = { chars: 0 }
-  for (let number = 1; number <= count; number++) {
+  // Once the decoders are over their cap the read is refused, so no further page is opened.
+  for (let number = 1; number <= count && !decoded.over; number++) {
     const page = await document.getPage(number).catch(() => undefined)
     const content = await page?.getTextContent().catch(() => undefined)
     const [left, bottom, right, top] = (page?.view ?? []) as number[]

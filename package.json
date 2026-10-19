@@ -153,6 +153,7 @@
     "gitlab-ai-provider@6.10.0": "patches/gitlab-ai-provider@6.10.0.patch",
     "ai-gateway-provider@3.1.2": "patches/ai-gateway-provider@3.1.2.patch",
     "follow-redirects@1.16.0": "patches/follow-redirects@1.16.0.patch",
-    "@jerome-benoit/sap-ai-provider@4.9.1": "patches/@jerome-benoit%2Fsap-ai-provider@4.9.1.patch"
+    "@jerome-benoit/sap-ai-provider@4.9.1": "patches/@jerome-benoit%2Fsap-ai-provider@4.9.1.patch",
+    "unpdf@1.9.0": "patches/unpdf@1.9.0.patch"
   }
 }
