@@ -146,6 +146,36 @@ test("adds a Markdown document in Settings and shows it searchable once Vector h
   expect(state.uploads[0]).toContain("Clients must retry at most 3 times.")
 })
 
+test("says documents are not available when the engine cannot list them, without breaking Settings", async ({
+  page,
+}) => {
+  // An engine from before documents answers 404; a dropped connection answers nothing.
+  const answers = [() => ({ status: 404, json: { name: "NotFound" } }), () => undefined]
+  const state = { calls: 0 }
+  const documents = () =>
+    page.route(/\/memory\/documents(?:\?|$)/, (route) => {
+      const answer = answers[Math.min(state.calls++, answers.length - 1)]!()
+      return answer ? route.fulfill(answer) : route.abort("connectionreset")
+    })
+  await setup(page, () => ({ items: [] }), documents)
+  await page.getByRole("button", { name: "Settings", exact: true }).click()
+  const settings = page.locator(".settings-v2-workspace")
+  await settings.getByRole("tab", { name: "Memory", exact: true }).click()
+  await settings.getByRole("tab", { name: "Documents", exact: true }).click()
+  await expect(settings.locator('[data-component="settings-memory-documents"]')).toContainText(
+    "Documents are not available.",
+  )
+  // Switching away and back asks again, and the dropped connection is not an error page either.
+  const tabs = settings.locator(".settings-memory-tabs")
+  await tabs.getByRole("tab", { name: "Memory", exact: true }).click()
+  await tabs.getByRole("tab", { name: "Documents", exact: true }).click()
+  await expect(settings.locator('[data-component="settings-memory-documents"]')).toContainText(
+    "Documents are not available.",
+  )
+  await expect(page.getByText("Something went wrong")).toHaveCount(0)
+  expect(state.calls).toBeGreaterThanOrEqual(2)
+})
+
 test("shows a delivered citation as a solid chip, any other as unverified text, and what memory the turn used", async ({
   page,
 }) => {
