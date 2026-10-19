@@ -9,6 +9,7 @@ import { makeGlobalNode } from "../effect/app-node"
 import { Global } from "../global"
 import { Glob } from "../util/glob"
 import { Token } from "../util/token"
+import { BrainCard } from "./card"
 import { BrainDatabase } from "./database"
 import { BrainLexical } from "./lexical"
 import { BrainParse } from "./parse"
@@ -79,13 +80,14 @@ export const BUDGET = {
 
 /**
  * Recalled memory as a request carries it; nothing at all for no lines. `newest` says that lines which may disagree
- * (an entry and a later correction of it) come newest first, so the model can tell which one is current.
+ * (an entry and a later correction of it) come newest first, so the model can tell which one is current. `documents`
+ * says some lines are document cards, which the wrapper then calls data, never instructions.
  */
-export function recallText(lines: readonly string[], options?: { readonly newest?: boolean }) {
+export function recallText(lines: readonly string[], options?: { readonly newest?: boolean; readonly documents?: boolean }) {
   if (lines.length === 0) return ""
   return [
     "<vector_memory_recall>",
-    `Memory that may bear on this request. Rules bind; the rest is advisory, so check it against the code${options?.newest ? ". Where two lines disagree, the first is newer" : ""}:`,
+    `${options?.documents ? "Memory and documents" : "Memory"} that may bear on this request. Rules bind; the rest is advisory, so check it against the code${options?.newest ? ". Where two lines disagree, the first is newer" : ""}${options?.documents ? `. ${BrainCard.DOCUMENTS}` : ""}:`,
     ...lines,
     "</vector_memory_recall>",
   ].join("\n")
@@ -188,6 +190,23 @@ export type Injection = {
   readonly newest?: boolean
 }
 
+/** An entry that bears on a request, as recall scored it and before any budget: what documents compete with. */
+export type Candidate = {
+  readonly id: string
+  /** The line recall sends for it. */
+  readonly line: string
+  readonly score: number
+  /** Request terms it shares. */
+  readonly matched: readonly string[]
+  /** One of its file patterns covers a file the request names. */
+  readonly path: boolean
+  readonly personal: boolean
+  readonly origin: BrainSchema.Origin
+  readonly confidence: number
+  readonly updatedAt: number
+  readonly terms: ReadonlyMap<string, number>
+}
+
 export type Stats = {
   readonly active: number
   readonly review: number
@@ -210,7 +229,26 @@ export type Consolidation = {
 
 export interface Interface {
   readonly sync: (place: Place) => Effect.Effect<void>
-  readonly digest: (place: Place, options: { readonly personal: boolean; readonly index: boolean }) => Effect.Effect<Injection>
+  /** `documents`: the line about the repository's documents, which goes in with the memory index. */
+  readonly digest: (
+    place: Place,
+    options: { readonly personal: boolean; readonly index: boolean; readonly documents?: string },
+  ) => Effect.Effect<Injection>
+  /** The scoring half of recall: entries that bear on a request, best first, before any budget. */
+  readonly candidates: (
+    place: Place,
+    input: {
+      readonly query: string
+      readonly files?: readonly string[]
+      readonly personal: boolean
+      readonly exclude?: ReadonlySet<string>
+    },
+  ) => Effect.Effect<readonly Candidate[]>
+  /** Counts entries as sent to a session, as recall does for what it sends. */
+  readonly used: (
+    ids: readonly string[],
+    input: { readonly sessionID?: string; readonly tier: "recall"; readonly tokens: number },
+  ) => Effect.Effect<void>
   readonly recall: (
     place: Place,
     input: {
@@ -531,7 +569,10 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       .pipe(Effect.orDie)
   })
 
-  const digest = Effect.fn("Brain.digest")(function* (place: Place, options: { personal: boolean; index: boolean }) {
+  const digest = Effect.fn("Brain.digest")(function* (
+    place: Place,
+    options: { personal: boolean; index: boolean; documents?: string },
+  ) {
     yield* sync(place)
     const paths = [
       personalFiles.rules,
@@ -568,6 +609,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
             `Vector also remembers ${rest.length} note${rest.length === 1 ? "" : "s"} about this work (lessons, decisions, facts, past failures); the memory tool searches them.`,
           ]
         : []),
+      ...(options.documents ? [options.documents] : []),
     ]
     if (sections.length === 0) return { ids: [], tokens: 0 }
     const text = [
@@ -582,10 +624,50 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     return { text, ids: [...shown], tokens: Token.estimate(text) }
   })
 
-  const candidates = Effect.fnUntraced(function* (place: Place, personal: boolean, exclude: ReadonlySet<string>) {
+  const recallable = Effect.fnUntraced(function* (place: Place, personal: boolean, exclude: ReadonlySet<string>) {
     return (yield* visibleRows(place, personal, ["active"])).filter(
       (row) => !row.tier0 && !row.pinned && !row.stale && row.kind !== "review" && !exclude.has(row.id),
     )
+  })
+
+  const candidates = Effect.fn("Brain.candidates")(function* (
+    place: Place,
+    input: { query: string; files?: readonly string[]; personal: boolean; exclude?: ReadonlySet<string> },
+  ) {
+    yield* sync(place)
+    const rows = yield* recallable(place, input.personal, input.exclude ?? new Set())
+    const files = (input.files ?? []).map(relative(place))
+    const query = BrainLexical.terms([input.query, ...files].join(" "))
+    const now = Date.now()
+    const ranked = BrainLexical.rank(
+      rows.map((row) => ({ id: row.id, terms: decode(row.terms) })),
+      query,
+    )
+    const scored = new Map(ranked.map((item) => [item.id, item]))
+    return rows
+      .flatMap((row): Candidate[] => {
+        const lexical = scored.get(row.id)
+        const pathHit = row.paths.length > 0 && files.some((file) => row.paths.some((pattern) => matches(pattern, file)))
+        // One shared word is noise in a long request; two, or the only word of a short one, is a topic.
+        const relevant = pathHit || (lexical !== undefined && (lexical.matched.length >= 2 || (query.size <= 2 && lexical.matched.length >= 1)))
+        if (!relevant) return []
+        const recency = Math.max(0.5, 0.995 ** ((now - (row.last_used_at ?? row.updated_at)) / HOUR))
+        return [
+          {
+            id: row.id,
+            line: line(row),
+            score: ((lexical?.score ?? 0) + (pathHit ? 5 : 0)) * row.confidence * recency,
+            matched: lexical?.matched ?? [],
+            path: pathHit,
+            personal: row.repository_id === PERSONAL,
+            origin: row.origin,
+            confidence: row.confidence,
+            updatedAt: row.updated_at,
+            terms: decode(row.terms),
+          },
+        ]
+      })
+      .toSorted((a, b) => b.score - a.score || a.id.localeCompare(b.id))
   })
 
   const recall = Effect.fn("Brain.recall")(function* (
@@ -600,68 +682,39 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     },
   ) {
     if (input.budget <= 0) return { ids: [], tokens: 0 }
-    yield* sync(place)
-    const rows = yield* candidates(place, input.personal, input.exclude ?? new Set())
-    const files = (input.files ?? []).map(relative(place))
-    const query = BrainLexical.terms([input.query, ...files].join(" "))
-    const now = Date.now()
-    const ranked = BrainLexical.rank(
-      rows.map((row) => ({ id: row.id, terms: decode(row.terms) })),
-      query,
-    )
-    const scored = new Map(ranked.map((item) => [item.id, item]))
-    const picked = rows
-      .flatMap((row) => {
-        const lexical = scored.get(row.id)
-        const pathHit = row.paths.length > 0 && files.some((file) => row.paths.some((pattern) => matches(pattern, file)))
-        // One shared word is noise in a long request; two, or the only word of a short one, is a topic.
-        const relevant = pathHit || (lexical !== undefined && (lexical.matched.length >= 2 || (query.size <= 2 && lexical.matched.length >= 1)))
-        if (!relevant) return []
-        const recency = Math.max(0.5, 0.995 ** ((now - (row.last_used_at ?? row.updated_at)) / HOUR))
-        return [{ row, score: ((lexical?.score ?? 0) + (pathHit ? 5 : 0)) * row.confidence * recency }]
-      })
-      .toSorted((a, b) => b.score - a.score || a.row.id.localeCompare(b.row.id))
+    const picked = (yield* candidates(place, input))
       .slice(0, 5)
       // Counted as sent, with the longer header, so recall never passes its budget.
-      .reduce<Row[]>(
+      .reduce<Candidate[]>(
         (kept, item) =>
-          Token.estimate(recallText([...kept, item.row].map(line), { newest: true })) > input.budget
+          Token.estimate(recallText([...kept, item].map((candidate) => candidate.line), { newest: true })) >
+          input.budget
             ? kept
-            : [...kept, item.row],
+            : [...kept, item],
         [],
       )
     if (picked.length === 0) return { ids: [], tokens: 0 }
-    // Learned entries that share most of their words may disagree (a rule and a later correction worded differently),
-    // so each such group goes newest first, at the place of its best match.
-    const groups = picked.reduce<Row[][]>((all, row) => {
-      if (all.some((group) => group.includes(row))) return all
-      const terms = decode(row.terms)
-      const group = picked.filter(
-        (other) =>
-          other === row ||
-          (LEARNED.includes(row.origin) &&
-            LEARNED.includes(other.origin) &&
-            !all.some((taken) => taken.includes(other)) &&
-            Math.max(overlap(terms, decode(other.terms)), overlap(decode(other.terms), terms)) >= RELATED),
-      )
-      return [...all, group.toSorted((a, b) => b.updated_at - a.updated_at)]
-    }, [])
-    const ordered = groups.flat()
-    const newest = groups.some((group) => group.length > 1)
-    const text = recallText(ordered.map(line), { newest })
+    const { ordered, newest } = order(picked)
+    const text = recallText(
+      ordered.map((item) => item.line),
+      { newest },
+    )
     const tokens = Token.estimate(text)
     yield* used(
-      ordered.map((row) => row.id),
+      ordered.map((item) => item.id),
       input.sessionID,
       "recall",
       tokens,
     )
     return {
       text,
-      ids: ordered.map((row) => row.id),
+      ids: ordered.map((item) => item.id),
       tokens,
-      personal: ordered.filter((row) => row.repository_id === PERSONAL).map((row) => row.id),
-      shared: recallText(ordered.filter((row) => row.repository_id !== PERSONAL).map(line), { newest }),
+      personal: ordered.filter((item) => item.personal).map((item) => item.id),
+      shared: recallText(
+        ordered.filter((item) => !item.personal).map((item) => item.line),
+        { newest },
+      ),
       newest,
     }
   })
@@ -684,7 +737,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     const file = relative(place)(input.file)
     if (file.startsWith("../")) return { ids: [], tokens: 0 }
     yield* sync(place)
-    const rows = (yield* candidates(place, input.personal, input.exclude ?? new Set())).filter(
+    const rows = (yield* recallable(place, input.personal, input.exclude ?? new Set())).filter(
       (row) => row.paths.length > 0 && row.paths.some((pattern) => matches(pattern, file)),
     )
     const picked = rows
@@ -1829,6 +1882,8 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
   return {
     sync,
     digest,
+    candidates,
+    used: (ids, input) => used(ids, input.sessionID, input.tier, input.tokens),
     recall,
     attach,
     search,
@@ -2040,6 +2095,27 @@ function confidence(proposal: Proposal, verified: boolean) {
   if (proposal.origin === "user") return 1
   if (!verified) return 0.5
   return proposal.evidence?.type === "message" ? 0.9 : 0.8
+}
+
+/**
+ * Recalled entries in the order a request carries them. Learned entries that share most of their words may disagree (a
+ * rule and a later correction worded differently), so each such group goes newest first, at the place of its best
+ * match; `newest` says some group has more than one line.
+ */
+export function order<C extends Pick<Candidate, "origin" | "terms" | "updatedAt">>(picked: readonly C[]) {
+  const groups = picked.reduce<C[][]>((all, item) => {
+    if (all.some((group) => group.includes(item))) return all
+    const group = picked.filter(
+      (other) =>
+        other === item ||
+        (LEARNED.includes(item.origin) &&
+          LEARNED.includes(other.origin) &&
+          !all.some((taken) => taken.includes(other)) &&
+          Math.max(overlap(item.terms, other.terms), overlap(other.terms, item.terms)) >= RELATED),
+    )
+    return [...all, group.toSorted((a, b) => b.updatedAt - a.updatedAt)]
+  }, [])
+  return { ordered: groups.flat(), newest: groups.some((group) => group.length > 1) }
 }
 
 /** Texts this alike may be one entry's wordings. They are one entry only when one says nothing the other does not. */
