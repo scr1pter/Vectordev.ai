@@ -162,6 +162,34 @@ describe("BrainKnowledge titles", () => {
     // Without a name from the user, the document's own heading is its title.
     expect(result.plain?.title).toBe("Auth spec")
   })
+
+  test("a title the user gives with a file stays theirs, even when it is the file's own name", async () => {
+    const result = await withKnowledge((setup) =>
+      Effect.gen(function* () {
+        return {
+          same: (yield* added(setup, { ...text("scan.pdf", SPEC_V1), title: "scan.pdf" })).document,
+          other: (yield* added(setup, { ...text("Limits.md", SPEC_V2), title: "Limits of uploads" })).document,
+        }
+      }),
+    )
+    expect(result.same?.title).toBe("scan.pdf")
+    expect(result.other?.title).toBe("Limits of uploads")
+  })
+})
+
+describe("BrainKnowledge pasted text", () => {
+  test("pasted text is read as Markdown whatever its name looks like", async () => {
+    const result = await withKnowledge((setup) =>
+      Effect.gen(function* () {
+        return {
+          dotted: (yield* added(setup, text("Release notes v1.2", "# Notes\n\nUploads MUST be scanned."))).document,
+          converted: (yield* added(setup, text("scan.pdf", "Uploads MUST be scanned twice."))).document,
+        }
+      }),
+    )
+    expect(result.dotted).toMatchObject({ format: "markdown", title: "Notes", status: "searchable" })
+    expect(result.converted).toMatchObject({ format: "markdown", title: "scan.pdf", status: "searchable" })
+  })
 })
 
 describe("BrainKnowledge pages", () => {

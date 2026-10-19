@@ -157,10 +157,11 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       }
     })
 
-    // What an add came to, as the routes answer it; a title the user gave is the document's.
+    // What an add came to, as the routes answer it. A title the user gave goes in with a new document, and renames
+    // one these bytes already are.
     const added = Effect.fnUntraced(function* (place: Brain.Place, result: BrainKnowledge.AddResult, title?: string) {
       if (result.type === "refused") return yield* refused(result.message, result.reason, result.document)
-      const named = title?.trim()
+      const named = result.type === "unchanged" ? title?.trim() : undefined
       if (named) yield* knowledge.update(place, result.document.id, { title: named })
       const document = named
         ? ((yield* knowledge.document(place, result.document.id, { personal: true }))?.document ?? result.document)
@@ -209,6 +210,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
         ...(file.mime ? { mime: file.mime } : {}),
         origin,
         ...(sessionID ? { sessionID } : {}),
+        ...(form.fields.get("title")?.trim() ? { title: form.fields.get("title")! } : {}),
         replace: form.fields.get("replace") === "true",
       })
       return yield* added(place, result, form.fields.get("title"))
@@ -228,6 +230,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
         links: false,
         replace: ctx.payload.replace ?? false,
         ...(ctx.payload.sessionID ? { sessionID: ctx.payload.sessionID } : {}),
+        ...(ctx.payload.title?.trim() ? { title: ctx.payload.title } : {}),
       })
       return yield* added(place, result, ctx.payload.title)
     })

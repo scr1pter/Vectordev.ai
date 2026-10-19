@@ -72,13 +72,20 @@ export const MemoryDocAddCommand = effectCmd({
           ? { type: "path" as const, path: path.resolve(process.cwd(), file) }
           : {
               type: "text" as const,
-              // Whatever the source was, what arrives on stdin is Markdown.
-              name: `${(args.name?.trim() || "stdin").replace(/\.[A-Za-z0-9]{1,8}$/, "")}.md`,
+              // Whatever the source was, what arrives on stdin is Markdown, kept under the name it was given.
+              name: args.name?.trim() || "stdin",
               text: piped,
             }
-      const result = yield* memory.knowledge.add(memory.place, { ...input, origin: "cli", replace: args.replace })
+      const result = yield* memory.knowledge.add(memory.place, {
+        ...input,
+        origin: "cli",
+        replace: args.replace,
+        ...(titled ? { title: titled } : {}),
+      })
       if (result.type === "refused") return { file, result }
-      if (titled) yield* memory.knowledge.update(memory.place, result.document.id, { title: titled })
+      // A file already kept under other bytes' name is renamed.
+      if (titled && result.type === "unchanged")
+        yield* memory.knowledge.update(memory.place, result.document.id, { title: titled })
       // Searchable by keywords is all there is to wait for until meaning search arrives.
       const document =
         (yield* memory.knowledge.wait(memory.place, result.document.id, "searchable", WAIT)) ?? result.document

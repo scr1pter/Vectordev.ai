@@ -64,6 +64,8 @@ export type AddInput = {
   readonly origin: Origin
   readonly sessionID?: string
   readonly hold?: BrainSchema.Hold
+  /** The user's title for it, which the title its text gives does not replace. */
+  readonly title?: string
   /**
    * false: a file of the same name as a document here is refused with reason "version" (and that document) rather than
    * read as its next version, so the user can be asked first. Anything else reads it as the next version.
@@ -509,6 +511,8 @@ function make(input: {
     added: [] as number[],
     // Cards as each session was first shown them, so a reindex mid-session keeps the bytes the provider cached.
     snapshots: new Map<string, Map<string, string>>(),
+    // Documents the user named before they were read, whose title the text must not replace.
+    titled: new Set<string>(),
   }
 
   const revise = (repository: string) =>
@@ -634,7 +638,7 @@ function make(input: {
       previous_id: previous?.id ?? null,
       ordinal,
       name: BrainCard.clip(BrainScan.stripHidden(path.basename(file.name)), 120),
-      title: nameTitle(file.name),
+      title: request.title?.trim() ? BrainCard.clip(BrainScan.stripHidden(request.title.trim()), 80) : nameTitle(file.name),
       format: sniffed.format,
       origin: request.origin,
       // Private unless it is the repository's own doc, which the agent can read anyway.
@@ -681,6 +685,7 @@ function make(input: {
       )
       .pipe(Effect.orDie)
     state.pending.set(id, { name: file.name, bytes: file.bytes, ...(file.mime ? { mime: file.mime } : {}) })
+    if (request.title?.trim()) state.titled.add(id)
     yield* revise(place.repository)
     yield* drain()
     return {
@@ -887,6 +892,7 @@ function make(input: {
     message: string,
   ) {
     state.pending.delete(document.id)
+    state.titled.delete(document.id)
     yield* db.delete(BrainJobTable).where(eq(BrainJobTable.id, job.id)).run().pipe(Effect.orDie)
     // A document that was already in use keeps what it had; only a new one shows that it could not be read.
     if (!USABLE.includes(document.status) && document.status !== "held")
@@ -1227,7 +1233,9 @@ function make(input: {
       .set({
         // A new document takes the title its text gives, unless the user named it; one read again keeps its title.
         title:
-          (document.status === "queued" || document.status === "reading") && title === nameTitle(document.name)
+          (document.status === "queued" || document.status === "reading") &&
+          !state.titled.has(document.id) &&
+          title === nameTitle(document.name)
             ? BrainCard.clip(structured.title, 80) || title
             : title,
         pages: structured.pages ?? null,
@@ -1255,6 +1263,7 @@ function make(input: {
       .run()
       .pipe(Effect.orDie)
     yield* totals(document.repository_id)
+    state.titled.delete(document.id)
     forgetCards(gone.map((item) => item.ref))
   })
 
@@ -2228,6 +2237,7 @@ function make(input: {
           .pipe(Effect.orDie)
         if (!pause) yield* drain()
       }
+      if (change.title && (row.status === "queued" || row.status === "reading")) state.titled.add(id)
       yield* db
         .update(BrainDocumentTable)
         .set({
@@ -2917,7 +2927,8 @@ export async function read(place: Brain.Place, request: AddInput): Promise<Read>
   if (request.type === "text")
     return {
       type: "file" as const,
-      name: /\.[A-Za-z0-9]{1,8}$/.test(request.name) ? request.name : `${request.name}.md`,
+      // Pasted text is Markdown, whatever its name looks like ("Release notes v1.2", "scan.pdf").
+      name: /\.(?:md|mdx|markdown|txt)$/i.test(request.name) ? request.name : `${request.name}.md`,
       bytes: new TextEncoder().encode(request.text),
       lineage: lineageOf(request.name),
     }
