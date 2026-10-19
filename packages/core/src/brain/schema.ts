@@ -48,6 +48,11 @@ export type Status = typeof Status.Type
 export const Origin = Schema.Literals(["file", "user", "agent", "failure-memory"])
 export type Origin = typeof Origin.Type
 
+/**
+ * Why an entry, a document or one of its passages waits for the user. Two only ever hold document content:
+ * - hidden-text: text a reader of the document would not see (tiny or off-page PDF text, hidden Word or HTML text).
+ * - suggested: a document the agent offered to keep without the user's own words asking for it.
+ */
 export const Hold = Schema.Literals([
   "web",
   "mcp",
@@ -56,6 +61,8 @@ export const Hold = Schema.Literals([
   "guest",
   "instruction-like",
   "hidden-unicode",
+  "hidden-text",
+  "suggested",
 ])
 export type Hold = typeof Hold.Type
 
@@ -88,7 +95,8 @@ export const Entry = Schema.Struct({
 export type Entry = typeof Entry.Type
 
 export const Evidence = Schema.Struct({
-  type: Schema.Literals(["message", "file", "check", "user", "file-item"]),
+  /** "document": a quote from a document's record or passage, whose id is the path. */
+  type: Schema.Literals(["message", "file", "check", "user", "file-item", "document"]),
   path: Schema.optional(Schema.String),
   quote: Schema.optional(Schema.String),
   command: Schema.optional(Schema.String),
@@ -96,3 +104,250 @@ export const Evidence = Schema.Struct({
   createdAt: Schema.Finite,
 }).annotate({ identifier: "MemoryEvidence" })
 export type Evidence = typeof Evidence.Type
+
+// Documents. A document the user gives Vector (or a doc the repository tracks) is read on this computer into sections,
+// passages and typed records. They live in tables of their own, never as entries, so recall over memory stays a scan of
+// a few hundred rows however many documents there are.
+
+/** The reader a document went through. DOCM reads as docx, MDX as markdown, TSV as csv, and .rst and .adoc as text. */
+export const Format = Schema.Literals([
+  "pdf",
+  "docx",
+  "pptx",
+  "xlsx",
+  "csv",
+  "markdown",
+  "html",
+  "json",
+  "yaml",
+  "openapi",
+  "text",
+])
+export type Format = typeof Format.Type
+
+/**
+ * - private: uploads and chat attachments, withheld where personal memory is (guests, models that may train).
+ * - repository: the repository's own tracked docs, which the agent could read anyway.
+ */
+export const Visibility = Schema.Literals(["private", "repository"])
+export type Visibility = typeof Visibility.Type
+
+/** How a document arrived. */
+export const DocumentOrigin = Schema.Literals(["upload", "chat", "agent", "repository", "cli"])
+export type DocumentOrigin = typeof DocumentOrigin.Type
+
+/**
+ * Where a document is in its reading, in order: queued, reading, linking (to code), searchable (by keywords and code
+ * links), embedding, ready (searchable by meaning too). partial: read, with pages or parts it could not read. held: the
+ * whole document waits for the user. superseded: a newer version replaced it.
+ */
+export const DocumentStatus = Schema.Literals([
+  "queued",
+  "reading",
+  "linking",
+  "searchable",
+  "embedding",
+  "ready",
+  "partial",
+  "held",
+  "failed",
+  "superseded",
+])
+export type DocumentStatus = typeof DocumentStatus.Type
+
+/** What the user should know about how a document was read. */
+export const DocumentWarning = Schema.Literals([
+  "truncated",
+  "scanned",
+  "encrypted",
+  "macros-ignored",
+  "external-links",
+  "secrets-removed",
+  "tables-approximate",
+])
+export type DocumentWarning = typeof DocumentWarning.Type
+
+/**
+ * - requirement: what must, should or may be so ("Clients MUST retry at most 3 times").
+ * - constraint: a limit with a number and unit ("at most 50 MB per file").
+ * - decision: a choice and its reason, from an ADR or prose.
+ * - contract: an endpoint, environment variable, CLI line, config key, function, event or error code.
+ * - procedure: ordered steps and their commands.
+ * - term: a glossary term or acronym and its definition.
+ * - entity: a service, table, queue, environment or component the document keeps naming.
+ * - fact: a parameter's default or a stated value ("p95 latency is 200 ms").
+ * - question: something the document leaves open (TBD, TODO, open questions).
+ */
+export const RecordKind = Schema.Literals([
+  "requirement",
+  "constraint",
+  "decision",
+  "contract",
+  "procedure",
+  "term",
+  "entity",
+  "fact",
+  "question",
+])
+export type RecordKind = typeof RecordKind.Type
+
+/** A passage's or record's state, as an entry's: only active ones reach the agent. */
+export const ItemStatus = Schema.Literals(["active", "proposed", "quarantined", "archived"])
+export type ItemStatus = typeof ItemStatus.Type
+
+/** Who wrote a record: Vector's rules, a model asked to distill (quote-locked), or the user. */
+export const RecordOrigin = Schema.Literals(["extracted", "distilled", "user"])
+export type RecordOrigin = typeof RecordOrigin.Type
+
+/** What reading a document produced, for its progress and its page. */
+export const DocumentStats = Schema.Struct({
+  /** Estimated tokens of the extracted text: what sending the document whole would cost. */
+  tokens: Schema.Finite,
+  /** Pages (or parts, for formats without pages) read so far. */
+  read: Schema.Finite,
+  sections: Schema.Finite,
+  passages: Schema.Finite,
+  records: Schema.Finite,
+  kinds: Schema.Record(RecordKind, Schema.Finite),
+  /** Passages held for the user's review. */
+  held: Schema.Finite,
+  /** Files of the repository its records and passages are linked to. */
+  linked: Schema.Finite,
+  /** Passages and records searchable by meaning. */
+  embedded: Schema.Finite,
+}).annotate({ identifier: "MemoryDocumentStats" })
+export type DocumentStats = typeof DocumentStats.Type
+
+export const Document = Schema.Struct({
+  id: Schema.String,
+  /** The number the user refers to it by ("document 3"), unique within the repository. */
+  ordinal: Schema.Finite,
+  version: Schema.Finite,
+  /** The version this one replaced. */
+  previous: Schema.optional(Schema.String),
+  /** The file name it arrived with. */
+  name: Schema.String,
+  title: Schema.String,
+  format: Format,
+  origin: DocumentOrigin,
+  visibility: Visibility,
+  status: DocumentStatus,
+  hold: Schema.optional(Hold),
+  bytes: Schema.Finite,
+  pages: Schema.optional(Schema.Finite),
+  /** Pages with no text layer (scanned images), which Vector does not read. */
+  unread: Schema.Array(Schema.Finite),
+  /** The repository file it mirrors, for repository docs and documents added by path. */
+  sourcePath: Schema.optional(Schema.String),
+  /** Whether a copy of the original file is kept (off unless the user turns it on). */
+  stored: Schema.Boolean,
+  stats: DocumentStats,
+  warnings: Schema.Array(DocumentWarning),
+  error: Schema.optional(Schema.String),
+  /** The local model its passages and records were embedded with. */
+  embedModel: Schema.optional(Schema.String),
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
+  indexedAt: Schema.optional(Schema.Finite),
+}).annotate({ identifier: "MemoryDocument" })
+export type Document = typeof Document.Type
+
+/** A passage's text as `get` returns it: verbatim and redacted. The header is the document's title and section path. */
+export const Passage = Schema.Struct({
+  id: Schema.String,
+  document: Schema.String,
+  section: Schema.String,
+  page: Schema.optional(Schema.Finite),
+  header: Schema.String,
+  text: Schema.String,
+  tokens: Schema.Finite,
+}).annotate({ identifier: "MemoryPassage" })
+export type Passage = typeof Passage.Type
+
+/** A typed record. Its id is stable across versions of its document, so pins, edits and citations survive them. */
+export const Record = Schema.Struct({
+  id: Schema.String,
+  document: Schema.String,
+  passage: Schema.String,
+  /** The section's path, such as "3 Limits > 3.2 Retries". */
+  section: Schema.String,
+  kind: RecordKind,
+  subject: Schema.String,
+  /** The line the agent sees, built from the source sentence with no paraphrase. */
+  card: Schema.String,
+  /** The exact source span. */
+  quote: Schema.String,
+  fields: Schema.Record(Schema.String, Schema.Unknown),
+  status: ItemStatus,
+  hold: Schema.optional(Hold),
+  confidence: Schema.Finite,
+  origin: RecordOrigin,
+  userEdited: Schema.Boolean,
+  pinned: Schema.Boolean,
+  page: Schema.optional(Schema.Finite),
+  /** The document version that last changed this record's text. */
+  changedVersion: Schema.optional(Schema.Finite),
+  uses: Schema.Finite,
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
+}).annotate({ identifier: "MemoryRecord" })
+export type Record = typeof Record.Type
+
+/** One line of document knowledge as search and citations show it: a record's card, or a passage's opening. */
+export const Card = Schema.Struct({
+  id: Schema.String,
+  kind: Schema.Literals([...RecordKind.literals, "passage"]),
+  document: Schema.String,
+  /** The document's title. */
+  title: Schema.String,
+  page: Schema.optional(Schema.Finite),
+  section: Schema.optional(Schema.String),
+  text: Schema.String,
+}).annotate({ identifier: "MemoryCard" })
+export type Card = typeof Card.Type
+
+/**
+ * - conflict: two records, or a record and an entry or rule, disagree. Never resolved automatically.
+ * - drift: linked code changed, or gives a different value than the document.
+ * - held: content that waits for the user.
+ */
+export const ReviewKind = Schema.Literals(["conflict", "drift", "held"])
+export type ReviewKind = typeof ReviewKind.Type
+
+export const ReviewStatus = Schema.Literals(["open", "dismissed", "resolved"])
+export type ReviewStatus = typeof ReviewStatus.Type
+
+/** Something in the brain that needs the user's look ("Needs a look" in Settings). */
+export const ReviewItem = Schema.Struct({
+  id: Schema.String,
+  kind: ReviewKind,
+  /** The record, passage, entry or document the item is about, and the other side of a conflict. */
+  a: Schema.String,
+  b: Schema.optional(Schema.String),
+  subject: Schema.String,
+  detail: Schema.Record(Schema.String, Schema.Unknown),
+  status: ReviewStatus,
+  /** Which side the user kept, for a resolved conflict. */
+  winner: Schema.optional(Schema.String),
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
+}).annotate({ identifier: "MemoryReviewItem" })
+export type ReviewItem = typeof ReviewItem.Type
+
+/** The local search model is downloaded only when the user asks; until it is ready, search uses keywords and code links. */
+export const ModelState = Schema.Literals(["absent", "downloading", "verifying", "ready", "failed"])
+export type ModelState = typeof ModelState.Type
+
+export const ModelStatus = Schema.Struct({
+  state: ModelState,
+  /** The model's id in Vector's manifest. */
+  model: Schema.optional(Schema.String),
+  /** From 0 to 1 while downloading or verifying. */
+  progress: Schema.optional(Schema.Finite),
+  /** Bytes received, or on disk once ready. */
+  bytes: Schema.optional(Schema.Finite),
+  /** Bytes the manifest expects. */
+  total: Schema.optional(Schema.Finite),
+  error: Schema.optional(Schema.String),
+}).annotate({ identifier: "MemoryModelStatus" })
+export type ModelStatus = typeof ModelStatus.Type

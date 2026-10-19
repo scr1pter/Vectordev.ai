@@ -1,4 +1,4 @@
-import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { blob, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
 import type { BrainSchema } from "./schema"
 
 // brain.db, a SQLite file of its own beside vector.db: erasing all memory deletes one folder, session repair, export
@@ -110,6 +110,15 @@ export const BrainStateTable = sqliteTable("brain_state", {
   revision: integer().notNull().default(0),
   learning: integer({ mode: "boolean" }).notNull().default(true),
   consolidated_at: integer(),
+  // Documents keep a revision of their own, so a memory write never invalidates what is cached about documents.
+  knowledge_revision: integer().notNull().default(0),
+  // BM25's N and total length over the repository's passages and records, kept here so a search reads no other row.
+  items: integer().notNull().default(0),
+  item_length_sum: integer().notNull().default(0),
+  // Whether the repository's tracked docs are read, and whether originals of added documents are kept.
+  repository_docs: integer({ mode: "boolean" }).notNull().default(true),
+  keep_originals: integer({ mode: "boolean" }).notNull().default(false),
+  scanned_at: integer(),
 })
 
 // Which entries reached which session, and through which tier. Pruned after 30 days.
@@ -119,9 +128,320 @@ export const BrainUseTable = sqliteTable(
     id: integer().primaryKey({ autoIncrement: true }),
     session_id: text().notNull(),
     entry_id: text().notNull(),
-    tier: text().$type<"digest" | "recall" | "attach" | "search">().notNull(),
+    tier: text()
+      .$type<"digest" | "recall" | "attach" | "search" | "pointer" | "guard" | "get" | "brief" | "review">()
+      .notNull(),
     tokens: integer().notNull(),
     at: integer().notNull(),
+    // The request message it reached, whether the answer cited it, and how that run ended, for outcome credit.
+    request_id: text(),
+    cited: integer({ mode: "boolean" }).notNull().default(false),
+    outcome: text().$type<"pass" | "revert">(),
   },
   (table) => [index("brain_use_session_idx").on(table.session_id)],
+)
+
+// Documents, and everything Vector reads from them. Created empty by the knowledge migration. A passage or a record is
+// one `brain_item`, which carries what a search filters on (visibility, status, BM25 length, outcome counters), so the
+// postings query never touches a content table. Sections, passages, records, postings and vectors go with their document
+// through foreign keys; the rest is keyed by repository, as entries are.
+
+export const BrainDocumentTable = sqliteTable(
+  "brain_document",
+  {
+    id: text().primaryKey(),
+    repository_id: text().notNull(),
+    // Stable across versions of the same document: its source path, or its normalised name.
+    lineage: text().notNull(),
+    version: integer().notNull().default(1),
+    previous_id: text(),
+    ordinal: integer().notNull(),
+    name: text().notNull(),
+    title: text().notNull(),
+    format: text().$type<BrainSchema.Format>().notNull(),
+    origin: text().$type<BrainSchema.DocumentOrigin>().notNull(),
+    visibility: text().$type<BrainSchema.Visibility>().notNull(),
+    content_hash: text().notNull(),
+    bytes: integer().notNull(),
+    pages: integer(),
+    unread: text({ mode: "json" }).$type<number[]>().notNull(),
+    source_path: text(),
+    stored: integer({ mode: "boolean" }).notNull().default(false),
+    status: text().$type<BrainSchema.DocumentStatus>().notNull(),
+    hold_reason: text().$type<BrainSchema.Hold>(),
+    stats: text({ mode: "json" }).$type<BrainSchema.DocumentStats>().notNull(),
+    warnings: text({ mode: "json" }).$type<BrainSchema.DocumentWarning[]>().notNull(),
+    error: text(),
+    // The reader's version, so a better reader can re-read what an older one read.
+    extractor: integer().notNull(),
+    embed_model: text(),
+    origin_session_id: text(),
+    created_at: integer().notNull(),
+    updated_at: integer().notNull(),
+    indexed_at: integer(),
+  },
+  (table) => [
+    index("brain_document_repository_idx").on(table.repository_id, table.status),
+    index("brain_document_hash_idx").on(table.repository_id, table.content_hash),
+    index("brain_document_lineage_idx").on(table.repository_id, table.lineage),
+    uniqueIndex("brain_document_ordinal_idx").on(table.repository_id, table.ordinal),
+  ],
+)
+
+export const BrainSectionTable = sqliteTable(
+  "brain_section",
+  {
+    id: text().primaryKey(),
+    document_id: text()
+      .notNull()
+      .references(() => BrainDocumentTable.id, { onDelete: "cascade" }),
+    parent_id: text(),
+    ordinal: integer().notNull(),
+    level: integer().notNull(),
+    heading: text().notNull(),
+    path: text().notNull(),
+    kind: text().$type<"section" | "slide" | "sheet">().notNull(),
+    page_start: integer(),
+    page_end: integer(),
+    tokens: integer().notNull(),
+  },
+  (table) => [index("brain_section_document_idx").on(table.document_id, table.ordinal)],
+)
+
+export const BrainItemTable = sqliteTable(
+  "brain_item",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    repository_id: text().notNull(),
+    type: text().$type<"passage" | "record">().notNull(),
+    // The passage's or record's id.
+    ref: text().notNull().unique(),
+    document_id: text()
+      .notNull()
+      .references(() => BrainDocumentTable.id, { onDelete: "cascade" }),
+    visibility: text().$type<BrainSchema.Visibility>().notNull(),
+    status: text().$type<BrainSchema.ItemStatus>().notNull(),
+    hold_reason: text().$type<BrainSchema.Hold>(),
+    // Terms indexed for it, BM25's document length.
+    length: integer().notNull(),
+    confidence: real().notNull(),
+    uses: integer().notNull().default(0),
+    // Outcome counts, which decay, so they are not whole numbers.
+    helpful: real().notNull().default(0),
+    harmful: real().notNull().default(0),
+    ignored: integer().notNull().default(0),
+    last_used_at: integer(),
+    last_helpful_at: integer(),
+  },
+  (table) => [index("brain_item_repository_idx").on(table.repository_id, table.status, table.visibility)],
+)
+
+export const BrainPassageTable = sqliteTable(
+  "brain_passage",
+  {
+    // Content-addressed within the document's lineage, so unchanged text keeps its id across versions.
+    id: text().primaryKey(),
+    item: integer()
+      .notNull()
+      .unique()
+      .references(() => BrainItemTable.id, { onDelete: "cascade" }),
+    document_id: text()
+      .notNull()
+      .references(() => BrainDocumentTable.id, { onDelete: "cascade" }),
+    section_id: text().notNull(),
+    ordinal: integer().notNull(),
+    page: integer(),
+    header: text().notNull(),
+    body: text().notNull(),
+    tokens: integer().notNull(),
+    // Offsets into the document's extracted text.
+    span_start: integer().notNull(),
+    span_end: integer().notNull(),
+    norm_hash: text().notNull(),
+  },
+  (table) => [index("brain_passage_document_idx").on(table.document_id, table.ordinal)],
+)
+
+export const BrainRecordTable = sqliteTable(
+  "brain_record",
+  {
+    // From the repository, lineage, kind and subject, so it is stable across versions and reordering.
+    id: text().primaryKey(),
+    item: integer()
+      .notNull()
+      .unique()
+      .references(() => BrainItemTable.id, { onDelete: "cascade" }),
+    document_id: text()
+      .notNull()
+      .references(() => BrainDocumentTable.id, { onDelete: "cascade" }),
+    passage_id: text().notNull(),
+    section_id: text().notNull(),
+    kind: text().$type<BrainSchema.RecordKind>().notNull(),
+    key: text().notNull(),
+    subject: text().notNull(),
+    card: text().notNull(),
+    quote: text().notNull(),
+    quote_hash: text().notNull(),
+    fields: text({ mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    polarity: text().notNull(),
+    // The extraction rule that found it.
+    rule: text().notNull(),
+    origin: text().$type<BrainSchema.RecordOrigin>().notNull(),
+    user_edited: integer({ mode: "boolean" }).notNull().default(false),
+    pinned: integer({ mode: "boolean" }).notNull().default(false),
+    changed_version: integer(),
+    page: integer(),
+    span_start: integer().notNull(),
+    span_end: integer().notNull(),
+    norm_hash: text().notNull(),
+    created_at: integer().notNull(),
+    updated_at: integer().notNull(),
+  },
+  (table) => [
+    index("brain_record_document_idx").on(table.document_id),
+    index("brain_record_subject_idx").on(table.subject),
+    index("brain_record_hash_idx").on(table.norm_hash),
+  ],
+)
+
+// The keyword index: one integer id per term and repository, with its document frequency.
+export const BrainTermTable = sqliteTable(
+  "brain_term",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    repository_id: text().notNull(),
+    term: text().notNull(),
+    df: integer().notNull().default(0),
+  },
+  (table) => [uniqueIndex("brain_term_repository_idx").on(table.repository_id, table.term)],
+)
+
+// Created WITHOUT ROWID by the migration (drizzle has no option for it), so a posting is its key and count, about 18
+// bytes, and a query reads only the rows of its own terms.
+export const BrainPostingTable = sqliteTable(
+  "brain_posting",
+  {
+    term: integer().notNull(),
+    item: integer()
+      .notNull()
+      .references(() => BrainItemTable.id, { onDelete: "cascade" }),
+    count: integer().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.term, table.item] }), index("brain_posting_item_idx").on(table.item)],
+)
+
+// A link from a record, passage or entry (`owner`) to the code it names.
+export const BrainAnchorTable = sqliteTable(
+  "brain_anchor",
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    repository_id: text().notNull(),
+    owner: text().notNull(),
+    path: text().notNull(),
+    symbol: text(),
+    line: integer(),
+    method: text().$type<"path" | "definition" | "use" | "route" | "env" | "constant" | "user" | "outcome">().notNull(),
+    weight: real().notNull(),
+    // A constant's value as the code gives it, for drift checks with values.
+    value: text({ mode: "json" }).$type<{ raw: string; value: number; unit?: string }>(),
+    file_hash: text().notNull(),
+    line_hash: text(),
+    status: text().$type<"fresh" | "drifted" | "missing">().notNull(),
+    origin: text().$type<"extracted" | "user" | "outcome">().notNull(),
+    checked_at: integer().notNull(),
+    created_at: integer().notNull(),
+  },
+  (table) => [
+    index("brain_anchor_path_idx").on(table.repository_id, table.path),
+    index("brain_anchor_owner_idx").on(table.owner),
+  ],
+)
+
+// Identifiers a document names that the code does not have yet; they link themselves when the code lands.
+export const BrainPendingTable = sqliteTable(
+  "brain_pending",
+  {
+    repository_id: text().notNull(),
+    owner: text().notNull(),
+    identifier: text().notNull(),
+    kind: text().$type<"symbol" | "path" | "route" | "env">().notNull(),
+    created_at: integer().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.repository_id, table.owner, table.identifier] })],
+)
+
+export const BrainEdgeTable = sqliteTable(
+  "brain_edge",
+  {
+    repository_id: text().notNull(),
+    source: text().notNull(),
+    target: text().notNull(),
+    type: text()
+      .$type<"derived_from" | "related" | "same_as" | "conflicts" | "defines" | "imports" | "co_changes">()
+      .notNull(),
+    weight: real().notNull(),
+    created_at: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.source, table.type, table.target] }),
+    index("brain_edge_target_idx").on(table.repository_id, table.target),
+  ],
+)
+
+// A passage's or record's embedding from the local model: int8 values with their scale, and sign bits for a prefilter.
+export const BrainVectorTable = sqliteTable(
+  "brain_vector",
+  {
+    item: integer()
+      .primaryKey()
+      .references(() => BrainItemTable.id, { onDelete: "cascade" }),
+    repository_id: text().notNull(),
+    model: text().notNull(),
+    q8: blob({ mode: "buffer" }).notNull(),
+    bits: blob({ mode: "buffer" }).notNull(),
+    scale: real().notNull(),
+    norm_hash: text().notNull(),
+    embedded_at: integer().notNull(),
+  },
+  (table) => [index("brain_vector_repository_idx").on(table.repository_id, table.model)],
+)
+
+// Work on documents, claimed with a lease so an engine and a CLI process sharing brain.db never do the same work twice.
+export const BrainJobTable = sqliteTable(
+  "brain_job",
+  {
+    id: text().primaryKey(),
+    repository_id: text().notNull(),
+    document_id: text().references(() => BrainDocumentTable.id, { onDelete: "cascade" }),
+    kind: text().$type<"extract" | "link" | "embed" | "scan" | "drift" | "distill">().notNull(),
+    state: text().$type<"queued" | "running" | "paused" | "done" | "failed">().notNull(),
+    lease_owner: text(),
+    lease_until: integer(),
+    attempts: integer().notNull().default(0),
+    next_at: integer().notNull(),
+    done: integer().notNull().default(0),
+    total: integer().notNull().default(0),
+    error: text(),
+    created_at: integer().notNull(),
+    updated_at: integer().notNull(),
+  },
+  (table) => [index("brain_job_state_idx").on(table.state, table.next_at)],
+)
+
+export const BrainReviewTable = sqliteTable(
+  "brain_review",
+  {
+    id: text().primaryKey(),
+    repository_id: text().notNull(),
+    kind: text().$type<BrainSchema.ReviewKind>().notNull(),
+    a: text().notNull(),
+    b: text(),
+    subject: text().notNull(),
+    detail: text({ mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    status: text().$type<BrainSchema.ReviewStatus>().notNull(),
+    winner: text(),
+    created_at: integer().notNull(),
+    updated_at: integer().notNull(),
+  },
+  (table) => [index("brain_review_repository_idx").on(table.repository_id, table.status)],
 )

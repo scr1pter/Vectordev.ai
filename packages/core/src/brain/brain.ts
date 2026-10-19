@@ -1,35 +1,38 @@
 export * as Brain from "./brain"
 
 import { createHash, randomBytes } from "node:crypto"
-import { chmodSync, mkdirSync } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
-import { EffectDrizzleSqlite } from "@vectordevai/effect-drizzle-sqlite"
-import { layer } from "#sqlite"
 import { Context, Effect, Layer } from "effect"
 import { makeGlobalNode } from "../effect/app-node"
-import { Flag } from "../flag/flag"
 import { Global } from "../global"
-import { InstallationChannel } from "../installation/version"
-import { DatabaseMigration } from "../database/migration"
 import { Glob } from "../util/glob"
 import { Token } from "../util/token"
+import { BrainDatabase } from "./database"
 import { BrainLexical } from "./lexical"
 import { BrainParse } from "./parse"
 import { BrainPaths } from "./paths"
 import { BrainScan } from "./scan"
 import type { BrainSchema } from "./schema"
 import {
+  BrainAnchorTable,
+  BrainDocumentTable,
+  BrainEdgeTable,
   BrainEntryTable,
   BrainEventTable,
   BrainEvidenceTable,
+  BrainItemTable,
+  BrainJobTable,
+  BrainPendingTable,
+  BrainReviewTable,
   BrainSourceTable,
   BrainStateTable,
+  BrainTermTable,
   BrainTombstoneTable,
   BrainUseTable,
+  BrainVectorTable,
 } from "./sql"
-import first from "./migration/20261018000000_brain"
 
 // The Vector brain: one local store for everything durable that steers the agent. Files people write stay theirs and
 // are only ever read (repository and personal RULES.md, MEMORY.md, the legacy BRAIN.md); what Vector learns lives in
@@ -262,8 +265,6 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@vector/Brain") {}
 
-const makeDatabase = EffectDrizzleSqlite.makeWithDefaults()
-type Database = Effect.Success<typeof makeDatabase>
 type Row = typeof BrainEntryTable.$inferSelect
 
 const HOUR = 60 * 60 * 1000
@@ -271,57 +272,30 @@ const DAY = 24 * HOUR
 const PERSONAL = ""
 const LEARNED: readonly BrainSchema.Origin[] = ["agent", "user"]
 
-export const layerFor = (input: { readonly file: string; readonly data?: string; readonly config?: string }) =>
+const build = (input: { readonly data?: string; readonly config?: string }) =>
   Layer.effect(
     Service,
     Effect.gen(function* () {
       const global = yield* Global.Service
-      const data = input.data ?? global.data
-      const config = input.config ?? global.config
-      const db = yield* makeDatabase
-      yield* db.run("PRAGMA journal_mode = WAL")
-      yield* db.run("PRAGMA synchronous = NORMAL")
-      yield* db.run("PRAGMA busy_timeout = 5000")
-      yield* db.run("PRAGMA foreign_keys = ON")
-      // Forgotten memory is overwritten on disk, not just unlinked from the b-tree.
-      yield* db.run("PRAGMA secure_delete = ON")
-      yield* DatabaseMigration.applyOnly(db, [first])
-      if (input.file !== ":memory:" && process.platform !== "win32")
-        yield* Effect.sync(() => chmodSync(input.file, 0o600)).pipe(Effect.ignore)
-      return make(db, { data, config })
-    }).pipe(Effect.orDie),
-  ).pipe(
-    Layer.provide(
-      Layer.suspend(() => {
-        if (input.file !== ":memory:") mkdirSync(path.dirname(input.file), { recursive: true, mode: 0o700 })
-        return layer({ filename: input.file })
-      }),
-    ),
+      const database = yield* BrainDatabase.Service
+      return make(database.db, { data: input.data ?? global.data, config: input.config ?? global.config })
+    }),
   )
 
-/**
- * brain.db beside vector.db: latest, beta and prod share one; a development channel gets its own, so a dev build never
- * touches real memory. A session database in memory (tests, the onboarding check) means a brain in memory too.
- */
-export function databasePath() {
-  if (Flag.VECTOR_AGENT_DB === ":memory:") return ":memory:"
-  const channel =
-    ["latest", "beta", "prod"].includes(InstallationChannel) ||
-    process.env.VECTOR_DISABLE_CHANNEL_DB === "1" ||
-    process.env.VECTOR_DISABLE_CHANNEL_DB === "true"
-  return path.join(
-    BrainPaths.directory(Global.Path.data),
-    channel ? "brain.db" : `brain-${InstallationChannel.replace(/[^a-zA-Z0-9._-]/g, "-")}.db`,
-  )
-}
+/** The brain over the process's one brain.db, which document knowledge shares. */
+export const layer = build({})
+
+/** A brain over its own database file (":memory:" in tests), with its own data and config folders when given. */
+export const layerFor = (input: { readonly file: string; readonly data?: string; readonly config?: string }) =>
+  build(input).pipe(Layer.provide(BrainDatabase.layerFor(input.file)))
 
 export const node = makeGlobalNode({
   service: Service,
-  layer: Layer.suspend(() => layerFor({ file: databasePath() })),
-  deps: [Global.node],
+  layer,
+  deps: [BrainDatabase.node, Global.node],
 })
 
-function make(db: Database, dirs: { readonly data: string; readonly config: string }): Interface {
+function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonly config: string }): Interface {
   const personalFiles = {
     memory: path.join(dirs.config, "MEMORY.md"),
     rules: path.join(dirs.config, "RULES.md"),
@@ -1433,6 +1407,45 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
             .where(repositories ? inArray(BrainTombstoneTable.repository_id, repositories) : undefined)
             .run()
           if (rows.length) yield* tx.delete(BrainUseTable).where(inArray(BrainUseTable.entry_id, rows.map((row) => row.id))).run()
+          // Documents belong to a repository whoever added them, so erasing personal memory keeps them. Sections,
+          // passages, records and postings go with their document and item.
+          if (scope === "personal") return
+          yield* tx
+            .delete(BrainUseTable)
+            .where(
+              inArray(
+                BrainUseTable.entry_id,
+                tx
+                  .select({ ref: BrainItemTable.ref })
+                  .from(BrainItemTable)
+                  .where(repositories ? inArray(BrainItemTable.repository_id, repositories) : undefined),
+              ),
+            )
+            .run()
+          yield* Effect.forEach(
+            [
+              BrainVectorTable,
+              BrainItemTable,
+              BrainDocumentTable,
+              BrainTermTable,
+              BrainAnchorTable,
+              BrainPendingTable,
+              BrainEdgeTable,
+              BrainJobTable,
+              BrainReviewTable,
+            ],
+            (table) =>
+              tx
+                .delete(table)
+                .where(repositories ? inArray(table.repository_id, repositories) : undefined)
+                .run(),
+            { discard: true },
+          )
+          yield* tx
+            .update(BrainStateTable)
+            .set({ knowledge_revision: sql`${BrainStateTable.knowledge_revision} + 1`, items: 0, item_length_sum: 0 })
+            .where(repositories ? inArray(BrainStateTable.repository_id, repositories) : undefined)
+            .run()
         }),
       )
       .pipe(Effect.orDie)
