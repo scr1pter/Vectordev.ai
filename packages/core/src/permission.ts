@@ -179,7 +179,7 @@ const layer = Layer.effect(
       const effects = input.resources.map((resource) => evaluate(input.action, resource, ...rules, remembered).effect)
       const effect: Permission.Effect = effects.includes("deny")
         ? "deny"
-        : PermissionPolicy.requiresCloudApproval(input.action, input.save) || effects.includes("ask")
+        : PermissionPolicy.requiresApproval(input.action, input.save) || effects.includes("ask")
           ? "ask"
           : "allow"
       return { effect, rules: all }
@@ -301,7 +301,7 @@ const layer = Layer.effect(
               EffectRuntime.catchTag("Session.NotFoundError", () => EffectRuntime.succeed(undefined)),
             )
             if (!rules) continue
-            if (denied(input, rules) || PermissionPolicy.requiresCloudApproval(input.action, input.save)) continue
+            if (denied(input, rules) || PermissionPolicy.requiresApproval(input.action, input.save)) continue
             if (
               !item.request.resources.every(
                 (resource) => evaluate(item.request.action, resource, ...rules, rememberedRules).effect === "allow",

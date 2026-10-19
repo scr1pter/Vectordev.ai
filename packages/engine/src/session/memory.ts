@@ -4,6 +4,7 @@ import path from "path"
 import { fileURLToPath } from "url"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
+import { FSUtil } from "@vectordevai/core/fs-util"
 import { attachedMemory } from "./instruction"
 
 // What the session runtime and the memory tool read from a conversation to use and to grow Vector's memory: the user's
@@ -254,6 +255,18 @@ export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hol
     return "subagent"
   if (commands.includes("mcp") || tools.some((tool) => !LOCAL_TOOLS.has(tool))) return "mcp"
   return undefined
+}
+
+/**
+ * Whether a file is one Vector's memory is read from: a repository's .vector/RULES.md, .vector/BRAIN.md or BRAIN.md, or
+ * the user's own RULES.md and MEMORY.md. Both the name a tool was given and the file it lands on count, so a link to
+ * one is one too.
+ */
+export function source(file: string, personal: { readonly memory: string; readonly rules: string }) {
+  const own = [personal.memory, personal.rules].map((item) => FSUtil.realpath(item))
+  return [file, FSUtil.realpath(file)].some(
+    (item) => /(?:^|\/)(?:\.vector\/(?:rules|brain)|brain)\.md$/i.test(item.split(path.sep).join("/")) || own.includes(item),
+  )
 }
 
 /** When the request message this step answers was sent: the per-message write cap counts from here. */

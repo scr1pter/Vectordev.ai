@@ -25,6 +25,11 @@ import { ModelV2 } from "@vectordevai/core/model"
 import { freeModelMayTrain } from "@vectordevai/core/free-model-choice"
 import { isRecord } from "@/util/record"
 import { NativePatch } from "./llm/native-patch"
+import { SessionMemory } from "./memory"
+import { Brain } from "@vectordevai/core/brain/brain"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
+import { InstanceState } from "@/effect/instance-state"
+import path from "path"
 
 const MCP_RESOURCE_TOOLS = {
   list: "list_mcp_resources",
@@ -60,6 +65,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const registry = yield* ToolRegistry.Service
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
+  const brain = yield* Brain.Service
 
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
@@ -110,14 +116,40 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         ),
       ),
     ask: (req) =>
-      permission
-        .ask({
-          ...req,
+      Effect.gen(function* () {
+        const request = {
           sessionID: input.session.id,
           tool: { messageID: input.processor.message.id, callID: options.toolCallId },
           ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
+        }
+        yield* permission.ask({ ...req, ...request })
+        // A line in a file memory is read from binds every later request, so planted text must not land in one unseen:
+        // a session that took in outside content asks every time before it changes one, whichever tool writes it (an
+        // edit, a patch or a shell redirect) and whatever the edit rules allow. A subagent always asks: it works from a
+        // brief another agent wrote, which carries whatever that agent took in.
+        if (req.permission !== "edit") return
+        const instance = yield* InstanceState.context
+        const files = req.patterns.filter((pattern) =>
+          SessionMemory.source(path.resolve(instance.worktree, pattern), brain.files()),
+        )
+        if (files.length === 0) return
+        const hold = input.session.parentID
+          ? "subagent"
+          : SessionMemory.taint([
+              ...(yield* sessions
+                .messages({ sessionID: input.session.id })
+                .pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[])))),
+              ...input.messages,
+            ])
+        if (!hold) return
+        yield* permission.ask({
+          permission: PermissionPolicy.MEMORY_SOURCE,
+          patterns: files,
+          always: [],
+          metadata: { ...req.metadata, hold },
+          ...request,
         })
-        .pipe(Effect.orDie),
+      }).pipe(Effect.orDie),
   })
 
   const builtinTask = (yield* registry.named()).task

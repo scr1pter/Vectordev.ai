@@ -8,6 +8,11 @@ test("automatic permission mode never approves doom-loop continuation", () => {
   expect(canAutoApprovePermission("computer_interact")).toBe(false)
 })
 
+test("a change to a memory file after outside content always asks", () => {
+  expect(canAutoApprovePermission("memory_source", ["*"])).toBe(false)
+  expect(canAlwaysAllowPermission("memory_source", ["*"])).toBe(false)
+})
+
 test("sensitive permissions can only be allowed once", () => {
   expect(canAlwaysAllowPermission("webfetch", ["https://example.com"])).toBe(true)
   expect(canAlwaysAllowPermission("browser_sensitive", ["*"])).toBe(false)
