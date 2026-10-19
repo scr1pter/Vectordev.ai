@@ -70,13 +70,15 @@ export function DirectoryDataProvider(
           onNavigateToSession={(sessionID: string) => navigate(href(sessionID))}
           onSessionHref={href}
           // Undo on a "Learned" line in the session: the same change as Undo in Settings > Memory.
+          // Undo of something the agent learned: an entry is taken back, and a document it kept is forgotten.
           onMemoryUndo={(memoryID: string) =>
-            sdk()
-              .client.memory.update({ memoryID, action: "undo" })
-              .then(
-                () => true,
-                () => false,
-              )
+            (/^d[0-9a-z]+$/.test(memoryID)
+              ? sdk().client.memory.documents.remove({ documentID: memoryID })
+              : sdk().client.memory.update({ memoryID, action: "undo" })
+            ).then(
+              () => true,
+              () => false,
+            )
           }
           // What cited memory and document ids are, for citation chips and "Used from memory". The engine answers
           // the owner only, so a guest's chips show the id alone.

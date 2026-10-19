@@ -2653,13 +2653,15 @@ ToolRegistry.register({
     const learned = createMemo(() => (props.status === "completed" ? memoryLearned(props.metadata) : undefined))
     return (
       <Show when={learned()} fallback={<GenericTool {...props} />}>
-        {(item) => <MemoryLearned id={item().id} text={item().text} private={item().private} />}
+        {(item) => (
+          <MemoryLearned id={item().id} text={item().text} private={item().private} document={item().document} />
+        )}
       </Show>
     )
   },
 })
 
-function MemoryLearned(props: { id: string; text?: string; private?: boolean }) {
+function MemoryLearned(props: { id: string; text?: string; private?: boolean; document?: boolean }) {
   const data = useData()
   const i18n = useI18n()
   const [state, setState] = createSignal<"learned" | "undoing" | "undone" | "failed">("learned")
@@ -2675,10 +2677,23 @@ function MemoryLearned(props: { id: string; text?: string; private?: boolean }) 
           <div data-slot="basic-tool-tool-info-structured">
             <div data-slot="basic-tool-tool-info-main">
               <span data-slot="basic-tool-tool-title">
-                {i18n.t(state() === "undone" ? "ui.tool.memory.undone" : "ui.tool.memory.learned")}
+                {i18n.t(
+                  state() === "undone"
+                    ? "ui.tool.memory.undone"
+                    : props.document
+                      ? "ui.tool.memory.kept"
+                      : "ui.tool.memory.learned",
+                )}
               </span>
               <span data-slot="basic-tool-tool-subtitle">
-                {props.text ?? i18n.t(props.private ? "ui.tool.memory.private" : "ui.tool.memory.personal")}
+                {props.text ??
+                  i18n.t(
+                    props.document
+                      ? "ui.tool.memory.document"
+                      : props.private
+                        ? "ui.tool.memory.private"
+                        : "ui.tool.memory.personal",
+                  )}
               </span>
             </div>
             <Show when={data.undoMemory && state() !== "undone"}>

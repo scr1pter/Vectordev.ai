@@ -26,6 +26,17 @@ describe("memoryLearned", () => {
     ).toEqual({ id: "m4k2q", text: undefined, private: true })
   })
 
+  test("a document the agent kept comes as one, without the private document's title, for Undo to forget", () => {
+    expect(
+      memoryLearned({
+        action: "add",
+        result: "queued",
+        id: "d4k2q9x7m",
+        learned: { scope: "repository", document: true, private: true },
+      }),
+    ).toEqual({ id: "d4k2q9x7m", text: undefined, private: true, document: true })
+  })
+
   test("a held write, a search, a refusal and words memory already had are not something learned", () => {
     expect(memoryLearned({ action: "add", result: "held", id: "m4k2q", hold: "web" })).toBeUndefined()
     expect(memoryLearned({ action: "search", result: "2" })).toBeUndefined()
