@@ -4,6 +4,7 @@ import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { TaskSize } from "@vectordevai/core/task-size"
 import { brainBudgetRows, brainCommandRows, documentCommandRows, knowledgeEval } from "../src/data/docs-content"
+import { brainCopy, brainRelease, publishedDesktopVersion } from "../src/data/vector-releases"
 import { docsMoved, docsNav } from "../src/data/docs-nav"
 
 // The brain's docs pages (desktop 1.99.110) and the README's section on it describe what this tree does: the budgets
@@ -143,9 +144,14 @@ test("the eval figures in the docs and the README are the dated report's", () =>
   )
 })
 
-test("the README names the release the brain ships in", () => {
-  expect(readme).toContain("From desktop 1.99.110, Vector is a self-evolving agentic harness.")
-  expect(section).toStartWith("### Vector Brain (from desktop 1.99.110)")
+// README.md cannot read the published version, so it is held to it here: coming in 1.99.110 until the download page
+// offers that release, then from it. Publishing 1.99.110 fails this test until the README says so.
+test("the README names the release the brain ships in, as coming until it is published", () => {
+  expect(readme).toContain(brainRelease.readme)
+  expect(section).toStartWith(brainRelease.heading)
+  const other = brainCopy(Bun.semver.order(publishedDesktopVersion, "1.99.110") < 0 ? "1.99.110" : "1.99.109")
+  expect(readme).not.toContain(other.readme)
+  expect(readme).not.toContain(other.heading)
   expect(section).toContain("with the next CLI release")
 })
 

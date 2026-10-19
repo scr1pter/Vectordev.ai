@@ -23,6 +23,32 @@ export const upcomingRelease = {
 // Update it in the same change that publishes the next desktop installers.
 export const publishedDesktopVersion = "1.99.108"
 
+// Vector Brain arrives in desktop 1.99.110. The site deploys from main, so until the download page offers that release
+// the landing page and the investor page say it is coming in it, and from then on that it is new in it. README.md
+// cannot read this, so test/brain-docs.test.ts holds its wording to the same version.
+export function brainCopy(published: string) {
+  const [major = 0, minor = 0, patch = 0] = published.split(".").map(Number)
+  if (major > 1 || (major === 1 && (minor > 99 || (minor === 99 && patch >= 110))))
+    return {
+      kicker: "new in desktop 1.99.110",
+      since: "From desktop 1.99.110,",
+      stage: "Desktop 1.99.110",
+      lede: "from desktop 1.99.110",
+      readme: "From desktop 1.99.110, Vector is a self-evolving agentic harness.",
+      heading: "### Vector Brain (from desktop 1.99.110)",
+    }
+  return {
+    kicker: "coming in desktop 1.99.110",
+    since: "Coming in desktop 1.99.110:",
+    stage: "Coming in 1.99.110",
+    lede: "coming in desktop 1.99.110",
+    readme: "Coming in desktop 1.99.110: Vector becomes a self-evolving agentic harness.",
+    heading: "### Vector Brain (coming in desktop 1.99.110)",
+  }
+}
+
+export const brainRelease = brainCopy(publishedDesktopVersion)
+
 export const releaseSeries: VectorRelease[] = [
   {
     version: "1.0",

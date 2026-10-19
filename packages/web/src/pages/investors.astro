@@ -2,18 +2,20 @@
 import "@fontsource/ibm-plex-mono/400.css"
 import "@fontsource/ibm-plex-mono/500.css"
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import { brainRelease } from "../data/vector-releases"
 
 export const prerender = true
 
 // One page an investor reads in two minutes. Every figure is one the full fact-check kept: the benchmark range comes
 // from the archive docs/benchmarks/vector-efficiency-2026-10 and the brain's from the dated knowledge eval in
 // docs/benchmarks/vector-knowledge-2026-10-19 (test/investor-page.test.ts recomputes both), the counts from the shipped
-// catalog and agents, and every item that is not live carries its status.
+// catalog and agents, and every item that is not live carries its status: the brain's follows brainRelease, coming in
+// desktop 1.99.110 until the download page offers that release.
 ---
 
 <MarketingLayout
   title="Vector · Investor one-pager"
-  description="Vector, the self-evolving AI agentic harness: a free, neutral workspace for coding agents with its own lean agent, a brain that learns each repository from desktop 1.99.110, and a model of its own in development."
+  description={`Vector, the self-evolving AI agentic harness: a free, neutral workspace for coding agents with its own lean agent, a brain that learns each repository (${brainRelease.lede}), and a model of its own in development.`}
   noindex
 >
   <div class="ip-root">
@@ -28,7 +30,7 @@ export const prerender = true
 
   <section class="ip-thesis" aria-labelledby="thesis-title">
     <h1 id="thesis-title">The self-evolving AI <em>agentic harness</em>.</h1>
-    <p class="ip-lede">Over a quarter of organisations send different work to different models,<sup>1</sup> yet each lab builds its agent around its own. <strong>Vector is the neutral harness:</strong> its own lean agent beside Claude Code, Codex and Cursor Agent, on any model, and, from desktop 1.99.110, a brain that learns each repository it works in.</p>
+    <p class="ip-lede">Over a quarter of organisations send different work to different models,<sup>1</sup> yet each lab builds its agent around its own. <strong>Vector is the neutral harness:</strong> its own lean agent beside Claude Code, Codex and Cursor Agent, on any model, and, {brainRelease.lede}, a brain that learns each repository it works in.</p>
     <div class="ip-facts">
       <div class="ip-fact"><strong class="ip-num">67–75%</strong><span>less modelled spend than Claude Code in a first session, offline*</span></div>
       <div class="ip-fact"><strong class="ip-num">219</strong><span>model providers and 8,184 models, plus local ones</span></div>
@@ -59,7 +61,7 @@ export const prerender = true
     <h2 id="tech-title" class="ip-eyebrow">Proprietary technology</h2>
     <div class="ip-road">
       <div class="ip-milestone ip-lead">
-        <span class="ip-stage">Desktop 1.99.110</span>
+        <span class="ip-stage">{brainRelease.stage}</span>
         <h3>Vector Brain</h3>
         <p>Rules, memory, lessons and a team's specs and PDFs in one local graph, linked to the code, with drift flagged and Undo on what it learns. Through code links, 40 of 40 eval tasks got their requirement; keywords alone, 1 of 40.†</p>
       </div>

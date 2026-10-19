@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
 import { legacyName } from "@vectordevai/core/flag/legacy"
-import { publishedDesktopVersion } from "../src/data/vector-releases"
+import { brainCopy, brainRelease, publishedDesktopVersion } from "../src/data/vector-releases"
 
 // The landing page is the product tour. Every claim on it has to hold for the desktop release it ships with, and
 // everything that is not live yet has to say so.
@@ -21,17 +21,29 @@ const page = [lander, index, footer].join("\n")
 // Link targets are left out: a model card's address can name an active size, though no page text does.
 const visible = [page, ...shots.map((shot) => shot.text)].map((text) => text.replace(/href(?:: |=)"[^"]*"/g, ""))
 
-// The brain ships in desktop 1.99.110, built in this tree. Its section and the memory card name that release, so they
-// stay true for someone still on an earlier one, and the "coming" label is gone.
+// The brain ships in desktop 1.99.110, built in this tree, and the site deploys from main. Its section and the memory
+// card name that release, and say it is coming until the download page offers it, then that it is new in it.
+test("the brain's release labels say coming in desktop 1.99.110 until that release is published, then new in it", () => {
+  for (const version of ["1.99.108", "1.99.109"])
+    expect(brainCopy(version)).toMatchObject({ kicker: "coming in desktop 1.99.110", since: "Coming in desktop 1.99.110:" })
+  for (const version of ["1.99.110", "1.99.111", "1.100.0", "2.0.0"])
+    expect(brainCopy(version)).toMatchObject({ kicker: "new in desktop 1.99.110", since: "From desktop 1.99.110," })
+  expect(brainRelease).toEqual(brainCopy(publishedDesktopVersion))
+  for (const version of ["1.99.109", "1.99.110"])
+    for (const label of Object.values(brainCopy(version))) expect(label).not.toMatch(/\bexactly\b|\bprojects?\b/i)
+})
+
 test("the self-evolving agent and the memory card name desktop 1.99.110, the release the brain ships in", async () => {
   expect(await Bun.file(path.join(repo, "packages/core/src/brain/brain.ts")).exists()).toBe(true)
   expect(await Bun.file(path.join(repo, "packages/core/src/brain/knowledge.ts")).exists()).toBe(true)
-  expect(lander).toContain('<p class="story-kicker" data-reveal>Self-evolving · new in desktop 1.99.110</p>')
+  expect(lander).toContain('<p class="story-kicker" data-reveal>Self-evolving · {brainRelease.kicker}</p>')
   expect(lander).toContain('data-chapter="Self-evolving"')
-  expect(lander).not.toContain("coming in 1.99.110")
   expect(lander).toContain(
-    '"From desktop 1.99.110, rules, memory and the documents you add are stored and searched on your computer',
+    "`${brainRelease.since} rules, memory and the documents you add are stored and searched on your computer",
   )
+  // Nothing else on the page calls the release out, shipped or coming, on its own.
+  const labels = lander.replace(/\$?\{brainRelease\.\w+\}/g, "")
+  expect(labels).not.toMatch(/(new|coming) in (desktop )?1\.99\.110|From desktop 1\.99\.110/)
   expect(lander).toContain('href: "/docs/brain"')
   expect(lander).not.toContain("/docs/local-memory")
   expect(lander).not.toMatch(/Vector (now )?(learns|remembers)[^.]*today/i)

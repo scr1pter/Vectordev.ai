@@ -3,9 +3,15 @@ import path from "node:path"
 import { DEFAULT_REVIEW_CONFIG } from "../packages/core/src/review/types"
 import summary from "../docs/benchmarks/vector-efficiency-2026-10/summary.json"
 import knowledge from "../docs/benchmarks/vector-knowledge-2026-10-19/report.json"
+import { brainCopy, brainRelease, publishedDesktopVersion } from "../packages/web/src/data/vector-releases"
 
 const root = path.join(import.meta.dir, "..")
-const page = await Bun.file(path.join(root, "packages/web/src/pages/investors.astro")).text()
+const source = await Bun.file(path.join(root, "packages/web/src/pages/investors.astro")).text()
+// The page as it is built: the brain's release labels filled in from the published desktop version.
+const page = source.replace(
+  /\$?\{brainRelease\.(\w+)\}/g,
+  (_, key: string) => brainRelease[key as keyof typeof brainRelease] ?? `{missing ${key}}`,
+)
 const markup = page.slice(0, page.indexOf("<style"))
 const section = (pattern: RegExp) => markup.match(pattern)?.[0] ?? ""
 const milestone = (title: string) =>
@@ -102,7 +108,7 @@ test("every technology carries its status, and only the shipped ones say Today",
   )
   expect(items.length).toBe(markup.match(/<div class="ip-milestone/g)?.length)
   expect(Object.fromEntries(items)).toEqual({
-    "Vector Brain": "Desktop 1.99.110",
+    "Vector Brain": brainRelease.stage,
     "Tokenomics engine": "Today",
     "Subagent system": "Today",
     Vectorscope: "Today",
@@ -117,10 +123,16 @@ test("every technology carries its status, and only the shipped ones say Today",
 })
 
 // The brain ships in desktop 1.99.110, built in this tree, so its card names that release instead of saying it is in
-// development, and its one figure comes from the dated knowledge eval with that eval's caveats.
+// development: coming in it until the download page offers it, then that release. Its one figure comes from the dated
+// knowledge eval with that eval's caveats.
 test("Vector Brain names desktop 1.99.110 and quotes the dated knowledge eval", async () => {
   expect(await Bun.file(path.join(root, "packages/core/src/brain/knowledge.ts")).exists()).toBe(true)
+  expect(brainCopy("1.99.109").stage).toBe("Coming in 1.99.110")
+  expect(brainCopy("1.99.110").stage).toBe("Desktop 1.99.110")
+  expect(source).toContain('<span class="ip-stage">{brainRelease.stage}</span>')
+  expect(page).not.toContain("{missing")
   const brain = milestone("Vector Brain")
+  expect(brain).toContain(Bun.semver.order(publishedDesktopVersion, "1.99.110") < 0 ? "Coming in 1.99.110" : "Desktop 1.99.110")
   expect(brain).not.toContain("In development")
   expect(markup).not.toContain("in development for desktop 1.99.110")
   const working = knowledge.found.working
@@ -162,8 +174,12 @@ test("the README gives Vector Velocity the investor page's status and size, and 
 
 test("the brain is labelled wherever the page opens with it", () => {
   // The lede is what investors read first, so the brain's release sits in it too, not only in its card.
-  expect(markup).toContain("and, from desktop 1.99.110, a brain that learns each repository it works in")
-  expect(page).toContain("a brain that learns each repository from desktop 1.99.110, and a model of its own in development")
+  const label = Bun.semver.order(publishedDesktopVersion, "1.99.110") < 0 ? "coming in" : "from"
+  expect(markup).toContain(`and, ${label} desktop 1.99.110, a brain that learns each repository it works in`)
+  expect(page).toContain(`a brain that learns each repository (${label} desktop 1.99.110), and a model of its own in development`)
+  // Every mention of the release on the page is one of the labels, so none says it shipped before it has.
+  const built = source.slice(source.indexOf("---", 3), source.indexOf("<style"))
+  expect(built.replace(/\$?\{brainRelease\.\w+\}/g, "")).not.toMatch(/1\.99\.110/)
 })
 
 test("the investor page names the outside agents Vector runs and the business it plans", () => {

@@ -10,7 +10,7 @@
 
 Vector is an agentic engineering workspace. It puts an editor, a terminal, a controlled browser and AI agents around the repository on your computer: you describe a change, watch agents edit files and run checks, and inspect the result before you merge or publish it.
 
-From desktop 1.99.110, Vector is a self-evolving agentic harness. Give it your specs, PDFs and docs once. It reads them on your computer, links requirements, endpoints and decisions to the code that implements them, warns you when the two drift apart, keeps what proved useful in runs that passed, and spends tokens only where they matter. "hi" costs nothing extra.
+Coming in desktop 1.99.110: Vector becomes a self-evolving agentic harness. Give it your specs, PDFs and docs once. It reads them on your computer, links requirements, endpoints and decisions to the code that implements them, warns you when the two drift apart, keeps what proved useful in runs that passed, and spends tokens only where they matter. "hi" costs nothing extra.
 
 Vector is free. Create a free Vector account at [vectordev.ai](https://vectordev.ai) to download the desktop app; the same account signs in the terminal agent.
 
@@ -35,7 +35,7 @@ Installers are at [vectordev.ai/download](https://vectordev.ai/download), and re
 
 ## Features
 
-### Vector Brain (from desktop 1.99.110)
+### Vector Brain (coming in desktop 1.99.110)
 
 **One brain for each repository.** The rules you write (`.vector/RULES.md`, and your own `RULES.md` and `MEMORY.md` in Vector's config folder), what Vector learns while it works and the documents you give it, kept in `brain.db` on your computer. Stored and searched on this computer. For each request Vector sends your model only the few lines that bear on it, within a budget set by the request's size, at most 900 tokens for a Thorough request in a repository with documents, and a greeting such as "hi" carries none. Private documents never go to a model that may train on prompts, or to a session a guest is in.
 

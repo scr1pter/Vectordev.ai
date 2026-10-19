@@ -36,6 +36,7 @@ import LanderMotion from "./marketing/LanderMotion.astro"
 import LanderMaterials from "./marketing/LanderMaterials.astro"
 import SiteFooter from "./marketing/SiteFooter.astro"
 import { wordmarkCells } from "../lib/wordmark"
+import { brainRelease } from "../data/vector-releases"
 
 // The landing page is the whole product tour: the hero and its one interactive
 // picture, the workspace in one screen, and the card shelf of what Vector does,
@@ -69,7 +70,7 @@ const workspaceFacts = [
   },
 ]
 
-// The self-evolving agent, new in desktop 1.99.110: the brain (rules, memory and lessons in one local graph) and
+// The self-evolving agent of desktop 1.99.110, called coming or new by brainRelease: the brain (rules, memory and lessons in one local graph) and
 // documents read into structured knowledge linked to the code, searched on the computer. Its numbers come only from the
 // dated knowledge eval in docs/benchmarks (test/landing-copy.test.ts checks them), and the section names the release,
 // so it stays true for readers still on an earlier one.
@@ -299,7 +300,7 @@ const trustCards = [
   {
     icon: Laptop,
     lead: "Memory stays yours.",
-    text: "From desktop 1.99.110, rules, memory and the documents you add are stored and searched on your computer, and Settings → Memory lets you read, edit, undo or forget any of it.",
+    text: `${brainRelease.since} rules, memory and the documents you add are stored and searched on your computer, and Settings → Memory lets you read, edit, undo or forget any of it.`,
     href: "/docs/brain",
     more: "Read about Vector Brain",
   },
@@ -397,7 +398,7 @@ const trustCards = [
 
     <section id="evolving" data-chapter="Self-evolving" class="story" aria-labelledby="evolving-title">
       <div class="story-copy" data-reveal-group>
-        <p class="story-kicker" data-reveal>Self-evolving · new in desktop 1.99.110</p>
+        <p class="story-kicker" data-reveal>Self-evolving · {brainRelease.kicker}</p>
         <h2 id="evolving-title" class="story-title" data-reveal>An agent that learns your&nbsp;repository.</h2>
         <p class="story-subtitle" data-reveal>Every session starts from what the last one learned.</p>
         <p class="story-body" data-reveal>
