@@ -1900,7 +1900,8 @@ const layer = Layer.effect(
         const build = sized && !chat && agent.name === "build" ? sized : undefined
         const maxSteps = agent.steps ?? Infinity
         const isLastStep = step >= maxSteps
-        const quick = stepAgent.name === "quick" || stepAgent.name === "autocomplete"
+        // The quick lane also carries Vector's lean helpers: autocomplete, and distill reading a document's sections.
+        const quick = stepAgent.name === "quick" || stepAgent.name === "autocomplete" || stepAgent.name === "distill"
         // The quick lane sees this request's own messages and the end of the agent's reply before it.
         const opened = sized?.messages[0]?.info.id ?? lastUser.id
         const previousReply =

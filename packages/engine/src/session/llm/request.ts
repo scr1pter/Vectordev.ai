@@ -7,6 +7,7 @@ import type { Agent } from "@/agent/agent"
 import type { MessageV2 } from "../message-v2"
 import type { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
+import { BrainDistill } from "@vectordevai/core/brain/distill"
 import { SystemPrompt } from "../system"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { Effect, Record } from "effect"
@@ -154,9 +155,12 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
       topK: ProviderTransform.topK(input.model),
       maxOutputTokens: ProviderTransform.maxOutputTokens(
         input.model,
-        input.user.executionMode === "fast"
-          ? Math.floor((input.flags.outputTokenMax ?? ProviderTransform.OUTPUT_TOKEN_MAX) * 1.5)
-          : input.flags.outputTokenMax,
+        // A document's suggestions are capped at what their estimate was given for.
+        input.agent.name === "distill"
+          ? BrainDistill.LIMIT.output
+          : input.user.executionMode === "fast"
+            ? Math.floor((input.flags.outputTokenMax ?? ProviderTransform.OUTPUT_TOKEN_MAX) * 1.5)
+            : input.flags.outputTokenMax,
       ),
       options,
     },

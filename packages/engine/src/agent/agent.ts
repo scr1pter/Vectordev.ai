@@ -12,6 +12,7 @@ import { ProviderTransform } from "@/provider/transform"
 import PROMPT_GENERATE from "./generate.txt"
 import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_DEBUG from "./prompt/debug.txt"
+import PROMPT_DISTILL from "./prompt/distill.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_GENERAL from "./prompt/general.txt"
 import PROMPT_JUDGE from "./prompt/judge.txt"
@@ -504,6 +505,18 @@ const layer = Layer.effect(
               user,
             ),
             prompt: PROMPT_SUMMARY,
+          },
+          // Reads a document's sections for suggestions in a hidden helper session. It runs on the quick lane (no tools,
+          // no repository context) and answers only through StructuredOutput, which its session's rules allow back.
+          distill: {
+            name: "distill",
+            mode: "primary",
+            options: {},
+            native: true,
+            hidden: true,
+            temperature: 0,
+            permission: Permission.merge(defaults, user, Permission.fromConfig({ "*": "deny" })),
+            prompt: PROMPT_DISTILL,
           },
         }
 
