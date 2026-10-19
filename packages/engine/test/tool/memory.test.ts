@@ -407,6 +407,16 @@ describe("tool.memory", () => {
       )
       expect(again.metadata.result).toBe("merged")
       expect(again.output).toContain('"Feature flags live in config/flags.ts."')
+
+      // Once the user puts it away, saying it again does not bring it back, and the agent is told to ask them.
+      if (mine.type !== "refused") yield* brain.update(place, mine.entry.id, { action: "archive" }, "user")
+      const restored = yield* run(
+        { action: "add", kind: "decision", text: "Feature flags live in config/flags.ts", quote: "feature flags live in config/flags.ts" },
+        messages,
+        sessionID,
+      )
+      expect(restored.output).toContain("Only the user can bring it back")
+      expect((yield* brain.list(place, {})).map((entry) => entry.text)).not.toContain("Feature flags live in config/flags.ts.")
     }),
   )
 

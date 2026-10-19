@@ -234,7 +234,8 @@ function written(result: Exclude<Brain.WriteResult, { type: "refused" }>, replac
   if (result.type === "added") return `Saved as ${id}.${related}`
   if (result.type === "merged") {
     if (result.entry.status === "active") return `Already known as ${id}: ${words(result.entry)}`
-    if (result.entry.status === "archived") return `Already in memory as ${id}, put away: ${words(result.entry)}`
+    if (result.entry.status === "archived")
+      return `Already in memory as ${id}, put away: ${words(result.entry)}. Only the user can bring it back, in Settings > Memory; ask them if it applies again.`
     return `Already in memory as ${id}, waiting for the user's review: ${words(result.entry)}`
   }
   if (result.type === "promoted") return `Confirmed ${id}: ${words(result.entry)}. It is in use now.`
