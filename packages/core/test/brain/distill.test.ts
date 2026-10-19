@@ -68,7 +68,8 @@ describe("BrainDistill.lock", () => {
         kind: "requirement",
         text: "Refunds are approved by a support lead",
         quote: "Refunds are approved by a support lead and paid back to the original card within ten business days.",
-        fields: { subject: "Refunds", value: 30 },
+        // 30 is not in the quote, and 1 is not a word of it either ("10" would not be "1").
+        fields: { subject: "Refunds", value: 30, days: "ten business days", count: 1, card: "car" },
       },
       // Nowhere in the document.
       { kind: "constraint", text: "Refunds are paid within 5 days", quote: "Refunds are paid within 5 days.", fields: {} },
@@ -77,8 +78,8 @@ describe("BrainDistill.lock", () => {
     expect(kept).toHaveLength(1)
     expect(kept[0]).toMatchObject({ passage: "p1", section: "s1", page: 7, start: 500 })
     expect(kept[0]!.end - kept[0]!.start).toBe(kept[0]!.quote.length)
-    // A field the quote does not give (30) is not kept.
-    expect(kept[0]!.fields).toEqual({ subject: "Refunds" })
+    // A field the quote does not give as a whole word is not kept.
+    expect(kept[0]!.fields).toEqual({ subject: "Refunds", days: "ten business days" })
   })
 
   test("matches across whitespace and typographic quotes, and records the document's own characters", () => {
@@ -118,8 +119,9 @@ describe("BrainDistill.lock", () => {
         },
       ],
     )
+    // The repeat is merged into the first, not counted as dropped.
     expect(kept).toHaveLength(1)
-    expect(dropped).toEqual({ quote: 2, scan: 1 })
+    expect(dropped).toEqual({ quote: 1, scan: 1 })
   })
 })
 

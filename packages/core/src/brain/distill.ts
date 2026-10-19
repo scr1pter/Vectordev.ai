@@ -275,7 +275,7 @@ export function lock(sections: readonly Section[], drafts: readonly Draft[]) {
     section.passages.map((passage) => ({ passage, section, ...folded(passage.body) })),
   )
   const seen = new Set<string>()
-  const results = drafts.map((draft): Locked | "quote" | "scan" => {
+  const results = drafts.map((draft): Locked | "quote" | "scan" | "repeat" => {
     const wanted = folded(draft.quote.normalize("NFC")).text
     const hit = wanted ? passages.find((item) => item.text.includes(wanted)) : undefined
     if (!hit) return "quote"
@@ -295,8 +295,9 @@ export function lock(sections: readonly Section[], drafts: readonly Draft[]) {
       quote.includes("[redacted]")
     )
       return "scan"
+    // The same thing suggested twice is one record.
     const key = `${draft.kind}\0${folded(quote).text}`
-    if (seen.has(key)) return "quote"
+    if (seen.has(key)) return "repeat"
     seen.add(key)
     return {
       kind: draft.kind,
@@ -320,21 +321,34 @@ export function lock(sections: readonly Section[], drafts: readonly Draft[]) {
   }
 }
 
-// A field survives only with a value the quote gives, compared without case or spacing: a model cannot add a number
-// or a name through `fields` that its quote does not say.
+// A field survives only with a value the quote gives as a whole word, compared without case or spacing: a model cannot
+// add a number or a name through `fields` that its quote does not say ("5" is not in "15 days").
 function fieldsOf(fields: Readonly<Record<string, unknown>>, quote: string) {
   const said = folded(quote).text.toLowerCase()
   return Object.fromEntries(
     Object.entries(fields)
       .filter(([key]) => /^[a-z][A-Za-z0-9_]{0,31}$/.test(key))
       .flatMap(([key, value]): [string, string | number][] => {
-        if (typeof value === "number" && Number.isFinite(value) && said.includes(String(value))) return [[key, value]]
+        if (typeof value === "number" && Number.isFinite(value) && gives(said, String(value))) return [[key, value]]
         if (typeof value !== "string" || value.length > 80) return []
-        const wanted = folded(value).text.toLowerCase()
-        return wanted && said.includes(wanted) ? [[key, value.trim()]] : []
+        return gives(said, folded(value).text.toLowerCase()) ? [[key, value.trim()]] : []
       })
       .slice(0, 8),
   )
+}
+
+// Whether `wanted` is in `said` with no letter or digit right before or after it.
+function gives(said: string, wanted: string) {
+  if (!wanted) return false
+  const word = /[\p{L}\p{N}]/u
+  const at = (from: number): boolean => {
+    const index = said.indexOf(wanted, from)
+    if (index < 0) return false
+    const before = said[index - 1]
+    const after = said[index + wanted.length]
+    return (!(before && word.test(before)) && !(after && word.test(after))) || at(index + 1)
+  }
+  return at(0)
 }
 
 // Text with each run of whitespace as one space and typographic quotes and dashes as plain ones, with the offset in the
