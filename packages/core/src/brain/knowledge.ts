@@ -3461,14 +3461,17 @@ function make(input: {
                 length: [...terms(item).values()].reduce((sum, count) => sum + count, 0),
                 confidence: BrainDistill.TRUST,
               })
+              // Another run that proposed it meanwhile has it already.
+              .onConflictDoNothing()
               .returning({ id: BrainItemTable.id })
               .get()
+            if (!inserted) return undefined
             const subject = BrainExtract.subjectOf(item.record.text)
             yield* tx
               .insert(BrainRecordTable)
               .values({
                 id: item.ref,
-                item: inserted!.id,
+                item: inserted.id,
                 document_id: id,
                 passage_id: item.record.passage,
                 section_id: item.record.section,
@@ -3490,9 +3493,9 @@ function make(input: {
                 updated_at: now,
               })
               .run()
-            return { item, id: inserted!.id }
+            return { item, id: inserted.id }
           }),
-        ),
+        ).pipe(Effect.map((rows) => rows.filter((row) => row !== undefined))),
       )
       .pipe(Effect.orDie)
     // Found by its words once the user keeps it; a proposed record never reaches the agent meanwhile.

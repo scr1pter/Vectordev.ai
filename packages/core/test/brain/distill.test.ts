@@ -233,6 +233,7 @@ describe("BrainKnowledge suggestions", () => {
         // twice.
         const after = yield* setup.knowledge.distillable(setup.place, document!.id)
         const again = yield* setup.knowledge.distilled(setup.place, document!.id, { records, run })
+
         const recalled = yield* setup.knowledge.search(setup.place, { query: "refunds support lead", personal: true })
         const detail = yield* setup.knowledge.document(setup.place, document!.id, { personal: true })
         const review = yield* setup.knowledge.review(setup.place)
@@ -255,7 +256,22 @@ describe("BrainKnowledge suggestions", () => {
     // Each run is on the History, newest first, with what it spent.
     const events = result.detail!.history.filter((item) => item.action === "distilled")
     expect(events.map((event) => event.detail?.kept)).toEqual([0, 1])
-    expect(events[1]?.detail).toMatchObject({ model: "lmstudio/test-model", cost: 0.002, tokens: { input: 900 } })
+    expect(events.at(-1)?.detail).toMatchObject({ model: "lmstudio/test-model", cost: 0.002, tokens: { input: 900 } })
+  })
+
+  test("a suggestion another process is storing at the same moment is skipped, not a failure", async () => {
+    const result = await withKnowledge((setup) =>
+      Effect.gen(function* () {
+        const { document } = yield* added(setup, text("Billing.md", BILLING))
+        const records = yield* locked(setup, document!.id)
+        const first = (yield* setup.knowledge.distilled(setup.place, document!.id, { records, run }))!.records[0]!
+        // The other process's transaction has written the item and not yet the record when this one checks.
+        yield* setup.db.run(sql`DELETE FROM brain_record WHERE id = ${first.id}`)
+        return yield* setup.knowledge.distilled(setup.place, document!.id, { records, run }).pipe(Effect.exit)
+      }),
+    )
+    expect(result._tag).toBe("Success")
+    if (result._tag === "Success") expect(result.value).toMatchObject({ records: [], duplicate: 1 })
   })
 
   test("keep-suggestions puts them in use, and a re-read keeps one whose quote is still there", async () => {
