@@ -3,6 +3,7 @@ import { EOL } from "os"
 import path from "path"
 import { Effect } from "effect"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Instruction } from "@/session/instruction"
 import { cmd } from "./cmd"
@@ -253,7 +254,7 @@ export const MemoryLearningCommand = effectCmd({
 // A readable page per kind, each entry with its evidence below it: open your brain and read it.
 export const MemoryExportCommand = effectCmd({
   command: "export",
-  describe: "print memory as Markdown, entries with their evidence",
+  describe: "print memory as Markdown: entries with their evidence, and what Vector read from documents",
   builder: (yargs) => scopeOption(yargs),
   handler: Effect.fn("Cli.memory.export")(function* (args) {
     const memory = yield* where
@@ -279,7 +280,35 @@ export const MemoryExportCommand = effectCmd({
         return [`## ${kind[0]!.toUpperCase()}${kind.slice(1)}s`, "", ...body.flat(), ""]
       }),
     )
-    process.stdout.write(`${["# Vector memory", "", ...sections.flat()].join(EOL)}${EOL}`)
+    // Documents with what Vector read from them, never their files: the originals are the user's own to keep.
+    const knowledge = yield* BrainKnowledge.Service
+    const documents = args.personal ? [] : yield* knowledge.documents(memory.place, { personal: true })
+    const read = yield* Effect.forEach(documents, (document) =>
+      Effect.gen(function* () {
+        const records: BrainSchema.Record[] = []
+        for (let cursor: string | undefined = undefined; ; ) {
+          const page: BrainKnowledge.RecordPage = yield* knowledge.records(memory.place, {
+            document: document.id,
+            limit: BrainKnowledge.LIMIT.records,
+            ...(cursor ? { cursor } : {}),
+            personal: true,
+          })
+          records.push(...page.records)
+          if (!page.cursor) break
+          cursor = page.cursor
+        }
+        return [
+          `### ${document.title}`,
+          "",
+          `${document.format}${document.pages ? `, ${document.pages} pages` : ""}, ${document.origin}, ${document.visibility}, ${document.status}${document.version > 1 ? `, version ${document.version}` : ""}`,
+          "",
+          ...records.map((record) => `- **${record.id}** ${record.kind}${record.page ? ` (p.${record.page})` : ""}: ${record.card}`),
+          "",
+        ]
+      }),
+    )
+    const documentSection = read.length ? ["## Documents", "", ...read.flat()] : []
+    process.stdout.write(`${["# Vector memory", "", ...sections.flat(), ...documentSection].join(EOL)}${EOL}`)
   }),
 })
 

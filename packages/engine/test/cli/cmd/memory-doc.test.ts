@@ -107,6 +107,14 @@ cliIt.concurrent(
       const read = yield* repo.doc(["read", "2", "2 Limits"])
       fixture.vector.expectExit(read, 0, "vector memory doc read")
       expect(read.stdout).toContain("retry at most 3 times")
+      const exported = yield* fixture.vector.spawn(["memory", "export"], {
+        cwd: repo.root,
+        env: { VECTOR_AGENT_DB: path.join(fixture.home, "vector.db") },
+        timeoutMs: 60_000,
+      })
+      fixture.vector.expectExit(exported, 0, "vector memory export")
+      expect(exported.stdout).toContain("## Documents")
+      expect(exported.stdout).toContain("retry at most 3 times")
       fixture.vector.expectExit(yield* repo.doc(["forget", "2"]), 0, "vector memory doc forget")
       expect(JSON.parse((yield* repo.doc(["list", "--json"])).stdout)).toEqual([])
     }),
