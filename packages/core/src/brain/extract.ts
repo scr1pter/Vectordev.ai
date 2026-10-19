@@ -1284,13 +1284,28 @@ function assemble(
       polarity: BrainLexical.polarity(quote),
       passage: passage.id,
       section: passage.section,
-      ...(passage.page === undefined ? {} : { page: passage.page }),
+      // The page the record's own sentence is on: a passage that runs across a page break starts on the earlier one.
+      ...pageOf(context.extracted.blocks, candidate.start, passage.page),
       start: candidate.start,
       end: candidate.start + quote.length,
       ...(passage.hold ? { hold: passage.hold } : {}),
     }
   })
   return { records, warnings: [...warnings] }
+}
+
+// The page of the block holding an offset, by binary search over blocks in document order, or the passage's page.
+function pageOf(blocks: readonly BrainDocument.Block[], offset: number, fallback: number | undefined) {
+  const state = { low: 0, high: blocks.length - 1, found: -1 }
+  while (state.low <= state.high) {
+    const middle = (state.low + state.high) >> 1
+    if (blocks[middle]!.span.start <= offset) {
+      state.found = middle
+      state.low = middle + 1
+    } else state.high = middle - 1
+  }
+  const page = blocks[state.found]?.span.page ?? fallback
+  return page === undefined ? {} : { page }
 }
 
 // The passage holding an offset: passages run in document order, so the last one starting at or before it, unless that
