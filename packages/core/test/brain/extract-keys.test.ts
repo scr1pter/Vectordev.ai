@@ -40,10 +40,12 @@ describe("BrainExtract keys", () => {
         "doc.md",
       )
     ).records
-    expect(records.filter((record) => record.kind === "requirement").map((record) => record.key)).toEqual([
-      "requirement|REQ-4",
-      "requirement|REQ-4#2",
-    ])
+    expect(
+      records
+        .filter((record) => record.kind === "requirement")
+        .map((record) => record.key)
+        .toSorted(),
+    ).toEqual(["requirement|REQ-4", "requirement|REQ-4#2"])
     expect(records.find((record) => record.kind === "contract")!.key).toBe("contract|endpoint:get /v1/users/*")
     expect(BrainExtract.route("/v1/users/{id}/sessions/:session/")).toBe("/v1/users/*/sessions/*")
   })
@@ -56,9 +58,30 @@ describe("BrainExtract keys", () => {
     const distinct = (
       await learn("Clients MUST retry at most 3 times.\n\n## Again\n\nThe clients MUST retry, at most 3 times!")
     ).records
-    expect(distinct.filter((record) => record.kind === "requirement").map((record) => record.key)).toEqual([
-      "requirement|client retry time",
-      "requirement|client retry time#2",
-    ])
+    expect(
+      distinct
+        .filter((record) => record.kind === "requirement")
+        .map((record) => record.key)
+        .toSorted(),
+    ).toEqual(["requirement|client retry time", "requirement|client retry time#2"])
+  })
+
+  test("records of one subject keep their ids when the document reorders them", async () => {
+    const a = "The client MUST retry when the server answers 503.\n\nThe client MUST retry when the server answers 429."
+    const b = "The client MUST retry when the server answers 429.\n\nThe client MUST retry when the server answers 503."
+    const ids = async (text: string) =>
+      new Map(
+        (await learn(text, "retries.md")).records
+          .filter((record) => record.kind === "requirement")
+          .map((record) => [record.quote, record.id]),
+      )
+    const before = await ids(a)
+    expect(before.size).toBe(2)
+    expect(await ids(b)).toEqual(before)
+  })
+
+  test("a question or an open item asks about a value and states no constraint", async () => {
+    const records = (await learn("TBD: should uploads over 1 GB use a different bucket?", "open.md")).records
+    expect(records.map((record) => record.kind)).toEqual(["question"])
   })
 })

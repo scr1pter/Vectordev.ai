@@ -392,8 +392,13 @@ export function normalize(value: number, unit: string) {
   return { value: Number((value * base[1]).toPrecision(12)), base: base[2] }
 }
 
+// A question or an open item ("TBD: should uploads over 1 GB use another bucket?") asks about a value; it states none.
+function asking(unit: Unit) {
+  return OPEN.test(unit.text) || /\?\s*$/.test(unit.text)
+}
+
 function constraint(unit: Unit): Candidate[] {
-  if (unit.type === "heading") return []
+  if (unit.type === "heading" || asking(unit)) return []
   return [...unit.text.matchAll(CONSTRAINT)].slice(0, 3).flatMap((match): Candidate[] => {
     const word = (match[1] ?? match[4] ?? "").replace(/\s+/g, " ")
     const value = Number((match[2] ?? match[5] ?? "").replace(/,/g, ""))
@@ -442,7 +447,14 @@ const STATED = new RegExp(
 const LIMITED = new RegExp(CONSTRAINT.source, "i")
 
 function statedValue(unit: Unit): Candidate[] {
-  if (unit.type === "heading" || LIMITED.test(unit.text) || KEYWORD.test(unit.text) || LOWER.test(unit.text)) return []
+  if (
+    unit.type === "heading" ||
+    asking(unit) ||
+    LIMITED.test(unit.text) ||
+    KEYWORD.test(unit.text) ||
+    LOWER.test(unit.text)
+  )
+    return []
   const match = unit.text.match(STATED)
   if (!match) return []
   const value = Number(match[2]!.replace(/,/g, ""))
@@ -1219,11 +1231,18 @@ function assemble(
       (a, b) =>
         a.candidate.start - b.candidate.start || RULES.indexOf(a.candidate.rule) - RULES.indexOf(b.candidate.rule),
     )
-  const seen = new Map<string, { count: number; quotes: Set<string> }>()
-  const records: Record[] = []
+  const seen = new Map<string, Set<string>>()
+  const chosen: {
+    candidate: Candidate
+    passage: BrainStructure.Passage
+    subject: string
+    base: string
+    quote: string
+    quoteHash: string
+  }[] = []
   const warnings = new Set<BrainSchema.DocumentWarning>()
   for (const { candidate, passage } of kept) {
-    if (records.length >= input.limits.output.records) {
+    if (chosen.length >= input.limits.output.records) {
       warnings.add("truncated")
       break
     }
@@ -1232,15 +1251,26 @@ function assemble(
     const base = `${candidate.kind}|${subject}`
     const quote = quoteOf(text, candidate.start, candidate.end)
     const quoteHash = BrainStructure.normHash(quote)
-    const entry = seen.get(base) ?? { count: 0, quotes: new Set<string>() }
+    const quotes = seen.get(base) ?? new Set<string>()
     // The same thing said twice is one record; a term or entity is one record however often it is defined.
-    if (entry.quotes.has(quoteHash) || (entry.count > 0 && (candidate.kind === "term" || candidate.kind === "entity")))
+    if (quotes.has(quoteHash) || (quotes.size > 0 && (candidate.kind === "term" || candidate.kind === "entity")))
       continue
-    entry.count++
-    entry.quotes.add(quoteHash)
-    seen.set(base, entry)
-    const key = entry.count > 1 ? `${base}#${entry.count}` : base
-    records.push({
+    quotes.add(quoteHash)
+    seen.set(base, quotes)
+    chosen.push({ candidate, passage, subject, base, quote, quoteHash })
+  }
+  // Records of one subject are told apart by what they quote, not by where they sit: ordinals follow their quotes'
+  // hashes, so reordering a document keeps each one's id ("retry on 503" and "retry on 429" share a subject, since
+  // numbers never become terms).
+  const ordinals = new Map(
+    [...seen].flatMap(([base, quotes]) =>
+      [...quotes].toSorted().map((hash, index) => [`${base}\0${hash}`, index + 1] as const),
+    ),
+  )
+  const records = chosen.map(({ candidate, passage, subject, base, quote, quoteHash }): Record => {
+    const ordinal = ordinals.get(`${base}\0${quoteHash}`)!
+    const key = ordinal > 1 ? `${base}#${ordinal}` : base
+    return {
       id: `r${BrainStructure.base32(BrainStructure.sha256(`${input.repository}\0${input.lineage}\0${key}`)).slice(0, 6)}`,
       key,
       kind: candidate.kind,
@@ -1258,8 +1288,8 @@ function assemble(
       start: candidate.start,
       end: candidate.start + quote.length,
       ...(passage.hold ? { hold: passage.hold } : {}),
-    })
-  }
+    }
+  })
   return { records, warnings: [...warnings] }
 }
 
