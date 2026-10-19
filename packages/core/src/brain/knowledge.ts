@@ -5,7 +5,7 @@ import { constants as fsConstants } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
-import { Context, Effect, Fiber, Layer, Queue, Scope } from "effect"
+import { Context, Effect, Fiber, Layer, Option, Queue, Scope } from "effect"
 import { makeGlobalNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
 import { Token } from "../util/token"
@@ -4027,30 +4027,75 @@ function make(input: {
   // Where each name is in the working tree. Identifiers are looked for in one Ripgrep pass, which finds where they are
   // defined and used; routes, environment variables and constants are looked up in the code index, which holds what
   // each file registers, reads and gives a value; paths are in the file list. A name looked up and found nowhere is
-  // pending; one too common to narrow anything down links nothing; one past the pass's cap is not looked up at all.
+  // pending; one too common to narrow anything down links nothing. A name whose lines did not all come back (the pass
+  // failed, it filled a pass on its own, or it was past the pass's cap) is incomplete: what it links stays as it was.
   const locate = Effect.fnUntraced(function* (
     place: Brain.Place,
     files: readonly string[],
     names: readonly BrainAnchor.Name[],
   ) {
-    const found = new Map<string, { readonly common: boolean; readonly hits: readonly Hit[] }>()
-    const identifiers = [...new Set(names.flatMap((name) => (name.kind === "symbol" ? [name.text] : [])))].slice(
-      0,
-      BrainAnchor.LIMIT.identifiers,
-    )
+    const found = new Map<string, { readonly common: boolean; readonly incomplete?: boolean; readonly hits: readonly Hit[] }>()
+    const symbols = [...new Set(names.flatMap((name) => (name.kind === "symbol" ? [name.text] : [])))]
+    const identifiers = symbols.slice(0, BrainAnchor.LIMIT.identifiers)
+    const incomplete = new Set(symbols.slice(BrainAnchor.LIMIT.identifiers))
+    // Names a pass that reached the cap already shows are in too many files.
+    const crowded = new Set<string>()
     const lines = new Map<string, { path: string; line: number; text: string }[]>()
-    for (const pattern of BrainAnchor.patterns(identifiers)) {
+    // Each name has the whole cap of lines to itself: a pass that reaches it is run again without the names it already
+    // shows are common, or in halves, until each name's lines all come back or it fills a pass alone.
+    const queue = BrainAnchor.groups(identifiers)
+    for (let passes = 1; queue.length > 0; passes++) {
+      const group = queue.shift()!
       const matches = yield* input.ripgrep
-        .grep({ cwd: place.root, pattern, limit: BrainAnchor.LIMIT.hits })
-        .pipe(Effect.catch(() => Effect.succeed([])))
-      for (const match of matches) {
+        .grep({ cwd: place.root, pattern: BrainAnchor.pattern(group), limit: BrainAnchor.LIMIT.hits })
+        .pipe(Effect.option)
+      if (Option.isNone(matches)) {
+        for (const name of group) incomplete.add(name)
+        continue
+      }
+      const own = new Map<string, { path: string; line: number; text: string }[]>()
+      for (const match of matches.value) {
         if (BrainAnchor.skipped(match.entry.path)) continue
         for (const word of new Set(match.submatches.map((sub) => sub.text))) {
-          const own = lines.get(word) ?? []
-          own.push({ path: match.entry.path, line: match.line, text: match.text.replace(/\r?\n$/, "") })
-          lines.set(word, own)
+          const hits = own.get(word) ?? []
+          hits.push({ path: match.entry.path, line: match.line, text: match.text.replace(/\r?\n$/, "") })
+          own.set(word, hits)
         }
       }
+      const complete = matches.value.length < BrainAnchor.LIMIT.hits
+      // More lines only add files, so a name already in too many is common however many lines it has left.
+      const common = group.filter((name) => new Set(own.get(name)?.map((hit) => hit.path)).size > BrainAnchor.LIMIT.common)
+      if (complete) {
+        for (const name of group) lines.set(name, own.get(name) ?? [])
+        continue
+      }
+      for (const name of common) crowded.add(name)
+      const rest = group.filter((name) => !common.includes(name))
+      if (rest.length === 0) continue
+      if (passes >= BrainAnchor.LIMIT.passes) {
+        for (const name of rest) incomplete.add(name)
+        continue
+      }
+      if (common.length > 0) {
+        queue.push(rest)
+        continue
+      }
+      if (rest.length > 1) {
+        queue.push(rest.slice(0, Math.ceil(rest.length / 2)), rest.slice(Math.ceil(rest.length / 2)))
+        continue
+      }
+      // One name fills a pass alone: one line from each file says whether it is in too many to be useful. In fewer,
+      // its lines are past what one pass reads, so it is incomplete.
+      passes++
+      const name = rest[0]!
+      const each = yield* input.ripgrep
+        .grep({ cwd: place.root, pattern: BrainAnchor.pattern([name]), limit: BrainAnchor.LIMIT.hits, maxCount: 1 })
+        .pipe(Effect.option)
+      const spread = Option.isSome(each)
+        ? new Set(each.value.filter((match) => !BrainAnchor.skipped(match.entry.path)).map((match) => match.entry.path)).size
+        : 0
+      if (spread > BrainAnchor.LIMIT.common) crowded.add(name)
+      else incomplete.add(name)
     }
     const values = [...new Set(names.flatMap((name) => (name.kind === "path" ? [] : [name.text])))]
     const literals = (yield* Effect.forEach(chunks(values, 500), (batch) =>
@@ -4075,7 +4120,15 @@ function make(input: {
       ),
     )
     for (const name of names) {
-      if (name.kind !== "symbol" || !identifiers.includes(name.text)) continue
+      if (name.kind !== "symbol") continue
+      if (crowded.has(name.text)) {
+        found.set(nameKey(name), { common: true, hits: [] })
+        continue
+      }
+      if (incomplete.has(name.text) || !lines.has(name.text)) {
+        found.set(nameKey(name), { common: false, incomplete: true, hits: [] })
+        continue
+      }
       const hits = (lines.get(name.text) ?? []).map((hit) => ({
         ...hit,
         method: BrainAnchor.classify(hit.text, name.text, hit.path) as BrainAnchor.Method,
@@ -4202,6 +4255,8 @@ function make(input: {
     }
     const now = Date.now()
     const made = owners.map((owner) => {
+      // Names whose lines did not all come back keep the links and the wait they had.
+      const kept = new Set(owner.names.filter((name) => located.get(nameKey(name))?.incomplete).map((name) => name.text))
       const anchors = owner.names.flatMap((name) => {
         const spot = located.get(nameKey(name))
         if (!spot || spot.common) return []
@@ -4210,6 +4265,7 @@ function make(input: {
             owner.value && hit.method === "definition" && name.kind === "symbol" ? BrainAnchor.value(hit.text, name.text) : undefined
           const method = constant ? ("constant" as const) : hit.method
           const symbol = name.kind === "path" ? undefined : name.kind === "route" ? routeSymbol(name) : name.text
+          if (symbol !== undefined && kept.has(symbol)) return []
           if (unlinked.has(anchorTombstone(owner.id, hit.path, symbol))) return []
           return [{ owner, name, hit, method, symbol, constant, weight: BrainAnchor.WEIGHT[method] }]
         })
@@ -4219,9 +4275,13 @@ function make(input: {
         owner,
         anchors: unique.toSorted((a, b) => b.weight - a.weight).slice(0, BrainAnchor.LIMIT.perOwner),
         waiting: owner.names
-          .filter((name) => located.get(nameKey(name))?.common === false && located.get(nameKey(name))!.hits.length === 0)
+          .filter((name) => {
+            const spot = located.get(nameKey(name))
+            return spot?.common === false && !spot.incomplete && spot.hits.length === 0
+          })
           .slice(0, BrainAnchor.LIMIT.pending),
         common: owner.names.filter((name) => located.get(nameKey(name))?.common === true).map((name) => name.text),
+        kept: [...kept],
       }
     })
     const rows = yield* Effect.promise(() =>
@@ -4259,12 +4319,12 @@ function make(input: {
         created_at: now,
       })),
     )
-    const ids = owners.map((owner) => owner.id)
+    const whole = made.filter((item) => item.kept.length === 0).map((item) => item.owner.id)
     yield* db
       .transaction((tx) =>
         Effect.gen(function* () {
           if (options.replace)
-            for (const batch of chunks(ids, 500)) {
+            for (const batch of chunks(whole, 500)) {
               yield* tx
                 .delete(BrainAnchorTable)
                 .where(
@@ -4278,6 +4338,31 @@ function make(input: {
               yield* tx
                 .delete(BrainPendingTable)
                 .where(and(eq(BrainPendingTable.repository_id, place.repository), inArray(BrainPendingTable.owner, batch)))
+                .run()
+            }
+          // An owner with a name whose lines did not all come back loses only the links and waits of its other names.
+          if (options.replace)
+            for (const item of made.filter((item) => item.kept.length > 0)) {
+              yield* tx
+                .delete(BrainAnchorTable)
+                .where(
+                  and(
+                    eq(BrainAnchorTable.repository_id, place.repository),
+                    eq(BrainAnchorTable.owner, item.owner.id),
+                    eq(BrainAnchorTable.origin, "extracted"),
+                    or(isNull(BrainAnchorTable.symbol), notInArray(BrainAnchorTable.symbol, item.kept)),
+                  ),
+                )
+                .run()
+              yield* tx
+                .delete(BrainPendingTable)
+                .where(
+                  and(
+                    eq(BrainPendingTable.repository_id, place.repository),
+                    eq(BrainPendingTable.owner, item.owner.id),
+                    notInArray(BrainPendingTable.identifier, item.kept),
+                  ),
+                )
                 .run()
             }
           for (const batch of chunks(rows, 500)) yield* tx.insert(BrainAnchorTable).values(batch).run()

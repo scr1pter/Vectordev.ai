@@ -31,8 +31,10 @@ export const LIMIT = {
   identifiers: 400,
   /** Bytes of one Ripgrep pattern. */
   pattern: 8 * 1024,
-  /** Matching lines read in one pass. */
+  /** Matching lines read in one pass. A pass that reaches it is looked at again without its common names, or in halves. */
   hits: 4_000,
+  /** Ripgrep passes one lookup makes; names still not looked at in full after them keep their links. */
+  passes: 24,
   /** Anchors one name makes. */
   perName: 5,
   /** A name found in more files than this is too common to say where anything is. */
@@ -123,23 +125,19 @@ export function names(input: {
   return [...found.values()]
 }
 
-/** Ripgrep patterns that find any of these identifiers as a whole word, each at most `LIMIT.pattern` bytes. */
-export function patterns(identifiers: readonly string[]) {
-  return identifiers
-    .reduce<string[][]>((chunks, name) => {
-      const last = chunks.at(-1)
-      if (last && [...last, name].join("|").length + 12 <= LIMIT.pattern) last.push(name)
-      else chunks.push([name])
-      return chunks
-    }, [])
-    .map((chunk) => `\\b(?:${chunk.join("|")})\\b`)
+/** Identifiers in groups whose Ripgrep `pattern` is at most `LIMIT.pattern` bytes. */
+export function groups(identifiers: readonly string[]) {
+  return identifiers.reduce<string[][]>((chunks, name) => {
+    const last = chunks.at(-1)
+    if (last && [...last, name].join("|").length + 12 <= LIMIT.pattern) last.push(name)
+    else chunks.push([name])
+    return chunks
+  }, [])
 }
 
-/** A Ripgrep pattern for lines that hold a string starting with any of these routes' fixed beginnings. */
-export function routePattern(routes: readonly string[]) {
-  const prefixes = [...new Set(routes.map((route) => route.split("*")[0]!.replace(/\/$/, "") || "/"))]
-  if (prefixes.length === 0) return undefined
-  return `["'\`](?:[A-Z]+ )?(?:${prefixes.map((prefix) => prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`
+/** A Ripgrep pattern that finds any of these identifiers as a whole word. */
+export function pattern(identifiers: readonly string[]) {
+  return `\\b(?:${identifiers.join("|")})\\b`
 }
 
 /** Files whose lines never anchor a document: other documents, and lock files. */

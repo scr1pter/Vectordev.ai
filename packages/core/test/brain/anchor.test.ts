@@ -197,6 +197,92 @@ describe("BrainKnowledge links to code", () => {
     )
   }, 30_000)
 
+  test("a file that is not UTF-8 keeps a document's links", async () => {
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          yield* added(setup, text("Auth spec.md", SPEC))
+          const before = yield* anchorsOf(setup)
+          // "café refreshTokenTtl" in Latin-1, where é is the single byte 0xe9.
+          yield* Effect.promise(() =>
+            fs.writeFile(
+              path.join(setup.root, "src", "legacy.ts"),
+              Buffer.from([...Buffer.from("// caf"), 0xe9, ...Buffer.from(" refreshTokenTtl\n")]),
+            ),
+          )
+          yield* setup.knowledge.link(setup.place)
+          return { before, after: yield* anchorsOf(setup) }
+        }),
+      { files: CODE, git: true },
+    )
+    const ttl = (anchors: typeof result.before) =>
+      anchors.filter((anchor) => anchor.symbol === "refreshTokenTtl" && anchor.method === "definition").map((anchor) => anchor.path)
+    expect(ttl(result.before)).toEqual(["src/auth/session.ts"])
+    expect(ttl(result.after)).toEqual(["src/auth/session.ts"])
+  }, 30_000)
+
+  test("a name on more lines than a pass reads is counted by its files, and a rare name beside it still links", async () => {
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          const { document } = yield* added(
+            setup,
+            text("Users.md", "# Users\n\n## 1 Ids\n\nThe `userId` MUST be checked on each call.\n\nThe `refreshTokenTtl` MUST be 14 days.\n"),
+          )
+          const linked = yield* setup.knowledge.link(setup.place)
+          return { document, linked, anchors: yield* anchorsOf(setup) }
+        }),
+      {
+        files: {
+          ...CODE,
+          // 4,800 lines in 60 files: more than one pass reads, and more files than a useful name is in.
+          ...Object.fromEntries(
+            Array.from({ length: 60 }, (_, index) => [`src/users/f${index}.ts`, "log(userId)\n".repeat(80)]),
+          ),
+        },
+        git: true,
+      },
+    )
+    expect(result.document?.status).toBe("searchable")
+    expect(result.anchors.filter((anchor) => anchor.symbol === "userId")).toEqual([])
+    expect(result.linked.common).toContain("userId")
+    expect(result.anchors).toContainEqual(
+      expect.objectContaining({ path: "src/auth/session.ts", symbol: "refreshTokenTtl", method: "definition" }),
+    )
+  }, 30_000)
+
+  test("a name whose lines do not all come back keeps the links it had", async () => {
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          yield* added(setup, text("Dense.md", "# Dense\n\n## 1 Counter\n\nThe `denseCounter` MUST start at zero.\n"))
+          const before = yield* anchorsOf(setup)
+          // One generated file uses it on more lines than a pass reads, in too few files to be common.
+          yield* Effect.promise(() =>
+            fs.writeFile(path.join(setup.root, "src", "generated.ts"), "denseCounter()\n".repeat(4_100)),
+          )
+          yield* setup.knowledge.link(setup.place)
+          return {
+            before,
+            after: yield* anchorsOf(setup),
+            pending: yield* setup.db.select().from(BrainPendingTable).all().pipe(Effect.orDie),
+          }
+        }),
+      {
+        files: {
+          "src/counter.ts": "export const denseCounter = () => 0\n",
+          "src/use.ts": "denseCounter()\ndenseCounter()\n",
+        },
+        git: true,
+      },
+    )
+    const links = (anchors: typeof result.before) =>
+      anchors.map((anchor) => `${anchor.path}:${anchor.method}`).toSorted()
+    expect(links(result.before)).toEqual(["src/counter.ts:definition", "src/use.ts:use"])
+    expect(links(result.after)).toEqual(links(result.before))
+    expect(result.pending).toEqual([])
+  }, 30_000)
+
   test("outside a git working tree nothing is linked", async () => {
     const anchors = await withKnowledge(
       (setup) =>
