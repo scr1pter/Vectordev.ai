@@ -219,7 +219,7 @@ function split(block: BrainDocument.Block, text: string): Piece[] {
       : block.type === "table" || block.type === "code"
         ? lines(whole, block.span.start).slice(block.type === "table" && block.header.length > 0 ? 1 : 0)
         : sentences(whole, block.span.start)
-  const header = block.type === "table" && block.header.length > 0 ? `${block.header.join(" | ")}\n` : ""
+  const header = block.type === "table" && block.header.length > 0 ? `${shorten(block.header.join(" | "))}\n` : ""
   const groups = units.reduce<{ start: number; end: number }[][]>((all, unit) => {
     const last = all.at(-1)
     if (last && Token.estimate(header + text.slice(last[0]!.start, unit.end)) <= MAXIMUM) last.push(unit)
@@ -232,7 +232,7 @@ function split(block: BrainDocument.Block, text: string): Piece[] {
     const slice = text.slice(start, end)
     // A sentence or line longer than a passage on its own is cut at whitespace.
     if (Token.estimate(header + slice) > MAXIMUM)
-      return hard(start, end, text, MAXIMUM * 4 - header.length).map((part) => ({
+      return hard(start, end, text, Math.max(HARD, MAXIMUM * 4 - header.length)).map((part) => ({
         ...part,
         body: header + part.body,
         tokens: Token.estimate(header + part.body),
@@ -288,6 +288,19 @@ function fill(piece: Piece, room: number): [Piece, Piece] | undefined {
     { start: rest.start, end: piece.end, body: second, tokens: Token.estimate(second), ...page, splittable: true },
   ]
 }
+
+// A table header repeated on every piece of a split table takes at most a quarter of a passage, so the rows always have
+// room: a header past that is cut at a word and ends in an ellipsis.
+const HEADER = MAXIMUM
+
+function shorten(header: string) {
+  if (header.length <= HEADER) return header
+  const cut = header.lastIndexOf(" ", HEADER - 1)
+  return `${header.slice(0, cut > HEADER / 2 ? cut : HEADER - 1)}…`
+}
+
+/** The fewest characters a hard cut takes, so a cut always moves forward. */
+const HARD = 400
 
 function hard(start: number, end: number, text: string, chars: number) {
   const parts: { start: number; end: number; body: string }[] = []

@@ -73,6 +73,38 @@ describe("BrainStructure", () => {
     expect(whole[0]!.tokens).toBeLessThanOrEqual(BrainStructure.WHOLE)
   })
 
+  test("a table with a header wider than a passage splits into whole rows under a shortened header", async () => {
+    // 64 columns of about 30 characters: a 2,109-character header, which used to make the row cutter loop forever.
+    const wide = Array.from(
+      { length: 64 },
+      (_, index) => `Quarterly revenue by region ${String(index).padStart(2, "0")}`,
+    )
+    const csv = [wide, ...Array.from({ length: 30 }, (_, row) => wide.map((_, column) => `${row * column}.5`))]
+      .map((cells) => cells.join(","))
+      .join("\n")
+    const started = performance.now()
+    const passages = (await learn(csv, "revenue.csv")).structured.passages
+    expect(performance.now() - started).toBeLessThan(5_000)
+    expect(passages.length).toBeGreaterThan(1)
+    expect(passages.length).toBeLessThan(30)
+    for (const passage of passages) {
+      const [header, ...rows] = passage.body.split("\n")
+      expect(header!.length).toBeLessThanOrEqual(BrainStructure.MAXIMUM)
+      expect(header!.endsWith("…")).toBe(true)
+      expect(header!.startsWith("Quarterly revenue by region 00 | Quarterly revenue by region 01")).toBe(true)
+      expect(passage.tokens).toBeLessThanOrEqual(BrainStructure.MAXIMUM)
+      expect(rows.join("\n").length).toBeGreaterThan(400)
+    }
+    // Just under the old threshold (1,917 characters), rows were cut into 3-character slices, each under the full header.
+    const narrow = [
+      ["Region", "y".repeat(1_917 - "Region | ".length)],
+      ...Array.from({ length: 60 }, (_, row) => [`North ${row}`, `${"revenue grew in the quarter ".repeat(10)}${row}`]),
+    ]
+    const near = (await learn(narrow.map((cells) => cells.join(",")).join("\n"), "narrow.csv")).structured.passages
+    expect(near.length).toBeLessThan(60)
+    for (const passage of near) expect(passage.body.split("\n").slice(1).join("\n").length).toBeGreaterThan(200)
+  })
+
   test("breadcrumbs name the title, section path and page; offsets round-trip", async () => {
     const { structured, extracted } = await learn(SPEC_V1, "auth-spec.md")
     expect(structured.passages.map((passage) => passage.header)).toContain("Auth spec > 2 Limits")
