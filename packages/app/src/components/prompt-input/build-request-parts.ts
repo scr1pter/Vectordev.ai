@@ -5,6 +5,7 @@ import { encodeFilePath } from "@/context/file/path"
 import type { AgentPart, FileAttachmentPart, ImageAttachmentPart, Prompt } from "@/context/prompt"
 import { Identifier } from "@/utils/id"
 import { createCommentMetadata, formatCommentNote } from "@/utils/comment-note"
+import { marker, modeFor } from "./remember"
 
 type PromptRequestPart = (TextPartInput | FilePartInput | AgentPartInput) & { id: string }
 
@@ -196,14 +197,17 @@ export function buildRequestParts(input: BuildRequestPartsInput) {
     ]
   })
 
-  const images = input.images.map((attachment) => {
-    return {
+  // A document the user chose to remember is followed by an empty marker the engine reads, naming its file part.
+  const images = input.images.flatMap((attachment) => {
+    const file = {
       id: Identifier.ascending("part"),
       type: "file",
       mime: attachment.mime,
       url: attachment.dataUrl,
       filename: attachment.sourcePath ?? attachment.filename,
     } satisfies PromptRequestPart
+    const mode = modeFor(attachment)
+    return mode ? [file, marker(Identifier.ascending("part"), file.id, mode) satisfies PromptRequestPart] : [file]
   })
 
   requestParts.push(...files, ...context, ...agents, ...images)

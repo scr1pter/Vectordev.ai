@@ -46,6 +46,15 @@ export interface ImageAttachmentPart {
   sourcePath?: string
   mime: string
   dataUrl: string
+  /** The file's size, which decides whether the composer suggests remembering it instead of sending it. */
+  bytes?: number
+  /**
+   * Whether Vector keeps this document in memory: "keep" also sends it, "instead" sends its outline and cards in its
+   * place, "send" is the user's "Send anyway". Unset until the user chooses, except for office files.
+   */
+  remember?: "keep" | "instead" | "send"
+  /** What the engine counted when it could read the file by its path: pages and tokens. */
+  probe?: { pages?: number; tokens: number; suggest: "remember-instead" | "none" }
 }
 
 export type ContentPart = TextPart | FileAttachmentPart | AgentPart | ImageAttachmentPart

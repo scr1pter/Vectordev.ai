@@ -23,6 +23,22 @@ describe("attachmentMime", () => {
     expect(await attachmentMime(file)).toBeUndefined()
   })
 
+  test("attaches Word, PowerPoint and Excel files by their office type", async () => {
+    const zip = Uint8Array.of(0x50, 0x4b, 0x03, 0x04, 0x14, 0, 0, 0)
+    expect(await attachmentMime(new File([zip], "plan.docx"))).toBe(
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    expect(await attachmentMime(new File([zip], "deck.PPTX", { type: "application/octet-stream" }))).toBe(
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+    expect(await attachmentMime(new File([zip], "sheet.xlsx"))).toBe(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    // A zip that is not named as one stays refused, and so does a .docx that is not a zip.
+    expect(await attachmentMime(new File([zip], "archive.zip"))).toBeUndefined()
+    expect(await attachmentMime(new File([Uint8Array.of(0, 1, 2, 3)], "fake.docx"))).toBeUndefined()
+  })
+
   test("recognizes JPEG images from their bytes when desktop does not provide a mime", async () => {
     const file = new File([Uint8Array.of(0xff, 0xd8, 0xff, 0xe1, 0, 12)], "camera-photo.jpg")
     expect(await attachmentMime(file)).toBe("image/jpeg")

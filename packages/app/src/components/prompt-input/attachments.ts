@@ -8,6 +8,7 @@ import { getCursorPosition } from "./editor-dom"
 import { attachmentMime } from "./files"
 import { prepareImageForModel } from "./image-processing"
 import { normalizePaste, pasteCaption, pasteMode } from "./paste"
+import { documentKind, prose } from "./remember"
 
 function dataUrl(file: Blob, mime: string) {
   return new Promise<string>((resolve) => {
@@ -38,6 +39,8 @@ type PromptAttachmentsCoreInput = {
   imageError?: (error: unknown) => void
   readClipboardImage?: () => Promise<File | null>
   getPathForFile?: (file: File) => string
+  /** Long pasted prose, which the composer offers to remember. */
+  onProse?: (text: string) => void
 }
 
 type PromptAttachmentsInput = {
@@ -49,6 +52,7 @@ type PromptAttachmentsInput = {
   addPart: (part: ContentPart) => boolean
   readClipboardImage?: () => Promise<File | null>
   getPathForFile?: (file: File) => string
+  onProse?: (text: string) => void
 }
 
 export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
@@ -86,6 +90,11 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
       sourcePath: input.getPathForFile?.(file) || undefined,
       mime: prepared.mime,
       dataUrl: url,
+      bytes: file.size,
+      // Models cannot read office files as they are, so these are remembered instead of sent, with Undo.
+      ...(documentKind({ filename: file.name, mime: prepared.mime }) === "office"
+        ? { remember: "instead" as const }
+        : {}),
     }
     target.prompt.set([...target.prompt.current(), attachment], target.cursor)
     return true
@@ -115,6 +124,14 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
     const target = input.capture()
     const current = target.current()
     const next = current.filter((part) => part.type !== "image" || part.id !== id)
+    target.set(next, target.cursor())
+  }
+
+  const updateAttachment = (id: string, patch: Partial<Pick<ImageAttachmentPart, "remember" | "probe">>) => {
+    const target = input.capture()
+    const next = target
+      .current()
+      .map((part) => (part.type === "image" && part.id === id ? { ...part, ...patch } : part))
     target.set(next, target.cursor())
   }
 
@@ -156,6 +173,7 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
 
   const insertText = (plainText: string) => {
     const text = normalizePaste(plainText)
+    if (prose(text)) input.onProse?.(text)
 
     const put = () => {
       if (input.addPart?.({ type: "text", content: text, start: 0, end: 0 })) return true
@@ -179,6 +197,7 @@ export function createPromptAttachmentsCore(input: PromptAttachmentsCoreInput) {
     addAttachments,
     addClipboardAttachment,
     removeAttachment,
+    updateAttachment,
     handlePaste,
   }
 }

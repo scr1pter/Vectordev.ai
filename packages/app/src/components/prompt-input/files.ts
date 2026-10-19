@@ -1,4 +1,5 @@
 import { ACCEPTED_FILE_TYPES, ACCEPTED_IMAGE_TYPES } from "@/constants/file-picker"
+import { OFFICE_TYPES, officeMime } from "./remember"
 
 export { ACCEPTED_FILE_TYPES }
 
@@ -125,6 +126,9 @@ export async function attachmentMime(file: File): Promise<string | undefined> {
   if (detected) return detected
   if (IMAGE_MIMES.has(type)) return type
   if (type === "application/pdf" || startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d])) return "application/pdf"
+  // Word, PowerPoint and Excel files are zip archives; they are attached to be remembered, never sent as they are.
+  const office = officeMime(file.name) ?? Object.values(OFFICE_TYPES).find((mime) => mime === type)
+  if (office && startsWith(bytes, [0x50, 0x4b, 0x03, 0x04])) return office
 
   const suffix = ext(file.name)
   const fallback = IMAGE_EXTS.get(suffix) ?? (suffix === "pdf" ? "application/pdf" : undefined)

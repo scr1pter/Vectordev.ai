@@ -69,6 +69,10 @@ import { acceptFreeModelTraining, freeModelTrainingGate } from "@/utils/free-mod
 import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/slash-popover"
 import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
+import { PromptRemember } from "./prompt-input/remember-chips"
+import { documentKind, pasteKept, pasteName } from "./prompt-input/remember"
+import { refusal, refusalLabel } from "./settings-v2/memory-documents-model"
+import { ServerConnection, useServer } from "@/context/server"
 import { PromptDragOverlay } from "./prompt-input/drag-overlay"
 import { FreeModelStart } from "./prompt-input/free-model-start"
 import { promptPlaceholder } from "./prompt-input/placeholder"
@@ -1420,7 +1424,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return true
   }
 
-  const { addAttachment, addAttachments, removeAttachment, handlePaste } = createPromptAttachments({
+  // Long pasted prose the composer offers to keep as a document, until the user keeps it, dismisses it or sends.
+  const [pasted, setPasted] = createSignal<{ text: string; name: string; busy: boolean }>()
+  const { addAttachment, addAttachments, removeAttachment, updateAttachment, handlePaste } = createPromptAttachments({
     prompt,
     editor: () => editorRef,
     isDialogActive: () => !!dialog.active,
@@ -1432,7 +1438,58 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     addPart,
     readClipboardImage: platform.readClipboardImage,
     getPathForFile: platform.getPathForFile,
+    onProse: (text) => setPasted({ text, name: pasteName(text), busy: false }),
   })
+  createEffect(() => {
+    if (blank()) setPasted(undefined)
+  })
+
+  // A PDF attached from this computer, to the app's own engine, is counted by the engine (pages and tokens), so the
+  // composer can suggest remembering it instead of sending every page. Anything else is judged by its size.
+  const server = useServer()
+  const probed = new Set<string>()
+  createEffect(() => {
+    const builtin = !!server.current && ServerConnection.builtin(server.current)
+    if (!builtin) return
+    for (const attachment of imageAttachments()) {
+      if (documentKind(attachment) !== "pdf" || !attachment.sourcePath || attachment.probe || probed.has(attachment.id))
+        continue
+      probed.add(attachment.id)
+      void sdk()
+        .client.memory.documents.probe({ path: attachment.sourcePath })
+        .then((result) => {
+          if (result.data) updateAttachment(attachment.id, { probe: result.data })
+        })
+        .catch(() => undefined)
+    }
+  })
+
+  const keepPasted = async () => {
+    const current = pasted()
+    if (!current || current.busy) return
+    setPasted({ ...current, busy: true })
+    const sessionID = props.controls.session.id
+    const result = await sdk()
+      .client.memory.documents.text({ name: current.name, text: current.text, ...(sessionID ? { sessionID } : {}) })
+      .catch((cause: unknown) => ({ error: cause, data: undefined }))
+    setPasted(undefined)
+    if (result.data) {
+      showToast({ title: pasteKept(current.name) })
+      return
+    }
+    const why = refusal(result.error)
+    showToast({ title: refusalLabel(why.reason, why.message, current.name), variant: "error" })
+  }
+  const rememberChips = () => (
+    <PromptRemember
+      attachments={imageAttachments()}
+      onMode={(id, remember) => updateAttachment(id, { remember })}
+      onRemove={removeAttachment}
+      paste={pasted() ? { name: pasted()!.name, busy: pasted()!.busy } : undefined}
+      onPasteKeep={() => void keepPasted()}
+      onPasteDismiss={() => setPasted(undefined)}
+    />
+  )
 
   const fileAttachmentInput = () => (
     <input
@@ -1955,6 +2012,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 onRemove={removeAttachment}
                 removeLabel={language.t("prompt.attachment.remove")}
               />
+              {rememberChips()}
               <div
                 class="relative min-h-[52px]"
                 onMouseDown={(e) => {
@@ -2331,6 +2389,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               onRemove={removeAttachment}
               removeLabel={language.t("prompt.attachment.remove")}
             />
+            {rememberChips()}
             <div
               class="relative"
               onMouseDown={(e) => {

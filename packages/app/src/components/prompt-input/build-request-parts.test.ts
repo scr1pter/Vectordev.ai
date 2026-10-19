@@ -49,6 +49,60 @@ describe("buildRequestParts", () => {
     expect(result.optimisticParts.every((part) => part.sessionID === "ses_1" && part.messageID === "msg_1")).toBe(true)
   })
 
+  test("marks documents the user chose to remember, office files always, images and Send anyway never", () => {
+    const pdf = "data:application/pdf;base64,JVBERi0="
+    const docx = "data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,UEsDBA=="
+    const result = buildRequestParts({
+      prompt: [{ type: "text", content: "read these", start: 0, end: 10 }],
+      context: [],
+      images: [
+        { type: "image", id: "a", filename: "spec.pdf", mime: "application/pdf", dataUrl: pdf, remember: "instead" },
+        {
+          type: "image",
+          id: "b",
+          filename: "notes.md",
+          mime: "text/plain",
+          dataUrl: "data:text/plain;base64,IyBh",
+          remember: "keep",
+        },
+        {
+          type: "image",
+          id: "c",
+          filename: "plan.docx",
+          mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          dataUrl: docx,
+        },
+        { type: "image", id: "d", filename: "big.pdf", mime: "application/pdf", dataUrl: pdf, remember: "send" },
+        {
+          type: "image",
+          id: "e",
+          filename: "shot.png",
+          mime: "image/png",
+          dataUrl: "data:image/png;base64,AAA",
+          remember: "keep",
+        },
+      ],
+      text: "read these",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      sessionDirectory: "/repo",
+    })
+    const parts = result.requestParts.slice(1)
+    const markers = parts.flatMap((part, index) =>
+      part.type === "text" ? [{ index, value: part.metadata?.["vector.memory.remember"], text: part.text }] : [],
+    )
+    expect(markers.map((item) => item.value)).toEqual([
+      { mode: "instead", part: parts[0]!.id },
+      { mode: "keep", part: parts[2]!.id },
+      { mode: "instead", part: parts[4]!.id },
+    ])
+    expect(markers.every((item) => item.text === "")).toBe(true)
+    // Each marker follows the file it names, and every attachment is still a file part.
+    expect(markers.map((item) => item.index)).toEqual([1, 3, 5])
+    expect(parts.filter((part) => part.type === "file")).toHaveLength(5)
+    expect(result.optimisticParts).toHaveLength(result.requestParts.length)
+  })
+
   test("keeps multiple uploaded attachments in order", () => {
     const result = buildRequestParts({
       prompt: [{ type: "text", content: "check these", start: 0, end: 11 }],
