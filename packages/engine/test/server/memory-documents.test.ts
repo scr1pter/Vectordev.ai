@@ -130,6 +130,8 @@ describe("memory document routes", () => {
       ["DELETE", "/memory/documents/dnone"],
       ["GET", "/memory/documents/dnone/pages/1"],
       ["GET", "/memory/documents/dnone/file"],
+      ["GET", "/memory/documents/dnone/distill"],
+      ["POST", "/memory/documents/dnone/distill", JSON.stringify({})],
       ["GET", "/memory/records"],
       ["GET", "/memory/records/rnone"],
       ["PATCH", "/memory/records/rnone", JSON.stringify({ pinned: true })],
@@ -150,6 +152,41 @@ describe("memory document routes", () => {
     // Nothing a guest sent was kept, and the owner reads the same list.
     expect((await get(shared.path, "/memory/documents")).documents).toEqual([])
     expect((await get(shared.path, "/memory/settings")).keepOriginals).toBe(false)
+  }, 30_000)
+
+  test("finding more with a model is off by default and says why, and with the flag on refuses before sending", async () => {
+    await using tmp = await tmpdir({ git: true, trusted: true, config: { formatter: false, lsp: false } })
+    const flag = process.env.VECTOR_KNOWLEDGE_DISTILL
+    delete process.env.VECTOR_KNOWLEDGE_DISTILL
+    try {
+      const created = await upload(tmp.path, "Auth spec.md", SPEC)
+      const id = ((await created.json()) as { document: { id: string } }).document.id
+      await searchable(tmp.path, id)
+      expect((await get(tmp.path, `/memory/documents/${id}`)).distill).toBe(false)
+      expect(await get(tmp.path, `/memory/documents/${id}/distill`)).toMatchObject({
+        enabled: false,
+        refused: { reason: "off" },
+        sections: 0,
+      })
+      const off = await json(tmp.path, `/memory/documents/${id}/distill`, "POST", {})
+      expect(off.status).toBe(400)
+      expect(await off.json()).toMatchObject({ name: "MemoryError", data: { code: "refused", reason: "off" } })
+
+      process.env.VECTOR_KNOWLEDGE_DISTILL = "1"
+      expect((await get(tmp.path, `/memory/documents/${id}`)).distill).toBe(true)
+      // A model nobody connected is refused with nothing sent, and so is more text than the cap.
+      const unknown = await json(tmp.path, `/memory/documents/${id}/distill`, "POST", { model: "nowhere/none" })
+      expect(unknown.status).toBe(400)
+      expect(await unknown.json()).toMatchObject({ data: { code: "refused", reason: "no-model" } })
+      const tooMuch = await json(tmp.path, `/memory/documents/${id}/distill`, "POST", { maxTokens: 90_000 })
+      expect(tooMuch.status).toBe(400)
+      // Keeping the suggestions of a document with none changes nothing.
+      const kept = await json(tmp.path, `/memory/documents/${id}`, "PATCH", { action: "keep-suggestions" })
+      expect(kept.status).toBe(200)
+    } finally {
+      if (flag === undefined) delete process.env.VECTOR_KNOWLEDGE_DISTILL
+      else process.env.VECTOR_KNOWLEDGE_DISTILL = flag
+    }
   }, 30_000)
 
   test("an upload over 64 MB is refused before it is read, by its length or as it streams, and nothing is kept", async () => {

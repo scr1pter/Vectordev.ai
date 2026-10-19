@@ -52,6 +52,8 @@ describe("server authentication", () => {
       ["DELETE", "/memory/documents/:documentID"],
       ["GET", "/memory/documents/:documentID/pages/:page"],
       ["GET", "/memory/documents/:documentID/file"],
+      ["GET", "/memory/documents/:documentID/distill"],
+      ["POST", "/memory/documents/:documentID/distill"],
       ["GET", "/memory/records"],
       ["GET", "/memory/records/:recordID"],
       ["PATCH", "/memory/records/:recordID"],

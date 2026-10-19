@@ -5,7 +5,10 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
+import { Flag } from "@vectordevai/core/flag/flag"
 import { Instruction } from "@/session/instruction"
+import { SessionDistill } from "@/session/distill"
+import { SessionID } from "@/session/schema"
 import { InstanceHttpApi } from "../api"
 import { MemoryApiError, MemoryTooLargeError, TEXT_BYTES, UPLOAD_BYTES } from "../groups/memory"
 
@@ -42,6 +45,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
     const brain = yield* Brain.Service
     const instruction = yield* Instruction.Service
     const knowledge = yield* BrainKnowledge.Service
+    const distiller = yield* SessionDistill.Service
 
     const list = Effect.fn("MemoryHttpApi.list")(function* (ctx: {
       query: { scope?: "repository" | "personal"; filter?: Brain.Filter; query?: string }
@@ -294,6 +298,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
         ...(detail.diff ? { diff: detail.diff } : {}),
         history: detail.history,
         usage: detail.usage,
+        distill: Flag.VECTOR_KNOWLEDGE_DISTILL,
       }
     })
 
@@ -302,7 +307,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       payload: {
         title?: string
         visibility?: BrainSchema.Visibility
-        action?: "approve" | "reject" | "reindex" | "pause" | "resume"
+        action?: "approve" | "reject" | "reindex" | "pause" | "resume" | "keep-suggestions"
       }
     }) {
       const place = yield* instruction.place()
@@ -357,6 +362,45 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
           "cache-control": "no-store",
         },
       })
+    })
+
+    // What a model would read of a document for suggestions, and what that may cost; nothing is sent.
+    const distillEstimate = Effect.fn("MemoryHttpApi.distillEstimate")(function* (ctx: {
+      params: { documentID: string }
+      query: { model?: string; maxTokens?: number }
+    }) {
+      return yield* distiller.estimate(yield* instruction.place(), {
+        document: ctx.params.documentID,
+        ...(ctx.query.model ? { model: ctx.query.model } : {}),
+        ...(ctx.query.maxTokens ? { maxTokens: ctx.query.maxTokens } : {}),
+      })
+    })
+
+    const distill = Effect.fn("MemoryHttpApi.distill")(function* (ctx: {
+      params: { documentID: string }
+      payload: { model?: string; maxTokens?: number; sessionID?: string }
+    }) {
+      const result = yield* distiller.run(yield* instruction.place(), {
+        document: ctx.params.documentID,
+        ...(ctx.payload.model ? { model: ctx.payload.model } : {}),
+        ...(ctx.payload.maxTokens ? { maxTokens: ctx.payload.maxTokens } : {}),
+        ...(ctx.payload.sessionID ? { sessionID: SessionID.make(ctx.payload.sessionID) } : {}),
+      })
+      if (result.type === "refused")
+        return yield* result.reason === "not-found"
+          ? missing(ctx.params.documentID, result.message)
+          : refused(result.message, result.reason)
+      return {
+        model: result.model,
+        sessionID: result.sessionID,
+        records: result.records,
+        duplicate: result.duplicate,
+        dropped: result.dropped,
+        tokens: result.tokens,
+        cost: result.cost,
+        costKind: result.costKind,
+        ...(result.error ? { error: result.error } : {}),
+      }
     })
 
     // --- Records --------------------------------------------------------------------------------------------------
@@ -445,6 +489,8 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       .handle("removeDocument", removeDocument)
       .handle("documentPage", documentPage)
       .handle("documentFile", documentFile)
+      .handle("distillEstimate", distillEstimate)
+      .handle("distill", distill)
       .handle("records", records)
       .handle("record", record)
       .handle("updateRecord", updateRecord)

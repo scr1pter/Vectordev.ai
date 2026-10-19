@@ -2,6 +2,7 @@ import { Schema } from "effect"
 import { Multipart } from "effect/unstable/http"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import { BrainSchema } from "@vectordevai/core/brain/schema"
+import { RunBudget } from "@vectordevai/schema/run-budget"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
 import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery, WorkspaceRoutingQueryFields } from "../middleware/workspace-routing"
@@ -245,14 +246,90 @@ export const MemoryDocumentDetail = Schema.Struct({
   history: Schema.Array(BrainSchema.DocumentEvent),
   /** Runs in the last 30 days whose answers cited or opened one of its cards, and how they ended. */
   usage: BrainSchema.DocumentUsage,
+  /** Whether "Find more with a model…" is on (VECTOR_KNOWLEDGE_DISTILL); absent from an engine without it. */
+  distill: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "MemoryDocumentDetail" })
 
 export const MemoryDocumentUpdatePayload = Schema.Struct({
   title: Schema.optional(Schema.String),
   visibility: Schema.optional(BrainSchema.Visibility),
-  /** reject forgets a held document; reindex reads it again; pause and resume hold and continue its reading. */
-  action: Schema.optional(Schema.Literals(["approve", "reject", "reindex", "pause", "resume"])),
+  /**
+   * reject forgets a held document; reindex reads it again; pause and resume hold and continue its reading;
+   * keep-suggestions puts every record a model suggested for it in use.
+   */
+  action: Schema.optional(Schema.Literals(["approve", "reject", "reindex", "pause", "resume", "keep-suggestions"])),
 })
+
+const DistillTokens = Schema.Finite.check(Schema.isInt(), Schema.isBetween({ minimum: 1_000, maximum: 30_000 }))
+
+export const MemoryDistillQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  /** "provider/model"; the configured default model when absent. */
+  model: Schema.optional(Schema.String),
+  /** Section text to send, in tokens: 1,000 to 30,000, the default. */
+  maxTokens: Schema.optional(
+    Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1_000, maximum: 30_000 })),
+  ),
+})
+
+const DistillReason = Schema.Literals([
+  "off",
+  "guest",
+  "may-train",
+  "zen",
+  "no-model",
+  "not-found",
+  "held",
+  "not-ready",
+  "nothing",
+])
+
+export const MemoryDistillEstimate = Schema.Struct({
+  /** VECTOR_KNOWLEDGE_DISTILL is set. */
+  enabled: Schema.Boolean,
+  /** "provider/model". */
+  model: Schema.optional(Schema.String),
+  /** Why it would not run: off, a guest's session, a model that may train, the Zen gateway, nothing to read. */
+  refused: Schema.optional(Schema.Struct({ reason: DistillReason, message: Schema.String })),
+  /** Sections that would be sent, the tokens sent, and the output cap. */
+  sections: Schema.Finite,
+  input: Schema.Finite,
+  output: Schema.Finite,
+  costKind: Schema.optional(RunBudget.CostKind),
+  /** At catalog rates, for a priced model. */
+  lowUsd: Schema.optional(Schema.Finite),
+  highUsd: Schema.optional(Schema.Finite),
+}).annotate({ identifier: "MemoryDistillEstimate" })
+
+export const MemoryDistillPayload = Schema.Struct({
+  model: Schema.optional(Schema.String),
+  maxTokens: Schema.optional(DistillTokens),
+  /** The session it was asked from: a guest in it refuses the request, and the helper's spend counts there. */
+  sessionID: Schema.optional(Schema.String),
+})
+
+export const MemoryDistillResult = Schema.Struct({
+  model: Schema.String,
+  /** The hidden helper session the request ran in; it is never listed. */
+  sessionID: Schema.String,
+  /** The suggestions that held their quotes, as proposed records for the user to keep or drop. */
+  records: Schema.Array(BrainSchema.Record),
+  /** Suggestions that said what a record of the document already says. */
+  duplicate: Schema.Finite,
+  /** Suggestions dropped: not readable, a quote not in the document, or text a scan failed. */
+  dropped: Schema.Struct({ invalid: Schema.Finite, quote: Schema.Finite, scan: Schema.Finite }),
+  tokens: Schema.Struct({
+    input: Schema.Finite,
+    output: Schema.Finite,
+    reasoning: Schema.Finite,
+    cacheRead: Schema.Finite,
+    cacheWrite: Schema.Finite,
+  }),
+  cost: Schema.Finite,
+  costKind: RunBudget.CostKind,
+  /** Why the model gave nothing usable, when it did not. */
+  error: Schema.optional(Schema.String),
+}).annotate({ identifier: "MemoryDistillResult" })
 
 export const MemoryDocumentPage = Schema.Struct({
   document: Schema.String,
@@ -591,6 +668,33 @@ export const MemoryApi = HttpApi.make("memory")
             summary: "Download a document's original",
             description:
               "The original file as it was added, as an attachment, only while the repository keeps originals. The copy is not redacted.",
+          }),
+        ),
+        HttpApiEndpoint.get("distillEstimate", `${root}/documents/:documentID/distill`, {
+          params: { documentID: DocumentID },
+          query: MemoryDistillQuery,
+          success: described(MemoryDistillEstimate, "What finding more with a model would send and may cost"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.documents.distill.estimate",
+            summary: "Estimate finding more with a model",
+            description:
+              "The sections a model would read for suggestions, the tokens sent, the output cap and, for a priced model, the cost at catalog rates; or why it would be refused. Nothing is sent.",
+          }),
+        ),
+        HttpApiEndpoint.post("distill", `${root}/documents/:documentID/distill`, {
+          params: { documentID: DocumentID },
+          query: WorkspaceRoutingQuery,
+          payload: MemoryDistillPayload,
+          success: described(MemoryDistillResult, "The suggestions kept for review, and what the request spent"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.documents.distill",
+            summary: "Find more with a model",
+            description:
+              "Off unless VECTOR_KNOWLEDGE_DISTILL is set. A model reads the document's sections where Vector's rules found little, in a hidden helper session, and each suggestion is kept only if its quote is the document's own words. Kept suggestions wait as proposed records. Refused for a session a guest is in, a model that may train on prompts and the Zen gateway.",
           }),
         ),
         HttpApiEndpoint.get("records", `${root}/records`, {
