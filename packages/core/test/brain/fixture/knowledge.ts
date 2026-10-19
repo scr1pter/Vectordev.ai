@@ -32,6 +32,8 @@ export async function withKnowledge<A, E>(
     readonly worker?: Layer.Layer<BrainWorker.Service>
     /** Make the repository a git working tree, which documents are linked to the code of. */
     readonly git?: boolean
+    /** Ripgrep patterns links were looked for with, as they are run. */
+    readonly greps?: string[]
   } = {},
 ) {
   await using tmp = await tmpdir()
@@ -44,7 +46,12 @@ export async function withKnowledge<A, E>(
   if (options.git) execFileSync("git", ["init", "-q"], { cwd: root })
   const place = placeFor(root, options.held)
   return await Effect.runPromise(
-    services(place, body, { file: ":memory:", dir: tmp.path, worker: options.worker ?? BrainWorker.layerInline }),
+    services(place, body, {
+      file: ":memory:",
+      dir: tmp.path,
+      worker: options.worker ?? BrainWorker.layerInline,
+      ...(options.greps ? { greps: options.greps } : {}),
+    }),
   )
 }
 
@@ -69,10 +76,24 @@ export function services<A, E>(
     readonly dir: string
     readonly worker: Layer.Layer<BrainWorker.Service>
     readonly owner?: string
+    readonly greps?: string[]
   },
 ) {
+  const greps = options.greps
+  const ripgrep = greps
+    ? Layer.effect(
+        Ripgrep.Service,
+        Effect.gen(function* () {
+          const real = yield* Ripgrep.Service
+          return Ripgrep.Service.of({
+            ...real,
+            grep: (input) => Effect.sync(() => greps.push(input.pattern)).pipe(Effect.andThen(real.grep(input))),
+          })
+        }),
+      ).pipe(Layer.provide(LayerNode.compile(Ripgrep.node)))
+    : LayerNode.compile(Ripgrep.node)
   const layer = BrainKnowledge.layerWith({ ...(options.owner ? { owner: options.owner } : {}) }).pipe(
-    Layer.provide(LayerNode.compile(Ripgrep.node)),
+    Layer.provide(ripgrep),
     Layer.provideMerge(Brain.layer),
     Layer.provideMerge(options.worker),
     Layer.provideMerge(BrainDatabase.layerFor(options.file).pipe(Layer.fresh)),

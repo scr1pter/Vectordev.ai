@@ -612,6 +612,9 @@ function make(input: {
     titled: new Set<string>(),
     // When each repository's links were last checked against its code.
     drifts: new Map<string, number>(),
+    // Repository docs read but not linked yet, with their code spans: a scan reads dozens at once, and they are
+    // linked in batches once the queue is empty, so one Ripgrep pass covers many of them.
+    unlinked: new Map<string, Map<string, readonly string[]>>(),
   }
 
   const remember = (place: Brain.Place) => {
@@ -834,6 +837,7 @@ function make(input: {
             ),
           )
         }
+        yield* linkLater().pipe(Effect.catchCause((cause) => Effect.logWarning("brain document linking failed", { cause })))
       }
     }).pipe(Effect.forkIn(input.scope))
   })
@@ -1333,7 +1337,9 @@ function make(input: {
       .pipe(Effect.orDie)
     const title = current?.title ?? document.title
     const final = hold && !approved ? ("held" as const) : structured.unread.length > 0 ? ("partial" as const) : ("searchable" as const)
-    const fresh = document.status === "queued" || document.status === "reading"
+    // A repository doc is linked with the others a scan read, once the queue is empty; it is searchable meanwhile.
+    const later = document.origin === "repository"
+    const fresh = (document.status === "queued" || document.status === "reading") && !later
     yield* db
       .update(BrainDocumentTable)
       .set({
@@ -1374,10 +1380,16 @@ function make(input: {
     forgetCards(gone.map((item) => item.ref))
     // Links to code and disagreements with what else Vector holds. Neither may cost the document its reading.
     const place = state.places.get(document.repository_id)
+    if (place && later) {
+      const waiting = state.unlinked.get(place.repository) ?? new Map<string, readonly string[]>()
+      waiting.set(document.id, structured.code ?? [])
+      state.unlinked.set(place.repository, waiting)
+    }
     if (place) {
-      yield* linkDocuments(place, [document.id], structured.code ?? []).pipe(
-        Effect.catchCause((cause) => Effect.logWarning("brain document linking failed", { cause })),
-      )
+      if (!later)
+        yield* linkDocuments(place, [document.id], structured.code ?? []).pipe(
+          Effect.catchCause((cause) => Effect.logWarning("brain document linking failed", { cause })),
+        )
       yield* conflictsOf(place, document.id).pipe(
         Effect.catchCause((cause) => Effect.logWarning("brain conflict check failed", { cause })),
       )
@@ -3585,6 +3597,19 @@ function make(input: {
         .where(eq(BrainDocumentTable.id, id))
         .run()
         .pipe(Effect.orDie)
+    }
+  })
+
+  // Repository docs waiting to be linked, 20 at a time per repository.
+  const linkLater = Effect.fnUntraced(function* () {
+    for (const [repository, waiting] of [...state.unlinked]) {
+      state.unlinked.delete(repository)
+      const place = state.places.get(repository)
+      if (!place) continue
+      for (const batch of chunks([...waiting.keys()], 20)) {
+        yield* linkDocuments(place, batch, batch.flatMap((id) => waiting.get(id) ?? []))
+        yield* revise(repository)
+      }
     }
   })
 

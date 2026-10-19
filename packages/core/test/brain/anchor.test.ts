@@ -335,3 +335,44 @@ describe("pointers and the spec guard", () => {
     expect(result.tokens).toBeLessThanOrEqual(60)
   }, 30_000)
 })
+
+describe("repository docs", () => {
+  test("a scan's docs are linked together once they are read", async () => {
+    const greps: string[] = []
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() => Bun.$`git add -A`.cwd(setup.root).quiet())
+          yield* setup.knowledge.scan(setup.place, { force: true })
+          const documents = yield* setup.knowledge.documents(setup.place, { personal: false })
+          for (const document of documents) yield* setup.knowledge.wait(setup.place, document.id, "searchable", 20_000)
+          // Linked in a batch once the queue is empty, after the docs became searchable.
+          for (let tries = 0; tries < 100; tries++) {
+            const anchors = yield* anchorsOf(setup)
+            if (anchors.length >= 2) return { documents, anchors }
+            yield* Effect.sleep(50)
+          }
+          return { documents, anchors: yield* anchorsOf(setup) }
+        }),
+      {
+        files: {
+          ...CODE,
+          "docs/auth.md": "# Auth\n\n## Sessions\n\nThe `refreshTokenTtl` MUST be 14 days.\n",
+          "docs/config.md": "# Config\n\n## Database\n\nThe server MUST read `DATABASE_URL` at start.\n",
+        },
+        git: true,
+        greps,
+      },
+    )
+    // One pass for all of them: their names in one pattern, their routes in another.
+    expect(greps.length).toBeLessThanOrEqual(2)
+    expect(result.documents.length).toBeGreaterThanOrEqual(2)
+    expect(result.documents.every((document) => document.origin === "repository")).toBe(true)
+    expect(result.anchors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "src/auth/session.ts", symbol: "refreshTokenTtl", method: "definition" }),
+        expect.objectContaining({ path: "src/config.ts", symbol: "DATABASE_URL", method: "env" }),
+      ]),
+    )
+  }, 30_000)
+})
