@@ -1,4 +1,5 @@
 import { describe, expect, setSystemTime, test } from "bun:test"
+import { Database } from "bun:sqlite"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Effect, Layer } from "effect"
@@ -596,6 +597,73 @@ describe("Brain consolidation", () => {
     expect(result.second.stale).toBe(0)
     expect(result.active.filter((entry) => entry.stale)).toHaveLength(70)
     expect(result.recalled.text ?? "").not.toContain("module65")
+  })
+
+  test("tidying drops what was mirrored from a worktree that was removed", async () => {
+    await using tmp = await tmpdir()
+    const config = path.join(tmp.path, "config")
+    const data = path.join(tmp.path, "data")
+    await Promise.all([config, data].map((dir) => fs.mkdir(dir, { recursive: true })))
+    const file = path.join(data, "brain", "brain.db")
+    const at = (root: string): Brain.Place => ({
+      repository: "repo-1",
+      root,
+      sources: [
+        { path: path.join(root, ".vector", "RULES.md"), type: "rules" },
+        { path: path.join(root, ".vector", "BRAIN.md"), type: "brain" },
+      ],
+      held: false,
+    })
+    const lessons = ["# Lessons", "", ...Array.from({ length: 150 }, (_, i) => `- lesson ${i} about topic${i} and module${i}.`)].join("\n")
+    const main = path.join(tmp.path, "main")
+    await fs.mkdir(path.join(main, ".vector"), { recursive: true })
+    await fs.writeFile(path.join(main, ".vector", "BRAIN.md"), "- The main checkout keeps its own lesson.\n")
+    const layer = Brain.layerFor({ file, data, config }).pipe(Layer.provide(Layer.succeed(Global.Service, Global.make({ config, data }))))
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const brain = yield* Brain.Service
+        for (const index of [0, 1, 2, 3, 4]) {
+          const root = path.join(tmp.path, `wt${index}`)
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.join(root, ".vector"), { recursive: true })
+            await fs.writeFile(path.join(root, ".vector", "BRAIN.md"), lessons)
+          })
+          yield* brain.sync(at(root))
+          // The workspace is removed, as a finished Parallel Workspace is.
+          yield* Effect.promise(() => fs.rm(root, { recursive: true, force: true }))
+        }
+        // Failure memory of a working tree nobody opened in 90 days goes too; its file stays.
+        const old = path.join(tmp.path, "old")
+        yield* Effect.promise(async () => {
+          await fs.mkdir(old, { recursive: true })
+          await fs.mkdir(path.dirname(BrainPaths.failureFile(data, old)), { recursive: true })
+          await fs.writeFile(
+            BrainPaths.failureFile(data, old),
+            JSON.stringify({ records: [{ signature: "a", checkLabel: "Unit tests", occurrences: 2, repair: { files: ["x.ts"], description: "Fixed x." } }] }),
+          )
+        })
+        setSystemTime(new Date(Date.now() - 91 * 24 * 60 * 60 * 1000))
+        yield* brain.sync(at(old))
+        setSystemTime()
+        // A worktree that is still there keeps its mirror.
+        const kept = path.join(tmp.path, "kept")
+        yield* Effect.promise(async () => {
+          await fs.mkdir(path.join(kept, ".vector"), { recursive: true })
+          await fs.writeFile(path.join(kept, ".vector", "BRAIN.md"), "- The kept worktree has a lesson too.\n")
+        })
+        yield* brain.sync(at(kept))
+        yield* brain.sync(at(main))
+        yield* brain.consolidate(at(main), { force: true })
+      }).pipe(Effect.provide(layer)),
+    )
+    const db = new Database(file, { readonly: true })
+    const sources = (db.query("select path from brain_source where repository_id = 'repo-1'").all() as { path: string }[]).map(
+      (row) => path.relative(tmp.path, row.path),
+    )
+    const rows = db.query("select count(*) as n from brain_entry where repository_id = 'repo-1'").get() as { n: number }
+    db.close()
+    expect(sources.toSorted()).toEqual([path.join("kept", ".vector", "BRAIN.md"), path.join("main", ".vector", "BRAIN.md")])
+    expect(rows.n).toBe(2)
   })
 })
 

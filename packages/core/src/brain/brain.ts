@@ -1599,6 +1599,32 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       if (stale) counts.stale++
       yield* db.update(BrainEntryTable).set({ stale }).where(eq(BrainEntryTable.id, item.entry)).run().pipe(Effect.orDie)
     }
+    // 4b. Mirrors of files that are gone, such as a removed worktree's or Parallel Workspace's rules and BRAIN.md, leave
+    //     the brain: nothing else removes them, and every query of the repository scans them. So does the failure
+    //     memory of a working tree no session here has read in 90 days; its file stays and is read again if that
+    //     working tree is opened.
+    const current = new Set(repositoryFiles(place))
+    const mirrored = yield* db
+      .select()
+      .from(BrainSourceTable)
+      .where(eq(BrainSourceTable.repository_id, place.repository))
+      .all()
+      .pipe(Effect.orDie)
+    const orphaned: string[] = []
+    for (const source of mirrored.filter((item) => !current.has(item.path))) {
+      const gone = !(yield* Effect.promise(() => statFollowing(source).then((stat) => stat?.isFile() ?? false)))
+      const unread = path.dirname(source.path) === path.dirname(failureFile(place)) && now - source.synced_at > 90 * DAY
+      if (gone || unread) orphaned.push(source.path)
+    }
+    if (orphaned.length)
+      yield* db
+        .transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx.delete(BrainEntryTable).where(inArray(BrainEntryTable.source_file, orphaned)).run()
+            yield* tx.delete(BrainSourceTable).where(inArray(BrainSourceTable.path, orphaned)).run()
+          }),
+        )
+        .pipe(Effect.orDie)
     // 5. Old links, history and tombstones go, and the archive keeps its newest entries, so the brain stays small
     //    however long it is used: replaced entries after 180 days, the oldest archived past the cap, history past 180
     //    days or an entry's newest events (a pending replacement's link is kept until it is reviewed).
@@ -1656,7 +1682,7 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       .onConflictDoUpdate({ target: BrainStateTable.repository_id, set: { consolidated_at: now } })
       .run()
       .pipe(Effect.orDie)
-    if (counts.merged + counts.archived + counts.dropped + counts.stale > 0) {
+    if (counts.merged + counts.archived + counts.dropped + counts.stale + orphaned.length > 0) {
       yield* bump(place.repository)
       yield* bump(PERSONAL)
     }
