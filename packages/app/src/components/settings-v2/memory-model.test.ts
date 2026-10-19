@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  MEMORY_TABS,
   approvable,
   editable,
   fileLabel,
@@ -32,9 +33,9 @@ describe("memory page model", () => {
     expect(originLabel({ origin: "file", scope: "personal", source: { file: files.rules } }, files)).toBe(
       "From your RULES.md",
     )
-    expect(originLabel({ origin: "file", scope: "repository", source: { file: "/repo/.vector/RULES.md" } }, files)).toBe(
-      "From the repository's .vector/RULES.md",
-    )
+    expect(
+      originLabel({ origin: "file", scope: "repository", source: { file: "/repo/.vector/RULES.md" } }, files),
+    ).toBe("From the repository's .vector/RULES.md")
     expect(originLabel({ origin: "file", scope: "repository", source: { file: "/repo/BRAIN.md" } }, files)).toBe(
       "From the repository's BRAIN.md (read-only)",
     )
@@ -108,9 +109,17 @@ describe("memory page model", () => {
 
   test("never says project", () => {
     const strings = [
-      ...["web", "mcp", "subagent", "untrusted-repository", "guest", "instruction-like", "hidden-unicode", "hidden-text", "suggested"].map(
-        (hold) => holdLabel(hold as never),
-      ),
+      ...[
+        "web",
+        "mcp",
+        "subagent",
+        "untrusted-repository",
+        "guest",
+        "instruction-like",
+        "hidden-unicode",
+        "hidden-text",
+        "suggested",
+      ].map((hold) => holdLabel(hold as never)),
       UNDONE,
       summary({ active: 1, review: 1, archived: 1, digestTokens: 1 }),
       originLabel({ origin: "file", scope: "repository", source: { file: "/repo/BRAIN.md" } }),
@@ -132,7 +141,15 @@ describe("memory page model", () => {
       savedNotice({ text: "Use pnpm.", status: "active", createdAt: now - 86_400_000, updatedAt: now }, "use pnpm"),
     ).toBe('This was already in memory, and it is in use: "Use pnpm."')
     expect(
-      savedNotice({ text: "Deploy key is [redacted].", status: "active", createdAt: now, updatedAt: now }, "Deploy key is ghp_x"),
+      savedNotice(
+        { text: "Deploy key is [redacted].", status: "active", createdAt: now, updatedAt: now },
+        "Deploy key is ghp_x",
+      ),
     ).toBe("Saved without the secret it contained. Vector will use it when it is relevant.")
+  })
+
+  test("splits the page into Memory and Documents", () => {
+    expect(MEMORY_TABS.map((item) => item.label)).toEqual(["Memory", "Documents"])
+    for (const item of MEMORY_TABS) expect(item.label.toLowerCase()).not.toContain("project")
   })
 })

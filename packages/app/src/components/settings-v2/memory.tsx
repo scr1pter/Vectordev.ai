@@ -6,9 +6,11 @@ import { getFilename } from "@vectordevai/core/util/path"
 import { useGlobal } from "@/context/global"
 import { useServer } from "@/context/server"
 import { LocalMemoryPanel } from "@/features/memory/local-memory-panel"
+import { SettingsMemoryDocuments } from "./memory-documents"
 import {
   MEMORY_FILTERS,
   MEMORY_KINDS,
+  MEMORY_TABS,
   RECENT,
   approvable,
   editable,
@@ -26,6 +28,7 @@ import {
   type MemoryEntryView,
   type MemoryFiles,
   type MemoryFilter,
+  type MemoryTab,
 } from "./memory-model"
 import "./settings-memory.css"
 
@@ -36,10 +39,11 @@ const PRIVATE = "Learned from a private document, so it is kept from guests and 
 // Settings > Memory: one place for what steers Vector. Rules people wrote and the user's MEMORY.md are shown as they
 // are read (and changed in their files); what Vector learned is listed with where it came from, and can be searched,
 // edited, pinned, approved, put away or forgotten. It replaces the Local memory card in General and the old rules page.
-export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirectory?: string }) {
+export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirectory?: string; tab?: MemoryTab }) {
   const global = useGlobal()
   const server = useServer()
   const directory = () => props.sessionDirectory ?? props.repositoryPath
+  const [tab, setTab] = createSignal<MemoryTab>(props.tab ?? "memory")
   const [scope, setScope] = createSignal<Scope>(directory() ? "repository" : "personal")
   const [filter, setFilter] = createSignal<MemoryFilter>("active")
   const [query, setQuery] = createSignal("")
@@ -116,167 +120,190 @@ export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirect
           <p class="settings-v2-page-kicker">Memory</p>
           <h2 class="settings-v2-page-title">What Vector remembers</h2>
           <p class="settings-v2-page-subtitle">
-            The rules you and your team wrote, what you told Vector about yourself, and what it learned while working.
-            All of it stays on this computer. A request carries your rules and only the memory that bears on it, so
-            memory saves tokens instead of adding them, and a greeting carries none.
+            The rules you and your team wrote, what you told Vector about yourself, what it learned while working, and
+            the documents you gave it. All of it stays on this computer. A request carries your rules and only the
+            memory that bears on it, so memory saves tokens instead of adding them, and a greeting carries none.
           </p>
         </div>
       </div>
 
-      <div class="settings-v2-card settings-v2-card--wide">
-        <div class="settings-v2-card-head">
-          <div class="settings-v2-card-copy">
-            <h3 class="settings-v2-card-title">
-              {scope() === "repository" ? getFilename(directory() ?? "") || "This repository" : "Your memory"}
-            </h3>
-            <p class="settings-v2-card-description">
-              <Show when={list.latest} fallback={list.loading ? "Reading memory…" : "Memory is not available."}>
-                {(current) => <>{summary(current().stats)}</>}
-              </Show>
-            </p>
-          </div>
-        </div>
-        <div class="settings-v2-card-body">
-          <div class="settings-v2-row-modern">
-            <div class="settings-v2-row-copy">
-              <div class="settings-v2-row-title">Let Vector learn as it works</div>
-              <div class="settings-v2-row-description">
-                Vector saves a short lesson, decision or preference as it works, when you state one, when a fix makes a
-                failing check pass, or when a lasting decision is made, and uses it from the next request. Each one is
-                listed under Recently learned, where one click undoes it. It never writes rules: only you do. What it
-                learns in a session that read web pages or other outside content, ran MCP tools, or had a guest or a
-                subagent in it waits for your review instead.
-              </div>
-            </div>
-            <div class="settings-v2-row-control settings-v2-row-control--compact">
-              <Switch
-                checked={settings.latest?.learning ?? true}
-                onChange={(learning) => {
-                  setSettings({ learning })
-                  void act(
-                    (current) => current.memory.settings.update({ learning }),
-                    learning ? "Vector will learn as it works." : "Vector will not add to its memory.",
-                  )
-                }}
-              />
-            </div>
-          </div>
-          <Show when={list.latest?.held}>
-            <p class="settings-memory-warning">
-              This repository has settings you have not trusted, so memory it ships (its BRAIN.md) waits for review.
-              Trust it in Repository trust to use that memory.
-            </p>
-          </Show>
-        </div>
-      </div>
-
-      <RecentlyLearned entries={learned.latest?.entries ?? []} act={act} />
-
-      <div class="settings-v2-card settings-v2-card--wide">
-        <div class="settings-memory-toolbar">
-          <div class="settings-memory-segments" role="tablist" aria-label="Whose memory">
-            <Show when={directory()}>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={scope() === "repository"}
-                classList={{ "is-active": scope() === "repository" }}
-                onClick={() => setScope("repository")}
-              >
-                This repository
-              </button>
-            </Show>
+      <div class="settings-memory-segments settings-memory-tabs" role="tablist" aria-label="Memory sections">
+        <For each={MEMORY_TABS}>
+          {(item) => (
             <button
               type="button"
               role="tab"
-              aria-selected={scope() === "personal"}
-              classList={{ "is-active": scope() === "personal" }}
-              onClick={() => setScope("personal")}
+              aria-selected={tab() === item.value}
+              classList={{ "is-active": tab() === item.value }}
+              data-tab={item.value}
+              onClick={() => setTab(item.value)}
             >
-              About you
+              {item.label}
             </button>
+          )}
+        </For>
+      </div>
+
+      <Show when={tab() === "documents"}>
+        <SettingsMemoryDocuments client={client} repository={!!directory()} />
+      </Show>
+
+      <Show when={tab() === "memory"}>
+        <div class="settings-v2-card settings-v2-card--wide">
+          <div class="settings-v2-card-head">
+            <div class="settings-v2-card-copy">
+              <h3 class="settings-v2-card-title">
+                {scope() === "repository" ? getFilename(directory() ?? "") || "This repository" : "Your memory"}
+              </h3>
+              <p class="settings-v2-card-description">
+                <Show when={list.latest} fallback={list.loading ? "Reading memory…" : "Memory is not available."}>
+                  {(current) => <>{summary(current().stats)}</>}
+                </Show>
+              </p>
+            </div>
           </div>
-          <div class="settings-memory-segments" role="tablist" aria-label="Which entries">
-            <For each={MEMORY_FILTERS}>
-              {(item) => (
+          <div class="settings-v2-card-body">
+            <div class="settings-v2-row-modern">
+              <div class="settings-v2-row-copy">
+                <div class="settings-v2-row-title">Let Vector learn as it works</div>
+                <div class="settings-v2-row-description">
+                  Vector saves a short lesson, decision or preference as it works, when you state one, when a fix makes
+                  a failing check pass, or when a lasting decision is made, and uses it from the next request. Each one
+                  is listed under Recently learned, where one click undoes it. It never writes rules: only you do. What
+                  it learns in a session that read web pages or other outside content, ran MCP tools, or had a guest or
+                  a subagent in it waits for your review instead.
+                </div>
+              </div>
+              <div class="settings-v2-row-control settings-v2-row-control--compact">
+                <Switch
+                  checked={settings.latest?.learning ?? true}
+                  onChange={(learning) => {
+                    setSettings((current) => current && { ...current, learning })
+                    void act(
+                      (current) => current.memory.settings.update({ learning }),
+                      learning ? "Vector will learn as it works." : "Vector will not add to its memory.",
+                    )
+                  }}
+                />
+              </div>
+            </div>
+            <Show when={list.latest?.held}>
+              <p class="settings-memory-warning">
+                This repository has settings you have not trusted, so memory it ships (its BRAIN.md) waits for review.
+                Trust it in Repository trust to use that memory.
+              </p>
+            </Show>
+          </div>
+        </div>
+
+        <RecentlyLearned entries={learned.latest?.entries ?? []} act={act} />
+
+        <div class="settings-v2-card settings-v2-card--wide">
+          <div class="settings-memory-toolbar">
+            <div class="settings-memory-segments" role="tablist" aria-label="Whose memory">
+              <Show when={directory()}>
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={filter() === item.value}
-                  classList={{ "is-active": filter() === item.value }}
-                  onClick={() => setFilter(item.value)}
+                  aria-selected={scope() === "repository"}
+                  classList={{ "is-active": scope() === "repository" }}
+                  onClick={() => setScope("repository")}
                 >
-                  {item.label}
-                  <Show when={item.value === "review" && (list.latest?.stats.review ?? 0) > 0}>
-                    <span class="settings-memory-count">{list.latest?.stats.review}</span>
-                  </Show>
+                  This repository
                 </button>
-              )}
-            </For>
+              </Show>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scope() === "personal"}
+                classList={{ "is-active": scope() === "personal" }}
+                onClick={() => setScope("personal")}
+              >
+                About you
+              </button>
+            </div>
+            <div class="settings-memory-segments" role="tablist" aria-label="Which entries">
+              <For each={MEMORY_FILTERS}>
+                {(item) => (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={filter() === item.value}
+                    classList={{ "is-active": filter() === item.value }}
+                    onClick={() => setFilter(item.value)}
+                  >
+                    {item.label}
+                    <Show when={item.value === "review" && (list.latest?.stats.review ?? 0) > 0}>
+                      <span class="settings-memory-count">{list.latest?.stats.review}</span>
+                    </Show>
+                  </button>
+                )}
+              </For>
+            </div>
+            <input
+              class="settings-memory-search"
+              type="search"
+              placeholder="Search memory"
+              aria-label="Search memory"
+              value={query()}
+              onInput={(event) => {
+                const value = event.currentTarget.value
+                setQuery(value)
+                clearTimeout(timer)
+                timer = setTimeout(() => setSearch(value.trim()), 200)
+              }}
+            />
           </div>
-          <input
-            class="settings-memory-search"
-            type="search"
-            placeholder="Search memory"
-            aria-label="Search memory"
-            value={query()}
-            onInput={(event) => {
-              const value = event.currentTarget.value
-              setQuery(value)
-              clearTimeout(timer)
-              timer = setTimeout(() => setSearch(value.trim()), 200)
-            }}
-          />
-        </div>
 
-        <AddMemory
-          scope={scope()}
-          onAdd={(input) =>
-            act(
-              (current) => current.memory.create({ ...input, scope: scope() }),
-              (entry) => (entry ? savedNotice(entry, input.text) : "Saved. Vector will use it when it is relevant."),
-            )
-          }
-        />
-
-        <Show when={notice()}>
-          <p class="settings-memory-notice" role="status">
-            {notice()}
-          </p>
-        </Show>
-        <Show when={error()}>
-          <p class="settings-memory-error" role="alert">
-            {error()}
-          </p>
-        </Show>
-
-        <div class="settings-memory-list">
-          <Show
-            when={entries().length > 0}
-            fallback={
-              <p class="settings-memory-empty">
-                {filter() === "review"
-                  ? "Nothing waits for your review."
-                  : search()
-                    ? "Nothing in memory matches."
-                    : scope() === "repository"
-                      ? "Nothing remembered for this repository yet. Rules in .vector/RULES.md and what Vector learns here show up in this list."
-                      : "Nothing remembered about you yet. Add a preference above, or write it in your memory file below."}
-              </p>
+          <AddMemory
+            scope={scope()}
+            onAdd={(input) =>
+              act(
+                (current) => current.memory.create({ ...input, scope: scope() }),
+                (entry) => (entry ? savedNotice(entry, input.text) : "Saved. Vector will use it when it is relevant."),
+              )
             }
-          >
-            <For each={entries()}>
-              {(entry) => <MemoryRow entry={entry} files={files()} root={directory()} act={act} />}
-            </For>
+          />
+
+          <Show when={notice()}>
+            <p class="settings-memory-notice" role="status">
+              {notice()}
+            </p>
           </Show>
+          <Show when={error()}>
+            <p class="settings-memory-error" role="alert">
+              {error()}
+            </p>
+          </Show>
+
+          <div class="settings-memory-list">
+            <Show
+              when={entries().length > 0}
+              fallback={
+                <p class="settings-memory-empty">
+                  {filter() === "review"
+                    ? "Nothing waits for your review."
+                    : search()
+                      ? "Nothing in memory matches."
+                      : scope() === "repository"
+                        ? "Nothing remembered for this repository yet. Rules in .vector/RULES.md and what Vector learns here show up in this list."
+                        : "Nothing remembered about you yet. Add a preference above, or write it in your memory file below."}
+                </p>
+              }
+            >
+              <For each={entries()}>
+                {(entry) => <MemoryRow entry={entry} files={files()} root={directory()} act={act} />}
+              </For>
+            </Show>
+          </div>
         </div>
-      </div>
 
-      <Show when={scope() === "personal"}>
-        <LocalMemoryPanel />
+        <Show when={scope() === "personal"}>
+          <LocalMemoryPanel />
+        </Show>
+
+        <EraseCard scope={scope()} repository={!!directory()} act={act} />
       </Show>
-
-      <EraseCard scope={scope()} repository={!!directory()} act={act} />
     </section>
   )
 }
@@ -409,14 +436,19 @@ function MemoryRow(props: {
   const [draft, setDraft] = createSignal("")
   const [confirming, setConfirming] = createSignal(false)
   const id = () => props.entry.id
-  const update = (change: { text?: string; pinned?: boolean; action?: "approve" | "reject" | "archive" | "restore" }, done: string) =>
-    props.act((current) => current.memory.update({ memoryID: id(), ...change }), done)
+  const update = (
+    change: { text?: string; pinned?: boolean; action?: "approve" | "reject" | "archive" | "restore" },
+    done: string,
+  ) => props.act((current) => current.memory.update({ memoryID: id(), ...change }), done)
   const waiting = () => props.entry.status === "proposed" || props.entry.status === "quarantined"
 
   return (
     <article
       class="settings-memory-row"
-      classList={{ "is-waiting": waiting(), "is-off": props.entry.status === "archived" || props.entry.status === "superseded" }}
+      classList={{
+        "is-waiting": waiting(),
+        "is-off": props.entry.status === "archived" || props.entry.status === "superseded",
+      }}
       data-component="settings-memory-entry"
     >
       <div class="settings-memory-row-head">
@@ -440,10 +472,7 @@ function MemoryRow(props: {
         <span class="settings-memory-id">{props.entry.id}</span>
       </div>
 
-      <Show
-        when={editing()}
-        fallback={<p class="settings-memory-text">{props.entry.text}</p>}
-      >
+      <Show when={editing()} fallback={<p class="settings-memory-text">{props.entry.text}</p>}>
         <textarea
           class="settings-memory-edit"
           aria-label="Edit memory"
@@ -483,12 +512,21 @@ function MemoryRow(props: {
         </Show>
         <Show when={!editing() && !confirming()}>
           <Show when={approvable(props.entry)}>
-            <ButtonV2 size="small" variant="outline" icon="check" onClick={() => update({ action: "approve" }, "Approved. Vector will use it.")}>
+            <ButtonV2
+              size="small"
+              variant="outline"
+              icon="check"
+              onClick={() => update({ action: "approve" }, "Approved. Vector will use it.")}
+            >
               Approve
             </ButtonV2>
           </Show>
           <Show when={rejectable(props.entry)}>
-            <ButtonV2 size="small" variant="ghost" onClick={() => update({ action: "reject" }, "Rejected and forgotten.")}>
+            <ButtonV2
+              size="small"
+              variant="ghost"
+              onClick={() => update({ action: "reject" }, "Rejected and forgotten.")}
+            >
               Reject
             </ButtonV2>
           </Show>
@@ -520,12 +558,24 @@ function MemoryRow(props: {
             </ButtonV2>
           </Show>
           <Show when={editable(props.entry) && props.entry.status === "active"}>
-            <ButtonV2 size="small" variant="ghost" icon="archive" onClick={() => update({ action: "archive" }, "Archived. Restore it any time.")}>
+            <ButtonV2
+              size="small"
+              variant="ghost"
+              icon="archive"
+              onClick={() => update({ action: "archive" }, "Archived. Restore it any time.")}
+            >
               Archive
             </ButtonV2>
           </Show>
-          <Show when={editable(props.entry) && (props.entry.status === "archived" || props.entry.status === "superseded")}>
-            <ButtonV2 size="small" variant="ghost" icon="reset" onClick={() => update({ action: "restore" }, "Restored.")}>
+          <Show
+            when={editable(props.entry) && (props.entry.status === "archived" || props.entry.status === "superseded")}
+          >
+            <ButtonV2
+              size="small"
+              variant="ghost"
+              icon="reset"
+              onClick={() => update({ action: "restore" }, "Restored.")}
+            >
               Restore
             </ButtonV2>
           </Show>
@@ -536,7 +586,8 @@ function MemoryRow(props: {
           </Show>
           <Show when={!editable(props.entry) && props.entry.origin === "file"}>
             <span class="settings-memory-file-hint">
-              Change it in {props.entry.source ? fileLabel(props.entry.source.file, props.files, props.root) : "its file"}
+              Change it in{" "}
+              {props.entry.source ? fileLabel(props.entry.source.file, props.files, props.root) : "its file"}
             </span>
           </Show>
         </Show>

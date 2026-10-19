@@ -37,6 +37,14 @@ export type MemoryFiles = { memory: string; rules: string; repository: readonly 
 
 export type MemoryFilter = "active" | "review" | "archived" | "all"
 
+/** Settings > Memory's sections. The search model gets its own when Vector can search by meaning. */
+export type MemoryTab = "memory" | "documents"
+
+export const MEMORY_TABS: readonly { value: MemoryTab; label: string }[] = [
+  { value: "memory", label: "Memory" },
+  { value: "documents", label: "Documents" },
+]
+
 export const MEMORY_FILTERS: readonly { value: MemoryFilter; label: string }[] = [
   { value: "active", label: "In use" },
   { value: "review", label: "Needs review" },
@@ -101,7 +109,10 @@ export function holdLabel(hold: MemoryHold | undefined) {
  * user's words as a new entry beside any that say something similar (it never replaces one on its own), but it removes
  * a secret and keeps one copy of the same words.
  */
-export function savedNotice(entry: Pick<MemoryEntryView, "text" | "status" | "updatedAt" | "createdAt">, typed: string) {
+export function savedNotice(
+  entry: Pick<MemoryEntryView, "text" | "status" | "updatedAt" | "createdAt">,
+  typed: string,
+) {
   if (entry.status !== "active") return "Saved for your review. Vector uses it once you approve it."
   if (entry.createdAt !== undefined && entry.updatedAt - entry.createdAt > 1000)
     return `This was already in memory, and it is in use: "${entry.text}"`
@@ -120,7 +131,8 @@ export function fileLabel(file: string, files?: MemoryFiles, root?: string) {
   if (files && file === files.memory) return "your MEMORY.md"
   if (files && file === files.rules) return "your RULES.md"
   const base = root?.replace(/[\\/]+$/, "")
-  if (base && (file.startsWith(`${base}/`) || file.startsWith(`${base}\\`))) return file.slice(base.length + 1).replaceAll("\\", "/")
+  if (base && (file.startsWith(`${base}/`) || file.startsWith(`${base}\\`)))
+    return file.slice(base.length + 1).replaceAll("\\", "/")
   return basename(file)
 }
 
