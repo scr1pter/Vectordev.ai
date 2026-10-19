@@ -770,7 +770,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
 
   // What the agent put in use on its own, newest first: entries it learned whose latest step into use was its own write,
   // not the user approving or restoring them. Settings lists them with Undo.
-  const learned = Effect.fnUntraced(function* (place: Place, scope: BrainSchema.Scope | undefined) {
+  const recentlyLearned = Effect.fnUntraced(function* (place: Place, scope: BrainSchema.Scope | undefined) {
     const rows = (yield* visibleRows(place, true, ["active"])).filter(
       (row) => row.origin === "agent" && (!scope || row.scope === scope),
     )
@@ -806,7 +806,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     input: { filter?: Filter; query?: string; scope?: BrainSchema.Scope },
   ) {
     yield* sync(place)
-    if (input.filter === "learned") return yield* learned(place, input.scope)
+    if (input.filter === "learned") return yield* recentlyLearned(place, input.scope)
     const statuses: readonly BrainSchema.Status[] =
       input.filter === "review"
         ? ["proposed", "quarantined"]
