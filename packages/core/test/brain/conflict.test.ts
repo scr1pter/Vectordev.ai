@@ -170,3 +170,26 @@ describe("BrainKnowledge conflict check", () => {
     expect(result.after.some((item) => item.id === result.modality.id)).toBe(false)
   }, 30_000)
 })
+
+describe("BrainKnowledge review of disagreements", () => {
+  test("a disagreement with a memory the user forgot since leaves nothing to look at", async () => {
+    const result = await withKnowledge((setup) =>
+      Effect.gen(function* () {
+        const memory = yield* setup.brain.propose(setup.place, {
+          kind: "fact",
+          text: "Refresh tokens expire after 7 days.",
+          scope: "repository",
+          origin: "user",
+        })
+        if (memory.type === "refused") throw new Error(memory.message)
+        yield* added(setup, text("Auth spec.md", A))
+        const before = (yield* setup.knowledge.review(setup.place)).filter((item) => item.b === memory.entry.id)
+        yield* setup.brain.forget(setup.place, memory.entry.id)
+        const after = (yield* setup.knowledge.review(setup.place)).filter((item) => item.b === memory.entry.id)
+        return { before, after }
+      }),
+    )
+    expect(result.before).toHaveLength(1)
+    expect(result.after).toEqual([])
+  }, 30_000)
+})

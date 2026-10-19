@@ -205,3 +205,21 @@ describe("BrainDrift", () => {
     expect(result.entries).toEqual([])
   }, 30_000)
 })
+
+describe("BrainKnowledge drift of records put away", () => {
+  test("a record the user put away is not raised when its code changes", async () => {
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          yield* added(setup, text("Limits.md", SPEC))
+          const linked = yield* anchorFor(setup, "refreshTokenTtl")
+          yield* setup.knowledge.changeRecord(setup.place, linked.owner, { action: "not-applicable" })
+          yield* write(setup, "src/auth/session.ts", "// Sessions live elsewhere now.\n")
+          yield* setup.knowledge.drift(setup.place, { force: true })
+          return (yield* setup.knowledge.review(setup.place)).filter((item) => item.a === linked.owner)
+        }),
+      { files: CODE, git: true },
+    )
+    expect(result).toEqual([])
+  }, 30_000)
+})

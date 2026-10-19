@@ -3791,13 +3791,20 @@ function make(input: {
       own.push(anchor)
       byPath.set(anchor.path, own)
     }
+    // Only a record in use is the user's to look at when its code changes; one put away waits as it is.
     const kinds = new Map(
       (anchors.length === 0
         ? []
         : yield* db
             .select({ id: BrainRecordTable.id, kind: BrainRecordTable.kind, fields: BrainRecordTable.fields })
             .from(BrainRecordTable)
-            .where(inArray(BrainRecordTable.id, [...new Set(anchors.map((anchor) => anchor.owner))]))
+            .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainRecordTable.item))
+            .where(
+              and(
+                inArray(BrainRecordTable.id, [...new Set(anchors.map((anchor) => anchor.owner))]),
+                eq(BrainItemTable.status, "active"),
+              ),
+            )
             .all()
             .pipe(Effect.orDie)
       ).map((row) => [row.id, row]),
@@ -4249,8 +4256,31 @@ function make(input: {
       .all()
       .pipe(Effect.orDie)
     const heldPassages = new Set(held.filter((row) => row.item.type === "passage").map((row) => row.item.ref))
+    // A disagreement or a drift is about what is still in use: a side forgotten since leaves nothing to look at.
+    const sides = [...new Set(stored.flatMap((row) => [row.a, ...(row.b ? [row.b] : [])]))]
+    const items = new Set(
+      (sides.length === 0
+        ? []
+        : yield* db
+            .select({ ref: BrainItemTable.ref })
+            .from(BrainItemTable)
+            .where(
+              and(
+                eq(BrainItemTable.repository_id, place.repository),
+                inArray(BrainItemTable.ref, sides),
+                eq(BrainItemTable.status, "active"),
+              ),
+            )
+            .all()
+            .pipe(Effect.orDie)
+      ).map((row) => row.ref),
+    )
+    const entries = sides.some((side) => !side.startsWith("r") && !side.startsWith("p"))
+      ? new Set((yield* brain.list(place, { filter: "active" })).map((entry) => entry.id))
+      : new Set<string>()
+    const live = (side: string) => items.has(side) || entries.has(side)
     return [
-      ...stored.map(toReview),
+      ...stored.filter((row) => live(row.a) && (!row.b || live(row.b))).map(toReview),
       ...documents.map(
         (row): BrainSchema.ReviewItem => ({
           id: row.id,
