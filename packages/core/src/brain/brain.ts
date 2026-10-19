@@ -3,7 +3,7 @@ export * as Brain from "./brain"
 import { createHash, randomBytes } from "node:crypto"
 import fs from "node:fs/promises"
 import path from "node:path"
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
 import { Context, Effect, Layer } from "effect"
 import { makeGlobalNode } from "../effect/app-node"
 import { Global } from "../global"
@@ -1174,6 +1174,10 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       return outcome(toEntry({ ...exact, ...next }))
     }
 
+    // Nor does the agent learn again a close rewording of what the user undid, put away or forgot.
+    if (agent && (yield* reworded(repository, peers, { body: text, terms: words })))
+      return refuse("forgotten", "The user took out a memory that says this, so it was not saved again.")
+
     // Another wording of a known entry. Similar words are not the same fact ("Run the web tests from packages/web" and
     // "... from packages/app" share most of them), so a wording only joins an entry when it adds nothing to it.
     const fresh = { body: text, terms: words }
@@ -1337,6 +1341,37 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     return row?.actor ?? "user"
   })
 
+  // Whether these words say again, the same way round, what the user took out of memory: an entry they undid or put
+  // away, or one they forgot, of this repository or their own. Sharing most terms, or adding none, is saying it again.
+  const reworded = Effect.fnUntraced(function* (
+    repository: string,
+    peers: readonly Row[],
+    fresh: { readonly body: string; readonly terms: ReadonlyMap<string, number> },
+  ) {
+    const way = BrainLexical.polarity(fresh.body)
+    const again = (terms: ReadonlyMap<string, number>) =>
+      BrainLexical.similarity(terms, fresh.terms) >= SIMILAR ||
+      [...fresh.terms].every(([term, count]) => (terms.get(term) ?? 0) >= count)
+    const forgotten = yield* db
+      .select({ terms: BrainTombstoneTable.terms, polarity: BrainTombstoneTable.polarity })
+      .from(BrainTombstoneTable)
+      .where(
+        and(
+          inArray(BrainTombstoneTable.repository_id, [...new Set([repository, PERSONAL])]),
+          gt(BrainTombstoneTable.until, Date.now()),
+          isNotNull(BrainTombstoneTable.terms),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    if (forgotten.some((row) => row.polarity === way && again(decode(row.terms!)))) return true
+    const away = peers.filter(
+      (row) => row.status === "archived" && BrainLexical.polarity(row.body) === way && again(decode(row.terms)),
+    )
+    for (const row of away) if ((yield* archivedBy(row.id)) === "user") return true
+    return false
+  })
+
   const freshId = Effect.fnUntraced(function* () {
     for (let attempt = 0; attempt < 8; attempt++) {
       const id = `m${base32(randomBytes(4)).slice(0, 5)}`
@@ -1455,10 +1490,10 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
             yield* tx.update(BrainEntryTable).set({ status: "archived", updated_at: now }).where(eq(BrainEntryTable.id, id)).run()
             yield* tx
               .insert(BrainTombstoneTable)
-              .values({ repository_id: row.repository_id, norm_hash: row.norm_hash, until: now + 180 * DAY })
+              .values({ ...tombstoneOf(row), until: now + 180 * DAY })
               .onConflictDoUpdate({
                 target: [BrainTombstoneTable.repository_id, BrainTombstoneTable.norm_hash],
-                set: { until: now + 180 * DAY },
+                set: { until: now + 180 * DAY, terms: row.terms, polarity: BrainLexical.polarity(row.body) },
               })
               .run()
             if (replaced)
@@ -1507,10 +1542,10 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
           yield* tx.delete(BrainEntryTable).where(eq(BrainEntryTable.id, row.id)).run()
           yield* tx
             .insert(BrainTombstoneTable)
-            .values({ repository_id: row.repository_id, norm_hash: row.norm_hash, until: Date.now() + 180 * DAY })
+            .values({ ...tombstoneOf(row), until: Date.now() + 180 * DAY })
             .onConflictDoUpdate({
               target: [BrainTombstoneTable.repository_id, BrainTombstoneTable.norm_hash],
-              set: { until: Date.now() + 180 * DAY },
+              set: { until: Date.now() + 180 * DAY, terms: row.terms, polarity: BrainLexical.polarity(row.body) },
             })
             .run()
           yield* tx.delete(BrainUseTable).where(eq(BrainUseTable.entry_id, row.id)).run()
@@ -2177,6 +2212,15 @@ function byPlace(a: Row, b: Row) {
     (a.source_line ?? 0) - (b.source_line ?? 0) ||
     b.updated_at - a.updated_at
   )
+}
+
+function tombstoneOf(row: Row) {
+  return {
+    repository_id: row.repository_id,
+    norm_hash: row.norm_hash,
+    terms: row.terms,
+    polarity: BrainLexical.polarity(row.body),
+  }
 }
 
 function toEntry(row: Row): BrainSchema.Entry {

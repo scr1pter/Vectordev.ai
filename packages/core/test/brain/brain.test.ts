@@ -412,6 +412,36 @@ describe("Brain writes", () => {
     expect(result?.restored.type).toBe("merged")
   })
 
+  test("a close rewording of what the user undid, put away or forgot is not learned again, but its opposite is", async () => {
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const learn = (text: string) =>
+          brain.propose(place, { kind: "lesson", text, scope: "repository", origin: "agent", sessionID: "ses_learn" })
+        const undone = yield* learn("Run the engine tests one file at a time with a timeout.")
+        const away = yield* learn("Deploy the staging stack from the release branch on Fridays.")
+        const forgotten = yield* learn("Keep the billing fixtures in the shared testdata folder.")
+        if (undone.type === "refused" || away.type === "refused" || forgotten.type === "refused") return undefined
+        yield* brain.update(place, undone.entry.id, { action: "undo" }, "user")
+        yield* brain.update(place, away.entry.id, { action: "archive" }, "user")
+        yield* brain.forget(place, forgotten.entry.id)
+        return {
+          undone: yield* learn("Run engine tests one file at a time with a timeout."),
+          away: yield* learn("Deploy staging stack from the release branch on Fridays!"),
+          forgotten: yield* learn("Keep billing fixtures in the shared testdata folder."),
+          shorter: yield* learn("Run the engine tests with a timeout."),
+          opposite: yield* learn("Never run the engine tests one file at a time with a timeout."),
+          other: yield* learn("Run the web tests from packages/web with the dev server off."),
+        }
+      }),
+    )
+    expect(result?.undone).toMatchObject({ type: "refused", reason: "forgotten" })
+    expect(result?.away).toMatchObject({ type: "refused", reason: "forgotten" })
+    expect(result?.forgotten).toMatchObject({ type: "refused", reason: "forgotten" })
+    expect(result?.shorter).toMatchObject({ type: "refused", reason: "forgotten" })
+    expect(result?.opposite.type).toBe("added")
+    expect(result?.other.type).toBe("added")
+  })
+
   test("what the user undid about themselves is not learned again, for a repository either", async () => {
     const result = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {

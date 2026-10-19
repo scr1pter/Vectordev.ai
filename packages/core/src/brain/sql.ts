@@ -89,6 +89,9 @@ export const BrainTombstoneTable = sqliteTable(
     repository_id: text().notNull(),
     norm_hash: text().notNull(),
     until: integer().notNull(),
+    // An entry's terms and their way round (BrainLexical.polarity), so a close rewording is refused too.
+    terms: text(),
+    polarity: text(),
   },
   (table) => [primaryKey({ columns: [table.repository_id, table.norm_hash] })],
 )

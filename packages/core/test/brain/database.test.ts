@@ -80,6 +80,7 @@ describe("BrainDatabase", () => {
         { id: "20261018000000_brain" },
         { id: "20261101000000_knowledge" },
         { id: "20261102000000_private_memory" },
+        { id: "20261103000000_tombstone_terms" },
       ],
       state: [{ repository_id: "repo-1" }],
     })
