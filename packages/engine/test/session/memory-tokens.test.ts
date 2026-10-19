@@ -6,6 +6,7 @@ import { Effect, Layer } from "effect"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { Global } from "@vectordevai/core/global"
 import { Token } from "@vectordevai/core/util/token"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
@@ -161,6 +162,7 @@ const root = LayerNode.group([
   SpendGuard.node,
   Auth.node,
   Brain.node,
+  BrainKnowledge.node,
   LayerNode.make({ service: TestLLMServer, layer: TestLLMServer.layer, deps: [] }),
 ])
 
@@ -243,6 +245,22 @@ const LEARNED = [
   "Session handling for login lives in src/auth/session.ts; refresh tokens rotate on every use.",
   "Run the auth tests with bun test test/auth from the repository root.",
   ...TOPICS.map((topic) => `The ${topic} service has its own feature flag, ${topic}_v2, read at startup only.`),
+]
+
+// Three documents: one about login, two about other things.
+const DOCUMENTS = [
+  {
+    name: "Auth spec.md",
+    text: "# Auth spec\n\n## 1 Login\n\nThe login button label MUST read Sign in.\nLogin sessions MUST expire after 14 days without use.\n\n## 2 Tokens\n\nRefresh tokens MUST rotate on every use of a login session.\n",
+  },
+  {
+    name: "Billing spec.md",
+    text: "# Billing spec\n\n## 1 Money\n\nInvoices MUST be issued in integer cents.\nA refund MUST name the invoice it reverses.\n",
+  },
+  {
+    name: "Runbook.md",
+    text: "# Runbook\n\n## Deploy\n\n1. Build the release.\n2. Run the smoke checks.\n3. Promote the release to production.\n",
+  },
 ]
 
 type Sizes = { hi: number; ok: number; light: number; large: number }
@@ -352,6 +370,42 @@ it.instance(
       expect(report.toolTokens).toBeLessThan(342)
       // And far less than the same files loaded whole.
       expect(report.added.large).toBeLessThan(legacy / 5)
+
+      // With documents: a greeting still costs nothing, and the rest stays inside the one budget that memory and
+      // documents share, beside a line in the digest and one in the tool.
+      const knowledge = yield* BrainKnowledge.Service
+      for (const document of DOCUMENTS) {
+        const added = yield* knowledge.add(place, { type: "text", name: document.name, text: document.text, origin: "upload" })
+        if (added.type === "refused") throw new Error(added.message)
+        yield* knowledge.wait(place, added.document.id, "searchable", 20_000)
+      }
+      const docs = yield* measure()
+      const withDocuments = (key: keyof Sizes) => Token.estimate(docs[key]) - Token.estimate(empty[key])
+      const documentDigest = blocks(docs.large, "vector_memory")[0] ?? ""
+      const documentRecall = (key: keyof Sizes) => blocks(docs[key], "vector_memory_recall")[0] ?? ""
+      const documentReport = {
+        toolTokens: Token.estimate(JSON.stringify(tool(docs.light) ?? {})),
+        digestTokens: Token.estimate(documentDigest),
+        added: { hi: withDocuments("hi"), ok: withDocuments("ok"), light: withDocuments("light"), large: withDocuments("large") },
+        recall: { light: Token.estimate(documentRecall("light")), large: Token.estimate(documentRecall("large")) },
+      }
+      console.log(`memory token gate with 3 documents: ${JSON.stringify(documentReport)}`)
+      expect(documentReport.added.hi).toBe(0)
+      expect(docs.hi).not.toContain("vector_memory")
+      expect(docs.hi).not.toContain("Sign in")
+      expect(tool(docs.hi)).toBeUndefined()
+      expect(documentReport.added.ok).toBe(0)
+      expect(documentDigest).toContain("Vector also holds 3 documents for this repository (Auth spec, Billing spec, Runbook)")
+      expect(documentReport.digestTokens).toBeLessThanOrEqual(report.digestTokens + 30)
+      expect(JSON.stringify(tool(docs.light))).toContain("Documents: search finds their cards")
+      expect(documentReport.toolTokens).toBeLessThanOrEqual(report.toolTokens + 45)
+      expect(documentRecall("light")).toMatch(/\[r[0-9a-z]{12}\] requirement · Auth spec §1: The login button label MUST read Sign in\./)
+      expect(documentRecall("light")).not.toContain("Invoices")
+      expect(documentReport.recall.light).toBeLessThanOrEqual(BrainKnowledge.budget("light", { documents: true, tight: false }))
+      expect(documentReport.recall.large).toBeLessThanOrEqual(BrainKnowledge.budget("thorough", { documents: true, tight: false }))
+      const toolDelta = documentReport.toolTokens - report.toolTokens
+      expect(documentReport.added.light).toBeLessThanOrEqual(documentReport.digestTokens + 300 + toolDelta)
+      expect(documentReport.added.large).toBeLessThanOrEqual(documentReport.digestTokens + 900 + toolDelta)
     }),
   60_000,
 )

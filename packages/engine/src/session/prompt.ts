@@ -72,6 +72,8 @@ import { SessionTable } from "@vectordevai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionMemory } from "./memory"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { DOCUMENTS as MEMORY_DOCUMENTS } from "@/tool/memory"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { SessionTools } from "./tools"
 import { TitleUsage } from "./title-usage"
@@ -194,6 +196,7 @@ const layer = Layer.effect(
     const database = yield* Database.Service
     const guard = yield* SpendGuard.Service
     const brain = yield* Brain.Service
+    const knowledge = yield* BrainKnowledge.Service
     const guests = yield* FreeModelGuests.Service
     const { db } = database
     const backgroundTasks = yield* InstanceState.make(
@@ -207,7 +210,7 @@ const layer = Layer.effect(
     // context is re-written anyway: after compaction gives the session a new history start, on another model, or once
     // the provider's cache has expired. An edit the agent makes itself is already in its context. Keyed by session, so
     // concurrent sessions keep their own snapshot.
-    const instructionSnapshots = new Map<SessionID, { key: string; instructions: string[] }>()
+    const instructionSnapshots = new Map<SessionID, { key: string; instructions: string[]; documents: boolean }>()
     // Request messages whose recall already ran in this process, so a message that recalled nothing is not scored again
     // on every step.
     const recallsTried = new Set<MessageID>()
@@ -225,14 +228,19 @@ const layer = Layer.effect(
       instructionSnapshots.delete(sessionID)
       if (snapshot && snapshot.key === full && !cold) {
         instructionSnapshots.set(sessionID, snapshot)
-        return snapshot.instructions
+        return snapshot
       }
-      const digest = yield* brain.digest(yield* instruction.place(), memory)
+      const place = yield* instruction.place()
+      // The repository's documents get one line beside the memory index, taken with the rest of the snapshot, and the
+      // memory tool says how to open them for as long as the snapshot holds.
+      const documents = memory.index ? yield* knowledge.digest(place, { personal: memory.personal }) : undefined
+      const digest = yield* brain.digest(place, { ...memory, ...(documents ? { documents } : {}) })
       const instructions = [...(yield* instruction.system()), ...(digest.text ? [digest.text] : [])]
-      instructionSnapshots.set(sessionID, { key: full, instructions })
+      const next = { key: full, instructions, documents: documents !== undefined }
+      instructionSnapshots.set(sessionID, next)
       if (instructionSnapshots.size > MAX_INSTRUCTION_SNAPSHOTS)
         instructionSnapshots.delete(instructionSnapshots.keys().next().value!)
-      return instructions
+      return next
     })
     const awaitTitles = Effect.fn("SessionPrompt.awaitTitles")(function* () {
       if (!(yield* InstanceState.has(backgroundTasks))) return
@@ -1201,6 +1209,7 @@ const layer = Layer.effect(
             }
             return pieces
           }
+          if (keptInstead(input.parts, part)) return [{ ...part, messageID: info.id, sessionID: input.sessionID }]
           const url = new URL(part.url)
           switch (url.protocol) {
             case "data:":
@@ -1893,12 +1902,16 @@ const layer = Layer.effect(
             : ""
         // The owner's personal memory never goes to a session an invited guest has acted in, nor to a model that may
         // train on prompts.
-        const personal = !(yield* guests.marked(sessionID)) && !freeModelMayTrain(model)
+        const guest = yield* guests.marked(sessionID)
+        const personal = !guest && !freeModelMayTrain(model)
+        // Attachments the user marked to remember become documents while this request runs, never at admission. A
+        // session a guest is in keeps none.
+        if (!guest && !session.parentID && !session.internal) msgs = yield* keepAttached({ sessionID, msgs, user: lastUser })
         // Tier 1 recall: once per request message on the main agent, from what the user wrote and attached, within the
         // budget its size allows. It is saved on the message, so later steps send the same bytes and the cache holds.
         if (!quick && sized && sized.tier !== "chat" && !session.parentID && !session.internal)
           msgs = yield* recallFor({ sessionID, msgs, user: lastUser, tier: sized.tier, personal })
-        msgs = yield* personalRecall(msgs, personal)
+        msgs = yield* withheldRecall(sessionID, msgs, personal)
         msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
           Effect.provideService(RuntimeFlags.Service, flags),
           Effect.provideService(FSUtil.Service, fsys),
@@ -2018,7 +2031,7 @@ const layer = Layer.effect(
           const offered = Object.keys(
             LLMRequestPrep.resolveTools({ tools, agent: stepAgent, permission: session.permission, user: lastUser }),
           )
-          const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
+          const [skills, env, snapshot, mcpInstructions, modelMsgs] = yield* Effect.all([
             quick ? Effect.succeed(undefined) : sys.skills(agent),
             quick
               ? Effect.succeed({ stable: [], session: [] })
@@ -2049,7 +2062,7 @@ const layer = Layer.effect(
                   ),
                 ),
             quick
-              ? Effect.succeed([])
+              ? Effect.succeed({ instructions: [], documents: false })
               : sessionInstructions(
                   sessionID,
                   `${msgs[0]?.info.id}|${model.providerID}/${model.id}`,
@@ -2064,6 +2077,9 @@ const layer = Layer.effect(
               model,
             ),
           ])
+          const instructions = snapshot.instructions
+          if (tools.memory && snapshot.documents)
+            tools.memory = { ...tools.memory, description: `${tools.memory.description}\n${MEMORY_DOCUMENTS.trim()}` }
           const system = [
             // The quick lane carries no environment, so this is how it can say which model answers.
             ...(stepAgent.name === "quick"
@@ -2169,6 +2185,10 @@ const layer = Layer.effect(
         yield* instruction
           .place()
           .pipe(Effect.flatMap((place) => brain.consolidate(place)), Effect.ignore, Effect.forkIn(background.scope))
+        // The repository's tracked docs are read beside it, at most every 10 minutes per repository.
+        yield* instruction
+          .place()
+          .pipe(Effect.flatMap((place) => knowledge.scan(place)), Effect.ignore, Effect.forkIn(background.scope))
       }
       return yield* lastAssistant(sessionID)
     })
@@ -2187,13 +2207,16 @@ const layer = Layer.effect(
       if (recallsTried.size > MAX_INSTRUCTION_SNAPSHOTS * 4) recallsTried.delete(recallsTried.values().next().value!)
       const query = SessionMemory.asked(message)
       if (!query) return input.msgs
-      const result = yield* brain.recall(yield* instruction.place(), {
+      const result = yield* knowledge.recall(yield* instruction.place(), {
         query,
         files: SessionMemory.files(message),
-        budget: Brain.recallBudget(input.tier),
+        tier: input.tier,
+        // Once Run Guard has warned, document context is halved.
+        tight: (yield* guard.snapshot(input.sessionID))?.warned === true,
         personal: input.personal,
         exclude: SessionMemory.injected(input.msgs),
         sessionID: input.sessionID,
+        requestID: message.info.id,
       })
       if (!result.text) return input.msgs
       // Only the repository's lines are saved with the message; personal ones are filled in for each request below.
@@ -2210,6 +2233,8 @@ const layer = Layer.effect(
             tokens: result.tokens,
             personal: [...(result.personal ?? [])],
             ...(result.newest ? { newest: true } : {}),
+            // Card text is never saved: each request renders the cards from their ids.
+            ...(result.cards.length ? { cards: [...result.cards], why: result.why } : {}),
           },
         },
       } satisfies SessionV1.TextPart)
@@ -2217,44 +2242,147 @@ const layer = Layer.effect(
       return input.msgs
     })
 
-    // Personal memory is never saved in the transcript, whether recalled or returned by the memory tool, so a session
-    // that is shared, exported or opened by an invited guest later does not carry the owner's personal memory, and
-    // forgetting an entry takes it out of later requests too. Each request fills it in from the brain while personal
-    // memory is allowed for it; the lines are the same from step to step, so the provider's cache still holds.
-    const personalRecall = Effect.fn("SessionPrompt.personalRecall")(function* (
+    // Personal memory and document knowledge are never saved in the transcript, whether recalled or returned by the
+    // memory tool, so a session that is shared, exported or opened by an invited guest later does not carry them, and
+    // forgetting an entry or a document takes it out of later requests too, old sessions included. Each request fills
+    // them in from the brain where allowed: personal memory and private documents only while personal memory is allowed
+    // for the request, the repository's own docs always. Lines are the same from step to step (cards keep the bytes the
+    // session was first shown), so the provider's cache still holds.
+    const withheldRecall = Effect.fn("SessionPrompt.withheldRecall")(function* (
+      sessionID: SessionID,
       msgs: SessionV1.WithParts[],
       personal: boolean,
     ) {
-      if (!personal) return msgs
-      const ids = msgs.flatMap((message) =>
-        message.parts.flatMap((part) => {
-          const recall = SessionMemory.recall(part)
-          return recall?.personal.length ? recall.ids : SessionMemory.personal(part)
-        }),
+      const parts = msgs.flatMap((message) => message.parts)
+      const recalls = parts.flatMap((part) => {
+        const recall = SessionMemory.recall(part)
+        return recall && (recall.cards.length > 0 || (personal && recall.personal.length > 0)) ? [recall] : []
+      })
+      const known = parts.flatMap((part) => {
+        const value = SessionMemory.knowledge(part)
+        return value ? [value] : []
+      })
+      const kept = msgs.flatMap((message) => SessionMemory.remember(message))
+      const toolPersonal = personal ? parts.flatMap((part) => SessionMemory.personal(part)) : []
+      if (recalls.length === 0 && known.length === 0 && kept.length === 0 && toolPersonal.length === 0) return msgs
+      const place = yield* instruction.place()
+      const entries = [...new Set([...recalls.flatMap((recall) => recall.ids), ...toolPersonal])]
+      const memory = entries.length ? yield* brain.lines(place, entries, { personal }) : new Map<string, string>()
+      const cardIds = [...new Set([...recalls.flatMap((recall) => recall.cards), ...known.flatMap((item) => item.cards)])]
+      const cards = cardIds.length
+        ? yield* knowledge.lines(place, cardIds, { personal, sessionID })
+        : new Map<string, string>()
+      const passages = new Map(
+        yield* Effect.forEach(
+          known.flatMap((item) => item.get),
+          (item) =>
+            knowledge
+              .get(place, { ...item, personal, sessionID })
+              .pipe(Effect.map((got) => [`${item.id}\0${item.part ?? ""}`, got?.text] as const)),
+        ),
       )
-      if (ids.length === 0) return msgs
-      const lines = yield* brain.lines(yield* instruction.place(), [...new Set(ids)], { personal: true })
+      const outlines = new Map(
+        yield* Effect.forEach(
+          known.flatMap((item) => (item.document && item.part ? [item.document] : [])),
+          (id) => knowledge.outline(place, id, { personal }).pipe(Effect.map((text) => [id, text] as const)),
+        ),
+      )
+      // A file kept instead of sending it is not sent: its outline and cards stand for it.
+      const instead = new Set(kept.flatMap((item) => (item.mode === "instead" ? [item.file.id] : [])))
       return msgs.map((message) => ({
         ...message,
-        parts: message.parts.map((part) => {
+        parts: message.parts.flatMap((part): SessionV1.Part[] => {
+          if (instead.has(part.id)) return []
           const recall = SessionMemory.recall(part)
-          if (part.type === "text" && recall?.personal.length)
-            return {
-              ...part,
-              text: Brain.recallText(
-                recall.ids.flatMap((id) => lines.get(id) ?? []),
-                { newest: recall.newest },
-              ),
-            }
-          const withheld = SessionMemory.personal(part)
-          if (part.type !== "tool" || part.state.status !== "completed" || withheld.length === 0) return part
-          const output = withheld.reduce(
-            (text, id) => text.replaceAll(SessionMemory.withheld(id), lines.get(id)?.replace(/^- /, "") ?? SessionMemory.withheld(id)),
+          if (part.type === "text" && recall && (recall.cards.length > 0 || (personal && recall.personal.length > 0))) {
+            const lines = recall.ids.flatMap((id) => cards.get(id) ?? memory.get(id) ?? [])
+            return [
+              {
+                ...part,
+                text: Brain.recallText(lines, {
+                  newest: recall.newest,
+                  documents: recall.ids.some((id) => cards.has(id)),
+                }),
+              },
+            ]
+          }
+          const value = SessionMemory.knowledge(part)
+          if (part.type === "text" && value?.document && value.part)
+            return [{ ...part, text: outlines.get(value.document) ?? part.text }]
+          if (part.type !== "tool" || part.state.status !== "completed") return [part]
+          const withheld = personal ? SessionMemory.personal(part) : []
+          if (withheld.length === 0 && !value) return [part]
+          const filled = withheld.reduce(
+            (text, id) =>
+              text.replaceAll(SessionMemory.withheld(id), memory.get(id)?.replace(/^- /, "") ?? SessionMemory.withheld(id)),
             part.state.output,
           )
-          return { ...part, state: { ...part.state, output } }
+          const rendered = [
+            ...(value?.cards ?? []).map(
+              (id) =>
+                [SessionMemory.document(id), cards.get(id)?.replace(/^- /, "") ?? `[${id}] is not available here.`] as const,
+            ),
+            ...(value?.get ?? []).map(
+              (item) =>
+                [
+                  SessionMemory.document(item.id),
+                  passages.get(`${item.id}\0${item.part ?? ""}`) ?? `[${item.id}] is no longer in memory.`,
+                ] as const,
+            ),
+          ].reduce((text, [placeholder, line]) => text.replace(placeholder, line), filled)
+          return [{ ...part, state: { ...part.state, output: rendered } }]
         }),
       }))
+    })
+
+    // Attachments the user marked to remember, kept as documents while their request runs. The keyword stage gets up
+    // to 10 seconds, so the same request gets the document's outline and can draw on its cards; a larger document
+    // finishes in the background. Each is kept once, recorded on a synthetic part that holds its id, never its text.
+    const keepAttached = Effect.fn("SessionPrompt.keepAttached")(function* (input: {
+      sessionID: SessionID
+      msgs: SessionV1.WithParts[]
+      user: SessionV1.User
+    }) {
+      const message = input.msgs.find((item) => item.info.id === input.user.id)
+      if (!message) return input.msgs
+      const done = new Set(
+        message.parts.flatMap((part) => {
+          const value = SessionMemory.knowledge(part)
+          return value?.part ? [value.part] : []
+        }),
+      )
+      const marked = SessionMemory.remember(message).filter((item) => !done.has(item.file.id))
+      if (marked.length === 0) return input.msgs
+      const place = yield* instruction.place()
+      for (const item of marked) {
+        const source = attachedSource(item.file)
+        const result = source
+          ? yield* knowledge.add(place, { ...source, origin: "chat", sessionID: input.sessionID })
+          : { type: "refused" as const, message: "Vector could not read this attachment." }
+        const document =
+          result.type === "refused"
+            ? undefined
+            : result.type === "unchanged"
+              ? result.document
+              : ((yield* knowledge.wait(place, result.document.id, "searchable", 10_000)) ?? result.document)
+        const part = yield* sessions.updatePart({
+          id: PartID.ascending(),
+          messageID: message.info.id,
+          sessionID: input.sessionID,
+          type: "text",
+          // Only why a file could not be kept is saved as text; a kept document's outline is rendered per request.
+          text:
+            result.type === "refused"
+              ? `Vector could not keep the attached ${item.file.filename ?? "file"} as a document: ${result.message}`
+              : "",
+          synthetic: true,
+          metadata: {
+            [SessionMemory.KNOWLEDGE]: { part: item.file.id, ...(document ? { document: document.id } : {}) },
+          },
+        } satisfies SessionV1.TextPart)
+        message.parts.push(part)
+      }
+      return input.msgs
     })
 
     const loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.loop")(function* (
@@ -2538,6 +2666,35 @@ const layer = Layer.effect(
     })
   }),
 )
+
+// An attachment as the knowledge store takes it: a file on this computer by its path, or the bytes a data URL carries.
+function attachedSource(file: SessionV1.FilePart) {
+  if (file.url.startsWith("file:")) {
+    const filepath = (() => {
+      try {
+        return fileURLToPath(file.url)
+      } catch {
+        return undefined
+      }
+    })()
+    return filepath ? { type: "path" as const, path: filepath } : undefined
+  }
+  const match = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(file.url)
+  if (!match) return undefined
+  const bytes = match[2] ? Buffer.from(match[3]!, "base64") : Buffer.from(decodeURIComponent(match[3]!))
+  return { type: "bytes" as const, name: file.filename ?? "attachment", bytes: new Uint8Array(bytes), mime: file.mime }
+}
+
+// Whether the user keeps this attached file in memory instead of sending it: then it is not read when the message is
+// admitted, and the runner keeps it as a document.
+function keptInstead(parts: PromptInput["parts"], file: { readonly id?: string; readonly filename?: string }) {
+  return parts.some((part) => {
+    if (part.type !== "text") return false
+    const value = part.metadata?.[SessionMemory.REMEMBER]
+    if (!value || typeof value !== "object" || value.mode !== "instead") return false
+    return file.id !== undefined && value.part === file.id ? true : file.filename !== undefined && value.filename === file.filename
+  })
+}
 
 function isFreeSelection(model: { providerID: string; modelID: string }) {
   return isFreeModelRef(model)
@@ -2921,6 +3078,7 @@ export const node = LayerNode.make({
     Database.node,
     SpendGuard.node,
     Brain.node,
+    BrainKnowledge.node,
     FreeModelGuests.node,
   ],
 })
