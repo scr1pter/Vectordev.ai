@@ -1042,6 +1042,10 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
     if (exact) {
       // A held write never adds to an entry outside the review queue, so outside content cannot vouch for memory.
       if (hold && exact.status !== "quarantined") return { type: "merged" as const, entry: toEntry(exact) }
+      // What the user put away stays away until they bring it back; the agent may restore only what it or tidying
+      // put away.
+      if (agent && exact.status === "archived" && (yield* archivedBy(exact.id)) === "user")
+        return { type: "merged" as const, entry: toEntry(exact) }
       // Only checked evidence confirms a proposal. A second session writing the same unchecked words proves nothing:
       // planted text reaches every session that reads it.
       const confirms = exact.status === "proposed" && verified
@@ -1221,6 +1225,18 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
     return { type: "added" as const, entry, ...extra }
   })
 
+  // Who last put an entry away. An entry with no record of it counts as put away by the user, so it stays away.
+  const archivedBy = Effect.fnUntraced(function* (id: string) {
+    const row = yield* db
+      .select({ actor: BrainEventTable.actor })
+      .from(BrainEventTable)
+      .where(and(eq(BrainEventTable.entry_id, id), eq(BrainEventTable.action, "archived")))
+      .orderBy(desc(BrainEventTable.id))
+      .get()
+      .pipe(Effect.orDie)
+    return row?.actor ?? "user"
+  })
+
   const freshId = Effect.fnUntraced(function* () {
     for (let attempt = 0; attempt < 8; attempt++) {
       const id = `m${base32(randomBytes(4)).slice(0, 5)}`
@@ -1261,6 +1277,7 @@ function make(db: Database, dirs: { readonly data: string; readonly config: stri
       .where(inArray(BrainEntryTable.id, excess.map((row) => row.id)))
       .run()
       .pipe(Effect.orDie)
+    yield* Effect.forEach(excess, (row) => event(row, "archived", "vector"), { discard: true })
     return excess.length
   })
 

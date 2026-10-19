@@ -683,6 +683,35 @@ describe("Brain evidence", () => {
     expect(text).not.toContain("force pushes")
   })
 
+  test("an entry the user put away stays away when the agent says it again; one the agent put away comes back", async () => {
+    const result = await run({}, ({ brain, place }) =>
+      Effect.gen(function* () {
+        const write = (text: string, origin: "user" | "agent", sessionID?: string) =>
+          brain.propose(place, {
+            kind: "decision",
+            text,
+            scope: "repository",
+            origin,
+            ...(sessionID ? { sessionID } : {}),
+            evidence: origin === "user" ? { type: "user" } : { type: "message", quote: text.replace(/\.$/, ""), verified: true },
+          })
+        const mine = yield* write("Releases are cut from the develop branch.", "user")
+        const learned = yield* write("Hotfixes go out from the hotfix branch.", "agent", "ses_learn")
+        if (mine.type === "refused" || learned.type === "refused") return undefined
+        yield* brain.update(place, mine.entry.id, { action: "archive" }, "user")
+        yield* brain.update(place, learned.entry.id, { action: "archive" }, "agent")
+        const again = yield* write("Releases are cut from the develop branch.", "agent", "ses_restore")
+        const back = yield* write("Hotfixes go out from the hotfix branch.", "agent", "ses_restore")
+        const active = (yield* brain.list(place, {})).map((entry) => entry.id)
+        return { again, back, active, mine: mine.entry.id, learned: learned.entry.id }
+      }),
+    )
+    expect(result?.again.type).toBe("merged")
+    expect(result?.again.type === "refused" ? "" : result?.again.entry.status).toBe("archived")
+    expect(result?.active).not.toContain(result?.mine)
+    expect(result?.active).toContain(result?.learned)
+  })
+
   test("the agent cannot put away or replace what the user wrote without the user's own words", async () => {
     const result = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {
