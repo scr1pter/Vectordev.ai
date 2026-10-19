@@ -90,4 +90,34 @@ describe("BrainDocument Markdown", () => {
     )
     expect(extracted.blocks.map(shape)).toEqual(["heading1:Guide", "paragraph:Keep backups for 30 days."])
   })
+
+  test("a paragraph of unmatched markup reads at once and keeps its words", async () => {
+    // Each of these took seconds: 24 KB of "*a _b " took about 3, growing with the square of its length.
+    for (const unit of ["*a _b ", "[x][y] ", "`a ", "<a "]) {
+      const started = performance.now()
+      const extracted = await read(`# Notes\n\n${unit.repeat(Math.floor(40_000 / unit.length))}\n\nThe last paragraph.`)
+      expect(performance.now() - started, unit).toBeLessThan(1_000)
+      expect(extracted.text).toContain("The last paragraph.")
+    }
+  })
+
+  test("past the lexing budget the rest of the file is read as plain text, and a table keeps 64 columns", async () => {
+    const definitions = Array.from({ length: 8_000 }, (_, index) => `[link${index}]: https://example.com/${index}`)
+    const limits = { ...BrainLimits.LIMITS.worker, markdown: { inline: 8_192, milliseconds: 50 } }
+    const started = performance.now()
+    const result = await BrainDocument.read(
+      {
+        name: "links.md",
+        bytes: new TextEncoder().encode(`# Links\n\n${definitions.join("\n")}\n\nThe closing paragraph stays.`),
+      },
+      limits,
+    )
+    expect(performance.now() - started).toBeLessThan(2_000)
+    if (result.type === "refused") throw new Error(result.message)
+    expect(result.text).toContain("The closing paragraph stays.")
+    const columns = Array.from({ length: 5_000 }, (_, index) => `c${index}`)
+    const table = await read(`| ${columns.join(" | ")} |\n|${" --- |".repeat(5_000)}\n| ${columns.join(" | ")} |`)
+    const block = table.blocks.find((item) => item.type === "table")
+    expect(block?.type === "table" ? block.header.length : 0).toBe(BrainLimits.LIMITS.worker.columns)
+  })
 })

@@ -1,29 +1,33 @@
 export * as BrainMarkdown from "./markdown"
 
-import { lexer, type Token, type Tokens } from "marked"
+import { Lexer, type Token, type Tokens } from "marked"
 import { BrainScan } from "../scan"
 import { BrainData } from "./data"
 import { BrainHtml } from "./html"
 import { refuse, type BrainLimits } from "./limits"
 import type { Draft, Read, ReadRefusal } from "./read"
+import { BrainText } from "./text"
 
 // Markdown and MDX through marked's lexer: headings, paragraphs with their code spans, nested lists, GFM tables, fences
 // and quotes. Raw HTML reads through the HTML reader, so hidden HTML inside Markdown is dropped and flagged the same
-// way. Front matter is YAML in the core schema; only its title is used.
+// way. Front matter is YAML in the core schema; only its title is used. marked is slow on some inputs (a long run of
+// unmatched emphasis, links or code spans in one paragraph, thousands of link definitions), so its work is bounded: a
+// paragraph or cell longer than `markdown.inline` keeps its text without inline markup, and once lexing has taken
+// `markdown.milliseconds` the rest of the file is read as plain text.
 
 type Inline = { code: string[]; links: string[]; hidden: boolean; hiding: number }
 
 export function read(source: string, limits: BrainLimits.Limits): Read | ReadRefusal {
   const front = matter(source, limits)
-  const tokens = lex(front.body)
-  if (!tokens) return refuse("invalid", "This Markdown nests too deeply to read safely.")
+  const lexed = lex(front.body, limits)
+  if (!lexed) return refuse("invalid", "This Markdown nests too deeply to read safely.")
   const links: string[] = []
-  const drafts = blocks(tokens, limits, links, 0)
+  const drafts = blocks(lexed.tokens, limits, links, 0)
   return {
     type: "read",
     format: "markdown",
     ...(front.title ? { title: front.title } : {}),
-    drafts: drafts.drafts,
+    drafts: lexed.rest ? [...drafts.drafts, ...BrainText.read(lexed.rest).drafts] : drafts.drafts,
     links,
     warnings: drafts.truncated ? ["truncated"] : [],
   }
@@ -44,8 +48,9 @@ function matter(source: string, limits: BrainLimits.Limits) {
 }
 
 // marked takes time growing with the square of a list's length, so a long document is lexed in pieces of about 250
-// lines, cut only outside code fences where a new block starts (a blank line, a heading or a top-level list item). A
-// very long list becomes several lists of the same items.
+// lines, cut only outside code fences where a new block starts (a blank line, a heading, a top-level list item or a
+// link definition). A very long list becomes several lists of the same items. A piece that finds no such place is cut
+// anyway at twice that, so a file with no blank lines is never lexed in one piece.
 const CHUNK = 250
 
 function chunks(body: string) {
@@ -56,7 +61,12 @@ function chunks(body: string) {
   for (const line of lines) {
     const current = out.at(-1)!
     const fence = line.match(/^ {0,3}(`{3,}|~{3,})/)?.[1]
-    if (!state.fence && current.length >= CHUNK && (!line.trim() || /^(?:#{1,6}\s|[-*+]\s|\d{1,9}[.)]\s)/.test(line)))
+    if (
+      !state.fence &&
+      ((current.length >= CHUNK &&
+        (!line.trim() || /^(?:#{1,6}\s|[-*+]\s|\d{1,9}[.)]\s| {0,3}\[[^\]\n]+\]:)/.test(line))) ||
+        current.length >= 2 * CHUNK)
+    )
       out.push([line])
     else current.push(line)
     if (fence && !state.fence) state.fence = fence
@@ -66,18 +76,35 @@ function chunks(body: string) {
 }
 
 // Quotes and lists more than 32 levels deep are flattened to 32 before lexing, since the lexer recurses once per level,
-// and runs of more than 64 of one delimiter (emphasis, brackets) are cut to 64, since the lexer slows down sharply on
-// long ones. A stack overflow the lexer still hits on a pathological line is caught and the file refused.
-function lex(body: string) {
+// runs of more than 64 of one delimiter (emphasis, brackets) are cut to 64, since the lexer slows down sharply on long
+// ones, and a line is cut after as many table cells as a table keeps. A stack overflow the lexer still hits on a
+// pathological line is caught and the file refused.
+function lex(body: string, limits: BrainLimits.Limits) {
   const bounded = body
+    .replace(/\r\n?/g, "\n")
     .replace(/^((?:[ \t]*>){32})(?:[ \t]*>)+/gm, "$1")
     .replace(/^[ \t]{129,}(?=\S)/gm, (indent) => indent.slice(0, 128))
     .replace(/([*_[\]()~`<>])\1{64,}/g, (run) => run.slice(0, 64))
+    .replace(new RegExp(`^((?:[^|\\n]*\\|){${limits.columns + 1}})[^\\n]*`, "gm"), "$1")
+  const deadline = performance.now() + limits.markdown.milliseconds
+  const pieces = chunks(bounded)
+  const tokens: Token[] = []
   try {
-    return chunks(bounded).flatMap((chunk) => lexer(chunk, { gfm: true }))
+    for (const [index, piece] of pieces.entries()) {
+      if (performance.now() > deadline) return { tokens, rest: pieces.slice(index).join("\n") }
+      const lexer = new Lexer({ gfm: true })
+      lexer.blockTokens(piece, lexer.tokens)
+      for (const pending of lexer.inlineQueue) {
+        if (pending.src.length <= limits.markdown.inline && performance.now() <= deadline)
+          lexer.inlineTokens(pending.src, pending.tokens)
+        else pending.tokens.push({ type: "text", raw: pending.src, text: pending.src } satisfies Tokens.Text)
+      }
+      tokens.push(...lexer.tokens)
+    }
   } catch {
     return undefined
   }
+  return { tokens, rest: "" }
 }
 
 function blocks(tokens: readonly Token[], limits: BrainLimits.Limits, links: string[], depth: number) {

@@ -43,6 +43,11 @@ export type Limits = {
   }
   readonly xml: { readonly depth: number; readonly nodes: number }
   readonly data: { readonly depth: number; readonly keys: number; readonly aliases: number }
+  /**
+   * Markdown's inline markup is read in paragraphs and cells up to `inline` characters, and the file is lexed for at
+   * most `milliseconds`; past either, text is kept without its markup.
+   */
+  readonly markdown: { readonly inline: number; readonly milliseconds: number }
   readonly output: {
     readonly sections: number
     readonly passages: number
@@ -70,6 +75,7 @@ const worker: Limits = {
   zip: { entries: 5_000, part: 32 * MB, total: 128 * MB, ratio: 100, grace: 1 * MB },
   xml: { depth: 256, nodes: 2_000_000 },
   data: { depth: 64, keys: 5_000, aliases: 100 },
+  markdown: { inline: 8_192, milliseconds: 5_000 },
   output: { sections: 2_000, passages: 4_000, records: 2_000, perPassage: 8 },
   yield: false,
   seconds: 120,
@@ -86,6 +92,7 @@ export const LIMITS = {
     bytes: { pdf: 20 * MB, office: 10 * MB, csv: 10 * MB, text: 10 * MB },
     streams: 64 * MB,
     pages: 300,
+    markdown: { inline: 8_192, milliseconds: 2_000 },
     yield: true,
   } satisfies Limits,
 } as const
