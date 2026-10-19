@@ -273,7 +273,7 @@ function written(result: Exclude<Brain.WriteResult, { type: "refused" }>, replac
       return `Already in memory as ${id}, put away: ${words(result.entry)}. Only the user can bring it back, in Settings > Memory; ask them if it applies again.`
     return `Already in memory as ${id}, waiting for the user's review: ${words(result.entry)}`
   }
-  if (result.type === "promoted") return `Confirmed ${id}: ${words(result.entry)}. It is in use now.`
+  if (result.type === "promoted") return `In use again as ${id}: ${words(result.entry)}`
   if (result.type === "superseded")
     return `Saved as ${id}, replacing ${result.previous}${replaced ? `: ${words(replaced, 120)}` : ""}.`
   return `Saved ${id} for the user's review (${holdReason(result.entry.hold)}). It is not used until they approve it.${related}`

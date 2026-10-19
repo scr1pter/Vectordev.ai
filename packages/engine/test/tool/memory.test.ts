@@ -204,6 +204,23 @@ describe("tool.memory", () => {
     }),
   )
 
+  it.instance("what the agent put away itself comes back in use when it learns it again, and shows as learned", () =>
+    Effect.gen(function* () {
+      const run = yield* memory
+      const text = "The search worker rebuilds its index nightly from the reports job."
+      const sessionID = SessionID.make("ses_memory_again")
+      const messages = history({ sessionID, said: "speed up search" })
+      const saved = yield* run({ action: "add", kind: "fact", text }, messages, sessionID)
+      yield* run({ action: "forget", id: saved.metadata.id }, messages, sessionID)
+      const later = SessionID.make("ses_memory_again_later")
+      const again = yield* run({ action: "add", kind: "fact", text }, history({ sessionID: later, said: "search is slow" }), later)
+      expect(again.metadata.result).toBe("promoted")
+      expect(again.metadata.id).toBe(saved.metadata.id)
+      expect(again.output).toBe(`In use again as ${saved.metadata.id}: "${text}"`)
+      expect(again.metadata.learned).toEqual({ scope: "repository", text })
+    }),
+  )
+
   it.instance("a check that failed and then passed is evidence for a lesson, and raises its confidence", () =>
     Effect.gen(function* () {
       const run = yield* memory
