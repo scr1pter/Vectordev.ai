@@ -167,10 +167,10 @@ import type {
   McpStatusResponses,
   MemoryCreateErrors,
   MemoryCreateResponses,
-  MemoryDocumentsDistillErrors,
-  MemoryDocumentsDistillEstimateErrors,
-  MemoryDocumentsDistillEstimateResponses,
-  MemoryDocumentsDistillResponses,
+  MemoryDistillEstimateErrors,
+  MemoryDistillEstimateResponses,
+  MemoryDistillRunErrors,
+  MemoryDistillRunResponses,
   MemoryDocumentsFileErrors,
   MemoryDocumentsFileResponses,
   MemoryDocumentsGetErrors,
@@ -3683,48 +3683,6 @@ export class Settings extends HeyApiClient {
   }
 }
 
-export class Distill extends HeyApiClient {
-  /**
-   * Estimate finding more with a model
-   *
-   * The sections a model would read for suggestions, the tokens sent, the output cap and, for a priced model, the cost at catalog rates; or why it would be refused. Nothing is sent.
-   */
-  public estimate<ThrowOnError extends boolean = false>(
-    parameters: {
-      documentID: string
-      directory?: string
-      workspace?: string
-      model?: string
-      maxTokens?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "documentID" },
-            { in: "query", key: "directory" },
-            { in: "query", key: "workspace" },
-            { in: "query", key: "model" },
-            { in: "query", key: "maxTokens" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).get<
-      MemoryDocumentsDistillEstimateResponses,
-      MemoryDocumentsDistillEstimateErrors,
-      ThrowOnError
-    >({
-      url: "/memory/documents/{documentID}/distill",
-      ...options,
-      ...params,
-    })
-  }
-}
-
 export class Documents extends HeyApiClient {
   /**
    * List documents
@@ -4119,13 +4077,55 @@ export class Documents extends HeyApiClient {
       ...params,
     })
   }
+}
+
+export class Distill extends HeyApiClient {
+  /**
+   * Estimate finding more with a model
+   *
+   * The sections a model would read for suggestions, the tokens sent, the output cap and, for a priced model, the cost at catalog rates; or why it would be refused. Nothing is sent.
+   */
+  public estimate<ThrowOnError extends boolean = false>(
+    parameters: {
+      documentID: string
+      directory?: string
+      workspace?: string
+      model?: string
+      maxTokens?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "documentID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "model" },
+            { in: "query", key: "maxTokens" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      MemoryDistillEstimateResponses,
+      MemoryDistillEstimateErrors,
+      ThrowOnError
+    >({
+      url: "/memory/documents/{documentID}/distill",
+      ...options,
+      ...params,
+    })
+  }
 
   /**
    * Find more with a model
    *
    * Off unless VECTOR_KNOWLEDGE_DISTILL is set. A model reads the document's sections where Vector's rules found little, in a hidden helper session, and each suggestion is kept only if its quote is the document's own words. Kept suggestions wait as proposed records. Refused for a session a guest is in, a model that may train on prompts and the Zen gateway.
    */
-  public distill<ThrowOnError extends boolean = false>(
+  public run<ThrowOnError extends boolean = false>(
     parameters: {
       documentID: string
       directory?: string
@@ -4151,11 +4151,7 @@ export class Documents extends HeyApiClient {
         },
       ],
     )
-    return (options?.client ?? this.client).post<
-      MemoryDocumentsDistillResponses,
-      MemoryDocumentsDistillErrors,
-      ThrowOnError
-    >({
+    return (options?.client ?? this.client).post<MemoryDistillRunResponses, MemoryDistillRunErrors, ThrowOnError>({
       url: "/memory/documents/{documentID}/distill",
       ...options,
       ...params,
@@ -4165,11 +4161,6 @@ export class Documents extends HeyApiClient {
         ...params.headers,
       },
     })
-  }
-
-  private _distill?: Distill
-  get distill2(): Distill {
-    return (this._distill ??= new Distill({ client: this.client }))
   }
 }
 
@@ -4726,6 +4717,11 @@ export class Memory extends HeyApiClient {
   private _documents?: Documents
   get documents(): Documents {
     return (this._documents ??= new Documents({ client: this.client }))
+  }
+
+  private _distill?: Distill
+  get distill(): Distill {
+    return (this._distill ??= new Distill({ client: this.client }))
   }
 
   private _records?: Records

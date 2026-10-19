@@ -782,14 +782,14 @@ const scenarios: Scenario[] = [
     .json(400, object, "status"),
   // Nothing is sent to a model here: the flag is off by default, and no document dnone exists either way.
   http.protected
-    .get("/memory/documents/{documentID}/distill", "memory.documents.distill.estimate")
+    .get("/memory/documents/{documentID}/distill", "memory.distill.estimate")
     .at((ctx) => ({ path: route("/memory/documents/{documentID}/distill", { documentID: "dnone" }), headers: ctx.headers() }))
     .json(200, (body) => {
       object(body)
       check(typeof body.refused === "object", "an estimate for a document that is not there says why it would not run")
     }),
   http.protected
-    .post("/memory/documents/{documentID}/distill", "memory.documents.distill")
+    .post("/memory/documents/{documentID}/distill", "memory.distill.run")
     .mutating()
     .at((ctx) => ({
       path: route("/memory/documents/{documentID}/distill", { documentID: "dnone" }),

@@ -12666,7 +12666,7 @@ export type MemoryDocumentsFileResponses = {
 
 export type MemoryDocumentsFileResponse = MemoryDocumentsFileResponses[keyof MemoryDocumentsFileResponses]
 
-export type MemoryDocumentsDistillEstimateData = {
+export type MemoryDistillEstimateData = {
   body?: never
   path: {
     /**
@@ -12683,7 +12683,7 @@ export type MemoryDocumentsDistillEstimateData = {
   url: "/memory/documents/{documentID}/distill"
 }
 
-export type MemoryDocumentsDistillEstimateErrors = {
+export type MemoryDistillEstimateErrors = {
   /**
    * MemoryError | InvalidRequestError
    */
@@ -12694,20 +12694,18 @@ export type MemoryDocumentsDistillEstimateErrors = {
   403: ForbiddenError
 }
 
-export type MemoryDocumentsDistillEstimateError =
-  MemoryDocumentsDistillEstimateErrors[keyof MemoryDocumentsDistillEstimateErrors]
+export type MemoryDistillEstimateError = MemoryDistillEstimateErrors[keyof MemoryDistillEstimateErrors]
 
-export type MemoryDocumentsDistillEstimateResponses = {
+export type MemoryDistillEstimateResponses = {
   /**
    * What finding more with a model would send and may cost
    */
   200: MemoryDistillEstimate
 }
 
-export type MemoryDocumentsDistillEstimateResponse =
-  MemoryDocumentsDistillEstimateResponses[keyof MemoryDocumentsDistillEstimateResponses]
+export type MemoryDistillEstimateResponse = MemoryDistillEstimateResponses[keyof MemoryDistillEstimateResponses]
 
-export type MemoryDocumentsDistillData = {
+export type MemoryDistillRunData = {
   body?: {
     model?: string
     maxTokens?: number
@@ -12726,7 +12724,7 @@ export type MemoryDocumentsDistillData = {
   url: "/memory/documents/{documentID}/distill"
 }
 
-export type MemoryDocumentsDistillErrors = {
+export type MemoryDistillRunErrors = {
   /**
    * MemoryError | InvalidRequestError
    */
@@ -12737,16 +12735,16 @@ export type MemoryDocumentsDistillErrors = {
   403: ForbiddenError
 }
 
-export type MemoryDocumentsDistillError = MemoryDocumentsDistillErrors[keyof MemoryDocumentsDistillErrors]
+export type MemoryDistillRunError = MemoryDistillRunErrors[keyof MemoryDistillRunErrors]
 
-export type MemoryDocumentsDistillResponses = {
+export type MemoryDistillRunResponses = {
   /**
    * The suggestions kept for review, and what the request spent
    */
   200: MemoryDistillResult
 }
 
-export type MemoryDocumentsDistillResponse = MemoryDocumentsDistillResponses[keyof MemoryDocumentsDistillResponses]
+export type MemoryDistillRunResponse = MemoryDistillRunResponses[keyof MemoryDistillRunResponses]
 
 export type MemoryRecordsListData = {
   body?: never

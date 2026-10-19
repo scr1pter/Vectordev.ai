@@ -7875,7 +7875,7 @@
     "/memory/documents/{documentID}/distill": {
       "get": {
         "tags": ["memory"],
-        "operationId": "memory.documents.distill.estimate",
+        "operationId": "memory.distill.estimate",
         "parameters": [
           {
             "name": "documentID",
@@ -7963,13 +7963,13 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.distill.estimate({\n  ...\n})"
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.distill.estimate({\n  ...\n})"
           }
         ]
       },
       "post": {
         "tags": ["memory"],
-        "operationId": "memory.documents.distill",
+        "operationId": "memory.distill.run",
         "parameters": [
           {
             "name": "documentID",
@@ -8064,7 +8064,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.documents.distill({\n  ...\n})"
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.distill.run({\n  ...\n})"
           }
         ]
       }

@@ -677,7 +677,7 @@ export const MemoryApi = HttpApi.make("memory")
           error: MemoryApiError,
         }).annotateMerge(
           OpenApi.annotations({
-            identifier: "memory.documents.distill.estimate",
+            identifier: "memory.distill.estimate",
             summary: "Estimate finding more with a model",
             description:
               "The sections a model would read for suggestions, the tokens sent, the output cap and, for a priced model, the cost at catalog rates; or why it would be refused. Nothing is sent.",
@@ -691,7 +691,7 @@ export const MemoryApi = HttpApi.make("memory")
           error: MemoryApiError,
         }).annotateMerge(
           OpenApi.annotations({
-            identifier: "memory.documents.distill",
+            identifier: "memory.distill.run",
             summary: "Find more with a model",
             description:
               "Off unless VECTOR_KNOWLEDGE_DISTILL is set. A model reads the document's sections where Vector's rules found little, in a hidden helper session, and each suggestion is kept only if its quote is the document's own words. Kept suggestions wait as proposed records. Refused for a session a guest is in, a model that may train on prompts and the Zen gateway.",
