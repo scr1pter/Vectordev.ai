@@ -91,7 +91,13 @@ export type RunHandle = {
   readonly result: Effect.Effect<RunResult>
 }
 
-export type SpawnOpts = { readonly timeoutMs?: number; readonly env?: Record<string, string>; readonly cwd?: string }
+export type SpawnOpts = {
+  readonly timeoutMs?: number
+  readonly env?: Record<string, string>
+  readonly cwd?: string
+  /** Text piped to the CLI's stdin, which is otherwise closed. */
+  readonly stdin?: string
+}
 
 // Typed equivalent of constructing argv for `vector run`. New flags should
 // land here so tests stay grep-able and refactor-safe.
@@ -221,7 +227,7 @@ export function withCliFixture<A, E>(
         cwd: opts?.cwd ?? home,
         env: { ...env, ...opts?.env },
         extendEnv: true,
-        stdin: "ignore",
+        stdin: opts?.stdin === undefined ? "ignore" : Stream.make(new TextEncoder().encode(opts.stdin)),
       })
       // Pass timeout to appProc.run rather than wrapping with
       // Effect.timeoutOrElse externally: AppProcess.run is itself scoped, so
