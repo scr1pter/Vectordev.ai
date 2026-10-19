@@ -24,7 +24,8 @@
     "package:win": "bun --no-env-file ./scripts/package-desktop.ts --target=win",
     "package:linux": "bun --no-env-file ./scripts/package-desktop.ts --target=linux",
     "native:build": "bun ./scripts/build-computer-use-helper.ts",
-    "verify:package": "bun ./scripts/verify-package.ts"
+    "verify:package": "bun ./scripts/verify-package.ts",
+    "verify:brain-worker": "bun ./scripts/verify-brain-worker.ts"
   },
   "main": "./out/main/index.js",
   "dependencies": {

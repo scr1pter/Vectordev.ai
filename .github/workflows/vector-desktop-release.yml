@@ -471,6 +471,17 @@ jobs:
         working-directory: packages/engine
         timeout-minutes: 5
         run: node script/smoke-node-bundle.ts
+      # The engine starts the brain's document reader as an eval worker inside Electron's utility process. Start
+      # Electron itself and have a utility process read a PDF that way, so a reader that cannot start there fails here
+      # rather than quietly reading documents on the main thread under tighter limits.
+      - name: Install the Electron runtime for the brain reader smoke test
+        if: matrix.name == 'desktop'
+        run: bun packages/desktop/node_modules/electron/install.js
+      - name: Smoke-test the brain reader in Electron's utility process
+        if: matrix.name == 'desktop'
+        working-directory: packages/desktop
+        timeout-minutes: 5
+        run: xvfb-run -a bun scripts/verify-brain-worker.ts
 
   draft:
     name: Prepare draft GitHub release
