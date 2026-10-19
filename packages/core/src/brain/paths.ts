@@ -3,6 +3,7 @@ export * as BrainPaths from "./paths"
 import { createHash } from "node:crypto"
 import { realpathSync } from "node:fs"
 import path from "node:path"
+import type { BrainSchema } from "./schema"
 
 // Where the brain keeps what it learns. Pure, with no import-time side effects, so the desktop main process can use it
 // to place failure memory where the engine reads it.
@@ -32,4 +33,28 @@ export function failureFile(data: string, root: string) {
 /** The repository key for a folder outside git, which has no repository ID of its own. */
 export function folderKey(directory: string) {
   return `dir:${createHash("sha256").update(canonical(directory)).digest("hex").slice(0, 16)}`
+}
+
+/** Kept originals of added documents, for repositories that keep them. Erasing all memory deletes them. */
+export function documents(data: string) {
+  return path.join(directory(data), "documents")
+}
+
+const EXTENSIONS: Readonly<Record<BrainSchema.Format, string>> = {
+  pdf: "pdf",
+  docx: "docx",
+  pptx: "pptx",
+  xlsx: "xlsx",
+  csv: "csv",
+  markdown: "md",
+  html: "html",
+  json: "json",
+  yaml: "yaml",
+  openapi: "json",
+  text: "txt",
+}
+
+/** A kept original in `folder`: named by its content hash, with its format's extension. */
+export function original(folder: string, hash: string, format: BrainSchema.Format) {
+  return path.join(folder, `${hash}.${EXTENSIONS[format]}`)
 }

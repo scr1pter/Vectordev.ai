@@ -475,7 +475,7 @@ export const layerWith = (options: Options = {}) =>
         scope,
         wakeup,
         owner: options.owner,
-        originals: path.join(BrainPaths.directory(global.data), "documents"),
+        originals: BrainPaths.documents(global.data),
       })
     }),
   )
@@ -926,7 +926,7 @@ function make(input: {
   // The kept copy of a document's file, if there is one and it is still those bytes.
   async function keptCopy(document: DocumentRow) {
     if (!document.stored) return undefined
-    const bytes = await fs.readFile(originalPath(input.originals, document.content_hash, document.format)).catch(() => undefined)
+    const bytes = await fs.readFile(BrainPaths.original(input.originals, document.content_hash, document.format)).catch(() => undefined)
     if (!bytes || createHash("sha256").update(bytes).digest("hex") !== document.content_hash) return undefined
     return new Uint8Array(bytes)
   }
@@ -947,7 +947,7 @@ function make(input: {
       await fs.mkdir(folder, { recursive: true, mode: 0o700 })
       if (process.platform !== "win32") await fs.chmod(folder, 0o700)
       return fs
-        .writeFile(originalPath(folder, hash, format), file.bytes, { mode: 0o600, flag: "wx" })
+        .writeFile(BrainPaths.original(folder, hash, format), file.bytes, { mode: 0o600, flag: "wx" })
         .then(() => true)
         .catch((error: NodeJS.ErrnoException) => error.code === "EEXIST")
     }).pipe(Effect.catchCause(() => Effect.succeed(false)))
@@ -969,7 +969,7 @@ function make(input: {
       Promise.all(
         copies
           .filter((copy) => !still.has(copy.hash))
-          .map((copy) => fs.rm(originalPath(folder, copy.hash, copy.format), { force: true }).catch(() => undefined)),
+          .map((copy) => fs.rm(BrainPaths.original(folder, copy.hash, copy.format), { force: true }).catch(() => undefined)),
       ),
     )
   })
@@ -3007,28 +3007,9 @@ async function upTo(file: string, cap: number) {
   return fill().finally(() => handle.close())
 }
 
-const EXTENSIONS: Readonly<Record<BrainSchema.Format, string>> = {
-  pdf: "pdf",
-  docx: "docx",
-  pptx: "pptx",
-  xlsx: "xlsx",
-  csv: "csv",
-  markdown: "md",
-  html: "html",
-  json: "json",
-  yaml: "yaml",
-  openapi: "json",
-  text: "txt",
-}
-
 /** The title a document has from its file name, until its text gives a better one or the user names it. */
 function nameTitle(name: string) {
   return BrainCard.clip(BrainScan.stripHidden(path.basename(name).replace(/\.[A-Za-z0-9]{1,8}$/, "")), 80)
-}
-
-/** Where a kept original lives: named by its hash, with its format's extension. */
-function originalPath(folder: string, hash: string, format: BrainSchema.Format) {
-  return path.join(folder, `${hash}.${EXTENSIONS[format]}`)
 }
 
 /** The memory kind a record becomes when the user saves it as memory. */

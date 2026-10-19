@@ -309,6 +309,28 @@ describe("BrainKnowledge versions, pausing and path mode", () => {
 })
 
 describe("BrainKnowledge kept originals", () => {
+  test("erasing a repository's memory deletes the originals it kept, and erasing everything deletes them all", async () => {
+    const result = await withKnowledge((setup) =>
+      Effect.gen(function* () {
+        const folder = path.join(setup.dir, "data", "brain", "documents")
+        const other = { ...setup.place, repository: "repo-2" }
+        yield* setup.knowledge.configure(setup.place, { keepOriginals: true })
+        yield* setup.knowledge.configure(other, { keepOriginals: true })
+        yield* added(setup, text("Auth spec.md", SPEC_V1))
+        yield* setup.knowledge.add(other, text("Limits.md", SPEC_V2))
+        const before = yield* Effect.promise(() => fs.readdir(folder))
+        yield* setup.brain.erase(setup.place, "repository")
+        const repository = yield* Effect.promise(() => fs.readdir(folder))
+        yield* setup.brain.erase(setup.place, "all")
+        const all = yield* Effect.promise(() => fs.readdir(folder).catch(() => [] as string[]))
+        return { before, repository, all }
+      }),
+    )
+    expect(result.before).toHaveLength(2)
+    expect(result.repository).toHaveLength(1)
+    expect(result.all).toEqual([])
+  })
+
   test("a repository that keeps originals keeps each file privately, reads it again from the copy, and deletes it when told", async () => {
     const bytes = new TextEncoder().encode(SPEC_V1)
     const result = await withKnowledge((setup) =>

@@ -1581,6 +1581,21 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       repositories ? inArray(BrainEntryTable.repository_id, repositories) : undefined,
     )
     const rows = yield* db.select({ id: BrainEntryTable.id }).from(BrainEntryTable).where(where).all().pipe(Effect.orDie)
+    // Kept originals of the documents erased below, which are not redacted, go with them.
+    const kept =
+      scope === "personal"
+        ? []
+        : yield* db
+            .select({ hash: BrainDocumentTable.content_hash, format: BrainDocumentTable.format })
+            .from(BrainDocumentTable)
+            .where(
+              and(
+                eq(BrainDocumentTable.stored, true),
+                repositories ? inArray(BrainDocumentTable.repository_id, repositories) : undefined,
+              ),
+            )
+            .all()
+            .pipe(Effect.orDie)
     yield* db
       .transaction((tx) =>
         Effect.gen(function* () {
@@ -1636,6 +1651,26 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
         }),
       )
       .pipe(Effect.orDie)
+    if (scope === "all")
+      yield* Effect.promise(() => fs.rm(BrainPaths.documents(dirs.data), { recursive: true, force: true }))
+    if (scope === "repository" && kept.length > 0) {
+      // A copy another repository's document still keeps stays.
+      const still = new Set(
+        (yield* db
+          .select({ hash: BrainDocumentTable.content_hash })
+          .from(BrainDocumentTable)
+          .where(and(eq(BrainDocumentTable.stored, true), inArray(BrainDocumentTable.content_hash, kept.map((copy) => copy.hash))))
+          .all()
+          .pipe(Effect.orDie)).map((row) => row.hash),
+      )
+      yield* Effect.promise(() =>
+        Promise.all(
+          kept
+            .filter((copy) => !still.has(copy.hash))
+            .map((copy) => fs.rm(BrainPaths.original(BrainPaths.documents(dirs.data), copy.hash, copy.format), { force: true })),
+        ),
+      )
+    }
     // What Vector learned in a repository includes its failure memory.
     if (scope !== "personal") {
       const files = scope === "all" ? [path.join(BrainPaths.directory(dirs.data), "failures")] : [failureFile(place)]
