@@ -67,6 +67,15 @@ async function answer(request: BrainWorkerProtocol.Request, signal?: AbortSignal
       sections: structured.sections,
       passages: structured.passages,
       records: extraction.records,
+      code: [
+        ...new Set(
+          extracted.blocks.flatMap((block) =>
+            block.type === "paragraph" ? block.code : block.type === "list" ? block.items.flatMap((item) => item.code) : [],
+          ),
+        ),
+      ]
+        .filter((code) => code.length <= 120)
+        .slice(0, 400),
     },
   }
 }

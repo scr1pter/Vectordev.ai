@@ -326,16 +326,42 @@ export type RecordEvent = typeof RecordEvent.Type
 
 /** A link from a record, passage or entry to the code it names. */
 export const Anchor = Schema.Struct({
+  /** The link's number, which unlinking names. */
+  id: Schema.Finite,
   owner: Schema.String,
   path: Schema.String,
   symbol: Schema.optional(Schema.String),
   line: Schema.optional(Schema.Finite),
+  /**
+   * - definition, use: the code defines or uses a name the document gives; route, env: registers its endpoint or reads
+   *   its environment variable; constant: defines a value the document states; path: is a file it names.
+   * - user: the user linked it; outcome: a run that cited the record changed this file and passed.
+   */
   method: Schema.Literals(["path", "definition", "use", "route", "env", "constant", "user", "outcome"]),
+  weight: Schema.Finite,
+  /** A constant's value as the code gives it, in the unit its name or comment gives. */
+  value: Schema.optional(Schema.Struct({ raw: Schema.String, value: Schema.Finite, unit: Schema.optional(Schema.String) })),
+  /** fresh: the linked line is unchanged (or only moved); drifted: it reads differently now; missing: it is gone. */
   status: Schema.Literals(["fresh", "drifted", "missing"]),
   origin: Schema.Literals(["extracted", "user", "outcome"]),
   checkedAt: Schema.Finite,
 }).annotate({ identifier: "MemoryAnchor" })
 export type Anchor = typeof Anchor.Type
+
+/** Something Vector holds that a file is linked to: a document's record or passage, or a memory entry. */
+export const Link = Schema.Struct({
+  owner: Schema.String,
+  type: Schema.Literals(["record", "passage", "entry"]),
+  /** A record's kind, "passage", or an entry's kind. */
+  kind: Schema.String,
+  /** The document's title, or "Memory" for an entry. */
+  title: Schema.String,
+  document: Schema.optional(Schema.String),
+  text: Schema.String,
+  /** The link itself; an entry covering the file by its paths has none. */
+  anchor: Schema.optional(Anchor),
+}).annotate({ identifier: "MemoryLink" })
+export type Link = typeof Link.Type
 
 /**
  * - conflict: two records, or a record and an entry or rule, disagree. Never resolved automatically.

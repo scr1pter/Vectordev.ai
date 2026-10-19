@@ -104,6 +104,8 @@ export const Structured = Schema.Struct({
   sections: Schema.Array(Section),
   passages: Schema.Array(Passage),
   records: Schema.Array(Record),
+  /** What the document set as code (backticks, a monospace font, a Code style), which links to code may name. */
+  code: Schema.optional(Schema.Array(Schema.String)),
 })
 export type Structured = typeof Structured.Type
 

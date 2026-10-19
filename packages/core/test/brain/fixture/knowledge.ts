@@ -1,6 +1,7 @@
 // The knowledge store over a brain in memory (or a file two services share), with a temporary repository, config and
 // data folder, so nothing touches the user's own. Documents are read on the main thread unless a test gives a worker.
 
+import { execFileSync } from "node:child_process"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Effect, Layer } from "effect"
@@ -10,6 +11,8 @@ import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { BrainWorkerEntry } from "@vectordevai/core/brain/worker/entry"
 import { BrainWorker } from "@vectordevai/core/brain/worker/host"
 import { Global } from "@vectordevai/core/global"
+import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { tmpdir } from "../../fixture/tmpdir"
 
 export type Setup = {
@@ -27,6 +30,8 @@ export async function withKnowledge<A, E>(
     readonly files?: Record<string, string | Uint8Array>
     readonly held?: boolean
     readonly worker?: Layer.Layer<BrainWorker.Service>
+    /** Make the repository a git working tree, which documents are linked to the code of. */
+    readonly git?: boolean
   } = {},
 ) {
   await using tmp = await tmpdir()
@@ -36,6 +41,7 @@ export async function withKnowledge<A, E>(
     await fs.mkdir(path.dirname(path.join(root, name)), { recursive: true })
     await fs.writeFile(path.join(root, name), content)
   }
+  if (options.git) execFileSync("git", ["init", "-q"], { cwd: root })
   const place = placeFor(root, options.held)
   return await Effect.runPromise(
     services(place, body, { file: ":memory:", dir: tmp.path, worker: options.worker ?? BrainWorker.layerInline }),
@@ -66,6 +72,7 @@ export function services<A, E>(
   },
 ) {
   const layer = BrainKnowledge.layerWith({ ...(options.owner ? { owner: options.owner } : {}) }).pipe(
+    Layer.provide(LayerNode.compile(Ripgrep.node)),
     Layer.provideMerge(Brain.layer),
     Layer.provideMerge(options.worker),
     Layer.provideMerge(BrainDatabase.layerFor(options.file).pipe(Layer.fresh)),

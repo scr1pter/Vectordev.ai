@@ -14,6 +14,10 @@ import { Brain } from "./brain"
 import { BrainCard } from "./card"
 import { BrainDatabase } from "./database"
 import { Global } from "../global"
+import { Ripgrep } from "../ripgrep"
+import { BrainAnchor } from "./anchor"
+import { BrainConflict } from "./conflict"
+import { BrainDrift } from "./drift"
 import { BrainLimits } from "./document/limits"
 import { BrainSniff } from "./document/sniff"
 import { BrainFuse } from "./fuse"
@@ -159,6 +163,10 @@ export type RecordChange = {
    * - make-memory: saved as a memory entry of the user's, as private as its document.
    */
   readonly action?: "not-applicable" | "forget" | "restore" | "make-memory"
+  /** The user's own link to a file of the repository, and the symbol in it, which no re-read takes away. */
+  readonly link?: { readonly path: string; readonly symbol?: string }
+  /** A link the user takes away, by its number; Vector does not make it again. */
+  readonly unlink?: number
 }
 
 export type RecordChanged =
@@ -240,6 +248,48 @@ export type Detail = {
     readonly bytes: number
     readonly createdAt: number
   }[]
+}
+
+/** What linking documents to code found: links made, names still waiting for their code, and names too common to link. */
+export type Linked = { readonly anchors: number; readonly pending: number; readonly common: readonly string[] }
+
+/** What a drift pass did: links checked, found drifted or missing, values that disagree, and waiting names it linked. */
+export type Drifted = {
+  readonly checked: number
+  readonly drifted: number
+  readonly missing: number
+  readonly values: number
+  readonly linked: number
+}
+
+/**
+ * The user's decision on an item that needs their look.
+ * - dismiss: not an issue; it stays dismissed while both sides say what they said.
+ * - keep-document: for drift, the document is right and the code is the user's to change.
+ * - keep-code: for drift, the code is right: a decision of the user's says so and the link takes the code as it is.
+ * - keep: for a conflict, the side `winner` names is kept and the other put away, as the user's to bring back.
+ * - approve, reject: for held content, as Settings decides it.
+ */
+export type Resolution = {
+  readonly action: "dismiss" | "keep-document" | "keep-code" | "keep" | "approve" | "reject"
+  readonly winner?: string
+}
+
+export type Resolved =
+  | { readonly type: "item"; readonly item: BrainSchema.ReviewItem; readonly entry?: BrainSchema.Entry }
+  | { readonly type: "settled" }
+  | { readonly type: "refused"; readonly message: string }
+
+/** A file the agent read or changed, for the line that names what is linked to it. */
+export type PointerInput = {
+  readonly file: string
+  readonly personal: boolean
+  /** Ids the conversation already has. */
+  readonly exclude: ReadonlySet<string>
+  /** The ids an earlier request was shown, rendered again for this one; nothing is recorded as used. */
+  readonly ids?: readonly string[]
+  readonly sessionID?: string
+  readonly requestID?: string
 }
 
 export interface Interface {
@@ -336,6 +386,8 @@ export interface Interface {
       readonly tight: boolean
       readonly personal: boolean
       readonly exclude: ReadonlySet<string>
+      /** What the request is touching: records linked to it come in with no word in common with the request. */
+      readonly seeds?: readonly BrainFuse.Seed[]
       readonly sessionID?: string
       readonly requestID?: string
     },
@@ -378,6 +430,23 @@ export interface Interface {
     ids: readonly string[],
   ) => Effect.Effect<{ readonly documents: readonly BrainSchema.Document[]; readonly missing: readonly string[] }>
   readonly worker: () => Effect.Effect<BrainWorker.Status>
+  /** The line a read of a linked file adds: `Documents linked to <file>: [r…] requirement (…)`, or nothing. */
+  readonly pointers: (place: Brain.Place, input: PointerInput) => Effect.Effect<Brain.Injection>
+  /** The line an edit of a file linked to a requirement, constraint or contract adds, or nothing. */
+  readonly guard: (place: Brain.Place, input: PointerInput) => Effect.Effect<Brain.Injection>
+  /** Links documents (one, or all of them) to the code they name, again. */
+  readonly link: (place: Brain.Place, input?: { readonly document?: string }) => Effect.Effect<Linked>
+  /** Checks links against the code, at most every 10 minutes per repository unless forced, and links waiting names. */
+  readonly drift: (place: Brain.Place, options?: { readonly force?: boolean }) => Effect.Effect<Drifted>
+  /** What is linked to a file: records and passages by their links, memory by the paths it covers. */
+  readonly links: (
+    place: Brain.Place,
+    file: string,
+    options: { readonly personal: boolean },
+  ) => Effect.Effect<readonly BrainSchema.Link[]>
+  /** What needs the user's look: conflicts, drift and held content, open ones only. */
+  readonly review: (place: Brain.Place) => Effect.Effect<readonly BrainSchema.ReviewItem[]>
+  readonly resolve: (place: Brain.Place, id: string, resolution: Resolution) => Effect.Effect<Resolved | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/BrainKnowledge") {}
@@ -409,6 +478,12 @@ export const GET = { card: 600, passage: 600, outline: 600, part: 1_500 } as con
 /** Tokens of document reads per request message, by size. */
 export const READS = { chat: 0, light: 2_000, standard: 5_000, thorough: 10_000 } as const
 
+/**
+ * The line a read or an edit of a linked file adds: links this strong or stronger, at most `ids` of them, in at most
+ * `tokens` tokens for a read and `guard` for the spec guard after an edit.
+ */
+export const POINTER = { weight: 0.6, ids: 3, tokens: 60, guard: 50 } as const
+
 /** The reader's version: documents an older reader read are read again when they can be. */
 export const EXTRACTOR = 1
 
@@ -431,6 +506,23 @@ const ABANDONED = 10 * MINUTE
 const BACKOFF = [MINUTE, 10 * MINUTE, 60 * MINUTE]
 const FORGOTTEN = 180 * DAY
 const SCAN_EVERY = 10 * MINUTE
+/** Bytes of a code file a link reads. */
+const FILE = 2 * 1024 * 1024
+/** Names waiting for their code that one pass looks for again. */
+const PENDING = 400
+/** A repository's links are checked against its code at most this often, unless asked. */
+const DRIFT_EVERY = 10 * MINUTE
+/** Links checked in one pass (the rest wait for the next), and anchored files looked at. */
+const DRIFT_RECHECKS = 200
+const DRIFT_FILES = 2_000
+/** Kinds a pointer ranks first, in order; the spec guard names the first three. */
+const GUARDED: readonly BrainSchema.RecordKind[] = ["requirement", "constraint", "contract", "decision"]
+/** Items the review list shows of each sort, and what the conflict check compares a document with. */
+const REVIEW = 200
+const CONFLICT_ENTRIES = 500
+const CONFLICT_RECORDS = 2_000
+/** Neighbours one activation pass reads. */
+const ACTIVATION_ITEMS = 2_000
 /** Characters of the outline card for a just-attached document, about 120 tokens. */
 const OUTLINE = 480
 
@@ -466,12 +558,14 @@ export const layerWith = (options: Options = {}) =>
       const global = yield* Global.Service
       const brain = yield* Brain.Service
       const worker = yield* BrainWorker.Service
+      const ripgrep = yield* Ripgrep.Service
       const scope = yield* Effect.scope
       const wakeup = yield* Queue.sliding<void>(1)
       return make({
         db: database.db,
         brain,
         worker,
+        ripgrep,
         scope,
         wakeup,
         owner: options.owner,
@@ -485,13 +579,14 @@ export const layer = layerWith()
 export const node = makeGlobalNode({
   service: Service,
   layer,
-  deps: [BrainDatabase.node, Global.node, Brain.node, BrainWorker.node],
+  deps: [BrainDatabase.node, Global.node, Brain.node, BrainWorker.node, Ripgrep.node],
 })
 
 function make(input: {
   readonly db: BrainDatabase.Database
   readonly brain: Brain.Interface
   readonly worker: BrainWorker.Interface
+  readonly ripgrep: Ripgrep.Interface
   readonly scope: Scope.Scope
   readonly wakeup: Queue.Queue<void>
   readonly owner?: string
@@ -506,13 +601,22 @@ function make(input: {
     draining: false,
     // Files added in this process and not yet read, by document id: originals are not kept, so these are the bytes.
     pending: new Map<string, File>(),
-    // Where each repository's working tree is, for reading a repository doc again by its path.
+    // Where each repository's working tree is, for reading a repository doc again by its path, and the place itself,
+    // for linking what a background read stored to the code.
     roots: new Map<string, string>(),
+    places: new Map<string, Brain.Place>(),
     added: [] as number[],
     // Cards as each session was first shown them, so a reindex mid-session keeps the bytes the provider cached.
     snapshots: new Map<string, Map<string, string>>(),
     // Documents the user named before they were read, whose title the text must not replace.
     titled: new Set<string>(),
+    // When each repository's links were last checked against its code.
+    drifts: new Map<string, number>(),
+  }
+
+  const remember = (place: Brain.Place) => {
+    state.roots.set(place.repository, place.root)
+    state.places.set(place.repository, place)
   }
 
   const revise = (repository: string) =>
@@ -533,7 +637,7 @@ function make(input: {
 
   const add = Effect.fn("BrainKnowledge.add")(function* (place: Brain.Place, request: AddInput) {
     if (request.hold === "guest") return refuse("guest", "A session an invited guest is in cannot add documents.")
-    state.roots.set(place.repository, place.root)
+    remember(place)
     const file = yield* Effect.promise(() => read(place, request))
     if (file.type === "refused") return file
     const status = yield* worker.status()
@@ -1228,6 +1332,8 @@ function make(input: {
       .get()
       .pipe(Effect.orDie)
     const title = current?.title ?? document.title
+    const final = hold && !approved ? ("held" as const) : structured.unread.length > 0 ? ("partial" as const) : ("searchable" as const)
+    const fresh = document.status === "queued" || document.status === "reading"
     yield* db
       .update(BrainDocumentTable)
       .set({
@@ -1241,7 +1347,8 @@ function make(input: {
         pages: structured.pages ?? null,
         unread: [...structured.unread],
         warnings: [...structured.warnings],
-        status: hold && !approved ? "held" : structured.unread.length > 0 ? "partial" : "searchable",
+        // A new document is linked to the code before it is searchable; one read again stays in use meanwhile.
+        status: fresh ? "linking" : final,
         hold_reason: hold ?? null,
         stats: {
           tokens: structured.tokens,
@@ -1265,6 +1372,18 @@ function make(input: {
     yield* totals(document.repository_id)
     state.titled.delete(document.id)
     forgetCards(gone.map((item) => item.ref))
+    // Links to code and disagreements with what else Vector holds. Neither may cost the document its reading.
+    const place = state.places.get(document.repository_id)
+    if (place) {
+      yield* linkDocuments(place, [document.id], structured.code ?? []).pipe(
+        Effect.catchCause((cause) => Effect.logWarning("brain document linking failed", { cause })),
+      )
+      yield* conflictsOf(place, document.id).pipe(
+        Effect.catchCause((cause) => Effect.logWarning("brain conflict check failed", { cause })),
+      )
+    }
+    if (fresh) yield* setStatus(document.id, final)
+    yield* revise(document.repository_id)
   })
 
   // Each term's document frequency, counted again for the terms a write touched; terms no item has any more go.
@@ -1628,6 +1747,7 @@ function make(input: {
     readonly text: string
     readonly line: string
     readonly visibility: BrainSchema.Visibility
+    readonly confidence: number
     /** A record's passage. */
     readonly passage?: string
   }
@@ -1643,6 +1763,7 @@ function make(input: {
           item: BrainItemTable.id,
           type: BrainItemTable.type,
           visibility: BrainItemTable.visibility,
+          confidence: BrainItemTable.confidence,
           document: BrainDocumentTable.id,
           title: BrainDocumentTable.title,
           ordinal: BrainDocumentTable.ordinal,
@@ -1683,6 +1804,7 @@ function make(input: {
           : []
         ).map((row) => [row.id, row]),
       )
+      const notes = yield* notesFor(place, rows.map((row) => row.ref))
       for (const row of rows) {
         const section = sections.get(row.recordSection ?? row.passageSection ?? "")
         const page = row.recordPage ?? row.passagePage ?? undefined
@@ -1708,14 +1830,45 @@ function make(input: {
             title: row.title,
             ...(page === undefined || page === null ? {} : { page }),
             ...(sectionPath ? { section: sectionPath } : {}),
-            text: BrainScan.redact(text).text,
+            text: `${BrainScan.redact(text).text}${notes.has(row.ref) ? ` (${notes.get(row.ref)!.join("; ")})` : ""}`,
           }),
           visibility: row.visibility,
+          confidence: row.confidence,
           ...(row.type === "record" && row.passage ? { passage: row.passage } : {}),
         })
       }
     }
     return found
+  })
+
+  // What a card says beside its own words: the value its linked code gives instead, and what it disagrees with.
+  const notesFor = Effect.fnUntraced(function* (place: Brain.Place, refs: readonly string[]) {
+    const notes = new Map<string, string[]>()
+    if (refs.length === 0) return notes
+    const rows = yield* db
+      .select()
+      .from(BrainReviewTable)
+      .where(
+        and(
+          eq(BrainReviewTable.repository_id, place.repository),
+          eq(BrainReviewTable.status, "open"),
+          inArray(BrainReviewTable.kind, ["drift", "conflict"]),
+          or(inArray(BrainReviewTable.a, [...refs]), inArray(BrainReviewTable.b, [...refs])),
+        ),
+      )
+      .orderBy(asc(BrainReviewTable.id))
+      .all()
+      .pipe(Effect.orDie)
+    const add = (ref: string, note: string) => notes.set(ref, [...(notes.get(ref) ?? []), note])
+    for (const row of rows) {
+      if (row.kind === "drift" && row.detail.type === "value" && typeof row.detail.code === "string")
+        add(row.a, `code says ${row.detail.code}`)
+      if (row.kind !== "conflict" || !row.b) continue
+      const newer = row.detail.newer
+      add(row.a, `conflicts with [${row.b}]${newer === row.b ? ", newer" : ""}`)
+      add(row.b, `conflicts with [${row.a}]${newer === row.a ? ", newer" : ""}`)
+    }
+    return notes
   })
 
   // A session's cards keep the bytes it was first shown, while the item is still there to show.
@@ -1736,7 +1889,7 @@ function make(input: {
 
   const record = Effect.fnUntraced(function* (
     found: readonly Card[],
-    input: { sessionID?: string; requestID?: string; tier: "recall" | "get" | "search"; tokens: number },
+    input: { sessionID?: string; requestID?: string; tier: "recall" | "get" | "search" | "pointer" | "guard"; tokens: number },
   ) {
     if (found.length === 0) return
     const now = Date.now()
@@ -1772,6 +1925,7 @@ function make(input: {
       tight: boolean
       personal: boolean
       exclude: ReadonlySet<string>
+      seeds?: readonly BrainFuse.Seed[]
       sessionID?: string
       requestID?: string
     },
@@ -1805,22 +1959,43 @@ function make(input: {
       // Below 0.6 a record is searchable but never recalled on its own.
       (item) => BrainFuse.eligible(item.matched.length, query.size) && item.confidence >= 0.6,
     )
+    // Code-anchored recall: what is linked to the files and symbols the request touches comes in with no word in
+    // common with it. A greeting has no terms, so it touches nothing.
+    const graph =
+      query.size > 0 && (request.seeds?.length ?? 0) > 0
+        ? yield* activated(place, request.seeds!)
+        : new Map<string, { readonly value: number; readonly why: string }>()
+    const active = [...graph]
+      .filter(([ref, item]) => item.value >= BrainFuse.ACTIVATED && !request.exclude.has(ref))
+      .toSorted((a, b) => b[1].value - a[1].value || a[0].localeCompare(b[0]))
+      .slice(0, BrainFuse.DEPTH)
+      .map(([ref]) => ref)
     const shown = yield* cards(
       place,
-      found.slice(0, BrainFuse.DEPTH).map((item) => item.ref),
+      [...found.slice(0, BrainFuse.DEPTH).map((item) => item.ref), ...active],
       request.personal,
     )
     // A record's card is its passage's own sentence, so a passage goes in only where no record of it does; the agent
     // opens the rest of it with get.
-    const covered = new Set(found.flatMap((item) => shown.get(item.ref)?.passage ?? []))
+    const covered = new Set([...shown.values()].flatMap((card) => (card.passage ? [card.passage] : [])))
     const documentHits = found
       .filter((item) => shown.has(item.ref) && !covered.has(item.ref))
       .slice(0, BrainFuse.DEPTH)
+    // Below 0.6 a record is searchable but never recalled on its own, however it was reached.
+    const linked = active.filter((ref) => shown.has(ref) && !covered.has(ref) && shown.get(ref)!.confidence >= 0.6)
+    const reached = [...new Set([...documentHits.map((item) => item.ref), ...linked])]
+    // Two records read from one sentence show the same words; the second adds nothing.
+    const documentIds = reached.filter(
+      (ref, index) => reached.findIndex((other) => shown.get(other)!.text === shown.get(ref)!.text) === index,
+    )
     const fused = BrainFuse.rrf([
       { weight: 1, ids: memory.map((item) => item.id) },
       { weight: 1, ids: documentHits.map((item) => item.ref) },
+      { weight: BrainFuse.GRAPH, ids: linked, strength: new Map(linked.map((ref) => [ref, graph.get(ref)!.value])) },
     ])
     const best = Math.max(0, ...fused.values())
+    const freshness = yield* freshnessOf(place, documentIds)
+    const partners = yield* conflictPairs(place, documentIds)
     const candidates = [
       ...memory.map((item) => ({
         id: item.id,
@@ -1834,22 +2009,23 @@ function make(input: {
         }),
         cost: Token.estimate(`${item.line}\n`),
       })),
-      ...documentHits.map((item) => {
-        const card = shown.get(item.ref)!
+      ...documentIds.map((ref) => {
+        const card = shown.get(ref)!
         return {
-          id: item.ref,
+          id: ref,
           value: BrainFuse.value({
-            fused: fused.get(item.ref) ?? 0,
+            fused: fused.get(ref) ?? 0,
             best,
-            trust: item.visibility === "repository" ? BrainFuse.TRUST.repository : BrainFuse.TRUST.document,
-            freshness: 1,
+            trust: card.visibility === "repository" ? BrainFuse.TRUST.repository : BrainFuse.TRUST.document,
+            freshness: freshness.get(ref) ?? 1,
             proven: 1,
-            confidence: item.confidence,
+            confidence: card.confidence,
           }),
           cost: Token.estimate(`${card.line}\n`),
           document: card.document,
           section: card.section,
           ...(card.subject ? { subject: card.subject } : {}),
+          ...(partners.has(ref) ? { conflicts: partners.get(ref)! } : {}),
         }
       }),
     ]
@@ -1857,8 +2033,8 @@ function make(input: {
     const header = Token.estimate(Brain.recallText(["-"], { newest: true, documents: true }))
     const picked = new Set(BrainPack.pack(candidates, total - header).map((item) => item.id))
     const ordered = Brain.order(memory.filter((item) => picked.has(item.id)))
-    const documentCards = documentHits
-      .flatMap((item) => (picked.has(item.ref) ? [shown.get(item.ref)!] : []))
+    const documentCards = documentIds
+      .flatMap((ref) => (picked.has(ref) ? [shown.get(ref)!] : []))
       // Grouped by document, then in reading order, so the bytes are stable and easy to read.
       .toSorted(
         (a, b) =>
@@ -1900,10 +2076,158 @@ function make(input: {
       cards: documentCards.map((card) => card.ref),
       why: Object.fromEntries([
         ...ordered.ordered.map((item) => [item.id, item.path ? "path" : `terms:${item.matched.join(",")}`] as const),
-        ...documentCards.map((card) => [card.ref, `terms:${hits.get(card.ref)?.matched.join(",") ?? ""}`] as const),
+        ...documentCards.map(
+          (card) =>
+            [card.ref, hits.has(card.ref) ? `terms:${hits.get(card.ref)!.matched.join(",")}` : (graph.get(card.ref)?.why ?? "")] as const,
+        ),
       ]),
       documents: true,
     }
+  })
+
+  // Records and passages linked to the files and symbols a request touches, by spreading activation over their links
+  // and one hop to their neighbours, each with why it was reached.
+  const activated = Effect.fnUntraced(function* (place: Brain.Place, seeds: readonly BrainFuse.Seed[]) {
+    const own = seeds
+      .slice(0, BrainFuse.SEEDS)
+      .map((seed) => (seed.path ? { ...seed, path: relativeTo(place.root, seed.path) } : seed))
+    const paths = [...new Set(own.flatMap((seed) => (seed.path ? [seed.path] : [])))]
+    const symbols = [...new Set(own.flatMap((seed) => (seed.symbol ? [seed.symbol] : [])))]
+    const out = new Map<string, { readonly value: number; readonly why: string }>()
+    if (paths.length === 0 && symbols.length === 0) return out
+    const anchors = yield* db
+      .select()
+      .from(BrainAnchorTable)
+      .where(
+        and(
+          eq(BrainAnchorTable.repository_id, place.repository),
+          or(
+            paths.length > 0 ? inArray(BrainAnchorTable.path, paths) : undefined,
+            symbols.length > 0 ? inArray(BrainAnchorTable.symbol, symbols) : undefined,
+          ),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    const active = BrainFuse.activation(
+      own,
+      anchors.map((anchor) => ({
+        owner: anchor.owner,
+        path: anchor.path,
+        ...(anchor.symbol ? { symbol: anchor.symbol } : {}),
+        weight: anchor.weight,
+        status: anchor.status,
+      })),
+    )
+    if (active.size === 0) return out
+    const sources = yield* db
+      .select({ id: BrainRecordTable.id, passage: BrainRecordTable.passage_id, section: BrainRecordTable.section_id })
+      .from(BrainRecordTable)
+      .where(inArray(BrainRecordTable.id, [...active.keys()]))
+      .all()
+      .pipe(Effect.orDie)
+    // A linked passage passes activation on to the records read from it.
+    const passages = [...active.keys()].filter((id) => !sources.some((source) => source.id === id))
+    const near = [...new Set([...sources.map((source) => source.passage), ...passages])]
+    const sections = [...new Set(sources.map((source) => source.section))]
+    const neighbours = yield* db
+      .select({
+        id: BrainRecordTable.id,
+        passage: BrainRecordTable.passage_id,
+        section: BrainRecordTable.section_id,
+        kind: BrainRecordTable.kind,
+        fields: BrainRecordTable.fields,
+      })
+      .from(BrainRecordTable)
+      .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainRecordTable.item))
+      .where(
+        and(
+          eq(BrainItemTable.repository_id, place.repository),
+          or(
+            near.length > 0 ? inArray(BrainRecordTable.passage_id, near) : undefined,
+            sections.length > 0 ? inArray(BrainRecordTable.section_id, sections) : undefined,
+            eq(BrainRecordTable.kind, "term"),
+          ),
+        ),
+      )
+      .limit(ACTIVATION_ITEMS)
+      .all()
+      .pipe(Effect.orDie)
+    const spread = BrainFuse.spread(
+      active,
+      [
+        ...sources,
+        ...passages.map((id) => ({ id, passage: id })),
+        ...neighbours.map((row) => ({
+          id: row.id,
+          passage: row.passage,
+          section: row.section,
+          ...(row.kind === "term" && typeof row.fields.term === "string" ? { term: row.fields.term } : {}),
+        })),
+      ],
+      own,
+    )
+    for (const [id, value] of spread) {
+      const anchor = anchors
+        .filter((item) => item.owner === id)
+        .toSorted((a, b) => b.weight - a.weight)[0]
+      out.set(id, { value, why: anchor ? `anchor:${anchor.path}:${anchor.method}` : "near" })
+    }
+    return out
+  })
+
+  // How far each record's links still say what they said: its freshest link counts, and a value the code gives
+  // differently costs it more.
+  const freshnessOf = Effect.fnUntraced(function* (place: Brain.Place, refs: readonly string[]) {
+    const out = new Map<string, number>()
+    if (refs.length === 0) return out
+    const anchors = yield* db
+      .select({ owner: BrainAnchorTable.owner, status: BrainAnchorTable.status })
+      .from(BrainAnchorTable)
+      .where(and(eq(BrainAnchorTable.repository_id, place.repository), inArray(BrainAnchorTable.owner, [...refs])))
+      .all()
+      .pipe(Effect.orDie)
+    for (const anchor of anchors) out.set(anchor.owner, Math.max(out.get(anchor.owner) ?? 0, BrainFuse.FRESHNESS[anchor.status]))
+    const drifts = yield* db
+      .select({ a: BrainReviewTable.a, detail: BrainReviewTable.detail })
+      .from(BrainReviewTable)
+      .where(
+        and(
+          eq(BrainReviewTable.repository_id, place.repository),
+          eq(BrainReviewTable.kind, "drift"),
+          eq(BrainReviewTable.status, "open"),
+          inArray(BrainReviewTable.a, [...refs]),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    for (const drift of drifts) if (drift.detail.type === "value") out.set(drift.a, (out.get(drift.a) ?? 1) * BrainFuse.FRESHNESS.drifted)
+    return out
+  })
+
+  // The other side of each open disagreement, so the two go in together or not at all.
+  const conflictPairs = Effect.fnUntraced(function* (place: Brain.Place, refs: readonly string[]) {
+    const out = new Map<string, string[]>()
+    if (refs.length === 0) return out
+    const rows = yield* db
+      .select({ a: BrainReviewTable.a, b: BrainReviewTable.b })
+      .from(BrainReviewTable)
+      .where(
+        and(
+          eq(BrainReviewTable.repository_id, place.repository),
+          eq(BrainReviewTable.kind, "conflict"),
+          eq(BrainReviewTable.status, "open"),
+          or(inArray(BrainReviewTable.a, [...refs]), inArray(BrainReviewTable.b, [...refs])),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    for (const row of rows) {
+      if (!row.b) continue
+      out.set(row.a, [...(out.get(row.a) ?? []), row.b])
+      out.set(row.b, [...(out.get(row.b) ?? []), row.a])
+    }
+    return out
   })
 
   const lines = Effect.fn("BrainKnowledge.lines")(function* (
@@ -2170,7 +2494,7 @@ function make(input: {
   })
 
   const reindex = Effect.fn("BrainKnowledge.reindex")(function* (place: Brain.Place, id?: string) {
-    state.roots.set(place.repository, place.root)
+    remember(place)
     const rows = yield* db
       .select()
       .from(BrainDocumentTable)
@@ -2265,18 +2589,48 @@ function make(input: {
       .get()
       .pipe(Effect.orDie)
     if (!item || !change.action) return "not-found" as const
+    // A held passage's records were held for the same words, so the user's word on the passage is their word on them.
+    const records =
+      item.type === "passage" && item.status !== "active" && item.status !== "archived"
+        ? yield* db
+            .select({ id: BrainItemTable.id, ref: BrainItemTable.ref })
+            .from(BrainItemTable)
+            .innerJoin(BrainRecordTable, eq(BrainRecordTable.item, BrainItemTable.id))
+            .where(
+              and(
+                eq(BrainRecordTable.passage_id, id),
+                inArray(BrainItemTable.status, ["quarantined", "proposed"]),
+                item.hold_reason ? eq(BrainItemTable.hold_reason, item.hold_reason) : undefined,
+              ),
+            )
+            .all()
+            .pipe(Effect.orDie)
+        : []
+    const items = [{ id: item.id, ref: id }, ...records]
     if (change.action === "approve") {
-      yield* db.update(BrainItemTable).set({ status: "active" }).where(eq(BrainItemTable.id, item.id)).run().pipe(Effect.orDie)
+      yield* db
+        .update(BrainItemTable)
+        .set({ status: "active" })
+        .where(inArray(BrainItemTable.id, items.map((row) => row.id)))
+        .run()
+        .pipe(Effect.orDie)
     } else {
       // Rejected stays rejected when the document is read again.
-      yield* db.update(BrainItemTable).set({ status: "archived" }).where(eq(BrainItemTable.id, item.id)).run().pipe(Effect.orDie)
+      yield* db
+        .update(BrainItemTable)
+        .set({ status: "archived" })
+        .where(inArray(BrainItemTable.id, items.map((row) => row.id)))
+        .run()
+        .pipe(Effect.orDie)
       yield* db
         .insert(BrainTombstoneTable)
-        .values({ repository_id: place.repository, norm_hash: itemTombstone(id), until: Number.MAX_SAFE_INTEGER })
+        .values(
+          items.map((row) => ({ repository_id: place.repository, norm_hash: itemTombstone(row.ref), until: Number.MAX_SAFE_INTEGER })),
+        )
         .onConflictDoNothing()
         .run()
         .pipe(Effect.orDie)
-      forgetCards([id])
+      forgetCards(items.map((row) => row.ref))
     }
     yield* revise(place.repository)
     return "updated" as const
@@ -2426,20 +2780,7 @@ function make(input: {
           }
         : {}),
       anchors: anchors.map(toAnchor),
-      conflicts: conflicts.map(
-        (item): BrainSchema.ReviewItem => ({
-          id: item.id,
-          kind: item.kind,
-          a: item.a,
-          ...(item.b ? { b: item.b } : {}),
-          subject: item.subject,
-          detail: item.detail,
-          status: item.status,
-          ...(item.winner ? { winner: item.winner } : {}),
-          createdAt: item.created_at,
-          updatedAt: item.updated_at,
-        }),
-      ),
+      conflicts: conflicts.map(toReview),
       history: history.map(
         (event): BrainSchema.RecordEvent => ({
           at: event.at,
@@ -2506,6 +2847,38 @@ function make(input: {
       yield* event("kind", { before: row.record.kind, after: change.kind })
       forgetCards([id])
     }
+    if (change.link) {
+      const linked = yield* linkByUser(place, id, change.link)
+      if (linked.type === "refused") return linked
+      yield* event("linked", { path: linked.path, ...(change.link.symbol ? { symbol: change.link.symbol } : {}) })
+    }
+    if (change.unlink !== undefined) {
+      const anchor = yield* db
+        .delete(BrainAnchorTable)
+        .where(
+          and(
+            eq(BrainAnchorTable.id, change.unlink),
+            eq(BrainAnchorTable.repository_id, place.repository),
+            eq(BrainAnchorTable.owner, id),
+          ),
+        )
+        .returning()
+        .get()
+        .pipe(Effect.orDie)
+      if (anchor) {
+        yield* db
+          .insert(BrainTombstoneTable)
+          .values({
+            repository_id: place.repository,
+            norm_hash: anchorTombstone(id, anchor.path, anchor.symbol ?? undefined),
+            until: Number.MAX_SAFE_INTEGER,
+          })
+          .onConflictDoNothing()
+          .run()
+          .pipe(Effect.orDie)
+        yield* event("unlinked", { path: anchor.path, ...(anchor.symbol ? { symbol: anchor.symbol } : {}) })
+      }
+    }
     if (change.pinned !== undefined && change.pinned !== row.record.pinned) {
       yield* db.update(BrainRecordTable).set({ pinned: change.pinned, updated_at: now }).where(eq(BrainRecordTable.id, id)).run().pipe(Effect.orDie)
       yield* event(change.pinned ? "pinned" : "unpinned")
@@ -2539,6 +2912,61 @@ function make(input: {
     yield* revise(place.repository)
     const after = yield* recordOf(place, id, { personal: true })
     return { type: "changed" as const, record: after!.record }
+  })
+
+  // A link the user makes: to a file of the working tree, at the symbol's definition when they name one.
+  const linkByUser = Effect.fnUntraced(function* (
+    place: Brain.Place,
+    owner: string,
+    target: { readonly path: string; readonly symbol?: string },
+  ) {
+    const file = relativeTo(place.root, target.path.trim())
+    const absolute = path.resolve(place.root, file)
+    const root = yield* Effect.promise(() => fs.realpath(place.root).catch(() => place.root))
+    const real = yield* Effect.promise(() => fs.realpath(absolute).catch(() => undefined))
+    const stat = real ? yield* Effect.promise(() => fs.lstat(real).catch(() => undefined)) : undefined
+    if (!real || !stat?.isFile() || !FSUtil.contains(root, real) || file.startsWith("..") || stat.size > FILE)
+      return { type: "refused" as const, message: `${file} is not a file of this repository.` }
+    const text = yield* Effect.promise(() => fs.readFile(real, "utf8").catch(() => ""))
+    const symbol = target.symbol?.trim() || undefined
+    const lines = text.split("\n")
+    const at = symbol
+      ? [lines.findIndex((line) => BrainAnchor.classify(line, symbol, file) === "definition"), lines.findIndex((line) => line.includes(symbol))].find(
+          (index) => index >= 0,
+        )
+      : undefined
+    const now = Date.now()
+    yield* db
+      .delete(BrainTombstoneTable)
+      .where(
+        and(
+          eq(BrainTombstoneTable.repository_id, place.repository),
+          eq(BrainTombstoneTable.norm_hash, anchorTombstone(owner, file, symbol)),
+        ),
+      )
+      .run()
+      .pipe(Effect.orDie)
+    yield* db
+      .insert(BrainAnchorTable)
+      .values({
+        repository_id: place.repository,
+        owner,
+        path: file,
+        symbol: symbol ?? null,
+        line: at === undefined ? null : at + 1,
+        method: "user",
+        weight: BrainAnchor.WEIGHT.user,
+        value: null,
+        file_hash: BrainDrift.hash(text),
+        line_hash: at === undefined ? null : BrainDrift.lineHash(lines[at]!),
+        status: "fresh",
+        origin: "user",
+        checked_at: now,
+        created_at: now,
+      })
+      .run()
+      .pipe(Effect.orDie)
+    return { type: "linked" as const, path: file }
   })
 
   // One item's keyword postings, written again from its terms; the repository's counts follow.
@@ -2748,7 +3176,7 @@ function make(input: {
   })
 
   const configure = Effect.fn("BrainKnowledge.configure")(function* (place: Brain.Place, change: Partial<Settings>) {
-    state.roots.set(place.repository, place.root)
+    remember(place)
     const before = yield* settings(place)
     const after = { ...before, ...change }
     yield* db
@@ -2794,7 +3222,7 @@ function make(input: {
   // --- The repository's own docs ----------------------------------------------------------------------------------
 
   const scan = Effect.fn("BrainKnowledge.scan")(function* (place: Brain.Place, options?: { force?: boolean }) {
-    state.roots.set(place.repository, place.root)
+    remember(place)
     const now = Date.now()
     const settings = yield* db
       .select()
@@ -2858,6 +3286,1133 @@ function make(input: {
     return results.filter((result) => result.type === "queued" || result.type === "version").length
   })
 
+  // --- Links to code ----------------------------------------------------------------------------------------------
+
+  type Owner = {
+    readonly id: string
+    readonly kind: BrainSchema.RecordKind | "passage"
+    readonly names: readonly BrainAnchor.Name[]
+    /** What a constraint or fact states, which the constants it is linked to are checked against. */
+    readonly value?: Stated
+  }
+
+  type Hit = { readonly path: string; readonly line: number; readonly text: string; readonly method: BrainAnchor.Method }
+
+  // Where each name is in the working tree: one Ripgrep pass for the identifiers, one for the routes, and the file list
+  // for paths. A name looked up and found nowhere is pending; one too common to narrow anything down links nothing; one
+  // past the pass's cap is not looked up at all, so it is neither.
+  const locate = Effect.fnUntraced(function* (
+    place: Brain.Place,
+    files: readonly string[],
+    names: readonly BrainAnchor.Name[],
+  ) {
+    const found = new Map<string, { readonly common: boolean; readonly hits: readonly Hit[] }>()
+    const identifiers = [
+      ...new Set(names.flatMap((name) => (name.kind === "symbol" || name.kind === "env" ? [name.text] : []))),
+    ].slice(0, BrainAnchor.LIMIT.identifiers)
+    const lines = new Map<string, { path: string; line: number; text: string }[]>()
+    for (const pattern of BrainAnchor.patterns(identifiers)) {
+      const matches = yield* input.ripgrep
+        .grep({ cwd: place.root, pattern, limit: BrainAnchor.LIMIT.hits })
+        .pipe(Effect.catch(() => Effect.succeed([])))
+      for (const match of matches) {
+        if (BrainAnchor.skipped(match.entry.path)) continue
+        for (const word of new Set(match.submatches.map((sub) => sub.text))) {
+          const own = lines.get(word) ?? []
+          own.push({ path: match.entry.path, line: match.line, text: match.text.replace(/\r?\n$/, "") })
+          lines.set(word, own)
+        }
+      }
+    }
+    for (const name of names) {
+      if ((name.kind !== "symbol" && name.kind !== "env") || !identifiers.includes(name.text)) continue
+      const hits = (lines.get(name.text) ?? []).map((hit) => ({
+        ...hit,
+        method: BrainAnchor.classify(hit.text, name.text, hit.path) as BrainAnchor.Method,
+      }))
+      const paths = [...new Set(hits.map((hit) => hit.path))]
+      if (paths.length > BrainAnchor.LIMIT.common) {
+        found.set(nameKey(name), { common: true, hits: [] })
+        continue
+      }
+      const defined = new Set(hits.filter((hit) => hit.method !== "use").map((hit) => hit.path))
+      // A file that only uses the name counts once it uses it on two lines: one mention is how unrelated code overlaps.
+      const uses = paths.flatMap((file) => {
+        const own = hits.filter((hit) => hit.path === file && hit.method === "use")
+        return own.length >= 2 && !defined.has(file) ? [own[0]!] : []
+      })
+      found.set(nameKey(name), {
+        common: false,
+        hits: [
+          ...hits.filter((hit) => hit.method === "definition"),
+          ...hits.filter((hit) => hit.method === "env"),
+          ...uses,
+        ].slice(0, BrainAnchor.LIMIT.perName),
+      })
+    }
+    const routes = names.filter((name) => name.kind === "route")
+    const pattern = BrainAnchor.routePattern(routes.map((name) => name.text))
+    const registered = pattern
+      ? (yield* input.ripgrep
+          .grep({ cwd: place.root, pattern, limit: BrainAnchor.LIMIT.hits })
+          .pipe(Effect.catch(() => Effect.succeed([])))).filter((match) => !BrainAnchor.skipped(match.entry.path))
+      : []
+    for (const name of routes)
+      found.set(nameKey(name), {
+        common: false,
+        hits: registered
+          .filter((match) => BrainAnchor.registers(match.text, name))
+          .slice(0, BrainAnchor.LIMIT.perName)
+          .map((match) => ({ path: match.entry.path, line: match.line, text: match.text.replace(/\r?\n$/, ""), method: "route" as const })),
+      })
+    const tracked = new Set(files)
+    for (const name of names.filter((item) => item.kind === "path")) {
+      const file = BrainAnchor.resolvePath(name.text, files, tracked)
+      found.set(nameKey(name), { common: false, hits: file ? [{ path: file, line: 0, text: "", method: "path" }] : [] })
+    }
+    return found
+  })
+
+  // Links for each owner from where its names are, at most 20 each, best first, never one the user unlinked. A
+  // constraint linked to a constant's definition is linked by the constant, with the value the code gives, and a value
+  // that differs from the document's opens a drift item at once.
+  const linkOwners = Effect.fnUntraced(function* (
+    place: Brain.Place,
+    owners: readonly Owner[],
+    files: readonly string[],
+    options: { readonly replace: boolean },
+  ) {
+    const located = yield* locate(
+      place,
+      files,
+      [...new Map(owners.flatMap((owner) => owner.names).map((name) => [nameKey(name), name])).values()],
+    )
+    const unlinked = new Set(
+      (yield* db
+        .select({ hash: BrainTombstoneTable.norm_hash })
+        .from(BrainTombstoneTable)
+        .where(eq(BrainTombstoneTable.repository_id, place.repository))
+        .all()
+        .pipe(Effect.orDie)).map((row) => row.hash),
+    )
+    const texts = new Map<string, string | undefined>()
+    const content = async (file: string) => {
+      if (texts.has(file)) return texts.get(file)
+      const absolute = path.join(place.root, file)
+      const stat = await fs.lstat(absolute).catch(() => undefined)
+      const text = stat?.isFile() && stat.size <= FILE ? await fs.readFile(absolute, "utf8").catch(() => undefined) : undefined
+      texts.set(file, text)
+      return text
+    }
+    const now = Date.now()
+    const made = owners.map((owner) => {
+      const anchors = owner.names.flatMap((name) => {
+        const spot = located.get(nameKey(name))
+        if (!spot || spot.common) return []
+        return spot.hits.flatMap((hit) => {
+          const constant =
+            owner.value && hit.method === "definition" && name.kind === "symbol" ? BrainAnchor.value(hit.text, name.text) : undefined
+          const method = constant ? ("constant" as const) : hit.method
+          const symbol = name.kind === "path" ? undefined : name.kind === "route" ? routeSymbol(name) : name.text
+          if (unlinked.has(anchorTombstone(owner.id, hit.path, symbol))) return []
+          return [{ owner, name, hit, method, symbol, constant, weight: BrainAnchor.WEIGHT[method] }]
+        })
+      })
+      const unique = [...new Map(anchors.map((anchor) => [`${anchor.hit.path}\0${anchor.symbol ?? ""}\0${anchor.hit.line}`, anchor])).values()]
+      return {
+        owner,
+        anchors: unique.toSorted((a, b) => b.weight - a.weight).slice(0, BrainAnchor.LIMIT.perOwner),
+        waiting: owner.names
+          .filter((name) => located.get(nameKey(name))?.common === false && located.get(nameKey(name))!.hits.length === 0)
+          .slice(0, BrainAnchor.LIMIT.pending),
+        common: owner.names.filter((name) => located.get(nameKey(name))?.common === true).map((name) => name.text),
+      }
+    })
+    const rows = yield* Effect.promise(() =>
+      Promise.all(
+        made.flatMap((item) =>
+          item.anchors.map(async (anchor) => {
+            const text = await content(anchor.hit.path)
+            const line = anchor.hit.line > 0 ? text?.split("\n")[anchor.hit.line - 1] : undefined
+            return {
+              repository_id: place.repository,
+              owner: item.owner.id,
+              path: anchor.hit.path,
+              symbol: anchor.symbol ?? null,
+              line: anchor.hit.line > 0 ? anchor.hit.line : null,
+              method: anchor.method,
+              weight: anchor.weight,
+              value: anchor.constant ?? null,
+              file_hash: BrainDrift.hash(text ?? ""),
+              line_hash: line === undefined ? null : BrainDrift.lineHash(line),
+              status: "fresh" as const,
+              origin: "extracted" as const,
+              checked_at: now,
+              created_at: now,
+            }
+          }),
+        ),
+      ),
+    )
+    const pending = made.flatMap((item) =>
+      item.waiting.map((name) => ({
+        repository_id: place.repository,
+        owner: item.owner.id,
+        identifier: name.kind === "route" ? routeSymbol(name) : name.text,
+        kind: name.kind,
+        created_at: now,
+      })),
+    )
+    const ids = owners.map((owner) => owner.id)
+    yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          if (options.replace)
+            for (const batch of chunks(ids, 500)) {
+              yield* tx
+                .delete(BrainAnchorTable)
+                .where(
+                  and(
+                    eq(BrainAnchorTable.repository_id, place.repository),
+                    inArray(BrainAnchorTable.owner, batch),
+                    eq(BrainAnchorTable.origin, "extracted"),
+                  ),
+                )
+                .run()
+              yield* tx
+                .delete(BrainPendingTable)
+                .where(and(eq(BrainPendingTable.repository_id, place.repository), inArray(BrainPendingTable.owner, batch)))
+                .run()
+            }
+          for (const batch of chunks(rows, 500)) yield* tx.insert(BrainAnchorTable).values(batch).run()
+          for (const batch of chunks(pending, 500)) yield* tx.insert(BrainPendingTable).values(batch).onConflictDoNothing().run()
+        }),
+      )
+      .pipe(Effect.orDie)
+    // A constant whose value is not the document's is drift from the start.
+    for (const item of made)
+      for (const anchor of item.anchors)
+        if (item.owner.value && anchor.constant)
+          yield* checkValue(place, {
+            owner: item.owner.id,
+            path: anchor.hit.path,
+            symbol: anchor.symbol ?? "",
+            line: anchor.hit.line,
+            stated: item.owner.value,
+            code: anchor.constant,
+          })
+    return {
+      anchors: rows.length,
+      pending: pending.length,
+      common: [...new Set(made.flatMap((item) => item.common))],
+      linked: made.filter((item) => item.anchors.length > 0).map((item) => ({ owner: item.owner.id, anchors: item.anchors })),
+    }
+  })
+
+  // The records and passages of documents, each with the names it gives. A passage names only what none of its own
+  // records already does, so a sentence is linked once.
+  const ownersOf = Effect.fnUntraced(function* (documents: readonly string[], code: readonly string[]) {
+    if (documents.length === 0) return [] as Owner[]
+    const records = yield* db
+      .select({
+        id: BrainRecordTable.id,
+        passage: BrainRecordTable.passage_id,
+        kind: BrainRecordTable.kind,
+        quote: BrainRecordTable.quote,
+        fields: BrainRecordTable.fields,
+      })
+      .from(BrainRecordTable)
+      .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainRecordTable.item))
+      .where(and(inArray(BrainRecordTable.document_id, [...documents]), ne(BrainItemTable.status, "archived")))
+      .all()
+      .pipe(Effect.orDie)
+    const passages = yield* db
+      .select({ id: BrainPassageTable.id, body: BrainPassageTable.body })
+      .from(BrainPassageTable)
+      .where(inArray(BrainPassageTable.document_id, [...documents]))
+      .all()
+      .pipe(Effect.orDie)
+    const named = records.map((record) => {
+      const value = stated(record.kind, record.fields)
+      return {
+        id: record.id,
+        passage: record.passage,
+        kind: record.kind,
+        names: BrainAnchor.names({ text: record.quote, code, fields: record.fields }),
+        ...(value ? { value } : {}),
+      }
+    })
+    const covered = new Map<string, Set<string>>()
+    for (const record of named)
+      covered.set(record.passage, new Set([...(covered.get(record.passage) ?? []), ...record.names.map(nameKey)]))
+    return [
+      ...named.filter((record) => record.names.length > 0),
+      ...passages.flatMap((passage): Owner[] => {
+        const names = BrainAnchor.names({ text: passage.body, code }).filter((name) => !covered.get(passage.id)?.has(nameKey(name)))
+        return names.length > 0 ? [{ id: passage.id, kind: "passage", names }] : []
+      }),
+    ]
+  })
+
+  // Links for documents, from what they name; the document's count of linked files follows.
+  const linkDocuments = Effect.fnUntraced(function* (place: Brain.Place, documents: readonly string[], code: readonly string[]) {
+    const files = yield* Effect.promise(() => workingFiles(place.root))
+    // Outside a git working tree there are no ignore rules to keep Ripgrep out of dependencies and build output.
+    if (files.length === 0) return { anchors: 0, pending: 0, common: [] as string[] }
+    const result = yield* linkOwners(place, yield* ownersOf(documents, code), files, { replace: true })
+    yield* countLinked(documents)
+    return { anchors: result.anchors, pending: result.pending, common: result.common }
+  })
+
+  const countLinked = Effect.fnUntraced(function* (documents: readonly string[]) {
+    for (const id of documents) {
+      const row = yield* db
+        .select({ count: sql<number>`count(DISTINCT ${BrainAnchorTable.path})` })
+        .from(BrainAnchorTable)
+        .where(
+          inArray(
+            BrainAnchorTable.owner,
+            db.select({ ref: BrainItemTable.ref }).from(BrainItemTable).where(eq(BrainItemTable.document_id, id)),
+          ),
+        )
+        .get()
+        .pipe(Effect.orDie)
+      const document = yield* db.select({ stats: BrainDocumentTable.stats }).from(BrainDocumentTable).where(eq(BrainDocumentTable.id, id)).get().pipe(Effect.orDie)
+      if (!document) continue
+      yield* db
+        .update(BrainDocumentTable)
+        .set({ stats: { ...document.stats, linked: row?.count ?? 0 } })
+        .where(eq(BrainDocumentTable.id, id))
+        .run()
+        .pipe(Effect.orDie)
+    }
+  })
+
+  const link = Effect.fn("BrainKnowledge.link")(function* (place: Brain.Place, request?: { readonly document?: string }) {
+    remember(place)
+    const rows = yield* db
+      .select({ id: BrainDocumentTable.id })
+      .from(BrainDocumentTable)
+      .where(
+        and(
+          eq(BrainDocumentTable.repository_id, place.repository),
+          request?.document ? eq(BrainDocumentTable.id, request.document) : undefined,
+          inArray(BrainDocumentTable.status, [...USABLE, "held"]),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    const totals = { anchors: 0, pending: 0, common: [] as string[] }
+    for (const batch of chunks(rows.map((row) => row.id), 20)) {
+      const result = yield* linkDocuments(place, batch, [])
+      totals.anchors += result.anchors
+      totals.pending += result.pending
+      totals.common = [...new Set([...totals.common, ...result.common])]
+    }
+    yield* revise(place.repository)
+    return totals
+  })
+
+  // Names documents gave that the code did not have yet, looked for again: each one found links its record and says
+  // so in the record's history, "linked to src/billing/invoice.ts when it was added".
+  const resolvePending = Effect.fnUntraced(function* (place: Brain.Place, files: readonly string[]) {
+    const rows = yield* db
+      .select()
+      .from(BrainPendingTable)
+      .where(eq(BrainPendingTable.repository_id, place.repository))
+      .orderBy(asc(BrainPendingTable.created_at))
+      .limit(PENDING)
+      .all()
+      .pipe(Effect.orDie)
+    if (rows.length === 0 || files.length === 0) return 0
+    const owners = [...new Set(rows.map((row) => row.owner))]
+    const fields = new Map(
+      (yield* db
+        .select({ id: BrainRecordTable.id, kind: BrainRecordTable.kind, fields: BrainRecordTable.fields })
+        .from(BrainRecordTable)
+        .where(inArray(BrainRecordTable.id, owners))
+        .all()
+        .pipe(Effect.orDie)).map((row) => [row.id, row]),
+    )
+    const result = yield* linkOwners(
+      place,
+      owners.map((owner) => {
+        const record = fields.get(owner)
+        const value = record ? stated(record.kind, record.fields) : undefined
+        return {
+          id: owner,
+          kind: record?.kind ?? ("passage" as const),
+          names: rows.filter((row) => row.owner === owner).map((row) => pendingName(row)),
+          ...(value ? { value } : {}),
+        }
+      }),
+      files,
+      { replace: false },
+    )
+    const now = Date.now()
+    const common = new Set(result.common)
+    for (const item of result.linked) {
+      const done = new Set(item.anchors.map((anchor) => nameKey(anchor.name)))
+      yield* db
+        .delete(BrainPendingTable)
+        .where(
+          and(
+            eq(BrainPendingTable.repository_id, place.repository),
+            eq(BrainPendingTable.owner, item.owner),
+            inArray(
+              BrainPendingTable.identifier,
+              rows.filter((row) => row.owner === item.owner && done.has(nameKey(pendingName(row)))).map((row) => row.identifier),
+            ),
+          ),
+        )
+        .run()
+        .pipe(Effect.orDie)
+      const first = item.anchors[0]!
+      yield* db
+        .insert(BrainEventTable)
+        .values({
+          entry_id: item.owner,
+          repository_id: place.repository,
+          at: now,
+          action: "linked",
+          actor: "vector",
+          detail: { path: first.hit.path, ...(first.symbol ? { symbol: first.symbol } : {}), method: first.method, added: true },
+        })
+        .run()
+        .pipe(Effect.orDie)
+    }
+    // A name the whole repository now uses never narrows anything down; it stops waiting.
+    if (common.size > 0)
+      yield* db
+        .delete(BrainPendingTable)
+        .where(and(eq(BrainPendingTable.repository_id, place.repository), inArray(BrainPendingTable.identifier, [...common])))
+        .run()
+        .pipe(Effect.orDie)
+    return result.linked.length
+  })
+
+  // --- Drift --------------------------------------------------------------------------------------------------------
+
+  // A constant's value against what its record states: a drift item while they differ, none once they agree.
+  const checkValue = Effect.fnUntraced(function* (
+    place: Brain.Place,
+    input: {
+      readonly owner: string
+      readonly path: string
+      readonly symbol: string
+      readonly line: number
+      readonly stated: Stated
+      readonly code: { readonly raw: string; readonly value: number; readonly unit?: string }
+    },
+  ) {
+    const code = input.code.unit ? BrainDrift.normalize(input.code.value, input.code.unit) : undefined
+    const id = driftId(input.owner, input.path, input.symbol)
+    if (!code || code.base !== input.stated.base || !BrainDrift.differs(code.value, input.stated.normalized)) {
+      yield* db
+        .delete(BrainReviewTable)
+        .where(and(eq(BrainReviewTable.id, id), eq(BrainReviewTable.status, "open")))
+        .run()
+        .pipe(Effect.orDie)
+      return false
+    }
+    yield* openReview(place, {
+      id,
+      kind: "drift",
+      a: input.owner,
+      subject: input.symbol,
+      detail: {
+        type: "value",
+        document: `${input.stated.value} ${input.stated.unit}`,
+        code: BrainDrift.format(code.value, input.stated.unit),
+        path: input.path,
+        line: input.line,
+        symbol: input.symbol,
+        value: code.value,
+        raw: input.code.raw,
+      },
+    })
+    return true
+  })
+
+  // An item for the user, opened again only when what it says changed since they dismissed or settled it.
+  const openReview = Effect.fnUntraced(function* (
+    place: Brain.Place,
+    item: {
+      readonly id: string
+      readonly kind: BrainSchema.ReviewKind
+      readonly a: string
+      readonly b?: string
+      readonly subject: string
+      readonly detail: Record<string, unknown>
+    },
+  ) {
+    const now = Date.now()
+    const before = yield* db.select().from(BrainReviewTable).where(eq(BrainReviewTable.id, item.id)).get().pipe(Effect.orDie)
+    if (before && before.status !== "open" && JSON.stringify(before.detail) === JSON.stringify(item.detail)) return
+    yield* db
+      .insert(BrainReviewTable)
+      .values({
+        id: item.id,
+        repository_id: place.repository,
+        kind: item.kind,
+        a: item.a,
+        b: item.b ?? null,
+        subject: item.subject,
+        detail: item.detail,
+        status: "open",
+        winner: null,
+        created_at: now,
+        updated_at: now,
+      })
+      .onConflictDoUpdate({
+        target: BrainReviewTable.id,
+        set: { detail: item.detail, status: "open", winner: null, subject: item.subject, updated_at: now },
+      })
+      .run()
+      .pipe(Effect.orDie)
+  })
+
+  const drift = Effect.fn("BrainKnowledge.drift")(function* (place: Brain.Place, options?: { readonly force?: boolean }) {
+    const now = Date.now()
+    const counts = { checked: 0, drifted: 0, missing: 0, values: 0, linked: 0 }
+    const last = state.drifts.get(place.repository)
+    if (!options?.force && last !== undefined && now - last < DRIFT_EVERY) return counts
+    state.drifts.set(place.repository, now)
+    remember(place)
+    const anchors = yield* db
+      .select()
+      .from(BrainAnchorTable)
+      .where(eq(BrainAnchorTable.repository_id, place.repository))
+      .all()
+      .pipe(Effect.orDie)
+    const byPath = new Map<string, (typeof anchors)[number][]>()
+    for (const anchor of anchors) {
+      const own = byPath.get(anchor.path) ?? []
+      own.push(anchor)
+      byPath.set(anchor.path, own)
+    }
+    const kinds = new Map(
+      (anchors.length === 0
+        ? []
+        : yield* db
+            .select({ id: BrainRecordTable.id, kind: BrainRecordTable.kind, fields: BrainRecordTable.fields })
+            .from(BrainRecordTable)
+            .where(inArray(BrainRecordTable.id, [...new Set(anchors.map((anchor) => anchor.owner))]))
+            .all()
+            .pipe(Effect.orDie)
+      ).map((row) => [row.id, row]),
+    )
+    const left = { rechecks: DRIFT_RECHECKS }
+    for (const file of [...byPath.keys()].slice(0, DRIFT_FILES)) {
+      const own = byPath.get(file)!
+      const absolute = path.join(place.root, file)
+      const stat = yield* Effect.promise(() => fs.lstat(absolute).catch(() => undefined))
+      const text =
+        stat?.isFile() && stat.mtimeMs >= Math.min(...own.map((anchor) => anchor.checked_at)) && stat.size <= FILE
+          ? yield* Effect.promise(() => fs.readFile(absolute, "utf8").catch(() => undefined))
+          : undefined
+      if (stat?.isFile() && text === undefined) continue
+      const hash = text === undefined ? undefined : BrainDrift.hash(text)
+      if (hash !== undefined && own.every((anchor) => anchor.file_hash === hash)) {
+        yield* db
+          .update(BrainAnchorTable)
+          .set({ checked_at: now })
+          .where(inArray(BrainAnchorTable.id, own.map((anchor) => anchor.id)))
+          .run()
+          .pipe(Effect.orDie)
+        continue
+      }
+      for (const anchor of own) {
+        // The rest wait for the next pass.
+        if (left.rechecks <= 0) break
+        left.rechecks -= 1
+        counts.checked += 1
+        const result =
+          text === undefined
+            ? { status: "missing" as const, line: undefined }
+            : BrainDrift.recheck(
+                {
+                  ...(anchor.line === null ? {} : { line: anchor.line }),
+                  ...(anchor.line_hash ? { lineHash: anchor.line_hash } : {}),
+                  ...(anchor.symbol ? { symbol: anchor.symbol } : {}),
+                  method: anchor.method,
+                },
+                text,
+                matcher(anchor),
+              )
+        yield* db
+          .update(BrainAnchorTable)
+          .set({
+            status: result.status,
+            ...(result.line === undefined ? {} : { line: result.line }),
+            file_hash: hash ?? anchor.file_hash,
+            checked_at: now,
+          })
+          .where(eq(BrainAnchorTable.id, anchor.id))
+          .run()
+          .pipe(Effect.orDie)
+        if (result.status === "drifted") counts.drifted += 1
+        if (result.status === "missing") counts.missing += 1
+        const record = kinds.get(anchor.owner)
+        const value = record ? stated(record.kind, record.fields) : undefined
+        const line = result.line === undefined ? undefined : text?.split("\n")[result.line - 1]
+        const code = anchor.method === "constant" && anchor.symbol && line !== undefined ? BrainAnchor.value(line, anchor.symbol) : undefined
+        if (value && code && result.line !== undefined) {
+          yield* db.update(BrainAnchorTable).set({ value: code }).where(eq(BrainAnchorTable.id, anchor.id)).run().pipe(Effect.orDie)
+          const differs = yield* checkValue(place, {
+            owner: anchor.owner,
+            path: anchor.path,
+            symbol: anchor.symbol!,
+            line: result.line,
+            stated: value,
+            code,
+          })
+          if (differs) counts.values += 1
+          continue
+        }
+        const id = driftId(anchor.owner, anchor.path, anchor.symbol ?? "")
+        // A requirement's link to a definition, route, env read or constant that changed is the user's to look at;
+        // a use moving about is not.
+        if (result.status !== "fresh" && record && GUARDED.includes(record.kind) && anchor.weight >= POINTER.weight)
+          yield* openReview(place, {
+            id,
+            kind: "drift",
+            a: anchor.owner,
+            subject: anchor.symbol ?? anchor.path,
+            detail: {
+              type: result.status,
+              path: anchor.path,
+              ...(result.line === undefined ? {} : { line: result.line }),
+              ...(anchor.symbol ? { symbol: anchor.symbol } : {}),
+              method: anchor.method,
+            },
+          })
+        if (result.status === "fresh")
+          yield* db
+            .delete(BrainReviewTable)
+            .where(and(eq(BrainReviewTable.id, id), eq(BrainReviewTable.status, "open")))
+            .run()
+            .pipe(Effect.orDie)
+      }
+    }
+    counts.linked = yield* resolvePending(place, yield* Effect.promise(() => workingFiles(place.root)))
+    if (counts.checked > 0 || counts.linked > 0) yield* revise(place.repository)
+    return counts
+  })
+
+  // --- Conflicts ----------------------------------------------------------------------------------------------------
+
+  // A document's records against what else Vector holds: the other documents' records of the same subject or
+  // endpoint, and the repository's rules and memory. Each disagreement is an item for the user, never settled here; one
+  // the user dismissed stays dismissed while both sides say what they said.
+  const conflictsOf = Effect.fnUntraced(function* (place: Brain.Place, documentID: string) {
+    const document = yield* findDocument(place, documentID)
+    if (!document) return 0
+    const own = yield* claimRows(and(eq(BrainRecordTable.document_id, documentID), eq(BrainItemTable.status, "active")))
+    if (own.length === 0) return 0
+    const keys = [...new Set(own.map((row) => row.record.key.replace(/#\d+$/, "")))]
+    const routes = [...new Set(own.flatMap((row) => (typeof row.record.fields.route === "string" ? [row.record.fields.route] : [])))]
+    const same = yield* Effect.forEach(chunks(keys, 200), (batch) =>
+      claimRows(
+        and(
+          eq(BrainItemTable.repository_id, place.repository),
+          eq(BrainItemTable.status, "active"),
+          ne(BrainDocumentTable.lineage, document.lineage),
+          inArray(BrainDocumentTable.status, [...USABLE]),
+          or(
+            inArray(BrainRecordTable.key, batch),
+            inArray(
+              BrainRecordTable.subject,
+              batch.map((key) => key.slice(key.indexOf("|") + 1)),
+            ),
+          ),
+        ),
+      ),
+    )
+    const endpoints =
+      routes.length === 0
+        ? []
+        : yield* claimRows(
+            and(
+              eq(BrainItemTable.repository_id, place.repository),
+              eq(BrainItemTable.status, "active"),
+              ne(BrainDocumentTable.lineage, document.lineage),
+              inArray(BrainDocumentTable.status, [...USABLE]),
+              eq(BrainRecordTable.kind, "contract"),
+              sql`${BrainRecordTable.subject} LIKE 'endpoint:%'`,
+            ),
+          )
+    const others = [...same.flat(), ...endpoints.filter((row) => routes.includes(String(row.record.fields.route)))]
+    const entries = (yield* brain.list(place, { filter: "active" })).slice(0, CONFLICT_ENTRIES)
+    const mine = own.map(claimOf)
+    const theirs = [
+      ...new Map(others.map((row) => [row.record.id, claimOf(row)])).values(),
+      ...entries.map((entry) =>
+        BrainConflict.fromText({
+          id: entry.id,
+          source: entry.kind === "rule" ? "rule" : entry.origin === "agent" || entry.origin === "failure-memory" ? "learned" : "user",
+          at: entry.updatedAt,
+          text: entry.text,
+        }),
+      ),
+    ]
+    const found = mine.flatMap((claim) =>
+      theirs.flatMap((other) => {
+        const conflict = BrainConflict.compare(claim, other)
+        return conflict ? [conflict] : []
+      }),
+    )
+    const texts = new Map([...own, ...others].map((row) => [row.record.id, row.record.card]))
+    entries.forEach((entry) => texts.set(entry.id, entry.text))
+    const titles = new Map([...own, ...others].map((row) => [row.record.id, row.title]))
+    const dates = new Map([...mine, ...theirs].map((claim) => [claim.id, claim.at]))
+    const ids = new Set<string>()
+    for (const conflict of found) {
+      const id = conflictId(conflict.a, conflict.b)
+      ids.add(id)
+      yield* openReview(place, {
+        id,
+        kind: "conflict",
+        a: conflict.a,
+        b: conflict.b,
+        subject: conflict.type,
+        detail: {
+          type: conflict.type,
+          said: conflict.said,
+          prefer: conflict.prefer,
+          newer: (dates.get(conflict.a) ?? 0) >= (dates.get(conflict.b) ?? 0) ? conflict.a : conflict.b,
+          a: { id: conflict.a, title: titles.get(conflict.a) ?? "Memory", text: BrainCard.clip(texts.get(conflict.a) ?? "", 200) },
+          b: { id: conflict.b, title: titles.get(conflict.b) ?? "Memory", text: BrainCard.clip(texts.get(conflict.b) ?? "", 200) },
+        },
+      })
+      yield* db
+        .insert(BrainEdgeTable)
+        .values({ repository_id: place.repository, source: conflict.a, target: conflict.b, type: "conflicts", weight: 0.4, created_at: Date.now() })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+    }
+    // What this document no longer disagrees with is no longer an open item.
+    const records = own.map((row) => row.record.id)
+    const stale = (yield* db
+      .select({ id: BrainReviewTable.id })
+      .from(BrainReviewTable)
+      .where(
+        and(
+          eq(BrainReviewTable.repository_id, place.repository),
+          eq(BrainReviewTable.kind, "conflict"),
+          eq(BrainReviewTable.status, "open"),
+          or(inArray(BrainReviewTable.a, records), inArray(BrainReviewTable.b, records)),
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)).filter((row) => !ids.has(row.id))
+    if (stale.length > 0)
+      yield* db.delete(BrainReviewTable).where(inArray(BrainReviewTable.id, stale.map((row) => row.id))).run().pipe(Effect.orDie)
+    return found.length
+  })
+
+  const claimRows = (where: ReturnType<typeof and>) =>
+    db
+      .select({
+        record: BrainRecordTable,
+        origin: BrainDocumentTable.origin,
+        title: BrainDocumentTable.title,
+        createdAt: BrainDocumentTable.created_at,
+      })
+      .from(BrainRecordTable)
+      .innerJoin(BrainItemTable, eq(BrainItemTable.id, BrainRecordTable.item))
+      .innerJoin(BrainDocumentTable, eq(BrainDocumentTable.id, BrainRecordTable.document_id))
+      .where(where)
+      .limit(CONFLICT_RECORDS)
+      .all()
+      .pipe(Effect.orDie)
+
+  // --- Pointers, the spec guard and the links a file has ------------------------------------------------------------
+
+  // The visible, active records and passages strongly linked to a file, best first: requirements, constraints and
+  // contracts before the rest, fresh links before drifted ones.
+  const linkedTo = Effect.fnUntraced(function* (
+    place: Brain.Place,
+    request: { file: string; personal: boolean; exclude: ReadonlySet<string>; kinds?: readonly BrainSchema.RecordKind[] },
+  ) {
+    const file = relativeTo(place.root, request.file)
+    const anchors = yield* db
+      .select()
+      .from(BrainAnchorTable)
+      .where(
+        and(
+          eq(BrainAnchorTable.repository_id, place.repository),
+          eq(BrainAnchorTable.path, file),
+          sql`${BrainAnchorTable.weight} >= ${POINTER.weight}`,
+        ),
+      )
+      .all()
+      .pipe(Effect.orDie)
+    const owners = [...new Set(anchors.map((anchor) => anchor.owner))].filter((owner) => !request.exclude.has(owner))
+    const shown = yield* cards(place, owners, request.personal)
+    const fields = new Map(
+      (owners.length === 0
+        ? []
+        : yield* db
+            .select({ id: BrainRecordTable.id, fields: BrainRecordTable.fields })
+            .from(BrainRecordTable)
+            .where(inArray(BrainRecordTable.id, owners))
+            .all()
+            .pipe(Effect.orDie)
+      ).map((row) => [row.id, row.fields]),
+    )
+    const rank = (kind: string) => {
+      const index = (GUARDED as readonly string[]).indexOf(kind)
+      return index < 0 ? GUARDED.length : index
+    }
+    const best = (owner: string) =>
+      anchors
+        .filter((anchor) => anchor.owner === owner)
+        .toSorted((a, b) => Number(a.status !== "fresh") - Number(b.status !== "fresh") || b.weight - a.weight)[0]!
+    return {
+      file,
+      linked: owners
+        .flatMap((owner) => {
+          const card = shown.get(owner)
+          if (!card || (request.kinds && !request.kinds.includes(card.kind as BrainSchema.RecordKind))) return []
+          return [{ card, anchor: best(owner), fields: fields.get(owner) ?? {} }]
+        })
+        .toSorted(
+          (a, b) =>
+            rank(a.card.kind) - rank(b.card.kind) ||
+            Number(a.anchor.status !== "fresh") - Number(b.anchor.status !== "fresh") ||
+            b.anchor.weight - a.anchor.weight ||
+            a.card.ref.localeCompare(b.card.ref),
+        ),
+    }
+  })
+
+  // One line naming what is linked to a file, at most three ids and `limit` tokens: each item's own short words.
+  const linkLine = (
+    linked: readonly { readonly card: Card; readonly fields: Readonly<Record<string, unknown>> }[],
+    render: (items: string) => string,
+    limit: number,
+    kinds: boolean,
+  ) => {
+    const items = linked.slice(0, POINTER.ids)
+    if (items.length === 0) return undefined
+    const short = (item: (typeof items)[number], chars: number) => {
+      const named = typeof item.fields.name === "string" && item.card.kind === "contract" ? item.fields.name : undefined
+      return BrainCard.escape(BrainCard.clip(BrainScan.redact(named ?? item.card.text).text.replace(/\s+/g, " "), chars))
+    }
+    for (const count of [3, 2, 1])
+      for (const chars of [48, 32, 20]) {
+        const text = render(
+          items
+            .slice(0, count)
+            .map((item) => `[${item.card.ref}]${kinds ? ` ${item.card.kind}` : ""} (${short(item, chars)})`)
+            .join(", "),
+        )
+        if (Token.estimate(text) <= limit) return { text, ids: items.slice(0, count).map((item) => item.card.ref) }
+      }
+    return undefined
+  }
+
+  const pointed = Effect.fnUntraced(function* (
+    place: Brain.Place,
+    request: {
+      file: string
+      personal: boolean
+      exclude: ReadonlySet<string>
+      ids?: readonly string[]
+      sessionID?: string
+      requestID?: string
+    },
+    mode: "pointer" | "guard",
+  ) {
+    const found = yield* linkedTo(place, {
+      file: request.file,
+      personal: request.personal,
+      exclude: request.exclude,
+      ...(mode === "guard" ? { kinds: GUARDED.slice(0, 3) } : {}),
+    })
+    // Shown again for a later request: the same ids, while each is still linked and may be shown.
+    const linked = request.ids ? found.linked.filter((item) => request.ids!.includes(item.card.ref)) : found.linked
+    const made =
+      mode === "pointer"
+        ? linkLine(linked, (items) => `Documents linked to ${BrainCard.escape(found.file)}: ${items}.`, POINTER.tokens, true)
+        : linkLine(linked, (items) => `Linked requirements: ${items}. Check the change still meets them.`, POINTER.guard, false)
+    if (!made) return { ids: [], tokens: 0 } satisfies Brain.Injection
+    const tokens = Token.estimate(made.text)
+    if (!request.ids)
+      yield* record(
+        linked.filter((item) => made.ids.includes(item.card.ref)).map((item) => item.card),
+        {
+          ...(request.sessionID ? { sessionID: request.sessionID } : {}),
+          ...(request.requestID ? { requestID: request.requestID } : {}),
+          tier: mode,
+          tokens,
+        },
+      )
+    return { text: made.text, ids: made.ids, tokens } satisfies Brain.Injection
+  })
+
+  const links = Effect.fn("BrainKnowledge.links")(function* (place: Brain.Place, file: string, options: { personal: boolean }) {
+    const relative = relativeTo(place.root, file)
+    const anchors = yield* db
+      .select()
+      .from(BrainAnchorTable)
+      .where(and(eq(BrainAnchorTable.repository_id, place.repository), eq(BrainAnchorTable.path, relative)))
+      .orderBy(desc(BrainAnchorTable.weight), asc(BrainAnchorTable.id))
+      .limit(100)
+      .all()
+      .pipe(Effect.orDie)
+    const owners = [...new Set(anchors.map((anchor) => anchor.owner))]
+    const items = new Map(
+      (owners.length === 0
+        ? []
+        : yield* db
+            .select({
+              ref: BrainItemTable.ref,
+              type: BrainItemTable.type,
+              status: BrainItemTable.status,
+              visibility: BrainItemTable.visibility,
+              document: BrainDocumentTable.id,
+              title: BrainDocumentTable.title,
+              kind: BrainRecordTable.kind,
+              card: BrainRecordTable.card,
+              body: BrainPassageTable.body,
+            })
+            .from(BrainItemTable)
+            .innerJoin(BrainDocumentTable, eq(BrainDocumentTable.id, BrainItemTable.document_id))
+            .leftJoin(BrainRecordTable, eq(BrainRecordTable.item, BrainItemTable.id))
+            .leftJoin(BrainPassageTable, eq(BrainPassageTable.item, BrainItemTable.id))
+            .where(and(eq(BrainItemTable.repository_id, place.repository), inArray(BrainItemTable.ref, owners)))
+            .all()
+            .pipe(Effect.orDie)
+      ).map((row) => [row.ref, row]),
+    )
+    const documents = anchors.flatMap((anchor): BrainSchema.Link[] => {
+      const item = items.get(anchor.owner)
+      if (!item || item.status === "archived" || (item.visibility === "private" && !options.personal)) return []
+      return [
+        {
+          owner: anchor.owner,
+          type: item.type,
+          kind: item.type === "record" ? (item.kind ?? "record") : "passage",
+          title: item.title,
+          document: item.document,
+          text: item.type === "record" ? (item.card ?? "") : BrainCard.opening(item.body ?? ""),
+          anchor: toAnchor(anchor),
+        },
+      ]
+    })
+    // Memory whose paths cover the file is linked to it as well.
+    const entries = (yield* brain.list(place, { filter: "active" }))
+      .filter((entry) => (options.personal || (entry.scope === "repository" && !entry.private)) && entry.paths.some((pattern) => Brain.matches(pattern, relative)))
+      .slice(0, 50)
+      .map((entry): BrainSchema.Link => ({ owner: entry.id, type: "entry", kind: entry.kind, title: "Memory", text: entry.text }))
+    return [...documents, ...entries]
+  })
+
+  // --- What needs the user's look -----------------------------------------------------------------------------------
+
+  const review = Effect.fn("BrainKnowledge.review")(function* (place: Brain.Place) {
+    const stored = yield* db
+      .select()
+      .from(BrainReviewTable)
+      .where(and(eq(BrainReviewTable.repository_id, place.repository), eq(BrainReviewTable.status, "open")))
+      .orderBy(desc(BrainReviewTable.updated_at))
+      .limit(REVIEW)
+      .all()
+      .pipe(Effect.orDie)
+    // Held content is listed from where it waits, so approving or rejecting it anywhere settles it here too.
+    const documents = yield* db
+      .select()
+      .from(BrainDocumentTable)
+      .where(and(eq(BrainDocumentTable.repository_id, place.repository), eq(BrainDocumentTable.status, "held")))
+      .orderBy(desc(BrainDocumentTable.updated_at))
+      .limit(REVIEW)
+      .all()
+      .pipe(Effect.orDie)
+    const held = yield* db
+      .select({ item: BrainItemTable, document: BrainDocumentTable, body: BrainPassageTable.body, page: BrainPassageTable.page, card: BrainRecordTable.card, passage: BrainRecordTable.passage_id })
+      .from(BrainItemTable)
+      .innerJoin(BrainDocumentTable, eq(BrainDocumentTable.id, BrainItemTable.document_id))
+      .leftJoin(BrainPassageTable, eq(BrainPassageTable.item, BrainItemTable.id))
+      .leftJoin(BrainRecordTable, eq(BrainRecordTable.item, BrainItemTable.id))
+      .where(
+        and(
+          eq(BrainItemTable.repository_id, place.repository),
+          inArray(BrainItemTable.status, ["quarantined", "proposed"]),
+          inArray(BrainDocumentTable.status, [...USABLE]),
+        ),
+      )
+      .orderBy(asc(BrainDocumentTable.ordinal), asc(BrainItemTable.id))
+      .limit(REVIEW)
+      .all()
+      .pipe(Effect.orDie)
+    const heldPassages = new Set(held.filter((row) => row.item.type === "passage").map((row) => row.item.ref))
+    return [
+      ...stored.map(toReview),
+      ...documents.map(
+        (row): BrainSchema.ReviewItem => ({
+          id: row.id,
+          kind: "held",
+          a: row.id,
+          subject: row.title,
+          detail: { type: "document", hold: row.hold_reason, document: row.id, title: row.title },
+          status: "open",
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        }),
+      ),
+      // A record held with its passage goes with it: approving the passage approves the records read from it.
+      ...held
+        .filter((row) => row.item.type === "passage" || !heldPassages.has(row.passage ?? ""))
+        .map(
+          (row): BrainSchema.ReviewItem => ({
+            id: row.item.ref,
+            kind: "held",
+            a: row.item.ref,
+            subject: row.document.title,
+            detail: {
+              type: row.item.type,
+              hold: row.item.hold_reason,
+              document: row.document.id,
+              title: row.document.title,
+              ...(row.page === null || row.page === undefined ? {} : { page: row.page }),
+              text: BrainCard.clip((row.item.type === "passage" ? row.body : row.card) ?? "", 240),
+            },
+            status: "open",
+            createdAt: row.document.created_at,
+            updatedAt: row.document.updated_at,
+          }),
+        ),
+    ]
+  })
+
+  const resolve = Effect.fn("BrainKnowledge.resolve")(function* (
+    place: Brain.Place,
+    id: string,
+    resolution: Resolution,
+  ) {
+    const now = Date.now()
+    const row = yield* db
+      .select()
+      .from(BrainReviewTable)
+      .where(and(eq(BrainReviewTable.id, id), eq(BrainReviewTable.repository_id, place.repository)))
+      .get()
+      .pipe(Effect.orDie)
+    if (!row) {
+      // Held content is settled where it is held.
+      if (resolution.action !== "approve" && resolution.action !== "reject") return undefined
+      const done = yield* update(place, id, { action: resolution.action })
+      return done === "updated" ? ({ type: "settled" as const }) : undefined
+    }
+    if (resolution.action === "dismiss") {
+      const after = { ...row, status: "dismissed" as const, updated_at: now }
+      yield* db.update(BrainReviewTable).set({ status: "dismissed", updated_at: now }).where(eq(BrainReviewTable.id, id)).run().pipe(Effect.orDie)
+      return { type: "item" as const, item: toReview(after) }
+    }
+    if (row.kind === "drift" && (resolution.action === "keep-document" || resolution.action === "keep-code")) {
+      const anchor = yield* db
+        .select()
+        .from(BrainAnchorTable)
+        .where(
+          and(
+            eq(BrainAnchorTable.repository_id, place.repository),
+            eq(BrainAnchorTable.owner, row.a),
+            or(eq(BrainAnchorTable.symbol, row.subject), eq(BrainAnchorTable.path, row.subject)),
+          ),
+        )
+        .get()
+        .pipe(Effect.orDie)
+      const entry =
+        resolution.action === "keep-code" ? yield* keepCode(place, row, anchor) : undefined
+      if (entry?.type === "refused") return { type: "refused" as const, message: entry.message }
+      const after = {
+        ...row,
+        status: "resolved" as const,
+        winner: resolution.action === "keep-code" ? "code" : row.a,
+        updated_at: now,
+      }
+      yield* db
+        .update(BrainReviewTable)
+        .set({ status: after.status, winner: after.winner, updated_at: now })
+        .where(eq(BrainReviewTable.id, id))
+        .run()
+        .pipe(Effect.orDie)
+      yield* revise(place.repository)
+      return { type: "item" as const, item: toReview(after), ...(entry ? { entry: entry.entry } : {}) }
+    }
+    if (row.kind === "conflict" && resolution.action === "keep" && (resolution.winner === row.a || resolution.winner === row.b)) {
+      // The side the user did not keep is put away, as theirs to bring back; a rule is the user's file to change.
+      const loser = resolution.winner === row.a ? row.b! : row.a
+      if (/^r/.test(loser)) yield* changeRecord(place, loser, { action: "not-applicable" })
+      else yield* brain.update(place, loser, { action: "archive" }, "user")
+      const after = { ...row, status: "resolved" as const, winner: resolution.winner, updated_at: now }
+      yield* db
+        .update(BrainReviewTable)
+        .set({ status: "resolved", winner: resolution.winner, updated_at: now })
+        .where(eq(BrainReviewTable.id, id))
+        .run()
+        .pipe(Effect.orDie)
+      yield* revise(place.repository)
+      return { type: "item" as const, item: toReview(after) }
+    }
+    return undefined
+  })
+
+  // "The code is right": a decision of the user's says so, derived from the record, and the link takes the code as it
+  // is now, so the same difference is not raised again.
+  const keepCode = Effect.fnUntraced(function* (
+    place: Brain.Place,
+    row: typeof BrainReviewTable.$inferSelect,
+    anchor: typeof BrainAnchorTable.$inferSelect | undefined,
+  ) {
+    const recordRow = yield* recordQuery()
+      .where(and(eq(BrainRecordTable.id, row.a), eq(BrainItemTable.repository_id, place.repository)))
+      .get()
+      .pipe(Effect.orDie)
+    const detail = row.detail
+    const where = `${String(detail.path ?? anchor?.path ?? "")}${detail.line ? `:${String(detail.line)}` : ""}`
+    const text =
+      detail.type === "value"
+        ? `${row.subject} is ${String(detail.code)} as ${where} sets it, not the ${String(detail.document)} the document gives.`
+        : `The code at ${where} is right where it differs from what the document says about ${row.subject}.`
+    const document = recordRow ? yield* findDocument(place, recordRow.record.document_id) : undefined
+    const written = yield* brain.propose(place, {
+      kind: "decision",
+      text: BrainCard.clip(text, 400),
+      scope: "repository",
+      origin: "user",
+      evidence: { type: "user" },
+      ...(anchor ? { paths: [anchor.path] } : {}),
+      ...(document?.visibility === "private" ? { private: true } : {}),
+    })
+    if (written.type === "refused") return { type: "refused" as const, message: written.message }
+    const now = Date.now()
+    yield* db
+      .insert(BrainEdgeTable)
+      .values({ repository_id: place.repository, source: written.entry.id, target: row.a, type: "derived_from", weight: 0.9, created_at: now })
+      .onConflictDoNothing()
+      .run()
+      .pipe(Effect.orDie)
+    if (anchor) {
+      const text = yield* Effect.promise(() => fs.readFile(path.join(place.root, anchor.path), "utf8").catch(() => undefined))
+      const line = anchor.line && text ? text.split("\n")[anchor.line - 1] : undefined
+      yield* db
+        .update(BrainAnchorTable)
+        .set({
+          status: "fresh",
+          ...(text === undefined ? {} : { file_hash: BrainDrift.hash(text) }),
+          ...(line === undefined ? {} : { line_hash: BrainDrift.lineHash(line) }),
+          checked_at: now,
+        })
+        .where(eq(BrainAnchorTable.id, anchor.id))
+        .run()
+        .pipe(Effect.orDie)
+    }
+    return { type: "written" as const, entry: written.entry }
+  })
+
   return {
     add,
     wait,
@@ -2890,6 +4445,13 @@ function make(input: {
     indexing,
     settings,
     configure,
+    pointers: (place, request) => pointed(place, request, "pointer"),
+    guard: (place, request) => pointed(place, request, "guard"),
+    link,
+    drift,
+    links,
+    review,
+    resolve,
   }
 }
 
@@ -3060,11 +4622,14 @@ function toRecord(row: {
 
 function toAnchor(row: typeof BrainAnchorTable.$inferSelect): BrainSchema.Anchor {
   return {
+    id: row.id,
     owner: row.owner,
     path: row.path,
     ...(row.symbol ? { symbol: row.symbol } : {}),
     ...(row.line === null ? {} : { line: row.line }),
     method: row.method,
+    weight: row.weight,
+    ...(row.value ? { value: row.value } : {}),
     status: row.status,
     origin: row.origin,
     checkedAt: row.checked_at,
@@ -3174,4 +4739,109 @@ function toDocument(row: DocumentRow): BrainSchema.Document {
     updatedAt: row.updated_at,
     ...(row.indexed_at === null ? {} : { indexedAt: row.indexed_at }),
   }
+}
+
+/** What a constraint or fact states, in its own unit and in the base unit it compares in. */
+type Stated = { readonly value: number; readonly unit: string; readonly normalized: number; readonly base: string }
+
+function stated(kind: BrainSchema.RecordKind, fields: Readonly<Record<string, unknown>>): Stated | undefined {
+  if (kind !== "constraint" && kind !== "fact") return undefined
+  if (typeof fields.value !== "number" || typeof fields.unit !== "string") return undefined
+  if (typeof fields.normalized !== "number" || typeof fields.base !== "string") return undefined
+  if (fields.base === "count" || fields.base === "%") return undefined
+  return { value: fields.value, unit: fields.unit, normalized: fields.normalized, base: fields.base }
+}
+
+function nameKey(name: BrainAnchor.Name) {
+  return `${name.kind}\0${name.method ?? ""}\0${name.text}`
+}
+
+/** A route as a link's symbol keeps it: "GET /v1/users/*", or the route alone when the document gives no method. */
+function routeSymbol(name: BrainAnchor.Name) {
+  return name.method ? `${name.method} ${name.text}` : name.text
+}
+
+function routeName(symbol: string): BrainAnchor.Name {
+  const match = /^([A-Z]+) (\/.*)$/.exec(symbol)
+  return match ? { kind: "route", text: match[2]!, method: match[1]! } : { kind: "route", text: symbol }
+}
+
+function pendingName(row: typeof BrainPendingTable.$inferSelect): BrainAnchor.Name {
+  return row.kind === "route" ? routeName(row.identifier) : { kind: row.kind, text: row.identifier }
+}
+
+/** What a line must do to still be the line a link points at. */
+function matcher(anchor: { readonly method: BrainAnchor.Method; readonly symbol: string | null; readonly path: string }) {
+  const symbol = anchor.symbol ?? ""
+  if (anchor.method === "route") {
+    const name = routeName(symbol)
+    return (line: string) => BrainAnchor.registers(line, name)
+  }
+  if (anchor.method === "definition" || anchor.method === "constant")
+    return (line: string) => BrainAnchor.classify(line, symbol, anchor.path) === "definition"
+  if (anchor.method === "env") return (line: string) => BrainAnchor.classify(line, symbol, anchor.path) === "env"
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(symbol)) return () => false
+  const word = new RegExp(`\\b${symbol}\\b`)
+  return (line: string) => word.test(line)
+}
+
+function anchorTombstone(owner: string, file: string, symbol: string | undefined) {
+  return createHash("sha256").update(`anchor\0${owner}\0${file}\0${symbol ?? ""}`).digest("hex").slice(0, 24)
+}
+
+function driftId(owner: string, file: string, symbol: string) {
+  return `v${createHash("sha256").update(`drift\0${owner}\0${file}\0${symbol}`).digest("hex").slice(0, 12)}`
+}
+
+function conflictId(a: string, b: string) {
+  return `v${createHash("sha256").update(`conflict\0${[a, b].toSorted().join("\0")}`).digest("hex").slice(0, 12)}`
+}
+
+/** A file as links name it: relative to the working tree's root, with forward slashes. */
+function relativeTo(root: string, file: string) {
+  return (path.isAbsolute(file) ? path.relative(root, file) : file).split(path.sep).join("/").replace(/^\.\//, "")
+}
+
+function claimOf(row: {
+  readonly record: typeof BrainRecordTable.$inferSelect
+  readonly origin: BrainSchema.DocumentOrigin
+  readonly createdAt: number
+}) {
+  return BrainConflict.fromRecord({
+    id: row.record.id,
+    source: row.record.origin === "distilled" ? "distilled" : row.origin === "repository" ? "repository" : "document",
+    at: row.createdAt,
+    key: row.record.key.replace(/#\d+$/, ""),
+    kind: row.record.kind,
+    quote: row.record.quote,
+    fields: row.record.fields,
+  })
+}
+
+function toReview(item: typeof BrainReviewTable.$inferSelect): BrainSchema.ReviewItem {
+  return {
+    id: item.id,
+    kind: item.kind,
+    a: item.a,
+    ...(item.b ? { b: item.b } : {}),
+    subject: item.subject,
+    detail: item.detail,
+    status: item.status,
+    ...(item.winner ? { winner: item.winner } : {}),
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  }
+}
+
+// The files of a working tree that git knows or would add (tracked, and untracked ones it does not ignore), or none
+// outside a git working tree.
+function workingFiles(root: string) {
+  return new Promise<string[]>((resolve) =>
+    execFile(
+      "git",
+      ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+      { cwd: root, timeout: 10_000, maxBuffer: 64 * 1024 * 1024 },
+      (error, stdout) => resolve(error ? [] : [...new Set(stdout.split("\0").filter(Boolean))]),
+    ),
+  )
 }

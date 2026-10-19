@@ -16,7 +16,9 @@ import { BrainKnowledge } from "../src/brain/knowledge"
 import { BrainStructure } from "../src/brain/structure"
 import { BrainWorkerEntry } from "../src/brain/worker/entry"
 import { BrainWorker } from "../src/brain/worker/host"
+import { LayerNode } from "../src/effect/layer-node"
 import { Global } from "../src/global"
+import { Ripgrep } from "../src/ripgrep"
 import { Token } from "../src/util/token"
 import { pdf } from "../test/brain/fixture/pdf"
 
@@ -80,6 +82,7 @@ console.log(
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vector-bench-knowledge-"))
 const file = path.join(dir, "brain.db")
 const layer = BrainKnowledge.layer.pipe(
+  Layer.provide(LayerNode.compile(Ripgrep.node)),
   Layer.provideMerge(Brain.layer),
   Layer.provideMerge(
     BrainWorker.layer.pipe(
@@ -177,6 +180,7 @@ await Effect.runPromise(
   }).pipe(
     Effect.provide(
       BrainKnowledge.layer.pipe(
+        Layer.provide(LayerNode.compile(Ripgrep.node)),
         Layer.provideMerge(Brain.layer),
         Layer.provideMerge(instant),
         Layer.provideMerge(BrainDatabase.layerFor(storeFile)),

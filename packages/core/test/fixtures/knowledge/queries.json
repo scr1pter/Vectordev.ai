@@ -1,0 +1,461 @@
+{
+  "working": [
+    {
+      "query": "change how long people stay signed in",
+      "seeds": [
+        {
+          "path": "src/auth/session.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "The refreshTokenTtl MUST be 14 days."
+    },
+    {
+      "query": "add a unit test for this file",
+      "seeds": [
+        {
+          "path": "src/auth/session.ts",
+          "how": "read"
+        }
+      ],
+      "expect": "The refreshTokenTtl MUST be 14 days."
+    },
+    {
+      "query": "the swap sometimes leaves the old one usable, fix it",
+      "seeds": [
+        {
+          "path": "src/auth/session.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "rotateRefreshToken MUST invalidate the previous token at once."
+    },
+    {
+      "query": "explain what this file does",
+      "seeds": [
+        {
+          "path": "src/auth/session.ts",
+          "how": "read"
+        }
+      ],
+      "expect": "rotateRefreshToken MUST invalidate the previous token at once."
+    },
+    {
+      "query": "speed this function up, it is slow on login",
+      "seeds": [
+        {
+          "path": "src/auth/password.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "hashPassword MUST use a salt of its own for every account."
+    },
+    {
+      "query": "add types to these helpers",
+      "seeds": [
+        {
+          "path": "src/auth/password.ts",
+          "how": "read"
+        }
+      ],
+      "expect": "hashPassword MUST use a salt of its own for every account."
+    },
+    {
+      "query": "loosen the rules for new passwords",
+      "seeds": [
+        {
+          "path": "src/auth/password.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "Passwords are at least 12 characters long"
+    },
+    {
+      "query": "why does sign-up reject what I type?",
+      "seeds": [
+        {
+          "path": "src/auth/password.ts",
+          "how": "read"
+        }
+      ],
+      "expect": "Passwords are at least 12 characters long"
+    },
+    {
+      "query": "people get stuck after a few wrong tries, make it friendlier",
+      "seeds": [
+        {
+          "path": "src/auth/lockout.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "the account MUST be locked for 15 minutes"
+    },
+    {
+      "query": "refactor this module to use a class",
+      "seeds": [
+        {
+          "path": "src/auth/lockout.ts",
+          "how": "read"
+        }
+      ],
+      "expect": "the account MUST be locked for 15 minutes"
+    },
+    {
+      "query": "return a nicer error for unknown people from the profile endpoint",
+      "seeds": [
+        {
+          "path": "src/api/routes.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "returns 404 when the user does not exist"
+    },
+    {
+      "query": "log every request that reaches this router",
+      "seeds": [
+        {
+          "path": "src/api/routes.ts",
+          "how": "read"
+        }
+      ],
+      "expect": "returns 404 when the user does not exist"
+    },
+    {
+      "query": "support amounts with fractions here",
+      "seeds": [
+        {
+          "path": "src/billing/invoice.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "createInvoice MUST store every amount in integer cents."
+    },
+    {
+      "query": "rename amountCents to amount",
+      "seeds": [
+        {
+          "path": "src/billing/invoice.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "createInvoice MUST store every amount in integer cents."
+    },
+    {
+      "query": "let the counter restart each year",
+      "seeds": [
+        {
+          "path": "src/billing/invoice.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "Every invoice number comes from InvoiceNumberer and MUST never be reused."
+    },
+    {
+      "query": "add validation to the handler that makes bills",
+      "seeds": [
+        {
+          "path": "src/api/routes.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "POST /v1/invoices creates an invoice and returns 201."
+    },
+    {
+      "query": "allow these without a reference",
+      "seeds": [
+        {
+          "path": "src/billing/refund.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "issueRefund MUST name the invoice it reverses."
+    },
+    {
+      "query": "make the return period configurable",
+      "seeds": [
+        {
+          "path": "src/billing/refund.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "Refunds are allowed for at most 30 days after payment"
+    },
+    {
+      "query": "why is this constant thirty?",
+      "seeds": [
+        {
+          "path": "src/billing/refund.ts",
+          "how": "read"
+        }
+      ],
+      "expect": "Refunds are allowed for at most 30 days after payment"
+    },
+    {
+      "query": "use Math.round everywhere in this file for simplicity",
+      "seeds": [
+        {
+          "path": "src/billing/tax.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "computeTax MUST round half to even."
+    },
+    {
+      "query": "this looks odd, simplify it",
+      "seeds": [
+        {
+          "path": "src/billing/tax.ts",
+          "how": "read"
+        }
+      ],
+      "expect": "computeTax MUST round half to even."
+    },
+    {
+      "query": "accept incoming events faster",
+      "seeds": [
+        {
+          "path": "src/api/payments.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "MUST reject a request whose signature header does not match."
+    },
+    {
+      "query": "add metrics to this handler",
+      "seeds": [
+        {
+          "path": "src/api/payments.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "MUST reject a request whose signature header does not match."
+    },
+    {
+      "query": "raise the cap for large files",
+      "seeds": [
+        {
+          "path": "src/upload/limits.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "Uploads are limited to at most 50 MB per file"
+    },
+    {
+      "query": "tidy this file",
+      "seeds": [
+        {
+          "path": "src/upload/limits.ts",
+          "how": "read"
+        }
+      ],
+      "expect": "Uploads are limited to at most 50 MB per file"
+    },
+    {
+      "query": "skip the expensive check for small files",
+      "seeds": [
+        {
+          "path": "src/upload/scan.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "scanUpload MUST run before a file is stored."
+    },
+    {
+      "query": "make this synchronous",
+      "seeds": [
+        {
+          "path": "src/upload/scan.ts",
+          "how": "read"
+        }
+      ],
+      "expect": "scanUpload MUST run before a file is stored."
+    },
+    {
+      "query": "hard-code the destination so local runs work",
+      "seeds": [
+        {
+          "path": "src/upload/storage.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "storeObject MUST write to the bucket that UPLOAD_BUCKET names."
+    },
+    {
+      "query": "add retries around the write",
+      "seeds": [
+        {
+          "path": "src/upload/storage.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "storeObject MUST write to the bucket that UPLOAD_BUCKET names."
+    },
+    {
+      "query": "make removal faster by only dropping the database row",
+      "seeds": [
+        {
+          "path": "src/api/routes.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "MUST remove the stored object as well."
+    },
+    {
+      "query": "make outgoing mail more reliable",
+      "seeds": [
+        {
+          "path": "src/notify/email.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "sendEmail MUST retry at most 3 times."
+    },
+    {
+      "query": "add a fourth attempt",
+      "seeds": [
+        {
+          "path": "src/notify/email.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "sendEmail MUST retry at most 3 times."
+    },
+    {
+      "query": "point this at our new relay in the code",
+      "seeds": [
+        {
+          "path": "src/notify/email.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "The mail server MUST come from SMTP_HOST"
+    },
+    {
+      "query": "sort the summary entries by time instead",
+      "seeds": [
+        {
+          "path": "src/notify/digest.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "buildDigest MUST group events by account."
+    },
+    {
+      "query": "split them by team instead",
+      "seeds": [
+        {
+          "path": "src/notify/digest.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "buildDigest MUST group events by account."
+    },
+    {
+      "query": "send the summary in the evening",
+      "seeds": [
+        {
+          "path": "src/notify/digest.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "The daily digest is sent at the hour DIGEST_HOUR_UTC gives."
+    },
+    {
+      "query": "make the rebuild run inline so tests are simpler",
+      "seeds": [
+        {
+          "path": "src/search/index.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "reindexAll MUST run in the background."
+    },
+    {
+      "query": "document this module",
+      "seeds": [
+        {
+          "path": "src/search/index.ts",
+          "how": "read"
+        }
+      ],
+      "expect": "reindexAll MUST run in the background."
+    },
+    {
+      "query": "show more hits per screen",
+      "seeds": [
+        {
+          "path": "src/search/index.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "Results come in pages of at most 20 items"
+    },
+    {
+      "query": "include everyone, even old customers",
+      "seeds": [
+        {
+          "path": "src/search/index.ts",
+          "how": "edited"
+        }
+      ],
+      "expect": "hideArchived MUST drop archived accounts from every result."
+    }
+  ],
+  "irrelevant": [
+    {
+      "query": "hi",
+      "seeds": []
+    },
+    {
+      "query": "ok",
+      "seeds": []
+    },
+    {
+      "query": "thanks, that looks good",
+      "seeds": []
+    },
+    {
+      "query": "what's the capital of France?",
+      "seeds": []
+    },
+    {
+      "query": "tell me a joke about cats",
+      "seeds": []
+    },
+    {
+      "query": "how do I center a div?",
+      "seeds": [
+        {
+          "path": "src/ui/theme.ts",
+          "how": "edited"
+        }
+      ]
+    },
+    {
+      "query": "change the accent color to green",
+      "seeds": [
+        {
+          "path": "src/ui/theme.ts",
+          "how": "edited"
+        }
+      ]
+    },
+    {
+      "query": "make the corners rounder",
+      "seeds": [
+        {
+          "path": "src/ui/theme.ts",
+          "how": "edited"
+        }
+      ]
+    },
+    {
+      "query": "what does HTTP 418 mean?",
+      "seeds": []
+    },
+    {
+      "query": "write a haiku about autumn leaves",
+      "seeds": []
+    }
+  ]
+}
