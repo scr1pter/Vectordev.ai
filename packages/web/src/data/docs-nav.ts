@@ -90,9 +90,16 @@ export const docsNav: DocGroup[] = [
         blurb: "Rewind an agent's file changes and the conversation, one request at a time.",
       },
       {
-        id: "local-memory",
-        title: "Local memory",
-        blurb: "Durable facts about how you work, kept in one MEMORY.md file on your machine.",
+        id: "brain",
+        title: "Vector Brain",
+        blurb:
+          "From desktop 1.99.110: rules, memory and what Vector learns, kept on your computer and sent only when they bear on a request.",
+      },
+      {
+        id: "documents",
+        title: "Documents and code links",
+        blurb:
+          "From desktop 1.99.110: give Vector your specs, PDFs and docs once, and it links them to the code that implements them.",
       },
       {
         id: "models",
@@ -202,6 +209,7 @@ export const docsMoved: Record<string, string> = {
   "cli-maintenance": "terminal-agent#cli-maintenance",
   faq: "troubleshooting#faq",
   "delete-account": "troubleshooting#delete-account",
+  "local-memory": "brain",
 }
 
 export const groupOf = (id: string) => docsNav.find((group) => group.links.some((link) => link.id === id))?.label ?? ""

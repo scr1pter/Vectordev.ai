@@ -1,0 +1,99 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+import { documentCommandRows, knowledgeEval } from "../../data/docs-content"
+
+export const prerender = true
+---
+
+<DocsPage id="documents">
+
+          <p>
+            From desktop 1.99.110, you can give Vector a repository's specs, PDFs, runbooks and API descriptions once.
+            It reads each one on this computer into sections, passages and typed records (requirements, constraints,
+            decisions, contracts, procedures, terms, entities, facts and open questions), links them to the code they
+            name, and brings the few that bear on a request into it as short cards, inside the budgets described in
+            <a href="/docs/brain#requests">Vector Brain</a>.
+          </p>
+
+          <h2 id="adding">Adding documents</h2>
+          <dl class="doc-rows">
+            <div><dt>Settings → Memory → Documents</dt><dd>Drop files there, or add them from your computer: PDF, Word, PowerPoint, Excel, Markdown, HTML, OpenAPI, JSON, YAML, CSV and text, up to 64 MB each (CSV up to 32 MB and text up to 10 MB), and the first 1,000 pages of a PDF. A repository keeps up to 200 documents.</dd></div>
+            <div><dt>In the composer</dt><dd>On a document you attach, <strong>Remember</strong> keeps it and still sends it, and <strong>Remember instead</strong> keeps it in place of sending it, so the model gets its outline and the cards for each request instead of every page. Vector suggests Remember instead for a file over 1 MB or a PDF over 20 pages. Word, PowerPoint and Excel files, which models cannot read as they are, are always remembered instead, with Undo. Pasted prose of 4,000 characters or more gets a <strong>Remember this text</strong> chip.</dd></div>
+            <div><dt>From the agent</dt><dd>The agent can keep a file it read. The session shows it as Kept, with Undo; after outside content it waits for your review, and a session a guest is in keeps none.</dd></div>
+            <div><dt>A new version</dt><dd><strong>Replace</strong> reads a file with the name of a document Vector keeps as that document's next version. Vector says what changed, and keeps your edits and pins.</dd></div>
+          </dl>
+          <p>
+            Pictures of text, such as scanned pages, are named but not read, password-protected parts are left out,
+            links to outside files are not followed, and secrets are removed before anything is saved. A passage that
+            reads like instructions to an AI, or hides text or characters from a reader, waits for your review. Vector
+            does not keep a copy of the file you added unless you turn on <strong>Keep copies of added files</strong>.
+          </p>
+
+          <h2 id="privacy">Who a document reaches</h2>
+          <p>
+            Documents you add are private: kept from invited guests and from models that may train on prompts, and so
+            is anything Vector learns from them. A document kept in a session that took in outside content, such as
+            web pages or MCP tools, waits for your review before Vector uses it.
+          </p>
+          <p>
+            In repositories you trust, Vector also reads the repository's own READMEs, docs folder, decision records and
+            API specs. Those are part of the repository, so they are shared like its other files, also with guests. Turn
+            them off with <strong>Read this repository's docs</strong> in Settings → Memory → Documents, which forgets
+            what Vector read of them.
+          </p>
+
+          <h2 id="code-links">Code links</h2>
+          <p>
+            Vector links each record to the code that defines, uses or serves what it names: definitions, uses,
+            routes, environment variables, constants and file paths in the working tree. A name the code does not have
+            yet waits until it does. In a git working tree with documents, Vector also indexes the code's files,
+            symbols and imports, and which files change together in its history. It never reads secrets, dependencies
+            or build output.
+          </p>
+          <p>
+            Recall starts from the files a request touches and follows those links, so a requirement comes in when you
+            open its code, or a file that imports it, even when the request shares no word with it. Search also knows
+            the repository's own vocabulary: glossary and acronym records, so "SLO" finds the service level objective.
+          </p>
+          <ul class="feature-list">
+            <li><strong>On a read</strong><span>Reading a linked file adds one short line naming the documents linked to it.</span></li>
+            <li><strong>On an edit</strong><span>Editing a file linked to a requirement adds one line asking the agent to check the change still meets it.</span></li>
+            <li><strong>Once</strong><span>Each line comes once per file per request, and never for Chat.</span></li>
+          </ul>
+          <p>
+            A document's <strong>Code links</strong> view lists every link, how it was made and whether the code still
+            says the same; <strong>Unlink</strong> removes one, and <strong>Link to file…</strong> adds your own.
+          </p>
+
+          <h2 id="needs-a-look">Drift and conflicts</h2>
+          <p>
+            When linked code and a document stop agreeing, Vector shows both sides, such as "spec says 50 MB; code says
+            64 MB", with the line in the code. It also finds documents, rules and memory that disagree with each other.
+            Both go to <strong>Needs a look</strong> in Settings → Memory → Documents, and only you settle them: keep the
+            document, keep the code, keep one side, or dismiss it.
+          </p>
+
+          <h2 id="citations">Citations</h2>
+          <p>
+            Every card carries an id. When an answer cites one, it shows as a chip naming the kind of record, the
+            document and the page, and why Vector gave it; a chip counts as verified only when Vector gave that card to
+            the model in the session. The turn says how many
+            tokens of memory it used, and a document's <strong>History</strong> lists its versions and the runs that
+            used it.
+          </p>
+
+          <h2 id="terminal">In the terminal</h2>
+          <p>
+            <code>vector memory doc</code> comes with the next CLI release, like <a href="/docs/brain#terminal">the rest
+            of <code>vector memory</code></a>.
+          </p>
+          <dl class="doc-rows">
+            {documentCommandRows.map(([term, detail]) => (<div><dt><code>{term}</code></dt><dd>{detail}</dd></div>))}
+          </dl>
+
+          <h2 id="measured">What the eval measured</h2>
+          <p>
+            {knowledgeEval.summary}
+          </p>
+          <p class="note">{knowledgeEval.caveat}</p>
+</DocsPage>

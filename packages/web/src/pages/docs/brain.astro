@@ -1,0 +1,108 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+import { brainBudgetRows, brainCommandRows } from "../../data/docs-content"
+
+export const prerender = true
+---
+
+<DocsPage id="brain">
+
+          <p>
+            From desktop 1.99.110, Vector keeps a brain for each repository and one for you: the rules you write, what
+            you tell it about yourself, what it learns while it works, and the documents you give it. All of it is
+            stored and searched on this computer. For each request Vector sends your model only the few lines that
+            bear on it. Private documents never go to a model that may train on prompts, or to a session a guest is in.
+          </p>
+          <p>
+            Desktop 1.99.109 and earlier keep one <code>MEMORY.md</code> file, shown in Settings → General, and send it
+            with every request.
+          </p>
+
+          <h2 id="what-it-holds">What the brain holds</h2>
+          <dl class="doc-rows">
+            <div><dt>Rules</dt><dd>The repository's <code>.vector/RULES.md</code> and your own <code>RULES.md</code> in Vector's config folder, beside the <code>AGENTS.md</code> that <a href="/docs/vector-agent#repository-rules">Repository rules</a> describes. Only you write rules; Vector never adds one on its own.</dd></div>
+            <div><dt>Your memory</dt><dd><code>MEMORY.md</code> in the same folder, and what you ask Vector to remember about you. It applies in every repository.</dd></div>
+            <div><dt>What Vector learned</dt><dd>Short lessons, decisions and preferences the agent saved while it worked, each with the evidence it was saved from.</dd></div>
+            <div><dt>Documents</dt><dd>Specs, PDFs, runbooks and API descriptions you add, and the repository's own docs. See <a href="/docs/documents">Documents and code links</a>.</dd></div>
+            <div><dt>A repository's <code>BRAIN.md</code></dt><dd>Memory a repository ships with it. Vector uses it once you trust the repository; until then it waits for your review.</dd></div>
+          </dl>
+          <p>
+            Files you write stay yours: Vector only reads them. What it learns and what it reads from documents live in
+            <code>brain.db</code> in Vector's data folder, beside its sessions. A key pasted into a memory or rules file
+            is not sent to a provider, and secrets in a document are removed before anything is saved.
+          </p>
+
+          <h2 id="requests">What a request carries</h2>
+          <p>
+            A request carries your rules, the start of <code>MEMORY.md</code> (about 800 tokens of it), the entries you
+            pinned (about 300 tokens) and one line saying what else the brain holds. That part stays the same through a
+            session, so the provider's prompt cache can reuse it. Then each request message recalls only what bears on
+            it, within a budget set by the request's size, and recalls nothing when nothing does:
+          </p>
+          <dl class="doc-rows">
+            {brainBudgetRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
+          </dl>
+          <p>
+            A greeting or a bare acknowledgement, such as "hi" or "ok", is sized Chat: it carries no memory, no memory
+            instructions and no memory tool, so it costs no extra tokens. Reading a file brings in up to about 200
+            tokens of memory about that file, and the agent can search memory and open an entry with its memory tool
+            when it decides to look. When a run nears its spend limit, a repository with documents recalls half as much.
+          </p>
+
+          <h2 id="learning">Learning as it works</h2>
+          <p>
+            Vector saves a short lesson, decision or preference as it works: when you state one, when a fix makes a
+            failing check pass, or when a lasting decision is made. It is in use from the next request. Each one shows
+            as a Learned line in the session and under <strong>Recently learned</strong> in Settings → Memory, where one
+            click undoes it; after Undo, Vector does not save the same words, or a close rewording, for 180 days. It
+            saves at most three a request message.
+          </p>
+          <p>
+            What it learns in a session that read web pages or other outside content, ran MCP tools, or had a guest or
+            a subagent in it waits for your review instead. Turn learning off with <strong>Let Vector learn as it
+            works</strong> in Settings → Memory, or <code>vector memory learning off</code>.
+          </p>
+
+          <h2 id="proven">What proved useful</h2>
+          <p>
+            A card or memory entry that an answer cited, or that the agent opened, in a run whose checks went from
+            failing to passing (or that the judge passed) gains weight. A record cited in a run you reverted loses it,
+            and one given to the agent again and again without being used fades. The weight moves a candidate's value
+            by at most 30% either way, and the counts behind it halve every 90 days, so it reorders what recall picks
+            but never decides it alone. A session a guest is in, or that took in outside content, credits nothing.
+          </p>
+
+          <h2 id="subagents-and-review">Subagents and Vectorscope</h2>
+          <p>
+            A subagent started by a Thorough request begins with up to 200 tokens of the cards and memory that bear on
+            its task, for up to four subagents a request, and none for smaller requests. A
+            <a href="/docs/vectorscope">Vectorscope</a> review gets the requirements, constraints, contracts and
+            decisions linked to the changed files, with any drift, in at most 300 tokens: private documents only when
+            the review model may not train on prompts, never in a review posted to a pull request, and never content
+            that waits for your review.
+          </p>
+
+          <h2 id="settings">Settings → Memory</h2>
+          <p>
+            <strong>Memory</strong> lists this repository's entries or your own: search them, add one, edit, pin or
+            forget it, and see what waits for your review. <strong>Recently learned</strong> lists what Vector saved on
+            its own, newest first, with Undo. <strong>Tidy and erase</strong> merges duplicates, archives what goes
+            unused and erases what Vector learned, leaving the files you wrote alone. <strong>Documents</strong> is
+            described in <a href="/docs/documents">Documents and code links</a>.
+          </p>
+
+          <h2 id="terminal">In the terminal</h2>
+          <p>
+            <code>vector memory</code> manages the same brain. The npm CLI 1.99.99 does not have it; it comes with the
+            next CLI release, and Windows WSL servers get it once a later desktop release requires that CLI. Add
+            <code>--personal</code> for your own memory.
+          </p>
+          <dl class="doc-rows">
+            {brainCommandRows.map(([term, detail]) => (<div><dt><code>{term}</code></dt><dd>{detail}</dd></div>))}
+          </dl>
+          <p class="note">
+            Deleting your Vector account does not reach the brain, because it is on your computer. Erase what Vector
+            learned and the documents it keeps with <code>vector memory erase --everywhere --yes</code>; the files you
+            wrote stay until you delete them.
+          </p>
+</DocsPage>

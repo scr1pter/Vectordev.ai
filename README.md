@@ -10,6 +10,8 @@
 
 Vector is an agentic engineering workspace. It puts an editor, a terminal, a controlled browser and AI agents around the repository on your computer: you describe a change, watch agents edit files and run checks, and inspect the result before you merge or publish it.
 
+From desktop 1.99.110, Vector is a self-evolving agentic harness. Give it your specs, PDFs and docs once. It reads them on your computer, links requirements, endpoints and decisions to the code that implements them, warns you when the two drift apart, keeps what proved useful in runs that passed, and spends tokens only where they matter. "hi" costs nothing extra.
+
 Vector is free. Create a free Vector account at [vectordev.ai](https://vectordev.ai) to download the desktop app; the same account signs in the terminal agent.
 
 Vector works in three places:
@@ -32,6 +34,18 @@ Installers are at [vectordev.ai/download](https://vectordev.ai/download), and re
 **Release status.** Desktop **1.99.108** and the npm CLI **1.99.99** (`@vectordevai/cli`) are published, including the guarded personal OpenRouter free-model setup described below; desktop 1.99.107 was skipped, so installed copies go from 1.99.106 to 1.99.108. The standalone installer at `vectordev.ai/install` currently installs a CLI build numbered **1.99.107** from 11 October, which predates the changes in desktop 1.99.108 and has no `vector trust`, `vector codium`, `vector tasks`, the TUI's `/trust` and `/tasks`, or `vector run --max-cost` and `--max-steps`; those arrive with the next CLI release, and Windows WSL servers keep the 1.99.99 engine that desktop 1.99.108 requires until a later desktop release requires the new CLI. Installed copies update with Check now in Settings → Updates & about, or Check for Updates in the Vector menu on macOS. Vector is free; model access follows the provider you connect. Version 2 is reserved. See the [release notes](https://vectordev.ai/docs/changelog#release-1-99-108) for what changed and what remains unavailable.
 
 ## Features
+
+### Vector Brain (from desktop 1.99.110)
+
+**One brain for each repository.** The rules you write (`.vector/RULES.md`, and your own `RULES.md` and `MEMORY.md` in Vector's config folder), what Vector learns while it works and the documents you give it, kept in `brain.db` on your computer. Stored and searched on this computer. For each request Vector sends your model only the few lines that bear on it, within a budget set by the request's size, at most 900 tokens for a Thorough request in a repository with documents, and a greeting such as "hi" carries none. Private documents never go to a model that may train on prompts, or to a session a guest is in.
+
+**Learns as it works, with Undo.** Vector saves a short lesson, decision or preference when you state one, when a fix makes a failing check pass, or when a lasting decision is made, and uses it from the next request. Each one is listed under Recently learned in Settings → Memory, where one click undoes it. Only you write rules. What it learns in a session that read web pages or other outside content, ran MCP tools, or had a guest or a subagent in it waits for your review. Cards and entries that answers cited in runs whose checks went from failing to passing gain weight, within bounds, and ones that keep going unused fade.
+
+**Documents linked to code.** Add PDF, Word, PowerPoint, Excel, Markdown, HTML, OpenAPI, JSON, YAML, CSV and text files in Settings → Memory → Documents, or choose Remember instead on an attachment in the composer. Vector reads them on your computer into requirements, constraints, decisions, contracts and other records, links each to the code that defines, uses or serves what it names, reminds the agent of the linked requirements when it reads or edits that code, and lists drift such as "spec says 50 MB; code says 64 MB" under Needs a look. An answer's citations show as chips.
+
+**Measured.** On the [knowledge eval of 19 October 2026](docs/benchmarks/vector-knowledge-2026-10-19/README.md), recall through code links brought in the governing requirement for 40 of 40 tasks that named the files they touch, against 1 of 40 by keywords alone, at 131 tokens a Light request on average, and 10 unrelated requests carried none. The eval is five short specs and 58 requests written alongside the feature, with no model call; it is not an independent benchmark.
+
+`vector memory` and `vector memory doc` manage the same brain from the terminal with the next CLI release. See [Vector Brain](https://vectordev.ai/docs/brain) and [Documents and code links](https://vectordev.ai/docs/documents).
 
 ### Agents
 
