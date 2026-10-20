@@ -46,11 +46,10 @@ export const SearchArgs = Schema.Struct({
   contextMaxCharacters: Schema.optional(Schema.Number),
 })
 
+// The query and nothing that ties it to the session or the model.
 export const ParallelSearchArgs = Schema.Struct({
   objective: Schema.String,
   search_queries: Schema.Array(Schema.String),
-  session_id: Schema.optional(Schema.String),
-  model_name: Schema.optional(Schema.String),
 })
 
 const McpRequest = <F extends Schema.Struct.Fields>(args: Schema.Struct<F>) =>

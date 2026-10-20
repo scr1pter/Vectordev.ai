@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
-import { parseResponse } from "../../src/tool/mcp-websearch"
+import { ParallelSearchArgs, parseResponse } from "../../src/tool/mcp-websearch"
 import { selectWebSearchProvider, webSearchAuthHeaders, webSearchProviderLabel } from "../../src/tool/websearch"
 
 import { webSearchEnabled } from "../../src/tool/registry"
@@ -54,6 +54,12 @@ describe("websearch provider", () => {
     expect(webSearchProviderLabel("parallel")).toBe("Parallel Web Search")
     expect(webSearchProviderLabel("exa")).toBe("Exa Web Search")
     expect(webSearchProviderLabel(undefined)).toBe("Web Search")
+  })
+})
+
+describe("websearch MCP request", () => {
+  test("has no field for the session or the model, so neither can be sent to Parallel", () => {
+    expect(Object.keys(ParallelSearchArgs.fields).toSorted()).toEqual(["objective", "search_queries"])
   })
 })
 
