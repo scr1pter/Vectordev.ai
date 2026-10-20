@@ -3,7 +3,8 @@ import path from "node:path"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { TaskSize } from "@vectordevai/core/task-size"
-import { brainBudgetRows, brainCommandRows, documentCommandRows, knowledgeEval } from "../src/data/docs-content"
+import { BrainEmbedManifest } from "@vectordevai/core/brain/embed-manifest"
+import { brainBudgetRows, brainCommandRows, documentCommandRows, knowledgeEval, modelCommandRows } from "../src/data/docs-content"
 import { brainCopy, brainRelease, publishedDesktopVersion } from "../src/data/vector-releases"
 import { docsMoved, docsNav } from "../src/data/docs-nav"
 
@@ -14,6 +15,7 @@ const repo = path.join(web, "../..")
 const read = async (file: string) => (await Bun.file(path.join(repo, file)).text()).replace(/\s+/g, " ")
 const brain = await read("packages/web/src/pages/docs/brain.astro")
 const documents = await read("packages/web/src/pages/docs/documents.astro")
+const meaning = await read("packages/web/src/pages/docs/search-by-meaning.astro")
 const readme = await read("README.md")
 const section = readme.slice(readme.indexOf("### Vector Brain"), readme.indexOf("### Agents"))
 const report = await Bun.file(path.join(repo, `${knowledgeEval.report}/report.json`)).json()
@@ -109,7 +111,7 @@ test("every terminal command the pages list is one the CLI has", async () => {
     await Bun.file(path.join(repo, "packages/engine/src/cli/cmd/memory.ts")).text(),
     await Bun.file(path.join(repo, "packages/engine/src/cli/cmd/memory-doc.ts")).text(),
   ].join("\n")
-  const commands = [...brainCommandRows, ...documentCommandRows].map(([command]) => command!)
+  const commands = [...brainCommandRows, ...documentCommandRows, ...modelCommandRows].map(([command]) => command!)
   expect(commands.every((command) => command.startsWith("vector memory "))).toBe(true)
   const missing = commands
     .map((command) => command.replace(/^vector memory (doc )?/, "").split(" ")[0]!)
@@ -132,7 +134,7 @@ test("the eval figures in the docs and the README are the dated report's", () =>
   )
   expect([...report.irrelevant.pagerank, report.tokens.chat.max]).toEqual(Array.from({ length: 11 }, () => 0))
   expect(knowledgeEval.caveat).toContain(
-    `The eval is ${words[report.fixture.documents]} short specs for a small invented repository and ${requests} requests, written alongside the feature, with no model call. It is not an independent benchmark.`,
+    `The eval is ${words[report.fixture.documents]} short specs for a small invented repository and ${requests} requests, written alongside the feature, with no language model call. It is not an independent benchmark.`,
   )
   expect(documents).toContain("{knowledgeEval.summary}")
   expect(documents).toContain("{knowledgeEval.caveat}")
@@ -140,7 +142,7 @@ test("the eval figures in the docs and the README are the dated report's", () =>
     `On the [knowledge eval of 19 October 2026](${knowledgeEval.report}/README.md), recall through code links brought in the governing requirement for ${working.pagerank} of ${working.tasks} tasks that named the files they touch, against ${working.keywords} of ${working.tasks} by keywords alone, at ${Math.round(report.tokens.light.mean)} tokens a Light request on average, and ${report.fixture.irrelevant} unrelated requests carried none.`,
   )
   expect(section).toContain(
-    `The eval is ${words[report.fixture.documents]} short specs and ${requests} requests written alongside the feature, with no model call; it is not an independent benchmark.`,
+    `Keywords and meaning, with no code links, found ${working.meaning} of ${working.tasks}. The eval is ${words[report.fixture.documents]} short specs and ${requests} requests written alongside the feature, with no language model call; it is not an independent benchmark.`,
   )
 })
 
@@ -156,7 +158,7 @@ test("the README names the release the brain ships in, as coming until it is pub
 })
 
 test("the brain's copy keeps to the owner's wording rules", () => {
-  for (const text of [brain, documents, section, knowledgeEval.summary, knowledgeEval.caveat]) {
+  for (const text of [brain, documents, meaning, section, knowledgeEval.summary, knowledgeEval.caveat, knowledgeEval.meaning, knowledgeEval.floor]) {
     expect(text).not.toMatch(/\bexactly\b|never exceeds|absolute privacy|guaranteed/i)
     expect(text).not.toMatch(/\bprojects?\b/i)
     expect(text).not.toMatch(/(cheaper|faster) than Codex|Codex[^.]*(cheaper|faster)/i)
@@ -168,11 +170,34 @@ test("the brain's copy keeps to the owner's wording rules", () => {
   expect(`${brain} ${documents} ${section}`).not.toMatch(/\bOCR\b/)
 })
 
-// Search by meaning needs the local embedding model, which is not in this tree yet. The pages say nothing about it
-// until it is; then describe it, with its download, and drop this test.
-test.skipIf(await Bun.file(path.join(repo, "packages/core/src/brain/embed.ts")).exists())(
-  "nothing describes search by meaning before the local embedding model is built",
-  () => {
-    for (const text of [brain, documents, section]) expect(text).not.toMatch(/by meaning|embedding|semantic/i)
-  },
-)
+test("Search by meaning has its own page, from desktop 1.99.110, with the manifest's model, size, license and revision", () => {
+  const features = docsNav.find((group) => group.label === "Features")?.links ?? []
+  const page = features.find((link) => link.id === "search-by-meaning")
+  expect(page?.title).toBe("Search by meaning")
+  expect(page?.blurb).toStartWith("From desktop 1.99.110:")
+  expect(meaning).toContain('<DocsPage id="search-by-meaning">')
+  expect(meaning).toContain("From desktop 1.99.110, Vector can also search your")
+  // Sizes and pins come from the manifest itself, so the page cannot drift from what Vector downloads.
+  expect(meaning).toContain("BrainEmbedManifest.size(arctic)")
+  expect(meaning).toContain("arctic.revision.slice(0, 12)")
+  expect(meaning).toContain("const graph = arctic.files.model.sha256")
+  expect(meaning).toContain("{graph.slice(0, 16)}")
+  expect(BrainEmbedManifest.megabytes(BrainEmbedManifest.size(BrainEmbedManifest.MODELS["arctic-embed-xs-q8"]))).toBe("24 MB")
+  expect(meaning).toContain("Nothing is downloaded until you ask")
+  expect(meaning).toContain("Until you do, Vector searches documents by keywords and code links")
+  expect(meaning).toContain("never for a model that may train on prompts, or in a session a guest is in")
+  expect(documents).toContain('<a href="/docs/search-by-meaning">Search by meaning</a>')
+  expect(section).toContain("With the optional local search model, a one-time 24 MB download you ask for")
+})
+
+test("the meaning figures are the dated report's, run with the pinned model", () => {
+  const working = report.found.working
+  const hops = report.found.hops
+  expect(report.dense.model).toBe(`${BrainEmbedManifest.MODELS["arctic-embed-xs-q8"].repo}@${BrainEmbedManifest.MODELS["arctic-embed-xs-q8"].revision.slice(0, 12)} int8`)
+  expect(knowledgeEval.meaning).toBe(
+    `With the search model, the same requests found the governing requirement for ${working.meaning} of ${working.tasks} tasks by keywords and meaning alone, with no code links, against ${working.keywords} of ${working.tasks} by keywords alone; with every channel at once, for ${working.all} of ${working.tasks}, and ${hops.all} of ${hops.tasks} through an import. The ${report.fixture.irrelevant} unrelated requests carried no tokens with it either.`,
+  )
+  expect(report.dense.irrelevant).toEqual(Array.from({ length: report.fixture.irrelevant }, () => 0))
+  expect(meaning).toContain("{knowledgeEval.meaning}")
+  expect(meaning).toContain("{knowledgeEval.floor} {knowledgeEval.caveat}")
+})

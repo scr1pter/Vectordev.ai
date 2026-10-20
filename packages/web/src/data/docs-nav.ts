@@ -102,6 +102,12 @@ export const docsNav: DocGroup[] = [
           "From desktop 1.99.110: give Vector your specs, PDFs and docs once, and it links them to the code that implements them.",
       },
       {
+        id: "search-by-meaning",
+        title: "Search by meaning",
+        blurb:
+          "From desktop 1.99.110: an optional local model that finds the passages of your documents that say what a request means in other words.",
+      },
+      {
         id: "models",
         title: "Models, free models and your own keys",
         blurb: "Sign in to Vector for free models, or connect a provider account or API key.",

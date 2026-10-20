@@ -1,0 +1,86 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+import { knowledgeEval, modelCommandRows } from "../../data/docs-content"
+import { BrainEmbedManifest } from "@vectordevai/core/brain/embed-manifest"
+
+export const prerender = true
+
+// Every size, license, revision and hash on this page is the manifest's (packages/core/src/brain/embed-manifest.ts).
+const arctic = BrainEmbedManifest.MODELS["arctic-embed-xs-q8"]
+const granite = BrainEmbedManifest.MODELS["granite-small-r2-q8"]
+const size = BrainEmbedManifest.megabytes(BrainEmbedManifest.size(arctic))
+const full = BrainEmbedManifest.megabytes(BrainEmbedManifest.size(arctic, "fp32"))
+const preview = BrainEmbedManifest.megabytes(BrainEmbedManifest.size(granite))
+const graph = arctic.files.model.sha256 ?? ""
+---
+
+<DocsPage id="search-by-meaning">
+
+          <p>
+            From desktop 1.99.110, Vector can also search your <a href="/docs/documents">documents</a> by what a request
+            means, not only by its words: "how long do sessions last" finds "refresh tokens expire after 14 days". It
+            does this with a small local model you download once. Until you do, Vector searches documents by keywords
+            and code links, and everything else works the same.
+          </p>
+
+          <h2 id="download">The download</h2>
+          <p>
+            Nothing is downloaded until you ask, in Settings → Memory → Search model, from the offer on the Documents
+            tab once you have documents, or with <code>vector memory model download</code> in the terminal. Each place
+            shows the size, the license and the source first.
+          </p>
+          <dl class="doc-rows">
+            <div><dt>{arctic.label}</dt><dd>Snowflake Arctic Embed XS, int8, {size}. {arctic.license}, by {arctic.owner}, pinned to revision <code>{arctic.revision.slice(0, 12)}</code> of <code>{arctic.repo}</code> on Hugging Face. The default.</dd></div>
+            <div><dt>Full precision</dt><dd>The same model's full-precision graph, {full}, offered only when the int8 one fails its check on your computer.</dd></div>
+            <div><dt>{granite.label} (preview)</dt><dd>IBM Granite Embedding Small English R2, int8, {preview}, {granite.license}, trained on code as well as prose. Offered on request; its check vectors are not pinned yet, so it is checked by how it ranks a set of test sentences.</dd></div>
+          </dl>
+          <p>
+            Files come from Vector's own copy and then from Hugging Face at the pinned revision. A file is kept only at
+            its pinned size and sha256 (the default model's graph is <code>{graph.slice(0, 16)}…</code>),
+            a cut download resumes where it stopped, and a redirect to a host the source does not use is refused. The
+            model lives in Vector's data folder, outside the brain's own folder, so erasing all memory keeps it. For a
+            computer with no network, <code>vector memory model install --from &lt;folder&gt;</code> takes the same files
+            from a folder, with the same checks.
+          </p>
+
+          <h2 id="offline">After the download</h2>
+          <p>
+            The model runs on this computer, in Vector's background reader, with no network: requests and documents are
+            embedded locally and the vectors stay in <code>brain.db</code>. Each time the model loads, Vector embeds
+            three test sentences and compares them with the vectors the pinned model gave them; a model that gives
+            other numbers on your computer is not used, and Settings offers the full-precision one instead.
+          </p>
+          <ul class="feature-list">
+            <li><strong>Records first</strong><span>Each document's records are embedded before its passages, in the background, and its progress shows as Meaning on its row.</span></li>
+            <li><strong>Gentle on your computer</strong><span>After each batch Vector rests as long as the batch took, and three times as long while an agent is working.</span></li>
+            <li><strong>Pause</strong><span>Pause embedding in Settings → Memory → Search model, or with <code>vector memory model pause</code>. What is embedded is still searched.</span></li>
+            <li><strong>Never in the way</strong><span>A request does not wait for a model that is still loading or slow to answer: it goes on with keywords and code links.</span></li>
+          </ul>
+
+          <h2 id="what-it-finds">What it adds to a request</h2>
+          <p>
+            Search by meaning is one more way to reach a card, beside keywords and code links, inside the same budget
+            described in <a href="/docs/brain#requests">Vector Brain</a>. A card it finds has to stand out: every text
+            looks a little alike to such a model, so Vector scores how far a passage is from what all text shares, and
+            keeps only matches over a floor and close to the best one. A greeting has no meaning to search for and
+            still carries nothing. Code itself is never embedded; code is reached through code links.
+          </p>
+          <p>
+            Private documents are searched by meaning only where they are searched at all: never for a model that may
+            train on prompts, or in a session a guest is in. Removing the model deletes the vectors made with it.
+          </p>
+
+          <h2 id="terminal">In the terminal</h2>
+          <p>
+            <code>vector memory model</code> comes with the next CLI release, like <a href="/docs/brain#terminal">the
+            rest of <code>vector memory</code></a>. A one-off command such as <code>vector memory doc search</code> loads
+            the model before it searches.
+          </p>
+          <dl class="doc-rows">
+            {modelCommandRows.map(([term, detail]) => (<div><dt><code>{term}</code></dt><dd>{detail}</dd></div>))}
+          </dl>
+
+          <h2 id="measured">What the eval measured</h2>
+          <p>{knowledgeEval.meaning}</p>
+          <p class="note">{knowledgeEval.floor} {knowledgeEval.caveat}</p>
+</DocsPage>
