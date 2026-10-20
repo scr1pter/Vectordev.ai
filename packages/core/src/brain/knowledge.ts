@@ -21,6 +21,7 @@ import { BrainConflict } from "./conflict"
 import { BrainCredit } from "./credit"
 import { BrainDistill } from "./distill"
 import { BrainDrift } from "./drift"
+import { BrainEmbed } from "./embed"
 import { BrainExtract } from "./extract"
 import { BrainLimits } from "./document/limits"
 import { BrainSniff } from "./document/sniff"
@@ -53,8 +54,10 @@ import {
   BrainTermTable,
   BrainTombstoneTable,
   BrainUseTable,
+  BrainVectorTable,
 } from "./sql"
 import { BrainStructure } from "./structure"
+import { BrainVector } from "./vector"
 import { BrainWorker } from "./worker/host"
 import type { BrainWorkerProtocol } from "./worker/protocol"
 
@@ -66,7 +69,10 @@ import type { BrainWorkerProtocol } from "./worker/protocol"
 // - Records keep their ids across versions of a document (they come from its lineage, kind and subject), so a new
 //   version keeps what the user did to them; unchanged passages keep theirs too.
 // - `recall` puts memory entries and document cards in one budget, found by keywords over a stored index that reads
-//   only the rows of a request's own terms. A repository with no documents recalls exactly as it did before.
+//   only the rows of a request's own terms, by code links, and by meaning once the local search model is downloaded.
+//   A repository with no documents recalls exactly as it did before, and so does one without the model.
+// - With the model, records are embedded first and passages after, one batch at a time in the background, resting
+//   after each batch as long as it took (three times as long while a session is at work), until the user pauses it.
 // - Cards are rendered from ids for every request and never saved in a transcript, so forgetting a document takes it
 //   out of every later request, old sessions included.
 // - Private documents (uploads, attachments, what the agent kept) are withheld where personal memory is: from sessions
@@ -551,6 +557,8 @@ export interface Interface {
     ids: readonly string[],
   ) => Effect.Effect<{ readonly documents: readonly BrainSchema.Document[]; readonly missing: readonly string[] }>
   readonly worker: () => Effect.Effect<BrainWorker.Status>
+  /** The local search model's state, with how much of this repository's documents it has embedded. */
+  readonly model: (place: Brain.Place) => Effect.Effect<BrainSchema.ModelStatus>
   /** The line a read of a linked file adds: `Documents linked to <file>: [r…] requirement (…)`, or nothing. */
   readonly pointers: (place: Brain.Place, input: PointerInput) => Effect.Effect<Brain.Injection>
   /** The line an edit of a file linked to a requirement, constraint or contract adds, or nothing. */
@@ -689,6 +697,15 @@ const DRIFT_EVERY = 10 * MINUTE
 /** Links checked in one pass (the rest wait for the next), and anchored files looked at. */
 const DRIFT_RECHECKS = 200
 const DRIFT_FILES = 2_000
+/** A match by meaning alone must be within this of the best one, as well as over the model's floor. */
+const MEANING_MARGIN = 0.08
+/** Tokens of short records embedded in one batch, at most so many of them; a passage is always a batch of its own. */
+const EMBED_TOKENS = 320
+const EMBED_ITEMS = 8
+/** A request this recent means a session is at work, so background embedding rests three times as long. */
+const WORKING = MINUTE
+/** A repository's vectors stay in memory this long after its last search by meaning. */
+const VECTORS_IDLE = 15 * MINUTE
 /** Kinds a pointer ranks first, in order; the spec guard names the first three. */
 const GUARDED: readonly BrainSchema.RecordKind[] = ["requirement", "constraint", "contract", "decision"]
 /** Items the review list shows of each sort, and what the conflict check compares a document with. */
@@ -732,6 +749,15 @@ type CodeGraph = {
   /** The symbol nodes links give for each name. */
   readonly symbols: ReadonlyMap<string, readonly string[]>
 }
+/** A repository's vectors as a search by meaning scans them: one block, with each row's item and who may see it. */
+type Vectors = {
+  readonly key: string
+  readonly block: BrainVector.Index
+  readonly refs: readonly string[]
+  /** 1 for a private document's row, which only a session that may see personal memory searches. */
+  readonly private: Uint8Array
+  used: number
+}
 type File = { readonly name: string; readonly bytes: Uint8Array; readonly mime?: string }
 type ItemRow = typeof BrainItemTable.$inferSelect
 
@@ -754,15 +780,19 @@ export const layerWith = (options: Options = {}) =>
       const brain = yield* Brain.Service
       const worker = yield* BrainWorker.Service
       const ripgrep = yield* Ripgrep.Service
+      const embed = yield* BrainEmbed.Service
       const scope = yield* Effect.scope
       const wakeup = yield* Queue.sliding<void>(1)
+      const embedding = yield* Queue.sliding<void>(1)
       return make({
         db: database.db,
         brain,
         worker,
         ripgrep,
+        embed,
         scope,
         wakeup,
+        embedding,
         owner: options.owner,
         graph: options.graph ?? "pagerank",
         originals: BrainPaths.documents(global.data),
@@ -775,7 +805,7 @@ export const layer = layerWith()
 export const node = makeGlobalNode({
   service: Service,
   layer,
-  deps: [BrainDatabase.node, Global.node, Brain.node, BrainWorker.node, Ripgrep.node],
+  deps: [BrainDatabase.node, Global.node, Brain.node, BrainWorker.node, Ripgrep.node, BrainEmbed.node],
 })
 
 function make(input: {
@@ -783,8 +813,11 @@ function make(input: {
   readonly brain: Brain.Interface
   readonly worker: BrainWorker.Interface
   readonly ripgrep: Ripgrep.Interface
+  readonly embed: BrainEmbed.Interface
   readonly scope: Scope.Scope
   readonly wakeup: Queue.Queue<void>
+  /** Wakes the background embedder: a document was stored, or the model changed. */
+  readonly embedding: Queue.Queue<void>
   readonly owner?: string
   readonly graph: "pagerank" | "activation"
   /** Where kept originals live: `<data>/brain/documents`. */
@@ -793,6 +826,7 @@ function make(input: {
   const db = input.db
   const brain = input.brain
   const worker = input.worker
+  const embed = input.embed
   const owner = input.owner ?? `${process.pid}-${randomBytes(4).toString("hex")}`
   const state = {
     draining: false,
@@ -816,6 +850,11 @@ function make(input: {
     vocabulary: new Map<string, { readonly revision: number; readonly words: readonly BrainFuse.Word[] }>(),
     // Each repository's code graph, by knowledge and code revision.
     graphs: new Map<string, CodeGraph>(),
+    // Each repository's vectors in one block, by model, count, latest vector and knowledge revision.
+    vectors: new Map<string, Vectors>(),
+    // When a request last asked the brain for anything: while a session works, embedding rests three times as long.
+    active: 0,
+    embedder: false,
   }
 
   const remember = (place: Brain.Place) => {
@@ -1161,6 +1200,7 @@ function make(input: {
     yield* store(document, result.structured)
     state.pending.delete(document.id)
     yield* db.delete(BrainJobTable).where(eq(BrainJobTable.id, job.id)).run().pipe(Effect.orDie)
+    yield* wakeEmbedder()
   })
 
   // Another attempt after 1 minute, then 10, then an hour; after the third the document could not be read.
@@ -1696,11 +1736,14 @@ function make(input: {
         .get()
         .pipe(Effect.orDie)
       if (!row) return undefined
+      // Ready means searchable by meaning too, where the model is in use and has anything of it left to embed.
       const done =
         row.status === "held" ||
         row.status === "failed" ||
         row.status === "superseded" ||
-        (until === "searchable" ? USABLE.includes(row.status) : row.status === "ready" || row.status === "partial")
+        (until === "searchable"
+          ? USABLE.includes(row.status)
+          : row.status === "ready" || (USABLE.includes(row.status) && !(yield* embeddingLeft(row.id))))
       // A document re-read in place stays searchable meanwhile; it is done once its job is.
       const job = done
         ? yield* db.select({ id: BrainJobTable.id }).from(BrainJobTable).where(eq(BrainJobTable.document_id, id)).get().pipe(Effect.orDie)
@@ -1728,6 +1771,10 @@ function make(input: {
       .all()
       .pipe(Effect.orDie)
     const paused = yield* pausedOf(place)
+    if (rows.length > 0) {
+      remember(place)
+      yield* wakeEmbedder()
+    }
     return rows.map((row) => ({ ...toDocument(row), ...(paused.has(row.id) ? { paused: true } : {}) }))
   })
 
@@ -2289,6 +2336,7 @@ function make(input: {
     },
   ) {
     const use = request.use ?? "recall"
+    state.active = Date.now()
     const has = (yield* count(place, { personal: request.personal })) > 0
     // Without documents memory recalls exactly as it always has.
     if (!has) {
@@ -2306,6 +2354,9 @@ function make(input: {
     }
     const total = request.budget ?? budget(request.tier, { documents: true, tight: request.tight })
     if (total <= 0) return { ids: [], tokens: 0, cards: [], why: {}, documents: true }
+    // This repository's documents are embedded in the background once the search model is ready.
+    remember(place)
+    yield* wakeEmbedder()
     const memory = (yield* brain.candidates(place, {
       query: request.query,
       files: request.files,
@@ -2335,20 +2386,29 @@ function make(input: {
       .toSorted((a, b) => b[1].value - a[1].value || a[0].localeCompare(b[0]))
       .slice(0, BrainFuse.DEPTH)
       .map(([ref]) => ref)
-    const shown = yield* cards(
+    // What the request means, in other words than its own: only for a request with words to mean something (a
+    // greeting has none), and only once the local model is ready and answers in time.
+    const near = query.size > 0 ? yield* meaning(place, request.query, { personal: request.personal, exclude: request.exclude }) : []
+    const lexicalShown = yield* cards(
       place,
       [...found.slice(0, BrainFuse.DEPTH).map((item) => item.ref), ...active],
       request.personal,
     )
+    const nearShown = near.length === 0 ? new Map<string, Card>() : yield* cards(place, near.map((hit) => hit.ref), request.personal)
+    const shown = new Map([...lexicalShown, ...nearShown])
     // A record's card is its passage's own sentence, so a passage goes in only where no record of it does; the agent
-    // opens the rest of it with get.
-    const covered = new Set([...shown.values()].flatMap((card) => (card.passage ? [card.passage] : [])))
+    // opens the rest of it with get. Records found by meaning count too, once they would be recalled.
+    const meant = near.filter((hit) => nearShown.has(hit.ref) && nearShown.get(hit.ref)!.confidence >= BrainCredit.FLOOR)
+    const covered = new Set(
+      [...lexicalShown.values(), ...meant.map((hit) => nearShown.get(hit.ref)!)].flatMap((card) => (card.passage ? [card.passage] : [])),
+    )
     const documentHits = found
       .filter((item) => shown.has(item.ref) && !covered.has(item.ref))
       .slice(0, BrainFuse.DEPTH)
     // Below 0.6 a record is searchable but never recalled on its own, however it was reached.
     const linked = active.filter((ref) => shown.has(ref) && !covered.has(ref) && shown.get(ref)!.confidence >= 0.6)
-    const reached = [...new Set([...documentHits.map((item) => item.ref), ...linked])]
+    const similar = meant.map((hit) => hit.ref).filter((ref) => !covered.has(ref))
+    const reached = [...new Set([...documentHits.map((item) => item.ref), ...linked, ...similar])]
     // Two records read from one sentence show the same words; the second adds nothing.
     const documentIds = reached.filter(
       (ref, index) => reached.findIndex((other) => shown.get(other)!.text === shown.get(ref)!.text) === index,
@@ -2357,6 +2417,7 @@ function make(input: {
       { weight: 1, ids: memory.map((item) => item.id) },
       { weight: 1, ids: documentHits.map((item) => item.ref) },
       { weight: BrainFuse.GRAPH, ids: linked, strength: new Map(linked.map((ref) => [ref, graph.get(ref)!.value])) },
+      { weight: BrainFuse.DENSE, ids: similar },
     ])
     const best = Math.max(0, ...fused.values())
     const freshness = yield* freshnessOf(place, documentIds)
@@ -2448,7 +2509,12 @@ function make(input: {
         ...ordered.ordered.map((item) => [item.id, item.path ? "path" : `terms:${item.matched.join(",")}`] as const),
         ...documentCards.map(
           (card) =>
-            [card.ref, hits.has(card.ref) ? `terms:${hits.get(card.ref)!.matched.join(",")}` : (graph.get(card.ref)?.why ?? "")] as const,
+            [
+              card.ref,
+              hits.has(card.ref)
+                ? `terms:${hits.get(card.ref)!.matched.join(",")}`
+                : (graph.get(card.ref)?.why ?? (similar.includes(card.ref) ? "meaning" : "")),
+            ] as const,
         ),
       ]),
       documents: true,
@@ -2801,6 +2867,7 @@ function make(input: {
     place: Brain.Place,
     request: { id: string; part?: string; budget: number; personal: boolean; sessionID?: string; requestID?: string },
   ) {
+    state.active = Date.now()
     const id = request.id.trim().replace(/^\[|\]$/g, "")
     if (id.startsWith("d")) return yield* getDocument(place, id, request)
     const row = yield* db
@@ -2928,14 +2995,25 @@ function make(input: {
     place: Brain.Place,
     request: { query: string; limit?: number; personal: boolean; sessionID?: string },
   ) {
-    const expanded = BrainFuse.expand(BrainLexical.terms(request.query), yield* vocabularyOf(place, request.personal))
-    const found = (yield* lexical(place, expanded.query, { personal: request.personal })).slice(0, request.limit ?? 5)
-    const shown = yield* cards(
-      place,
-      found.map((item) => item.ref),
-      request.personal,
-    )
-    const picked = found.flatMap((item) => (shown.has(item.ref) ? [shown.get(item.ref)!] : []))
+    state.active = Date.now()
+    const terms = BrainLexical.terms(request.query)
+    const expanded = BrainFuse.expand(terms, yield* vocabularyOf(place, request.personal))
+    const limit = request.limit ?? 5
+    const lexicalFound = yield* lexical(place, expanded.query, { personal: request.personal })
+    const near = terms.size > 0 ? yield* meaning(place, request.query, { personal: request.personal }) : []
+    // By meaning too, once the local model is ready: both rankings fused, so a passage in other words can come first.
+    const fused =
+      near.length === 0
+        ? undefined
+        : BrainFuse.rrf([
+            { weight: 1, ids: lexicalFound.map((item) => item.ref) },
+            { weight: BrainFuse.DENSE, ids: near.map((hit) => hit.ref) },
+          ])
+    const refs = fused
+      ? [...fused].toSorted((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([ref]) => ref).slice(0, limit)
+      : lexicalFound.slice(0, limit).map((item) => item.ref)
+    const shown = yield* cards(place, refs, request.personal)
+    const picked = refs.flatMap((ref) => (shown.has(ref) ? [shown.get(ref)!] : []))
     yield* record(picked, {
       ...(request.sessionID ? { sessionID: request.sessionID } : {}),
       tier: "search",
@@ -2952,6 +3030,293 @@ function make(input: {
         text: BrainScan.redact(card.text).text,
       }),
     )
+  })
+
+  // --- Meaning ----------------------------------------------------------------------------------------------------
+
+  // Records and passages near a request in meaning, best first: what the local model's vectors put over the model's
+  // floor and within MEANING_MARGIN of the best match. Nothing when no model is ready, it is still loading, or the
+  // request's vector takes over 300 ms: then keywords and code links are all there is, as before the model.
+  const meaning = Effect.fnUntraced(function* (
+    place: Brain.Place,
+    text: string,
+    options: { readonly personal: boolean; readonly exclude?: ReadonlySet<string> },
+  ) {
+    const none: { readonly ref: string; readonly score: number }[] = []
+    const current = yield* embed.current()
+    if (!current) return none
+    const vectors = yield* vectorsOf(place, current)
+    if (vectors.block.size === 0) return none
+    const query = yield* embed.query(text)
+    if (!query) return none
+    const hits = BrainVector.search(vectors.block, query, {
+      k: BrainFuse.DEPTH,
+      allow: (row) => (options.personal || vectors.private[row] === 0) && !options.exclude?.has(vectors.refs[row]!),
+    })
+    const gate = Math.max(current.floor, (hits[0]?.score ?? 0) - MEANING_MARGIN)
+    return hits.filter((hit) => hit.score >= gate).map((hit) => ({ ref: vectors.refs[hit.row]!, score: hit.score }))
+  })
+
+  // A repository's vectors of usable items in one block, built again only when a vector, an item or a document changed.
+  const vectorsOf = Effect.fnUntraced(function* (place: Brain.Place, current: BrainEmbed.Current) {
+    const now = Date.now()
+    for (const [repository, cached] of state.vectors) if (now - cached.used > VECTORS_IDLE) state.vectors.delete(repository)
+    const latest = yield* db
+      .get<{ count: number; latest: number | null; revision: number | null }>(
+        sql`SELECT count(*) AS count, max(v.embedded_at) AS latest,
+              (SELECT s.knowledge_revision FROM ${BrainStateTable} s WHERE s.repository_id = ${place.repository}) AS revision
+            FROM ${BrainVectorTable} v WHERE v.repository_id = ${place.repository} AND v.model = ${current.key}`,
+      )
+      .pipe(Effect.orDie)
+    const key = `${current.key}:${latest?.count ?? 0}:${latest?.latest ?? 0}:${latest?.revision ?? 0}`
+    const cached = state.vectors.get(place.repository)
+    if (cached?.key === key) {
+      cached.used = now
+      return cached
+    }
+    const rows = yield* db
+      .all<{ item: number; q8: Uint8Array; scale: number; ref: string; visibility: string }>(
+        sql`SELECT v.item AS item, v.q8 AS q8, v.scale AS scale, i.ref AS ref, i.visibility AS visibility
+            FROM ${BrainVectorTable} v
+            JOIN ${BrainItemTable} i ON i.id = v.item
+            JOIN ${BrainDocumentTable} d ON d.id = i.document_id
+            WHERE v.repository_id = ${place.repository} AND v.model = ${current.key} AND i.status = 'active'
+              AND d.status IN (${sql.join(
+                USABLE.map((status) => sql`${status}`),
+                sql`, `,
+              )})
+            ORDER BY v.item`,
+      )
+      .pipe(Effect.orDie)
+    const usable = rows.filter((row) => row.q8.byteLength === current.dims)
+    const vectors: Vectors = {
+      key,
+      block: BrainVector.index(current.dims, usable),
+      refs: usable.map((row) => row.ref),
+      private: Uint8Array.from(usable, (row) => (row.visibility === "repository" ? 0 : 1)),
+      used: now,
+    }
+    state.vectors.set(place.repository, vectors)
+    return vectors
+  })
+
+  // The background embedder, one per process, started by the first document this process stores or shows: it embeds
+  // what the model in use has no vector for, then waits to be woken (a document stored, the model downloaded, removed,
+  // paused or resumed) or looks again every half minute.
+  const wakeEmbedder = Effect.fnUntraced(function* () {
+    yield* Queue.offer(input.embedding, undefined)
+    if (state.embedder) return
+    state.embedder = true
+    yield* Effect.gen(function* () {
+      for (;;) {
+        yield* Queue.take(input.embedding).pipe(Effect.raceFirst(Effect.sleep(RENEW)), Effect.raceFirst(embed.changed))
+        yield* embedAll().pipe(Effect.catchCause((cause) => Effect.logWarning("brain embedding failed", { cause })))
+      }
+    }).pipe(Effect.forkIn(input.scope))
+  })
+
+  // Batches until nothing is left, the user pauses, or the model cannot run. After each batch it rests as long as the
+  // batch took (about half of one core), three times as long while a session works (about a quarter).
+  const embedAll = Effect.fnUntraced(function* () {
+    for (;;) {
+      const current = yield* embed.current()
+      if (!current) return yield* unembedded()
+      if (current.paused) return
+      const worked = { any: false }
+      for (const repository of [...state.places.keys()]) {
+        const batch = yield* nextBatch(repository, current.key)
+        if (batch.length === 0) {
+          yield* embeddedAll(repository, current.key)
+          continue
+        }
+        const started = Date.now()
+        const vectors = yield* embed.embed(batch.map((item) => item.text))
+        if (!vectors || vectors.length !== batch.length) return
+        yield* keepVectors(repository, current.key, batch, vectors)
+        worked.any = true
+        const took = Date.now() - started
+        yield* Effect.sleep(Date.now() - state.active < WORKING ? took * 3 : took)
+      }
+      if (!worked.any) return
+    }
+  })
+
+  // What to embed next in a repository: records first (a card with its document's title), then passages (breadcrumb
+  // and body), each with no vector from this model or one of text it no longer has. Short records go several at once;
+  // a passage goes alone, so a request's query waits for at most one.
+  const nextBatch = Effect.fnUntraced(function* (repository: string, key: string) {
+    const rows = yield* db
+      .all<{
+        item: number
+        type: "record" | "passage"
+        document: string
+        title: string
+        card: string | null
+        header: string | null
+        body: string | null
+        hash: string
+      }>(
+        sql`SELECT i.id AS item, i.type AS type, i.document_id AS document, d.title AS title, r.card AS card,
+              p.header AS header, p.body AS body, COALESCE(r.norm_hash || ':' || r.updated_at, p.norm_hash) AS hash
+            FROM ${BrainItemTable} i
+            JOIN ${BrainDocumentTable} d ON d.id = i.document_id
+            LEFT JOIN ${BrainRecordTable} r ON r.item = i.id
+            LEFT JOIN ${BrainPassageTable} p ON p.item = i.id
+            LEFT JOIN ${BrainVectorTable} v ON v.item = i.id
+            WHERE i.repository_id = ${repository} AND i.status = 'active'
+              AND d.status IN (${sql.join(
+                USABLE.map((status) => sql`${status}`),
+                sql`, `,
+              )})
+              AND (r.item IS NOT NULL OR p.item IS NOT NULL)
+              AND (v.item IS NULL OR v.model != ${key}
+                OR v.norm_hash != COALESCE(r.norm_hash || ':' || r.updated_at, p.norm_hash))
+            ORDER BY CASE i.type WHEN 'record' THEN 0 ELSE 1 END, d.ordinal, i.id
+            LIMIT ${EMBED_ITEMS}`,
+      )
+      .pipe(Effect.orDie)
+    const items = rows.map((row) => ({
+      ...row,
+      text: row.type === "record" ? `${row.title}: ${row.card ?? ""}` : `${row.header ?? ""}\n${row.body ?? ""}`,
+    }))
+    if (items[0]?.type !== "record") return items.slice(0, 1)
+    const records = items.filter((item) => item.type === "record")
+    const tokens = records.map((item) => Token.estimate(item.text))
+    const fits = tokens.findIndex((_, at) => tokens.slice(0, at + 1).reduce((sum, value) => sum + value, 0) > EMBED_TOKENS)
+    return records.slice(0, Math.max(1, fits < 0 ? records.length : fits))
+  })
+
+  const keepVectors = Effect.fnUntraced(function* (
+    repository: string,
+    key: string,
+    batch: readonly { readonly item: number; readonly document: string; readonly hash: string }[],
+    vectors: readonly Float32Array[],
+  ) {
+    const now = Date.now()
+    yield* db
+      .transaction((tx) =>
+        Effect.forEach(
+          batch,
+          (item, index) => {
+            const quantized = BrainVector.quantize(vectors[index]!)
+            const values = {
+              item: item.item,
+              repository_id: repository,
+              model: key,
+              q8: Buffer.from(quantized.q8.buffer, quantized.q8.byteOffset, quantized.q8.byteLength),
+              bits: Buffer.from(quantized.bits),
+              scale: quantized.scale,
+              norm_hash: item.hash,
+              embedded_at: now,
+            }
+            return tx.insert(BrainVectorTable).values(values).onConflictDoUpdate({ target: BrainVectorTable.item, set: values }).run()
+          },
+          { discard: true },
+        ),
+      )
+      .pipe(Effect.orDie)
+    for (const document of new Set(batch.map((item) => item.document))) yield* countEmbedded(document, key, "embedding")
+  })
+
+  // A document's count of what is embedded, and its status: embedding while some of it is, ready once all of it is. A
+  // partly read or held document keeps the status that says so.
+  const countEmbedded = Effect.fnUntraced(function* (document: string, key: string, next: "embedding" | "ready") {
+    const row = yield* db.select().from(BrainDocumentTable).where(eq(BrainDocumentTable.id, document)).get().pipe(Effect.orDie)
+    if (!row) return
+    const counted = yield* db
+      .get<{ count: number }>(
+        sql`SELECT count(*) AS count FROM ${BrainVectorTable} v JOIN ${BrainItemTable} i ON i.id = v.item
+            WHERE i.document_id = ${document} AND v.model = ${key} AND i.status = 'active'`,
+      )
+      .pipe(Effect.orDie)
+    const status = row.status === "searchable" || row.status === "embedding" || row.status === "ready" ? next : row.status
+    const embedded = counted?.count ?? 0
+    if (status === row.status && row.stats.embedded === embedded && row.embed_model === key) return
+    yield* db
+      .update(BrainDocumentTable)
+      .set({ status, stats: { ...row.stats, embedded }, embed_model: key })
+      .where(eq(BrainDocumentTable.id, document))
+      .run()
+      .pipe(Effect.orDie)
+  })
+
+  // Nothing is left to embed in a repository: its documents are ready, with their counts.
+  const embeddedAll = Effect.fnUntraced(function* (repository: string, key: string) {
+    const rows = yield* db
+      .select({ id: BrainDocumentTable.id, status: BrainDocumentTable.status, model: BrainDocumentTable.embed_model })
+      .from(BrainDocumentTable)
+      .where(and(eq(BrainDocumentTable.repository_id, repository), inArray(BrainDocumentTable.status, [...USABLE])))
+      .all()
+      .pipe(Effect.orDie)
+    for (const row of rows) if (row.status !== "ready" || row.model !== key) yield* countEmbedded(row.id, key, "ready")
+  })
+
+  // The model was removed: its vectors go, and documents are searchable by keywords and code links again. A model
+  // that only failed its check here keeps the vectors another process may have made with it.
+  const unembedded = Effect.fnUntraced(function* () {
+    if ((yield* embed.status()).state !== "absent") return
+    const embedded = yield* db
+      .select({ id: BrainDocumentTable.id })
+      .from(BrainDocumentTable)
+      .where(or(inArray(BrainDocumentTable.status, ["embedding", "ready"]), sql`${BrainDocumentTable.embed_model} IS NOT NULL`))
+      .limit(1)
+      .get()
+      .pipe(Effect.orDie)
+    const vector = yield* db.select({ item: BrainVectorTable.item }).from(BrainVectorTable).limit(1).get().pipe(Effect.orDie)
+    if (!embedded && !vector) return
+    yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          yield* tx.delete(BrainVectorTable).run()
+          yield* tx
+            .update(BrainDocumentTable)
+            .set({ status: "searchable" })
+            .where(inArray(BrainDocumentTable.status, ["embedding", "ready"]))
+            .run()
+          yield* tx
+            .update(BrainDocumentTable)
+            .set({ stats: sql`json_set(${BrainDocumentTable.stats}, '$.embedded', 0)`, embed_model: null })
+            .where(sql`${BrainDocumentTable.embed_model} IS NOT NULL OR json_extract(${BrainDocumentTable.stats}, '$.embedded') > 0`)
+            .run()
+        }),
+      )
+      .pipe(Effect.orDie)
+    state.vectors.clear()
+  })
+
+  const modelOf = Effect.fn("BrainKnowledge.model")(function* (place: Brain.Place) {
+    remember(place)
+    yield* wakeEmbedder()
+    const status = yield* embed.status()
+    const current = yield* embed.current()
+    const counts = yield* db
+      .get<{ total: number; done: number }>(
+        sql`SELECT count(*) AS total, count(v.item) AS done
+            FROM ${BrainItemTable} i
+            JOIN ${BrainDocumentTable} d ON d.id = i.document_id
+            LEFT JOIN ${BrainVectorTable} v ON v.item = i.id AND v.model = ${current?.key ?? ""}
+            WHERE i.repository_id = ${place.repository} AND i.status = 'active'
+              AND d.status IN (${sql.join(
+                USABLE.map((value) => sql`${value}`),
+                sql`, `,
+              )})`,
+      )
+      .pipe(Effect.orDie)
+    return { ...status, embedded: { done: counts?.done ?? 0, total: counts?.total ?? 0 } } satisfies BrainSchema.ModelStatus
+  })
+
+  // Whether a document has anything the model in use could still embed; false when no model is in use.
+  const embeddingLeft = Effect.fnUntraced(function* (document: string) {
+    const current = yield* embed.current()
+    if (!current || current.paused) return false
+    const left = yield* db
+      .get<{ item: number }>(
+        sql`SELECT i.id AS item FROM ${BrainItemTable} i
+            LEFT JOIN ${BrainVectorTable} v ON v.item = i.id AND v.model = ${current.key}
+            WHERE i.document_id = ${document} AND i.status = 'active' AND v.item IS NULL LIMIT 1`,
+      )
+      .pipe(Effect.orDie)
+    return left !== undefined
   })
 
   // --- Changing ---------------------------------------------------------------------------------------------------
@@ -5378,6 +5743,7 @@ function make(input: {
     },
     mode: "pointer" | "guard",
   ) {
+    state.active = Date.now()
     const found = yield* linkedTo(place, {
       file: request.file,
       personal: request.personal,
@@ -6211,6 +6577,7 @@ function make(input: {
     scan,
     sources,
     worker: () => worker.status(),
+    model: modelOf,
     records,
     distillable,
     distilled,

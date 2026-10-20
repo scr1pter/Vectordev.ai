@@ -1,9 +1,9 @@
 export * as BrainFuse from "./fuse"
 
 // How the brain's retrieval channels become one ranking. Each channel ranks what it finds (keywords over memory, keywords
-// over documents; code links and meaning in later releases), weighted reciprocal rank fusion merges the rankings without
-// comparing their raw scores, and a gate keeps out what no channel found convincingly, so an unrelated request recalls
-// nothing at all.
+// over documents, code links, and meaning once the local search model is downloaded), weighted reciprocal rank fusion
+// merges the rankings without comparing their raw scores, and a gate keeps out what no channel found convincingly, so
+// an unrelated request recalls nothing at all.
 
 /** RRF's constant: how quickly the credit for a lower rank falls off. */
 export const K = 60
@@ -86,6 +86,9 @@ export const ACTIVATED = 0.4
 
 /** Weight of code-link activation in fusion, when the seeds are the request's own working set. */
 export const GRAPH = 1.2
+
+/** Weight of the search by meaning in fusion; when the model is not ready its list is empty, so it weighs nothing. */
+export const DENSE = 1
 
 export type Link = {
   readonly owner: string
