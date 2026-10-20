@@ -41,12 +41,12 @@ const range = (session: number) => {
 
 test("the one-pager stays one page", () => {
   // Visible words outside the collapsed sources list. The page is read in a couple of minutes; grow it only by
-  // cutting something else.
+  // cutting something else. The owner added the markets section on 19 October 2026.
   const text = markup
     .slice(markup.indexOf("<div class=\"ip-page\">"))
     .replace(/<details[\s\S]*?<\/details>/g, "")
     .replace(/<[^>]+>/g, " ")
-  expect(text.split(/\s+/).filter((word) => /\w/.test(word)).length).toBeLessThan(750)
+  expect(text.split(/\s+/).filter((word) => /\w/.test(word)).length).toBeLessThan(880)
   expect(markup).not.toMatch(/<table/)
 })
 
@@ -149,8 +149,16 @@ test("the README gives Vector Velocity the investor page's status and size, and 
 
 test("the brain is labelled wherever the page opens with it", () => {
   // The lede is what investors read first, so the brain's status sits in it too, not only in its card.
-  expect(markup).toContain("and, in development for desktop 1.99.110, a brain that learns each repository it works in")
+  expect(markup).toContain("Its brain, in development for desktop 1.99.110, learns each repository it works in")
   expect(page).toContain("a brain that learns each repository and a model of its own, both in development")
+})
+
+test("the markets the brain serves are labelled as not yet products, and say what the brain does, not how", () => {
+  const markets = section(/<section class="ip-section" aria-labelledby="markets-title">[\s\S]*?<\/section>/)
+  expect(markets).toContain("None of these is a separate product or on sale yet.")
+  expect(markets.match(/<div class="ip-reason">/g)).toHaveLength(6)
+  // How the brain checks documents against code stays off the public page.
+  expect(markup).not.toMatch(/\bdrift|mismatch|spec says|datasheet says|code says/i)
 })
 
 test("the investor page names the outside agents Vector runs and the business it plans", () => {
