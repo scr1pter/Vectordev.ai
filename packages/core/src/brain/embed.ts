@@ -22,7 +22,7 @@ import { BrainWorker } from "./worker/host"
 // The local search model: downloaded once when the user asks, checked, and from then on run on this computer with no
 // network at all.
 //
-// - Files come from Vector's own copy (a GitHub release) and then from Hugging Face at the pinned revision. A
+// - Files come from Vector's own copy (its Vercel Blob store) and then from Hugging Face at the pinned revision. A
 //   redirect is followed only to the hosts of the source it came from. Each file streams to `<file>.part`, resumes
 //   with an HTTP range after a cut, stops once it grows past its pinned size, and is renamed into place only when its
 //   sha256 is the pinned one. manifest.json is written last, so a folder without one holds no model.
