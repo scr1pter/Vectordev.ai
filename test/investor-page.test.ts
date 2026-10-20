@@ -179,8 +179,10 @@ test("the investor page leads with the self-evolving AI agentic harness that bui
   expect(page).toContain(
     "Vector, the self-evolving AI agentic harness: designed to build and ship applications and to learn about you and your company, with your data in your control.",
   )
-  expect(markup).toContain("Vector runs three of their agents and its own on any model, so if one door closes the work moves.")
-  expect(markup).toContain("Vector plans to earn on <strong class=\"ip-ink\">Codium</strong> credits, then its own model")
+  expect(markup).toContain(
+    "Vector runs three of their agents and its own on any model, so if one door closes the work moves.",
+  )
+  expect(markup).toContain('Vector plans to earn on <strong class="ip-ink">Codium</strong> credits, then its own model')
   expect(markup).not.toMatch(/a brain that learns each repository it works in|each lab's own CLI/)
 })
 
