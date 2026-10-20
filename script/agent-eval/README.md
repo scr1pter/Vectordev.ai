@@ -194,6 +194,43 @@ endpoint is fixed to the provider and which needs a real sign-in:
 developer item where a ChatGPT sign-in sends `instructions` plus a developer
 item, and the provider's order for `instructions` against `tools` is not public.
 
+## Does the brain compound?
+
+`compounding/` asks whether Vector's brain pays off on one repository over time.
+Sixteen tasks over six simulated weeks run on _ledger_, a small invoicing and
+refunds service, where later tasks need what earlier ones taught: a preference
+the user states once (pnpm), a decision and its reason (integer cents), a check
+that breaks on a stale generated file, values and requirements from a spec PDF
+the owner adds to memory, a naming convention, and a flaky-test fix.
+
+```
+bun script/agent-eval/compounding/run.ts --out docs/benchmarks/vector-compounding-<date>
+bun script/agent-eval/compounding/run.ts --arms off,on --tasks t01-slugify,t08-csv-export --dump requests/
+```
+
+Three arms run the same prompts from the same starting files: _off_ (no memory
+tool, databases in memory, a fresh home per task), _on_ (one home, learning on)
+and _blind_, a control that keeps the brain on but has the fake model server
+delete everything the brain added before the scripted model reads the request.
+The scripted model (`policy.ts`) is a pure function of each request: it gets a
+fact right only when the fact is in the request, and makes the mistake a model
+without it makes otherwise. Mistakes are read from the run (an `npm install`, a
+stale route table, a hidden acceptance test of a fact), never from the script.
+The report gives tokens, steps, re-reads, repeated mistakes and checks passed per
+task, per week and cumulatively, as `README.md` and `report.json`.
+
+`--live` runs the off and on arms against a real model: a local
+OpenAI-compatible endpoint (`--provider openai-compatible --base-url ...`) or a
+provider the owner picks (`--provider anthropic --api-key-env NAME`). It prints a
+cost estimate and does nothing without `--yes`, gives each task `--max-cost` of
+what is left under `--max-spend` (default $5), and refuses to run in CI.
+
+The tests run from `script/agent-eval/compounding`, one file at a time:
+`tasks.test.ts` (each reference solution passes, each missing fact fails its
+check), `policy.test.ts` and `measure.test.ts` (pure), and `harness.test.ts`
+(four tasks against the real engine: the same numbers twice, brain off never
+reads a planted `brain.db`, and the blind control loses brain on's advantage).
+
 ## Unavailable is not zero
 
 The rule this harness must never break: **a runtime that cannot be measured is
@@ -256,9 +293,11 @@ Practically:
 - To compare two Vector builds, run both back to back in one sitting, and pin
   `--model` so the model is not a free variable.
 - Re-run before believing any single result.
-- No results are checked into this repository, and none should be. There are no
-  published numbers for this harness and nothing here should be quoted as a
-  benchmark score.
+- No results of `run.ts` are checked into this repository, and none should be.
+  There are no published numbers for this harness and nothing here should be
+  quoted as a benchmark score. The offline compounding benchmark is different:
+  the same revision gives the same numbers, so its dated reports are kept in
+  `docs/benchmarks/`.
 
 ## Adding a task
 
