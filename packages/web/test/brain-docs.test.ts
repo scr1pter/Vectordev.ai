@@ -21,20 +21,45 @@ const section = readme.slice(readme.indexOf("### Vector Brain"), readme.indexOf(
 const report = await Bun.file(path.join(repo, `${knowledgeEval.report}/report.json`)).json()
 const words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
 
-test("Vector Brain and Documents and code links are pages of their own, and old local-memory links land on the brain", async () => {
-  const features = docsNav.find((group) => group.label === "Features")?.links.map((link) => link.id) ?? []
+// Desktop 1.99.109 and earlier still have local memory, so its page stays until the download page offers 1.99.110; from
+// then on the page is gone and /docs/local-memory and /docs#local-memory land on the brain page.
+const brainPublished = Bun.semver.order(publishedDesktopVersion, "1.99.110") >= 0
+const features = docsNav.find((group) => group.label === "Features")?.links.map((link) => link.id) ?? []
+const localMemory = Bun.file(path.join(web, "src/pages/docs/local-memory.astro"))
+const vercel = (await Bun.file(path.join(repo, "vercel.json")).json()) as {
+  redirects: { source: string; destination: string }[]
+}
+const localMemoryRedirect = vercel.redirects.find((redirect) => redirect.source === "/docs/local-memory")
+
+test.skipIf(brainPublished)("until desktop 1.99.110 is published, local memory keeps its page, beside the brain's", async () => {
+  expect(features.indexOf("local-memory")).toBe(features.indexOf("brain") - 1)
+  expect(docsNav.flatMap((group) => group.links).find((link) => link.id === "local-memory")?.blurb).toStartWith(
+    "Desktop 1.99.109 and earlier:",
+  )
+  expect(await localMemory.exists()).toBe(true)
+  const page = (await localMemory.text()).replace(/\s+/g, " ")
+  expect(page).toContain('<DocsPage id="local-memory">')
+  expect(page).toContain('{brainRelease.since} <a href="/docs/brain">Vector Brain</a> replaces local memory.')
+  expect(brainRelease.since).toBe("Coming in desktop 1.99.110:")
+  expect(brain).toContain('see <a href="/docs/local-memory">Local memory</a>')
+  // A permanent redirect would be cached by browsers, so neither it nor the /docs#local-memory shim may move readers on.
+  expect(localMemoryRedirect).toBeUndefined()
+  expect(docsMoved["local-memory"]).toBeUndefined()
+})
+
+test.if(brainPublished)("once desktop 1.99.110 is published, local memory's page is gone and its links land on the brain", async () => {
+  expect(features).not.toContain("local-memory")
+  expect(await localMemory.exists()).toBe(false)
+  expect(brain).not.toContain('href="/docs/local-memory"')
+  expect(docsMoved["local-memory"]).toBe("brain")
+  expect(localMemoryRedirect?.destination).toBe("/docs/brain")
+})
+
+test("Vector Brain and Documents and code links are pages of their own", async () => {
   expect(features).toContain("brain")
   expect(features).toContain("documents")
-  expect(features).not.toContain("local-memory")
   expect(brain).toContain('<DocsPage id="brain">')
   expect(documents).toContain('<DocsPage id="documents">')
-  expect(await Bun.file(path.join(web, "src/pages/docs/local-memory.astro")).exists()).toBe(false)
-  // The /docs#local-memory shim and the /docs/local-memory redirect both reach the brain page.
-  expect(docsMoved["local-memory"]).toBe("brain")
-  const vercel = (await Bun.file(path.join(repo, "vercel.json")).json()) as {
-    redirects: { source: string; destination: string }[]
-  }
-  expect(vercel.redirects.find((redirect) => redirect.source === "/docs/local-memory")?.destination).toBe("/docs/brain")
   // Every link between the two pages lands on a heading that exists.
   const links = Array.from(`${brain} ${documents}`.matchAll(/href="\/docs\/(brain|documents)#([\w-]+)"/g), (match) => ({
     page: match[1] === "brain" ? brain : documents,
