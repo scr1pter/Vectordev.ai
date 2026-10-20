@@ -2214,7 +2214,7 @@ export class Model extends HeyApiClient {
   /**
    * Change the search model
    *
-   * download starts the one-time download in the background (poll GET /memory/model); install copies the pinned files from a folder on this computer, for one with no network; remove deletes every downloaded model and the vectors made with it; pause and resume hold or continue embedding in the background. Each file is used only at its pinned size and sha256.
+   * download starts the one-time download in the background (poll GET /memory/model); install copies the pinned files from a folder on this computer, for one with no network; remove deletes every downloaded model and the vectors made with it; pause and resume hold or continue embedding in the background. Each file is used only at its pinned size and sha256, except the Code-aware preview's tokenizer.json and tokenizer_config.json, which are checked by size and taken only from Hugging Face at the preview's pinned revision.
    */
   public update<ThrowOnError extends boolean = false>(options?: Options<MemoryModelUpdateData, ThrowOnError>) {
     return (options?.client ?? this.client).post<MemoryModelUpdateResponses, MemoryModelUpdateErrors, ThrowOnError>({

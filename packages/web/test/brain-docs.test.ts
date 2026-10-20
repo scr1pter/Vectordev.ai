@@ -179,7 +179,7 @@ test("the brain's copy keeps to the owner's wording rules", () => {
   expect(`${brain} ${documents} ${section}`).not.toMatch(/\bOCR\b/)
 })
 
-test("Search by meaning has its own page, from desktop 1.99.110, with the manifest's model, size, license and revision", () => {
+test("Search by meaning has its own page, from desktop 1.99.110, with the manifest's model, size, license and revision", async () => {
   const features = docsNav.find((group) => group.label === "Features")?.links ?? []
   const page = features.find((link) => link.id === "search-by-meaning")
   expect(page?.title).toBe("Search by meaning")
@@ -197,6 +197,22 @@ test("Search by meaning has its own page, from desktop 1.99.110, with the manife
   expect(meaning).toContain("never for a model that may train on prompts, or in a session a guest is in")
   expect(documents).toContain('<a href="/docs/search-by-meaning">Search by meaning</a>')
   expect(section).toContain("With the optional local search model, a one-time 24 MB download you ask for")
+  // Only the preview's two tokenizer files have no pinned sha256, and every place that promises the hash says so.
+  const unpinned = Object.values(BrainEmbedManifest.MODELS).flatMap((model) =>
+    Object.values(model.files).flatMap((file) => (file && !file.sha256 ? [`${model.id}/${file.name}`] : [])),
+  )
+  expect(unpinned).toEqual(["granite-small-r2-q8/tokenizer.json", "granite-small-r2-q8/tokenizer_config.json"])
+  expect(meaning).toContain(
+    "except the Code-aware preview's <code>tokenizer.json</code> and <code>tokenizer_config.json</code>, whose hashes are not pinned yet: they are checked by size and taken only from Hugging Face at the preview's pinned revision.",
+  )
+  const notices = await read("THIRD_PARTY_NOTICES.md")
+  expect(notices).toContain(
+    "except the Code-aware preview's `tokenizer.json` and `tokenizer_config.json`, which are pinned by size only for now and taken only from Hugging Face at the preview's pinned revision.",
+  )
+  const api = await read("packages/engine/src/server/routes/instance/httpapi/groups/memory.ts")
+  expect(api).toContain(
+    "Each file is used only at its pinned size and sha256, except the Code-aware preview's tokenizer.json and tokenizer_config.json, which are checked by size and taken only from Hugging Face at the preview's pinned revision.",
+  )
   // The full-precision fallback has never been run with this build, so the page and the command say so.
   expect(meaning).toContain(
     "Not yet verified: it has not been run in this release, and the check it must pass on your computer has not been measured on it.",

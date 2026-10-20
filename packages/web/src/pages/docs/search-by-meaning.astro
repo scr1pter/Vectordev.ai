@@ -36,8 +36,10 @@ const graph = arctic.files.model.sha256 ?? ""
           </dl>
           <p>
             Files come from Vector's own copy and then from Hugging Face at the pinned revision. A file is kept only at
-            its pinned size and sha256 (the default model's graph is <code>{graph.slice(0, 16)}…</code>),
-            a cut download resumes where it stopped, and a redirect to a host the source does not use is refused. The
+            its pinned size and sha256 (the default model's graph is <code>{graph.slice(0, 16)}…</code>), except the
+            Code-aware preview's <code>tokenizer.json</code> and <code>tokenizer_config.json</code>, whose hashes are not
+            pinned yet: they are checked by size and taken only from Hugging Face at the preview's pinned revision. A
+            cut download resumes where it stopped, and a redirect to a host the source does not use is refused. The
             model lives in Vector's data folder, outside the brain's own folder, so erasing all memory keeps it. For a
             computer with no network, <code>vector memory model install --from &lt;folder&gt;</code> takes the same files
             from a folder, with the same checks.
