@@ -125,7 +125,10 @@ export const WebFetchTool = Tool.define(
           }
 
           const pdf = mime === "application/pdf" || body.subarray(0, 5).toString("latin1") === "%PDF-"
-          const content = pdf ? yield* Effect.promise(() => readPdf(body)) : new TextDecoder().decode(body)
+          // A PDF is read within the fetch's own time limit, so a file that makes the reader run long stops there.
+          const content = pdf
+            ? yield* Effect.promise(() => readPdf(body, AbortSignal.any([ctx.abort, AbortSignal.timeout(timeout)])))
+            : new TextDecoder().decode(body)
           const converted = !pdf && params.format !== "html" && contentType.includes("text/html")
           const text = WebFence.clean(
             converted
@@ -135,12 +138,12 @@ export const WebFetchTool = Tool.define(
               : content,
           )
           // A converted page or a PDF is read once and rarely needed whole; anything else keeps the usual limits. A
-          // configured tool_output.max_bytes still decides, as it does for shell.
-          const page = yield* truncate.output(
-            text,
-            converted || pdf ? { maxBytes: (yield* config.get()).tool_output?.max_bytes ?? MAX_PAGE_BYTES } : {},
-          )
+          // configured tool_output.max_bytes still decides, as it does for shell. The whole page is saved in a fence of
+          // its own, escaped and flagged as the preview is, and Grep and Read fence what they show from it again.
           const fence = (preview: string) => WebFence.fenceWebPage({ url: params.url, tool: "webfetch" }, preview)
+          const limits =
+            converted || pdf ? { maxBytes: (yield* config.get()).tool_output?.max_bytes ?? MAX_PAGE_BYTES } : {}
+          const page = yield* truncate.output(text, { ...limits, save: () => fence(text) })
           return {
             output: page.truncated ? fenceTruncated(page.content, text, fence) : fence(page.content),
             title,
@@ -169,14 +172,26 @@ function fenceTruncated(content: string, page: string, fence: (preview: string) 
 }
 
 // A PDF's text through the brain's reader, which runs no script and fetches nothing, under a heading for each page.
-async function readPdf(bytes: Uint8Array) {
+// The reader runs on this thread, with the inline limits and a turn for the event loop after every page, and stops
+// when `signal` does.
+export async function readPdf(bytes: Uint8Array, signal: AbortSignal) {
+  const stoppedMessage = "Vector stopped reading this PDF: it took longer than the fetch's time limit."
+  if (signal.aborted) return stoppedMessage
   const { BrainDocument } = await import("@vectordevai/core/brain/document/read")
   const { BrainLimits } = await import("@vectordevai/core/brain/document/limits")
-  // pdf.js refuses a Node Buffer, so the reader gets plain bytes.
-  const read = await BrainDocument.read(
-    { name: "page.pdf", bytes: new Uint8Array(bytes), mime: "application/pdf" },
-    BrainLimits.LIMITS.inline,
+  const stopped = new Promise<"stopped">((resolve) =>
+    signal.addEventListener("abort", () => resolve("stopped"), { once: true }),
   )
+  // pdf.js refuses a Node Buffer, so the reader gets plain bytes.
+  const read = await Promise.race([
+    BrainDocument.read(
+      { name: "page.pdf", bytes: new Uint8Array(bytes), mime: "application/pdf" },
+      BrainLimits.LIMITS.inline,
+      signal,
+    ),
+    stopped,
+  ])
+  if (read === "stopped") return stoppedMessage
   if (read.type === "refused") return `This PDF could not be read: ${read.message}`
   const pages = Map.groupBy(read.blocks, (block) => block.span.page ?? 1)
   const head = [

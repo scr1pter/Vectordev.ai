@@ -12,6 +12,7 @@ import { SessionID, MessageID } from "../../src/session/schema"
 import { testEffect } from "../lib/effect"
 import { AppNodeBuilderV1 } from "../../src/effect/app-node-builder-v1"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
+import { FenceMatch } from "../../../core/test/lib/fence"
 
 const it = testEffect(
   LayerNode.compile(LayerNode.group([httpClient, Truncate.node, Agent.node, Auth.node, RuntimeFlags.node])),
@@ -94,8 +95,11 @@ describe("stored search keys", () => {
         expect(Object.keys(body.params.arguments)).not.toContain("session_id")
         expect(Object.keys(body.params.arguments)).not.toContain("model_name")
         expect(JSON.stringify(body)).not.toContain("ses_search_credentials")
-        expect(output.output).toBe(
-          `<untrusted_web_page title="${provider === "exa" ? "Exa" : "Parallel"} Web Search: Vector fixture" tool="websearch">\nFixture search result\n</untrusted_web_page>`,
+        expect(output.output).toEqual(
+          FenceMatch.block(
+            `title="${provider === "exa" ? "Exa" : "Parallel"} Web Search: Vector fixture" tool="websearch"`,
+            "Fixture search result",
+          ),
         )
         expect(JSON.stringify(output)).not.toContain("fixture-secret")
         expect(guard.outside()).toEqual([])

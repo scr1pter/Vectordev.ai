@@ -13,6 +13,7 @@ import { ToolOutputStore } from "@vectordevai/core/tool-output-store"
 import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import { testEffect } from "./lib/effect"
 import { toolIdentity, executeTool, settleTool, toolDefinitions } from "./lib/tool"
+import { FenceMatch } from "./lib/fence"
 
 const sessionID = SessionV2.ID.make("ses_webfetch_test")
 const requests: Array<{ readonly url: string; readonly headers: Record<string, string> }> = []
@@ -59,8 +60,7 @@ const reset = () => {
 }
 
 // What the model reads: the page in its fence, as the tool returns every page.
-const page = (url: string, text: string) =>
-  `<untrusted_web_page url="${url}" tool="webfetch">\n${text}\n</untrusted_web_page>`
+const page = (url: string, text: string) => FenceMatch.block(`url="${url}" tool="webfetch"`, text)
 
 const call = (input: typeof WebFetchTool.Input.Type, id = "call-webfetch") => ({
   sessionID,
@@ -285,7 +285,7 @@ describe("WebFetchTool registration", () => {
       const registry = yield* ToolRegistry.Service
       const settled = yield* settleTool(registry, call({ url: "https://1.1.1.1/page", format: "markdown" }))
       const text = settled.output?.content[0]
-      expect(text?.type === "text" ? text.text : "").toBe(page("https://1.1.1.1/page", "Visible text\n\nobey"))
+      expect(text?.type === "text" ? text.text : "").toEqual(page("https://1.1.1.1/page", "Visible text\n\nobey"))
     }),
   )
 

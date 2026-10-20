@@ -5,6 +5,7 @@ import { filesystem } from "@vectordevai/core/effect/app-node-platform"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Effect, FileSystem } from "effect"
 import { Truncate } from "@/tool/truncate"
+import { WebFence } from "@vectordevai/core/research/fence"
 import { Config } from "@/config/config"
 import { Identifier } from "../../src/id/id"
 import { Process } from "@/util/process"
@@ -82,6 +83,31 @@ describe("Truncate", () => {
         const tail = yield* svc.output(line, { maxBytes: 101, direction: "tail" })
         expect(tail.content.endsWith("éé end")).toBe(true)
         expect(tail.content).not.toContain("\uFFFD")
+      }),
+    )
+
+    it.live("saves what it is given to save, and names a saved web page so Grep and Read fence it", () =>
+      Effect.gen(function* () {
+        const svc = yield* Truncate.Service
+        const page = "heat pump ".repeat(200)
+        const fenced = WebFence.fenceWebPage({ url: "https://e.example/", tool: "webfetch" }, page)
+        const web = yield* svc.output(page, { maxBytes: 100, save: () => fenced })
+        if (!web.truncated) throw new Error("expected a truncated page")
+        expect(web.outputPath).toEndWith(".web")
+        expect(WebFence.savedFile(web.outputPath)).toBe(true)
+        expect(yield* Effect.promise(() => Bun.file(web.outputPath).text())).toBe(fenced)
+        // Output that is not web text keeps its plain name, and a short page is never built or saved.
+        const shell = yield* svc.output("x".repeat(1000), { maxBytes: 100 })
+        if (!shell.truncated) throw new Error("expected truncated output")
+        expect(WebFence.savedFile(shell.outputPath)).toBe(false)
+        const built: string[] = []
+        const short = yield* svc.output("short", {
+          save: () => {
+            built.push("built")
+            return fenced
+          },
+        })
+        expect({ truncated: short.truncated, built }).toEqual({ truncated: false, built: [] })
       }),
     )
 
@@ -266,8 +292,13 @@ describe("Truncate", () => {
           path.join(Truncate.DIR, Identifier.create("tool", "ascending", Date.now() - 10 * DAY_MS)),
           "expired tool output",
         )
+        const oldPage = yield* writeFileStringScoped(
+          path.join(Truncate.DIR, `${Identifier.create("tool", "ascending", Date.now() - 10 * DAY_MS)}.web`),
+          "expired web page",
+        )
         yield* svc.cleanup()
         expect(yield* fs.exists(old)).toBe(false)
+        expect(yield* fs.exists(oldPage)).toBe(false)
         for (const name of names) expect(yield* fs.exists(path.join(Truncate.DIR, name))).toBe(true)
       }),
     )

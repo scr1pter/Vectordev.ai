@@ -7,6 +7,7 @@ import { FileSystem } from "../filesystem"
 import { Image } from "../image"
 import { LocationMutation } from "../location-mutation"
 import { PermissionV2 } from "../permission"
+import { WebFence } from "../research/fence"
 import { AbsolutePath } from "../schema"
 import { ReadToolFileSystem } from "./read-filesystem"
 import { ToolRegistry } from "./registry"
@@ -90,6 +91,16 @@ const layer = Layer.effectDiscard(
               }
               if ("encoding" in content && content.encoding === "base64")
                 return yield* Effect.fail(new ReadToolFileSystem.BinaryFileError({ resource }))
+              // A page a web tool saved whole is web text, so whichever of its lines are read come back fenced again.
+              if (content instanceof ReadToolFileSystem.TextPage && WebFence.savedFile(absolute))
+                return new ReadToolFileSystem.TextPage({
+                  ...content,
+                  content: WebFence.fenceLines(
+                    { tool: name, file: absolute },
+                    content.content.split("\n").map((text, index) => ({ line: content.offset + index, text })),
+                    (line) => line.text,
+                  ),
+                })
               return content
             }).pipe(
               Effect.mapError((error) => {

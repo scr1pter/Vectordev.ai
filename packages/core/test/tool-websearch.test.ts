@@ -13,6 +13,7 @@ import { Credential } from "@vectordevai/core/credential"
 import { Integration } from "@vectordevai/schema/integration"
 import { testEffect } from "./lib/effect"
 import { toolIdentity, executeTool, settleTool, toolDefinitions } from "./lib/tool"
+import { FenceMatch } from "./lib/fence"
 
 const sessionID = SessionV2.ID.make("ses_websearch_test")
 const payload = (text: string) =>
@@ -184,8 +185,7 @@ describe("WebSearchTool registration", () => {
         }),
       ).toEqual({
         type: "text",
-        value:
-          '<untrusted_web_page title="Search: effect typescript" tool="websearch">\nexa results\n</untrusted_web_page>',
+        value: FenceMatch.block('title="Search: effect typescript" tool="websearch"', "exa results"),
       })
       expect(assertions).toMatchObject([
         {
@@ -257,8 +257,7 @@ describe("WebSearchTool registration", () => {
       expect(requests[0]?.body).not.toHaveProperty("params.arguments.session_id")
       expect(requests[0]?.body).not.toHaveProperty("params.arguments.model_name")
       expect(JSON.stringify(requests[0]?.body)).not.toContain(sessionID)
-      const fenced =
-        '<untrusted_web_page title="Search: effect layers" tool="websearch">\nparallel results\n</untrusted_web_page>'
+      const fenced = FenceMatch.block('title="Search: effect layers" tool="websearch"', "parallel results")
       expect(settled).toEqual({
         result: { type: "text", value: fenced },
         output: {
@@ -377,8 +376,7 @@ for (const provider of ["exa", "parallel"] as const) {
         })
         expect(result).toEqual({
           type: "text",
-          value:
-            '<untrusted_web_page title="Search: own credential" tool="websearch">\nsearch results\n</untrusted_web_page>',
+          value: FenceMatch.block('title="Search: own credential" tool="websearch"', "search results"),
         })
         expect(requests[0]?.url).toBe(provider === "exa" ? WebSearchTool.EXA_URL : WebSearchTool.PARALLEL_URL)
         expect(requests[0]?.headers[provider === "exa" ? "x-api-key" : "authorization"]).toBe(

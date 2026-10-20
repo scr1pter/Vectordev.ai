@@ -7,6 +7,7 @@ import { Config } from "@/config/config"
 import { Identifier } from "../id/id"
 import { ToolID } from "./schema"
 import { TRUNCATION_DIR } from "./truncation-dir"
+import { WebFence } from "@vectordevai/core/research/fence"
 
 const RETENTION = Duration.days(7)
 
@@ -21,6 +22,8 @@ export interface Options {
   maxLines?: number
   maxBytes?: number
   direction?: "head" | "tail"
+  /** What the saved file holds in place of the text, such as a web page in its fence; built only when it is saved. */
+  save?: () => string
 }
 
 export interface Interface {
@@ -51,17 +54,18 @@ const layer = Layer.effect(
       const entries = yield* fs.readDirectory(TRUNCATION_DIR).pipe(
         // The directory also holds retained artifacts. Only generated tool IDs
         // encode a timestamp; unrelated names must not abort or enter cleanup.
-        Effect.map((all) => all.filter((name) => /^tool_[0-9a-f]{12}[0-9A-Za-z]{14}$/.test(name))),
+        // A saved web page ends in `.web`, so Grep and Read know to fence it.
+        Effect.map((all) => all.filter((name) => /^tool_[0-9a-f]{12}[0-9A-Za-z]{14}(?:\.web)?$/.test(name))),
         Effect.catch(() => Effect.succeed([])),
       )
       for (const entry of entries) {
-        if (Identifier.timestamp(entry) >= cutoff) continue
+        if (Identifier.timestamp(entry.replace(/\.web$/, "")) >= cutoff) continue
         yield* fs.remove(path.join(TRUNCATION_DIR, entry)).pipe(Effect.catch(() => Effect.void))
       }
     })
 
     const write = Effect.fn("Truncate.write")(function* (text: string) {
-      const file = path.join(TRUNCATION_DIR, ToolID.ascending())
+      const file = path.join(TRUNCATION_DIR, WebFence.savedName(ToolID.ascending(), text))
       yield* fs.ensureDir(TRUNCATION_DIR).pipe(Effect.orDie)
       yield* fs.writeFileString(file, text).pipe(Effect.orDie)
       return file
@@ -128,7 +132,7 @@ const layer = Layer.effect(
       const removed = hitBytes ? totalBytes - bytes : lines.length - out.length
       const unit = hitBytes ? "bytes" : "lines"
       const preview = out.join("\n")
-      const file = yield* write(text)
+      const file = yield* write(options.save?.() ?? text)
 
       // A Grep or a ranged Read of the saved file costs far less than a subagent that starts from an empty context.
       const hint = `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse Grep to search the full content or Read with offset/limit to view specific sections.`
