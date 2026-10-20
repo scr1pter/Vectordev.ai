@@ -290,11 +290,12 @@ export function markdown(input: {
     "- The fixture is small and was written alongside the feature it measures. It shows that code links reach requirements keywords miss; it is not an independent benchmark, and it does not measure the quality of a model's answers.",
     "- Times are from one run on the machine named above and change with the machine and its load.",
     real
-      ? "- Search by meaning ran the pinned int8 model on this computer's CPU through ONNX Runtime's WebAssembly build; another machine embeds at another speed."
+      ? "- Search by meaning ran the pinned int8 model on this computer's CPU through ONNX Runtime's WebAssembly build; another machine embeds at another speed. Its floor (0.2, as a cosine less the mean every text shares) was set on this same fixture, as the least that lets none of the unrelated requests through with room to spare, so the meaning columns are not an out-of-sample result."
       : "- Search by meaning ran a hash stand-in, not the model: run it again with `--model <folder>` for the model's figures.",
+    "- The 300-page PDF measures the keyword stage only; how long the model takes to embed it is not timed here.",
     "- Token counts are Vector's estimate of what the recalled text costs, not a provider's count.",
     "",
-    "Run it again with `cd packages/core && bun script/knowledge-eval.ts --out <folder>`.",
+    `Run it again with \`cd packages/core && bun script/knowledge-eval.ts --out <folder>${real ? " --model <folder of the pinned model files>" : ""}\`.`,
     "",
   ].join("\n")
 }
