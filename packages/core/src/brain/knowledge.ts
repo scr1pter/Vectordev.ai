@@ -560,6 +560,8 @@ export interface Interface {
   readonly worker: () => Effect.Effect<BrainWorker.Status>
   /** The local search model's state, with how much of this repository's documents it has embedded. */
   readonly model: (place: Brain.Place) => Effect.Effect<BrainSchema.ModelStatus>
+  /** Deletes every downloaded search model and, before it returns, every vector made with one. */
+  readonly removeModel: () => Effect.Effect<BrainSchema.ModelStatus>
   /** The line a read of a linked file adds: `Documents linked to <file>: [r…] requirement (…)`, or nothing. */
   readonly pointers: (place: Brain.Place, input: PointerInput) => Effect.Effect<Brain.Injection>
   /** The line an edit of a file linked to a requirement, constraint or contract adds, or nothing. */
@@ -3295,6 +3297,14 @@ function make(input: {
       )
       .pipe(Effect.orDie)
     state.vectors.clear()
+  })
+
+  // The vectors go here, not in the background embedder, which a process that only removes the model (the CLI) never
+  // starts before it exits.
+  const removeModel = Effect.fn("BrainKnowledge.removeModel")(function* () {
+    const status = yield* embed.remove()
+    yield* unembedded()
+    return status
   })
 
   const modelOf = Effect.fn("BrainKnowledge.model")(function* (place: Brain.Place) {
@@ -6591,6 +6601,7 @@ function make(input: {
     sources,
     worker: () => worker.status(),
     model: modelOf,
+    removeModel,
     records,
     distillable,
     distilled,

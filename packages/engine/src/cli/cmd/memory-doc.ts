@@ -658,8 +658,8 @@ export const MemoryModelRemoveCommand = effectCmd({
   command: "remove",
   describe: "delete the downloaded search model and the vectors made with it",
   handler: Effect.fn("Cli.memory.model.remove")(function* () {
-    const embed = yield* BrainEmbed.Service
-    yield* embed.remove()
+    const knowledge = yield* BrainKnowledge.Service
+    yield* knowledge.removeModel()
     UI.println("Removed. Vector searches documents by keywords and code links until you download the model again.")
   }),
 })

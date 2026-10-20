@@ -195,7 +195,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
           .install(path.resolve(from), choice)
           .pipe(Effect.catch((error) => Effect.fail(refused(error.message, error.reason))))
       }
-      if (ctx.payload.action === "remove") yield* embed.remove()
+      if (ctx.payload.action === "remove") yield* knowledge.removeModel()
       if (ctx.payload.action === "pause" || ctx.payload.action === "resume") yield* embed.pause(ctx.payload.action === "pause")
       return yield* knowledge.model(place)
     })
