@@ -16,7 +16,7 @@ export const spendRows = [
   ],
   [
     "Your keys, your bill",
-    "Connect your own provider account to start. From 1.99.99, guarded personal OpenRouter free access works independently of Vector's shared allowance, which serves the same models to a signed-in Vector account only while Vector's service has it switched on. Keep that account free: no credit purchase, payment method, automatic top-ups, paid upstream BYOK credentials, or default or enforced paid plugins. When free limits or eligible endpoints are unavailable, wait; the guarded route does not switch to paid models or providers. Other provider connections have their own pricing.",
+    "Connect your own provider account to start. From 1.99.99, guarded personal OpenRouter free access works independently of the free models provided by Vector, which a signed-in Vector account gets only while Vector's service has them switched on. Keep that account free: no credit purchase, payment method, automatic top-ups, paid upstream BYOK credentials, or default or enforced paid plugins. When free limits or eligible endpoints are unavailable, wait; the guarded route does not switch to paid models or providers. Other provider connections have their own pricing.",
   ],
 ]
 
@@ -139,7 +139,7 @@ export const modelCommandRows = [
   ],
   [
     "vector memory model download",
-    "Download it once, after it shows the size, license and source and asks; --yes skips the question, --code-aware takes the Code-aware preview, and --full-precision the full-precision model.",
+    "Download it once, after it shows the size, license and source and asks; --yes skips the question, --code-aware takes the Code-aware preview, and --full-precision the full-precision model, which is not yet verified.",
   ],
   [
     "vector memory model install --from <folder>",
@@ -162,7 +162,7 @@ export const knowledgeEval = {
   meaning:
     "With the search model, the same requests found the governing requirement for 13 of 40 tasks by keywords and meaning alone, with no code links, against 1 of 40 by keywords alone; with every channel at once, for 40 of 40, and 8 of 8 through an import. The 10 unrelated requests carried no tokens with it either.",
   floor:
-    "The least score a match by meaning needs was set on this same eval, as the least that lets none of the unrelated requests through with room to spare, so these figures are not an out-of-sample result.",
+    "The least score a match by meaning needs, 0.2, was set on this same eval. There the unrelated requests carried no cards from 0.18 up, and at 0.17 one of them carried 122 tokens, so the floor sits 0.02 above the least that kept them out, and these figures are not an out-of-sample result.",
 }
 
 // The engine's eight subagent specialists (packages/engine/src/agent/agent.ts)
@@ -321,7 +321,7 @@ export const changelog = [
   [
     "October 2026 · 1.99.100",
     "Messages work again in the desktop app",
-    "This release fixes the desktop app, where in 1.99.99 every message failed with \"Bun is not defined\" on macOS, Windows and Linux. Local plugins and skills loaded from a URL failed in the desktop app with the same error, and plugins installed from npm and providers whose SDK Vector downloads on first use could not load there; all of them work now. The 1.99.99 apps for Intel Macs, Windows on Arm and Linux on Arm did not open, because they were built without the terminal component for their processor. 1.99.100 includes it on every platform, and a terminal component that cannot load now affects only terminals. A copy that does not open never reaches its update check, so on those computers download 1.99.100 from your account page or GitHub releases and install it over the old one; your projects and settings stay where they are. On Windows, Vector's Git commands now follow your Git line-ending and symlink settings: a file whose only change is its line endings no longer shows as edited or blocks switching an agent's branch, and Vector's commits keep the line endings your repository expects. Also on Windows, Claude Code and Codex installed with npm receive the whole Parallel Workspace prompt instead of only its first line, Cursor Agent installed as a command script says it cannot take the prompt instead of running with part of it, detecting these agents no longer fails when one of them or VS Code is installed as a command script, Publish finds Vercel and Netlify CLIs installed with npm, and merge and pull-request checks run npm, pnpm and yarn instead of skipping them. A failed agent check no longer repeats in a loop while the Parallel Workspace composer is open. On Linux, Restart in 1.99.99 and in-app updates to it could open a new, empty profile; 1.99.100 opens your original profile again, so anything you signed in to or set up only in that empty profile needs to be set up again. The terminal agent was not affected and stays at 1.99.99. This release is not yet code-signed, so a new install may show an operating-system warning on first launch.",
+    "This release fixes the desktop app, where in 1.99.99 every message failed with \"Bun is not defined\" on macOS, Windows and Linux. Local plugins and skills loaded from a URL failed in the desktop app with the same error, and plugins installed from npm and providers whose SDK Vector downloads on first use could not load there; all of them work now. The 1.99.99 apps for Intel Macs, Windows on Arm and Linux on Arm did not open, because they were built without the terminal component for their processor. 1.99.100 includes it on every platform, and a terminal component that cannot load now affects only terminals. A copy that does not open never reaches its update check, so on those computers download 1.99.100 from vectordev.ai/download with your free Vector account and install it over the old one; your repositories and settings stay where they are. On Windows, Vector's Git commands now follow your Git line-ending and symlink settings: a file whose only change is its line endings no longer shows as edited or blocks switching an agent's branch, and Vector's commits keep the line endings your repository expects. Also on Windows, Claude Code and Codex installed with npm receive the whole Parallel Workspace prompt instead of only its first line, Cursor Agent installed as a command script says it cannot take the prompt instead of running with part of it, detecting these agents no longer fails when one of them or VS Code is installed as a command script, Publish finds Vercel and Netlify CLIs installed with npm, and merge and pull-request checks run npm, pnpm and yarn instead of skipping them. A failed agent check no longer repeats in a loop while the Parallel Workspace composer is open. On Linux, Restart in 1.99.99 and in-app updates to it could open a new, empty profile; 1.99.100 opens your original profile again, so anything you signed in to or set up only in that empty profile needs to be set up again. The terminal agent was not affected and stays at 1.99.99. This release is not yet code-signed, so a new install may show an operating-system warning on first launch.",
   ],
   [
     "October 2026 · 1.99.99",
@@ -454,7 +454,7 @@ export const faqs = [
   {
     question: "Do I need an API key?",
     answer:
-      "Not for free models. Sign in to Vector to use Free models inside of Vector on Vector's shared allowance, while Vector's service has it on, at no cost to you within a daily limit for each account; a limit or an unavailable endpoint stops the request without a paid fallback. Otherwise connect a provider with your own API key or sign in with ChatGPT. Requests to free models whose providers don't train ask OpenRouter to deny data collection, which excludes endpoints OpenRouter records as training on prompts. Free models whose providers may train are labelled \"May train on your prompts\" and are sent only after you accept that once. Providers may keep prompts and outputs under their own policies, and these routing controls do not cover local history or account logging.",
+      "Not for free models. Sign in to Vector to use Free models inside of Vector, provided by Vector at no cost to you while Vector's service has them on, within a daily limit for each account; a limit or an unavailable endpoint stops the request without a paid fallback. Otherwise connect a provider with your own API key or sign in with ChatGPT. Requests to free models whose providers don't train ask OpenRouter to deny data collection, which excludes endpoints OpenRouter records as training on prompts. Free models whose providers may train are labelled \"May train on your prompts\" and are sent only after you accept that once. Providers may keep prompts and outputs under their own policies, and these routing controls do not cover local history or account logging.",
   },
   {
     question: "Is Vector free?",

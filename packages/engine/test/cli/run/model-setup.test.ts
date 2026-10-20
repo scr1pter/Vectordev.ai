@@ -108,7 +108,7 @@ cliIt.live(
       const signedIn = yield* vector.spawn(["models"], { env })
       vector.expectExit(signedIn, 0, "models")
       expect(signedIn.stdout.split("\n")).toContain(shared)
-      expect(signedIn.stderr).toContain("Shared Vector allowance")
+      expect(signedIn.stderr).toContain("Provided by Vector")
       expect(signedIn.stderr).not.toContain(FREE_MODELS_SIGN_IN_TERMINAL)
       // With the OpenRouter key alone, the shared allowance is not listed, and the CLI says how to get it.
       yield* Effect.promise(() => Bun.file(account).delete())

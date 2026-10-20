@@ -119,7 +119,7 @@ export const BARRED_FREE_PROVIDERS = BARRED_FREE_AUTHORS.map((item) => item.prov
 // never receive these either. Serving Gemma there needs the region limit in Google's terms applied, or a finding that
 // it does not apply; see docs/vector/owner-actions/free-models-legal.md.
 const GEMMA_SHARED =
-  "Google's Gemini API terms (28 April 2026) let EEA, Swiss and UK users use it only through Paid Services, and the shared allowance does not check where its users are."
+  "Google's Gemini API terms (28 April 2026) let EEA, Swiss and UK users use it only through Paid Services, and free models provided by Vector do not check where their users are."
 // Xing4.0 was here until 17 October 2026, when the owner decided every free model belongs on the shared allowance
 // unless its terms bar it: RedPill's terms, under which Phala serves it, do not address free use, which is not a bar.
 const PERSONAL_ONLY_FREE_MODELS: ReadonlyMap<string, string> = new Map([

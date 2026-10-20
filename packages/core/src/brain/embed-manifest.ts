@@ -34,8 +34,9 @@ export type Model = {
   readonly query: string
   /**
    * The least centred cosine (BrainVector: the cosine less the mean every text shares) a match by meaning needs; the
-   * gate also wants it within 0.08 of the best. Set on the knowledge eval, where it is the least that lets none of
-   * the unrelated requests through, with room to spare.
+   * gate also wants it within 0.08 of the best. Set on the knowledge eval, whose floor sweep (report.json in
+   * docs/benchmarks/vector-knowledge-meaning-2026-10-19) has unrelated requests carrying no cards from 0.18 up and one
+   * carrying 122 tokens at 0.17: a margin of 0.02 on the data it was tuned on.
    */
   readonly floor: number
   /** The int8 graph and the files it reads. Only int8 MatMulInteger graphs are used, never q4 MatMulNBits. */
@@ -226,13 +227,14 @@ export const CHECK = 0.995
 export const CHECK_FALLBACK = 0.97
 
 /**
- * The owner-controlled copy of the pinned files, tried before Hugging Face: assets of one GitHub release, each named
- * `<model id>-<file name without folders>`, and used only when its sha256 is the one pinned here.
+ * The owner-controlled copy of the pinned files, tried before Hugging Face: one folder of the public Vercel Blob store
+ * the installers come from, each file named `<model id>-<file name without folders>`, and used only when its sha256 is
+ * the one pinned here. The store serves its files itself, so no redirect leaves it.
  */
 export const MIRROR = {
   tag: "knowledge-pack-1",
-  base: "https://github.com/scr1pter/Vectordev.ai/releases/download/knowledge-pack-1/",
-  hosts: ["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"],
+  base: "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/knowledge-pack-1/",
+  hosts: ["42qryducihx01gl0.public.blob.vercel-storage.com"],
 } as const
 
 /** Hugging Face serves small files itself and large ones from its CDN. */
@@ -252,7 +254,7 @@ export function files(model: Model, variant: Variant = "int8"): readonly File[] 
   ]
 }
 
-/** What a file is called among the mirror's release assets. */
+/** What a file is called in the mirror's folder. */
 export function asset(model: Model, file: File) {
   return `${model.id}-${file.name.split("/").at(-1)}`
 }

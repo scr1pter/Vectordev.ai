@@ -195,7 +195,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
           .install(path.resolve(from), choice)
           .pipe(Effect.catch((error) => Effect.fail(refused(error.message, error.reason))))
       }
-      if (ctx.payload.action === "remove") yield* embed.remove()
+      if (ctx.payload.action === "remove") yield* knowledge.removeModel()
       if (ctx.payload.action === "pause" || ctx.payload.action === "resume") yield* embed.pause(ctx.payload.action === "pause")
       return yield* knowledge.model(place)
     })
@@ -240,8 +240,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
         ),
       )
       const file = form.files[0]
-      if (form.files.length !== 1 || !file)
-        return yield* refused("Send exactly one file, in the field named file.", "invalid")
+      if (form.files.length !== 1 || !file) return yield* refused("Send one file, in the field named file.", "invalid")
       if (file.bytes.length > UPLOAD_BYTES) return yield* tooLarge("This file is over 64 MB, the most Vector reads.")
       const origin = form.fields.get("origin") === "chat" ? ("chat" as const) : ("upload" as const)
       const sessionID = form.fields.get("sessionID")

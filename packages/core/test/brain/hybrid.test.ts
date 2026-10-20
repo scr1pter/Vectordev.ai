@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import fs from "node:fs/promises"
 import path from "node:path"
 import { sql } from "drizzle-orm"
 import { Effect, Layer } from "effect"
@@ -10,7 +11,7 @@ import { BrainWorker } from "@vectordevai/core/brain/worker/host"
 import { Global } from "@vectordevai/core/global"
 import { tmpdir } from "../fixture/tmpdir"
 import { SPEC_V1 } from "./fixture/documents"
-import { added, text, withKnowledge } from "./fixture/knowledge"
+import { added, placeFor, services, text, withKnowledge } from "./fixture/knowledge"
 import * as Fixture from "./fixture/onnx"
 
 // Search by meaning beside keywords and code links. Without the model nothing changes; with it (the hash embedder,
@@ -247,5 +248,70 @@ describe("search by meaning", () => {
     expect(result.after?.embedModel).toBeUndefined()
     expect(result.vectors?.count).toBe(0)
     expect(result.recalled.text).toContain("The audit log keeps entries for 7 years.")
+  }, 60_000)
+
+  // `vector memory model remove` is a process of its own that exits once the model is gone, before any background
+  // embedder of its own would run: removeModel deletes the vectors before it returns.
+  test("removeModel deletes the vectors at once, in a process that never started the background embedder", async () => {
+    await using tmp = await tmpdir()
+    const source = await Fixture.write(path.join(tmp.path, "source"))
+    const root = path.join(tmp.path, "repo")
+    await fs.mkdir(root, { recursive: true })
+    const place = placeFor(root)
+    const options = {
+      file: path.join(tmp.path, "brain.db"),
+      dir: tmp.path,
+      worker: BrainWorker.layerInline,
+      embed: fixtureModel(),
+    }
+    const count = sql`SELECT count(*) AS count FROM brain_vector`
+    const ready = await Effect.runPromise(
+      services(
+        place,
+        (setup) =>
+          Effect.gen(function* () {
+            yield* setup.embed.install(source)
+            const kept = yield* added(setup, text("Audit.md", AUDIT))
+            yield* setup.knowledge.wait(setup.place, kept.document!.id, "ready", 20_000)
+            return yield* setup.db.get<{ count: number }>(count)
+          }),
+        options,
+      ),
+    )
+    // Removing the files alone, as the command did, leaves every vector behind in such a process.
+    const files = await Effect.runPromise(
+      services(
+        place,
+        (setup) =>
+          Effect.gen(function* () {
+            const status = yield* setup.embed.remove()
+            return { status, vectors: yield* setup.db.get<{ count: number }>(count) }
+          }),
+        options,
+      ),
+    )
+    const removed = await Effect.runPromise(
+      services(
+        place,
+        (setup) =>
+          Effect.gen(function* () {
+            const status = yield* setup.knowledge.removeModel()
+            return {
+              status,
+              vectors: yield* setup.db.get<{ count: number }>(count),
+              documents: yield* setup.db.all<{ status: string; embed_model: string | null }>(
+                sql`SELECT status, embed_model FROM brain_document`,
+              ),
+            }
+          }),
+        options,
+      ),
+    )
+    expect(ready?.count).toBeGreaterThan(0)
+    expect(files.status.state).toBe("absent")
+    expect(files.vectors?.count).toBe(ready?.count)
+    expect(removed.status.state).toBe("absent")
+    expect(removed.vectors?.count).toBe(0)
+    expect(removed.documents).toEqual([{ status: "searchable", embed_model: null }])
   }, 60_000)
 })

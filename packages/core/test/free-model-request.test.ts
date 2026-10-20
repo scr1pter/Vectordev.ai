@@ -117,7 +117,7 @@ test("shared request limit counts serialized UTF-8 bytes at the boundary and lea
   const oversized = { ...request, messages: [{ role: "user", content: `${content}é` }] }
   expect(JSON.stringify(oversized).length).toBeLessThan(4_500_000)
   expect(() => serializeFreeModelRequest(oversized, true)).toThrow(
-    "Context too large for the shared free allowance. Compact this conversation, or use a model from a provider you've connected with your own key.",
+    "Context too large for free models provided by Vector. Compact this conversation, or use a model from a provider you've connected with your own key.",
   )
   expect(serializeFreeModelRequest(oversized, false)).toBe(JSON.stringify(oversized))
 })

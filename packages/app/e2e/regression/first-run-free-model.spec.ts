@@ -142,7 +142,7 @@ test("fresh profile is told how to sign in to Vector, then starts on the shared 
   await expect(card).toContainText("run vector login there")
   await expect(card.getByRole("button", { name: "Sign in to Vector" })).toHaveCount(0)
   // The card says who processes prompts on the shared allowance; naming OpenRouter there promotes nothing.
-  await expect(card).toContainText("Vector's shared allowance")
+  await expect(card).toContainText("Free models are provided by Vector at no cost to you")
   await expect(card).toContainText("OpenRouter and the model's provider process your prompts.")
   // It never asks anyone to bring an OpenRouter account of their own.
   await expect(card).not.toContainText(/connect (?:your own )?(?:free )?openrouter/i)

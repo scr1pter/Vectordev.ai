@@ -21,20 +21,45 @@ const section = readme.slice(readme.indexOf("### Vector Brain"), readme.indexOf(
 const report = await Bun.file(path.join(repo, `${knowledgeEval.report}/report.json`)).json()
 const words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
 
-test("Vector Brain and Documents and code links are pages of their own, and old local-memory links land on the brain", async () => {
-  const features = docsNav.find((group) => group.label === "Features")?.links.map((link) => link.id) ?? []
+// Desktop 1.99.109 and earlier still have local memory, so its page stays until the download page offers 1.99.110; from
+// then on the page is gone and /docs/local-memory and /docs#local-memory land on the brain page.
+const brainPublished = Bun.semver.order(publishedDesktopVersion, "1.99.110") >= 0
+const features = docsNav.find((group) => group.label === "Features")?.links.map((link) => link.id) ?? []
+const localMemory = Bun.file(path.join(web, "src/pages/docs/local-memory.astro"))
+const vercel = (await Bun.file(path.join(repo, "vercel.json")).json()) as {
+  redirects: { source: string; destination: string }[]
+}
+const localMemoryRedirect = vercel.redirects.find((redirect) => redirect.source === "/docs/local-memory")
+
+test.skipIf(brainPublished)("until desktop 1.99.110 is published, local memory keeps its page, beside the brain's", async () => {
+  expect(features.indexOf("local-memory")).toBe(features.indexOf("brain") - 1)
+  expect(docsNav.flatMap((group) => group.links).find((link) => link.id === "local-memory")?.blurb).toStartWith(
+    "Desktop 1.99.109 and earlier:",
+  )
+  expect(await localMemory.exists()).toBe(true)
+  const page = (await localMemory.text()).replace(/\s+/g, " ")
+  expect(page).toContain('<DocsPage id="local-memory">')
+  expect(page).toContain('{brainRelease.since} <a href="/docs/brain">Vector Brain</a> replaces local memory.')
+  expect(brainRelease.since).toBe("Coming in desktop 1.99.110:")
+  expect(brain).toContain('see <a href="/docs/local-memory">Local memory</a>')
+  // A permanent redirect would be cached by browsers, so neither it nor the /docs#local-memory shim may move readers on.
+  expect(localMemoryRedirect).toBeUndefined()
+  expect(docsMoved["local-memory"]).toBeUndefined()
+})
+
+test.if(brainPublished)("once desktop 1.99.110 is published, local memory's page is gone and its links land on the brain", async () => {
+  expect(features).not.toContain("local-memory")
+  expect(await localMemory.exists()).toBe(false)
+  expect(brain).not.toContain('href="/docs/local-memory"')
+  expect(docsMoved["local-memory"]).toBe("brain")
+  expect(localMemoryRedirect?.destination).toBe("/docs/brain")
+})
+
+test("Vector Brain and Documents and code links are pages of their own", async () => {
   expect(features).toContain("brain")
   expect(features).toContain("documents")
-  expect(features).not.toContain("local-memory")
   expect(brain).toContain('<DocsPage id="brain">')
   expect(documents).toContain('<DocsPage id="documents">')
-  expect(await Bun.file(path.join(web, "src/pages/docs/local-memory.astro")).exists()).toBe(false)
-  // The /docs#local-memory shim and the /docs/local-memory redirect both reach the brain page.
-  expect(docsMoved["local-memory"]).toBe("brain")
-  const vercel = (await Bun.file(path.join(repo, "vercel.json")).json()) as {
-    redirects: { source: string; destination: string }[]
-  }
-  expect(vercel.redirects.find((redirect) => redirect.source === "/docs/local-memory")?.destination).toBe("/docs/brain")
   // Every link between the two pages lands on a heading that exists.
   const links = Array.from(`${brain} ${documents}`.matchAll(/href="\/docs\/(brain|documents)#([\w-]+)"/g), (match) => ({
     page: match[1] === "brain" ? brain : documents,
@@ -70,10 +95,19 @@ test("the budgets the brain page gives are the ones recall uses", () => {
       `Up to ${Brain.recallBudget(tier)} tokens, or ${BrainKnowledge.budget(tier, { documents: true, tight: false })} in a repository with documents.`,
     )
   }
-  // The README's ceiling is the Thorough budget with documents.
+  // The README's ceiling is the Thorough budget with documents, and it bounds recall only: like the brain page, the
+  // README says every request but a greeting also carries the fixed part.
   expect(section).toContain(
-    `at most ${BrainKnowledge.budget("thorough", { documents: true, tight: false })} tokens for a Thorough request in a repository with documents`,
+    `On top of that, Vector recalls only the few lines that bear on the request, within a budget set by its size, at most ${BrainKnowledge.budget("thorough", { documents: true, tight: false })} tokens for a Thorough request in a repository with documents.`,
   )
+  expect(section).toContain(
+    `Every request but a greeting carries a fixed part: your rules, about ${Brain.BUDGET.memory} tokens of \`MEMORY.md\`, the entries you pinned (about ${Brain.BUDGET.pinned} tokens) and one line saying what else the brain holds`,
+  )
+  expect(section).toContain('A greeting such as "hi" carries none of it.')
+  expect(brain).toContain(
+    `Every request but a greeting carries your rules, the start of <code>MEMORY.md</code> (about ${Brain.BUDGET.memory} tokens of it), the entries you pinned (about ${Brain.BUDGET.pinned} tokens) and one line saying what else the brain holds.`,
+  )
+  expect(section).not.toMatch(/sends your model only the few lines/)
   // What the page says about the cached part, a file read and a subagent's brief.
   expect(brain).toContain(`about ${Brain.BUDGET.memory} tokens of it`)
   expect(brain).toContain(`(about ${Brain.BUDGET.pinned} tokens)`)
@@ -170,7 +204,7 @@ test("the brain's copy keeps to the owner's wording rules", () => {
   expect(`${brain} ${documents} ${section}`).not.toMatch(/\bOCR\b/)
 })
 
-test("Search by meaning has its own page, from desktop 1.99.110, with the manifest's model, size, license and revision", () => {
+test("Search by meaning has its own page, from desktop 1.99.110, with the manifest's model, size, license and revision", async () => {
   const features = docsNav.find((group) => group.label === "Features")?.links ?? []
   const page = features.find((link) => link.id === "search-by-meaning")
   expect(page?.title).toBe("Search by meaning")
@@ -188,6 +222,30 @@ test("Search by meaning has its own page, from desktop 1.99.110, with the manife
   expect(meaning).toContain("never for a model that may train on prompts, or in a session a guest is in")
   expect(documents).toContain('<a href="/docs/search-by-meaning">Search by meaning</a>')
   expect(section).toContain("With the optional local search model, a one-time 24 MB download you ask for")
+  // Only the preview's two tokenizer files have no pinned sha256, and every place that promises the hash says so.
+  const unpinned = Object.values(BrainEmbedManifest.MODELS).flatMap((model) =>
+    Object.values(model.files).flatMap((file) => (file && !file.sha256 ? [`${model.id}/${file.name}`] : [])),
+  )
+  expect(unpinned).toEqual(["granite-small-r2-q8/tokenizer.json", "granite-small-r2-q8/tokenizer_config.json"])
+  expect(meaning).toContain(
+    "except the Code-aware preview's <code>tokenizer.json</code> and <code>tokenizer_config.json</code>, whose hashes are not pinned yet: they are checked by size and taken only from Hugging Face at the preview's pinned revision.",
+  )
+  const notices = await read("THIRD_PARTY_NOTICES.md")
+  expect(notices).toContain(
+    "except the Code-aware preview's `tokenizer.json` and `tokenizer_config.json`, which are pinned by size only for now and taken only from Hugging Face at the preview's pinned revision.",
+  )
+  const api = await read("packages/engine/src/server/routes/instance/httpapi/groups/memory.ts")
+  expect(api).toContain(
+    "Each file is used only at its pinned size and sha256, except the Code-aware preview's tokenizer.json and tokenizer_config.json, which are checked by size and taken only from Hugging Face at the preview's pinned revision.",
+  )
+  // The full-precision fallback has never been run with this build, so the page and the command say so.
+  expect(meaning).toContain(
+    "Not yet verified: it has not been run in this release, and the check it must pass on your computer has not been measured on it.",
+  )
+  expect(meaning).toContain("Settings offers the full-precision one instead, which is not yet verified.")
+  expect(modelCommandRows.find(([command]) => command === "vector memory model download")?.[1]).toContain(
+    "--full-precision the full-precision model, which is not yet verified.",
+  )
 })
 
 test("the meaning figures are the dated report's, run with the pinned model", () => {
@@ -200,4 +258,19 @@ test("the meaning figures are the dated report's, run with the pinned model", ()
   expect(report.dense.irrelevant).toEqual(Array.from({ length: report.fixture.irrelevant }, () => 0))
   expect(meaning).toContain("{knowledgeEval.meaning}")
   expect(meaning).toContain("{knowledgeEval.floor} {knowledgeEval.caveat}")
+})
+
+// The floor was tuned on the eval it is quoted from, so the page gives the margin the report's sweep measured, not a
+// claim of room to spare.
+test("the meaning floor's margin is the one the dated report's sweep measured", async () => {
+  const dense = report.dense
+  expect(dense.floor).toBe(BrainEmbedManifest.MODELS["arctic-embed-xs-q8"].floor)
+  expect(dense.sweep.map((row: { floor: number }) => row.floor)).toContain(dense.floor)
+  expect(knowledgeEval.floor).toBe(
+    `The least score a match by meaning needs, ${dense.floor}, was set on this same eval. There the unrelated requests carried no cards from ${dense.clear.toFixed(2)} up, and at ${dense.leak.floor.toFixed(2)} ${words[dense.leak.requests]} of them carried ${dense.leak.tokens} tokens, so the floor sits ${(dense.floor - dense.clear).toFixed(2)} above the least that kept them out, and these figures are not an out-of-sample result.`,
+  )
+  const manifest = await Bun.file(path.join(repo, "packages/core/src/brain/embed-manifest.ts")).text()
+  const archive = await Bun.file(path.join(repo, `${knowledgeEval.report}/README.md`)).text()
+  for (const text of [knowledgeEval.floor, manifest, archive]) expect(text).not.toContain("room to spare")
+  expect(archive).toContain("## The meaning floor")
 })

@@ -2,7 +2,6 @@ import { expect, test } from "bun:test"
 import path from "node:path"
 import { DEFAULT_REVIEW_CONFIG } from "../packages/core/src/review/types"
 import summary from "../docs/benchmarks/vector-efficiency-2026-10/summary.json"
-import knowledge from "../docs/benchmarks/vector-knowledge-2026-10-19/report.json"
 import { brainCopy, brainRelease, publishedDesktopVersion } from "../packages/web/src/data/vector-releases"
 
 const root = path.join(import.meta.dir, "..")
@@ -47,12 +46,12 @@ const range = (session: number) => {
 
 test("the one-pager stays one page", () => {
   // Visible words outside the collapsed sources list. The page is read in a couple of minutes; grow it only by
-  // cutting something else.
+  // cutting something else. The owner added the markets section on 19 October 2026.
   const text = markup
     .slice(markup.indexOf("<div class=\"ip-page\">"))
     .replace(/<details[\s\S]*?<\/details>/g, "")
     .replace(/<[^>]+>/g, " ")
-  expect(text.split(/\s+/).filter((word) => /\w/.test(word)).length).toBeLessThan(750)
+  expect(text.split(/\s+/).filter((word) => /\w/.test(word)).length).toBeLessThan(880)
   expect(markup).not.toMatch(/<table/)
 })
 
@@ -123,9 +122,8 @@ test("every technology carries its status, and only the shipped ones say Today",
 })
 
 // The brain ships in desktop 1.99.110, built in this tree, so its card names that release instead of saying it is in
-// development: coming in it until the download page offers it, then that release. Its one figure comes from the dated
-// knowledge eval with that eval's caveats.
-test("Vector Brain names desktop 1.99.110 and quotes the dated knowledge eval", async () => {
+// development: coming in it until the download page offers it, then new in it. The card keeps the owner's description.
+test("Vector Brain names desktop 1.99.110 and keeps the owner's description", async () => {
   expect(await Bun.file(path.join(root, "packages/core/src/brain/knowledge.ts")).exists()).toBe(true)
   expect(brainCopy("1.99.109").stage).toBe("Coming in 1.99.110")
   expect(brainCopy("1.99.110").stage).toBe("Desktop 1.99.110")
@@ -135,21 +133,10 @@ test("Vector Brain names desktop 1.99.110 and quotes the dated knowledge eval", 
   expect(brain).toContain(Bun.semver.order(publishedDesktopVersion, "1.99.110") < 0 ? "Coming in 1.99.110" : "Desktop 1.99.110")
   expect(brain).not.toContain("In development")
   expect(markup).not.toContain("in development for desktop 1.99.110")
-  const working = knowledge.found.working
-  expect(knowledge.date).toBe("2026-10-19")
-  expect(knowledge.dirty).toBe(false)
   expect(brain).toContain(
-    `Through code links, ${working.pagerank} of ${working.tasks} eval tasks got their requirement; keywords alone, ${working.keywords} of ${working.tasks}.†`,
+    "A local graph of each repository's rules, decisions, lessons and failures, plus the PDFs and docs a team feeds it, turned from unstructured text into structured knowledge linked to the code.",
   )
-  const method = markup.match(/<strong>† Knowledge eval\.<\/strong>([^<]*)<\/p>/)?.[1] ?? ""
-  ;[
-    "19 October 2026",
-    "docs/benchmarks/vector-knowledge-2026-10-19",
-    "five short specs for a small invented repository",
-    `${knowledge.fixture.working + knowledge.fixture.hops + knowledge.fixture.irrelevant} requests, written alongside the feature; no model call`,
-    "Not an independent benchmark.",
-  ].forEach((caveat) => expect(method).toContain(caveat))
-  expect(knowledge.fixture.documents).toBe(5)
+  expect(brain).toContain("Offline RAG gives each task only the facts it needs, and the agent adds to the graph as it works.")
 })
 
 test("the investor page gives Vector Velocity one status, one size, 550B parameters, and no active size, base or provider", () => {
@@ -175,11 +162,36 @@ test("the README gives Vector Velocity the investor page's status and size, and 
 test("the brain is labelled wherever the page opens with it", () => {
   // The lede is what investors read first, so the brain's release sits in it too, not only in its card.
   const label = Bun.semver.order(publishedDesktopVersion, "1.99.110") < 0 ? "coming in" : "from"
-  expect(markup).toContain(`and, ${label} desktop 1.99.110, a brain that learns each repository it works in`)
-  expect(page).toContain(`a brain that learns each repository (${label} desktop 1.99.110), and a model of its own in development`)
+  expect(markup).toContain(`Its brain, ${label} desktop 1.99.110, learns about you, your company and each repository`)
+  expect(page).toContain(`Its brain is ${brainRelease.kicker} and its own model is in development.`)
   // Every mention of the release on the page is one of the labels, so none says it shipped before it has.
   const built = source.slice(source.indexOf("---", 3), source.indexOf("<style"))
   expect(built.replace(/\$?\{brainRelease\.\w+\}/g, "")).not.toMatch(/1\.99\.110/)
+  // Prompts go to the model provider the user picks, so control is described, never claimed as total.
+  expect(markup).toContain("The brain lives on your computer, and you choose which model sees each request.")
+  expect(page).not.toMatch(/controlled only by you|only you control|never leaves your (computer|machine)/i)
+})
+
+// The owner's positioning (19 October 2026), held so that taking the brain branch's older page back fails.
+test("the investor page leads with the self-evolving AI agentic harness that builds and ships applications", () => {
+  expect(markup).toContain('<h1 id="thesis-title">The self-evolving AI <em>agentic harness</em>.</h1>')
+  expect(markup).toContain("<strong>Vector is the neutral harness designed to build and ship applications:</strong>")
+  expect(page).toContain(
+    "Vector, the self-evolving AI agentic harness: designed to build and ship applications and to learn about you and your company, with your data in your control.",
+  )
+  expect(markup).toContain(
+    "Vector runs three of their agents and its own on any model, so if one door closes the work moves.",
+  )
+  expect(markup).toContain('Vector plans to earn on <strong class="ip-ink">Codium</strong> credits, then its own model')
+  expect(markup).not.toMatch(/a brain that learns each repository it works in|each lab's own CLI/)
+})
+
+test("the markets the brain serves are labelled as not yet products, and say what the brain does, not how", () => {
+  const markets = section(/<section class="ip-section" aria-labelledby="markets-title">[\s\S]*?<\/section>/)
+  expect(markets).toContain("None of these is a separate product or on sale yet.")
+  expect(markets.match(/<div class="ip-reason">/g)).toHaveLength(6)
+  // How the brain checks documents against code stays off the public page.
+  expect(markup).not.toMatch(/\bdrift|mismatch|spec says|datasheet says|code says/i)
 })
 
 test("the investor page names the outside agents Vector runs and the business it plans", () => {

@@ -133,6 +133,33 @@ async function download(options: { readonly handler?: Handler; readonly extra?: 
 }
 
 describe("downloading the search model", () => {
+  // The repository is private, so its GitHub releases 404 for users: Vector's copy is the public Blob store the
+  // installers come from, and each source's first request must be on a host that source allows.
+  test("asks Vector's copy on the public download store first, then Hugging Face at the pinned revision", () => {
+    const [mirror, huggingFace] = BrainEmbed.SOURCES
+    const arctic = BrainEmbedManifest.MODELS["arctic-embed-xs-q8"]
+    const granite = BrainEmbedManifest.MODELS["granite-small-r2-q8"]
+    expect(mirror?.name).toBe("mirror")
+    expect(mirror?.hosts).toEqual(["42qryducihx01gl0.public.blob.vercel-storage.com"])
+    expect(BrainEmbedManifest.files(arctic).map((file) => mirror?.url(arctic, file))).toEqual([
+      "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/knowledge-pack-1/arctic-embed-xs-q8-model_quantized.onnx",
+      "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/knowledge-pack-1/arctic-embed-xs-q8-tokenizer.json",
+      "https://42qryducihx01gl0.public.blob.vercel-storage.com/releases/knowledge-pack-1/arctic-embed-xs-q8-tokenizer_config.json",
+    ])
+    // A file pinned by size only is never taken from the copy.
+    expect(mirror?.url(granite, granite.files.tokenizer)).toBeUndefined()
+    expect(huggingFace?.name).toBe("huggingface")
+    expect(huggingFace?.url(arctic, arctic.files.model)).toBe(
+      `https://huggingface.co/Snowflake/snowflake-arctic-embed-xs/resolve/${arctic.revision}/onnx/model_quantized.onnx`,
+    )
+    for (const source of BrainEmbed.SOURCES)
+      for (const model of [arctic, granite])
+        for (const file of BrainEmbedManifest.files(model)) {
+          const url = source.url(model, file)
+          if (url) expect(source.hosts, url).toContain(new URL(url).hostname)
+        }
+  })
+
   test("takes the files from Vector's copy first, checks each, writes manifest.json last, and runs offline after", async () => {
     const result = await download()
     expect(result.outcome).toMatchObject({ ok: true, status: { state: "ready", source: "mirror", variant: "int8" } })

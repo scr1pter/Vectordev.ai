@@ -1,6 +1,6 @@
 {
   "date": "2026-10-19",
-  "revision": "79e59826873ddca09c02bb3cc5945a852c740067",
+  "revision": "38b9362211a0cde86201434d110ebefae025adec",
   "dirty": false,
   "machine": "Apple M3, 8 cores, darwin arm64, Bun 1.3.14, one-minute load average 5.5 at the start",
   "fixture": {
@@ -47,11 +47,273 @@
       0
     ],
     "recall": {
-      "p50": 13.927499999999782,
-      "p95": 21.17920800000047
+      "p50": 13.02362500000072,
+      "p95": 22.04125000000022
     },
     "embedded": 49,
-    "seconds": 1.1632112499999998
+    "seconds": 0.9002672920000004,
+    "floor": 0.2,
+    "clear": 0.18,
+    "leak": {
+      "floor": 0.17,
+      "requests": 1,
+      "tokens": 122
+    },
+    "sweep": [
+      {
+        "floor": 0.14,
+        "meaning": {
+          "working": 23,
+          "hops": 2
+        },
+        "all": {
+          "working": 40,
+          "hops": 8
+        },
+        "irrelevant": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          122,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "floor": 0.15,
+        "meaning": {
+          "working": 21,
+          "hops": 2
+        },
+        "all": {
+          "working": 40,
+          "hops": 8
+        },
+        "irrelevant": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          122,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "floor": 0.16,
+        "meaning": {
+          "working": 19,
+          "hops": 2
+        },
+        "all": {
+          "working": 40,
+          "hops": 8
+        },
+        "irrelevant": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          122,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "floor": 0.17,
+        "meaning": {
+          "working": 18,
+          "hops": 2
+        },
+        "all": {
+          "working": 40,
+          "hops": 8
+        },
+        "irrelevant": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          122,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "floor": 0.18,
+        "meaning": {
+          "working": 17,
+          "hops": 2
+        },
+        "all": {
+          "working": 40,
+          "hops": 8
+        },
+        "irrelevant": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "floor": 0.19,
+        "meaning": {
+          "working": 15,
+          "hops": 2
+        },
+        "all": {
+          "working": 40,
+          "hops": 8
+        },
+        "irrelevant": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "floor": 0.2,
+        "meaning": {
+          "working": 13,
+          "hops": 3
+        },
+        "all": {
+          "working": 40,
+          "hops": 8
+        },
+        "irrelevant": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "floor": 0.21,
+        "meaning": {
+          "working": 12,
+          "hops": 2
+        },
+        "all": {
+          "working": 40,
+          "hops": 8
+        },
+        "irrelevant": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "floor": 0.22,
+        "meaning": {
+          "working": 9,
+          "hops": 2
+        },
+        "all": {
+          "working": 40,
+          "hops": 8
+        },
+        "irrelevant": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "floor": 0.25,
+        "meaning": {
+          "working": 5,
+          "hops": 1
+        },
+        "all": {
+          "working": 40,
+          "hops": 8
+        },
+        "irrelevant": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "floor": 0.3,
+        "meaning": {
+          "working": 2,
+          "hops": 0
+        },
+        "all": {
+          "working": 40,
+          "hops": 8
+        },
+        "irrelevant": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ]
   },
   "cards": 1.975,
   "tokens": {
@@ -105,10 +367,10 @@
     ]
   },
   "keyword": {
-    "seconds": 0.5369005,
+    "seconds": 0.37036270800000004,
     "recall": {
-      "p50": 1.8387500000000045,
-      "p95": 4.982792000000018
+      "p50": 2.266958000000045,
+      "p95": 4.7931670000000395
     }
   },
   "missed": [],
@@ -118,13 +380,13 @@
     "tokens": 169340,
     "records": 2000,
     "passages": 540,
-    "seconds": 2.4933654590000005,
+    "seconds": 1.8193446670000013,
     "reader": "worker",
     "recall": {
       "queries": 20,
       "answered": 20,
-      "p50": 6.690458000000945,
-      "p95": 9.058665999998993,
+      "p50": 6.485999999997148,
+      "p95": 9.022250000001804,
       "maxTokens": 221
     }
   },

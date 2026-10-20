@@ -93,4 +93,21 @@ describe("search model dependencies", () => {
     expect(await Bun.file(path.join(root, "licenses/dependencies/onnxruntime-web@1.30.0.txt")).exists()).toBe(true)
     expect(await Bun.file(path.join(root, "licenses/dependencies/onnxruntime-common@1.30.0.txt")).exists()).toBe(true)
   })
+
+  test("the notices reproduce ONNX Runtime 1.30.0's ThirdPartyNotices.txt unchanged", async () => {
+    // The file at https://raw.githubusercontent.com/microsoft/onnxruntime/v1.30.0/ThirdPartyNotices.txt, read on
+    // 19 October 2026. A new ONNX Runtime release needs its own file here, with its size and sha256.
+    const pinned = { bytes: 338_088, sha256: "143764b952fdb1a7c69ce653bfba74a7744d6a8a573bfb73e235fba356c83de3" }
+    const notices = await Bun.file(path.join(root, "THIRD_PARTY_NOTICES.md")).text()
+    const start = "<!-- onnxruntime-third-party-notices:start -->\n```text\n"
+    const end = "```\n<!-- onnxruntime-third-party-notices:end -->"
+    const text = notices.slice(notices.indexOf(start) + start.length, notices.indexOf(end))
+    expect(notices.indexOf(start)).toBeGreaterThan(notices.indexOf("## ONNX Runtime WebAssembly in the search model"))
+    expect(notices.indexOf(end)).toBeLessThan(notices.indexOf("## Downloaded on request: search model weights"))
+    const bytes = new TextEncoder().encode(text)
+    expect(bytes.byteLength).toBe(pinned.bytes)
+    expect(new Bun.CryptoHasher("sha256").update(bytes).digest("hex")).toBe(pinned.sha256)
+    expect(text).toStartWith("THIRD PARTY SOFTWARE NOTICES AND INFORMATION")
+    expect(notices).toContain(`${pinned.bytes.toLocaleString("en-US")} bytes, sha256 \`${pinned.sha256}\`). That file covers`)
+  })
 })

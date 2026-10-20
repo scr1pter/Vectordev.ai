@@ -1013,10 +1013,17 @@ export function sourceLabel(status: Pick<MemoryModelStatus, "source"> | undefine
 export const MODEL_DOWNLOADS_OFF =
   "Downloads are turned off here. In a terminal, install the model from a folder of its files with vector memory model install --from <folder>."
 
+/**
+ * Said wherever the full-precision fallback is offered or in use: its 90 MB graph has not been run in this build, and
+ * it is checked against the int8 model's test vectors at a threshold nobody has measured on it.
+ */
+export const MODEL_FALLBACK_UNVERIFIED =
+  "Not yet verified: the full-precision model has not been run in this release, so it may not pass its check on this computer either."
+
 /** What each model action says once the engine answered. */
 export const MODEL_DONE = {
   download: "Downloading the search model. You can keep working; documents are searched by meaning once it is ready.",
-  fallback: "Downloading the full-precision model.",
+  fallback: "Downloading the full-precision model, which is not yet verified.",
   remove: "Removed. Vector searches documents by keywords and code links until you download the model again.",
   pause: "Paused. What is embedded is still searched by meaning; the rest waits until you resume.",
   resume: "Resumed.",
