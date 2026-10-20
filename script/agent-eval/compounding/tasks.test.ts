@@ -26,9 +26,9 @@ async function checked(index: number, work: Record<string, string>, regenerate: 
 }
 
 describe("the task sequence", () => {
-  test("no prompt states a fact the task needs and does not teach", () => {
+  test("no prompt states a fact the task needs and does not teach, or one that is out of date by then", () => {
     const leaks = TASKS.flatMap((task) =>
-      task.needs
+      [...task.needs, ...(task.misleads ?? [])]
         .filter((id) => !task.teaches.some((item) => item.fact === id))
         .filter((id) => FACTS.find((item) => item.id === id)!.marker.test(task.prompt))
         .map((id) => `${task.id}: ${id}`),
@@ -44,10 +44,16 @@ describe("the task sequence", () => {
     }
   })
 
-  test("the sequence spans six weeks with 12 to 20 tasks", () => {
+  test("the sequence spans seven weeks with 12 to 20 tasks, and memory can mislead only after a fact changed", () => {
     expect(TASKS.length).toBeGreaterThanOrEqual(12)
     expect(TASKS.length).toBeLessThanOrEqual(20)
-    expect(new Set(TASKS.map((task) => task.week))).toEqual(new Set([1, 2, 3, 4, 5, 6]))
+    expect(new Set(TASKS.map((task) => task.week))).toEqual(new Set([1, 2, 3, 4, 5, 6, 7]))
+    for (const [index, task] of TASKS.entries())
+      for (const id of task.misleads ?? []) {
+        const taught = TASKS.findIndex((item) => item.teaches.some((teach) => teach.fact === id))
+        expect(taught).toBeGreaterThanOrEqual(0)
+        expect(taught).toBeLessThan(index)
+      }
   })
 
   for (const [index, task] of TASKS.entries()) {
@@ -57,7 +63,7 @@ describe("the task sequence", () => {
         const start = startOf(index)
         const reference = await checked(index, { ...solve(start.files, task) }, true)
         expect(reference.filter((item) => !item.passed).map((item) => item.name)).toEqual([])
-        expect(reference.some((item) => item.name.startsWith("fact:"))).toBe(true)
+        expect(reference.some((item) => /^(?:fact|stale):/.test(item.name))).toBe(true)
 
         // The work of a model that knows none of the facts: the mistaken code, npm's lockfile for a dependency, and
         // no regenerated route table.
@@ -69,6 +75,18 @@ describe("the task sequence", () => {
         const failed = wrong.filter((item) => !item.passed).map((item) => item.name)
         for (const id of task.needs.filter((need) => !task.teaches.some((item) => item.fact === need && item.quote)))
           expect(failed).toContain(`fact:${id}`)
+
+        // The work of a model that acts on what is out of date: where that changes the files, the stale check fails.
+        // (Where it does not, as with a removed script, the run shows it: measure.test.ts.)
+        const misled = (task.misleads ?? []).filter((id) => {
+          const acted = apply(start.files, task.changes(start.files, (known) => known === id))
+          return JSON.stringify(acted) !== JSON.stringify(unknown)
+        })
+        for (const id of misled) {
+          const acted = apply(start.files, task.changes(start.files, (known) => known === id))
+          const result = await checked(index, { ...acted }, true)
+          expect(result.filter((item) => !item.passed).map((item) => item.name)).toContain(`stale:${id}`)
+        }
       },
       60_000,
     )

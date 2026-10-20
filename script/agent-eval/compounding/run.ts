@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// The brain compounding benchmark: sixteen tasks over six simulated weeks on one repository, with Vector's brain off
+// The brain compounding benchmark: nineteen tasks over seven simulated weeks on one repository, with Vector's brain off
 // and on, and a control arm that keeps the brain on but hides what it adds from the model.
 //
 //   bun script/agent-eval/compounding/run.ts                          offline: all three arms, report in a temp folder
@@ -12,10 +12,12 @@
 //     --api-key-env ANTHROPIC_API_KEY --price-input 3 --price-output 15 --max-spend 20 [--yes]
 //
 // Offline it needs no network and no key: a scripted model on a local fake server answers every request. Live runs
-// the same sequence against a model the owner configures, shows a cost estimate first, and stops at a hard spend cap;
-// it never runs in CI.
+// the same sequence against a model the owner configures, shows a cost estimate first, and stops at a hard spend cap
+// counted from the tokens the provider reports at the prices given; it never runs in CI, and it refuses a paid
+// provider without prices. Live, the model gets a shell with every permission: run it in a container or a throwaway
+// machine (see the README).
 
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises"
 import { cpus, loadavg, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { ARMS, REPO_ROOT, runArm, type Arm, type Provider, type TaskRun } from "./harness"
@@ -47,12 +49,13 @@ if (live && arms.includes("blind")) fail("The control arm needs the scripted mod
 const tasks = flag("tasks")?.split(",")
 const missing = (tasks ?? []).filter((id) => !TASKS.some((task) => task.id === id))
 if (missing.length) fail(`Unknown task ${missing.join(", ")}. Tasks: ${TASKS.map((task) => task.id).join(", ")}`)
-const work = resolve(flag("work") ?? (await mkdtemp(join(tmpdir(), "vector-compounding-"))))
+// Live, the provider and the estimate come first, so a run that stops there leaves no folder behind.
+const provider = live ? await liveProvider() : undefined
+const work = await folder(flag("work") ?? (await mkdtemp(join(tmpdir(), "vector-compounding-"))))
 const now = new Date()
 const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
 const out = resolve(flag("out") ?? join(tmpdir(), `vector-compounding-${date}-${Date.now()}`))
 
-const provider = live ? await liveProvider() : undefined
 const started = performance.now()
 process.stderr.write(`Running ${arms.join(", ")} over ${tasks?.length ?? TASKS.length} tasks in ${work}\n`)
 // Offline arms are independent, so they run side by side; live arms run one after the other under one spend cap.
@@ -95,7 +98,9 @@ function options(arm: Arm) {
   }
 }
 
-// Live: one arm at a time, each task given what is left of the cap as its own `--max-cost`.
+// Live: one arm at a time. Spend is counted from each step's reported tokens at the given prices: a task is stopped once
+// its own spend reaches what is left of the cap, and no task starts after that. Vector's Run Guard gets the same rest as
+// `--max-cost`, a second stop that counts at the same prices.
 async function sequential(list: readonly Arm[]) {
   const cap = Number(flag("max-spend") ?? 5)
   let spent = 0
@@ -103,7 +108,7 @@ async function sequential(list: readonly Arm[]) {
   for (const arm of list) {
     result[arm] = await runArm({
       ...options(arm),
-      provider: { ...provider!, maxCost: () => Math.max(0.01, Math.round((cap - spent) * 100) / 100) },
+      provider: { ...provider!, maxCost: () => Math.max(0.01, Math.round((cap - spent) * 100) / 100), remaining: () => cap - spent },
       stop: () => spent >= cap,
       onTask: (run) => {
         spent += run.costUsd
@@ -121,13 +126,37 @@ async function sequential(list: readonly Arm[]) {
 async function liveProvider(): Promise<Provider> {
   if (process.env.CI) fail("The live benchmark never runs in CI: it calls a real model.")
   const kind = flag("provider") ?? "openai-compatible"
+  if (!["anthropic", "openai", "openai-compatible"].includes(kind)) fail(`Unknown provider ${kind}: anthropic, openai or openai-compatible`)
   const model = flag("model") ?? fail("--model is required with --live")
+  const base = flag("base-url")
+  if (kind === "openai-compatible" && !base) fail("--base-url is required for an OpenAI-compatible endpoint")
+  // Only an endpoint on this machine may run unpriced: anything else bills by the token.
+  const local = kind === "openai-compatible" && ["localhost", "127.0.0.1", "[::1]"].includes(URL.parse(base!)?.hostname ?? "")
+  const priced = (name: string) => {
+    const value = flag(name)
+    if (value === undefined) return undefined
+    const number = Number(value)
+    return number >= 0 ? number : fail(`--${name} must be a number of US dollars per million tokens`)
+  }
+  const input = priced("price-input") ?? 0
+  const output = priced("price-output") ?? 0
+  // Without prices every step counts as $0, and the cap would never stop a paid model.
+  if (!local && !(input > 0 && output > 0))
+    fail(
+      `${kind === "openai-compatible" ? `${base} is not an endpoint on this machine` : `${kind} bills by the token`}: give --price-input and --price-output (US dollars per million tokens), so the spend cap can count what the run spends. Without them every step counts as $0 and the cap never stops it.`,
+    )
   const keyEnv = flag("api-key-env")
   const key = keyEnv ? (process.env[keyEnv] ?? fail(`${keyEnv} is not set`)) : undefined
-  const input = Number(flag("price-input") ?? 0)
-  const output = Number(flag("price-output") ?? 0)
   const cap = Number(flag("max-spend") ?? 5)
   if (!(cap > 0)) fail("--max-spend must be a positive number of US dollars")
+  // Anthropic bills cache reads at a tenth and writes at 1.25 times input; elsewhere reads count at half, to stay on the
+  // safe side of the cap, and writes as input.
+  const rates = {
+    input,
+    output,
+    cacheRead: priced("price-cache-read") ?? (kind === "anthropic" ? input / 10 : input / 2),
+    cacheWrite: kind === "anthropic" ? input * 1.25 : input,
+  }
   const footprint = await offlineFootprint()
   const count = (tasks?.length ?? TASKS.length) * arms.length
   // A real model takes more turns than the script and writes more: one to three times the scripted input, and about
@@ -138,9 +167,12 @@ async function liveProvider(): Promise<Provider> {
     [
       `Live run: ${count} task runs (${arms.join(", ")}) on ${kind}/${model}.`,
       input === 0 && output === 0
-        ? "No prices given (--price-input, --price-output in $ per million tokens), so the estimate is $0: right for a local model, wrong for a paid one."
+        ? `Estimated cost: $0. ${base} is on this machine and no prices were given, so every step counts as $0 and the spend cap limits nothing: each task stops only at 40 steps. If this endpoint forwards to a paid service, give its prices.`
         : `Estimated cost: $${low.toFixed(2)} to $${high.toFixed(2)} (the offline footprint of ${footprint.toLocaleString("en-US")} input tokens, one to three times over, at $${input}/$${output} per million).`,
-      `Hard cap: $${cap.toFixed(2)}. Each task runs with --max-cost set to what is left, and no task starts once it is spent.`,
+      input === 0 && output === 0
+        ? `Hard cap: $${cap.toFixed(2)}, which counts nothing at $0 a token.`
+        : `Hard cap: $${cap.toFixed(2)}, counted from the tokens the provider reports at these prices. A task stops at the step that reaches what is left (that one step can take it past the cap), and no task starts once it is spent.`,
+      "The model gets a shell with every permission. Run this inside a container or a throwaway machine.",
       "",
     ].join("\n"),
   )
@@ -149,9 +181,6 @@ async function liveProvider(): Promise<Provider> {
     process.stderr.write("Nothing was run. Add --yes to start.\n")
     process.exit(0)
   }
-  const base = flag("base-url")
-  if (kind === "openai-compatible" && !base) fail("--base-url is required for an OpenAI-compatible endpoint")
-  if (!["anthropic", "openai", "openai-compatible"].includes(kind)) fail(`Unknown provider ${kind}: anthropic, openai or openai-compatible`)
   // The model is declared here, with the prices given, so Vector's Run Guard counts spend at the same rates as the
   // estimate and the cap.
   const id = kind === "openai-compatible" ? "local" : kind
@@ -174,13 +203,20 @@ async function liveProvider(): Promise<Provider> {
             temperature: true,
             release_date: "2026-01-01",
             limit: { context: Number(flag("context") ?? (kind === "openai-compatible" ? 131_072 : 200_000)), output: 16_384 },
-            cost: { input, output, cache_read: input / 10, ...(kind === "anthropic" ? { cache_write: input * 1.25 } : {}) },
+            cost: { input, output, cache_read: rates.cacheRead, cache_write: rates.cacheWrite },
             options: {},
           },
         },
       },
     },
+    rates,
   }
+}
+
+// A work folder as its real path, made if it is not there yet (see runArm).
+async function folder(path: string) {
+  await mkdir(resolve(path), { recursive: true })
+  return realpath(resolve(path))
 }
 
 // Input tokens the offline arms sent for these tasks, from the newest committed offline report (about 68,000 a task

@@ -201,6 +201,28 @@ export const BASE: Record<string, string> = {
   ].join("\n"),
 }
 
+// script/check.ts after a teammate's change in week 7: the check writes the route table itself, so the table can no
+// longer go stale and the gen script is gone (tasks.ts removes it from package.json).
+export const REGENERATING_CHECK = [
+  "// The CI gate every change must pass besides the tests. It writes src/generated/routes.gen.ts from src/routes.ts",
+  "// itself, so the route table can no longer go stale.",
+  'import { existsSync } from "node:fs"',
+  "",
+  "const failures: string[] = []",
+  'if (existsSync("package-lock.json"))',
+  "  failures.push(",
+  '    "package-lock.json found. This repository uses pnpm (see CONTRIBUTING.md): delete package-lock.json and install with pnpm.",',
+  "  )",
+  'const generated = Bun.spawnSync(["bun", "script/gen-routes.ts"], { stdout: "ignore", stderr: "pipe" })',
+  "if (generated.exitCode !== 0) failures.push(`script/gen-routes.ts failed: ${generated.stderr.toString().trim()}`)",
+  "if (failures.length > 0) {",
+  '  console.error(["check failed:", ...failures.map((failure) => `- ${failure}`)].join("\\n"))',
+  "  process.exit(1)",
+  "}",
+  'console.log("check ok")',
+  "",
+].join("\n")
+
 // Packages the stand-in package managers install. Each is a tiny ES module, so a test that imports one runs offline.
 export const REGISTRY: Record<string, Record<string, string>> = {
   "tiny-slug": {

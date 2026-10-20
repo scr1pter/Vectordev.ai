@@ -1,14 +1,24 @@
-// The facts a team teaches its agent once, and sixteen tasks over six simulated weeks that need them again. Each fact
-// is taught one way (the user says it, a check breaks, or a spec PDF says it) and needed later by tasks whose prompts
-// do not repeat it. Prompts name the files to change, as a user who knows the code would, and nothing more.
+// The facts a team teaches its agent once, and nineteen tasks over seven simulated weeks that need them again. Each
+// fact is taught one way (the user says it, a check breaks, or a spec PDF says it) and needed later by tasks whose
+// prompts do not repeat it. In week 7 two facts go out of date, so memory can mislead: the user changes the refund
+// window the spec PDF gives, and a teammate's commit, which nobody mentions, makes the route table generate itself.
+// Prompts name the files to change, as a user who knows the code would, and nothing more.
 
-import { BASE, REGISTRY, refundPolicyPdf } from "./fixture"
+import { BASE, REGENERATING_CHECK, REGISTRY, refundPolicyPdf } from "./fixture"
 
-export type FactID = "pnpm" | "cents" | "routes" | "window" | "idempotency" | "email" | "events" | "clock"
+export type FactID = "pnpm" | "cents" | "routes" | "window" | "idempotency" | "email" | "events" | "clock" | "window21"
 
 export type Fact = {
   readonly id: FactID
-  readonly kind: "user preference" | "decision and its reason" | "build gotcha" | "spec value" | "spec requirement" | "naming convention" | "flaky-test fix"
+  readonly kind:
+    | "user preference"
+    | "decision and its reason"
+    | "build gotcha"
+    | "spec value"
+    | "spec requirement"
+    | "naming convention"
+    | "flaky-test fix"
+    | "changed spec value"
   readonly summary: string
   /**
    * What in a request shows the scripted model the fact: its words in the user's message, a memory line, a document
@@ -24,7 +34,8 @@ export const FACTS: readonly Fact[] = [
     id: "pnpm",
     kind: "user preference",
     summary: "The repository uses pnpm; npm writes a package-lock.json the check rejects.",
-    marker: /\bpnpm\b/,
+    // The preference itself, not any command that happens to start with pnpm (`pnpm gen`, `pnpm test:ci`).
+    marker: /\b(?:use|uses) pnpm\b|\bpnpm add\b|\bnever (?:run )?npm\b|"packageManager": "pnpm@/i,
     memory: {
       kind: "preference",
       text: "We use pnpm in this repository, never npm: add dependencies with pnpm add and run scripts with pnpm.",
@@ -88,6 +99,17 @@ export const FACTS: readonly Fact[] = [
       text: "Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
     },
   },
+  {
+    id: "window21",
+    kind: "changed spec value",
+    summary: "From week 7 the refund window is 21 days after capture; the refund policy PDF's 14 days is out of date (the user says so).",
+    // The user's correction, or Vector's note that the code no longer says what the document does.
+    marker: /\b21 days\b|code says[^\n]*\b21\b/,
+    memory: {
+      kind: "decision",
+      text: "The refund window is 21 days after capture since 16 November 2026 (finance extended it): REFUND_WINDOW_DAYS in src/refunds.ts. The refund policy PDF still says 14 days and is out of date on this.",
+    },
+  },
 ]
 
 export function fact(id: FactID) {
@@ -109,6 +131,8 @@ export type Task = {
   readonly prompt: string
   /** Files that appear in the repository before this task starts (the spec PDF). */
   readonly arrives?: Readonly<Record<string, Uint8Array>>
+  /** A teammate's change committed before this task starts, which nobody tells the agent about. */
+  readonly upstream?: (state: Files) => Files
   /** Files the owner keeps as documents in Vector's memory before this task (brain on only; nothing to keep it in otherwise). */
   readonly upload?: readonly string[]
   /** What the model reads first: the files it is about to change or build on. */
@@ -125,7 +149,15 @@ export type Task = {
   readonly needs: readonly FactID[]
   /** Facts the task teaches, and the evidence the model saves with what it learned. */
   readonly teaches: readonly { readonly fact: FactID; readonly quote?: string }[]
-  /** Hidden acceptance tests the harness runs after the agent finishes, as `test(name)` bodies; `fact:<id>` names one fact. */
+  /**
+   * Facts an earlier task taught that are out of date by this task. Acting on one is a mistake of its own, memory
+   * misleading, caught by a hidden `stale:<id>` check or by what the run did.
+   */
+  readonly misleads?: readonly FactID[]
+  /**
+   * Hidden acceptance tests the harness runs after the agent finishes, as `test(name)` bodies; `fact:<id>` names one
+   * fact, and `stale:<id>` fails when the work acted on that fact after it went out of date.
+   */
   readonly acceptance: string
 }
 
@@ -1001,6 +1033,171 @@ export const TASKS: readonly Task[] = [
       'test("fact:clock", () => {\n  expect(ciSuite()).toBe(0)\n})',
     ].join("\n"),
   },
+  {
+    id: "t17-refund-window-21",
+    week: 7,
+    day: "Mon",
+    title: "The user extends the refund window the spec PDF gives, and says the PDF is out of date",
+    prompt:
+      "Finance extended the refund window to 21 days after capture, starting today. The refund policy PDF still says 14 until legal reissues it, so go by this, not the PDF. Change REFUND_WINDOW_DAYS in src/refunds.ts and refundDeadline in src/invoice-pdf.ts to match, and update their tests.",
+    reads: ["src/refunds.ts", "test/refunds.test.ts", "src/invoice-pdf.ts", "test/refund-deadline.test.ts"],
+    changes: () => [
+      {
+        path: "src/refunds.ts",
+        from: "/** Refunds are allowed for at most this many days after capture (refund policy, section 2). */\nexport const REFUND_WINDOW_DAYS = 14",
+        to: "/** Refunds are allowed for at most this many days after capture (finance, from 16 November 2026; the refund policy PDF still says 14). */\nexport const REFUND_WINDOW_DAYS = 21",
+      },
+      { path: "test/refunds.test.ts", from: '"k2", new Date("2026-10-16T00:00:00.000Z")', to: '"k2", new Date("2026-10-23T00:00:00.000Z")' },
+      {
+        path: "src/invoice-pdf.ts",
+        from: `/** The last day a refund can be asked for: 14 days after capture. */\nexport function refundDeadline(order: Order) {\n  return new Date(new Date(order.capturedOn).getTime() + 14 * ${DAY_MS})`,
+        to: `/** The last day a refund can be asked for: 21 days after capture. */\nexport function refundDeadline(order: Order) {\n  return new Date(new Date(order.capturedOn).getTime() + 21 * ${DAY_MS})`,
+      },
+      { path: "test/refund-deadline.test.ts", from: '.toBe("2026-10-15")', to: '.toBe("2026-10-22")' },
+    ],
+    needs: [],
+    teaches: [
+      {
+        fact: "window21",
+        quote:
+          "Finance extended the refund window to 21 days after capture, starting today. The refund policy PDF still says 14 until legal reissues it, so go by this, not the PDF.",
+      },
+    ],
+    acceptance: [
+      'test("fact:window21", async () => {',
+      '  const { requestRefund } = await import("../src/refunds")',
+      '  const { refundDeadline } = await import("../src/invoice-pdf")',
+      '  const order = { id: "o21", customer: "c21", amount: 5_000, capturedOn: "2026-10-01T00:00:00.000Z" }',
+      '  expect(requestRefund(order, 100, "w1", new Date("2026-10-21T23:00:00.000Z")).ok).toBe(true)',
+      '  expect(requestRefund(order, 100, "w2", new Date("2026-10-22T01:00:00.000Z"))).toEqual({ ok: false, reason: "window_closed" })',
+      '  expect(refundDeadline(order)).toBe("2026-10-22")',
+      "})",
+    ].join("\n"),
+  },
+  {
+    id: "t18-refund-reminder",
+    week: 7,
+    day: "Wed",
+    title: "A refund reminder: the window again, where the spec PDF the brain keeps is out of date",
+    prompt:
+      "Remind customers before they can no longer ask for a refund: add `refundReminderOn(order)` in src/notify/refund-reminder.ts, which returns the date (YYYY-MM-DD) two days before the last day they can ask for one, with tests.",
+    reads: ["src/orders.ts", "src/notify/refund-email.ts"],
+    changes: (_, knows) => {
+      // What it acts on: the correction, else the spec PDF's out-of-date value, else a guess.
+      const days = knows("window21") ? 21 : knows("window") ? 14 : 30
+      return [
+        {
+          path: "src/notify/refund-reminder.ts",
+          content: [
+            'import type { Order } from "../orders"',
+            "",
+            "/** The day to remind a customer: two days before the last day they can ask for a refund of the order. */",
+            "export function refundReminderOn(order: Order) {",
+            `  return new Date(new Date(order.capturedOn).getTime() + ${days - 2} * ${DAY_MS}).toISOString().slice(0, 10)`,
+            "}",
+            "",
+          ].join("\n"),
+        },
+        {
+          path: "test/refund-reminder.test.ts",
+          content: [
+            'import { expect, test } from "bun:test"',
+            'import { refundReminderOn } from "../src/notify/refund-reminder"',
+            "",
+            'test("the reminder goes out two days before refunds close", () => {',
+            `  expect(refundReminderOn({ id: "o", customer: "c", amount: 100, capturedOn: "2026-10-01T00:00:00.000Z" })).toBe("${new Date(Date.UTC(2026, 9, 1 + days - 2)).toISOString().slice(0, 10)}")`,
+            "})",
+            "",
+          ].join("\n"),
+        },
+      ]
+    },
+    needs: ["window21"],
+    teaches: [],
+    misleads: ["window"],
+    acceptance: [
+      'const order = { id: "o18", customer: "c18", amount: 5_000, capturedOn: "2026-11-01T00:00:00.000Z" }',
+      'test("fact:window21", async () => {',
+      '  const { refundReminderOn } = await import("../src/notify/refund-reminder")',
+      '  expect(refundReminderOn(order)).toBe("2026-11-20")',
+      "})",
+      // Twelve days: two before the 14 the spec PDF still says.
+      'test("stale:window", async () => {',
+      '  const { refundReminderOn } = await import("../src/notify/refund-reminder")',
+      '  expect(refundReminderOn(order)).not.toBe("2026-11-13")',
+      "})",
+    ].join("\n"),
+  },
+  {
+    id: "t19-refund-lookup",
+    week: 7,
+    day: "Thu",
+    title: "A new route after a teammate made the route table generate itself, which nobody mentions",
+    prompt:
+      "Add a GET /refunds/:id route handled by `getRefund` in src/http/refunds.ts, which looks the refund up with a new `findRefund(id)` in src/refunds.ts and answers 404 when there is none.",
+    upstream: regenerating,
+    reads: ["src/routes.ts", "src/http/refunds.ts", "src/refunds.ts"],
+    changes: (state) => [
+      route('  { method: "GET", path: "/refunds/:id", handler: "getRefund" },'),
+      {
+        path: "src/refunds.ts",
+        from: "/** Requests a refund of part or all of an order",
+        to: [
+          "/** The refund with this id, if there is one. */",
+          "export function findRefund(id: string) {",
+          "  return [...byKey.values()].find((refund) => refund.id === id)",
+          "}",
+          "",
+          "/** Requests a refund of part or all of an order",
+        ].join("\n"),
+      },
+      {
+        path: "src/http/refunds.ts",
+        content:
+          state["src/http/refunds.ts"]!.replace('import { requestRefund } from "../refunds"', 'import { findRefund, requestRefund } from "../refunds"') +
+          [
+            "",
+            "/** GET /refunds/:id. */",
+            "export function getRefund(request: { params: { id: string } }) {",
+            "  const refund = findRefund(request.params.id)",
+            '  return refund ? { status: 200, body: refund } : { status: 404, body: { error: "not_found" } }',
+            "}",
+            "",
+          ].join("\n"),
+      },
+      {
+        path: "test/refund-lookup.test.ts",
+        content: [
+          'import { expect, test } from "bun:test"',
+          'import { getRefund } from "../src/http/refunds"',
+          "",
+          'test("an unknown refund is a 404", () => {',
+          '  expect(getRefund({ params: { id: "rf_missing" } }).status).toBe(404)',
+          "})",
+          "",
+        ].join("\n"),
+      },
+    ],
+    needs: [],
+    teaches: [],
+    misleads: ["routes"],
+    acceptance: [
+      'test("getRefund", async () => {',
+      '  const { getRefund } = await import("../src/http/refunds")',
+      '  const { requestRefund } = await import("../src/refunds")',
+      '  const order = { id: "o19", customer: "c19", amount: 5_000, capturedOn: "2026-10-01T00:00:00.000Z" }',
+      '  const made = requestRefund(order, 100, "l1", new Date("2026-10-05T00:00:00.000Z"))',
+      '  expect(made.ok && getRefund({ params: { id: made.refund.id } }).status).toBe(200)',
+      '  expect(getRefund({ params: { id: "rf_missing" } }).status).toBe(404)',
+      "})",
+      // The teammate's change stands: no gen script brought back, and the check writes the table with the new route.
+      'test("stale:routes", () => {',
+      '  expect(JSON.parse(readFileSync("package.json", "utf8")).scripts.gen).toBeUndefined()',
+      '  expect(Bun.spawnSync(["bun", "script/check.ts"], { stdout: "ignore", stderr: "ignore" }).exitCode).toBe(0)',
+      '  expect(readFileSync("src/generated/routes.gen.ts", "utf8")).toContain("/refunds/:id")',
+      "})",
+    ].join("\n"),
+  },
 ]
 
 /** The preamble every acceptance file starts with: what its tests share. */
@@ -1016,18 +1213,23 @@ export const ACCEPTANCE_PREAMBLE = [
   "",
 ].join("\n")
 
-/** Where every task starts: week 0 plus the reference solution of every task before it, and what has arrived since. */
+/**
+ * Where every task starts: week 0 plus the reference solution of every task before it, what has arrived since, and any
+ * teammate's change committed before it.
+ */
 export function startOf(index: number): { files: Files; binary: Readonly<Record<string, Uint8Array>> } {
-  return TASKS.slice(0, index).reduce(
+  const begin = (files: Files, task: Task | undefined) => (task?.upstream ? task.upstream(files) : files)
+  const state = TASKS.slice(0, index).reduce(
     (state, task) => ({
-      files: solve(state.files, task),
+      files: solve(begin(state.files, task), task),
       binary: { ...state.binary, ...(task.arrives ?? {}) },
     }),
     { files: BASE as Files, binary: (TASKS[index]?.arrives ?? {}) as Readonly<Record<string, Uint8Array>> },
   )
+  return { ...state, files: begin(state.files, TASKS[index]) }
 }
 
-/** A task's reference solution: every fact known, the dependency added the pnpm way. */
+/** A task's reference solution from its start: every fact known, the dependency added the pnpm way. */
 export function solve(files: Files, task: Task): Files {
   const changed = apply(files, task.changes(files, () => true))
   return task.dependency ? withDependency(changed, task.dependency) : changed
@@ -1054,6 +1256,19 @@ export function withDependency(files: Files, name: string): Files {
     "pnpm-lock.yaml": `lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    dependencies:\n${deps
       .map((dep) => `      ${dep}:\n        specifier: ${manifest.dependencies[dep]}\n        version: ${manifest.dependencies[dep].slice(1)}`)
       .join("\n")}\n`,
+  }
+}
+
+// The teammate's commit before t19: the check writes the route table itself, so `pnpm gen` is gone.
+function regenerating(files: Files): Files {
+  const manifest = JSON.parse(files["package.json"]!)
+  delete manifest.scripts.gen
+  return {
+    ...files,
+    "package.json": `${JSON.stringify(manifest, null, 2)}\n`,
+    "script/check.ts": REGENERATING_CHECK,
+    "script/gen-routes.ts": files["script/gen-routes.ts"]!.replace("by \\`pnpm gen\\`", "by script/check.ts"),
+    "CONTRIBUTING.md": `${files["CONTRIBUTING.md"]}\nThe check writes src/generated/routes.gen.ts from src/routes.ts itself, so there is no gen script.\n`,
   }
 }
 

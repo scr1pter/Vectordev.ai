@@ -32,7 +32,7 @@ export type Options = {
   readonly documents?: ReadonlyMap<string, string>
 }
 
-// What Vector's memory puts in a request, wherever it sits. The blind control deletes exactly these.
+// What Vector's memory puts in a request, wherever it sits. The blind control deletes these, and only these.
 const BRAIN_SPANS = [
   /<vector_memory_recall>[\s\S]*?<\/vector_memory_recall>/g,
   /<vector_memory>[\s\S]*?<\/vector_memory>/g,
@@ -85,7 +85,8 @@ export function perceive(body: Record<string, unknown>, options: Pick<Options, "
     for (const block of blocks as Record<string, unknown>[]) {
       if (block.type === "tool_result") {
         const text = flatten(block.content, options.documents)
-        results.set(String(block.tool_use_id), text)
+        // The blind control deletes the brain's lines from tool results too: a document pointer on a read is one.
+        results.set(String(block.tool_use_id), options.blind ? withoutBrain(text) : text)
         // A memory tool result is the brain answering; the blind control deletes it too.
         if (names.get(String(block.tool_use_id)) === "memory") {
           memory.push(text)

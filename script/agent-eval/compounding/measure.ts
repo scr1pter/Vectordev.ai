@@ -3,10 +3,10 @@
 // Mistakes are read from what the agent did and what the acceptance tests found, never from the scripted model's own
 // account, so offline and live runs are measured by the same rules.
 
-import { meterLine, type Meter } from "../meter"
+import { meterLine, type Meter, type Tokens } from "../meter"
 import { createPromptCache, estimate, price, strip, type Rates, type Recorded } from "../prompt-cache"
 import { brainSpans } from "./policy"
-import { FACTS, TASKS, type FactID, type Task } from "./tasks"
+import { TASKS, fact, type FactID, type Task } from "./tasks"
 
 /** Claude Sonnet 4.5 list prices per million tokens, with 5-minute cache writes; offline requests are priced at them. */
 export const RATES: Rates = { input: 3, cacheWrite: 3.75, cacheRead: 0.3, output: 15 }
@@ -53,30 +53,52 @@ function decode(text: string) {
   return text.replaceAll("&quot;", '"').replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&")
 }
 
-export type Mistake = { readonly fact: FactID; readonly how: string; readonly repeated: boolean }
+export type Mistake = {
+  readonly fact: FactID
+  readonly how: string
+  /** An earlier task in the sequence already taught the fact. */
+  readonly repeated: boolean
+  /** The work acted on the fact after it went out of date: memory misleading, not memory missing. */
+  readonly stale: boolean
+}
 
 /**
- * Mistakes in one task: a command or a broken check that shows a fact was missing, or a hidden acceptance test of a
- * fact that failed. A mistake is repeated when an earlier task in the sequence already taught the fact.
+ * Mistakes in one task: a command or a broken check that shows a fact was missing, a hidden acceptance test of a fact
+ * that failed, or a sign the work acted on a fact that was out of date by then (a `stale:` check that failed, or a
+ * command the repository no longer has).
  */
 export function mistakes(task: Task, steps: readonly Step[], acceptance: Acceptance): Mistake[] {
   const index = TASKS.findIndex((item) => item.id === task.id)
   const shell = steps.filter((step) => step.tool === "bash")
-  // At most one per fact and task: the first sign of it.
-  const signs: { fact: FactID; how: string }[] = [
+  // At most one per fact and task, and kind: the first sign of it.
+  const signs: { fact: FactID; how: string; stale?: true }[] = [
     ...shell
       .filter((step) => /(?:^|[;&|]\s*)npm\s+(?:install|i|add)\b/.test(String(step.input.command ?? "")))
       .map((step) => ({ fact: "pnpm" as const, how: `ran \`${String(step.input.command)}\`` })),
     ...shell
       .filter((step) => /routes\.gen\.ts is stale/.test(step.output))
       .map(() => ({ fact: "routes" as const, how: "the check failed on a stale src/generated/routes.gen.ts" })),
+    ...shell
+      .filter((step) => /^pnpm gen\b/.test(String(step.input.command ?? "")) && /Command "gen" not found|Missing script: "?gen/.test(step.output))
+      .map(() => ({ fact: "routes" as const, how: "ran `pnpm gen`, which the repository no longer has", stale: true as const })),
     ...acceptance
       .filter((test) => !test.passed && test.name.startsWith("fact:"))
       .map((test) => ({ fact: test.name.slice(5) as FactID, how: `the hidden check ${test.name} failed` })),
+    ...acceptance
+      .filter((test) => !test.passed && test.name.startsWith("stale:"))
+      .map((test) => ({ fact: test.name.slice(6) as FactID, how: `acted on what was out of date: the hidden check ${test.name} failed`, stale: true as const })),
   ]
   return signs
-    .filter((item, at) => signs.findIndex((other) => other.fact === item.fact) === at)
-    .map((item) => ({ ...item, repeated: taughtBefore(item.fact, index) }))
+    .filter((item, at) => signs.findIndex((other) => other.fact === item.fact && !other.stale === !item.stale) === at)
+    .map((item) => ({ fact: item.fact, how: item.how, repeated: !item.stale && taughtBefore(item.fact, index), stale: item.stale ?? false }))
+}
+
+/** What a live run spent, from the tokens the provider reported, at the prices the owner gave (US dollars per million). */
+export function spend(tokens: Tokens, rates: Rates) {
+  return (
+    (tokens.input * rates.input + tokens.cacheRead * rates.cacheRead + tokens.cacheWrite * rates.cacheWrite + tokens.output * rates.output) /
+    1_000_000
+  )
 }
 
 /** Whether a task before this one taught the fact. */
@@ -108,8 +130,13 @@ export type TaskMetrics = {
   readonly mistakes: readonly Mistake[]
   readonly checks: { readonly passed: number; readonly total: number; readonly failed: readonly string[] }
   readonly success: boolean
-  /** The facts the task needed that were in the model's first request, and what brought each one. */
+  /** The facts the task needed that were in what the brain added to the model's first request. */
   readonly delivered: readonly FactID[]
+  /**
+   * The line the brain added to the first request that carried each fact the task needed, and each out-of-date fact it
+   * could act on (a line that also states the correction does not count as the out-of-date fact).
+   */
+  readonly brought: readonly { readonly fact: FactID; readonly line: string }[]
 }
 
 /** One task's metrics. `earlier` is every file the arm read in tasks before this one. */
@@ -136,6 +163,12 @@ export function measure(input: {
   const sum = (pick: (cost: (typeof costs)[number]) => number) => costs.reduce((total, cost) => total + pick(cost), 0)
   const first = offline?.find((request) => Array.isArray(request.body.tools) && request.body.tools.length > 0)
   const text = (request: Recorded) => JSON.stringify(request.body)
+  const lines = first ? brainSpans(unescape(text(first))).join("\n").split("\n") : []
+  const needed = (line: string) => input.task.needs.some((id) => fact(id).marker.test(line))
+  const brought = [
+    ...input.task.needs.map((id) => ({ fact: id, line: lines.find((line) => fact(id).marker.test(line)) })),
+    ...(input.task.misleads ?? []).map((id) => ({ fact: id, line: lines.find((line) => fact(id).marker.test(line) && !needed(line)) })),
+  ].flatMap((item) => (item.line === undefined ? [] : [{ fact: item.fact, line: item.line.trim().slice(0, 160) }]))
   const memoryTokens = offline
     ? offline.reduce((total, request) => total + estimate(brainSpans(unescape(text(request))).join("")), 0)
     : 0
@@ -158,13 +191,18 @@ export function measure(input: {
     memoryCalls: steps.filter((step) => step.tool === "memory").length,
     cacheRead: offline ? sum((cost) => cost.cacheRead) : (meter.tokens?.cacheRead ?? 0),
     cacheWrite: offline ? sum((cost) => cost.cacheWrite) : (meter.tokens?.cacheWrite ?? 0),
-    costUsd: offline ? Math.round(sum((cost) => cost.costUsd) * 1e6) / 1e6 : (meter.costUsd ?? 0),
+    // Live: spend from the reported tokens at the owner's prices, never the run's own figure, which is $0 for a model
+    // Vector has no price for.
+    costUsd: offline
+      ? Math.round(sum((cost) => cost.costUsd) * 1e6) / 1e6
+      : input.rates && meter.tokens
+        ? Math.round(spend(meter.tokens, input.rates) * 1e6) / 1e6
+        : (meter.costUsd ?? 0),
     mistakes: mistakes(input.task, steps, input.acceptance),
     checks: { passed: input.acceptance.length - failed.length, total: input.acceptance.length, failed },
     success: input.acceptance.length > 0 && failed.length === 0,
-    delivered: first
-      ? input.task.needs.filter((id) => FACTS.find((item) => item.id === id)!.marker.test(brainSpans(unescape(text(first))).join("\n")))
-      : [],
+    delivered: input.task.needs.filter((id) => brought.some((item) => item.fact === id)),
+    brought,
   }
 }
 
@@ -186,6 +224,8 @@ export type Totals = {
   readonly costUsd: number
   readonly mistakes: number
   readonly repeated: number
+  /** Mistakes from acting on a fact after it went out of date. */
+  readonly misled: number
   readonly checksPassed: number
   readonly checksTotal: number
   readonly succeeded: number
@@ -206,6 +246,7 @@ export function totals(rows: readonly TaskMetrics[]): Totals {
     costUsd: Math.round(sum((row) => row.costUsd) * 1e6) / 1e6,
     mistakes: sum((row) => row.mistakes.length),
     repeated: sum((row) => row.mistakes.filter((item) => item.repeated).length),
+    misled: sum((row) => row.mistakes.filter((item) => item.stale).length),
     checksPassed: sum((row) => row.checks.passed),
     checksTotal: sum((row) => row.checks.total),
     succeeded: sum((row) => (row.success ? 1 : 0)),

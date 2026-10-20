@@ -5,19 +5,21 @@
 //          is ever opened.
 // - on:    brain on. One home for the whole sequence, so brain.db persists; learning is on and what the agent saves is
 //          in use from the next request, as Vector ships it (the user can undo it; nobody does here).
-// - blind: the mutation control. The brain is on exactly as in `on`, but the fake model server deletes everything the
+// - blind: the mutation control. The brain is on as in `on`, but the fake model server deletes everything the
 //          brain added to each request before the scripted model reads it. If `on` wins only through what the brain
 //          put in the requests, `blind` must lose that advantage.
 //
-// Every task starts every arm from the same files (week 0 plus the reference solutions of the tasks before it), so the
-// arms differ only in what Vector carried from one task to the next.
+// Every task starts every arm from the same files (week 0, the reference solutions of the tasks before it, and any
+// teammate's commit the sequence makes before it), so the arms differ only in what Vector carried from one task to the
+// next.
 
 import { spawn } from "node:child_process"
-import { mkdir, readdir, rm, symlink, writeFile } from "node:fs/promises"
+import { mkdir, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
-import type { Recorded } from "../prompt-cache"
+import { meterLine, type Meter } from "../meter"
+import type { Rates, Recorded } from "../prompt-cache"
 import { PACKAGE_MANAGER, REGISTRY } from "./fixture"
-import { junit, measure, type TaskMetrics } from "./measure"
+import { junit, measure, spend, type TaskMetrics } from "./measure"
 import { attachments, decide } from "./policy"
 import { serve, type Call } from "./model-server"
 import { ACCEPTANCE_PREAMBLE, TASKS, startOf, type Task } from "./tasks"
@@ -35,6 +37,10 @@ export type Provider = {
   readonly config: Record<string, unknown>
   /** Passed through to `vector run --max-cost`, live only. */
   readonly maxCost?: () => number | undefined
+  /** Live: the owner's prices, at which spend is counted from the tokens the provider reports. */
+  readonly rates?: Rates
+  /** Live: US dollars left under the spend cap; a task is stopped once its own spend reaches it. */
+  readonly remaining?: () => number
 }
 
 export type TaskRun = TaskMetrics & {
@@ -46,6 +52,8 @@ export type TaskRun = TaskMetrics & {
   readonly brainFiles: readonly string[]
   readonly recall: readonly string[]
   readonly wallMs: number
+  /** Live: the task was stopped when its spend reached what was left under the cap. */
+  readonly capped?: boolean
 }
 
 export type ArmOptions = {
@@ -66,12 +74,14 @@ export type ArmOptions = {
 }
 
 export async function runArm(options: ArmOptions): Promise<TaskRun[]> {
-  const base = resolve(options.root)
-  await rm(base, { recursive: true, force: true })
+  await rm(resolve(options.root), { recursive: true, force: true })
+  await mkdir(join(resolve(options.root), "repo"), { recursive: true })
+  // The folder's real path: Vector matches a file the model reads against the root git reports, which resolves
+  // symlinks, so under a symlinked folder (macOS's temporary folder is one) no document pointer or guard would show.
+  const base = await realpath(resolve(options.root))
   const dir = join(base, "repo")
   const bin = join(base, "bin")
   const registry = join(base, "registry")
-  await mkdir(dir, { recursive: true })
   await installTools(bin, registry)
   await git(dir, ["init", "--quiet", "-b", "main"])
   const engine = options.engine ?? join(REPO_ROOT, "packages", "engine", "src", "index.ts")
@@ -114,6 +124,17 @@ export async function runArm(options: ArmOptions): Promise<TaskRun[]> {
     }
     const server = options.provider ? undefined : serve(respond)
     const started = performance.now()
+    // Live: the task's spend, counted from each step's reported tokens at the owner's prices as the run goes, stops it
+    // once it reaches what is left under the cap, whatever Vector's own cost figure says.
+    const left = options.provider?.rates ? options.provider.remaining?.() : undefined
+    const metered: { meter: Meter } = { meter: {} }
+    const watch =
+      left === undefined
+        ? undefined
+        : (line: string) => {
+            metered.meter = meterLine(metered.meter, line)
+            return metered.meter.tokens !== undefined && spend(metered.meter.tokens, options.provider!.rates!) >= left
+          }
     const result = await exec(
       process.execPath,
       [
@@ -132,6 +153,7 @@ export async function runArm(options: ArmOptions): Promise<TaskRun[]> {
       ],
       dir,
       env(server?.url),
+      watch,
     )
     server?.stop()
     const wallMs = performance.now() - started
@@ -140,7 +162,15 @@ export async function runArm(options: ArmOptions): Promise<TaskRun[]> {
       await writeFile(join(options.dump, `${options.arm}-${task.id}.json`), JSON.stringify({ requests: server?.requests ?? [], stdout: result.stdout, output: result.output }, null, 1))
     }
     const acceptance = await accept(dir, task)
-    const metrics = measure({ task, requests: server?.requests as Recorded[] | undefined, stdout: result.stdout, dir, acceptance, earlier })
+    const metrics = measure({
+      task,
+      requests: server?.requests as Recorded[] | undefined,
+      stdout: result.stdout,
+      dir,
+      acceptance,
+      earlier,
+      ...(options.provider?.rates ? { rates: options.provider.rates } : {}),
+    })
     metrics.read.forEach((file) => earlier.add(file))
     const run: TaskRun = {
       ...metrics,
@@ -151,6 +181,7 @@ export async function runArm(options: ArmOptions): Promise<TaskRun[]> {
       brainFiles: await brainFiles(home),
       recall: server ? firstRecall(server.requests) : [],
       wallMs: Math.round(wallMs),
+      ...(result.stopped ? { capped: true } : {}),
     }
     runs.push(run)
     options.onTask?.(run)
@@ -332,21 +363,30 @@ async function pdfText(bytes: Uint8Array) {
   return text
 }
 
-// Starts a process with only the given environment, nothing inherited, and gathers its output.
-export function exec(command: string, args: string[], cwd: string, env: Record<string, string>) {
-  return new Promise<{ exitCode: number; output: string; stdout: string }>((done) => {
+// Starts a process with only the given environment, nothing inherited, and gathers its output. `watch` sees each
+// stdout line as it arrives and stops the process by returning true.
+export function exec(command: string, args: string[], cwd: string, env: Record<string, string>, watch?: (line: string) => boolean) {
+  return new Promise<{ exitCode: number; output: string; stdout: string; stopped: boolean }>((done) => {
     const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] })
     const output: string[] = []
     const stdout: string[] = []
+    const state = { pending: "", stopped: false }
     child.stdout.on("data", (chunk: Buffer) => {
       output.push(chunk.toString("utf8"))
       stdout.push(chunk.toString("utf8"))
+      if (!watch || state.stopped) return
+      const lines = `${state.pending}${chunk.toString("utf8")}`.split("\n")
+      state.pending = lines.pop() ?? ""
+      if (!lines.map(watch).includes(true)) return
+      state.stopped = true
+      child.kill("SIGTERM")
+      setTimeout(() => child.kill("SIGKILL"), 5_000).unref()
     })
     child.stderr.on("data", (chunk: Buffer) => output.push(chunk.toString("utf8")))
     const timer = setTimeout(() => child.kill("SIGKILL"), 180_000)
     child.once("close", (code) => {
       clearTimeout(timer)
-      done({ exitCode: code ?? 1, output: output.join(""), stdout: stdout.join("") })
+      done({ exitCode: code ?? 1, output: output.join(""), stdout: stdout.join(""), stopped: state.stopped })
     })
   })
 }

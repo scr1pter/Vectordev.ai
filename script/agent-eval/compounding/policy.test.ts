@@ -58,6 +58,18 @@ describe("the scripted model", () => {
     expect(String(blind.content)).not.toContain("Math.round")
   })
 
+  test("follows a document pointer on a read, and the blind control never sees one", () => {
+    const pointer = "1: export {}\n\n<system-reminder>\nDocuments linked to src/invoice-pdf.ts: [rabcd12345678] constraint (Refunds are allowed for at most 14…).\n</system-reminder>"
+    const body = request(task("t15-refund-deadline").prompt, {
+      turns: [{ name: "read", input: { filePath: `${DIR}/src/invoice-pdf.ts` }, result: pointer }],
+    })
+    expect(decide(task("t15-refund-deadline"), start("t15-refund-deadline"), body, { dir: DIR })).toEqual({ name: "memory", input: { action: "get", id: "rabcd12345678" } })
+    expect(decide(task("t15-refund-deadline"), start("t15-refund-deadline"), body, { dir: DIR, blind: true })).toEqual({
+      name: "read",
+      input: { filePath: `${DIR}/src/orders.ts` },
+    })
+  })
+
   test("reads a fact from a file it read, like any other part of the request", () => {
     const write = firstWrite("t07-order-discount", (turns) =>
       request(task("t07-order-discount").prompt, {
@@ -77,10 +89,25 @@ describe("the scripted model", () => {
     for (const item of TASKS) {
       const seen = perceive(request(item.prompt))
       const taught = new Set<FactID>(item.teaches.flatMap((teach) => (teach.quote ? [teach.fact] : [])))
-      // pnpm in a prompt is the user saying so (t01, t06): that is the request carrying it.
-      for (const need of item.needs.filter((id) => !taught.has(id) && !(id === "pnpm" && /pnpm/.test(item.prompt))))
-        expect(knows(seen, 0, need)).toBe(false)
+      for (const need of [...item.needs, ...(item.misleads ?? [])].filter((id) => !taught.has(id))) expect(knows(seen, 0, need)).toBe(false)
     }
+  })
+
+  test("knows the pnpm preference from the preference, not from a command that starts with pnpm", () => {
+    const lessons = `- [m4r8tq] lesson: ${fact("routes").memory!.text}\n- [m7c2lk] lesson: ${fact("clock").memory!.text}`
+    expect(knows(perceive(request("Add a helper.", { recall: lessons })), 0, "pnpm")).toBe(false)
+    expect(knows(perceive(request("Add a helper.", { recall: `- [m9p1zz] preference: ${fact("pnpm").memory!.text}` })), 0, "pnpm")).toBe(true)
+  })
+
+  test("acts on a correction it is shown, and on the out-of-date fact when that is all it has", () => {
+    const stale = "- [rtrc1w45jqejn] constraint · Refund policy p.1 §2: Refunds are allowed for at most 14 days after capture, as REFUND_WINDOW_DAYS sets."
+    const correction = `- [mq3w8e] decision: ${fact("window21").memory!.text}`
+    const reminder = (recall?: string) =>
+      String(firstWrite("t18-refund-reminder", (turns) => request(task("t18-refund-reminder").prompt, { ...(recall ? { recall } : {}), turns })).content)
+    expect(reminder(`${stale}\n${correction}`)).toContain("+ 19 * 86_400_000")
+    expect(reminder(correction)).toContain("+ 19 * 86_400_000")
+    expect(reminder(stale)).toContain("+ 12 * 86_400_000")
+    expect(reminder()).toContain("+ 28 * 86_400_000")
   })
 
   test("is a pure function of the request: the same request gets the same call, with no files to read", () => {
