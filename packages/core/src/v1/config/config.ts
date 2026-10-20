@@ -11,11 +11,13 @@ import { ConfigAttachmentV1 } from "./attachment"
 import { ConfigCommandV1 } from "./command"
 import { ConfigFormatterV1 } from "./formatter"
 import { ConfigLayoutV1 } from "./layout"
+import { ConfigLocalV1 } from "./local"
 import { ConfigLSPV1 } from "./lsp"
 import { ConfigMCPV1 } from "./mcp"
 import { ConfigPermissionV1 } from "./permission"
 import { ConfigPluginV1 } from "./plugin"
 import { ConfigProviderV1 } from "./provider"
+import { ConfigResearchV1 } from "./research"
 import { ConfigServerV1 } from "./server"
 import { ConfigSkillsV1 } from "./skills"
 
@@ -200,6 +202,14 @@ export const Info = Schema.Struct({
       }),
     }),
   ).annotate({ description: "Task sizing: how much harness, reasoning and verification each request gets." }),
+  local: Schema.optional(ConfigLocalV1.Info).annotate({
+    description:
+      "Vector Local (in development; this version does not apply these settings yet): run Vector's AI features only on model servers you or your company host. Read from your user config and your company's managed config, never a repository's.",
+  }),
+  research: Schema.optional(ConfigResearchV1.Info).annotate({
+    description:
+      "Deep research (in development; this version does not apply these settings yet): where research searches go, how deep it goes and what one run may spend.",
+  }),
   experimental: Schema.optional(
     Schema.Struct({
       disable_paste_summary: Schema.optional(Schema.Boolean),

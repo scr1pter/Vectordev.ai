@@ -3,12 +3,20 @@ import { providerAllowed, renamedModel } from "./provider-policy"
 
 export const ProviderUnavailable = Schema.Struct({
   id: Schema.String,
-  reason: Schema.Literals(["sign-in-paused", "provider-not-configured", "disabled", "no-models"]),
+  reason: Schema.Literals(["sign-in-paused", "provider-not-configured", "disabled", "no-models", "off-in-local"]),
   message: Schema.String,
 })
 export type ProviderUnavailable = typeof ProviderUnavailable.Type
 
 export function providerUnavailable(id: string, reason: ProviderUnavailable["reason"]): ProviderUnavailable {
+  // Vector Local keeps the credential: removing it would not make the provider usable, so the logout advice that ends
+  // the other messages does not apply.
+  if (reason === "off-in-local")
+    return {
+      id,
+      reason,
+      message: `${id}: off in Vector Local, because its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.`,
+    }
   const action = {
     "sign-in-paused": "sign-in is paused in Vector; connect a supported provider with an API key",
     "provider-not-configured": "provider is not configured; add its endpoint and models to vector.json",

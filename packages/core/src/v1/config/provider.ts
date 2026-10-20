@@ -112,6 +112,10 @@ export const Info = Schema.Struct({
           description:
             "Timeout in milliseconds between streamed SSE chunks for this provider. If no chunk arrives within this window, the request is aborted.",
         }),
+        concurrency: Schema.optional(PositiveInt).annotate({
+          description:
+            "In development, not applied by this version yet: how many requests Vector sends to this provider's server at once. Providers that point at one server share its limit.",
+        }),
       }),
       [Schema.Record(Schema.String, Schema.Any)],
     ),

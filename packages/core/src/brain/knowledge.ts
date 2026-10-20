@@ -209,7 +209,7 @@ export type DistillRun = {
     readonly cacheWrite: number
   }
   readonly cost: number
-  readonly costKind: "free" | "priced" | "plan" | "unknown"
+  readonly costKind: "free" | "priced" | "plan" | "local" | "unknown"
   readonly dropped: BrainDistill.Dropped
   readonly error?: string
 }

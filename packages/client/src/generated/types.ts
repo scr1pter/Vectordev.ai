@@ -858,7 +858,7 @@ export type SessionsSpendOutput = {
     readonly spentUsd: number
     readonly steps: number
     readonly unpricedSteps: number
-    readonly costKind?: "free" | "priced" | "plan" | "unknown"
+    readonly costKind?: "free" | "priced" | "plan" | "local" | "unknown"
   } | null
 }["data"]
 

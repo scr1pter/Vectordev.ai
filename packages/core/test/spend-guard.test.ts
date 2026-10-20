@@ -16,6 +16,14 @@ describe("SpendGuard cost kind and price", () => {
     expect(SpendGuard.costKindOf({ free: false, oauthPlan: false, listed: false })).toBe("unknown")
   })
 
+  test("costKindOf counts a local server as local unless a price is configured for it", () => {
+    expect(SpendGuard.costKindOf({ free: false, oauthPlan: false, listed: false, local: true })).toBe("local")
+    expect(SpendGuard.costKindOf({ free: false, oauthPlan: false, listed: true, local: true })).toBe("priced")
+    expect(SpendGuard.costKindOf({ free: true, oauthPlan: false, listed: false, local: true })).toBe("free")
+    // An unpriced company endpoint on the internet is not local, so the unpriced-step stop still covers it.
+    expect(SpendGuard.costKindOf({ free: false, oauthPlan: false, listed: false, local: false })).toBe("unknown")
+  })
+
   test("priceOf has no price for all-zero rates", () => {
     expect(SpendGuard.priceOf({ input: 0, output: 0, cache: { read: 0.5, write: 1 } })).toBeUndefined()
     expect(SpendGuard.priceOf({ input: 0, output: 0 })).toBeUndefined()
@@ -183,9 +191,30 @@ describe("SpendGuard.afterStep", () => {
       state: "stopped",
       reason: "unpriced",
       message:
-        "Stopped after 40 unpriced steps: this model has no catalog price, so Vector cannot count its spend against your $5.00 cap.",
+        "Stopped after 40 unpriced steps: Vector has no per-token price for this model, so it cannot count what they cost against your $5.00 cap. Without a dollar cap, step and loop limits still apply.",
     })
     expect(result.run.spentUsd).toBe(0)
+  })
+
+  test("never stops a local model on dollars, however many steps it takes, but does on steps", () => {
+    const local = Array.from({ length: 100 }, () => step({ costKind: "local", costUsd: 3 }))
+    const capped = play({ usd: 1 }, local)
+    expect(capped.verdicts.every((verdict) => verdict.state === "ok")).toBe(true)
+    expect(capped.run).toMatchObject({ steps: 100, spentUsd: 0, unpricedSteps: 0, costKind: "local" })
+
+    const limited = play({ usd: 1, steps: 100 }, local)
+    expect(limited.verdicts.slice(0, 99).every((verdict) => verdict.state === "ok")).toBe(true)
+    expect(limited.verdicts[99]).toEqual({
+      state: "stopped",
+      reason: "steps",
+      message: "Step limit reached: 100 of 100 steps used for this run.",
+    })
+  })
+
+  test("still pauses a local model's loops", () => {
+    const repeated = step({ costKind: "local", tools: [{ tool: "read", input: "a.ts", output: "same" }] })
+    const result = play({ usd: 1 }, [repeated, repeated, repeated])
+    expect(result.verdicts.at(-1)).toMatchObject({ state: "stopped", reason: "loop" })
   })
 
   test("never stops plan or free models on dollars, but does on steps", () => {

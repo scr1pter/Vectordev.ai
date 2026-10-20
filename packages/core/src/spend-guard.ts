@@ -31,12 +31,14 @@ export const ERROR_STREAK = 3
 // Finished runs kept for snapshot(); the oldest is dropped first.
 export const LAST_RUNS = 200
 
-// The order matters: a free model with a catalog price is still free, and an OAuth plan with a catalog price is
-// billed by the plan, not per token.
-export function costKindOf(input: { free: boolean; listed: boolean; oauthPlan: boolean }): CostKind {
+// The order matters: a free model with a catalog price is still free, an OAuth plan with a catalog price is billed by
+// the plan, not per token, and a local server with a configured price is priced at it. `local` is a model server on
+// this computer or a listed private address; a company endpoint on the internet without a price stays unknown.
+export function costKindOf(input: { free: boolean; listed: boolean; oauthPlan: boolean; local?: boolean }): CostKind {
   if (input.free) return "free"
   if (input.oauthPlan) return "plan"
   if (input.listed) return "priced"
+  if (input.local) return "local"
   return "unknown"
 }
 
@@ -189,7 +191,7 @@ export function stopMessage(reason: RunBudget.StopReason, run: Run, detail: Stop
   if (reason === "predicted")
     return `Stopped before the next step: ${formatUsd(run.spentUsd)} spent of a ${cap} cap, and the next step was estimated at ${formatRange(detail.estimate ?? { lowUsd: 0, highUsd: 0 })} at catalog list prices.`
   if (reason === "unpriced")
-    return `Stopped after ${run.unpricedSteps} unpriced steps: this model has no catalog price, so Vector cannot count its spend against your ${cap} cap.`
+    return `Stopped after ${run.unpricedSteps} unpriced steps: Vector has no per-token price for this model, so it cannot count what they cost against your ${cap} cap. Without a dollar cap, step and loop limits still apply.`
   if (reason === "steps")
     return `Step limit reached: ${run.steps} of ${run.budget.steps ?? run.steps} steps used for this run.`
   const tool = detail.loop?.tool ?? "a tool"
@@ -221,8 +223,8 @@ function stop(run: Run, verdict: Stop & Verdict) {
   return { run: { ...run, stopped: { reason: verdict.reason, message: verdict.message } }, verdict }
 }
 
-// Step and dollar limits. Dollars are checked only with a dollar cap and a priced or unpriced model: plan and free
-// models are not billed per token. The next step is predicted from this step's context, like Vectorscope does. A
+// Step and dollar limits. Dollars are checked only with a dollar cap and a priced or unpriced model: plan, free and
+// local models are not billed per token, so only the step and loop limits stop them. The next step is predicted from this step's context, like Vectorscope does. A
 // final answer that reaches a limit still stops the run, so no other session of it starts another step, but the
 // answer itself stands: callers end a turn early only for a step that continues.
 function checkLimits(run: Run, step: Step, sessionID: SessionID): Verdict {
