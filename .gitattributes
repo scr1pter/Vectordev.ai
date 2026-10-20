@@ -12,3 +12,7 @@ packages/core/src/database/migration.gen.ts linguist-generated
 
 # Review output is compared byte-for-byte with these canonical fixtures.
 /packages/core/test/review/fixtures/*.golden.txt text eol=lf
+
+# Prompts and tool descriptions go to the model as written, so a Windows checkout must not add carriage returns to them.
+/packages/engine/src/**/*.txt text eol=lf
+/packages/core/src/**/*.txt text eol=lf

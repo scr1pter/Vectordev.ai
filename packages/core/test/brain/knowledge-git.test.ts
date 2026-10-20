@@ -107,13 +107,15 @@ describe("UntrustedGit.program", () => {
   // repository it may not trust. On Windows, git comes from an absolute PATH entry only.
   test("on Windows, takes git from an absolute PATH entry, never from a repository or a relative entry", async () => {
     await using tmp = await tmpdir()
-    const repo = path.join(tmp.path, "repo")
+    // The planted repository sits under the working directory, so its PATH entry stays relative and still reaches the
+    // planted git. On Windows CI the temporary folder is on another drive, where path.relative returns an absolute path.
+    await using repo = await tmpdir(process.cwd())
     const bin = path.join(tmp.path, "Git", "cmd")
-    await fs.mkdir(repo, { recursive: true })
     await fs.mkdir(bin, { recursive: true })
-    await fs.writeFile(path.join(repo, "git.exe"), "planted")
+    await fs.writeFile(path.join(repo.path, "git.exe"), "planted")
     await fs.writeFile(path.join(bin, "git.exe"), "installed")
-    const relative = path.relative(process.cwd(), repo)
+    const relative = path.relative(process.cwd(), repo.path)
+    expect(path.isAbsolute(relative)).toBe(false)
     const PATH = (...dirs: string[]) => ({ PATH: dirs.join(path.delimiter) })
     expect(UntrustedGit.program("win32", PATH(".", "", relative, `"${bin}"`))).toBe(path.join(bin, "git.exe"))
     expect(UntrustedGit.program("win32", PATH(".", relative))).toBeUndefined()
