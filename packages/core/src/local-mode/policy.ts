@@ -117,11 +117,15 @@ export function host(input: string) {
   return new URL(address).hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "")
 }
 
-/** Where a host is, by its name or address alone. A name that is not obviously local is on the internet. */
+/**
+ * Where a host is, by its name or address alone. A name that is not obviously local is on the internet. A name under
+ * `localhost` (`app.localhost`) is not this computer by its name alone: a resolver without RFC 6761's rule may answer
+ * it from upstream DNS, so only Vector Local's resolver, once it pins one to loopback, counts it as here.
+ */
 export function hostClass(input: string): HostClass {
   const name = host(input)
   if (!name) return "internet"
-  if (name === "localhost" || name.endsWith(".localhost")) return "this-computer"
+  if (name === "localhost") return "this-computer"
   const v4 = ipv4(name)
   if (v4) return ipv4Class(v4)
   const v6 = ipv6(name)
@@ -167,6 +171,23 @@ export function domainMatches(input: string, pattern: string) {
   const base = host(pattern.replace(/^\*\./, ""))
   if (!name || !base) return false
   return name === base || name.endsWith(`.${base}`)
+}
+
+/**
+ * Whether a host matches a pattern from a list of hosts: a name or `*.name`, as `domainMatches` reads it, or a name
+ * with `*` inside a label, such as `*-aiplatform.googleapis.com` or `bedrock-runtime.*.amazonaws.com`, where the `*`
+ * stands for a region or a resource name. Either covers the names under it too.
+ */
+export function hostMatches(input: string, pattern: string) {
+  const inner = pattern.trim().toLowerCase().replace(/^\*\./, "")
+  if (!inner.includes("*")) return domainMatches(input, pattern)
+  const name = host(input)
+  if (!name) return false
+  const source = inner
+    .split("*")
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+    .join("[a-z0-9-]+")
+  return new RegExp(`^(?:[a-z0-9-]+\\.)*${source}$`).test(name)
 }
 
 /**
@@ -404,7 +425,7 @@ function allowEntry(policy: LocalMode.Policy, source: string | undefined, name: 
   if (!source) return undefined
   return policy.allow.find(
     (entry) =>
-      entry.source === source && (!entry.hosts?.length || entry.hosts.some((pattern) => domainMatches(name, pattern))),
+      entry.source === source && (!entry.hosts?.length || entry.hosts.some((pattern) => hostMatches(name, pattern))),
   )
 }
 
@@ -484,7 +505,7 @@ function userEndpoint(
     return []
   }
   const name = new URL(normal).hostname
-  if (rules.cloud.some((pattern) => domainMatches(name, pattern))) {
+  if (rules.cloud.some((pattern) => hostMatches(name, pattern))) {
     warnings.push(
       `Ignored ${normal}: it is a cloud AI service, not a server you host. Your company's policy can list it.`,
     )

@@ -1,6 +1,7 @@
 export * as LocalSources from "./sources"
 
 import type { LocalMode } from "@vectordevai/schema/local-mode"
+import { LocalPolicy } from "./policy"
 
 // Every connection Vector makes, as data: what it is for, where it goes, what it sends, why Vector makes it, and how it
 // behaves with Vector Local on. Each source has one labelling call site per runtime; `callSites` lists the files that
@@ -25,14 +26,23 @@ export type Source = {
 const VECTOR = ["vectordev.ai"]
 
 // Cloud AI services a user may not list as a model server of their own. A company's managed file can still list one,
-// such as a private Azure OpenAI deployment, which is then labelled as listed by the company.
+// such as a private Azure OpenAI deployment, which is then labelled as listed by the company. `cloudHosts` adds every
+// provider address in the model catalog; a `*` inside a name stands for a region or a resource name.
 export const CLOUD_INFERENCE_HOSTS = [
   "api.openai.com",
   "chatgpt.com",
   "openai.azure.com",
+  "cognitiveservices.azure.com",
+  "services.ai.azure.com",
+  "models.ai.azure.com",
+  "models.inference.ai.azure.com",
   "api.anthropic.com",
   "generativelanguage.googleapis.com",
   "aiplatform.googleapis.com",
+  "*-aiplatform.googleapis.com",
+  "bedrock-runtime.*.amazonaws.com",
+  "bedrock-runtime-fips.*.amazonaws.com",
+  "bedrock-mantle.*.api.aws",
   "openrouter.ai",
   "api.x.ai",
   "api.groq.com",
@@ -44,9 +54,22 @@ export const CLOUD_INFERENCE_HOSTS = [
   "api.cerebras.ai",
   "api.sambanova.ai",
   "api.perplexity.ai",
+  "api.cohere.com",
+  "api.cohere.ai",
+  "api.moonshot.ai",
+  "api.moonshot.cn",
+  "dashscope.aliyuncs.com",
+  "dashscope-intl.aliyuncs.com",
+  "api.z.ai",
+  "open.bigmodel.cn",
+  "api.minimax.io",
+  "api.minimaxi.com",
+  "router.huggingface.co",
+  "api-inference.huggingface.co",
   "integrate.api.nvidia.com",
   "inference.baseten.co",
   "api.githubcopilot.com",
+  "models.github.ai",
   "gateway.ai.cloudflare.com",
   "api.cloudflare.com",
   "inference.do-ai.run",
@@ -56,6 +79,40 @@ export const CLOUD_INFERENCE_HOSTS = [
   "api.poe.com",
   "ollama.com",
 ]
+
+// What a `${VARIABLE}` in a catalog address is read as while the address is parsed.
+const PLACEHOLDER = "vector-variable"
+
+/**
+ * The cloud AI hosts with every provider address in a model catalog added: a provider's `api`, and a model's own. A
+ * provider on this computer or the user's network (Ollama, LM Studio) is left out, and a `${VARIABLE}` in an address,
+ * such as a region, reads as `*`.
+ */
+export function cloudHosts(
+  catalog: Readonly<
+    Record<
+      string,
+      {
+        readonly api?: string
+        readonly models?: Readonly<Record<string, { readonly provider?: { readonly api?: string } }>>
+      }
+    >
+  >,
+) {
+  const addresses = Object.values(catalog).flatMap((provider) => [
+    provider.api,
+    ...Object.values(provider.models ?? {}).map((model) => model.provider?.api),
+  ])
+  const hosts = addresses.flatMap((address) => {
+    const written = address?.trim().replace(/\$\{[^}]*\}/g, PLACEHOLDER)
+    if (!written || !URL.canParse(written)) return []
+    const url = new URL(written)
+    if (url.protocol !== "http:" && url.protocol !== "https:") return []
+    // An address that is all variable, such as `${BASE_URL}`, reads as a name with no dot and is left out.
+    return LocalPolicy.hostClass(url.hostname) === "internet" ? [url.hostname.replaceAll(PLACEHOLDER, "*")] : []
+  })
+  return [...new Set([...CLOUD_INFERENCE_HOSTS, ...hosts])]
+}
 
 export const SOURCES: readonly Source[] = [
   {

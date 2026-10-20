@@ -280,7 +280,7 @@ describe("LocalPolicy.hostClass", () => {
     for (const host of [
       "localhost",
       "localhost.",
-      "Dev.LOCALHOST",
+      "LOCALHOST",
       "127.0.0.1",
       "127.0.0.1.",
       "127.1",
@@ -337,6 +337,8 @@ describe("LocalPolicy.hostClass", () => {
       "example.com",
       "127.0.0.1.nip.io",
       "localhost.example.com",
+      // A name under localhost is answered by whatever resolver is in use, which may ask upstream DNS.
+      "dev.localhost",
       "ts.net.example.com",
       "1.2.3.256",
       "evil.com/@127.0.0.1",

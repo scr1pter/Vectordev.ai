@@ -4,9 +4,11 @@ import { afterAll, beforeAll } from "bun:test"
 import { EgressGuard } from "../../src/local-mode/guard"
 import { FakeWeb } from "./fake-web"
 
-// The egress guard in strict mode for tests: any connection that leaves this computer throws EgressBlocked before it
-// is made, and every attempt is listed. The fake web's names count as this computer, since its resolver pins them to
-// 127.0.0.1. Engine tests import this by relative path, as they do core's other test fixtures.
+// The egress guard in strict mode for tests: a connection that would leave this computer throws EgressBlocked before
+// it is made, or is refused by the guard's own proxy, and every attempt is listed. While it is installed the proxy
+// environment points at that proxy, so a proxy the machine has set is not used. guard.ts lists what strict mode covers
+// and what it does not. The fake web's names count as this computer, since its resolver pins them to 127.0.0.1. Engine
+// tests import this by relative path, as they do core's other test fixtures.
 
 /** Installs the strict guard now. Call `uninstall()` when the test is done; `use()` does both for a file. */
 export function strict(options: EgressGuard.Options = {}) {

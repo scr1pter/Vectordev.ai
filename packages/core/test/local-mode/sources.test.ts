@@ -108,6 +108,57 @@ describe("LocalSources registry", () => {
     expect(blocked("model-catalog", allowed)).toBe(false)
   })
 
+  test("refuses regional and per-resource cloud hosts too", () => {
+    const hosts = [
+      "https://us-central1-aiplatform.googleapis.com",
+      "https://bedrock-runtime.us-east-1.amazonaws.com",
+      "https://myres.cognitiveservices.azure.com",
+      "https://myres.services.ai.azure.com",
+      "https://myres.openai.azure.com",
+      "https://api.moonshot.ai",
+      "https://dashscope.aliyuncs.com",
+    ]
+    const policy = LocalPolicy.resolve({ global: { enabled: true, endpoints: [...hosts, "https://gpu.example.com"] } })
+    expect(policy.endpoints).toEqual([{ origin: "https://gpu.example.com", from: "user" }])
+    expect(policy.warnings).toHaveLength(hosts.length)
+    // A pattern's `*` is one name's worth of letters, digits and hyphens, never a way around its fixed part.
+    expect(LocalPolicy.hostMatches("bedrock-runtime.eu-west-1.amazonaws.com", "bedrock-runtime.*.amazonaws.com")).toBe(
+      true,
+    )
+    expect(LocalPolicy.hostMatches("bedrock-runtime.evil.example", "bedrock-runtime.*.amazonaws.com")).toBe(false)
+    expect(LocalPolicy.hostMatches("aiplatform.googleapis.com.evil.example", "*-aiplatform.googleapis.com")).toBe(false)
+    expect(LocalPolicy.hostMatches("my-aiplatform.googleapis.com", "*-aiplatform.googleapis.com")).toBe(true)
+  })
+
+  test("adds every cloud provider address in the model catalog, and none on this computer or the network", () => {
+    const hosts = LocalSources.cloudHosts({
+      newcloud: { api: "https://api.newcloud.example/v1" },
+      regional: { api: "https://inference.${REGION}.regional.example/openai" },
+      ollama: { api: "http://localhost:11434/v1" },
+      lmstudio: { api: "http://127.0.0.1:1234/v1" },
+      box: { api: "http://gpu-box:8000/v1" },
+      mixed: { models: { one: { provider: { api: "https://models.mixed.example/api" } } } },
+      variable: { api: "${OPENAI_BASE_URL}" },
+      none: {},
+    })
+    expect(hosts).toEqual(
+      expect.arrayContaining(["api.newcloud.example", "inference.*.regional.example", "models.mixed.example"]),
+    )
+    expect(hosts.filter((host) => /localhost|127\.0\.0\.1|gpu-box|variable|\$/.test(host))).toEqual([])
+    const policy = LocalPolicy.resolve({
+      global: {
+        enabled: true,
+        endpoints: [
+          "https://api.newcloud.example",
+          "https://inference.eu-1.regional.example",
+          "http://localhost:11434",
+        ],
+      },
+      cloudHosts: hosts,
+    })
+    expect(policy.endpoints).toEqual([{ origin: "http://localhost:11434", from: "user" }])
+  })
+
   test("refuses the cloud AI hosts as a user's model servers by default", () => {
     const policy = LocalPolicy.resolve({
       global: { enabled: true, endpoints: LocalSources.CLOUD_INFERENCE_HOSTS.map((host) => `https://${host}`) },
