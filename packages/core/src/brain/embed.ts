@@ -76,6 +76,8 @@ export interface Interface {
   readonly embed: (texts: readonly string[]) => Effect.Effect<readonly Float32Array[] | undefined>
   /** Load the model in the background, so the next request's query does not wait. */
   readonly warm: () => Effect.Effect<void>
+  /** Load the model now and wait for it, as a one-off command does; false when there is none to use. */
+  readonly prepare: () => Effect.Effect<boolean>
   /** Waits until a model is downloaded, removed, paused, resumed or fails. */
   readonly changed: Effect.Effect<void>
 }
@@ -161,6 +163,7 @@ export const layerOff = Layer.succeed(
     query: () => Effect.succeed(undefined),
     embed: () => Effect.succeed(undefined),
     warm: () => Effect.void,
+    prepare: () => Effect.succeed(false),
     changed: Effect.never,
   }),
 )
@@ -186,6 +189,7 @@ export const layerHash = (options: { readonly dims?: number; readonly floor?: nu
       query: (text) => Effect.succeed(hashed(text, dims)),
       embed: (texts) => Effect.succeed(texts.map((text) => hashed(text, dims))),
       warm: () => Effect.void,
+      prepare: () => Effect.succeed(true),
       changed: Effect.never,
     }),
   )
@@ -840,6 +844,13 @@ function make(
     )
   })
 
+  const prepare = Effect.fn("BrainEmbed.prepare")(function* () {
+    const found = yield* chosen()
+    if (!found || state.failures.has(found.key)) return false
+    if (yield* worker.loaded(found.key)) return true
+    return yield* load(found)
+  })
+
   const query = Effect.fn("BrainEmbed.query")(function* (text: string) {
     const found = yield* chosen()
     if (!found || state.failures.has(found.key)) return undefined
@@ -883,6 +894,7 @@ function make(
     query,
     embed,
     warm,
+    prepare,
     changed: Queue.take(deps.changes),
   })
 }

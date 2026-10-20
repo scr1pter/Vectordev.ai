@@ -141,6 +141,8 @@ describe("memory document routes", () => {
       ["PATCH", "/memory/review/vnone", JSON.stringify({ action: "dismiss" })],
       ["GET", "/memory/settings"],
       ["PATCH", "/memory/settings", JSON.stringify({ keepOriginals: true })],
+      ["GET", "/memory/model"],
+      ["POST", "/memory/model", JSON.stringify({ action: "remove" })],
     ]
     for (const [method, route, body] of routes) {
       const url = new URL(route, listener.url)
@@ -152,6 +154,35 @@ describe("memory document routes", () => {
     // Nothing a guest sent was kept, and the owner reads the same list.
     expect((await get(shared.path, "/memory/documents")).documents).toEqual([])
     expect((await get(shared.path, "/memory/settings")).keepOriginals).toBe(false)
+  }, 30_000)
+
+  test("the search model is not downloaded unasked, says what it would download, and installs only its pinned files", async () => {
+    await using tmp = await tmpdir({ git: true, trusted: true, config: { formatter: false, lsp: false } })
+    const status = await get(tmp.path, "/memory/model")
+    expect(status).toMatchObject({ state: "absent", downloads: false, embedded: { done: 0, total: 0 } })
+    expect(status.options[0]).toMatchObject({
+      id: "arctic-embed-xs-q8",
+      label: "Search by meaning",
+      license: "Apache-2.0",
+      bytes: 23_686_074,
+      sha256: "e6aa5e656466a73d7c3111e9a3378bd13e5b93af30eaac2b3f13fd56692589a1",
+      installed: false,
+    })
+    expect(status.options[0].source).toContain("huggingface.co/Snowflake/snowflake-arctic-embed-xs/tree/d8c86521")
+    expect((await get(tmp.path, "/memory/documents")).model).toMatchObject({ state: "absent" })
+    // Files that are not the pinned ones are refused, by name, and nothing is installed.
+    const folder = path.join(tmp.path, "not-the-model")
+    await fs.mkdir(path.join(folder, "onnx"), { recursive: true })
+    await fs.writeFile(path.join(folder, "onnx", "model_quantized.onnx"), "not a model")
+    const refused = await json(tmp.path, "/memory/model", "POST", { action: "install", from: folder })
+    expect(refused.status).toBe(400)
+    expect(await refused.json()).toMatchObject({ data: { code: "refused", reason: "size" } })
+    const off = await json(tmp.path, "/memory/model", "POST", { action: "download" })
+    expect(await off.json()).toMatchObject({ data: { code: "refused", reason: "off" } })
+    const paused = await json(tmp.path, "/memory/model", "POST", { action: "pause" })
+    expect(await paused.json()).toMatchObject({ state: "absent", paused: true })
+    const resumed = await json(tmp.path, "/memory/model", "POST", { action: "resume" })
+    expect((await resumed.json()).paused).toBeUndefined()
   }, 30_000)
 
   test("finding more with a model is off by default and says why, and with the flag on refuses before sending", async () => {

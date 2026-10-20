@@ -710,6 +710,21 @@ const scenarios: Scenario[] = [
       check(typeof body.repositoryDocs === "boolean", "memory settings should say whether repository docs are read")
       check(body.keepOriginals === false, "originals are not kept unless the user turns it on")
     }),
+  http.protected.get("/memory/model", "memory.model.get").json(200, (body) => {
+    object(body)
+    check(body.state === "absent", "no search model is downloaded until the user asks")
+    check(body.downloads === false, "tests turn search model downloads off")
+    check(Array.isArray(body.options) && body.options.length === 2, "the model status should list what can be downloaded")
+  }),
+  // Downloads are off in tests; installing from a folder is what an offline computer does instead.
+  http.protected
+    .post("/memory/model", "memory.model.update")
+    .mutating()
+    .at((ctx) => ({ path: "/memory/model", headers: ctx.headers(), body: { action: "download" } }))
+    .json(400, (body) => {
+      object(body)
+      check(isRecord(body.data) && body.data.reason === "off", "a download where downloads are off should be refused")
+    }),
   http.protected.get("/memory/documents", "memory.documents.list").json(200, (body) => {
     object(body)
     check(Array.isArray(body.documents), "documents list should return documents")

@@ -3,6 +3,7 @@ import { Effect, Stream } from "effect"
 import { HttpServerRequest, HttpServerResponse, type Multipart } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainEmbed } from "@vectordevai/core/brain/embed"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Flag } from "@vectordevai/core/flag/flag"
@@ -45,6 +46,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
     const brain = yield* Brain.Service
     const instruction = yield* Instruction.Service
     const knowledge = yield* BrainKnowledge.Service
+    const embed = yield* BrainEmbed.Service
     const distiller = yield* SessionDistill.Service
 
     const list = Effect.fn("MemoryHttpApi.list")(function* (ctx: {
@@ -146,8 +148,7 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       const worker = yield* knowledge.worker()
       return {
         documents: yield* knowledge.documents(place, { personal: true }),
-        // The local search model arrives with semantic search; until then search is by keywords.
-        model: { state: "absent" as const },
+        model: yield* knowledge.model(place),
         settings: yield* settingsOf(place),
         limits: {
           upload: UPLOAD_BYTES,
@@ -159,6 +160,44 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
         indexing: yield* knowledge.indexing(place),
         worker: { mode: worker.mode, ...(worker.reason ? { reason: worker.reason } : {}), threads: worker.threads },
       }
+    })
+
+    // --- Search model -------------------------------------------------------------------------------------------
+
+    const model = Effect.fn("MemoryHttpApi.model")(function* () {
+      return yield* knowledge.model(yield* instruction.place())
+    })
+
+    // A download runs in the background and the app polls; the rest finish before they answer.
+    const changeModel = Effect.fn("MemoryHttpApi.changeModel")(function* (ctx: {
+      payload: {
+        action: "download" | "remove" | "install" | "pause" | "resume"
+        model?: "arctic-embed-xs-q8" | "granite-small-r2-q8"
+        variant?: BrainSchema.ModelVariant
+        from?: string
+      }
+    }) {
+      const place = yield* instruction.place()
+      const choice = {
+        ...(ctx.payload.model ? { model: ctx.payload.model } : {}),
+        ...(ctx.payload.variant ? { variant: ctx.payload.variant } : {}),
+      }
+      if (ctx.payload.action === "download") {
+        const status = yield* embed.status()
+        if (status.downloads === false)
+          return yield* refused("Downloads are turned off here. Install the model from a folder instead.", "off")
+        yield* embed.start(choice)
+      }
+      if (ctx.payload.action === "install") {
+        const from = ctx.payload.from?.trim()
+        if (!from) return yield* refused("Name the folder that holds the model's files.", "missing")
+        yield* embed
+          .install(path.resolve(from), choice)
+          .pipe(Effect.catch((error) => Effect.fail(refused(error.message, error.reason))))
+      }
+      if (ctx.payload.action === "remove") yield* embed.remove()
+      if (ctx.payload.action === "pause" || ctx.payload.action === "resume") yield* embed.pause(ctx.payload.action === "pause")
+      return yield* knowledge.model(place)
     })
 
     // What an add came to, as the routes answer it. A title the user gave goes in with a new document, and renames
@@ -479,6 +518,8 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       .handle("tidy", tidy)
       .handle("settings", settings)
       .handle("configure", configure)
+      .handle("model", model)
+      .handle("changeModel", changeModel)
       .handle("documents", documents)
       .handle("upload", upload)
       .handle("addPath", addPath)

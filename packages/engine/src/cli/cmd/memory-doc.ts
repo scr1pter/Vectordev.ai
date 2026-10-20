@@ -1,7 +1,9 @@
 import type { Argv } from "yargs"
 import { EOL } from "os"
 import path from "path"
-import { Effect } from "effect"
+import { Effect, Fiber } from "effect"
+import { BrainEmbed } from "@vectordevai/core/brain/embed"
+import { BrainEmbedManifest } from "@vectordevai/core/brain/embed-manifest"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Flag } from "@vectordevai/core/flag/flag"
@@ -58,7 +60,7 @@ export const MemoryDocAddCommand = effectCmd({
         default: false,
       })
       .option("wait", {
-        describe: "wait until the document is searchable by keywords, or until it is read in full",
+        describe: "wait until the document is searchable by keywords, or also by meaning when the search model is in use",
         choices: ["keyword", "all"] as const,
         default: "keyword" as const,
       })
@@ -89,9 +91,14 @@ export const MemoryDocAddCommand = effectCmd({
       // A file already kept under other bytes' name is renamed.
       if (titled && result.type === "unchanged")
         yield* memory.knowledge.update(memory.place, result.document.id, { title: titled })
-      // Searchable by keywords is all there is to wait for until meaning search arrives.
+      // All of it means searchable by meaning too, where the search model is downloaded and not paused.
       const document =
-        (yield* memory.knowledge.wait(memory.place, result.document.id, "searchable", WAIT)) ?? result.document
+        (yield* memory.knowledge.wait(
+          memory.place,
+          result.document.id,
+          args.wait === "all" ? "ready" : "searchable",
+          args.wait === "all" ? 10 * WAIT : WAIT,
+        )) ?? result.document
       return { file, result: { ...result, document: titled ? { ...document, title: titled } : document } }
     })
     const results: { file: string; result: BrainKnowledge.AddResult }[] = []
@@ -236,7 +243,7 @@ export const MemoryDocShowCommand = effectCmd({
 
 export const MemoryDocSearchCommand = effectCmd({
   command: "search <query..>",
-  describe: "search documents by keywords, the way the agent does",
+  describe: "search documents by keywords, and by meaning once the search model is downloaded, the way the agent does",
   builder: (yargs) =>
     yargs
       .positional("query", { type: "string", array: true, demandOption: true })
@@ -244,7 +251,10 @@ export const MemoryDocSearchCommand = effectCmd({
       .option("json", { describe: "print JSON", type: "boolean", default: false }),
   handler: Effect.fn("Cli.memory.doc.search")(function* (args) {
     const memory = yield* where
+    const embed = yield* BrainEmbed.Service
     const query = args.query.join(" ")
+    // A command runs once, so it loads the search model first rather than leave it for a next request.
+    const meaning = yield* embed.prepare()
     const cards = yield* memory.knowledge.search(memory.place, { query, limit: 10, personal: true })
     const words = Array.from(new Set<string>(query.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? []))
     // What each result shares with the query, said plainly; it is never sent to a model.
@@ -256,7 +266,10 @@ export const MemoryDocSearchCommand = effectCmd({
       UI.println(
         `${UI.Style.TEXT_HIGHLIGHT}${card.id}${UI.Style.TEXT_NORMAL} ${card.kind} · ${card.title}${card.page ? ` p.${card.page}` : ""}${card.section ? ` §${card.section}` : ""}: ${card.text.replace(/\s+/g, " ").slice(0, 200)}`,
       )
-      if (args.why) UI.println(`  ${UI.Style.TEXT_DIM}matched: ${why(card).join(", ") || "related words"}${UI.Style.TEXT_NORMAL}`)
+      if (args.why)
+        UI.println(
+          `  ${UI.Style.TEXT_DIM}${why(card).length > 0 ? `matched: ${why(card).join(", ")}` : meaning ? "found by meaning" : "matched: related words"}${UI.Style.TEXT_NORMAL}`,
+        )
     }
   }),
 })
@@ -521,6 +534,195 @@ export const MemoryRepoDocsCommand = effectCmd({
     )
   }),
 })
+
+// `vector memory model`: the local model documents are searched by meaning with. Downloaded once when asked, then run
+// on this computer with no network; until then search uses keywords and code links.
+export const MemoryModelCommand = cmd({
+  command: "model",
+  describe: "the local model Vector searches documents by meaning with: see it, download it once, or remove it",
+  builder: (yargs: Argv) =>
+    yargs
+      .command(MemoryModelStatusCommand)
+      .command(MemoryModelDownloadCommand)
+      .command(MemoryModelInstallCommand)
+      .command(MemoryModelRemoveCommand)
+      .command(MemoryModelPauseCommand)
+      .command(MemoryModelResumeCommand)
+      .demandCommand(),
+  async handler() {},
+})
+
+const choice = (args: { codeAware?: boolean; fullPrecision?: boolean }) => ({
+  model: args.codeAware ? ("granite-small-r2-q8" as const) : BrainEmbedManifest.DEFAULT,
+  variant: args.fullPrecision ? ("fp32" as const) : ("int8" as const),
+})
+
+const modelOptions = (yargs: Argv) =>
+  yargs
+    .option("code-aware", {
+      describe: "the larger Code-aware preview model (55 MB) instead of the default",
+      type: "boolean",
+      default: false,
+    })
+    .option("full-precision", {
+      describe: "the full-precision graph (90 MB), for a computer where the int8 one fails its check",
+      type: "boolean",
+      default: false,
+    })
+
+export const MemoryModelStatusCommand = effectCmd({
+  command: "status",
+  describe: "whether the search model is downloaded and how much of this repository's documents it has embedded",
+  builder: (yargs) => yargs.option("json", { describe: "print JSON", type: "boolean", default: false }),
+  handler: Effect.fn("Cli.memory.model.status")(function* (args) {
+    const memory = yield* where
+    const status = yield* memory.knowledge.model(memory.place)
+    if (args.json) return print(status)
+    for (const line of modelLines(status)) UI.println(line)
+  }),
+})
+
+export const MemoryModelDownloadCommand = effectCmd({
+  command: "download",
+  describe: "download the search model once; documents are then searched by meaning on this computer",
+  builder: (yargs) =>
+    modelOptions(yargs)
+      .option("yes", { describe: "download without asking first", type: "boolean", default: false })
+      .option("json", { describe: "print JSON", type: "boolean", default: false }),
+  handler: Effect.fn("Cli.memory.model.download")(function* (args) {
+    const memory = yield* where
+    const embed = yield* BrainEmbed.Service
+    const picked = choice(args)
+    const model = BrainEmbedManifest.MODELS[picked.model]
+    const bytes = BrainEmbedManifest.size(model, picked.variant)
+    if (!args.json) {
+      UI.println(
+        `${UI.Style.TEXT_HIGHLIGHT_BOLD}${model.label}${UI.Style.TEXT_NORMAL}: a one-time ${BrainEmbedManifest.megabytes(bytes)} download, then it runs on this computer with no network.`,
+      )
+      UI.println(`${model.description}`)
+      UI.println(`${model.owner}, ${model.license}. Source: https://huggingface.co/${model.repo}/tree/${model.revision}`)
+      if (model.preview) UI.println(`${UI.Style.TEXT_WARNING}${model.preview}${UI.Style.TEXT_NORMAL}`)
+    }
+    if (!args.yes) {
+      if (!process.stdin.isTTY) return yield* fail("Run again with --yes to download it.")
+      const { confirm, isCancel } = yield* Effect.promise(() => import("@clack/prompts"))
+      const answer = yield* Effect.promise(() => confirm({ message: "Download it now?" }))
+      if (isCancel(answer) || !answer) return UI.println("Nothing was downloaded.")
+    }
+    // Progress on one line while it runs, for a terminal.
+    const progress = yield* Effect.gen(function* () {
+      for (;;) {
+        yield* Effect.sleep("500 millis")
+        const status = yield* embed.status()
+        if (process.stderr.isTTY && !args.json && status.state === "downloading")
+          process.stderr.write(`\r${Math.round((status.progress ?? 0) * 100)}% of ${BrainEmbedManifest.megabytes(status.total ?? bytes)}`)
+      }
+    }).pipe(Effect.forkChild)
+    const result = yield* embed.download(picked).pipe(
+      Effect.ensuring(Fiber.interrupt(progress)),
+      Effect.catch((error) => fail(error.message)),
+    )
+    if (process.stderr.isTTY && !args.json) process.stderr.write("\r")
+    const status = yield* memory.knowledge.model(memory.place)
+    if (args.json) return print(status)
+    for (const line of modelLines(status)) UI.println(line)
+    if (result.state !== "ready") return yield* fail("The search model is downloaded but cannot be used here.")
+  }),
+})
+
+export const MemoryModelInstallCommand = effectCmd({
+  command: "install",
+  describe: "install the search model from a folder of its pinned files, for a computer with no network",
+  builder: (yargs) =>
+    modelOptions(yargs)
+      .option("from", { describe: "the folder that holds the model's files", type: "string", demandOption: true })
+      .option("json", { describe: "print JSON", type: "boolean", default: false }),
+  handler: Effect.fn("Cli.memory.model.install")(function* (args) {
+    const memory = yield* where
+    const embed = yield* BrainEmbed.Service
+    yield* embed
+      .install(path.resolve(process.cwd(), args.from), choice(args))
+      .pipe(Effect.catch((error) => fail(error.message)))
+    const status = yield* memory.knowledge.model(memory.place)
+    if (args.json) return print(status)
+    for (const line of modelLines(status)) UI.println(line)
+    if (status.state !== "ready") return yield* fail("The search model is installed but cannot be used here.")
+  }),
+})
+
+export const MemoryModelRemoveCommand = effectCmd({
+  command: "remove",
+  describe: "delete the downloaded search model and the vectors made with it",
+  handler: Effect.fn("Cli.memory.model.remove")(function* () {
+    const embed = yield* BrainEmbed.Service
+    yield* embed.remove()
+    UI.println("Removed. Vector searches documents by keywords and code links until you download the model again.")
+  }),
+})
+
+export const MemoryModelPauseCommand = effectCmd({
+  command: "pause",
+  describe: "hold embedding documents in the background, until you resume it",
+  handler: Effect.fn("Cli.memory.model.pause")(function* () {
+    const embed = yield* BrainEmbed.Service
+    yield* embed.pause(true)
+    UI.println("Paused. What is embedded is still searched by meaning; the rest waits until `vector memory model resume`.")
+  }),
+})
+
+export const MemoryModelResumeCommand = effectCmd({
+  command: "resume",
+  describe: "go on embedding documents in the background",
+  handler: Effect.fn("Cli.memory.model.resume")(function* () {
+    const embed = yield* BrainEmbed.Service
+    yield* embed.pause(false)
+    UI.println("Resumed.")
+  }),
+})
+
+// The search model's state in a few lines, as Settings > Memory > Search model says it.
+function modelLines(status: BrainSchema.ModelStatus) {
+  const option = status.options?.find((item) => item.id === status.model)
+  const name = option?.label ?? "Search by meaning"
+  const embedded = status.embedded
+  const progress =
+    embedded && embedded.total > 0
+      ? [`Embedded: ${embedded.done.toLocaleString("en-US")} of ${embedded.total.toLocaleString("en-US")} passages and records in this repository${status.paused ? " (paused)" : ""}.`]
+      : []
+  if (status.state === "absent")
+    return [
+      "Search by meaning is not downloaded: Vector searches documents by keywords and code links.",
+      ...(status.downloads === false
+        ? ["Downloads are turned off here. Install the model with `vector memory model install --from <folder>`."]
+        : [`Download the ${BrainEmbedManifest.megabytes(status.options?.[0]?.bytes ?? 0)} model once with \`vector memory model download\`.`]),
+      ...(status.error ? [`Last attempt: ${status.error}`] : []),
+    ]
+  if (status.state === "downloading" || status.state === "verifying")
+    return [`${name}: ${status.state} (${Math.round((status.progress ?? 0) * 100)}%).`]
+  if (status.state === "failed")
+    return [
+      `${name} cannot be used on this computer: ${status.error ?? "it failed its check"}`,
+      ...(status.fallback
+        ? ["Download the full-precision graph instead with `vector memory model download --full-precision`."]
+        : []),
+      "Until then Vector searches documents by keywords and code links.",
+    ]
+  return [
+    `${name}: ready (${status.variant ?? "int8"}, ${BrainEmbedManifest.megabytes(status.total ?? 0)}${status.source === "mirror" ? ", from Vector's copy" : status.source === "folder" ? ", installed from a folder" : ""}).`,
+    ...progress,
+    ...(option ? [`${option.owner}, ${option.license}. Source: ${option.source}`, `sha256 ${option.sha256}`] : []),
+    ...(status.check
+      ? [
+          status.check.by === "vectors"
+            ? `Checked on this computer: lowest match ${status.check.lowest.toFixed(3)} (needs ${status.check.needed}).`
+            : "Checked on this computer by how it ranks its test sentences.",
+        ]
+      : []),
+    ...(status.worker?.mode === "in-process"
+      ? [`It does not run here: ${status.worker.reason ?? "Vector's background reader is not running"}.`]
+      : []),
+  ]
+}
 
 // Whether `-` (stdin) is among the files. yargs drops a lone "-" from a list of positionals, so it is looked for where
 // the user typed it, after `doc add`.

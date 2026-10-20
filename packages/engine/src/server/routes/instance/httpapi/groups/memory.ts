@@ -136,6 +136,17 @@ export const MemoryWorker = Schema.Struct({
   threads: Schema.Finite,
 }).annotate({ identifier: "MemoryWorker" })
 
+/** A change to the local search model: download, remove, install from a folder, or pause and resume embedding. */
+export const MemoryModelPayload = Schema.Struct({
+  action: Schema.Literals(["download", "remove", "install", "pause", "resume"]),
+  /** Which model; the default (arctic-embed-xs int8) when absent. */
+  model: Schema.optional(Schema.Literals(["arctic-embed-xs-q8", "granite-small-r2-q8"])),
+  /** fp32: the full-precision graph, offered when the int8 one fails its check on this computer. */
+  variant: Schema.optional(BrainSchema.ModelVariant),
+  /** For install: a folder on this computer holding the model's files. */
+  from: Schema.optional(Schema.String),
+}).annotate({ identifier: "MemoryModelPayload" })
+
 export const MemoryDocumentList = Schema.Struct({
   documents: Schema.Array(BrainSchema.Document),
   model: BrainSchema.ModelStatus,
@@ -542,6 +553,30 @@ export const MemoryApi = HttpApi.make("memory")
             summary: "Change memory settings",
             description:
               "Turn Vector's learning on or off, reading the repository's own docs, and keeping originals of added documents. Memory already saved stays until you erase it; turning repository docs off forgets what Vector read of them, and turning originals off deletes the kept copies.",
+          }),
+        ),
+        HttpApiEndpoint.get("model", `${root}/model`, {
+          query: WorkspaceRoutingQuery,
+          success: described(BrainSchema.ModelStatus, "The local search model, and how much of the repository's documents it has embedded"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.model.get",
+            summary: "Get the search model",
+            description:
+              "Whether the local model Vector searches documents by meaning with is downloaded, downloading, ready or failed its check on this computer, with every model it can download (size, license, source and sha256) and how much of the repository's documents it has embedded. Until it is ready, search uses keywords and code links.",
+          }),
+        ),
+        HttpApiEndpoint.post("changeModel", `${root}/model`, {
+          query: WorkspaceRoutingQuery,
+          payload: MemoryModelPayload,
+          success: described(BrainSchema.ModelStatus, "The search model after the change"),
+          error: MemoryApiError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "memory.model.update",
+            summary: "Change the search model",
+            description:
+              "download starts the one-time download in the background (poll GET /memory/model); install copies the pinned files from a folder on this computer, for one with no network; remove deletes every downloaded model and the vectors made with it; pause and resume hold or continue embedding in the background. Each file is used only at its pinned size and sha256.",
           }),
         ),
         HttpApiEndpoint.get("documents", `${root}/documents`, {
