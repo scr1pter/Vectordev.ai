@@ -1736,14 +1736,18 @@ function make(input: {
         .get()
         .pipe(Effect.orDie)
       if (!row) return undefined
-      // Ready means searchable by meaning too, where the model is in use and has anything of it left to embed.
+      // Ready means searchable by meaning too, where the model is in use: a partly read document has no ready of its
+      // own, and without a model (or while it is paused) searchable is all there is.
+      const model = until === "ready" ? yield* embed.current() : undefined
       const done =
         row.status === "held" ||
         row.status === "failed" ||
         row.status === "superseded" ||
         (until === "searchable"
           ? USABLE.includes(row.status)
-          : row.status === "ready" || (USABLE.includes(row.status) && !(yield* embeddingLeft(row.id))))
+          : row.status === "ready" ||
+            (USABLE.includes(row.status) && (!model || model.paused)) ||
+            (row.status === "partial" && !(yield* embeddingLeft(row.id))))
       // A document re-read in place stays searchable meanwhile; it is done once its job is.
       const job = done
         ? yield* db.select({ id: BrainJobTable.id }).from(BrainJobTable).where(eq(BrainJobTable.document_id, id)).get().pipe(Effect.orDie)
@@ -3215,7 +3219,8 @@ function make(input: {
         ),
       )
       .pipe(Effect.orDie)
-    for (const document of new Set(batch.map((item) => item.document))) yield* countEmbedded(document, key, "embedding")
+    for (const document of new Set(batch.map((item) => item.document)))
+      yield* countEmbedded(document, key, (yield* embeddingLeft(document)) ? "embedding" : "ready")
   })
 
   // A document's count of what is embedded, and its status: embedding while some of it is, ready once all of it is. A

@@ -170,6 +170,30 @@ describe("search by meaning", () => {
     expect(result.model.paused).toBeUndefined()
   }, 60_000)
 
+  test("waiting for ready returns a document once it is ready, never while its status still says embedding", async () => {
+    // A model slow enough that the embedder rests between batches, as it does on a real one.
+    const slow = Layer.effect(
+      BrainEmbed.Service,
+      Effect.gen(function* () {
+        const hash = yield* BrainEmbed.Service
+        return BrainEmbed.Service.of({
+          ...hash,
+          embed: (texts) => Effect.sleep("150 millis").pipe(Effect.andThen(hash.embed(texts))),
+        })
+      }),
+    ).pipe(Layer.provide(BrainEmbed.layerHash()))
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          const kept = yield* added(setup, text("Audit.md", AUDIT))
+          return yield* setup.knowledge.wait(setup.place, kept.document!.id, "ready", 10_000)
+        }),
+      { embed: slow },
+    )
+    expect(result?.status).toBe("ready")
+    expect(result?.stats.embedded).toBe(result!.stats.records + result!.stats.passages)
+  }, 30_000)
+
   test("removing the model removes its vectors, and documents are searchable by keywords again", async () => {
     await using tmp = await tmpdir()
     const source = await Fixture.write(path.join(tmp.path, "source"))
