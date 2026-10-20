@@ -76,8 +76,9 @@ export type ArmOptions = {
 export async function runArm(options: ArmOptions): Promise<TaskRun[]> {
   await rm(resolve(options.root), { recursive: true, force: true })
   await mkdir(join(resolve(options.root), "repo"), { recursive: true })
-  // The folder's real path: Vector matches a file the model reads against the root git reports, which resolves
-  // symlinks, so under a symlinked folder (macOS's temporary folder is one) no document pointer or guard would show.
+  // The folder's real path, so every request carries the same repository path however the folder was reached (its
+  // length counts in each request's tokens). Before f20739052 it mattered more: under a symlinked folder (macOS's
+  // temporary folder is one) Vector never showed a document pointer or guard.
   const base = await realpath(resolve(options.root))
   const dir = join(base, "repo")
   const bin = join(base, "bin")
