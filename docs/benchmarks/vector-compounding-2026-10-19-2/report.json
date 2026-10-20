@@ -2,11 +2,11 @@
   "date": "2026-10-19",
   "mode": "offline",
   "model": "scripted model on a local fake Anthropic Messages server",
-  "revision": "c7900b74c",
-  "machine": "Apple M3, 8 cores, darwin arm64, Bun 1.3.14, one-minute load average 10.5 at the end",
-  "command": "bun script/agent-eval/compounding/run.ts --out docs/benchmarks/vector-compounding-2026-10-19",
-  "seconds": 94.203156875,
-  "question": "On the same repository over time, does Vector with its brain need fewer tokens and steps, repeat fewer mistakes and pass more checks than Vector without it?",
+  "revision": "d844c3d95",
+  "machine": "Apple M3, 8 cores, darwin arm64, Bun 1.3.14, one-minute load average 8.0 at the end",
+  "command": "bun script/agent-eval/compounding/run.ts --out docs/benchmarks/vector-compounding-2026-10-19-2",
+  "seconds": 94.258672083,
+  "question": "On one repository over seven weeks, does Vector's brain carry what an earlier task taught into the later requests that need it, at what cost in tokens and steps, and does it mislead once a fact has changed?",
   "estimation": "Tokens are characters / 4 of each request as sent; cost at Claude Sonnet 4.5 list prices with a cold prompt cache per task.",
   "sequence": [
     {
@@ -21,7 +21,9 @@
       "teaches": [
         "pnpm"
       ],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
     },
     {
       "task": "t02-late-fee-cents",
@@ -33,7 +35,9 @@
       "teaches": [
         "cents"
       ],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
     },
     {
       "task": "t03-invoice-pdf-route",
@@ -47,7 +51,9 @@
       "teaches": [
         "routes"
       ],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
     },
     {
       "task": "t04-refund-request",
@@ -63,9 +69,11 @@
         "idempotency",
         "email"
       ],
+      "misleads": [],
       "upload": [
         "docs/specs/refund-policy.pdf"
-      ]
+      ],
+      "upstream": false
     },
     {
       "task": "t05-event-names",
@@ -77,7 +85,9 @@
       "teaches": [
         "events"
       ],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
     },
     {
       "task": "t06-flaky-session-test",
@@ -91,7 +101,9 @@
       "teaches": [
         "clock"
       ],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
     },
     {
       "task": "t07-order-discount",
@@ -103,7 +115,9 @@
         "cents"
       ],
       "teaches": [],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
     },
     {
       "task": "t08-csv-export",
@@ -115,7 +129,9 @@
         "pnpm"
       ],
       "teaches": [],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
     },
     {
       "task": "t09-refunds-http",
@@ -128,7 +144,9 @@
         "idempotency"
       ],
       "teaches": [],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
     },
     {
       "task": "t10-refund-email",
@@ -141,7 +159,9 @@
         "events"
       ],
       "teaches": [],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
     },
     {
       "task": "t11-reset-link-expiry",
@@ -153,7 +173,9 @@
         "clock"
       ],
       "teaches": [],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
     },
     {
       "task": "t12-shipping-fee",
@@ -165,7 +187,9 @@
         "cents"
       ],
       "teaches": [],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
     },
     {
       "task": "t13-credit-notes",
@@ -178,7 +202,9 @@
         "events"
       ],
       "teaches": [],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
     },
     {
       "task": "t14-pdf-dependency",
@@ -190,7 +216,9 @@
         "pnpm"
       ],
       "teaches": [],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
     },
     {
       "task": "t15-refund-deadline",
@@ -202,7 +230,9 @@
         "window"
       ],
       "teaches": [],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
     },
     {
       "task": "t16-late-fee-grace",
@@ -214,7 +244,53 @@
         "clock"
       ],
       "teaches": [],
-      "upload": []
+      "misleads": [],
+      "upload": [],
+      "upstream": false
+    },
+    {
+      "task": "t17-refund-window-21",
+      "week": 7,
+      "day": "Mon",
+      "title": "The user extends the refund window the spec PDF gives, and says the PDF is out of date",
+      "prompt": "Finance extended the refund window to 21 days after capture, starting today. The refund policy PDF still says 14 until legal reissues it, so go by this, not the PDF. Change REFUND_WINDOW_DAYS in src/refunds.ts and refundDeadline in src/invoice-pdf.ts to match, and update their tests.",
+      "needs": [],
+      "teaches": [
+        "window21"
+      ],
+      "misleads": [],
+      "upload": [],
+      "upstream": false
+    },
+    {
+      "task": "t18-refund-reminder",
+      "week": 7,
+      "day": "Wed",
+      "title": "A refund reminder: the window again, where the spec PDF the brain keeps is out of date",
+      "prompt": "Remind customers before they can no longer ask for a refund: add `refundReminderOn(order)` in src/notify/refund-reminder.ts, which returns the date (YYYY-MM-DD) two days before the last day they can ask for one, with tests.",
+      "needs": [
+        "window21"
+      ],
+      "teaches": [],
+      "misleads": [
+        "window"
+      ],
+      "upload": [],
+      "upstream": false
+    },
+    {
+      "task": "t19-refund-lookup",
+      "week": 7,
+      "day": "Thu",
+      "title": "A new route after a teammate made the route table generate itself, which nobody mentions",
+      "prompt": "Add a GET /refunds/:id route handled by `getRefund` in src/http/refunds.ts, which looks the refund up with a new `findRefund(id)` in src/refunds.ts and answers 404 when there is none.",
+      "needs": [],
+      "teaches": [],
+      "misleads": [
+        "routes"
+      ],
+      "upload": [],
+      "upstream": true
     }
   ],
   "facts": [
@@ -262,27 +338,106 @@
       "kind": "flaky-test fix",
       "summary": "Tests that depend on time use createClock from src/clock.ts: real time made a test flaky on CI.",
       "memory": "Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
+    },
+    {
+      "id": "window21",
+      "kind": "changed spec value",
+      "summary": "From week 7 the refund window is 21 days after capture; the refund policy PDF's 14 days is out of date (the user says so).",
+      "memory": "The refund window is 21 days after capture since 16 November 2026 (finance extended it): REFUND_WINDOW_DAYS in src/refunds.ts. The refund policy PDF still says 14 days and is out of date on this."
+    }
+  ],
+  "needs": [
+    {
+      "task": "t07-order-discount",
+      "fact": "cents",
+      "read": false
+    },
+    {
+      "task": "t08-csv-export",
+      "fact": "pnpm",
+      "read": false
+    },
+    {
+      "task": "t09-refunds-http",
+      "fact": "routes",
+      "read": false
+    },
+    {
+      "task": "t09-refunds-http",
+      "fact": "idempotency",
+      "read": false
+    },
+    {
+      "task": "t10-refund-email",
+      "fact": "email",
+      "read": false
+    },
+    {
+      "task": "t10-refund-email",
+      "fact": "events",
+      "read": false
+    },
+    {
+      "task": "t11-reset-link-expiry",
+      "fact": "clock",
+      "read": false
+    },
+    {
+      "task": "t12-shipping-fee",
+      "fact": "cents",
+      "read": true
+    },
+    {
+      "task": "t13-credit-notes",
+      "fact": "routes",
+      "read": false
+    },
+    {
+      "task": "t13-credit-notes",
+      "fact": "events",
+      "read": false
+    },
+    {
+      "task": "t14-pdf-dependency",
+      "fact": "pnpm",
+      "read": false
+    },
+    {
+      "task": "t15-refund-deadline",
+      "fact": "window",
+      "read": false
+    },
+    {
+      "task": "t16-late-fee-grace",
+      "fact": "clock",
+      "read": false
+    },
+    {
+      "task": "t18-refund-reminder",
+      "fact": "window21",
+      "read": false
     }
   ],
   "arms": {
     "off": {
       "name": "Brain off",
       "totals": {
-        "tasks": 16,
-        "requests": 128,
-        "steps": 112,
-        "reads": 30,
-        "rereads": 15,
-        "inputTokens": 983107,
+        "tasks": 19,
+        "requests": 156,
+        "steps": 137,
+        "reads": 39,
+        "rereads": 20,
+        "inputTokens": 1209863,
         "memoryTokens": 0,
         "memoryToolTokens": 0,
         "memoryCalls": 0,
-        "costUsd": 0.837965,
-        "mistakes": 13,
-        "repeated": 12,
-        "checksPassed": 50,
-        "checksTotal": 58,
-        "succeeded": 9
+        "costUsd": 1.021959,
+        "mistakes": 14,
+        "repeated": 13,
+        "misled": 0,
+        "checksPassed": 60,
+        "checksTotal": 69,
+        "succeeded": 11
       },
       "weeks": [
         {
@@ -293,13 +448,14 @@
             "steps": 19,
             "reads": 4,
             "rereads": 1,
-            "inputTokens": 164472,
+            "inputTokens": 164626,
             "memoryTokens": 0,
             "memoryToolTokens": 0,
             "memoryCalls": 0,
-            "costUsd": 0.141876,
+            "costUsd": 0.142319,
             "mistakes": 1,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 11,
             "checksTotal": 11,
             "succeeded": 3
@@ -310,13 +466,14 @@
             "steps": 19,
             "reads": 4,
             "rereads": 1,
-            "inputTokens": 164472,
+            "inputTokens": 164626,
             "memoryTokens": 0,
             "memoryToolTokens": 0,
             "memoryCalls": 0,
-            "costUsd": 0.141876,
+            "costUsd": 0.142319,
             "mistakes": 1,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 11,
             "checksTotal": 11,
             "succeeded": 3
@@ -330,13 +487,14 @@
             "steps": 22,
             "reads": 9,
             "rereads": 2,
-            "inputTokens": 200794,
+            "inputTokens": 201058,
             "memoryTokens": 0,
             "memoryToolTokens": 0,
             "memoryCalls": 0,
-            "costUsd": 0.169544,
+            "costUsd": 0.170193,
             "mistakes": 0,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 10,
             "checksTotal": 10,
             "succeeded": 3
@@ -347,13 +505,14 @@
             "steps": 41,
             "reads": 13,
             "rereads": 3,
-            "inputTokens": 365266,
+            "inputTokens": 365684,
             "memoryTokens": 0,
             "memoryToolTokens": 0,
             "memoryCalls": 0,
-            "costUsd": 0.31142,
+            "costUsd": 0.312512,
             "mistakes": 1,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 21,
             "checksTotal": 21,
             "succeeded": 6
@@ -367,13 +526,14 @@
             "steps": 24,
             "reads": 5,
             "rereads": 2,
-            "inputTokens": 206630,
+            "inputTokens": 206838,
             "memoryTokens": 0,
             "memoryToolTokens": 0,
             "memoryCalls": 0,
-            "costUsd": 0.165213,
+            "costUsd": 0.165753,
             "mistakes": 4,
             "repeated": 4,
+            "misled": 0,
             "checksPassed": 9,
             "checksTotal": 11,
             "succeeded": 1
@@ -384,13 +544,14 @@
             "steps": 65,
             "reads": 18,
             "rereads": 5,
-            "inputTokens": 571896,
+            "inputTokens": 572522,
             "memoryTokens": 0,
             "memoryToolTokens": 0,
             "memoryCalls": 0,
-            "costUsd": 0.476633,
+            "costUsd": 0.478265,
             "mistakes": 5,
             "repeated": 4,
+            "misled": 0,
             "checksPassed": 30,
             "checksTotal": 32,
             "succeeded": 7
@@ -404,13 +565,14 @@
             "steps": 16,
             "reads": 4,
             "rereads": 3,
-            "inputTokens": 144090,
+            "inputTokens": 144220,
             "memoryTokens": 0,
             "memoryToolTokens": 0,
             "memoryCalls": 0,
-            "costUsd": 0.144853,
+            "costUsd": 0.14529,
             "mistakes": 3,
             "repeated": 3,
+            "misled": 0,
             "checksPassed": 8,
             "checksTotal": 11,
             "succeeded": 1
@@ -421,13 +583,14 @@
             "steps": 81,
             "reads": 22,
             "rereads": 8,
-            "inputTokens": 715986,
+            "inputTokens": 716742,
             "memoryTokens": 0,
             "memoryToolTokens": 0,
             "memoryCalls": 0,
-            "costUsd": 0.621486,
+            "costUsd": 0.623555,
             "mistakes": 8,
             "repeated": 7,
+            "misled": 0,
             "checksPassed": 38,
             "checksTotal": 43,
             "succeeded": 8
@@ -441,13 +604,14 @@
             "steps": 19,
             "reads": 4,
             "rereads": 3,
-            "inputTokens": 160802,
+            "inputTokens": 160992,
             "memoryTokens": 0,
             "memoryToolTokens": 0,
             "memoryCalls": 0,
-            "costUsd": 0.116483,
+            "costUsd": 0.1169,
             "mistakes": 3,
             "repeated": 3,
+            "misled": 0,
             "checksPassed": 7,
             "checksTotal": 8,
             "succeeded": 1
@@ -458,13 +622,14 @@
             "steps": 100,
             "reads": 26,
             "rereads": 11,
-            "inputTokens": 876788,
+            "inputTokens": 877734,
             "memoryTokens": 0,
             "memoryToolTokens": 0,
             "memoryCalls": 0,
-            "costUsd": 0.737969,
+            "costUsd": 0.740455,
             "mistakes": 11,
             "repeated": 10,
+            "misled": 0,
             "checksPassed": 45,
             "checksTotal": 51,
             "succeeded": 9
@@ -478,13 +643,14 @@
             "steps": 12,
             "reads": 4,
             "rereads": 4,
-            "inputTokens": 106319,
+            "inputTokens": 106435,
             "memoryTokens": 0,
             "memoryToolTokens": 0,
             "memoryCalls": 0,
-            "costUsd": 0.099996,
+            "costUsd": 0.100353,
             "mistakes": 2,
             "repeated": 2,
+            "misled": 0,
             "checksPassed": 5,
             "checksTotal": 7,
             "succeeded": 0
@@ -495,16 +661,56 @@
             "steps": 112,
             "reads": 30,
             "rereads": 15,
-            "inputTokens": 983107,
+            "inputTokens": 984169,
             "memoryTokens": 0,
             "memoryToolTokens": 0,
             "memoryCalls": 0,
-            "costUsd": 0.837965,
+            "costUsd": 0.840808,
             "mistakes": 13,
             "repeated": 12,
+            "misled": 0,
             "checksPassed": 50,
             "checksTotal": 58,
             "succeeded": 9
+          }
+        },
+        {
+          "week": 7,
+          "week_totals": {
+            "tasks": 3,
+            "requests": 28,
+            "steps": 25,
+            "reads": 9,
+            "rereads": 5,
+            "inputTokens": 225694,
+            "memoryTokens": 0,
+            "memoryToolTokens": 0,
+            "memoryCalls": 0,
+            "costUsd": 0.181151,
+            "mistakes": 1,
+            "repeated": 1,
+            "misled": 0,
+            "checksPassed": 10,
+            "checksTotal": 11,
+            "succeeded": 2
+          },
+          "cumulative": {
+            "tasks": 19,
+            "requests": 156,
+            "steps": 137,
+            "reads": 39,
+            "rereads": 20,
+            "inputTokens": 1209863,
+            "memoryTokens": 0,
+            "memoryToolTokens": 0,
+            "memoryCalls": 0,
+            "costUsd": 1.021959,
+            "mistakes": 14,
+            "repeated": 13,
+            "misled": 0,
+            "checksPassed": 60,
+            "checksTotal": 69,
+            "succeeded": 11
           }
         }
       ],
@@ -517,14 +723,14 @@
           "reads": 0,
           "rereads": 0,
           "read": [],
-          "inputTokens": 43579,
-          "outputTokens": 237,
+          "inputTokens": 43593,
+          "outputTokens": 241,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 36064,
-          "cacheWrite": 7515,
-          "costUsd": 0.042555,
+          "cacheRead": 36074,
+          "cacheWrite": 7519,
+          "costUsd": 0.042633,
           "mistakes": [],
           "checks": {
             "passed": 4,
@@ -533,12 +739,13 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "A slug helper on a new dependency; the user says once that the repository uses pnpm",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 3900
+          "wallMs": 3286
         },
         {
           "task": "t02-late-fee-cents",
@@ -551,14 +758,14 @@
             "src/invoice.ts",
             "test/invoice.test.ts"
           ],
-          "inputTokens": 52758,
-          "outputTokens": 238,
+          "inputTokens": 52816,
+          "outputTokens": 246,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 44864,
-          "cacheWrite": 7894,
-          "costUsd": 0.046632,
+          "cacheRead": 44910,
+          "cacheWrite": 7906,
+          "costUsd": 0.046811,
           "mistakes": [],
           "checks": {
             "passed": 3,
@@ -567,12 +774,13 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "The team decides money is integer cents, and says why",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 5674
+          "wallMs": 3176
         },
         {
           "task": "t03-invoice-pdf-route",
@@ -585,19 +793,20 @@
             "src/routes.ts",
             "src/invoice.ts"
           ],
-          "inputTokens": 68135,
-          "outputTokens": 309,
+          "inputTokens": 68217,
+          "outputTokens": 317,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 60131,
-          "cacheWrite": 8004,
-          "costUsd": 0.052689,
+          "cacheRead": 60201,
+          "cacheWrite": 8016,
+          "costUsd": 0.052875,
           "mistakes": [
             {
               "fact": "routes",
               "how": "the check failed on a stale src/generated/routes.gen.ts",
-              "repeated": false
+              "repeated": false,
+              "stale": false
             }
           ],
           "checks": {
@@ -607,12 +816,13 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "A new route; the check breaks on the stale generated route table",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 4790
+          "wallMs": 3614
         },
         {
           "task": "t04-refund-request",
@@ -625,14 +835,14 @@
             "docs/specs/refund-policy.pdf",
             "src/orders.ts"
           ],
-          "inputTokens": 59738,
-          "outputTokens": 676,
+          "inputTokens": 59784,
+          "outputTokens": 684,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 50519,
-          "cacheWrite": 9219,
-          "costUsd": 0.059867,
+          "cacheRead": 50555,
+          "cacheWrite": 9229,
+          "costUsd": 0.060036,
           "mistakes": [],
           "checks": {
             "passed": 4,
@@ -641,12 +851,13 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "Refund requests from the refund policy PDF, which the owner also keeps in Vector's memory",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 5007
+          "wallMs": 2919
         },
         {
           "task": "t05-event-names",
@@ -659,14 +870,14 @@
             "src/invoice.ts",
             "test/invoice.test.ts"
           ],
-          "inputTokens": 52599,
-          "outputTokens": 227,
+          "inputTokens": 52657,
+          "outputTokens": 235,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 44733,
-          "cacheWrite": 7866,
-          "costUsd": 0.046323,
+          "cacheRead": 44779,
+          "cacheWrite": 7878,
+          "costUsd": 0.046501,
           "mistakes": [],
           "checks": {
             "passed": 3,
@@ -675,12 +886,13 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "The user states the event naming convention",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 5006
+          "wallMs": 3129
         },
         {
           "task": "t06-flaky-session-test",
@@ -696,14 +908,14 @@
             "package.json",
             "ci/slow-clock.ts"
           ],
-          "inputTokens": 88457,
-          "outputTokens": 421,
+          "inputTokens": 88617,
+          "outputTokens": 433,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 79616,
-          "cacheWrite": 8841,
-          "costUsd": 0.063354,
+          "cacheRead": 79754,
+          "cacheWrite": 8863,
+          "costUsd": 0.063656,
           "mistakes": [],
           "checks": {
             "passed": 3,
@@ -712,12 +924,13 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "A test that fails one CI run in five; the fix is an injected clock",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 5017
+          "wallMs": 3940
         },
         {
           "task": "t07-order-discount",
@@ -730,19 +943,20 @@
             "src/orders.ts",
             "test/orders.test.ts"
           ],
-          "inputTokens": 52358,
-          "outputTokens": 386,
+          "inputTokens": 52416,
+          "outputTokens": 394,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 44474,
-          "cacheWrite": 7884,
-          "costUsd": 0.048698,
+          "cacheRead": 44520,
+          "cacheWrite": 7896,
+          "costUsd": 0.048876,
           "mistakes": [
             {
               "fact": "cents",
               "how": "the hidden check fact:cents failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -754,12 +968,13 @@
           },
           "success": false,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "A discount on orders: money arithmetic",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 4057
+          "wallMs": 3151
         },
         {
           "task": "t08-csv-export",
@@ -771,19 +986,20 @@
           "read": [
             "CONTRIBUTING.md"
           ],
-          "inputTokens": 75278,
-          "outputTokens": 380,
+          "inputTokens": 75324,
+          "outputTokens": 386,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 67269,
-          "cacheWrite": 8009,
-          "costUsd": 0.055913,
+          "cacheRead": 67307,
+          "cacheWrite": 8017,
+          "costUsd": 0.056046,
           "mistakes": [
             {
               "fact": "pnpm",
               "how": "ran `npm install tiny-csv`",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -793,12 +1009,13 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "A CSV export on a new dependency",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 5431
+          "wallMs": 4683
         },
         {
           "task": "t09-refunds-http",
@@ -811,24 +1028,26 @@
             "src/routes.ts",
             "src/refunds.ts"
           ],
-          "inputTokens": 78994,
-          "outputTokens": 508,
+          "inputTokens": 79098,
+          "outputTokens": 518,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 70506,
-          "cacheWrite": 8488,
-          "costUsd": 0.060602,
+          "cacheRead": 70596,
+          "cacheWrite": 8502,
+          "costUsd": 0.060831,
           "mistakes": [
             {
               "fact": "routes",
               "how": "the check failed on a stale src/generated/routes.gen.ts",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             },
             {
               "fact": "idempotency",
               "how": "the hidden check fact:idempotency failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -840,12 +1059,13 @@
           },
           "success": false,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "Refunds over HTTP: a route, and a header the spec requires",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 5403
+          "wallMs": 4310
         },
         {
           "task": "t10-refund-email",
@@ -858,24 +1078,26 @@
             "src/refunds.ts",
             "src/events.ts"
           ],
-          "inputTokens": 54294,
-          "outputTokens": 457,
+          "inputTokens": 54352,
+          "outputTokens": 465,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 46062,
-          "cacheWrite": 8232,
-          "costUsd": 0.051543,
+          "cacheRead": 46108,
+          "cacheWrite": 8244,
+          "costUsd": 0.051722,
           "mistakes": [
             {
               "fact": "email",
               "how": "the hidden check fact:email failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             },
             {
               "fact": "events",
               "how": "the hidden check fact:events failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -888,12 +1110,13 @@
           },
           "success": false,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "The refund email: a subject the spec fixes, and a new event",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 4389
+          "wallMs": 3044
         },
         {
           "task": "t11-reset-link-expiry",
@@ -903,19 +1126,20 @@
           "reads": 0,
           "rereads": 0,
           "read": [],
-          "inputTokens": 36341,
-          "outputTokens": 317,
+          "inputTokens": 36355,
+          "outputTokens": 321,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 28846,
-          "cacheWrite": 7495,
-          "costUsd": 0.041515,
+          "cacheRead": 28856,
+          "cacheWrite": 7499,
+          "costUsd": 0.041594,
           "mistakes": [
             {
               "fact": "clock",
               "how": "the hidden check fact:clock failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -927,12 +1151,13 @@
           },
           "success": false,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "Password reset links that expire: tests that depend on time",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 3658
+          "wallMs": 2732
         },
         {
           "task": "t12-shipping-fee",
@@ -945,14 +1170,14 @@
             "src/orders.ts",
             "test/orders.test.ts"
           ],
-          "inputTokens": 53455,
-          "outputTokens": 514,
+          "inputTokens": 53513,
+          "outputTokens": 522,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 45325,
-          "cacheWrite": 8130,
-          "costUsd": 0.051795,
+          "cacheRead": 45371,
+          "cacheWrite": 8142,
+          "costUsd": 0.051974,
           "mistakes": [],
           "checks": {
             "passed": 3,
@@ -961,12 +1186,13 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "A shipping fee: money arithmetic again",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 4137
+          "wallMs": 3083
         },
         {
           "task": "t13-credit-notes",
@@ -979,24 +1205,26 @@
             "src/routes.ts",
             "src/events.ts"
           ],
-          "inputTokens": 76840,
-          "outputTokens": 420,
+          "inputTokens": 76944,
+          "outputTokens": 430,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 68649,
-          "cacheWrite": 8191,
-          "costUsd": 0.05761,
+          "cacheRead": 68739,
+          "cacheWrite": 8205,
+          "costUsd": 0.057841,
           "mistakes": [
             {
               "fact": "routes",
               "how": "the check failed on a stale src/generated/routes.gen.ts",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             },
             {
               "fact": "events",
               "how": "the hidden check fact:events failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -1008,12 +1236,13 @@
           },
           "success": false,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "Credit notes: a new route and a new event in a new module",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 5191
+          "wallMs": 4034
         },
         {
           "task": "t14-pdf-dependency",
@@ -1026,19 +1255,20 @@
             "src/invoice-pdf.ts",
             "CONTRIBUTING.md"
           ],
-          "inputTokens": 83962,
-          "outputTokens": 366,
+          "inputTokens": 84048,
+          "outputTokens": 374,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 75790,
-          "cacheWrite": 8172,
-          "costUsd": 0.058873,
+          "cacheRead": 75864,
+          "cacheWrite": 8184,
+          "costUsd": 0.059059,
           "mistakes": [
             {
               "fact": "pnpm",
               "how": "ran `npm install tiny-pdf`",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -1048,12 +1278,13 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "Real invoice PDFs on a new dependency",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 5617
+          "wallMs": 4514
         },
         {
           "task": "t15-refund-deadline",
@@ -1066,19 +1297,20 @@
             "src/invoice-pdf.ts",
             "src/orders.ts"
           ],
-          "inputTokens": 53018,
-          "outputTokens": 385,
+          "inputTokens": 53076,
+          "outputTokens": 393,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 45016,
-          "cacheWrite": 8002,
-          "costUsd": 0.049287,
+          "cacheRead": 45062,
+          "cacheWrite": 8014,
+          "costUsd": 0.049467,
           "mistakes": [
             {
               "fact": "window",
               "how": "the hidden check fact:window failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -1090,12 +1322,13 @@
           },
           "success": false,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "The refund deadline on the invoice: a value only the spec gives",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 4046
+          "wallMs": 3222
         },
         {
           "task": "t16-late-fee-grace",
@@ -1108,19 +1341,20 @@
             "src/invoice.ts",
             "test/invoice.test.ts"
           ],
-          "inputTokens": 53301,
-          "outputTokens": 457,
+          "inputTokens": 53359,
+          "outputTokens": 465,
           "memoryTokens": 0,
           "memoryToolTokens": 0,
           "memoryCalls": 0,
-          "cacheRead": 45225,
-          "cacheWrite": 8076,
-          "costUsd": 0.050709,
+          "cacheRead": 45271,
+          "cacheWrite": 8088,
+          "costUsd": 0.050886,
           "mistakes": [
             {
               "fact": "clock",
               "how": "the hidden check fact:clock failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -1132,33 +1366,152 @@
           },
           "success": false,
           "delivered": [],
+          "brought": [],
           "arm": "off",
           "title": "A grace period for late fees: a boundary test that depends on time",
           "exitCode": 0,
           "brainFiles": [],
           "recall": [],
-          "wallMs": 4483
+          "wallMs": 3143
+        },
+        {
+          "task": "t17-refund-window-21",
+          "week": 7,
+          "requests": 11,
+          "steps": 10,
+          "reads": 4,
+          "rereads": 2,
+          "read": [
+            "src/refunds.ts",
+            "test/refunds.test.ts",
+            "src/invoice-pdf.ts",
+            "test/refund-deadline.test.ts"
+          ],
+          "inputTokens": 91067,
+          "outputTokens": 553,
+          "memoryTokens": 0,
+          "memoryToolTokens": 0,
+          "memoryCalls": 0,
+          "cacheRead": 82056,
+          "cacheWrite": 9011,
+          "costUsd": 0.066704,
+          "mistakes": [],
+          "checks": {
+            "passed": 3,
+            "total": 3,
+            "failed": []
+          },
+          "success": true,
+          "delivered": [],
+          "brought": [],
+          "arm": "off",
+          "title": "The user extends the refund window the spec PDF gives, and says the PDF is out of date",
+          "exitCode": 0,
+          "brainFiles": [],
+          "recall": [],
+          "wallMs": 4143
+        },
+        {
+          "task": "t18-refund-reminder",
+          "week": 7,
+          "requests": 7,
+          "steps": 6,
+          "reads": 2,
+          "rereads": 1,
+          "read": [
+            "src/orders.ts",
+            "src/notify/refund-email.ts"
+          ],
+          "inputTokens": 53493,
+          "outputTokens": 353,
+          "memoryTokens": 0,
+          "memoryToolTokens": 0,
+          "memoryCalls": 0,
+          "cacheRead": 45433,
+          "cacheWrite": 8060,
+          "costUsd": 0.04915,
+          "mistakes": [
+            {
+              "fact": "window21",
+              "how": "the hidden check fact:window21 failed",
+              "repeated": true,
+              "stale": false
+            }
+          ],
+          "checks": {
+            "passed": 3,
+            "total": 4,
+            "failed": [
+              "fact:window21"
+            ]
+          },
+          "success": false,
+          "delivered": [],
+          "brought": [],
+          "arm": "off",
+          "title": "A refund reminder: the window again, where the spec PDF the brain keeps is out of date",
+          "exitCode": 0,
+          "brainFiles": [],
+          "recall": [],
+          "wallMs": 3149
+        },
+        {
+          "task": "t19-refund-lookup",
+          "week": 7,
+          "requests": 10,
+          "steps": 9,
+          "reads": 3,
+          "rereads": 2,
+          "read": [
+            "src/routes.ts",
+            "src/http/refunds.ts",
+            "src/refunds.ts"
+          ],
+          "inputTokens": 81134,
+          "outputTokens": 684,
+          "memoryTokens": 0,
+          "memoryToolTokens": 0,
+          "memoryCalls": 0,
+          "cacheRead": 72236,
+          "cacheWrite": 8898,
+          "costUsd": 0.065297,
+          "mistakes": [],
+          "checks": {
+            "passed": 4,
+            "total": 4,
+            "failed": []
+          },
+          "success": true,
+          "delivered": [],
+          "brought": [],
+          "arm": "off",
+          "title": "A new route after a teammate made the route table generate itself, which nobody mentions",
+          "exitCode": 0,
+          "brainFiles": [],
+          "recall": [],
+          "wallMs": 4039
         }
       ]
     },
     "on": {
       "name": "Brain on",
       "totals": {
-        "tasks": 16,
-        "requests": 125,
-        "steps": 109,
-        "reads": 28,
-        "rereads": 14,
-        "inputTokens": 1029383,
-        "memoryTokens": 23190,
-        "memoryToolTokens": 46025,
-        "memoryCalls": 5,
-        "costUsd": 0.887457,
+        "tasks": 19,
+        "requests": 155,
+        "steps": 136,
+        "reads": 37,
+        "rereads": 19,
+        "inputTokens": 1299502,
+        "memoryTokens": 37892,
+        "memoryToolTokens": 57335,
+        "memoryCalls": 6,
+        "costUsd": 1.096913,
         "mistakes": 2,
-        "repeated": 1,
-        "checksPassed": 57,
-        "checksTotal": 58,
-        "succeeded": 15
+        "repeated": 0,
+        "misled": 1,
+        "checksPassed": 69,
+        "checksTotal": 69,
+        "succeeded": 19
       },
       "weeks": [
         {
@@ -1169,13 +1522,14 @@
             "steps": 22,
             "reads": 4,
             "rereads": 1,
-            "inputTokens": 197624,
+            "inputTokens": 197806,
             "memoryTokens": 1044,
             "memoryToolTokens": 8325,
             "memoryCalls": 3,
-            "costUsd": 0.159931,
+            "costUsd": 0.160382,
             "mistakes": 1,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 11,
             "checksTotal": 11,
             "succeeded": 3
@@ -1186,13 +1540,14 @@
             "steps": 22,
             "reads": 4,
             "rereads": 1,
-            "inputTokens": 197624,
+            "inputTokens": 197806,
             "memoryTokens": 1044,
             "memoryToolTokens": 8325,
             "memoryCalls": 3,
-            "costUsd": 0.159931,
+            "costUsd": 0.160382,
             "mistakes": 1,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 11,
             "checksTotal": 11,
             "succeeded": 3
@@ -1206,13 +1561,14 @@
             "steps": 24,
             "reads": 9,
             "rereads": 2,
-            "inputTokens": 232599,
+            "inputTokens": 232897,
             "memoryTokens": 4482,
             "memoryToolTokens": 10179,
             "memoryCalls": 2,
-            "costUsd": 0.188106,
+            "costUsd": 0.188768,
             "mistakes": 0,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 10,
             "checksTotal": 10,
             "succeeded": 3
@@ -1223,13 +1579,14 @@
             "steps": 46,
             "reads": 13,
             "rereads": 3,
-            "inputTokens": 430223,
+            "inputTokens": 430703,
             "memoryTokens": 5526,
             "memoryToolTokens": 18504,
             "memoryCalls": 5,
-            "costUsd": 0.348037,
+            "costUsd": 0.34915,
             "mistakes": 1,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 21,
             "checksTotal": 21,
             "succeeded": 6
@@ -1243,16 +1600,17 @@
             "steps": 19,
             "reads": 4,
             "rereads": 2,
-            "inputTokens": 180250,
-            "memoryTokens": 5245,
+            "inputTokens": 181252,
+            "memoryTokens": 5756,
             "memoryToolTokens": 8294,
             "memoryCalls": 0,
-            "costUsd": 0.160731,
-            "mistakes": 1,
-            "repeated": 1,
-            "checksPassed": 10,
+            "costUsd": 0.162651,
+            "mistakes": 0,
+            "repeated": 0,
+            "misled": 0,
+            "checksPassed": 11,
             "checksTotal": 11,
-            "succeeded": 2
+            "succeeded": 3
           },
           "cumulative": {
             "tasks": 9,
@@ -1260,16 +1618,17 @@
             "steps": 65,
             "reads": 17,
             "rereads": 5,
-            "inputTokens": 610473,
-            "memoryTokens": 10771,
+            "inputTokens": 611955,
+            "memoryTokens": 11282,
             "memoryToolTokens": 26798,
             "memoryCalls": 5,
-            "costUsd": 0.508768,
-            "mistakes": 2,
-            "repeated": 1,
-            "checksPassed": 31,
+            "costUsd": 0.511801,
+            "mistakes": 1,
+            "repeated": 0,
+            "misled": 0,
+            "checksPassed": 32,
             "checksTotal": 32,
-            "succeeded": 8
+            "succeeded": 9
           }
         },
         {
@@ -1280,13 +1639,14 @@
             "steps": 17,
             "reads": 4,
             "rereads": 3,
-            "inputTokens": 164680,
-            "memoryTokens": 5087,
+            "inputTokens": 165168,
+            "memoryTokens": 5375,
             "memoryToolTokens": 7540,
             "memoryCalls": 0,
-            "costUsd": 0.159268,
+            "costUsd": 0.159967,
             "mistakes": 0,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 11,
             "checksTotal": 11,
             "succeeded": 3
@@ -1297,16 +1657,17 @@
             "steps": 82,
             "reads": 21,
             "rereads": 8,
-            "inputTokens": 775153,
-            "memoryTokens": 15858,
+            "inputTokens": 777123,
+            "memoryTokens": 16657,
             "memoryToolTokens": 34338,
             "memoryCalls": 5,
-            "costUsd": 0.668036,
-            "mistakes": 2,
-            "repeated": 1,
-            "checksPassed": 42,
+            "costUsd": 0.671768,
+            "mistakes": 1,
+            "repeated": 0,
+            "misled": 0,
+            "checksPassed": 43,
             "checksTotal": 43,
-            "succeeded": 11
+            "succeeded": 12
           }
         },
         {
@@ -1317,13 +1678,14 @@
             "steps": 14,
             "reads": 3,
             "rereads": 2,
-            "inputTokens": 129579,
+            "inputTokens": 129707,
             "memoryTokens": 3095,
             "memoryToolTokens": 6032,
             "memoryCalls": 0,
-            "costUsd": 0.107986,
+            "costUsd": 0.108282,
             "mistakes": 0,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 8,
             "checksTotal": 8,
             "succeeded": 2
@@ -1334,16 +1696,17 @@
             "steps": 96,
             "reads": 24,
             "rereads": 10,
-            "inputTokens": 904732,
-            "memoryTokens": 18953,
+            "inputTokens": 906830,
+            "memoryTokens": 19752,
             "memoryToolTokens": 40370,
             "memoryCalls": 5,
-            "costUsd": 0.776022,
-            "mistakes": 2,
-            "repeated": 1,
-            "checksPassed": 50,
+            "costUsd": 0.78005,
+            "mistakes": 1,
+            "repeated": 0,
+            "misled": 0,
+            "checksPassed": 51,
             "checksTotal": 51,
-            "succeeded": 13
+            "succeeded": 14
           }
         },
         {
@@ -1354,13 +1717,14 @@
             "steps": 13,
             "reads": 4,
             "rereads": 4,
-            "inputTokens": 124651,
+            "inputTokens": 124779,
             "memoryTokens": 4237,
             "memoryToolTokens": 5655,
             "memoryCalls": 0,
-            "costUsd": 0.111435,
+            "costUsd": 0.111766,
             "mistakes": 0,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 7,
             "checksTotal": 7,
             "succeeded": 2
@@ -1371,16 +1735,56 @@
             "steps": 109,
             "reads": 28,
             "rereads": 14,
-            "inputTokens": 1029383,
-            "memoryTokens": 23190,
+            "inputTokens": 1031609,
+            "memoryTokens": 23989,
             "memoryToolTokens": 46025,
             "memoryCalls": 5,
-            "costUsd": 0.887457,
-            "mistakes": 2,
-            "repeated": 1,
-            "checksPassed": 57,
+            "costUsd": 0.891816,
+            "mistakes": 1,
+            "repeated": 0,
+            "misled": 0,
+            "checksPassed": 58,
             "checksTotal": 58,
-            "succeeded": 15
+            "succeeded": 16
+          }
+        },
+        {
+          "week": 7,
+          "week_totals": {
+            "tasks": 3,
+            "requests": 30,
+            "steps": 27,
+            "reads": 9,
+            "rereads": 5,
+            "inputTokens": 267893,
+            "memoryTokens": 13903,
+            "memoryToolTokens": 11310,
+            "memoryCalls": 1,
+            "costUsd": 0.205097,
+            "mistakes": 1,
+            "repeated": 0,
+            "misled": 1,
+            "checksPassed": 11,
+            "checksTotal": 11,
+            "succeeded": 3
+          },
+          "cumulative": {
+            "tasks": 19,
+            "requests": 155,
+            "steps": 136,
+            "reads": 37,
+            "rereads": 19,
+            "inputTokens": 1299502,
+            "memoryTokens": 37892,
+            "memoryToolTokens": 57335,
+            "memoryCalls": 6,
+            "costUsd": 1.096913,
+            "mistakes": 2,
+            "repeated": 0,
+            "misled": 1,
+            "checksPassed": 69,
+            "checksTotal": 69,
+            "succeeded": 19
           }
         }
       ],
@@ -1393,14 +1797,14 @@
           "reads": 0,
           "rereads": 0,
           "read": [],
-          "inputTokens": 53547,
-          "outputTokens": 302,
+          "inputTokens": 53565,
+          "outputTokens": 306,
           "memoryTokens": 0,
           "memoryToolTokens": 2331,
           "memoryCalls": 1,
-          "cacheRead": 45577,
-          "cacheWrite": 7970,
-          "costUsd": 0.048091,
+          "cacheRead": 45591,
+          "cacheWrite": 7974,
+          "costUsd": 0.048169,
           "mistakes": [],
           "checks": {
             "passed": 4,
@@ -1409,6 +1813,7 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "on",
           "title": "A slug helper on a new dependency; the user says once that the repository uses pnpm",
           "exitCode": 0,
@@ -1418,7 +1823,7 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [],
-          "wallMs": 4019
+          "wallMs": 3202
         },
         {
           "task": "t02-late-fee-cents",
@@ -1431,14 +1836,14 @@
             "src/invoice.ts",
             "test/invoice.test.ts"
           ],
-          "inputTokens": 63930,
-          "outputTokens": 331,
+          "inputTokens": 64000,
+          "outputTokens": 339,
           "memoryTokens": 464,
           "memoryToolTokens": 2664,
           "memoryCalls": 1,
-          "cacheRead": 55495,
-          "cacheWrite": 8435,
-          "costUsd": 0.053245,
+          "cacheRead": 55553,
+          "cacheWrite": 8447,
+          "costUsd": 0.053429,
           "mistakes": [],
           "checks": {
             "passed": 3,
@@ -1447,6 +1852,7 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "on",
           "title": "The team decides money is integer cents, and says why",
           "exitCode": 0,
@@ -1456,7 +1862,7 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [],
-          "wallMs": 5404
+          "wallMs": 3410
         },
         {
           "task": "t03-invoice-pdf-route",
@@ -1469,19 +1875,20 @@
             "src/routes.ts",
             "src/invoice.ts"
           ],
-          "inputTokens": 80147,
-          "outputTokens": 350,
+          "inputTokens": 80241,
+          "outputTokens": 358,
           "memoryTokens": 580,
           "memoryToolTokens": 3330,
           "memoryCalls": 1,
-          "cacheRead": 71654,
-          "cacheWrite": 8493,
-          "costUsd": 0.058595,
+          "cacheRead": 71736,
+          "cacheWrite": 8505,
+          "costUsd": 0.058784,
           "mistakes": [
             {
               "fact": "routes",
               "how": "the check failed on a stale src/generated/routes.gen.ts",
-              "repeated": false
+              "repeated": false,
+              "stale": false
             }
           ],
           "checks": {
@@ -1491,6 +1898,7 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "on",
           "title": "A new route; the check breaks on the stale generated route table",
           "exitCode": 0,
@@ -1500,7 +1908,7 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [],
-          "wallMs": 5198
+          "wallMs": 3876
         },
         {
           "task": "t04-refund-request",
@@ -1513,14 +1921,14 @@
             "docs/specs/refund-policy.pdf",
             "src/orders.ts"
           ],
-          "inputTokens": 64470,
-          "outputTokens": 676,
+          "inputTokens": 64516,
+          "outputTokens": 684,
           "memoryTokens": 2030,
           "memoryToolTokens": 2639,
           "memoryCalls": 0,
-          "cacheRead": 54575,
-          "cacheWrite": 9895,
-          "costUsd": 0.063618,
+          "cacheRead": 54611,
+          "cacheWrite": 9905,
+          "costUsd": 0.063787,
           "mistakes": [],
           "checks": {
             "passed": 4,
@@ -1529,6 +1937,7 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "on",
           "title": "Refund requests from the refund policy PDF, which the owner also keeps in Vector's memory",
           "exitCode": 0,
@@ -1543,7 +1952,7 @@
             "- [rxr5y8z2hc35e] requirement · Refund policy p.1 §3: requestRefund MUST return the first refund for a repeated key instead of creating another.",
             "- [rp2md96wc7xve] requirement · Refund policy p.2 §4: Every refund MUST send the customer one email."
           ],
-          "wallMs": 4877
+          "wallMs": 3077
         },
         {
           "task": "t05-event-names",
@@ -1556,14 +1965,14 @@
             "src/invoice.ts",
             "test/invoice.test.ts"
           ],
-          "inputTokens": 64310,
-          "outputTokens": 327,
+          "inputTokens": 64380,
+          "outputTokens": 335,
           "memoryTokens": 664,
           "memoryToolTokens": 3016,
           "memoryCalls": 1,
-          "cacheRead": 55826,
-          "cacheWrite": 8484,
-          "costUsd": 0.053469,
+          "cacheRead": 55884,
+          "cacheWrite": 8496,
+          "costUsd": 0.053651,
           "mistakes": [],
           "checks": {
             "passed": 3,
@@ -1572,6 +1981,7 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "on",
           "title": "The user states the event naming convention",
           "exitCode": 0,
@@ -1581,7 +1991,7 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [],
-          "wallMs": 4145
+          "wallMs": 3272
         },
         {
           "task": "t06-flaky-session-test",
@@ -1597,14 +2007,14 @@
             "package.json",
             "ci/slow-clock.ts"
           ],
-          "inputTokens": 103819,
-          "outputTokens": 476,
+          "inputTokens": 104001,
+          "outputTokens": 488,
           "memoryTokens": 1788,
           "memoryToolTokens": 4524,
           "memoryCalls": 1,
-          "cacheRead": 94331,
-          "cacheWrite": 9488,
-          "costUsd": 0.071019,
+          "cacheRead": 94491,
+          "cacheWrite": 9510,
+          "costUsd": 0.07133,
           "mistakes": [],
           "checks": {
             "passed": 3,
@@ -1613,6 +2023,7 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "on",
           "title": "A test that fails one CI run in five; the fix is an injected clock",
           "exitCode": 0,
@@ -1622,9 +2033,9 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [mfpd7z] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check."
+            "- [mbc4nt] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check."
           ],
-          "wallMs": 4971
+          "wallMs": 4029
         },
         {
           "task": "t07-order-discount",
@@ -1637,14 +2048,14 @@
             "src/orders.ts",
             "test/orders.test.ts"
           ],
-          "inputTokens": 56525,
-          "outputTokens": 399,
+          "inputTokens": 56583,
+          "outputTokens": 406,
           "memoryTokens": 1435,
           "memoryToolTokens": 2639,
           "memoryCalls": 0,
-          "cacheRead": 48043,
-          "cacheWrite": 8482,
-          "costUsd": 0.052205,
+          "cacheRead": 48089,
+          "cacheWrite": 8494,
+          "costUsd": 0.05237,
           "mistakes": [],
           "checks": {
             "passed": 3,
@@ -1655,6 +2066,12 @@
           "delivered": [
             "cents"
           ],
+          "brought": [
+            {
+              "fact": "cents",
+              "line": "- [myb4hs] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a ce"
+            }
+          ],
           "arm": "on",
           "title": "A discount on orders: money arithmetic",
           "exitCode": 0,
@@ -1664,10 +2081,10 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [m82we4] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
-            "- [mqwpty] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
+            "- [myb4hs] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
+            "- [mg76kg] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
           ],
-          "wallMs": 3826
+          "wallMs": 3425
         },
         {
           "task": "t08-csv-export",
@@ -1677,14 +2094,14 @@
           "reads": 0,
           "rereads": 0,
           "read": [],
-          "inputTokens": 47188,
-          "outputTokens": 308,
+          "inputTokens": 47202,
+          "outputTokens": 309,
           "memoryTokens": 1164,
           "memoryToolTokens": 2262,
           "memoryCalls": 0,
-          "cacheRead": 39043,
-          "cacheWrite": 8145,
-          "costUsd": 0.046877,
+          "cacheRead": 39053,
+          "cacheWrite": 8149,
+          "costUsd": 0.04691,
           "mistakes": [],
           "checks": {
             "passed": 4,
@@ -1695,6 +2112,12 @@
           "delivered": [
             "pnpm"
           ],
+          "brought": [
+            {
+              "fact": "pnpm",
+              "line": "- [mfzj0h] preference: We use pnpm in this repository, never npm: add dependencies with pnpm add and run scripts with pnpm."
+            }
+          ],
           "arm": "on",
           "title": "A CSV export on a new dependency",
           "exitCode": 0,
@@ -1704,10 +2127,10 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [me2p2f] preference: We use pnpm in this repository, never npm: add dependencies with pnpm add and run scripts with pnpm.",
-            "- [mqwpty] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
+            "- [mfzj0h] preference: We use pnpm in this repository, never npm: add dependencies with pnpm add and run scripts with pnpm.",
+            "- [mg76kg] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
           ],
-          "wallMs": 4055
+          "wallMs": 3077
         },
         {
           "task": "t09-refunds-http",
@@ -1720,31 +2143,34 @@
             "src/routes.ts",
             "src/refunds.ts"
           ],
-          "inputTokens": 76537,
-          "outputTokens": 497,
-          "memoryTokens": 2646,
+          "inputTokens": 77467,
+          "outputTokens": 561,
+          "memoryTokens": 3157,
           "memoryToolTokens": 3393,
           "memoryCalls": 0,
-          "cacheRead": 67484,
-          "cacheWrite": 9053,
-          "costUsd": 0.061649,
-          "mistakes": [
+          "cacheRead": 68274,
+          "cacheWrite": 9193,
+          "costUsd": 0.063371,
+          "mistakes": [],
+          "checks": {
+            "passed": 4,
+            "total": 4,
+            "failed": []
+          },
+          "success": true,
+          "delivered": [
+            "routes",
+            "idempotency"
+          ],
+          "brought": [
+            {
+              "fact": "routes",
+              "line": "- [mbc4nt] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check."
+            },
             {
               "fact": "idempotency",
-              "how": "the hidden check fact:idempotency failed",
-              "repeated": true
+              "line": "- [rapt6fsw8m41t] requirement · Refund policy p.1 §3: POST /refunds MUST reject a request without an Idempotency-Key header with status 400."
             }
-          ],
-          "checks": {
-            "passed": 3,
-            "total": 4,
-            "failed": [
-              "fact:idempotency"
-            ]
-          },
-          "success": false,
-          "delivered": [
-            "routes"
           ],
           "arm": "on",
           "title": "Refunds over HTTP: a route, and a header the spec requires",
@@ -1755,12 +2181,13 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [mfpd7z] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check.",
+            "- [mbc4nt] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check.",
             "- [pfgdd5qgy84sc] passage · Refund policy p.1 §1: This spec covers refunds of captured card orders, through requestRefund and the refunds API.",
             "- [rc711dmrvtxvj] requirement · Refund policy p.1 §2: A request after the window MUST be rejected with the reason window_closed.",
+            "- [rapt6fsw8m41t] requirement · Refund policy p.1 §3: POST /refunds MUST reject a request without an Idempotency-Key header with status 400.",
             "- [rxr5y8z2hc35e] requirement · Refund policy p.1 §3: requestRefund MUST return the first refund for a repeated key instead of creating another."
           ],
-          "wallMs": 5261
+          "wallMs": 3781
         },
         {
           "task": "t10-refund-email",
@@ -1773,14 +2200,14 @@
             "src/refunds.ts",
             "src/events.ts"
           ],
-          "inputTokens": 59659,
-          "outputTokens": 463,
-          "memoryTokens": 2674,
+          "inputTokens": 60071,
+          "outputTokens": 470,
+          "memoryTokens": 2962,
           "memoryToolTokens": 2639,
           "memoryCalls": 0,
-          "cacheRead": 50662,
-          "cacheWrite": 8997,
-          "costUsd": 0.055883,
+          "cacheRead": 51003,
+          "cacheWrite": 9068,
+          "costUsd": 0.056356,
           "mistakes": [],
           "checks": {
             "passed": 4,
@@ -1792,6 +2219,16 @@
             "email",
             "events"
           ],
+          "brought": [
+            {
+              "fact": "email",
+              "line": "- [rbj42n5awxf2t] requirement · Refund policy p.2 §4: The refund email subject MUST be: Your refund for order ‹order id>."
+            },
+            {
+              "fact": "events",
+              "line": "- [mjwkh6] decision: Our event names are lowercase <domain>.<past-tense verb>, such as invoice.paid, never upper snake case like INVOICE_PAID or camelCase, in t"
+            }
+          ],
           "arm": "on",
           "title": "The refund email: a subject the spec fixes, and a new event",
           "exitCode": 0,
@@ -1801,14 +2238,14 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [m0s270] decision: Our event names are lowercase <domain>.<past-tense verb>, such as invoice.paid, never upper snake case like INVOICE_PAID or camelCase, in the events we emit.",
-            "- [m82we4] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
-            "- [mqwpty] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
+            "- [mjwkh6] decision: Our event names are lowercase <domain>.<past-tense verb>, such as invoice.paid, never upper snake case like INVOICE_PAID or camelCase, in the events we emit.",
+            "- [myb4hs] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
+            "- [mg76kg] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
             "- [pfgdd5qgy84sc] passage · Refund policy p.1 §1: This spec covers refunds of captured card orders, through requestRefund and the refunds API.",
             "- [rbj42n5awxf2t] requirement · Refund policy p.2 §4: The refund email subject MUST be: Your refund for order ‹order id>.",
             "- [rp2md96wc7xve] requirement · Refund policy p.2 §4: Every refund MUST send the customer one email."
           ],
-          "wallMs": 4119
+          "wallMs": 3112
         },
         {
           "task": "t11-reset-link-expiry",
@@ -1818,14 +2255,14 @@
           "reads": 0,
           "rereads": 0,
           "read": [],
-          "inputTokens": 47429,
-          "outputTokens": 382,
+          "inputTokens": 47447,
+          "outputTokens": 385,
           "memoryTokens": 978,
           "memoryToolTokens": 2262,
           "memoryCalls": 0,
-          "cacheRead": 39238,
-          "cacheWrite": 8191,
-          "costUsd": 0.048219,
+          "cacheRead": 39252,
+          "cacheWrite": 8195,
+          "costUsd": 0.048282,
           "mistakes": [],
           "checks": {
             "passed": 4,
@@ -1836,6 +2273,12 @@
           "delivered": [
             "clock"
           ],
+          "brought": [
+            {
+              "fact": "clock",
+              "line": "- [mg76kg] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pn"
+            }
+          ],
           "arm": "on",
           "title": "Password reset links that expire: tests that depend on time",
           "exitCode": 0,
@@ -1845,9 +2288,9 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [mqwpty] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
+            "- [mg76kg] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
           ],
-          "wallMs": 3859
+          "wallMs": 3028
         },
         {
           "task": "t12-shipping-fee",
@@ -1860,14 +2303,14 @@
             "src/orders.ts",
             "test/orders.test.ts"
           ],
-          "inputTokens": 57592,
-          "outputTokens": 520,
+          "inputTokens": 57650,
+          "outputTokens": 527,
           "memoryTokens": 1435,
           "memoryToolTokens": 2639,
           "memoryCalls": 0,
-          "cacheRead": 48871,
-          "cacheWrite": 8721,
-          "costUsd": 0.055166,
+          "cacheRead": 48917,
+          "cacheWrite": 8733,
+          "costUsd": 0.055329,
           "mistakes": [],
           "checks": {
             "passed": 3,
@@ -1878,6 +2321,12 @@
           "delivered": [
             "cents"
           ],
+          "brought": [
+            {
+              "fact": "cents",
+              "line": "- [myb4hs] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a ce"
+            }
+          ],
           "arm": "on",
           "title": "A shipping fee: money arithmetic again",
           "exitCode": 0,
@@ -1887,10 +2336,10 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [m82we4] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
-            "- [mqwpty] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
+            "- [myb4hs] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
+            "- [mg76kg] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
           ],
-          "wallMs": 3882
+          "wallMs": 3537
         },
         {
           "task": "t13-credit-notes",
@@ -1903,14 +2352,14 @@
             "src/routes.ts",
             "src/events.ts"
           ],
-          "inputTokens": 73770,
-          "outputTokens": 412,
+          "inputTokens": 73860,
+          "outputTokens": 421,
           "memoryTokens": 1737,
           "memoryToolTokens": 3393,
           "memoryCalls": 0,
-          "cacheRead": 65115,
-          "cacheWrite": 8655,
-          "costUsd": 0.058171,
+          "cacheRead": 65191,
+          "cacheWrite": 8669,
+          "costUsd": 0.058382,
           "mistakes": [],
           "checks": {
             "passed": 4,
@@ -1922,6 +2371,16 @@
             "routes",
             "events"
           ],
+          "brought": [
+            {
+              "fact": "routes",
+              "line": "- [mbc4nt] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check."
+            },
+            {
+              "fact": "events",
+              "line": "- [mjwkh6] decision: Our event names are lowercase <domain>.<past-tense verb>, such as invoice.paid, never upper snake case like INVOICE_PAID or camelCase, in t"
+            }
+          ],
           "arm": "on",
           "title": "Credit notes: a new route and a new event in a new module",
           "exitCode": 0,
@@ -1931,10 +2390,10 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [m0s270] decision: Our event names are lowercase <domain>.<past-tense verb>, such as invoice.paid, never upper snake case like INVOICE_PAID or camelCase, in the events we emit.",
-            "- [mfpd7z] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check."
+            "- [mjwkh6] decision: Our event names are lowercase <domain>.<past-tense verb>, such as invoice.paid, never upper snake case like INVOICE_PAID or camelCase, in the events we emit.",
+            "- [mbc4nt] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check."
           ],
-          "wallMs": 4781
+          "wallMs": 4005
         },
         {
           "task": "t14-pdf-dependency",
@@ -1946,14 +2405,14 @@
           "read": [
             "src/invoice-pdf.ts"
           ],
-          "inputTokens": 55809,
-          "outputTokens": 294,
+          "inputTokens": 55847,
+          "outputTokens": 297,
           "memoryTokens": 1358,
           "memoryToolTokens": 2639,
           "memoryCalls": 0,
-          "cacheRead": 47501,
-          "cacheWrite": 8308,
-          "costUsd": 0.049815,
+          "cacheRead": 47531,
+          "cacheWrite": 8316,
+          "costUsd": 0.0499,
           "mistakes": [],
           "checks": {
             "passed": 4,
@@ -1964,6 +2423,12 @@
           "delivered": [
             "pnpm"
           ],
+          "brought": [
+            {
+              "fact": "pnpm",
+              "line": "- [mfzj0h] preference: We use pnpm in this repository, never npm: add dependencies with pnpm add and run scripts with pnpm."
+            }
+          ],
           "arm": "on",
           "title": "Real invoice PDFs on a new dependency",
           "exitCode": 0,
@@ -1973,10 +2438,10 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [mqwpty] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
-            "- [me2p2f] preference: We use pnpm in this repository, never npm: add dependencies with pnpm add and run scripts with pnpm."
+            "- [mg76kg] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
+            "- [mfzj0h] preference: We use pnpm in this repository, never npm: add dependencies with pnpm add and run scripts with pnpm."
           ],
-          "wallMs": 4052
+          "wallMs": 3239
         },
         {
           "task": "t15-refund-deadline",
@@ -1989,14 +2454,14 @@
             "src/invoice-pdf.ts",
             "src/orders.ts"
           ],
-          "inputTokens": 58324,
-          "outputTokens": 393,
+          "inputTokens": 58382,
+          "outputTokens": 400,
           "memoryTokens": 2597,
           "memoryToolTokens": 2639,
           "memoryCalls": 0,
-          "cacheRead": 49564,
-          "cacheWrite": 8760,
-          "costUsd": 0.053614,
+          "cacheRead": 49610,
+          "cacheWrite": 8772,
+          "costUsd": 0.053777,
           "mistakes": [],
           "checks": {
             "passed": 3,
@@ -2007,6 +2472,12 @@
           "delivered": [
             "window"
           ],
+          "brought": [
+            {
+              "fact": "window",
+              "line": "- [rtrc1w45jqejn] constraint · Refund policy p.1 §2: Refunds are allowed for at most 14 days after capture, as REFUND_WINDOW_DAYS sets."
+            }
+          ],
           "arm": "on",
           "title": "The refund deadline on the invoice: a value only the spec gives",
           "exitCode": 0,
@@ -2016,14 +2487,14 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [m82we4] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
-            "- [mqwpty] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
+            "- [myb4hs] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
+            "- [mg76kg] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
             "- [pfgdd5qgy84sc] passage · Refund policy p.1 §1: This spec covers refunds of captured card orders, through requestRefund and the refunds API.",
             "- [rtrc1w45jqejn] constraint · Refund policy p.1 §2: Refunds are allowed for at most 14 days after capture, as REFUND_WINDOW_DAYS sets.",
             "- [rbj42n5awxf2t] requirement · Refund policy p.2 §4: The refund email subject MUST be: Your refund for order ‹order id>.",
             "- [rp2md96wc7xve] requirement · Refund policy p.2 §4: Every refund MUST send the customer one email."
           ],
-          "wallMs": 3277
+          "wallMs": 3060
         },
         {
           "task": "t16-late-fee-grace",
@@ -2036,14 +2507,14 @@
             "src/invoice.ts",
             "test/invoice.test.ts"
           ],
-          "inputTokens": 66327,
-          "outputTokens": 505,
+          "inputTokens": 66397,
+          "outputTokens": 512,
           "memoryTokens": 1640,
           "memoryToolTokens": 3016,
           "memoryCalls": 0,
-          "cacheRead": 57530,
-          "cacheWrite": 8797,
-          "costUsd": 0.057821,
+          "cacheRead": 57588,
+          "cacheWrite": 8809,
+          "costUsd": 0.057989,
           "mistakes": [],
           "checks": {
             "passed": 4,
@@ -2054,6 +2525,12 @@
           "delivered": [
             "clock"
           ],
+          "brought": [
+            {
+              "fact": "clock",
+              "line": "- [mg76kg] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pn"
+            }
+          ],
           "arm": "on",
           "title": "A grace period for late fees: a boundary test that depends on time",
           "exitCode": 0,
@@ -2063,31 +2540,193 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [mqwpty] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
-            "- [m82we4] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off."
+            "- [mg76kg] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
+            "- [myb4hs] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off."
           ],
-          "wallMs": 3524
+          "wallMs": 3014
+        },
+        {
+          "task": "t17-refund-window-21",
+          "week": 7,
+          "requests": 12,
+          "steps": 11,
+          "reads": 4,
+          "rereads": 2,
+          "read": [
+            "src/refunds.ts",
+            "test/refunds.test.ts",
+            "src/invoice-pdf.ts",
+            "test/refund-deadline.test.ts"
+          ],
+          "inputTokens": 109743,
+          "outputTokens": 657,
+          "memoryTokens": 5978,
+          "memoryToolTokens": 4524,
+          "memoryCalls": 1,
+          "cacheRead": 99759,
+          "cacheWrite": 9984,
+          "costUsd": 0.077222,
+          "mistakes": [],
+          "checks": {
+            "passed": 3,
+            "total": 3,
+            "failed": []
+          },
+          "success": true,
+          "delivered": [],
+          "brought": [],
+          "arm": "on",
+          "title": "The user extends the refund window the spec PDF gives, and says the PDF is out of date",
+          "exitCode": 0,
+          "brainFiles": [
+            ".local/share/vector/brain/brain-local.db",
+            ".local/share/vector/brain/brain-local.db-shm",
+            ".local/share/vector/brain/brain-local.db-wal"
+          ],
+          "recall": [
+            "- [mg76kg] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
+            "- [myb4hs] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
+            "- [pfgdd5qgy84sc] passage · Refund policy p.1 §1: This spec covers refunds of captured card orders, through requestRefund and the refunds API.",
+            "- [rtrc1w45jqejn] constraint · Refund policy p.1 §2: Refunds are allowed for at most 14 days after capture, as REFUND_WINDOW_DAYS sets.",
+            "- [rxr5y8z2hc35e] requirement · Refund policy p.1 §3: requestRefund MUST return the first refund for a repeated key instead of creating another.",
+            "- [rp2md96wc7xve] requirement · Refund policy p.2 §4: Every refund MUST send the customer one email."
+          ],
+          "wallMs": 3707
+        },
+        {
+          "task": "t18-refund-reminder",
+          "week": 7,
+          "requests": 7,
+          "steps": 6,
+          "reads": 2,
+          "rereads": 1,
+          "read": [
+            "src/orders.ts",
+            "src/notify/refund-email.ts"
+          ],
+          "inputTokens": 59212,
+          "outputTokens": 362,
+          "memoryTokens": 3017,
+          "memoryToolTokens": 2639,
+          "memoryCalls": 0,
+          "cacheRead": 50335,
+          "cacheWrite": 8877,
+          "costUsd": 0.05382,
+          "mistakes": [],
+          "checks": {
+            "passed": 4,
+            "total": 4,
+            "failed": []
+          },
+          "success": true,
+          "delivered": [
+            "window21"
+          ],
+          "brought": [
+            {
+              "fact": "window21",
+              "line": "- [mq2tvg] decision: The refund window is 21 days after capture since 16 November 2026 (finance extended it): REFUND_WINDOW_DAYS in src/refunds.ts. The refund p"
+            }
+          ],
+          "arm": "on",
+          "title": "A refund reminder: the window again, where the spec PDF the brain keeps is out of date",
+          "exitCode": 0,
+          "brainFiles": [
+            ".local/share/vector/brain/brain-local.db",
+            ".local/share/vector/brain/brain-local.db-shm",
+            ".local/share/vector/brain/brain-local.db-wal"
+          ],
+          "recall": [
+            "- [mg76kg] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
+            "- [mq2tvg] decision: The refund window is 21 days after capture since 16 November 2026 (finance extended it): REFUND_WINDOW_DAYS in src/refunds.ts. The refund policy PDF still says 14 days and is out of date on this.",
+            "- [myb4hs] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
+            "- [pfgdd5qgy84sc] passage · Refund policy p.1 §1: This spec covers refunds of captured card orders, through requestRefund and the refunds API.",
+            "- [rtrc1w45jqejn] constraint · Refund policy p.1 §2: Refunds are allowed for at most 14 days after capture, as REFUND_WINDOW_DAYS sets. (code says 21 days)",
+            "- [rbj42n5awxf2t] requirement · Refund policy p.2 §4: The refund email subject MUST be: Your refund for order ‹order id>.",
+            "- [rp2md96wc7xve] requirement · Refund policy p.2 §4: Every refund MUST send the customer one email."
+          ],
+          "wallMs": 2558
+        },
+        {
+          "task": "t19-refund-lookup",
+          "week": 7,
+          "requests": 11,
+          "steps": 10,
+          "reads": 3,
+          "rereads": 2,
+          "read": [
+            "src/routes.ts",
+            "src/http/refunds.ts",
+            "src/refunds.ts"
+          ],
+          "inputTokens": 98938,
+          "outputTokens": 701,
+          "memoryTokens": 4908,
+          "memoryToolTokens": 4147,
+          "memoryCalls": 0,
+          "cacheRead": 89124,
+          "cacheWrite": 9814,
+          "costUsd": 0.074055,
+          "mistakes": [
+            {
+              "fact": "routes",
+              "how": "ran `pnpm gen`, which the repository no longer has",
+              "repeated": false,
+              "stale": true
+            }
+          ],
+          "checks": {
+            "passed": 4,
+            "total": 4,
+            "failed": []
+          },
+          "success": true,
+          "delivered": [],
+          "brought": [
+            {
+              "fact": "routes",
+              "line": "- [mbc4nt] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check."
+            }
+          ],
+          "arm": "on",
+          "title": "A new route after a teammate made the route table generate itself, which nobody mentions",
+          "exitCode": 0,
+          "brainFiles": [
+            ".local/share/vector/brain/brain-local.db",
+            ".local/share/vector/brain/brain-local.db-shm",
+            ".local/share/vector/brain/brain-local.db-wal"
+          ],
+          "recall": [
+            "- [mbc4nt] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check.",
+            "- [mq2tvg] decision: The refund window is 21 days after capture since 16 November 2026 (finance extended it): REFUND_WINDOW_DAYS in src/refunds.ts. The refund policy PDF still says 14 days and is out of date on this.",
+            "- [pfgdd5qgy84sc] passage · Refund policy p.1 §1: This spec covers refunds of captured card orders, through requestRefund and the refunds API.",
+            "- [rc711dmrvtxvj] requirement · Refund policy p.1 §2: A request after the window MUST be rejected with the reason window_closed.",
+            "- [rtrc1w45jqejn] constraint · Refund policy p.1 §2: Refunds are allowed for at most 14 days after capture, as REFUND_WINDOW_DAYS sets. (code says 21 days)",
+            "- [rxr5y8z2hc35e] requirement · Refund policy p.1 §3: requestRefund MUST return the first refund for a repeated key instead of creating another."
+          ],
+          "wallMs": 7482
         }
       ]
     },
     "blind": {
       "name": "Brain on, hidden from the model",
       "totals": {
-        "tasks": 16,
-        "requests": 137,
-        "steps": 121,
-        "reads": 30,
-        "rereads": 15,
-        "inputTokens": 1134408,
-        "memoryTokens": 25736,
-        "memoryToolTokens": 50549,
-        "memoryCalls": 9,
-        "costUsd": 0.926309,
-        "mistakes": 13,
-        "repeated": 12,
-        "checksPassed": 50,
-        "checksTotal": 58,
-        "succeeded": 9
+        "tasks": 19,
+        "requests": 166,
+        "steps": 147,
+        "reads": 39,
+        "rereads": 20,
+        "inputTokens": 1394727,
+        "memoryTokens": 40063,
+        "memoryToolTokens": 61482,
+        "memoryCalls": 10,
+        "costUsd": 1.131387,
+        "mistakes": 14,
+        "repeated": 13,
+        "misled": 0,
+        "checksPassed": 60,
+        "checksTotal": 69,
+        "succeeded": 11
       },
       "weeks": [
         {
@@ -2098,13 +2737,14 @@
             "steps": 22,
             "reads": 4,
             "rereads": 1,
-            "inputTokens": 197624,
+            "inputTokens": 197806,
             "memoryTokens": 1044,
             "memoryToolTokens": 8325,
             "memoryCalls": 3,
-            "costUsd": 0.159931,
+            "costUsd": 0.160382,
             "mistakes": 1,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 11,
             "checksTotal": 11,
             "succeeded": 3
@@ -2115,13 +2755,14 @@
             "steps": 22,
             "reads": 4,
             "rereads": 1,
-            "inputTokens": 197624,
+            "inputTokens": 197806,
             "memoryTokens": 1044,
             "memoryToolTokens": 8325,
             "memoryCalls": 3,
-            "costUsd": 0.159931,
+            "costUsd": 0.160382,
             "mistakes": 1,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 11,
             "checksTotal": 11,
             "succeeded": 3
@@ -2135,13 +2776,14 @@
             "steps": 24,
             "reads": 9,
             "rereads": 2,
-            "inputTokens": 232599,
+            "inputTokens": 232897,
             "memoryTokens": 4482,
             "memoryToolTokens": 10179,
             "memoryCalls": 2,
-            "costUsd": 0.188106,
+            "costUsd": 0.188768,
             "mistakes": 0,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 10,
             "checksTotal": 10,
             "succeeded": 3
@@ -2152,13 +2794,14 @@
             "steps": 46,
             "reads": 13,
             "rereads": 3,
-            "inputTokens": 430223,
+            "inputTokens": 430703,
             "memoryTokens": 5526,
             "memoryToolTokens": 18504,
             "memoryCalls": 5,
-            "costUsd": 0.348037,
+            "costUsd": 0.34915,
             "mistakes": 1,
             "repeated": 0,
+            "misled": 0,
             "checksPassed": 21,
             "checksTotal": 21,
             "succeeded": 6
@@ -2172,13 +2815,14 @@
             "steps": 26,
             "reads": 5,
             "rereads": 2,
-            "inputTokens": 241353,
-            "memoryTokens": 6803,
+            "inputTokens": 242318,
+            "memoryTokens": 7440,
             "memoryToolTokens": 10933,
             "memoryCalls": 2,
-            "costUsd": 0.184118,
+            "costUsd": 0.185136,
             "mistakes": 4,
             "repeated": 4,
+            "misled": 0,
             "checksPassed": 9,
             "checksTotal": 11,
             "succeeded": 1
@@ -2189,13 +2833,14 @@
             "steps": 72,
             "reads": 18,
             "rereads": 5,
-            "inputTokens": 671576,
-            "memoryTokens": 12329,
+            "inputTokens": 673021,
+            "memoryTokens": 12966,
             "memoryToolTokens": 29437,
             "memoryCalls": 7,
-            "costUsd": 0.532155,
+            "costUsd": 0.534286,
             "mistakes": 5,
             "repeated": 4,
+            "misled": 0,
             "checksPassed": 30,
             "checksTotal": 32,
             "succeeded": 7
@@ -2209,13 +2854,14 @@
             "steps": 16,
             "reads": 4,
             "rereads": 3,
-            "inputTokens": 156343,
-            "memoryTokens": 4924,
+            "inputTokens": 156827,
+            "memoryTokens": 5212,
             "memoryToolTokens": 7163,
             "memoryCalls": 0,
-            "costUsd": 0.15511,
+            "costUsd": 0.155855,
             "mistakes": 3,
             "repeated": 3,
+            "misled": 0,
             "checksPassed": 8,
             "checksTotal": 11,
             "succeeded": 1
@@ -2226,13 +2872,14 @@
             "steps": 88,
             "reads": 22,
             "rereads": 8,
-            "inputTokens": 827919,
-            "memoryTokens": 17253,
+            "inputTokens": 829848,
+            "memoryTokens": 18178,
             "memoryToolTokens": 36600,
             "memoryCalls": 7,
-            "costUsd": 0.687265,
+            "costUsd": 0.690141,
             "mistakes": 8,
             "repeated": 7,
+            "misled": 0,
             "checksPassed": 38,
             "checksTotal": 43,
             "succeeded": 8
@@ -2246,13 +2893,14 @@
             "steps": 21,
             "reads": 4,
             "rereads": 3,
-            "inputTokens": 190734,
+            "inputTokens": 190949,
             "memoryTokens": 4451,
             "memoryToolTokens": 8671,
             "memoryCalls": 2,
-            "costUsd": 0.131567,
+            "costUsd": 0.131985,
             "mistakes": 3,
             "repeated": 3,
+            "misled": 0,
             "checksPassed": 7,
             "checksTotal": 8,
             "succeeded": 1
@@ -2263,13 +2911,14 @@
             "steps": 109,
             "reads": 26,
             "rereads": 11,
-            "inputTokens": 1018653,
-            "memoryTokens": 21704,
+            "inputTokens": 1020797,
+            "memoryTokens": 22629,
             "memoryToolTokens": 45271,
             "memoryCalls": 9,
-            "costUsd": 0.818832,
+            "costUsd": 0.822126,
             "mistakes": 11,
             "repeated": 10,
+            "misled": 0,
             "checksPassed": 45,
             "checksTotal": 51,
             "succeeded": 9
@@ -2283,13 +2932,14 @@
             "steps": 12,
             "reads": 4,
             "rereads": 4,
-            "inputTokens": 115755,
+            "inputTokens": 115871,
             "memoryTokens": 4032,
             "memoryToolTokens": 5278,
             "memoryCalls": 0,
-            "costUsd": 0.107477,
+            "costUsd": 0.107832,
             "mistakes": 2,
             "repeated": 2,
+            "misled": 0,
             "checksPassed": 5,
             "checksTotal": 7,
             "succeeded": 0
@@ -2300,16 +2950,56 @@
             "steps": 121,
             "reads": 30,
             "rereads": 15,
-            "inputTokens": 1134408,
-            "memoryTokens": 25736,
+            "inputTokens": 1136668,
+            "memoryTokens": 26661,
             "memoryToolTokens": 50549,
             "memoryCalls": 9,
-            "costUsd": 0.926309,
+            "costUsd": 0.929958,
             "mistakes": 13,
             "repeated": 12,
+            "misled": 0,
             "checksPassed": 50,
             "checksTotal": 58,
             "succeeded": 9
+          }
+        },
+        {
+          "week": 7,
+          "week_totals": {
+            "tasks": 3,
+            "requests": 29,
+            "steps": 26,
+            "reads": 9,
+            "rereads": 5,
+            "inputTokens": 258059,
+            "memoryTokens": 13402,
+            "memoryToolTokens": 10933,
+            "memoryCalls": 1,
+            "costUsd": 0.201429,
+            "mistakes": 1,
+            "repeated": 1,
+            "misled": 0,
+            "checksPassed": 10,
+            "checksTotal": 11,
+            "succeeded": 2
+          },
+          "cumulative": {
+            "tasks": 19,
+            "requests": 166,
+            "steps": 147,
+            "reads": 39,
+            "rereads": 20,
+            "inputTokens": 1394727,
+            "memoryTokens": 40063,
+            "memoryToolTokens": 61482,
+            "memoryCalls": 10,
+            "costUsd": 1.131387,
+            "mistakes": 14,
+            "repeated": 13,
+            "misled": 0,
+            "checksPassed": 60,
+            "checksTotal": 69,
+            "succeeded": 11
           }
         }
       ],
@@ -2322,14 +3012,14 @@
           "reads": 0,
           "rereads": 0,
           "read": [],
-          "inputTokens": 53547,
-          "outputTokens": 302,
+          "inputTokens": 53565,
+          "outputTokens": 306,
           "memoryTokens": 0,
           "memoryToolTokens": 2331,
           "memoryCalls": 1,
-          "cacheRead": 45577,
-          "cacheWrite": 7970,
-          "costUsd": 0.048091,
+          "cacheRead": 45591,
+          "cacheWrite": 7974,
+          "costUsd": 0.048169,
           "mistakes": [],
           "checks": {
             "passed": 4,
@@ -2338,6 +3028,7 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "blind",
           "title": "A slug helper on a new dependency; the user says once that the repository uses pnpm",
           "exitCode": 0,
@@ -2347,7 +3038,7 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [],
-          "wallMs": 4025
+          "wallMs": 3271
         },
         {
           "task": "t02-late-fee-cents",
@@ -2360,14 +3051,14 @@
             "src/invoice.ts",
             "test/invoice.test.ts"
           ],
-          "inputTokens": 63930,
-          "outputTokens": 331,
+          "inputTokens": 64000,
+          "outputTokens": 339,
           "memoryTokens": 464,
           "memoryToolTokens": 2664,
           "memoryCalls": 1,
-          "cacheRead": 55495,
-          "cacheWrite": 8435,
-          "costUsd": 0.053245,
+          "cacheRead": 55553,
+          "cacheWrite": 8447,
+          "costUsd": 0.053429,
           "mistakes": [],
           "checks": {
             "passed": 3,
@@ -2376,6 +3067,7 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "blind",
           "title": "The team decides money is integer cents, and says why",
           "exitCode": 0,
@@ -2385,7 +3077,7 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [],
-          "wallMs": 5493
+          "wallMs": 3318
         },
         {
           "task": "t03-invoice-pdf-route",
@@ -2398,19 +3090,20 @@
             "src/routes.ts",
             "src/invoice.ts"
           ],
-          "inputTokens": 80147,
-          "outputTokens": 350,
+          "inputTokens": 80241,
+          "outputTokens": 358,
           "memoryTokens": 580,
           "memoryToolTokens": 3330,
           "memoryCalls": 1,
-          "cacheRead": 71654,
-          "cacheWrite": 8493,
-          "costUsd": 0.058595,
+          "cacheRead": 71736,
+          "cacheWrite": 8505,
+          "costUsd": 0.058784,
           "mistakes": [
             {
               "fact": "routes",
               "how": "the check failed on a stale src/generated/routes.gen.ts",
-              "repeated": false
+              "repeated": false,
+              "stale": false
             }
           ],
           "checks": {
@@ -2420,6 +3113,7 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "blind",
           "title": "A new route; the check breaks on the stale generated route table",
           "exitCode": 0,
@@ -2429,7 +3123,7 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [],
-          "wallMs": 5166
+          "wallMs": 3847
         },
         {
           "task": "t04-refund-request",
@@ -2442,14 +3136,14 @@
             "docs/specs/refund-policy.pdf",
             "src/orders.ts"
           ],
-          "inputTokens": 64470,
-          "outputTokens": 676,
+          "inputTokens": 64516,
+          "outputTokens": 684,
           "memoryTokens": 2030,
           "memoryToolTokens": 2639,
           "memoryCalls": 0,
-          "cacheRead": 54575,
-          "cacheWrite": 9895,
-          "costUsd": 0.063618,
+          "cacheRead": 54611,
+          "cacheWrite": 9905,
+          "costUsd": 0.063787,
           "mistakes": [],
           "checks": {
             "passed": 4,
@@ -2458,6 +3152,7 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "blind",
           "title": "Refund requests from the refund policy PDF, which the owner also keeps in Vector's memory",
           "exitCode": 0,
@@ -2472,7 +3167,7 @@
             "- [rxr5y8z2hc35e] requirement · Refund policy p.1 §3: requestRefund MUST return the first refund for a repeated key instead of creating another.",
             "- [rp2md96wc7xve] requirement · Refund policy p.2 §4: Every refund MUST send the customer one email."
           ],
-          "wallMs": 4842
+          "wallMs": 3091
         },
         {
           "task": "t05-event-names",
@@ -2485,14 +3180,14 @@
             "src/invoice.ts",
             "test/invoice.test.ts"
           ],
-          "inputTokens": 64310,
-          "outputTokens": 327,
+          "inputTokens": 64380,
+          "outputTokens": 335,
           "memoryTokens": 664,
           "memoryToolTokens": 3016,
           "memoryCalls": 1,
-          "cacheRead": 55826,
-          "cacheWrite": 8484,
-          "costUsd": 0.053469,
+          "cacheRead": 55884,
+          "cacheWrite": 8496,
+          "costUsd": 0.053651,
           "mistakes": [],
           "checks": {
             "passed": 3,
@@ -2501,6 +3196,7 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "blind",
           "title": "The user states the event naming convention",
           "exitCode": 0,
@@ -2510,7 +3206,7 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [],
-          "wallMs": 4071
+          "wallMs": 3265
         },
         {
           "task": "t06-flaky-session-test",
@@ -2526,14 +3222,14 @@
             "package.json",
             "ci/slow-clock.ts"
           ],
-          "inputTokens": 103819,
-          "outputTokens": 476,
+          "inputTokens": 104001,
+          "outputTokens": 488,
           "memoryTokens": 1788,
           "memoryToolTokens": 4524,
           "memoryCalls": 1,
-          "cacheRead": 94331,
-          "cacheWrite": 9488,
-          "costUsd": 0.071019,
+          "cacheRead": 94491,
+          "cacheWrite": 9510,
+          "costUsd": 0.07133,
           "mistakes": [],
           "checks": {
             "passed": 3,
@@ -2542,6 +3238,7 @@
           },
           "success": true,
           "delivered": [],
+          "brought": [],
           "arm": "blind",
           "title": "A test that fails one CI run in five; the fix is an injected clock",
           "exitCode": 0,
@@ -2551,9 +3248,9 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [mkkmth] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check."
+            "- [m3dfmj] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check."
           ],
-          "wallMs": 5052
+          "wallMs": 4139
         },
         {
           "task": "t07-order-discount",
@@ -2566,19 +3263,20 @@
             "src/orders.ts",
             "test/orders.test.ts"
           ],
-          "inputTokens": 56495,
-          "outputTokens": 386,
+          "inputTokens": 56553,
+          "outputTokens": 394,
           "memoryTokens": 1435,
           "memoryToolTokens": 2639,
           "memoryCalls": 0,
-          "cacheRead": 48020,
-          "cacheWrite": 8475,
-          "costUsd": 0.051977,
+          "cacheRead": 48066,
+          "cacheWrite": 8487,
+          "costUsd": 0.052156,
           "mistakes": [
             {
               "fact": "cents",
               "how": "the hidden check fact:cents failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -2592,6 +3290,12 @@
           "delivered": [
             "cents"
           ],
+          "brought": [
+            {
+              "fact": "cents",
+              "line": "- [mjd8ta] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a ce"
+            }
+          ],
           "arm": "blind",
           "title": "A discount on orders: money arithmetic",
           "exitCode": 0,
@@ -2601,10 +3305,10 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [mgnzpt] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
-            "- [m51b6w] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
+            "- [mjd8ta] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
+            "- [mycc2c] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
           ],
-          "wallMs": 3784
+          "wallMs": 3477
         },
         {
           "task": "t08-csv-export",
@@ -2616,19 +3320,20 @@
           "read": [
             "CONTRIBUTING.md"
           ],
-          "inputTokens": 89778,
-          "outputTokens": 424,
+          "inputTokens": 89832,
+          "outputTokens": 430,
           "memoryTokens": 2134,
           "memoryToolTokens": 4147,
           "memoryCalls": 1,
-          "cacheRead": 81068,
-          "cacheWrite": 8710,
-          "costUsd": 0.063345,
+          "cacheRead": 81114,
+          "cacheWrite": 8718,
+          "costUsd": 0.063477,
           "mistakes": [
             {
               "fact": "pnpm",
               "how": "ran `npm install tiny-csv`",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -2640,6 +3345,12 @@
           "delivered": [
             "pnpm"
           ],
+          "brought": [
+            {
+              "fact": "pnpm",
+              "line": "- [mpcvg1] preference: We use pnpm in this repository, never npm: add dependencies with pnpm add and run scripts with pnpm."
+            }
+          ],
           "arm": "blind",
           "title": "A CSV export on a new dependency",
           "exitCode": 0,
@@ -2649,10 +3360,10 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [mn2kne] preference: We use pnpm in this repository, never npm: add dependencies with pnpm add and run scripts with pnpm.",
-            "- [m51b6w] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
+            "- [mpcvg1] preference: We use pnpm in this repository, never npm: add dependencies with pnpm add and run scripts with pnpm.",
+            "- [mycc2c] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
           ],
-          "wallMs": 6244
+          "wallMs": 4402
         },
         {
           "task": "t09-refunds-http",
@@ -2665,24 +3376,26 @@
             "src/routes.ts",
             "src/refunds.ts"
           ],
-          "inputTokens": 95080,
-          "outputTokens": 549,
-          "memoryTokens": 3234,
+          "inputTokens": 95933,
+          "outputTokens": 559,
+          "memoryTokens": 3871,
           "memoryToolTokens": 4147,
           "memoryCalls": 1,
-          "cacheRead": 85794,
-          "cacheWrite": 9286,
-          "costUsd": 0.068796,
+          "cacheRead": 86560,
+          "cacheWrite": 9373,
+          "costUsd": 0.069503,
           "mistakes": [
             {
               "fact": "routes",
               "how": "the check failed on a stale src/generated/routes.gen.ts",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             },
             {
               "fact": "idempotency",
               "how": "the hidden check fact:idempotency failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -2694,7 +3407,18 @@
           },
           "success": false,
           "delivered": [
-            "routes"
+            "routes",
+            "idempotency"
+          ],
+          "brought": [
+            {
+              "fact": "routes",
+              "line": "- [m3dfmj] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check."
+            },
+            {
+              "fact": "idempotency",
+              "line": "- [rapt6fsw8m41t] requirement · Refund policy p.1 §3: POST /refunds MUST reject a request without an Idempotency-Key header with status 400."
+            }
           ],
           "arm": "blind",
           "title": "Refunds over HTTP: a route, and a header the spec requires",
@@ -2705,12 +3429,13 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [mkkmth] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check.",
+            "- [m3dfmj] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check.",
             "- [pfgdd5qgy84sc] passage · Refund policy p.1 §1: This spec covers refunds of captured card orders, through requestRefund and the refunds API.",
             "- [rc711dmrvtxvj] requirement · Refund policy p.1 §2: A request after the window MUST be rejected with the reason window_closed.",
+            "- [rapt6fsw8m41t] requirement · Refund policy p.1 §3: POST /refunds MUST reject a request without an Idempotency-Key header with status 400.",
             "- [rxr5y8z2hc35e] requirement · Refund policy p.1 §3: requestRefund MUST return the first refund for a repeated key instead of creating another."
           ],
-          "wallMs": 5753
+          "wallMs": 4249
         },
         {
           "task": "t10-refund-email",
@@ -2723,24 +3448,26 @@
             "src/refunds.ts",
             "src/events.ts"
           ],
-          "inputTokens": 59670,
-          "outputTokens": 457,
-          "memoryTokens": 2674,
+          "inputTokens": 60082,
+          "outputTokens": 465,
+          "memoryTokens": 2962,
           "memoryToolTokens": 2639,
           "memoryCalls": 0,
-          "cacheRead": 50670,
-          "cacheWrite": 9000,
-          "costUsd": 0.055806,
+          "cacheRead": 51011,
+          "cacheWrite": 9071,
+          "costUsd": 0.056294,
           "mistakes": [
             {
               "fact": "email",
               "how": "the hidden check fact:email failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             },
             {
               "fact": "events",
               "how": "the hidden check fact:events failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -2756,6 +3483,16 @@
             "email",
             "events"
           ],
+          "brought": [
+            {
+              "fact": "email",
+              "line": "- [rbj42n5awxf2t] requirement · Refund policy p.2 §4: The refund email subject MUST be: Your refund for order ‹order id>."
+            },
+            {
+              "fact": "events",
+              "line": "- [m43msw] decision: Our event names are lowercase <domain>.<past-tense verb>, such as invoice.paid, never upper snake case like INVOICE_PAID or camelCase, in t"
+            }
+          ],
           "arm": "blind",
           "title": "The refund email: a subject the spec fixes, and a new event",
           "exitCode": 0,
@@ -2765,14 +3502,14 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [mwz7n4] decision: Our event names are lowercase <domain>.<past-tense verb>, such as invoice.paid, never upper snake case like INVOICE_PAID or camelCase, in the events we emit.",
-            "- [mgnzpt] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
-            "- [m51b6w] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
+            "- [m43msw] decision: Our event names are lowercase <domain>.<past-tense verb>, such as invoice.paid, never upper snake case like INVOICE_PAID or camelCase, in the events we emit.",
+            "- [mjd8ta] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
+            "- [mycc2c] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
             "- [pfgdd5qgy84sc] passage · Refund policy p.1 §1: This spec covers refunds of captured card orders, through requestRefund and the refunds API.",
             "- [rbj42n5awxf2t] requirement · Refund policy p.2 §4: The refund email subject MUST be: Your refund for order ‹order id>.",
             "- [rp2md96wc7xve] requirement · Refund policy p.2 §4: Every refund MUST send the customer one email."
           ],
-          "wallMs": 3984
+          "wallMs": 3172
         },
         {
           "task": "t11-reset-link-expiry",
@@ -2782,19 +3519,20 @@
           "reads": 0,
           "rereads": 0,
           "read": [],
-          "inputTokens": 39081,
-          "outputTokens": 317,
+          "inputTokens": 39095,
+          "outputTokens": 321,
           "memoryTokens": 815,
           "memoryToolTokens": 1885,
           "memoryCalls": 0,
-          "cacheRead": 31038,
-          "cacheWrite": 8043,
-          "costUsd": 0.044228,
+          "cacheRead": 31048,
+          "cacheWrite": 8047,
+          "costUsd": 0.044307,
           "mistakes": [
             {
               "fact": "clock",
               "how": "the hidden check fact:clock failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -2808,6 +3546,12 @@
           "delivered": [
             "clock"
           ],
+          "brought": [
+            {
+              "fact": "clock",
+              "line": "- [mycc2c] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pn"
+            }
+          ],
           "arm": "blind",
           "title": "Password reset links that expire: tests that depend on time",
           "exitCode": 0,
@@ -2817,9 +3561,9 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [m51b6w] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
+            "- [mycc2c] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
           ],
-          "wallMs": 3442
+          "wallMs": 2718
         },
         {
           "task": "t12-shipping-fee",
@@ -2832,14 +3576,14 @@
             "src/orders.ts",
             "test/orders.test.ts"
           ],
-          "inputTokens": 57592,
-          "outputTokens": 514,
+          "inputTokens": 57650,
+          "outputTokens": 522,
           "memoryTokens": 1435,
           "memoryToolTokens": 2639,
           "memoryCalls": 0,
-          "cacheRead": 48871,
-          "cacheWrite": 8721,
-          "costUsd": 0.055076,
+          "cacheRead": 48917,
+          "cacheWrite": 8733,
+          "costUsd": 0.055254,
           "mistakes": [],
           "checks": {
             "passed": 3,
@@ -2850,6 +3594,12 @@
           "delivered": [
             "cents"
           ],
+          "brought": [
+            {
+              "fact": "cents",
+              "line": "- [mjd8ta] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a ce"
+            }
+          ],
           "arm": "blind",
           "title": "A shipping fee: money arithmetic again",
           "exitCode": 0,
@@ -2859,10 +3609,10 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [mgnzpt] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
-            "- [m51b6w] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
+            "- [mjd8ta] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
+            "- [mycc2c] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci)."
           ],
-          "wallMs": 3975
+          "wallMs": 3194
         },
         {
           "task": "t13-credit-notes",
@@ -2875,24 +3625,26 @@
             "src/routes.ts",
             "src/events.ts"
           ],
-          "inputTokens": 91518,
-          "outputTokens": 461,
+          "inputTokens": 91635,
+          "outputTokens": 471,
           "memoryTokens": 2123,
           "memoryToolTokens": 4147,
           "memoryCalls": 1,
-          "cacheRead": 82630,
-          "cacheWrite": 8888,
-          "costUsd": 0.065036,
+          "cacheRead": 82734,
+          "cacheWrite": 8901,
+          "costUsd": 0.065264,
           "mistakes": [
             {
               "fact": "routes",
               "how": "the check failed on a stale src/generated/routes.gen.ts",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             },
             {
               "fact": "events",
               "how": "the hidden check fact:events failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -2907,6 +3659,16 @@
             "routes",
             "events"
           ],
+          "brought": [
+            {
+              "fact": "routes",
+              "line": "- [m3dfmj] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check."
+            },
+            {
+              "fact": "events",
+              "line": "- [m43msw] decision: Our event names are lowercase <domain>.<past-tense verb>, such as invoice.paid, never upper snake case like INVOICE_PAID or camelCase, in t"
+            }
+          ],
           "arm": "blind",
           "title": "Credit notes: a new route and a new event in a new module",
           "exitCode": 0,
@@ -2916,10 +3678,10 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [mwz7n4] decision: Our event names are lowercase <domain>.<past-tense verb>, such as invoice.paid, never upper snake case like INVOICE_PAID or camelCase, in the events we emit.",
-            "- [mkkmth] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check."
+            "- [m43msw] decision: Our event names are lowercase <domain>.<past-tense verb>, such as invoice.paid, never upper snake case like INVOICE_PAID or camelCase, in the events we emit.",
+            "- [m3dfmj] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check."
           ],
-          "wallMs": 5852
+          "wallMs": 4464
         },
         {
           "task": "t14-pdf-dependency",
@@ -2932,19 +3694,20 @@
             "src/invoice-pdf.ts",
             "CONTRIBUTING.md"
           ],
-          "inputTokens": 99216,
-          "outputTokens": 410,
+          "inputTokens": 99314,
+          "outputTokens": 418,
           "memoryTokens": 2328,
           "memoryToolTokens": 4524,
           "memoryCalls": 1,
-          "cacheRead": 90342,
-          "cacheWrite": 8874,
-          "costUsd": 0.066531,
+          "cacheRead": 90428,
+          "cacheWrite": 8886,
+          "costUsd": 0.066721,
           "mistakes": [
             {
               "fact": "pnpm",
               "how": "ran `npm install tiny-pdf`",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -2956,6 +3719,12 @@
           "delivered": [
             "pnpm"
           ],
+          "brought": [
+            {
+              "fact": "pnpm",
+              "line": "- [mpcvg1] preference: We use pnpm in this repository, never npm: add dependencies with pnpm add and run scripts with pnpm."
+            }
+          ],
           "arm": "blind",
           "title": "Real invoice PDFs on a new dependency",
           "exitCode": 0,
@@ -2965,10 +3734,10 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [m51b6w] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
-            "- [mn2kne] preference: We use pnpm in this repository, never npm: add dependencies with pnpm add and run scripts with pnpm."
+            "- [mycc2c] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
+            "- [mpcvg1] preference: We use pnpm in this repository, never npm: add dependencies with pnpm add and run scripts with pnpm."
           ],
-          "wallMs": 5145
+          "wallMs": 4682
         },
         {
           "task": "t15-refund-deadline",
@@ -2981,19 +3750,20 @@
             "src/invoice-pdf.ts",
             "src/orders.ts"
           ],
-          "inputTokens": 58324,
-          "outputTokens": 385,
+          "inputTokens": 58382,
+          "outputTokens": 393,
           "memoryTokens": 2597,
           "memoryToolTokens": 2639,
           "memoryCalls": 0,
-          "cacheRead": 49564,
-          "cacheWrite": 8760,
-          "costUsd": 0.053494,
+          "cacheRead": 49610,
+          "cacheWrite": 8772,
+          "costUsd": 0.053672,
           "mistakes": [
             {
               "fact": "window",
               "how": "the hidden check fact:window failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -3007,6 +3777,12 @@
           "delivered": [
             "window"
           ],
+          "brought": [
+            {
+              "fact": "window",
+              "line": "- [rtrc1w45jqejn] constraint · Refund policy p.1 §2: Refunds are allowed for at most 14 days after capture, as REFUND_WINDOW_DAYS sets."
+            }
+          ],
           "arm": "blind",
           "title": "The refund deadline on the invoice: a value only the spec gives",
           "exitCode": 0,
@@ -3016,14 +3792,14 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [mgnzpt] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
-            "- [m51b6w] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
+            "- [mjd8ta] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
+            "- [mycc2c] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
             "- [pfgdd5qgy84sc] passage · Refund policy p.1 §1: This spec covers refunds of captured card orders, through requestRefund and the refunds API.",
             "- [rtrc1w45jqejn] constraint · Refund policy p.1 §2: Refunds are allowed for at most 14 days after capture, as REFUND_WINDOW_DAYS sets.",
             "- [rbj42n5awxf2t] requirement · Refund policy p.2 §4: The refund email subject MUST be: Your refund for order ‹order id>.",
             "- [rp2md96wc7xve] requirement · Refund policy p.2 §4: Every refund MUST send the customer one email."
           ],
-          "wallMs": 3287
+          "wallMs": 2953
         },
         {
           "task": "t16-late-fee-grace",
@@ -3036,19 +3812,20 @@
             "src/invoice.ts",
             "test/invoice.test.ts"
           ],
-          "inputTokens": 57431,
-          "outputTokens": 457,
+          "inputTokens": 57489,
+          "outputTokens": 465,
           "memoryTokens": 1435,
           "memoryToolTokens": 2639,
           "memoryCalls": 0,
-          "cacheRead": 48765,
-          "cacheWrite": 8666,
-          "costUsd": 0.053983,
+          "cacheRead": 48811,
+          "cacheWrite": 8678,
+          "costUsd": 0.05416,
           "mistakes": [
             {
               "fact": "clock",
               "how": "the hidden check fact:clock failed",
-              "repeated": true
+              "repeated": true,
+              "stale": false
             }
           ],
           "checks": {
@@ -3062,6 +3839,12 @@
           "delivered": [
             "clock"
           ],
+          "brought": [
+            {
+              "fact": "clock",
+              "line": "- [mycc2c] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pn"
+            }
+          ],
           "arm": "blind",
           "title": "A grace period for late fees: a boundary test that depends on time",
           "exitCode": 0,
@@ -3071,10 +3854,173 @@
             ".local/share/vector/brain/brain-local.db-wal"
           ],
           "recall": [
-            "- [m51b6w] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
-            "- [mgnzpt] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off."
+            "- [mycc2c] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
+            "- [mjd8ta] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off."
           ],
-          "wallMs": 2547
+          "wallMs": 2761
+        },
+        {
+          "task": "t17-refund-window-21",
+          "week": 7,
+          "requests": 12,
+          "steps": 11,
+          "reads": 4,
+          "rereads": 2,
+          "read": [
+            "src/refunds.ts",
+            "test/refunds.test.ts",
+            "src/invoice-pdf.ts",
+            "test/refund-deadline.test.ts"
+          ],
+          "inputTokens": 109743,
+          "outputTokens": 657,
+          "memoryTokens": 5978,
+          "memoryToolTokens": 4524,
+          "memoryCalls": 1,
+          "cacheRead": 99759,
+          "cacheWrite": 9984,
+          "costUsd": 0.077222,
+          "mistakes": [],
+          "checks": {
+            "passed": 3,
+            "total": 3,
+            "failed": []
+          },
+          "success": true,
+          "delivered": [],
+          "brought": [],
+          "arm": "blind",
+          "title": "The user extends the refund window the spec PDF gives, and says the PDF is out of date",
+          "exitCode": 0,
+          "brainFiles": [
+            ".local/share/vector/brain/brain-local.db",
+            ".local/share/vector/brain/brain-local.db-shm",
+            ".local/share/vector/brain/brain-local.db-wal"
+          ],
+          "recall": [
+            "- [mycc2c] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
+            "- [mjd8ta] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
+            "- [pfgdd5qgy84sc] passage · Refund policy p.1 §1: This spec covers refunds of captured card orders, through requestRefund and the refunds API.",
+            "- [rtrc1w45jqejn] constraint · Refund policy p.1 §2: Refunds are allowed for at most 14 days after capture, as REFUND_WINDOW_DAYS sets.",
+            "- [rxr5y8z2hc35e] requirement · Refund policy p.1 §3: requestRefund MUST return the first refund for a repeated key instead of creating another.",
+            "- [rp2md96wc7xve] requirement · Refund policy p.2 §4: Every refund MUST send the customer one email."
+          ],
+          "wallMs": 3541
+        },
+        {
+          "task": "t18-refund-reminder",
+          "week": 7,
+          "requests": 7,
+          "steps": 6,
+          "reads": 2,
+          "rereads": 1,
+          "read": [
+            "src/orders.ts",
+            "src/notify/refund-email.ts"
+          ],
+          "inputTokens": 59212,
+          "outputTokens": 353,
+          "memoryTokens": 3017,
+          "memoryToolTokens": 2639,
+          "memoryCalls": 0,
+          "cacheRead": 50335,
+          "cacheWrite": 8877,
+          "costUsd": 0.053685,
+          "mistakes": [
+            {
+              "fact": "window21",
+              "how": "the hidden check fact:window21 failed",
+              "repeated": true,
+              "stale": false
+            }
+          ],
+          "checks": {
+            "passed": 3,
+            "total": 4,
+            "failed": [
+              "fact:window21"
+            ]
+          },
+          "success": false,
+          "delivered": [
+            "window21"
+          ],
+          "brought": [
+            {
+              "fact": "window21",
+              "line": "- [mpcnf0] decision: The refund window is 21 days after capture since 16 November 2026 (finance extended it): REFUND_WINDOW_DAYS in src/refunds.ts. The refund p"
+            }
+          ],
+          "arm": "blind",
+          "title": "A refund reminder: the window again, where the spec PDF the brain keeps is out of date",
+          "exitCode": 0,
+          "brainFiles": [
+            ".local/share/vector/brain/brain-local.db",
+            ".local/share/vector/brain/brain-local.db-shm",
+            ".local/share/vector/brain/brain-local.db-wal"
+          ],
+          "recall": [
+            "- [mycc2c] lesson: Tests that depend on time must use createClock from src/clock.ts, not Date.now or sleeps: real time made test/session.test.ts flaky on CI (pnpm test:ci).",
+            "- [mpcnf0] decision: The refund window is 21 days after capture since 16 November 2026 (finance extended it): REFUND_WINDOW_DAYS in src/refunds.ts. The refund policy PDF still says 14 days and is out of date on this.",
+            "- [mjd8ta] decision: Money amounts (orders, invoices, refunds and fees) are integer cents, never decimal dollars, because float rounding put invoice totals a cent off.",
+            "- [pfgdd5qgy84sc] passage · Refund policy p.1 §1: This spec covers refunds of captured card orders, through requestRefund and the refunds API.",
+            "- [rtrc1w45jqejn] constraint · Refund policy p.1 §2: Refunds are allowed for at most 14 days after capture, as REFUND_WINDOW_DAYS sets. (code says 21 days)",
+            "- [rbj42n5awxf2t] requirement · Refund policy p.2 §4: The refund email subject MUST be: Your refund for order ‹order id>.",
+            "- [rp2md96wc7xve] requirement · Refund policy p.2 §4: Every refund MUST send the customer one email."
+          ],
+          "wallMs": 5788
+        },
+        {
+          "task": "t19-refund-lookup",
+          "week": 7,
+          "requests": 10,
+          "steps": 9,
+          "reads": 3,
+          "rereads": 2,
+          "read": [
+            "src/routes.ts",
+            "src/http/refunds.ts",
+            "src/refunds.ts"
+          ],
+          "inputTokens": 89104,
+          "outputTokens": 684,
+          "memoryTokens": 4407,
+          "memoryToolTokens": 3770,
+          "memoryCalls": 0,
+          "cacheRead": 79385,
+          "cacheWrite": 9719,
+          "costUsd": 0.070522,
+          "mistakes": [],
+          "checks": {
+            "passed": 4,
+            "total": 4,
+            "failed": []
+          },
+          "success": true,
+          "delivered": [],
+          "brought": [
+            {
+              "fact": "routes",
+              "line": "- [m3dfmj] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check."
+            }
+          ],
+          "arm": "blind",
+          "title": "A new route after a teammate made the route table generate itself, which nobody mentions",
+          "exitCode": 0,
+          "brainFiles": [
+            ".local/share/vector/brain/brain-local.db",
+            ".local/share/vector/brain/brain-local.db-shm",
+            ".local/share/vector/brain/brain-local.db-wal"
+          ],
+          "recall": [
+            "- [m3dfmj] lesson: After changing src/routes.ts run pnpm gen: a stale src/generated/routes.gen.ts fails the check.",
+            "- [mpcnf0] decision: The refund window is 21 days after capture since 16 November 2026 (finance extended it): REFUND_WINDOW_DAYS in src/refunds.ts. The refund policy PDF still says 14 days and is out of date on this.",
+            "- [pfgdd5qgy84sc] passage · Refund policy p.1 §1: This spec covers refunds of captured card orders, through requestRefund and the refunds API.",
+            "- [rc711dmrvtxvj] requirement · Refund policy p.1 §2: A request after the window MUST be rejected with the reason window_closed.",
+            "- [rtrc1w45jqejn] constraint · Refund policy p.1 §2: Refunds are allowed for at most 14 days after capture, as REFUND_WINDOW_DAYS sets. (code says 21 days)",
+            "- [rxr5y8z2hc35e] requirement · Refund policy p.1 §3: requestRefund MUST return the first refund for a repeated key instead of creating another."
+          ],
+          "wallMs": 6363
         }
       ]
     }
