@@ -338,6 +338,8 @@ describe("BrainKnowledge.add", () => {
           Effect.sync(() => calls.push(input.document)).pipe(Effect.andThen(Effect.die(new Error("the store broke")))),
         probe: () => Effect.die("not used"),
         status: () => Effect.succeed({ mode: "worker" as const, threads: 0 }),
+        embed: () => Effect.die("not used"),
+        loaded: () => Effect.succeed(false),
       }),
     )
     const result = await withKnowledge(
@@ -371,6 +373,8 @@ describe("BrainKnowledge.add", () => {
           ),
         probe: () => Effect.die("not used"),
         status: () => Effect.succeed({ mode: "worker" as const, threads: 0 }),
+        embed: () => Effect.die("not used"),
+        loaded: () => Effect.succeed(false),
       }),
     )
     const result = await withKnowledge(

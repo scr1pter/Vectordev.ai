@@ -35,7 +35,49 @@ export const Probe = Schema.Struct({
   limits: LimitsName,
 })
 
-export const Request = Schema.Union([Ping, Extract, Probe])
+/** How a model turns text into a vector, from its manifest. */
+export const EmbedSettings = Schema.Struct({
+  dims: Schema.Finite,
+  pooling: Schema.Literals(["cls", "mean"]),
+  maxTokens: Schema.Finite,
+  queryTokens: Schema.Finite,
+  query: Schema.String,
+})
+export type EmbedSettings = typeof EmbedSettings.Type
+
+export const Role = Schema.Literals(["query", "passage"])
+
+/**
+ * Load the local search model from its files' bytes and ONNX Runtime's wasm, then embed the canary sentences for the
+ * host to compare with their pinned vectors. `key` names the model, revision and graph.
+ */
+export const Load = Schema.Struct({
+  id: Schema.Finite,
+  type: Schema.Literal("load"),
+  key: Schema.String,
+  wasm: Schema.Uint8Array,
+  model: Schema.Uint8Array,
+  /** The graph's weights when they are a file of their own, under the name the graph gives that file. */
+  data: Schema.optional(Schema.Uint8Array),
+  dataName: Schema.optional(Schema.String),
+  tokenizer: Schema.String,
+  config: Schema.String,
+  settings: EmbedSettings,
+  canaries: Schema.Array(Schema.Struct({ text: Schema.String, role: Role, vector: Schema.Array(Schema.Finite) })),
+})
+export type Load = typeof Load.Type
+
+/** Embed texts with the loaded model. */
+export const Embed = Schema.Struct({
+  id: Schema.Finite,
+  type: Schema.Literal("embed"),
+  key: Schema.String,
+  texts: Schema.Array(Schema.String),
+  role: Role,
+})
+export type Embed = typeof Embed.Type
+
+export const Request = Schema.Union([Ping, Extract, Probe, Load, Embed])
 export type Request = typeof Request.Type
 
 const Hold = Schema.Literals(["hidden-text", "hidden-unicode", "instruction-like"])
@@ -126,6 +168,21 @@ export const Response = Schema.Union([
   Schema.Struct({ id: Schema.Finite, type: Schema.Literal("extracted"), result: Structured }),
   Schema.Struct({ id: Schema.Finite, type: Schema.Literal("probed"), result: Probed }),
   Schema.Struct({ id: Schema.Finite, type: Schema.Literal("refused"), reason: Refusal, message: Schema.String }),
+  /** The canaries' cosines against their pinned vectors, in order, and how long loading took. */
+  Schema.Struct({
+    id: Schema.Finite,
+    type: Schema.Literal("loaded"),
+    cosines: Schema.Array(Schema.Finite),
+    ms: Schema.Finite,
+    dims: Schema.Finite,
+  }),
+  /** One vector of `dims` floats per text, one after another. */
+  Schema.Struct({
+    id: Schema.Finite,
+    type: Schema.Literal("embedded"),
+    vectors: Schema.instanceOf(Float32Array),
+    dims: Schema.Finite,
+  }),
   Schema.Struct({ id: Schema.Finite, type: Schema.Literal("failed"), message: Schema.String }),
 ])
 export type Response = typeof Response.Type

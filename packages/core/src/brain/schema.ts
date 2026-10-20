@@ -431,10 +431,38 @@ export type ReviewItem = typeof ReviewItem.Type
 export const ModelState = Schema.Literals(["absent", "downloading", "verifying", "ready", "failed"])
 export type ModelState = typeof ModelState.Type
 
+/** Which graph of a model: int8, or the full-precision one offered when int8 fails its check on this computer. */
+export const ModelVariant = Schema.Literals(["int8", "fp32"])
+export type ModelVariant = typeof ModelVariant.Type
+
+/** A model Vector can download, as Settings and the CLI describe it before asking. */
+export const ModelOption = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  description: Schema.String,
+  license: Schema.String,
+  /** Who made it. */
+  owner: Schema.String,
+  /** The model's page at the revision its files are pinned to. */
+  source: Schema.String,
+  revision: Schema.String,
+  /** Bytes the int8 download takes. */
+  bytes: Schema.Finite,
+  /** Bytes the full-precision graph takes, for a model that has one. */
+  fallback: Schema.optional(Schema.Finite),
+  /** sha256 of its int8 graph. */
+  sha256: Schema.String,
+  /** Set for a model offered only on request, saying what is not yet checked. */
+  preview: Schema.optional(Schema.String),
+  installed: Schema.Boolean,
+}).annotate({ identifier: "MemoryModelOption" })
+export type ModelOption = typeof ModelOption.Type
+
 export const ModelStatus = Schema.Struct({
   state: ModelState,
   /** The model's id in Vector's manifest. */
   model: Schema.optional(Schema.String),
+  variant: Schema.optional(ModelVariant),
   /** From 0 to 1 while downloading or verifying. */
   progress: Schema.optional(Schema.Finite),
   /** Bytes received, or on disk once ready. */
@@ -442,5 +470,25 @@ export const ModelStatus = Schema.Struct({
   /** Bytes the manifest expects. */
   total: Schema.optional(Schema.Finite),
   error: Schema.optional(Schema.String),
+  /** Embedding in the background is held until the user resumes it. */
+  paused: Schema.optional(Schema.Boolean),
+  /** The int8 graph failed its check here, so the full-precision one is offered. */
+  fallback: Schema.optional(Schema.Boolean),
+  /** False where downloads are turned off (VECTOR_BRAIN_EMBED=off); installing from a folder still works. */
+  downloads: Schema.optional(Schema.Boolean),
+  /** Where its files came from. */
+  source: Schema.optional(Schema.Literals(["mirror", "huggingface", "folder"])),
+  /** The last load's check: its lowest canary cosine against the least it needed, or a check by ranking. */
+  check: Schema.optional(
+    Schema.Struct({ lowest: Schema.Finite, needed: Schema.Finite, by: Schema.Literals(["vectors", "ranking"]) }),
+  ),
+  /** Every model Vector can download. */
+  options: Schema.optional(Schema.Array(ModelOption)),
+  /** Passages and records of this repository's documents embedded with the model in use, of all it could embed. */
+  embedded: Schema.optional(Schema.Struct({ done: Schema.Finite, total: Schema.Finite })),
+  /** Where the model runs: the background reader, or nowhere when documents are read on the main thread. */
+  worker: Schema.optional(
+    Schema.Struct({ mode: Schema.Literals(["worker", "in-process"]), reason: Schema.optional(Schema.String) }),
+  ),
 }).annotate({ identifier: "MemoryModelStatus" })
 export type ModelStatus = typeof ModelStatus.Type

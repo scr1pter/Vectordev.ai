@@ -1,5 +1,6 @@
 // The knowledge store over a brain in memory (or a file two services share), with a temporary repository, config and
-// data folder, so nothing touches the user's own. Documents are read on the main thread unless a test gives a worker.
+// data folder, so nothing touches the user's own. Documents are read on the main thread unless a test gives a worker,
+// and there is no search model unless a test gives one (the hash embedder, or the fixture model installed).
 
 import { execFileSync } from "node:child_process"
 import fs from "node:fs/promises"
@@ -7,6 +8,7 @@ import path from "node:path"
 import { Effect, Layer } from "effect"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainDatabase } from "@vectordevai/core/brain/database"
+import { BrainEmbed } from "@vectordevai/core/brain/embed"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { BrainWorkerEntry } from "@vectordevai/core/brain/worker/entry"
 import { BrainWorker } from "@vectordevai/core/brain/worker/host"
@@ -15,6 +17,11 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { tmpdir } from "../../fixture/tmpdir"
 
+/** A search model layer, or one to build over the test's data folder (its models live in `<data>/models/embedding`). */
+export type Embed =
+  | Layer.Layer<BrainEmbed.Service, never, BrainWorker.Service | Global.Service>
+  | ((data: string) => Layer.Layer<BrainEmbed.Service, never, BrainWorker.Service | Global.Service>)
+
 export type Setup = {
   readonly knowledge: BrainKnowledge.Interface
   readonly brain: Brain.Interface
@@ -22,6 +29,7 @@ export type Setup = {
   readonly place: Brain.Place
   readonly root: string
   readonly dir: string
+  readonly embed: BrainEmbed.Interface
 }
 
 export async function withKnowledge<A, E>(
@@ -30,6 +38,8 @@ export async function withKnowledge<A, E>(
     readonly files?: Record<string, string | Uint8Array>
     readonly held?: boolean
     readonly worker?: Layer.Layer<BrainWorker.Service>
+    /** The search model; none by default. Given a function, it is built over the test's data folder and worker. */
+    readonly embed?: Embed
     /** Make the repository a git working tree, which documents are linked to the code of. */
     readonly git?: boolean
     /** Ripgrep patterns links were looked for with, as they are run. */
@@ -52,6 +62,7 @@ export async function withKnowledge<A, E>(
       file: ":memory:",
       dir: tmp.path,
       worker: options.worker ?? BrainWorker.layerInline,
+      ...(options.embed ? { embed: options.embed } : {}),
       ...(options.greps ? { greps: options.greps } : {}),
       ...(options.graph ? { graph: options.graph } : {}),
     }),
@@ -78,6 +89,7 @@ export function services<A, E>(
     readonly file: string
     readonly dir: string
     readonly worker: Layer.Layer<BrainWorker.Service>
+    readonly embed?: Embed
     readonly owner?: string
     readonly greps?: string[]
     readonly graph?: BrainKnowledge.Options["graph"]
@@ -96,11 +108,14 @@ export function services<A, E>(
         }),
       ).pipe(Layer.provide(LayerNode.compile(Ripgrep.node)))
     : LayerNode.compile(Ripgrep.node)
+  const embed =
+    typeof options.embed === "function" ? options.embed(path.join(options.dir, "data")) : (options.embed ?? BrainEmbed.layerOff)
   const layer = BrainKnowledge.layerWith({
     ...(options.owner ? { owner: options.owner } : {}),
     ...(options.graph ? { graph: options.graph } : {}),
   }).pipe(
     Layer.provide(ripgrep),
+    Layer.provideMerge(embed),
     Layer.provideMerge(Brain.layer),
     Layer.provideMerge(options.worker),
     Layer.provideMerge(BrainDatabase.layerFor(options.file).pipe(Layer.fresh)),
@@ -115,7 +130,8 @@ export function services<A, E>(
     const knowledge = yield* BrainKnowledge.Service
     const brain = yield* Brain.Service
     const database = yield* BrainDatabase.Service
-    return yield* body({ knowledge, brain, db: database.db, place, root: place.root, dir: options.dir })
+    const model = yield* BrainEmbed.Service
+    return yield* body({ knowledge, brain, db: database.db, place, root: place.root, dir: options.dir, embed: model })
   }).pipe(Effect.provide(layer))
 }
 
@@ -136,6 +152,8 @@ export function countingWorker(calls: string[], gate?: Promise<unknown>) {
         }),
       probe: () => Effect.die("not used"),
       status: () => Effect.succeed({ mode: "worker" as const, threads: 0 }),
+      embed: () => Effect.die("not used"),
+      loaded: () => Effect.succeed(false),
     }),
   )
 }

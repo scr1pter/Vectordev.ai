@@ -9,6 +9,7 @@ import path from "node:path"
 import { Effect, Layer } from "effect"
 import { Brain } from "../src/brain/brain"
 import { BrainDatabase } from "../src/brain/database"
+import { BrainEmbed } from "../src/brain/embed"
 import { BrainLimits } from "../src/brain/document/limits"
 import { BrainDocument } from "../src/brain/document/read"
 import { BrainExtract } from "../src/brain/extract"
@@ -57,6 +58,7 @@ const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vector-bench-knowledge-"))
 const file = path.join(dir, "brain.db")
 const layer = BrainKnowledge.layer.pipe(
   Layer.provide(LayerNode.compile(Ripgrep.node)),
+  Layer.provide(BrainEmbed.layerOff),
   Layer.provideMerge(Brain.layer),
   Layer.provideMerge(
     BrainWorker.layer.pipe(
@@ -136,6 +138,8 @@ const instant = Layer.succeed(
     extract: () => Effect.succeed({ type: "extracted" as const, structured: answer.result }),
     probe: () => Effect.die("not used"),
     status: () => Effect.succeed({ mode: "worker" as const, threads: 0 }),
+    embed: () => Effect.die("not used"),
+    loaded: () => Effect.succeed(false),
   }),
 )
 const storeFile = path.join(dir, "store.db")
@@ -152,6 +156,7 @@ await Effect.runPromise(
     Effect.provide(
       BrainKnowledge.layer.pipe(
         Layer.provide(LayerNode.compile(Ripgrep.node)),
+        Layer.provide(BrainEmbed.layerOff),
         Layer.provideMerge(Brain.layer),
         Layer.provideMerge(instant),
         Layer.provideMerge(BrainDatabase.layerFor(storeFile)),

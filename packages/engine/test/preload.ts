@@ -38,6 +38,8 @@ process.env["XDG_STATE_HOME"] = path.join(dir, "state")
 process.env["VECTOR_MODELS_PATH"] = path.join(import.meta.dir, "tool", "fixtures", "models-api.json")
 // Keep vectordev.ai out of tests, including the owner's live ChatGPT sign-in switch.
 process.env["VECTOR_DISABLE_MODELS_FETCH"] = "true"
+// The local search model is never downloaded in tests; a test installs the fixture model from a folder.
+process.env["VECTOR_BRAIN_EMBED"] = "off"
 process.env["VECTOR_EXPERIMENTAL_EVENT_SYSTEM"] = "true"
 process.env["VECTOR_EXPERIMENTAL_WORKSPACES"] = "true"
 

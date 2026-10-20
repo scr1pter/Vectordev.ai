@@ -18,6 +18,7 @@ import path from "node:path"
 import { Effect, Layer } from "effect"
 import { Brain } from "../src/brain/brain"
 import { BrainDatabase } from "../src/brain/database"
+import { BrainEmbed } from "../src/brain/embed"
 import { BrainFuse } from "../src/brain/fuse"
 import { BrainKnowledge } from "../src/brain/knowledge"
 import { BrainWorker } from "../src/brain/worker/host"
@@ -123,6 +124,7 @@ export async function keywordStage(pages: number) {
   const place: Brain.Place = { repository: "eval-large", root: tmp.path, sources: [], held: false }
   const layer = BrainKnowledge.layer.pipe(
     Layer.provide(LayerNode.compile(Ripgrep.node)),
+    Layer.provide(BrainEmbed.layerOff),
     Layer.provideMerge(Brain.layer),
     Layer.provideMerge(
       BrainWorker.layer.pipe(

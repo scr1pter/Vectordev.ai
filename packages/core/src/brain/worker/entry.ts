@@ -6,12 +6,14 @@ import { BrainLimits } from "../document/limits"
 import { BrainDocument } from "../document/read"
 import { BrainExtract } from "../extract"
 import { BrainStructure } from "../structure"
+import { BrainWorkerEmbed } from "./embed"
 import type { BrainWorkerProtocol } from "./protocol"
 
-// The brain's background reader. It runs in a worker thread, started from a bundle of this file the engine carries as
-// a string, so a hostile document that makes a parser loop or grow can be stopped without touching the process that
-// serves the user. When no worker can start, the same `handle` runs on the main thread under tighter limits. It uses
-// Node APIs only: the desktop runs it in Electron's utility process, which has no Bun.
+// The brain's background reader, which also runs the local search model. It runs in a worker thread, started from a
+// bundle of this file the engine carries as a string, so a hostile document that makes a parser loop or grow can be
+// stopped without touching the process that serves the user. When no worker can start, the same `handle` runs on the
+// main thread under tighter limits. It uses Node APIs only: the desktop runs it in Electron's utility process, which
+// has no Bun.
 
 /**
  * One request, answered. Never rejects: a reader's failure is a `failed` answer. On the main thread the host passes
@@ -30,6 +32,8 @@ export function handle(
 
 async function answer(request: BrainWorkerProtocol.Request, signal?: AbortSignal): Promise<BrainWorkerProtocol.Response> {
   if (request.type === "ping") return { id: request.id, type: "pong" }
+  if (request.type === "load") return { id: request.id, type: "loaded", ...(await BrainWorkerEmbed.load(request)) }
+  if (request.type === "embed") return { id: request.id, type: "embedded", ...(await BrainWorkerEmbed.embed(request)) }
   const limits = BrainLimits.LIMITS[request.limits]
   const extracted = await BrainDocument.read(
     { name: request.name, bytes: request.bytes, ...(request.mime ? { mime: request.mime } : {}) },
