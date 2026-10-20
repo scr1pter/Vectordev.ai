@@ -149,8 +149,11 @@ test("the README gives Vector Velocity the investor page's status and size, and 
 
 test("the brain is labelled wherever the page opens with it", () => {
   // The lede is what investors read first, so the brain's status sits in it too, not only in its card.
-  expect(markup).toContain("Its brain, in development for desktop 1.99.110, learns each repository it works in")
-  expect(page).toContain("a brain that learns each repository and a model of its own, both in development")
+  expect(markup).toContain("Its brain, in development for desktop 1.99.110, learns about you, your company and each repository")
+  expect(page).toContain("Its brain and its own model are in development.")
+  // Prompts go to the model provider the user picks, so control is described, never claimed as total.
+  expect(markup).toContain("The brain lives on your computer, and you choose which model sees each request.")
+  expect(page).not.toMatch(/controlled only by you|only you control|never leaves your (computer|machine)/i)
 })
 
 test("the markets the brain serves are labelled as not yet products, and say what the brain does, not how", () => {
