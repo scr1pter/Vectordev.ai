@@ -132,7 +132,7 @@ await Bun.file(`${out}/README.md`).write(
     "vector              # start the agent in the current repository",
     "```",
     "",
-    "Open the model picker and choose a model under **Free models inside of Vector** to use the shared free allowance. No provider API key is needed.",
+    "Open the model picker and choose a model under **Free models inside of Vector**: they are provided by Vector at no cost to you. No provider API key is needed.",
     "Connecting your own provider is optional: run `vector auth login` to use your own credentials and available models.",
     "For GitHub reviews, set the MODEL workflow input and its provider secret.",
     "",

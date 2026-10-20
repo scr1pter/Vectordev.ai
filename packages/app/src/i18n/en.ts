@@ -1,5 +1,5 @@
 export const dict = {
-  "freeModels.limit.reset": "The shared allowance is expected to reset at {{time}}.",
+  "freeModels.limit.reset": "Free models provided by Vector are expected to be available again at {{time}}.",
   "freeModels.limit.ownKeys":
     "To keep working now, choose a model from another provider you've connected, or add your own provider key in Settings → Providers.",
   "freeModels.limit.addKey": "Use my own API key",
@@ -16,7 +16,7 @@ export const dict = {
   "freeModels.start.unavailableShared":
     "Free models inside of Vector are unavailable right now. Try again later, or use an API key you already have.",
   "freeModels.start.note":
-    "Free models run on Vector's shared allowance at no cost to you, within a daily limit for each account. OpenRouter and the model's provider process your prompts.",
+    "Free models are provided by Vector at no cost to you, within a daily limit for each account. OpenRouter and the model's provider process your prompts.",
   "freeModels.start.ownKey": "Use my own API key",
   "command.category.suggested": "Suggested",
   "command.category.view": "View",

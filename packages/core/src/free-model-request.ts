@@ -19,7 +19,7 @@ export function serializeFreeModelRequest(body: ReturnType<typeof freeModelReque
   const text = JSON.stringify(body)
   if (shared && new TextEncoder().encode(text).byteLength > 4_500_000)
     throw new Error(
-      "Context too large for the shared free allowance. Compact this conversation, or use a model from a provider you've connected with your own key.",
+      "Context too large for free models provided by Vector. Compact this conversation, or use a model from a provider you've connected with your own key.",
     )
   return text
 }

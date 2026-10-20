@@ -29,11 +29,11 @@ export const prerender = true
 
           <h2 id="free-models">Free models inside of Vector</h2>
           <p>
-            Sign in to Vector and the Free models inside of Vector are there at no cost to you: Vector's shared
-            allowance runs them on Vector's own OpenRouter account, through Vector's server, which checks your account
-            and its limits. You don't need an OpenRouter account of your own. Every model is listed at a zero price
+            Sign in to Vector and the Free models inside of Vector are there at no cost to you: they are provided by
+            Vector, on Vector's own OpenRouter account, through Vector's server, which checks your account and its
+            limits. You don't need an OpenRouter account of your own. Every model is listed at a zero price
             with tool-capable endpoints, and a request never switches to a paid model or provider. The section appears
-            while Vector's service has the shared allowance switched on and has models to serve.
+            while Vector's service has free models switched on and has models to serve.
           </p>
           <p>
             From desktop 1.99.109 and the next CLI release, Vector offers every free model OpenRouter lists that can
@@ -48,8 +48,8 @@ export const prerender = true
               Preview (AtlasCloud, which does not publish how long it keeps prompts) and XingChen's Xing4.0 (Phala).
               Each request asks OpenRouter to deny data collection. Google's Gemma 4 26B and 31B (Google AI Studio,
               kept up to 55 days) are listed only for an OpenRouter account of your own, because Google's terms limit
-              users in the EEA, Switzerland and the UK to paid use, and the shared allowance does not check where you
-              are.
+              users in the EEA, Switzerland and the UK to paid use, and Vector does not check where you are when it
+              provides free models.
             </li>
             <li>
               <strong>May train on your prompts:</strong> Poolside's Laguna S 2.1 and XS 2.1 (free until 31 October
@@ -77,9 +77,9 @@ export const prerender = true
             CLI 1.99.99 are offered no-training models only.
           </p>
           <p>
-            The shared allowance has a per-minute and a daily limit for each account, and everyone on it shares
-            OpenRouter's limits for Vector's account. A coding task can use many requests, since each tool step is
-            one. At a limit, Vector says when the allowance is expected to reset; to keep working before then, choose
+            Free models provided by Vector have a per-minute and a daily limit for each account, and everyone using
+            them shares OpenRouter's limits for Vector's account. A coding task can use many requests, since each tool
+            step is one. At a limit, Vector says when they are expected to be available again; to keep working before then, choose
             a model from another provider you've connected, or add your own provider key in Settings → Providers.
           </p>
           <p>
@@ -92,10 +92,10 @@ export const prerender = true
           </p>
           <p>
             OpenRouter is also an ordinary provider in Settings → Providers. If you connect an OpenRouter account of
-            your own there, its free models are listed under Free models inside of Vector beside the shared ones,
-            marked Your OpenRouter account, and run on that account's own limits and privacy settings. The shared
-            models stay listed, marked Shared Vector allowance, and keep running on the shared allowance while that
-            account is connected, so each model runs where its label says. A key stored only in a repository's
+            your own there, its free models are listed under Free models inside of Vector beside the ones provided by
+            Vector, marked Your OpenRouter account, and run on that account's own limits and privacy settings. The
+            models provided by Vector stay listed, marked Provided by Vector, and keep running on Vector's account
+            while yours is connected, so each model runs where its label says. A key stored only in a repository's
             <code>provider.openrouter.options.apiKey</code> does not list them. From
             1.99.99 to 1.99.108, connecting OpenRouter was the way to start free; from desktop 1.99.109 it is signing
             in to Vector.
@@ -110,8 +110,8 @@ export const prerender = true
           <p class="doc-cmd"><code>vector models
 vector models anthropic --verbose</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
           <p>
-            Signed in with <code>vector login</code>, the shared allowance's models are listed under
-            <strong>Free models inside of Vector</strong>, marked Shared Vector allowance. Display names omit
+            Signed in with <code>vector login</code>, the free models provided by Vector are listed under
+            <strong>Free models inside of Vector</strong>, marked Provided by Vector. Display names omit
             <code>:free</code>; selectors retain it. Human guidance, including the “May train on your prompts” label
             from the next CLI release, goes to stderr, while stdout keeps plain model selectors.
           </p>

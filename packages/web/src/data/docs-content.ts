@@ -16,7 +16,7 @@ export const spendRows = [
   ],
   [
     "Your keys, your bill",
-    "Connect your own provider account to start. From 1.99.99, guarded personal OpenRouter free access works independently of Vector's shared allowance, which serves the same models to a signed-in Vector account only while Vector's service has it switched on. Keep that account free: no credit purchase, payment method, automatic top-ups, paid upstream BYOK credentials, or default or enforced paid plugins. When free limits or eligible endpoints are unavailable, wait; the guarded route does not switch to paid models or providers. Other provider connections have their own pricing.",
+    "Connect your own provider account to start. From 1.99.99, guarded personal OpenRouter free access works independently of the free models provided by Vector, which a signed-in Vector account gets only while Vector's service has them switched on. Keep that account free: no credit purchase, payment method, automatic top-ups, paid upstream BYOK credentials, or default or enforced paid plugins. When free limits or eligible endpoints are unavailable, wait; the guarded route does not switch to paid models or providers. Other provider connections have their own pricing.",
   ],
 ]
 
@@ -454,7 +454,7 @@ export const faqs = [
   {
     question: "Do I need an API key?",
     answer:
-      "Not for free models. Sign in to Vector to use Free models inside of Vector on Vector's shared allowance, while Vector's service has it on, at no cost to you within a daily limit for each account; a limit or an unavailable endpoint stops the request without a paid fallback. Otherwise connect a provider with your own API key or sign in with ChatGPT. Requests to free models whose providers don't train ask OpenRouter to deny data collection, which excludes endpoints OpenRouter records as training on prompts. Free models whose providers may train are labelled \"May train on your prompts\" and are sent only after you accept that once. Providers may keep prompts and outputs under their own policies, and these routing controls do not cover local history or account logging.",
+      "Not for free models. Sign in to Vector to use Free models inside of Vector, provided by Vector at no cost to you while Vector's service has them on, within a daily limit for each account; a limit or an unavailable endpoint stops the request without a paid fallback. Otherwise connect a provider with your own API key or sign in with ChatGPT. Requests to free models whose providers don't train ask OpenRouter to deny data collection, which excludes endpoints OpenRouter records as training on prompts. Free models whose providers may train are labelled \"May train on your prompts\" and are sent only after you accept that once. Providers may keep prompts and outputs under their own policies, and these routing controls do not cover local history or account logging.",
   },
   {
     question: "Is Vector free?",

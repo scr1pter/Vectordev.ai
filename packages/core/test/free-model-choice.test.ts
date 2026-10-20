@@ -38,7 +38,7 @@ describe("free model presentation", () => {
     expect(freeModelName(own)).toBe("Maker Coder")
     expect(own.id).toBe("maker/coder:free")
     expect(freeModelSource(own)).toBe("Your OpenRouter account")
-    expect(freeModelSource(shared)).toBe("Shared Vector allowance")
+    expect(freeModelSource(shared)).toBe("Provided by Vector")
   })
   test("price and free-looking names cannot enable the section when metadata is absent", () => {
     const ordinary = { id: shared.id, name: "Maker Coder (free)", cost: { input: 0, output: 0 } }
@@ -51,7 +51,7 @@ describe("free model presentation", () => {
 test("quota notices accept only typed limits and never repeat upstream text", () => {
   const data = { reason: "user_daily", resetAt: 1893542400000, message: "private upstream details" }
   const limit = freeModelsLimitNotice({ name: "FreeModelsLimitError", data })!
-  expect(freeModelsLimitTitle(limit)).toBe("You've used today's shared allowance for Free models inside of Vector")
+  expect(freeModelsLimitTitle(limit)).toBe("You've reached today's limit for Free models inside of Vector")
   expect(freeModelsResetLabel(limit, "en-US")).toContain("2030")
   expect(freeModelsLimitNotice({ _tag: "FreeModelsLimitError", ...data })).toEqual(limit)
   expect(freeModelsLimitNotice({ type: "free_models_limit", code: "VECTOR_FREE_MODELS_LIMIT", ...data })).toEqual(limit)
@@ -94,10 +94,12 @@ test("an invited guest whose acceptance the engine refuses is told only the owne
   for (const status of [500, 503, undefined]) expect(freeModelTrainingRefusal(status)).toContain("Try again")
 })
 
-test("limit notices say when the shared allowance resets and offer the user's own keys, never an OpenRouter account", () => {
+test("limit notices say when free models provided by Vector are available again and offer the user's own keys, never an OpenRouter account", () => {
   const limit = { reason: "user_daily" as const, resetAt: Date.UTC(2030, 0, 1, 12) }
   const desktop = freeModelsLimitMessage(limit, { locale: "en-US" })
-  expect(desktop).toStartWith(`${freeModelsLimitTitle(limit)}. The shared allowance is expected to reset at`)
+  expect(desktop).toStartWith(
+    `${freeModelsLimitTitle(limit)}. They are expected to be available again at`,
+  )
   expect(desktop).toContain(freeModelsResetLabel(limit, "en-US"))
   expect(desktop).toEndWith(FREE_MODELS_OWN_KEYS)
   expect(freeModelsLimitMessage(limit, { terminal: true })).toEndWith(FREE_MODELS_OWN_KEYS_TERMINAL)
@@ -131,7 +133,7 @@ test("the in-use notice names the source and label of a model that may train, an
     freeModel: { source: "shared" as const, dataPolicy: "may-train" as const },
   }
   expect(freeModelTrainingNotice(laguna)).toEqual({
-    summary: "Shared Vector allowance · May train on your prompts",
+    summary: "Provided by Vector · May train on your prompts",
     disclaimer: FREE_MODEL_TRAINING_DISCLAIMER,
   })
   expect(

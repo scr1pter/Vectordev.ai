@@ -38,6 +38,11 @@ test("the self-evolving agent and the memory card name desktop 1.99.110, the rel
   expect(await Bun.file(path.join(repo, "packages/core/src/brain/knowledge.ts")).exists()).toBe(true)
   expect(lander).toContain('<p class="story-kicker" data-reveal>Self-evolving · {brainRelease.kicker}</p>')
   expect(lander).toContain('data-chapter="Self-evolving"')
+  // The owner's title for the section (19 October 2026): the brain learns the people and the company, not only the code.
+  expect(lander).toContain(
+    '<h2 id="evolving-title" class="story-title" data-reveal>An agent that learns you and your&nbsp;company.</h2>',
+  )
+  expect(lander).not.toContain("An agent that learns your&nbsp;repository.")
   expect(lander).toContain(
     "`${brainRelease.since} rules, memory and the documents you add are stored and searched on your computer",
   )
@@ -103,9 +108,11 @@ test("Vector Velocity is in development and branded by one size, 550B parameters
 })
 
 test("what is not live when the page ships is labelled, and what ships with it is not", () => {
-  // Free models on Vector's shared allowance, with may-train models labelled and a one-time question, ship in desktop
-  // 1.99.109 with this page.
-  expect(lander).toContain("Sign in to Vector and its free models run on Vector's shared allowance")
+  // Free models provided by Vector, with may-train models labelled and a one-time question, ship in desktop 1.99.109
+  // with this page. The owner's wording (19 October 2026) says Vector provides them, never a shared allowance.
+  expect(lander).toContain("Sign in to Vector and its free models are provided by Vector at no cost to you")
+  expect(lander).toContain("every free OpenRouter model that can use tools and whose terms allow Vector to provide it")
+  expect(page).not.toMatch(/shared allowance|allow shared use/i)
   expect(lander).not.toMatch(/connect a free OpenRouter account|your own OpenRouter account/i)
   expect(lander).toContain("sent only after you accept that once")
   expect(page).toContain("May train on your prompts")

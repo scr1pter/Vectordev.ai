@@ -585,7 +585,7 @@ describe("Free models inside of Vector", () => {
     }
     expect(modelDisplayName(own)).toBe("Maker Coder")
     expect(modelTitle(own)).toContain("Your OpenRouter account")
-    expect(modelTitle(shared)).toContain("Shared Vector allowance")
+    expect(modelTitle(shared)).toContain("Provided by Vector")
   })
   test('a model whose provider may train says "May train on your prompts" on its row, tooltip and spoken label', () => {
     const laguna = {
