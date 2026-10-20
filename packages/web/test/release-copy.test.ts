@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test"
 import { publishedDesktopVersion, release199, upcomingRelease } from "../src/data/vector-releases"
 
-// GitHub release v1.99.108 was published on 2026-10-17 by release run #88, and all four in-app update feeds report it,
-// so no later edit may present it, or anything before it, as upcoming. 1.99.107 was skipped and never published.
-const shipped = "1.99.108"
+// GitHub release v1.99.109 was published on 2026-10-19, and all four in-app update feeds report it, so no later edit
+// may present it, or anything before it, as upcoming. 1.99.108 was published on 2026-10-17 by release run #88;
+// 1.99.107 was skipped and never published.
+const shipped = "1.99.109"
 const web = new URL("..", import.meta.url).pathname
 // The source repository is private, so its releases and files 404 for visitors. Installers come from the account
 // download page, which needs a free Vector account.
@@ -17,8 +18,8 @@ const stale = [
   /\b(upcoming|next release)\W+1\.99\.99\b/i,
   /\b1\.99\.99,? the next (desktop )?release\b/i,
   /\b1\.99\.99 installers are not published\b/i,
-  /\bnot published yet\b[^.]*\b1\.99\.(8|99|100|101|102|103|104|105|106|107|108)\b/i,
-  /\b1\.99\.108\b[^.]*\b(prepared|not (yet )?published|installers are not released)\b/i,
+  /\bnot published yet\b[^.]*\b1\.99\.(8|99|100|101|102|103|104|105|106|107|108|109)\b/i,
+  /\b1\.99\.10[89]\b[^.]*\b(prepared|not (yet )?published|installers are not released)\b/i,
   /\b(remain|are still)( at)? (desktop )?\**1\.99\.(8|99)\b/i,
   /\bcurrently (published|downloadable)\b[^.]*\b1\.99\.[78]\b/i,
   /\bno standalone CLI release is published\b/i,
