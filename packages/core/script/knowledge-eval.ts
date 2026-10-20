@@ -9,7 +9,8 @@
 // request size sends and how long the keyword stage takes: for the five specs, and for a generated 300-page PDF read
 // in the background reader. Search by meaning runs the same requests with the local model: the pinned
 // arctic-embed-xs int8 files when --model (or VECTOR_TEST_EMBED_DIR) names a folder of them, otherwise a hash stand-in
-// that knows spelling, not meaning, and the report says which it was.
+// that knows spelling, not meaning, and the report says which it was. With the model it also sweeps the meaning floor
+// over FLOORS on the same embedded fixture, so the report shows what the shipped floor leaves out and lets through.
 //
 //   bun script/knowledge-eval.ts                print the report
 //   bun script/knowledge-eval.ts --out <dir>    also write <dir>/report.json and <dir>/README.md
@@ -36,6 +37,8 @@ import { tmpdir } from "../test/fixture/tmpdir"
 
 const FIXTURE = path.join(import.meta.dir, "..", "test", "fixtures", "knowledge")
 const TIERS = ["chat", "light", "standard", "thorough"] as const
+// The meaning floors the model run sweeps, around the shipped 0.2.
+const FLOORS = [0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.2, 0.21, 0.22, 0.25, 0.3]
 
 type Case = {
   readonly query: string
@@ -51,8 +54,14 @@ type Queries = {
 
 type Graph = "pagerank" | "activation"
 
-/** The search model a run uses: none, the hash stand-in, or the pinned model's files in a folder. */
-type Meaning = { readonly type: "off" } | { readonly type: "hash" } | { readonly type: "model"; readonly dir: string }
+/**
+ * The search model a run uses: none, the hash stand-in, or the pinned model's files in a folder, with the floors to
+ * sweep after the run at the model's own floor.
+ */
+type Meaning =
+  | { readonly type: "off" }
+  | { readonly type: "hash" }
+  | { readonly type: "model"; readonly dir: string; readonly floors?: readonly number[] }
 
 /**
  * Recall on the fixture with each way of reaching code-linked records, and with search by meaning, summed up the way
@@ -64,7 +73,7 @@ export async function evaluate(options: { readonly model?: string } = {}) {
   const repo = await files(path.join(FIXTURE, "repo"))
   const pagerank = await run(queries, documents, repo, "pagerank")
   const activation = await run(queries, documents, repo, "activation")
-  const meaning: Meaning = options.model ? { type: "model", dir: options.model } : { type: "hash" }
+  const meaning: Meaning = options.model ? { type: "model", dir: options.model, floors: FLOORS } : { type: "hash" }
   const dense = await run(queries, documents, repo, "pagerank", meaning)
   const count = (items: readonly { readonly found: boolean }[]) => items.filter((item) => item.found).length
   const keywords = (items: readonly { readonly keywords: boolean }[]) => items.filter((item) => item.keywords).length
@@ -100,6 +109,9 @@ export async function evaluate(options: { readonly model?: string } = {}) {
       recall: { p50: percentile(dense.times, 0.5), p95: percentile(dense.times, 0.95) },
       embedded: dense.embedded,
       seconds: dense.embedSeconds,
+      ...(meaning.type === "model" ? margin(dense.sweep, BrainEmbedManifest.MODELS["arctic-embed-xs-q8"].floor) : {}),
+      // The same requests at each swept floor: what meaning finds, and the most each unrelated request carries.
+      sweep: dense.sweep,
     },
     cards: mean(pagerank.working.map((item) => item.cards)),
     tokens: Object.fromEntries(
@@ -243,6 +255,18 @@ export function markdown(input: {
   const tier = (name: (typeof TIERS)[number]) =>
     `| ${name[0]!.toUpperCase()}${name.slice(1)} | ${report.tokens[name].budget} | ${report.tokens[name].mean.toFixed(0)} | ${report.tokens[name].max} |`
   const large = input.large
+  const dense = report.dense
+  const swept = (row: Report["dense"]["sweep"][number]) =>
+    `| ${row.floor.toFixed(2)}${row.floor === dense.floor ? " (shipped)" : ""} | ${of(row.meaning.working, report.fixture.working)} | ${of(row.meaning.hops, report.fixture.hops)} | ${row.all.working} of ${report.fixture.working} and ${row.all.hops} of ${report.fixture.hops} | ${row.irrelevant.filter((tokens) => tokens > 0).length} | ${sum(row.irrelevant)} |`
+  const leak = "leak" in dense ? dense.leak : undefined
+  const clear = "clear" in dense ? dense.clear : undefined
+  const counted = (count: number) => ["no", "one", "two", "three", "four", "five"][count] ?? String(count)
+  const measured =
+    clear === undefined
+      ? `unrelated requests still carried cards at the shipped floor, ${dense.floor}`
+      : `unrelated requests carried no cards from ${clear.toFixed(2)} up${leak ? `, and at ${leak.floor.toFixed(2)} ${counted(leak.requests)} of them carried ${leak.tokens} tokens` : ""}`
+  const room =
+    clear === undefined ? "" : `, so the shipped floor sits ${((dense.floor ?? 0) - clear).toFixed(2)} above the least that kept them out`
   return [
     `# Knowledge eval, ${day}`,
     "",
@@ -274,6 +298,20 @@ export function markdown(input: {
     "| Size | Budget | Mean | Most |",
     "| --- | ---: | ---: | ---: |",
     ...TIERS.map(tier),
+    ...(real && dense.sweep.length > 0
+      ? [
+          "",
+          "## The meaning floor",
+          "",
+          `A match by meaning is kept only when its centred cosine is at least the floor and within 0.08 of the best match. The same embedded fixture at each floor: the tasks as Light requests, and the most each unrelated request carried at any size.`,
+          "",
+          "| Floor | Keywords and meaning, named files | Keywords and meaning, through an import | Every channel | Unrelated requests with cards | Their tokens |",
+          "| --- | ---: | ---: | ---: | ---: | ---: |",
+          ...dense.sweep.map(swept),
+          "",
+          `On this fixture ${measured}${room}.`,
+        ]
+      : []),
     "",
     "## Keyword stage",
     "",
@@ -290,7 +328,7 @@ export function markdown(input: {
     "- The fixture is small and was written alongside the feature it measures. It shows that code links reach requirements keywords miss; it is not an independent benchmark, and it does not measure the quality of a model's answers.",
     "- Times are from one run on the machine named above and change with the machine and its load.",
     real
-      ? "- Search by meaning ran the pinned int8 model on this computer's CPU through ONNX Runtime's WebAssembly build; another machine embeds at another speed. Its floor (0.2, as a cosine less the mean every text shares) was set on this same fixture, as the least that lets none of the unrelated requests through with room to spare, so the meaning columns are not an out-of-sample result."
+      ? `- Search by meaning ran the pinned int8 model on this computer's CPU through ONNX Runtime's WebAssembly build; another machine embeds at another speed. Its floor (${dense.floor}, as a cosine less the mean every text shares) was set on this same fixture, where ${measured}${room}; the meaning columns are not an out-of-sample result.`
       : "- Search by meaning ran a hash stand-in, not the model: run it again with `--model <folder>` for the model's figures.",
     "- The 300-page PDF measures the keyword stage only; how long the model takes to embed it is not timed here.",
     "- Token counts are Vector's estimate of what the recalled text costs, not a provider's count.",
@@ -340,6 +378,8 @@ async function run(
   graph: Graph,
   meaning: Meaning = { type: "off" },
 ) {
+  // The floor the sweep has set, in place of the model's own while it runs.
+  const gate: { floor?: number } = {}
   return withKnowledge(
     (setup) =>
       Effect.gen(function* () {
@@ -419,7 +459,27 @@ async function run(
             return { query: item.query, tokens: Math.max(...sizes.map((size) => size.tokens)) }
           }),
         )
-        return { documents: read, seconds, times, working, hops, irrelevant, embedded, embedSeconds }
+        const found = (cases: readonly Case[], seeded: boolean) =>
+          Effect.forEach(cases, (item) =>
+            recall(item, "light", seeded).pipe(Effect.map((recalled) => (recalled.text ?? "").includes(item.expect!))),
+          ).pipe(Effect.map((items) => items.filter(Boolean).length))
+        const sweep = yield* Effect.forEach(meaning.type === "model" ? (meaning.floors ?? []) : [], (floor) =>
+          Effect.gen(function* () {
+            gate.floor = floor
+            const unrelated = yield* Effect.forEach(queries.irrelevant, (item) =>
+              Effect.forEach(["light", "standard", "thorough"] as const, (tier) => recall(item, tier, true)).pipe(
+                Effect.map((sizes) => Math.max(...sizes.map((size) => size.tokens))),
+              ),
+            )
+            return {
+              floor,
+              meaning: { working: yield* found(queries.working, false), hops: yield* found(queries.hops, false) },
+              all: { working: yield* found(queries.working, true), hops: yield* found(queries.hops, true) },
+              irrelevant: unrelated,
+            }
+          }),
+        ).pipe(Effect.ensuring(Effect.sync(() => delete gate.floor)))
+        return { documents: read, seconds, times, working, hops, irrelevant, embedded, embedSeconds, sweep }
       }),
     {
       files: repo,
@@ -428,16 +488,64 @@ async function run(
       ...(meaning.type === "hash" ? { embed: BrainEmbed.layerHash() } : {}),
       ...(meaning.type === "model"
         ? {
+            // The model's own service, with the floor the sweep has set in place of the model's.
             embed: (data: string) =>
-              BrainEmbed.layerWith({ dir: path.join(data, "models", "embedding"), downloads: false }).pipe(
-                Layer.provide(FetchHttpClient.layer),
-                Layer.provide(BrainWorker.layerInline),
-                Layer.provide(Layer.succeed(Global.Service, Global.make({ data }))),
+              Layer.effect(
+                BrainEmbed.Service,
+                Effect.gen(function* () {
+                  const embed = yield* BrainEmbed.Service
+                  return BrainEmbed.Service.of({
+                    ...embed,
+                    current: () =>
+                      embed
+                        .current()
+                        .pipe(
+                          Effect.map((current) =>
+                            current && gate.floor !== undefined ? { ...current, floor: gate.floor } : current,
+                          ),
+                        ),
+                  })
+                }),
+              ).pipe(
+                Layer.provide(
+                  BrainEmbed.layerWith({ dir: path.join(data, "models", "embedding"), downloads: false }).pipe(
+                    Layer.provide(FetchHttpClient.layer),
+                    Layer.provide(BrainWorker.layerInline),
+                    Layer.provide(Layer.succeed(Global.Service, Global.make({ data }))),
+                  ),
+                ),
               ),
           }
         : {}),
     },
   )
+}
+
+/**
+ * How far the shipped floor sits above the least swept floor that, like every swept floor between it and the shipped
+ * one, let no unrelated request carry a card; and the swept floor just below that, with what got through there.
+ */
+function margin(
+  sweep: readonly { readonly floor: number; readonly irrelevant: readonly number[] }[],
+  floor: number,
+) {
+  const below = sweep.filter((row) => row.floor <= floor).toReversed()
+  const at = below.findIndex((row) => row.irrelevant.some((tokens) => tokens > 0))
+  const clear = (at === -1 ? below.at(-1) : below[at - 1])?.floor
+  const leak = at === -1 ? undefined : below[at]!
+  return {
+    floor,
+    ...(clear === undefined ? {} : { clear }),
+    ...(leak
+      ? {
+          leak: {
+            floor: leak.floor,
+            requests: leak.irrelevant.filter((tokens) => tokens > 0).length,
+            tokens: sum(leak.irrelevant),
+          },
+        }
+      : {}),
+  }
 }
 
 async function files(dir: string, base = dir): Promise<Record<string, string>> {

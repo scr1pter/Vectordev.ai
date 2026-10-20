@@ -38,6 +38,8 @@ describe("knowledge eval", () => {
     expect(working.all).toBeGreaterThanOrEqual(working.pagerank)
     expect(hops.all).toBeGreaterThanOrEqual(hops.pagerank)
     expect(report.dense.irrelevant).toEqual(Array.from({ length: 10 }, () => 0))
+    // Only the real model's floor is swept: the stand-in's says nothing about it.
+    expect(report.dense.sweep).toEqual([])
     // A greeting is sized Chat and recalls nothing; every other size stays inside its budget.
     expect(report.tokens.chat).toEqual({ mean: 0, max: 0, budget: 0 })
     for (const tier of ["light", "standard", "thorough"] as const)
@@ -56,7 +58,36 @@ describe("knowledge eval", () => {
     expect(text).toContain("| Keywords and meaning | Every channel |")
     expect(text).toContain("hash stand-in")
     expect(text).not.toContain("not in this build")
+    expect(text).not.toContain("## The meaning floor")
     expect(text).not.toMatch(/\bexactly\b|never exceeds|absolute privacy|\bprojects?\b/i)
+    // With the model, the floor's margin is the one the sweep measured, never a claim of room to spare.
+    const swept = markdown({
+      report: {
+        ...report,
+        dense: {
+          ...report.dense,
+          model: "the pinned model",
+          floor: 0.2,
+          clear: 0.18,
+          leak: { floor: 0.17, requests: 1, tokens: 122 },
+          sweep: [0.17, 0.18, 0.2].map((floor) => ({
+            floor,
+            meaning: { working: 13, hops: 3 },
+            all: { working: 40, hops: 8 },
+            irrelevant: Array.from({ length: 10 }, (_, index) => (floor === 0.17 && index === 0 ? 122 : 0)),
+          })),
+        },
+      },
+      date: new Date(2026, 9, 19),
+      revision: "0123456789abcdef",
+      dirty: false,
+      machine: "a test machine",
+    })
+    expect(swept).toContain("| 0.20 (shipped) | 13 of 40 (33%) | 3 of 8 (38%) | 40 of 40 and 8 of 8 | 0 | 0 |")
+    expect(swept).toContain(
+      "On this fixture unrelated requests carried no cards from 0.18 up, and at 0.17 one of them carried 122 tokens, so the shipped floor sits 0.02 above the least that kept them out.",
+    )
+    expect(swept).not.toContain("room to spare")
   }, 110_000)
 
   // The pinned model, where its files are at hand: meaning must add to keywords and take nothing from the code graph,
@@ -74,6 +105,11 @@ describe("knowledge eval", () => {
       expect(report.found.working.all).toBeGreaterThanOrEqual(report.found.working.pagerank)
       expect(report.found.hops.all).toBeGreaterThanOrEqual(report.found.hops.pagerank)
       expect(report.dense.irrelevant).toEqual(Array.from({ length: 10 }, () => 0))
+      // The sweep reruns the same requests at each floor, and at the shipped one gives what the run gave.
+      const shipped = report.dense.sweep.find((row) => row.floor === report.dense.floor)
+      expect(shipped?.meaning).toEqual({ working: report.found.working.meaning, hops: report.found.hops.meaning })
+      expect(shipped?.irrelevant).toEqual(report.dense.irrelevant)
+      expect("clear" in report.dense ? report.dense.clear : undefined).toBeLessThanOrEqual(report.dense.floor ?? 0)
       // With the model warm a request's recall stays within the design's 90 ms at the 95th percentile.
       expect(report.dense.recall.p95).toBeLessThanOrEqual(90)
     },
