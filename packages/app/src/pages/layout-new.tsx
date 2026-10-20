@@ -793,8 +793,9 @@ export default function NewLayout(props: ParentProps) {
 
   // The Browser Agent's live page is a native Electron WebContentsView that
   // composites on top of all DOM, so it paints over any modal dialog. Hide it
-  // whenever a dialog is open and restore it when the stack clears. The
-  // main-process setVisible handler ignores contextId, so any value is fine.
+  // whenever a dialog is open and restore it when the stack clears. The main
+  // process hides every browser view in this window and later shows only the
+  // ones it hid, whatever contextId is sent.
   createEffect(() => {
     const modalOpen = Boolean(dialog.active)
     const run = globalThis.window?.api?.runBrowserAgent

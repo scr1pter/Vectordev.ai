@@ -25,10 +25,14 @@ type BrowserAgentNetworkError = { url: string; status?: number; error?: string; 
 type BrowserAgentDom = NonNullable<BrowserAutomationRun["domSummary"]>
 type BrowserAgentComputedStyle = NonNullable<BrowserAutomationRun["computedStyles"]>[number]
 type BrowserAgentBounds = { x: number; y: number; width: number; height: number }
-type BrowserContext = {
+export type BrowserContext = {
   id: string
   view?: WebContentsView
   hostWindow?: BrowserWindow
+  /** Hidden because a dialog covers its window, so it shows again when the dialog closes. */
+  covered?: boolean
+  /** The command running on this page; the next one starts when it settles. */
+  queue: Promise<unknown>
   lastBounds?: BrowserAgentBounds
   consoleLogs: BrowserAgentLog[]
   pageErrors: string[]
@@ -47,6 +51,15 @@ type BrowserContext = {
 let attaching: Promise<void> | undefined
 const contexts = new Map<string, BrowserContext>()
 const contextStorage = new AsyncLocalStorage<BrowserContext>()
+// Windows a dialog in the app covers: their browser views stay hidden until it closes.
+const coveredWindows = new WeakSet<BrowserWindow>()
+const hardenedSessions = new WeakSet<Electron.Session>()
+
+const PARTITION = "persist:vector-browser"
+export const DOWNLOADS_OFF = "Downloads are off in the agent browser."
+// Commands that only place or show the panel's view. They never wait behind a page command, so resizing or opening
+// a dialog stays immediate while the agent waits on a page.
+const PANEL_COMMANDS = new Set(["attach", "setBounds", "detach", "setVisible"])
 
 function currentContext() {
   const context = contextStorage.getStore()
@@ -69,9 +82,65 @@ function getContext(id: string, create = true) {
     lastUsedAt: Date.now(),
     allowedExternalOrigins: new Set(),
     intent: navigationIntent(),
+    queue: Promise.resolve(),
   }
   contexts.set(id, context)
   return context
+}
+
+/**
+ * The agent browser grants a page no permission but fullscreen: no camera, microphone, location, notifications,
+ * clipboard, devices or any other, and it never asks the user on a page's behalf.
+ */
+export function browserPermissionAllowed(permission: string) {
+  return permission === "fullscreen"
+}
+
+/** Records a download the agent browser cancelled, so the command's report says why nothing was saved. */
+export function refuseDownload(context: BrowserContext, url: string) {
+  const shown = redactText(url)
+  context.networkErrors = [...context.networkErrors, { url: shown, error: DOWNLOADS_OFF }].slice(-50)
+  pushAction("Cancelled a download", false, DOWNLOADS_OFF, undefined, context)
+}
+
+/**
+ * Hides every browser view in a window while a dialog covers it, and shows again only the views it hid. A dialog
+ * is DOM, and a WebContentsView paints over all DOM, so the view would otherwise cover the dialog.
+ */
+export function setWindowVisible(
+  window: BrowserWindow,
+  visible: boolean,
+  all: Iterable<BrowserContext> = contexts.values(),
+) {
+  if (visible) coveredWindows.delete(window)
+  else coveredWindows.add(window)
+  for (const context of all) {
+    const view = context.view
+    if (context.hostWindow !== window || !view || view.webContents.isDestroyed()) continue
+    if (!visible && view.getVisible()) {
+      view.setVisible(false)
+      context.covered = true
+    }
+    if (visible && context.covered) {
+      view.setVisible(true)
+      context.covered = false
+    }
+  }
+}
+
+// The partition's own handlers: permissions denied but fullscreen, and downloads cancelled and reported.
+function hardenSession(partition: Electron.Session) {
+  if (hardenedSessions.has(partition)) return
+  hardenedSessions.add(partition)
+  partition.setPermissionRequestHandler((_contents, permission, callback) =>
+    callback(browserPermissionAllowed(permission)),
+  )
+  partition.setPermissionCheckHandler((_contents, permission) => browserPermissionAllowed(permission))
+  partition.on("will-download", (event, item, contents) => {
+    event.preventDefault()
+    const context = Array.from(contexts.values()).find((candidate) => candidate.view?.webContents === contents)
+    if (context) refuseDownload(context, item.getURL())
+  })
 }
 
 // Vector sets no cap on browser tasks. A new context only retires the oldest
@@ -254,7 +323,10 @@ async function attachView(event: IpcMainInvokeEvent, bounds?: { x: number; y: nu
     if (!win) throw new Error("Browser Agent could not find the requesting window.")
     const active = ensureBrowserView()
     for (const item of contexts.values()) {
-      if (item.id !== context.id && item.hostWindow === win && item.view) item.view.setVisible(false)
+      if (item.id !== context.id && item.hostWindow === win && item.view) {
+        item.view.setVisible(false)
+        item.covered = false
+      }
     }
     if (context.hostWindow !== win) {
       if (context.hostWindow && !context.hostWindow.isDestroyed())
@@ -270,7 +342,9 @@ async function attachView(event: IpcMainInvokeEvent, bounds?: { x: number; y: nu
       context.lastBounds = scaledBounds(event.sender, bounds)
       active.setBounds(context.lastBounds)
     }
-    active.setVisible(true)
+    // Under an open dialog the view waits, hidden, for the dialog to close.
+    context.covered = coveredWindows.has(win)
+    active.setVisible(!context.covered)
   })()
   try {
     await attaching
@@ -282,9 +356,11 @@ async function attachView(event: IpcMainInvokeEvent, bounds?: { x: number; y: nu
 function ensureBrowserView() {
   const context = currentContext()
   if (context.view && !context.view.webContents.isDestroyed()) return context.view
+  const partition = session.fromPartition(PARTITION)
+  hardenSession(partition)
   context.view = new WebContentsView({
     webPreferences: {
-      session: session.fromPartition("persist:vector-browser"),
+      session: partition,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -302,6 +378,7 @@ function detachView() {
   // agent (or the user) left off. closeBrowser destroys it for real.
   const context = currentContext()
   if (context.view && context.hostWindow && !context.hostWindow.isDestroyed()) context.view.setVisible(false)
+  context.covered = false
 }
 
 async function closeBrowser() {
@@ -802,6 +879,12 @@ export async function runBrowserAgent(
 ): Promise<BrowserAutomationRun> {
   const contextId = input.contextId.trim()
   if (!contextId) throw new Error("The controlled browser needs an active Vector task context.")
+  // The app's dialogs hide and restore every browser view in their own window, whichever task each one belongs to.
+  if (input.command === "setVisible" && event) {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (window) setWindowVisible(window, input.visible !== false)
+    return stoppedReport()
+  }
   const passive =
     input.command === "detach" ||
     input.command === "setBounds" ||
@@ -809,13 +892,21 @@ export async function runBrowserAgent(
     input.command === "setVisible"
   const context = getContext(contextId, !passive)
   if (!context) return stoppedReport()
-  const driving = DRIVING_COMMANDS.has(input.command ?? "")
-  if (driving) beginAutomation(context.intent)
-  try {
-    return await contextStorage.run(context, () => runBrowserAgentInContext(event, input))
-  } finally {
-    if (driving) endAutomation(context.intent, Date.now())
+  const run = async () => {
+    const driving = DRIVING_COMMANDS.has(input.command ?? "")
+    if (driving) beginAutomation(context.intent)
+    try {
+      return await contextStorage.run(context, () => runBrowserAgentInContext(event, input))
+    } finally {
+      if (driving) endAutomation(context.intent, Date.now())
+    }
   }
+  if (PANEL_COMMANDS.has(input.command ?? "")) return run()
+  // One command at a time on a page, so two calls never interleave their steps on it. The number of pages stays
+  // uncapped.
+  const turn = context.queue.then(run, run)
+  context.queue = turn.catch(() => undefined)
+  return turn
 }
 
 async function runBrowserAgentInContext(
