@@ -200,11 +200,6 @@
       "permanent": true
     },
     {
-      "source": "/docs/local-memory",
-      "destination": "/docs/brain",
-      "permanent": true
-    },
-    {
       "source": "/docs/cli-terminal",
       "destination": "/docs/terminal-agent",
       "permanent": true

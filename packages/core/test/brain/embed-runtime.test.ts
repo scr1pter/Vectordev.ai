@@ -9,6 +9,7 @@ import { BrainVector } from "@vectordevai/core/brain/vector"
 import { BrainWorker } from "@vectordevai/core/brain/worker/host"
 import { Global } from "@vectordevai/core/global"
 import { tmpdir } from "../fixture/tmpdir"
+import { bundle } from "./fixture/bundle"
 import * as Fixture from "./fixture/onnx"
 
 // The local search model on ONNX Runtime's real WASM build, run here with a tiny model written byte by byte (a table
@@ -17,12 +18,6 @@ import * as Fixture from "./fixture/onnx"
 // canary vectors. The real model runs too when VECTOR_TEST_EMBED_DIR names a folder of its pinned files.
 
 const ENTRY = path.join(import.meta.dir, "../../src/brain/worker/entry.ts")
-const built: { source?: Promise<string> } = {}
-const bundle = () =>
-  (built.source ??= Bun.build({ entrypoints: [ENTRY], target: "node", format: "esm", minify: true }).then((result) => {
-    if (!result.success) throw new Error(result.logs.join("\n"))
-    return result.outputs[0]!.text()
-  }))
 
 /** The fixture's canary vectors, as the pinned model would give them. */
 function pinned(values = Fixture.table()): BrainEmbed.Golden {
@@ -69,10 +64,12 @@ async function run<A>(
   )
 }
 
-const inWorker = async () =>
-  BrainWorker.layerWith({}).pipe(
-    Layer.provide(Layer.succeed(BrainWorker.Source, BrainWorker.Source.of({ load: Effect.succeed(await bundle()) }))),
+const inWorker = async () => {
+  const source = await bundle(ENTRY, { minify: true })
+  return BrainWorker.layerWith({}).pipe(
+    Layer.provide(Layer.succeed(BrainWorker.Source, BrainWorker.Source.of({ load: Effect.succeed(source) }))),
   )
+}
 
 describe("the local search model", () => {
   test("ONNX Runtime's WASM build gives the fixture model's vectors, the same every time, checked against its canaries", async () => {

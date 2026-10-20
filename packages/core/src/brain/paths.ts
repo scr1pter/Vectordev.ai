@@ -30,6 +30,28 @@ export function failureFile(data: string, root: string) {
   return path.join(directory(data), "failures", `${key}.json`)
 }
 
+/**
+ * A file as the brain names it: relative to the working tree's root, with forward slashes. Both are compared where
+ * they really are, so a file read through a symlinked spelling of the root (macOS /tmp and /var, a linked folder of
+ * projects) has the same name as one read through the real path git reports. A file that really lands outside the
+ * root, through `..` or a link, comes back starting with `..`, which callers refuse.
+ */
+export function relative(root: string, file: string) {
+  return path.relative(real(root), real(path.resolve(root, file))).split(path.sep).join("/")
+}
+
+// Where a path really is, following links in it and in its parents. One that cannot be resolved (it does not exist
+// yet or any more, or it is a link loop) is its deepest resolvable parent's real path with the rest put back, so it
+// cannot pass for a file inside the root when a parent leads out.
+function real(target: string): string {
+  try {
+    return realpathSync(target)
+  } catch {
+    const parent = path.dirname(target)
+    return parent === target ? target : path.join(real(parent), path.basename(target))
+  }
+}
+
 /** The repository key for a folder outside git, which has no repository ID of its own. */
 export function folderKey(directory: string) {
   return `dir:${createHash("sha256").update(canonical(directory)).digest("hex").slice(0, 16)}`

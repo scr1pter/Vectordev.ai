@@ -194,6 +194,66 @@ endpoint is fixed to the provider and which needs a real sign-in:
 developer item where a ChatGPT sign-in sends `instructions` plus a developer
 item, and the provider's order for `instructions` against `tools` is not public.
 
+## Does the brain compound?
+
+`compounding/` asks whether Vector's brain carries what one task taught into the
+later tasks on the same repository that need it, at what cost, and whether it
+misleads once a fact has changed. Nineteen tasks over seven simulated weeks run
+on _ledger_, a small invoicing and refunds service, where later tasks need what
+earlier ones taught: a preference the user states once (pnpm), a decision and
+its reason (integer cents), a check that breaks on a stale generated file,
+values and requirements from a spec PDF the owner adds to memory, a naming
+convention, and a flaky-test fix. In week 7 two of those go out of date: the
+user changes the refund window the PDF gives, and a teammate's commit, which
+nobody mentions, removes `pnpm gen`.
+
+```
+bun script/agent-eval/compounding/run.ts --out docs/benchmarks/vector-compounding-<date>
+bun script/agent-eval/compounding/run.ts --arms off,on --tasks t01-slugify,t08-csv-export --dump requests/
+```
+
+Three arms run the same prompts from the same starting files: _off_ (no memory
+tool, databases in memory, a fresh home per task), _on_ (one home, learning on)
+and _blind_, a control that keeps the brain on but has the fake model server
+delete everything the brain added before the scripted model reads the request.
+Brain off cannot carry anything between tasks, so its repeated mistakes follow
+from the task design; it is there to price the brain. The scripted model
+(`policy.ts`) is a pure function of each request: it gets a fact right only when
+the fact is in the request, goes by a correction when it is shown one, and acts
+on an out-of-date fact when that is all it has. What it saves, and when it
+opens a document pointer, come from the task definition. Mistakes are read from
+the run (an `npm install`, a stale route table, a `pnpm gen` that no longer
+exists, a hidden acceptance test of a fact or of acting on an out-of-date one),
+never from the script. The report gives tokens, steps, re-reads, repeated
+mistakes, mistakes from out-of-date facts and checks passed per task, per week
+and cumulatively, and the line that brought each fact, as `README.md` and
+`report.json`. Arms run under their folder's real path: Vector matches a file
+the model reads against the root git reports, which resolves symlinks, so under
+macOS's symlinked temporary folder no document pointer would show.
+
+`--live` runs the off and on arms against a real model: a local
+OpenAI-compatible endpoint (`--provider openai-compatible --base-url ...`) or a
+provider the owner picks (`--provider anthropic --api-key-env NAME`). It prints a
+cost estimate and does nothing without `--yes`, and refuses to run in CI. It
+refuses a paid provider (`anthropic`, `openai`, or an endpoint that is not on
+this machine) without `--price-input` and `--price-output`, because spend is
+counted from the tokens the provider reports at those prices: a task is stopped
+at the step that reaches what is left of `--max-spend` (default $5; that one
+step can take it past the cap), and no task starts once it is spent. A local
+endpoint may run unpriced, and the estimate then says the cap limits nothing.
+**Live, the model gets a shell with every permission**
+(`--dangerously-skip-permissions`): its home is redirected and its PATH
+narrowed, but absolute paths outside the work folder are reachable, so run it
+inside a container or a throwaway machine with a copy of the repository.
+
+The tests run from `script/agent-eval/compounding`, one file at a time:
+`tasks.test.ts` (each reference solution passes, each missing fact fails its
+check, and acting on an out-of-date fact fails its `stale:` check),
+`policy.test.ts` and `measure.test.ts` (pure), `run.test.ts` (live mode's
+refusals and estimate, with nothing run), and `harness.test.ts` (four tasks
+against the real engine: the same numbers twice, brain off never reads a
+planted `brain.db`, and the blind control loses brain on's advantage).
+
 ## Unavailable is not zero
 
 The rule this harness must never break: **a runtime that cannot be measured is
@@ -256,9 +316,11 @@ Practically:
 - To compare two Vector builds, run both back to back in one sitting, and pin
   `--model` so the model is not a free variable.
 - Re-run before believing any single result.
-- No results are checked into this repository, and none should be. There are no
-  published numbers for this harness and nothing here should be quoted as a
-  benchmark score.
+- No results of `run.ts` are checked into this repository, and none should be.
+  There are no published numbers for this harness and nothing here should be
+  quoted as a benchmark score. The offline compounding benchmark is different:
+  the same revision gives the same numbers, so its dated reports are kept in
+  `docs/benchmarks/`.
 
 ## Adding a task
 

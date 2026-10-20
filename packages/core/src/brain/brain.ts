@@ -686,7 +686,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
   ) {
     yield* sync(place)
     const rows = yield* recallable(place, input.personal, input.exclude ?? new Set())
-    const files = (input.files ?? []).map(relative(place))
+    const files = (input.files ?? []).map((file) => BrainPaths.relative(place.root, file))
     const query = BrainLexical.terms([input.query, ...files].join(" "))
     const now = Date.now()
     const ranked = BrainLexical.rank(
@@ -789,7 +789,7 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     place: Place,
     input: { file: string; personal: boolean; exclude?: ReadonlySet<string>; sessionID?: string },
   ) {
-    const file = relative(place)(input.file)
+    const file = BrainPaths.relative(place.root, input.file)
     if (file.startsWith("../")) return { ids: [], tokens: 0 }
     yield* sync(place)
     const rows = (yield* recallable(place, input.personal, input.exclude ?? new Set())).filter(
@@ -2174,15 +2174,8 @@ function render(
 }
 
 function label(place: Place, file: string) {
-  const relativePath = path.relative(place.root, file)
-  return relativePath && !relativePath.startsWith("..") ? relativePath.split(path.sep).join("/") : file
-}
-
-function relative(place: Place) {
-  return (file: string) => {
-    const resolved = path.isAbsolute(file) ? path.relative(place.root, file) : file
-    return resolved.split(path.sep).join("/").replace(/^\.\//, "")
-  }
+  const relativePath = BrainPaths.relative(place.root, file)
+  return relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath) ? relativePath : file
 }
 
 /** A file pattern from a rule or entry: a glob, or a bare directory that covers everything under it. */

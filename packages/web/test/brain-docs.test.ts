@@ -21,20 +21,45 @@ const section = readme.slice(readme.indexOf("### Vector Brain"), readme.indexOf(
 const report = await Bun.file(path.join(repo, `${knowledgeEval.report}/report.json`)).json()
 const words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
 
-test("Vector Brain and Documents and code links are pages of their own, and old local-memory links land on the brain", async () => {
-  const features = docsNav.find((group) => group.label === "Features")?.links.map((link) => link.id) ?? []
+// Desktop 1.99.109 and earlier still have local memory, so its page stays until the download page offers 1.99.110; from
+// then on the page is gone and /docs/local-memory and /docs#local-memory land on the brain page.
+const brainPublished = Bun.semver.order(publishedDesktopVersion, "1.99.110") >= 0
+const features = docsNav.find((group) => group.label === "Features")?.links.map((link) => link.id) ?? []
+const localMemory = Bun.file(path.join(web, "src/pages/docs/local-memory.astro"))
+const vercel = (await Bun.file(path.join(repo, "vercel.json")).json()) as {
+  redirects: { source: string; destination: string }[]
+}
+const localMemoryRedirect = vercel.redirects.find((redirect) => redirect.source === "/docs/local-memory")
+
+test.skipIf(brainPublished)("until desktop 1.99.110 is published, local memory keeps its page, beside the brain's", async () => {
+  expect(features.indexOf("local-memory")).toBe(features.indexOf("brain") - 1)
+  expect(docsNav.flatMap((group) => group.links).find((link) => link.id === "local-memory")?.blurb).toStartWith(
+    "Desktop 1.99.109 and earlier:",
+  )
+  expect(await localMemory.exists()).toBe(true)
+  const page = (await localMemory.text()).replace(/\s+/g, " ")
+  expect(page).toContain('<DocsPage id="local-memory">')
+  expect(page).toContain('{brainRelease.since} <a href="/docs/brain">Vector Brain</a> replaces local memory.')
+  expect(brainRelease.since).toBe("Coming in desktop 1.99.110:")
+  expect(brain).toContain('see <a href="/docs/local-memory">Local memory</a>')
+  // A permanent redirect would be cached by browsers, so neither it nor the /docs#local-memory shim may move readers on.
+  expect(localMemoryRedirect).toBeUndefined()
+  expect(docsMoved["local-memory"]).toBeUndefined()
+})
+
+test.if(brainPublished)("once desktop 1.99.110 is published, local memory's page is gone and its links land on the brain", async () => {
+  expect(features).not.toContain("local-memory")
+  expect(await localMemory.exists()).toBe(false)
+  expect(brain).not.toContain('href="/docs/local-memory"')
+  expect(docsMoved["local-memory"]).toBe("brain")
+  expect(localMemoryRedirect?.destination).toBe("/docs/brain")
+})
+
+test("Vector Brain and Documents and code links are pages of their own", async () => {
   expect(features).toContain("brain")
   expect(features).toContain("documents")
-  expect(features).not.toContain("local-memory")
   expect(brain).toContain('<DocsPage id="brain">')
   expect(documents).toContain('<DocsPage id="documents">')
-  expect(await Bun.file(path.join(web, "src/pages/docs/local-memory.astro")).exists()).toBe(false)
-  // The /docs#local-memory shim and the /docs/local-memory redirect both reach the brain page.
-  expect(docsMoved["local-memory"]).toBe("brain")
-  const vercel = (await Bun.file(path.join(repo, "vercel.json")).json()) as {
-    redirects: { source: string; destination: string }[]
-  }
-  expect(vercel.redirects.find((redirect) => redirect.source === "/docs/local-memory")?.destination).toBe("/docs/brain")
   // Every link between the two pages lands on a heading that exists.
   const links = Array.from(`${brain} ${documents}`.matchAll(/href="\/docs\/(brain|documents)#([\w-]+)"/g), (match) => ({
     page: match[1] === "brain" ? brain : documents,
@@ -44,15 +69,25 @@ test("Vector Brain and Documents and code links are pages of their own, and old 
   for (const link of links) expect(link.page).toContain(`<h2 id="${link.anchor}">`)
 })
 
-test("both pages and their sidebar entries name desktop 1.99.110, and the brain page says what leaves the computer", () => {
+test("both pages and their sidebar entries name desktop 1.99.110, and the brain page says what leaves the computer", async () => {
   for (const id of ["brain", "documents"])
     expect(docsNav.flatMap((group) => group.links).find((link) => link.id === id)?.blurb).toStartWith(
       "From desktop 1.99.110:",
     )
   expect(brain).toContain("From desktop 1.99.110, Vector keeps a brain for each repository")
   expect(documents).toContain("From desktop 1.99.110, you can give Vector a repository's specs")
+  // The fixed part goes with every request but a greeting, so the privacy line names it before "only the few lines".
   expect(brain).toContain(
-    "All of it is stored and searched on this computer. For each request Vector sends your model only the few lines that bear on it. Private documents never go to a model that may train on prompts, or to a session a guest is in.",
+    "All of it is stored and searched on this computer. Beyond your rules, the start of <code>MEMORY.md</code> and the entries you pinned, which go with every request but a greeting, Vector sends your model only the few lines that bear on each request. Private documents never go to a free model labelled <strong>May train on your prompts</strong>, or to a session a guest is in.",
+  )
+  // Redaction is pattern-based, and a kept copy is the file as added, as the app's Keep copies toggle says.
+  for (const page of [brain, documents]) {
+    expect(page).toContain("Vector removes what looks like a secret from what it reads")
+    expect(page).toContain("is the file as you added it, secrets included")
+    expect(page).not.toMatch(/secrets (in a document )?are removed/)
+  }
+  expect(await read("packages/app/src/components/settings-v2/memory-documents-model.ts")).toContain(
+    "The copy is the file as you added it, secrets included",
   )
   // Readers still on 1.99.109 are told what they have.
   expect(brain).toContain("Desktop 1.99.109 and earlier keep one <code>MEMORY.md</code> file")
@@ -194,7 +229,9 @@ test("Search by meaning has its own page, from desktop 1.99.110, with the manife
   expect(BrainEmbedManifest.megabytes(BrainEmbedManifest.size(BrainEmbedManifest.MODELS["arctic-embed-xs-q8"]))).toBe("24 MB")
   expect(meaning).toContain("Nothing is downloaded until you ask")
   expect(meaning).toContain("Until you do, Vector searches documents by keywords and code links")
-  expect(meaning).toContain("never for a model that may train on prompts, or in a session a guest is in")
+  expect(meaning).toContain(
+    "never for a free model labelled <strong>May train on your prompts</strong>, or in a session a guest is in",
+  )
   expect(documents).toContain('<a href="/docs/search-by-meaning">Search by meaning</a>')
   expect(section).toContain("With the optional local search model, a one-time 24 MB download you ask for")
   // Only the preview's two tokenizer files have no pinned sha256, and every place that promises the hash says so.
@@ -248,4 +285,6 @@ test("the meaning floor's margin is the one the dated report's sweep measured", 
   const archive = await Bun.file(path.join(repo, `${knowledgeEval.report}/README.md`)).text()
   for (const text of [knowledgeEval.floor, manifest, archive]) expect(text).not.toContain("room to spare")
   expect(archive).toContain("## The meaning floor")
+  // The review only checks for free models labelled May train on your prompts, so no page claims more.
+  expect(await Bun.file(`${import.meta.dir}/../src/pages/docs/brain.astro`).text()).not.toMatch(/may not train on prompts/)
 })

@@ -6,6 +6,7 @@ import { Effect } from "effect"
 import { BrainAnchor } from "@vectordevai/core/brain/anchor"
 import { BrainAnchorTable, BrainEventTable, BrainPendingTable } from "@vectordevai/core/brain/sql"
 import { tmpdir } from "../fixture/tmpdir"
+import { bundle } from "./fixture/bundle"
 import { added, text, withKnowledge, type Setup } from "./fixture/knowledge"
 
 // Links from documents to code, found with Ripgrep in a real (temporary) git working tree: definitions, uses, routes,
@@ -109,12 +110,10 @@ describe("BrainAnchor.names", () => {
   // runs of spaces as Bun's regex interpreter does.
   test.skipIf(!Bun.which("node"))("the definition check stays quick on a 500 KB line in V8", async () => {
     await using tmp = await tmpdir()
-    const built = await Bun.build({
-      entrypoints: [path.join(import.meta.dir, "../../src/brain/anchor.ts")],
-      target: "node",
-      format: "esm",
-    })
-    await Bun.write(path.join(tmp.path, "anchor.mjs"), built.outputs[0]!)
+    await Bun.write(
+      path.join(tmp.path, "anchor.mjs"),
+      await bundle(path.join(import.meta.dir, "../../src/brain/anchor.ts")),
+    )
     await Bun.write(
       path.join(tmp.path, "time.mjs"),
       [
@@ -446,6 +445,39 @@ describe("pointers and the spec guard", () => {
     )
     // An uploaded document is private: withheld where personal memory is.
     expect(result.hidden).toEqual([])
+  }, 30_000)
+
+  // git reports a repository's real path, while a read or an edit can come through a symlinked one (macOS /tmp and
+  // /var, a linked folder of projects), and the other way round.
+  test("a file read through a symlinked path of its repository has its pointer, guard and links", async () => {
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          yield* added(setup, text("Auth spec.md", SPEC))
+          const linked = path.join(setup.dir, "linked")
+          yield* Effect.promise(() => fs.symlink(setup.root, linked))
+          const request = { personal: true, exclude: new Set<string>() }
+          const read = (place: typeof setup.place, root: string) =>
+            Effect.gen(function* () {
+              return {
+                pointer: (yield* setup.knowledge.pointers(place, { ...request, file: path.join(root, "src/auth/session.ts") })).text,
+                guard: (yield* setup.knowledge.guard(place, { ...request, file: path.join(root, "src/api/users.ts") })).text,
+                links: (yield* setup.knowledge.links(place, path.join(root, "src/auth/session.ts"), { personal: true })).length,
+              }
+            })
+          return {
+            real: yield* read(setup.place, setup.root),
+            throughLink: yield* read(setup.place, linked),
+            fromLink: yield* read({ ...setup.place, root: linked }, setup.root),
+          }
+        }),
+      { files: CODE, git: true },
+    )
+    expect(result.real.pointer).toMatch(/^Documents linked to src\/auth\/session\.ts: /)
+    expect(result.real.guard).toMatch(/^Linked requirements: /)
+    expect(result.real.links).toBeGreaterThan(0)
+    expect(result.throughLink).toEqual(result.real)
+    expect(result.fromLink).toEqual(result.real)
   }, 30_000)
 
   test("at most three ids in at most 60 tokens however many records a file has", async () => {

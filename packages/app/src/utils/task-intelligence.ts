@@ -54,12 +54,13 @@ const DIFFICULTY = {
 } as const satisfies Record<TaskSize.Tier, TaskDifficulty>
 
 // Only a social message is trivial, and only when no work is waiting on the user (`open`): then even a "thanks" answers
-// or follows up that work, so it goes to the engine with the history rather than to the quick lane. A message with
-// files, images or a named subagent is never trivial, as the engine sizes it: "help" with a screenshot of an error
-// needs the tools.
+// or follows up that work, so it goes to the engine with the history rather than to the quick lane. A bare "ok" is
+// social too, unless a plan from Plan mode waits on it (`plan`): then it carries the plan out. A message with files,
+// images or a named subagent is never trivial, as the engine sizes it: "help" with a screenshot of an error needs the
+// tools.
 export function classifyTaskDifficulty(
   task: string,
-  input: { open?: boolean; files?: number; images?: number; agents?: readonly string[] } = {},
+  input: { open?: boolean; plan?: boolean; files?: number; images?: number; agents?: readonly string[] } = {},
 ): TaskDifficulty {
   if (!task.trim() && !input.files && !input.images && !input.agents?.length) return "trivial"
   return DIFFICULTY[TaskSize.classify({ text: task, ...input }).tier]
@@ -105,6 +106,17 @@ export function workOpen(
     )
     .findLast((item) => item.length > 0)
   return TaskSize.asks(text ?? "")
+}
+
+/**
+ * Whether the work before the next message is a plan from Plan mode that nobody has carried out yet, as the engine reads
+ * it: the last reply that was not a greeting's came from the plan agent. Then "ok" approves the plan.
+ */
+export function planPending(messages: readonly HistoryMessage[]) {
+  return (
+    messages.findLast((message) => message.role === "assistant" && message.size !== "chat" && message.agent !== "quick")
+      ?.agent === "plan"
+  )
 }
 
 // Finish reasons of a run that stopped before its answer was done, as the engine reads them.
