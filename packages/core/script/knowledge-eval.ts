@@ -266,7 +266,9 @@ export function markdown(input: {
       ? `unrelated requests still carried cards at the shipped floor, ${dense.floor}`
       : `unrelated requests carried no cards from ${clear.toFixed(2)} up${leak ? `, and at ${leak.floor.toFixed(2)} ${counted(leak.requests)} of them carried ${leak.tokens} tokens` : ""}`
   const room =
-    clear === undefined ? "" : `, so the shipped floor sits ${((dense.floor ?? 0) - clear).toFixed(2)} above the least that kept them out`
+    clear === undefined
+      ? ""
+      : `, so the shipped floor sits ${((dense.floor ?? 0) - clear).toFixed(2)} above the least that kept them out`
   return [
     `# Knowledge eval, ${day}`,
     "",
@@ -525,10 +527,7 @@ async function run(
  * How far the shipped floor sits above the least swept floor that, like every swept floor between it and the shipped
  * one, let no unrelated request carry a card; and the swept floor just below that, with what got through there.
  */
-function margin(
-  sweep: readonly { readonly floor: number; readonly irrelevant: readonly number[] }[],
-  floor: number,
-) {
+function margin(sweep: readonly { readonly floor: number; readonly irrelevant: readonly number[] }[], floor: number) {
   const below = sweep.filter((row) => row.floor <= floor).toReversed()
   const at = below.findIndex((row) => row.irrelevant.some((tokens) => tokens > 0))
   const clear = (at === -1 ? below.at(-1) : below[at - 1])?.floor

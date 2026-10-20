@@ -34,8 +34,9 @@ export type Model = {
   readonly query: string
   /**
    * The least centred cosine (BrainVector: the cosine less the mean every text shares) a match by meaning needs; the
-   * gate also wants it within 0.08 of the best. Set on the knowledge eval, where it is the least that lets none of
-   * the unrelated requests through, with room to spare.
+   * gate also wants it within 0.08 of the best. Set on the knowledge eval, whose floor sweep (report.json in
+   * docs/benchmarks/vector-knowledge-meaning-2026-10-19) has unrelated requests carrying no cards from 0.18 up and one
+   * carrying 122 tokens at 0.17: a margin of 0.02 on the data it was tuned on.
    */
   readonly floor: number
   /** The int8 graph and the files it reads. Only int8 MatMulInteger graphs are used, never q4 MatMulNBits. */

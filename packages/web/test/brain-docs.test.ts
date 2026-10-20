@@ -201,3 +201,18 @@ test("the meaning figures are the dated report's, run with the pinned model", ()
   expect(meaning).toContain("{knowledgeEval.meaning}")
   expect(meaning).toContain("{knowledgeEval.floor} {knowledgeEval.caveat}")
 })
+
+// The floor was tuned on the eval it is quoted from, so the page gives the margin the report's sweep measured, not a
+// claim of room to spare.
+test("the meaning floor's margin is the one the dated report's sweep measured", async () => {
+  const dense = report.dense
+  expect(dense.floor).toBe(BrainEmbedManifest.MODELS["arctic-embed-xs-q8"].floor)
+  expect(dense.sweep.map((row: { floor: number }) => row.floor)).toContain(dense.floor)
+  expect(knowledgeEval.floor).toBe(
+    `The least score a match by meaning needs, ${dense.floor}, was set on this same eval. There the unrelated requests carried no cards from ${dense.clear.toFixed(2)} up, and at ${dense.leak.floor.toFixed(2)} ${words[dense.leak.requests]} of them carried ${dense.leak.tokens} tokens, so the floor sits ${(dense.floor - dense.clear).toFixed(2)} above the least that kept them out, and these figures are not an out-of-sample result.`,
+  )
+  const manifest = await Bun.file(path.join(repo, "packages/core/src/brain/embed-manifest.ts")).text()
+  const archive = await Bun.file(path.join(repo, `${knowledgeEval.report}/README.md`)).text()
+  for (const text of [knowledgeEval.floor, manifest, archive]) expect(text).not.toContain("room to spare")
+  expect(archive).toContain("## The meaning floor")
+})

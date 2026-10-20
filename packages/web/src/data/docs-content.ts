@@ -162,7 +162,7 @@ export const knowledgeEval = {
   meaning:
     "With the search model, the same requests found the governing requirement for 13 of 40 tasks by keywords and meaning alone, with no code links, against 1 of 40 by keywords alone; with every channel at once, for 40 of 40, and 8 of 8 through an import. The 10 unrelated requests carried no tokens with it either.",
   floor:
-    "The least score a match by meaning needs was set on this same eval, as the least that lets none of the unrelated requests through with room to spare, so these figures are not an out-of-sample result.",
+    "The least score a match by meaning needs, 0.2, was set on this same eval. There the unrelated requests carried no cards from 0.18 up, and at 0.17 one of them carried 122 tokens, so the floor sits 0.02 above the least that kept them out, and these figures are not an out-of-sample result.",
 }
 
 // The engine's eight subagent specialists (packages/engine/src/agent/agent.ts)
