@@ -1,0 +1,805 @@
+{
+  "date": "2026-10-19",
+  "revision": "79e59826873ddca09c02bb3cc5945a852c740067",
+  "dirty": false,
+  "machine": "Apple M3, 8 cores, darwin arm64, Bun 1.3.14, one-minute load average 5.5 at the start",
+  "fixture": {
+    "documents": 5,
+    "records": 34,
+    "characters": 1792,
+    "tokens": 423,
+    "files": 25,
+    "working": 40,
+    "hops": 8,
+    "irrelevant": 10
+  },
+  "found": {
+    "working": {
+      "tasks": 40,
+      "keywords": 1,
+      "activation": 40,
+      "pagerank": 40,
+      "meaning": 13,
+      "all": 40
+    },
+    "hops": {
+      "tasks": 8,
+      "keywords": 0,
+      "activation": 0,
+      "pagerank": 8,
+      "meaning": 3,
+      "all": 8
+    }
+  },
+  "dense": {
+    "model": "Snowflake/snowflake-arctic-embed-xs@d8c86521100d int8",
+    "tokens": 148.75,
+    "irrelevant": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "recall": {
+      "p50": 13.927499999999782,
+      "p95": 21.17920800000047
+    },
+    "embedded": 49,
+    "seconds": 1.1632112499999998
+  },
+  "cards": 1.975,
+  "tokens": {
+    "chat": {
+      "mean": 0,
+      "max": 0,
+      "budget": 0
+    },
+    "light": {
+      "mean": 131.05,
+      "max": 202,
+      "budget": 300
+    },
+    "standard": {
+      "mean": 131.05,
+      "max": 202,
+      "budget": 500
+    },
+    "thorough": {
+      "mean": 131.05,
+      "max": 202,
+      "budget": 900
+    }
+  },
+  "activationTokens": 136.45,
+  "lightMedian": 130,
+  "irrelevant": {
+    "pagerank": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "activation": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "keyword": {
+    "seconds": 0.5369005,
+    "recall": {
+      "p50": 1.8387500000000045,
+      "p95": 4.982792000000018
+    }
+  },
+  "missed": [],
+  "large": {
+    "pages": 300,
+    "megabytes": 0.9995718002319336,
+    "tokens": 169340,
+    "records": 2000,
+    "passages": 540,
+    "seconds": 2.4933654590000005,
+    "reader": "worker",
+    "recall": {
+      "queries": 20,
+      "answered": 20,
+      "p50": 6.690458000000945,
+      "p95": 9.058665999998993,
+      "maxTokens": 221
+    }
+  },
+  "cases": [
+    {
+      "set": "working",
+      "query": "change how long people stay signed in",
+      "files": [
+        "src/auth/session.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 2,
+      "tokens": 126
+    },
+    {
+      "set": "working",
+      "query": "add a unit test for this file",
+      "files": [
+        "src/auth/session.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 2,
+      "tokens": 126
+    },
+    {
+      "set": "working",
+      "query": "the swap sometimes leaves the old one usable, fix it",
+      "files": [
+        "src/auth/session.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 2,
+      "tokens": 126
+    },
+    {
+      "set": "working",
+      "query": "explain what this file does",
+      "files": [
+        "src/auth/session.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 2,
+      "tokens": 126
+    },
+    {
+      "set": "working",
+      "query": "speed this function up, it is slow on login",
+      "files": [
+        "src/auth/password.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 2,
+      "tokens": 133
+    },
+    {
+      "set": "working",
+      "query": "add types to these helpers",
+      "files": [
+        "src/auth/password.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 2,
+      "tokens": 133
+    },
+    {
+      "set": "working",
+      "query": "loosen the rules for new passwords",
+      "files": [
+        "src/auth/password.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 2,
+      "tokens": 133
+    },
+    {
+      "set": "working",
+      "query": "why does sign-up reject what I type?",
+      "files": [
+        "src/auth/password.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 4,
+      "tokens": 202
+    },
+    {
+      "set": "working",
+      "query": "people get stuck after a few wrong tries, make it friendlier",
+      "files": [
+        "src/auth/lockout.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 1,
+      "tokens": 112
+    },
+    {
+      "set": "working",
+      "query": "refactor this module to use a class",
+      "files": [
+        "src/auth/lockout.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 1,
+      "tokens": 112
+    },
+    {
+      "set": "working",
+      "query": "return a nicer error for unknown people from the profile endpoint",
+      "files": [
+        "src/api/routes.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 3,
+      "tokens": 156
+    },
+    {
+      "set": "working",
+      "query": "log every request that reaches this router",
+      "files": [
+        "src/api/routes.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 3,
+      "tokens": 156
+    },
+    {
+      "set": "working",
+      "query": "support amounts with fractions here",
+      "files": [
+        "src/billing/invoice.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 2,
+      "tokens": 135
+    },
+    {
+      "set": "working",
+      "query": "rename amountCents to amount",
+      "files": [
+        "src/billing/invoice.ts"
+      ],
+      "keywords": true,
+      "activation": true,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 2,
+      "tokens": 135
+    },
+    {
+      "set": "working",
+      "query": "let the counter restart each year",
+      "files": [
+        "src/billing/invoice.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 2,
+      "tokens": 135
+    },
+    {
+      "set": "working",
+      "query": "add validation to the handler that makes bills",
+      "files": [
+        "src/api/routes.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 3,
+      "tokens": 156
+    },
+    {
+      "set": "working",
+      "query": "allow these without a reference",
+      "files": [
+        "src/billing/refund.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 2,
+      "tokens": 134
+    },
+    {
+      "set": "working",
+      "query": "make the return period configurable",
+      "files": [
+        "src/billing/refund.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 2,
+      "tokens": 134
+    },
+    {
+      "set": "working",
+      "query": "why is this constant thirty?",
+      "files": [
+        "src/billing/refund.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 3,
+      "tokens": 164
+    },
+    {
+      "set": "working",
+      "query": "use Math.round everywhere in this file for simplicity",
+      "files": [
+        "src/billing/tax.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 1,
+      "tokens": 99
+    },
+    {
+      "set": "working",
+      "query": "this looks odd, simplify it",
+      "files": [
+        "src/billing/tax.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 1,
+      "tokens": 99
+    },
+    {
+      "set": "working",
+      "query": "accept incoming events faster",
+      "files": [
+        "src/api/payments.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 1,
+      "tokens": 112
+    },
+    {
+      "set": "working",
+      "query": "add metrics to this handler",
+      "files": [
+        "src/api/payments.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 1,
+      "tokens": 112
+    },
+    {
+      "set": "working",
+      "query": "raise the cap for large files",
+      "files": [
+        "src/upload/limits.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 1,
+      "tokens": 106
+    },
+    {
+      "set": "working",
+      "query": "tidy this file",
+      "files": [
+        "src/upload/limits.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 1,
+      "tokens": 106
+    },
+    {
+      "set": "working",
+      "query": "skip the expensive check for small files",
+      "files": [
+        "src/upload/scan.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 1,
+      "tokens": 101
+    },
+    {
+      "set": "working",
+      "query": "make this synchronous",
+      "files": [
+        "src/upload/scan.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 1,
+      "tokens": 101
+    },
+    {
+      "set": "working",
+      "query": "hard-code the destination so local runs work",
+      "files": [
+        "src/upload/storage.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 1,
+      "tokens": 106
+    },
+    {
+      "set": "working",
+      "query": "add retries around the write",
+      "files": [
+        "src/upload/storage.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 1,
+      "tokens": 106
+    },
+    {
+      "set": "working",
+      "query": "make removal faster by only dropping the database row",
+      "files": [
+        "src/api/routes.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 3,
+      "tokens": 156
+    },
+    {
+      "set": "working",
+      "query": "make outgoing mail more reliable",
+      "files": [
+        "src/notify/email.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 2,
+      "tokens": 130
+    },
+    {
+      "set": "working",
+      "query": "add a fourth attempt",
+      "files": [
+        "src/notify/email.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 2,
+      "tokens": 130
+    },
+    {
+      "set": "working",
+      "query": "point this at our new relay in the code",
+      "files": [
+        "src/notify/email.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 2,
+      "tokens": 130
+    },
+    {
+      "set": "working",
+      "query": "sort the summary entries by time instead",
+      "files": [
+        "src/notify/digest.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 2,
+      "tokens": 130
+    },
+    {
+      "set": "working",
+      "query": "split them by team instead",
+      "files": [
+        "src/notify/digest.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 2,
+      "tokens": 130
+    },
+    {
+      "set": "working",
+      "query": "send the summary in the evening",
+      "files": [
+        "src/notify/digest.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 2,
+      "tokens": 130
+    },
+    {
+      "set": "working",
+      "query": "make the rebuild run inline so tests are simpler",
+      "files": [
+        "src/search/index.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 3,
+      "tokens": 156
+    },
+    {
+      "set": "working",
+      "query": "document this module",
+      "files": [
+        "src/search/index.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 3,
+      "tokens": 156
+    },
+    {
+      "set": "working",
+      "query": "show more hits per screen",
+      "files": [
+        "src/search/index.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 3,
+      "tokens": 156
+    },
+    {
+      "set": "working",
+      "query": "include everyone, even old customers",
+      "files": [
+        "src/search/index.ts"
+      ],
+      "keywords": false,
+      "activation": true,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 3,
+      "tokens": 156
+    },
+    {
+      "set": "hops",
+      "query": "add a discount line before paying",
+      "files": [
+        "src/checkout/cart.ts"
+      ],
+      "keywords": false,
+      "activation": false,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 2,
+      "tokens": 135
+    },
+    {
+      "set": "hops",
+      "query": "let support staff undo a purchase from this screen",
+      "files": [
+        "src/admin/support.ts"
+      ],
+      "keywords": false,
+      "activation": false,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 2,
+      "tokens": 134
+    },
+    {
+      "set": "hops",
+      "query": "schedule this job hourly instead of nightly",
+      "files": [
+        "src/jobs/nightly.ts"
+      ],
+      "keywords": false,
+      "activation": false,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 3,
+      "tokens": 156
+    },
+    {
+      "set": "hops",
+      "query": "add a captcha to registration",
+      "files": [
+        "src/account/signup.ts"
+      ],
+      "keywords": false,
+      "activation": false,
+      "pagerank": true,
+      "meaning": true,
+      "all": true,
+      "cards": 2,
+      "tokens": 133
+    },
+    {
+      "set": "hops",
+      "query": "warn people sooner when space gets low",
+      "files": [
+        "src/alerts/disk.ts"
+      ],
+      "keywords": false,
+      "activation": false,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 2,
+      "tokens": 130
+    },
+    {
+      "set": "hops",
+      "query": "crop pictures to a square first",
+      "files": [
+        "src/media/avatar.ts"
+      ],
+      "keywords": false,
+      "activation": false,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 1,
+      "tokens": 106
+    },
+    {
+      "set": "hops",
+      "query": "add a column for the region to this report",
+      "files": [
+        "src/reports/monthly.ts"
+      ],
+      "keywords": false,
+      "activation": false,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 1,
+      "tokens": 99
+    },
+    {
+      "set": "hops",
+      "query": "reject requests from banned clients here",
+      "files": [
+        "src/gateway/guard.ts"
+      ],
+      "keywords": false,
+      "activation": false,
+      "pagerank": true,
+      "meaning": false,
+      "all": true,
+      "cards": 3,
+      "tokens": 160
+    }
+  ]
+}
