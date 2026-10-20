@@ -110,7 +110,14 @@ test("Check for Updates is named only as the macOS menu item", () => {
   ).toEqual([])
 })
 
-test("no page or README links to the private source repository or offers installers without an account", () => {
+test("no page or README links to the private source repository or offers installers without an account", async () => {
+  // Release notes keep their wording, but none may send readers to the private repository's releases.
+  const notes = [...sources, { file: "public/changelog.json", text: await Bun.file(`${web}public/changelog.json`).text() }]
+  expect(
+    notes.flatMap((source) =>
+      (source.text.match(/[^.]*\bGitHub releases?\b[^.]*/gi) ?? []).map((match) => `${source.file}: ${match.trim().slice(0, 120)}`),
+    ),
+  ).toEqual([])
   expect(
     sources.flatMap((source) =>
       source.text
