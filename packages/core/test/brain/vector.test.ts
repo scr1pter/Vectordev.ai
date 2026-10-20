@@ -36,14 +36,15 @@ function corpus(count: number, clusters: number, noise = 0.04, seed = 7) {
   return { vectors, centres, around }
 }
 
+function rows(vectors: readonly Float32Array[]) {
+  return vectors.map((vector, item) => {
+    const quantized = BrainVector.quantize(vector)
+    return { item, q8: new Uint8Array(quantized.q8.buffer), scale: quantized.scale }
+  })
+}
+
 function block(vectors: readonly Float32Array[]) {
-  return BrainVector.index(
-    DIMS,
-    vectors.map((vector, item) => {
-      const quantized = BrainVector.quantize(vector)
-      return { item, q8: new Uint8Array(quantized.q8.buffer), scale: quantized.scale }
-    }),
-  )
+  return BrainVector.index(DIMS, rows(vectors))
 }
 
 describe("BrainVector", () => {
@@ -76,6 +77,36 @@ describe("BrainVector", () => {
     // A query of the wrong size, or an empty index, finds nothing rather than nonsense.
     expect(BrainVector.search(index, new Float32Array(16), { k: 5 })).toEqual([])
     expect(BrainVector.search(BrainVector.index(DIMS, []), query, { k: 5 })).toEqual([])
+  })
+
+  test("a centred cosine takes out the direction every row shares, and a background mean keeps a small block honest", () => {
+    const { vectors, centres, around } = corpus(2_000, 100)
+    const index = block(vectors)
+    const related = BrainVector.search(index, around(centres[5]!), {
+      k: 1,
+      by: "centred",
+      allow: (row) => row === 105,
+    })[0]!
+    const unrelated = BrainVector.search(index, around(centres[5]!), {
+      k: 1,
+      by: "centred",
+      allow: (row) => row === 106,
+    })[0]!
+    // Raw cosines of unrelated rows are high because of what they share; centred, they are near zero.
+    expect(unrelated.score).toBeGreaterThan(0.2)
+    expect(unrelated.centred).toBeLessThan(0.15)
+    expect(related.centred).toBeGreaterThan(0.25)
+    // Three rows on one subject: centred on themselves alone, the subject they share is taken out too, and a request
+    // on it looks unrelated. Blended with the background mean (here, the mean of the whole corpus), it does not.
+    const small = vectors.filter((_, row) => row % 100 === 5).slice(0, 3)
+    const background = { mean: block(vectors).mean, weight: 64 }
+    const alone = BrainVector.search(block(small), around(centres[5]!), { k: 1, by: "centred" })[0]!
+    const blended = BrainVector.search(BrainVector.index(DIMS, rows(small), background), around(centres[5]!), {
+      k: 1,
+      by: "centred",
+    })[0]!
+    expect(alone.centred).toBeLessThan(0.15)
+    expect(blended.centred).toBeGreaterThan(0.25)
   })
 
   test("the sign-bit prefilter keeps recall@10 at least 0.98 against an exact scan on 10,000 vectors", () => {

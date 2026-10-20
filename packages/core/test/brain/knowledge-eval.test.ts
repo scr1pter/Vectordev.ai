@@ -58,4 +58,25 @@ describe("knowledge eval", () => {
     expect(text).not.toContain("not in this build")
     expect(text).not.toMatch(/\bexactly\b|never exceeds|absolute privacy|\bprojects?\b/i)
   }, 110_000)
+
+  // The pinned model, where its files are at hand: meaning must add to keywords and take nothing from the code graph,
+  // and send nothing for an unrelated request.
+  const real = process.env.VECTOR_TEST_EMBED_DIR
+  test.skipIf(!real)(
+    "with the pinned model, every channel finds what the code graph does and unrelated requests cost 0 tokens",
+    async () => {
+      const report = await evaluate({ model: real! })
+      console.log(
+        `knowledge eval with ${report.dense.model}: keywords and meaning ${report.found.working.meaning}/${report.found.working.tasks} and ${report.found.hops.meaning}/${report.found.hops.tasks}, every channel ${report.found.working.all}/${report.found.working.tasks} and ${report.found.hops.all}/${report.found.hops.tasks}, unrelated ${report.dense.irrelevant.join(",")}, recall p95 ${report.dense.recall.p95.toFixed(1)} ms`,
+      )
+      expect(report.dense.model).not.toBe("hash stand-in")
+      expect(report.found.working.meaning).toBeGreaterThan(report.found.working.keywords)
+      expect(report.found.working.all).toBeGreaterThanOrEqual(report.found.working.pagerank)
+      expect(report.found.hops.all).toBeGreaterThanOrEqual(report.found.hops.pagerank)
+      expect(report.dense.irrelevant).toEqual(Array.from({ length: 10 }, () => 0))
+      // With the model warm a request's recall stays within the design's 90 ms at the 95th percentile.
+      expect(report.dense.recall.p95).toBeLessThanOrEqual(90)
+    },
+    110_000,
+  )
 })

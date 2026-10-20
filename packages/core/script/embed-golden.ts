@@ -24,6 +24,7 @@ const GOLDEN = path.join(import.meta.dirname, "..", "src", "brain", "embed-golde
 const AGREE = 0.9999
 
 type Vectors = { readonly text: string; readonly role: "query" | "passage"; readonly vector: number[] }[]
+type Pinned = { revision: string; int8?: Vectors; fp32?: Vectors; background?: number[] }
 
 if (process.argv[2] === "--node") {
   const [dir, wasm, id, variant] = process.argv.slice(3)
@@ -66,9 +67,7 @@ async function main() {
   )
   if (agreement.some((value) => value < AGREE))
     throw new Error("Bun and Node gave different vectors; nothing was written.")
-  const pinned: Record<string, { revision: string; int8?: Vectors; fp32?: Vectors }> = JSON.parse(
-    await fs.readFile(GOLDEN, "utf8"),
-  )
+  const pinned: Record<string, Pinned> = JSON.parse(await fs.readFile(GOLDEN, "utf8"))
   if (args.includes("--check")) {
     const entry = pinned[id]
     const against = variant === "fp32" ? (entry?.fp32 ?? entry?.int8) : entry?.int8
@@ -79,19 +78,26 @@ async function main() {
     return
   }
   const rounded = bun.map((item) => ({ ...item, vector: item.vector.map((value) => Number(value.toFixed(7))) }))
+  // The background mean comes from the int8 graph, the one in use unless it fails its check.
+  const background =
+    variant === "int8"
+      ? (await backgroundOf(BrainEmbedManifest.key(model, variant))).map((value) => Number(value.toFixed(7)))
+      : undefined
   const next = {
     ...pinned,
     [id]: {
       ...(pinned[id]?.revision === model.revision ? pinned[id] : {}),
       revision: model.revision,
       [variant]: rounded,
+      ...(background ? { background } : {}),
     },
   }
   // One canary's vector on one line, so the file reads as three sentences and their numbers.
-  const text = JSON.stringify(next, (key, value) => (key === "vector" ? JSON.stringify(value) : value), 2).replace(
-    /"vector": "(\[[^"]*\])"/g,
-    '"vector": $1',
-  )
+  const text = JSON.stringify(
+    next,
+    (key, value) => (key === "vector" || key === "background" ? JSON.stringify(value) : value),
+    2,
+  ).replace(/"(vector|background)": "(\[[^"]*\])"/g, '"$1": $2')
   await fs.writeFile(GOLDEN, `${text}\n`)
   console.log(
     `Wrote ${bun.length} ${variant} canary vectors of ${model.dims} dimensions for ${id}@${model.revision} to ${GOLDEN}`,
@@ -139,6 +145,16 @@ async function canaries(
     out.push({ text: canary.text, role: canary.role, vector: Array.from(result.vectors) })
   }
   return out
+}
+
+// The mean vector of the everyday sentences, with the model already loaded.
+async function backgroundOf(key: string) {
+  const texts = [...BrainEmbedManifest.BACKGROUND]
+  const result = await BrainWorkerEmbed.embed({ id: 3, type: "embed", key, texts, role: "passage" })
+  return Array.from(
+    { length: result.dims },
+    (_, dim) => texts.reduce((sum, _, row) => sum + result.vectors[row * result.dims + dim]!, 0) / texts.length,
+  )
 }
 
 // The same canaries under Node, from this script bundled for it, so a vector pinned here holds on both runtimes.

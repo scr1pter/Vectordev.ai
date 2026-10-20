@@ -22,6 +22,7 @@ import { BrainCredit } from "./credit"
 import { BrainDistill } from "./distill"
 import { BrainDrift } from "./drift"
 import { BrainEmbed } from "./embed"
+import { BrainEmbedManifest } from "./embed-manifest"
 import { BrainExtract } from "./extract"
 import { BrainLimits } from "./document/limits"
 import { BrainSniff } from "./document/sniff"
@@ -3039,8 +3040,10 @@ function make(input: {
   // --- Meaning ----------------------------------------------------------------------------------------------------
 
   // Records and passages near a request in meaning, best first: what the local model's vectors put over the model's
-  // floor and within MEANING_MARGIN of the best match. Nothing when no model is ready, it is still loading, or the
-  // request's vector takes over 300 ms: then keywords and code links are all there is, as before the model.
+  // floor and within MEANING_MARGIN of the best match, by cosine centred on the repository's mean blended with the
+  // model's background (all text looks a little alike to a model; only what stands out of that is meaning). Nothing
+  // when no model is ready, it is still loading, or the request's vector takes over 300 ms: then keywords and code
+  // links are all there is, as before the model.
   const meaning = Effect.fnUntraced(function* (
     place: Brain.Place,
     text: string,
@@ -3055,10 +3058,11 @@ function make(input: {
     if (!query) return none
     const hits = BrainVector.search(vectors.block, query, {
       k: BrainFuse.DEPTH,
+      by: "centred",
       allow: (row) => (options.personal || vectors.private[row] === 0) && !options.exclude?.has(vectors.refs[row]!),
     })
-    const gate = Math.max(current.floor, (hits[0]?.score ?? 0) - MEANING_MARGIN)
-    return hits.filter((hit) => hit.score >= gate).map((hit) => ({ ref: vectors.refs[hit.row]!, score: hit.score }))
+    const gate = Math.max(current.floor, (hits[0]?.centred ?? 0) - MEANING_MARGIN)
+    return hits.filter((hit) => hit.centred >= gate).map((hit) => ({ ref: vectors.refs[hit.row]!, score: hit.centred }))
   })
 
   // A repository's vectors of usable items in one block, built again only when a vector, an item or a document changed.
@@ -3095,7 +3099,11 @@ function make(input: {
     const usable = rows.filter((row) => row.q8.byteLength === current.dims)
     const vectors: Vectors = {
       key,
-      block: BrainVector.index(current.dims, usable),
+      block: BrainVector.index(
+        current.dims,
+        usable,
+        current.background ? { mean: current.background, weight: BrainEmbedManifest.BACKGROUND_WEIGHT } : undefined,
+      ),
       refs: usable.map((row) => row.ref),
       private: Uint8Array.from(usable, (row) => (row.visibility === "repository" ? 0 : 1)),
       used: now,

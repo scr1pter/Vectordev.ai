@@ -54,6 +54,8 @@ export type Current = {
   readonly dims: number
   /** The user holds embedding in the background. */
   readonly paused: boolean
+  /** The model's background mean (BrainEmbedManifest.BACKGROUND), which search by meaning centres scores on. */
+  readonly background?: Float32Array
 }
 
 export interface Interface {
@@ -93,7 +95,15 @@ export type Source = {
 
 export type Canary = { readonly text: string; readonly role: "query" | "passage"; readonly vector: readonly number[] }
 export type Golden = Readonly<
-  Record<string, { readonly revision: string; readonly int8?: readonly Canary[]; readonly fp32?: readonly Canary[] }>
+  Record<
+    string,
+    {
+      readonly revision: string
+      readonly int8?: readonly Canary[]
+      readonly fp32?: readonly Canary[]
+      readonly background?: readonly number[]
+    }
+  >
 >
 
 export type Options = {
@@ -283,6 +293,13 @@ function make(
   }
 
   const changed = () => Queue.offer(deps.changes, undefined).pipe(Effect.asVoid)
+  // One array per model for its background mean, made once: a request asks for it every time.
+  const memo = new Map<string, Float32Array>()
+  const backgrounds = (key: string, values: readonly number[]) => {
+    const made = memo.get(key) ?? Float32Array.from(values)
+    memo.set(key, made)
+    return made
+  }
 
   const folder = (model: BrainEmbedManifest.Model) => path.join(dir, `${model.id}@${model.revision}`)
 
@@ -824,11 +841,14 @@ function make(
   const current = Effect.fn("BrainEmbed.current")(function* () {
     const found = yield* chosen()
     if (!found || state.failures.has(found.key)) return undefined
+    const pinned = goldens[found.model.id]
+    const background = pinned?.revision === found.model.revision ? pinned.background : undefined
     return {
       key: found.key,
       floor: found.model.floor,
       dims: found.model.dims,
       paused: (yield* disk()).settings.paused === true,
+      ...(background && background.length === found.model.dims ? { background: backgrounds(found.key, background) } : {}),
     }
   })
 

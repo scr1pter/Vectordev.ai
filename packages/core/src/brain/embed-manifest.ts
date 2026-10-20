@@ -32,7 +32,11 @@ export type Model = {
   readonly queryTokens: number
   /** What a request is prefixed with, as the model was trained to see queries. */
   readonly query: string
-  /** The least cosine a match by meaning alone needs (the gate also wants it within 0.08 of the best). */
+  /**
+   * The least centred cosine (BrainVector: the cosine less the mean every text shares) a match by meaning needs; the
+   * gate also wants it within 0.08 of the best. Set on the knowledge eval, where it is the least that lets none of
+   * the unrelated requests through, with room to spare.
+   */
   readonly floor: number
   /** The int8 graph and the files it reads. Only int8 MatMulInteger graphs are used, never q4 MatMulNBits. */
   readonly files: {
@@ -67,7 +71,7 @@ export const MODELS: Readonly<Record<ModelID, Model>> = {
     maxTokens: 320,
     queryTokens: 64,
     query: "Represent this sentence for searching relevant passages: ",
-    floor: 0.42,
+    floor: 0.2,
     files: {
       model: {
         name: "onnx/model_quantized.onnx",
@@ -136,6 +140,81 @@ export const CANARIES = [
   { text: "Refresh tokens expire after 14 days, after which the user signs in again.", role: "passage" },
   { text: "Clients MUST wait Retry-After seconds after a 429 response and retry at most 3 times.", role: "passage" },
 ] as const satisfies readonly { readonly text: string; readonly role: "query" | "passage" }[]
+
+/**
+ * Everyday sentences on every kind of subject, whose mean vector (pinned beside the canaries) is the direction a
+ * model gives every text. Search by meaning scores passages less that mean, blended with the repository's own, so a
+ * greeting or a question about cooking does not look near a spec just because all text looks a little alike.
+ */
+export const BACKGROUND = [
+  "It rained all morning, so the picnic moved indoors.",
+  "Add two cups of flour and stir until the dough is smooth.",
+  "The striker scored twice in the second half.",
+  "Our flight was delayed by three hours at the gate.",
+  "She planted tomatoes and basil along the fence.",
+  "The museum is closed on Mondays.",
+  "Interest rates rose again this quarter.",
+  "He practised the piano every evening before dinner.",
+  "The train to the coast leaves at seven.",
+  "Wash the dark clothes in cold water.",
+  "The novel follows two sisters across forty years.",
+  "A small bakery opened on the corner last week.",
+  "The cat slept in a patch of sunlight on the floor.",
+  "Remember to water the plants while I am away.",
+  "The concert sold out within an hour.",
+  "Mountain roads are icy in the winter months.",
+  "The recipe calls for fresh lemon juice.",
+  "Our team meets on Thursday afternoons.",
+  "The hospital added a new wing for children.",
+  "He forgot his umbrella on the bus.",
+  "The river flooded the fields after the storm.",
+  "Please bring a dish to share at the party.",
+  "The library extended its opening hours.",
+  "She ran her first marathon in the spring.",
+  "The old bridge was painted bright red.",
+  "Coffee prices went up this year.",
+  "The children built a sandcastle by the shore.",
+  "Thank you so much for your help yesterday.",
+  "What time does the pharmacy open tomorrow?",
+  "The garden is full of bees in July.",
+  "Turn left at the second traffic light.",
+  "The play opens next Friday at the town theatre.",
+  "He collects stamps from countries he has visited.",
+  "The soup needs a little more salt.",
+  "Snow is expected over the weekend.",
+  "The shop on the high street sells handmade candles.",
+  "My grandmother tells the best stories.",
+  "The bus was crowded on the way home.",
+  "The election results will be announced tonight.",
+  "Use a soft brush to clean the shoes.",
+  "The hotel has a view of the harbour.",
+  "We watched the sunset from the hill.",
+  "The orchestra tuned their instruments before the show.",
+  "Fresh bread smells wonderful in the morning.",
+  "The dog loves chasing the ball in the park.",
+  "Her paintings hang in a gallery downtown.",
+  "Please close the window, it is getting cold.",
+  "The farmers market is busiest on Saturdays.",
+  "He fixed the bicycle chain with a small wrench.",
+  "The puzzle has a thousand pieces.",
+  "Tea is served with milk and honey.",
+  "The beach was quiet early in the day.",
+  "She learned to speak Italian before the trip.",
+  "The kitchen tap has been dripping all week.",
+  "A rainbow appeared after the shower.",
+  "The football match was postponed because of fog.",
+  "He wrote a letter to his old teacher.",
+  "The festival lights up the whole town.",
+  "Hi, how are you today?",
+  "Okay, sounds good to me.",
+  "Can you tell me a joke?",
+  "The movie was longer than I expected.",
+  "Birds gather on the wire at dusk.",
+  "The neighbours are repainting their fence.",
+] as const
+
+/** How many repository rows the background mean counts as when it is blended with theirs. */
+export const BACKGROUND_WEIGHT = 64
 
 /** The least cosine each canary needs against vectors pinned for the same graph. */
 export const CHECK = 0.995
