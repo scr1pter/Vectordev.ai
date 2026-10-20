@@ -6,6 +6,7 @@ import { Truncate } from "./truncate"
 import { Config } from "@/config/config"
 import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import { collectBoundedResponseBody } from "@vectordevai/core/tool/http-body"
+import { WebFence } from "@vectordevai/core/research/fence"
 import DESCRIPTION from "./webfetch.txt"
 import { isImageAttachment } from "@/util/media"
 
@@ -70,11 +71,12 @@ export const WebFetchTool = Tool.define(
 
           const { response, body } = yield* Effect.gen(function* () {
             const response = yield* WebFetchRequest.execute(http, request, {
+              // "Always allow" covers the site asked about, never every site.
               authorize: (url) =>
                 ctx.ask({
                   permission: "webfetch",
                   patterns: [url],
-                  always: ["*"],
+                  always: siteAlways(url),
                   metadata: {
                     url,
                     format: params.format,
@@ -122,19 +124,25 @@ export const WebFetchTool = Tool.define(
             }
           }
 
-          const content = new TextDecoder().decode(body)
-
-          if (params.format === "html" || !contentType.includes("text/html"))
-            return { output: content, title, metadata: {} }
-          const page = yield* truncate.output(
-            params.format === "markdown"
-              ? yield* Effect.promise(() => convertHTMLToMarkdown(content, params.url))
-              : extractTextFromHTML(content),
-            // A configured tool_output.max_bytes still decides, as it does for shell.
-            { maxBytes: (yield* config.get()).tool_output?.max_bytes ?? MAX_PAGE_BYTES },
+          const pdf = mime === "application/pdf" || body.subarray(0, 5).toString("latin1") === "%PDF-"
+          const content = pdf ? yield* Effect.promise(() => readPdf(body)) : new TextDecoder().decode(body)
+          const converted = !pdf && params.format !== "html" && contentType.includes("text/html")
+          const text = WebFence.clean(
+            converted
+              ? params.format === "markdown"
+                ? yield* Effect.promise(() => convertHTMLToMarkdown(content, params.url))
+                : extractTextFromHTML(content)
+              : content,
           )
+          // A converted page or a PDF is read once and rarely needed whole; anything else keeps the usual limits. A
+          // configured tool_output.max_bytes still decides, as it does for shell.
+          const page = yield* truncate.output(
+            text,
+            converted || pdf ? { maxBytes: (yield* config.get()).tool_output?.max_bytes ?? MAX_PAGE_BYTES } : {},
+          )
+          const fence = (preview: string) => WebFence.fenceWebPage({ url: params.url, tool: "webfetch" }, preview)
           return {
-            output: page.content,
+            output: page.truncated ? fenceTruncated(page.content, text, fence) : fence(page.content),
             title,
             metadata: { truncated: page.truncated, ...(page.truncated && { outputPath: page.outputPath }) },
           }
@@ -143,13 +151,57 @@ export const WebFetchTool = Tool.define(
   }),
 )
 
+// The origin of a URL as the permission patterns an "Always allow" saves: the site itself and every page on it.
+function siteAlways(url: string) {
+  const origin = new URL(url).origin
+  return [origin, `${origin}/*`]
+}
+
+// Truncate returns the start of the page and then its own note about where the rest was saved. The note is Vector's,
+// so it goes after the fence; it starts at the last "truncated" marker whose text before it is the page's own start.
+function fenceTruncated(content: string, page: string, fence: (preview: string) => string) {
+  const cut = [...content.matchAll(/\n\n\.\.\.\d+ (?:bytes|lines) truncated\.\.\.\n\n/g)]
+    .map((match) => match.index)
+    .filter((index) => page.startsWith(content.slice(0, index)))
+    .at(-1)
+  if (cut === undefined) return fence(content)
+  return `${fence(content.slice(0, cut))}\n\n${content.slice(cut + 2)}`
+}
+
+// A PDF's text through the brain's reader, which runs no script and fetches nothing, under a heading for each page.
+async function readPdf(bytes: Uint8Array) {
+  const { BrainDocument } = await import("@vectordevai/core/brain/document/read")
+  const { BrainLimits } = await import("@vectordevai/core/brain/document/limits")
+  // pdf.js refuses a Node Buffer, so the reader gets plain bytes.
+  const read = await BrainDocument.read(
+    { name: "page.pdf", bytes: new Uint8Array(bytes), mime: "application/pdf" },
+    BrainLimits.LIMITS.inline,
+  )
+  if (read.type === "refused") return `This PDF could not be read: ${read.message}`
+  const pages = Map.groupBy(read.blocks, (block) => block.span.page ?? 1)
+  const head = [
+    `PDF: ${read.title || "Untitled"}, ${read.pages ?? pages.size} page${(read.pages ?? pages.size) === 1 ? "" : "s"}`,
+    read.unread.length > 0 ? `Pages with no text Vector can read: ${read.unread.join(", ")}` : undefined,
+    read.warnings.includes("truncated") ? "Only the start of this PDF was read." : undefined,
+  ].filter((line): line is string => line !== undefined)
+  const body = [...pages.entries()].map(
+    ([page, blocks]) =>
+      `[Page ${page}]\n${blocks.map((block) => read.text.slice(block.span.start, block.span.end)).join("\n\n")}`,
+  )
+  return [head.join("\n"), ...body].join("\n\n")
+}
+
 function extractTextFromHTML(html: string) {
   let text = ""
   let skipDepth = 0
 
   const parser = new Parser({
-    onopentag(name) {
-      if (skipDepth > 0 || ["script", "style", "noscript", "iframe", "object", "embed"].includes(name)) {
+    onopentag(name, attributes) {
+      if (
+        skipDepth > 0 ||
+        ["script", "style", "noscript", "iframe", "object", "embed"].includes(name) ||
+        WebFence.invisible({ hidden: "hidden" in attributes, style: attributes.style })
+      ) {
         skipDepth++
       }
     },
@@ -211,6 +263,12 @@ async function convertHTMLToMarkdown(html: string, base: string) {
         ? `[${content}](${target.href})`
         : content
     },
+  })
+  // Text a person reading the page would not see is left out, so it cannot speak to the agent unseen. Added last, it
+  // runs before every other rule, the link and image rules included.
+  turndownService.addRule("hidden", {
+    filter: (node) => WebFence.invisible({ hidden: node.hasAttribute("hidden"), style: node.getAttribute("style") }),
+    replacement: () => "",
   })
   return turndownService.turndown(html)
 }

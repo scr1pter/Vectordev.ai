@@ -11,10 +11,14 @@ import { WebSearchTool } from "../../src/tool/websearch"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { testEffect } from "../lib/effect"
 import { AppNodeBuilderV1 } from "../../src/effect/app-node-builder-v1"
+import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
 const it = testEffect(
   LayerNode.compile(LayerNode.group([httpClient, Truncate.node, Agent.node, Auth.node, RuntimeFlags.node])),
 )
+
+// The search requests are sent to a local server; anything that tried to reach Exa or Parallel would throw.
+const guard = NetworkGuard.use()
 
 describe("stored search keys", () => {
   test("V2 search resolves the same saved key through the desktop engine bridge", async () => {
@@ -39,12 +43,14 @@ describe("stored search keys", () => {
         yield* auth.remove("parallel")
         yield* auth.set(provider, { type: "api", key: `${provider}-fixture-secret` })
         const requests: Request[] = []
+        const bodies: string[] = []
         const server = yield* Effect.acquireRelease(
           Effect.sync(() =>
             Bun.serve({
               port: 0,
-              fetch(request) {
+              async fetch(request) {
                 requests.push(request.clone())
+                bodies.push(await request.text())
                 return Response.json({ result: { content: [{ type: "text", text: "Fixture search result" }] } })
               },
             }),
@@ -83,8 +89,16 @@ describe("stored search keys", () => {
           provider === "exa" ? "exa-fixture-secret" : "Bearer parallel-fixture-secret",
         )
         expect(new URL(requests[0].url).search).toBe("")
-        expect(output.output).toBe("Fixture search result")
+        // The search service gets the query and nothing that ties it to the session or the model.
+        const body = JSON.parse(bodies[0] ?? "{}") as { params: { arguments: Record<string, unknown> } }
+        expect(Object.keys(body.params.arguments)).not.toContain("session_id")
+        expect(Object.keys(body.params.arguments)).not.toContain("model_name")
+        expect(JSON.stringify(body)).not.toContain("ses_search_credentials")
+        expect(output.output).toBe(
+          `<untrusted_web_page title="${provider === "exa" ? "Exa" : "Parallel"} Web Search: Vector fixture" tool="websearch">\nFixture search result\n</untrusted_web_page>`,
+        )
         expect(JSON.stringify(output)).not.toContain("fixture-secret")
+        expect(guard.outside()).toEqual([])
         yield* auth.remove(provider)
       }),
     )

@@ -1,22 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { parseResponse } from "../../src/tool/mcp-websearch"
-import {
-  selectWebSearchProvider,
-  webSearchAuthHeaders,
-  webSearchModelName,
-  webSearchProviderLabel,
-} from "../../src/tool/websearch"
+import { selectWebSearchProvider, webSearchAuthHeaders, webSearchProviderLabel } from "../../src/tool/websearch"
 
 import { webSearchEnabled } from "../../src/tool/registry"
 import { it } from "../lib/effect"
 import { ProviderV2 } from "@vectordevai/core/provider"
 
-const SESSION_ID = "ses_0196aabbccddeeff001122334455"
-
 describe("websearch provider", () => {
   test("keeps keyless search off without an explicit opt-in", () => {
-    expect(selectWebSearchProvider(SESSION_ID)).toBeUndefined()
+    expect(selectWebSearchProvider()).toBeUndefined()
   })
 
   test("keeps both providers' keys in authentication headers", () => {
@@ -33,10 +26,10 @@ describe("websearch provider", () => {
 
     try {
       process.env.VECTOR_WEBSEARCH_PROVIDER = "parallel"
-      expect(selectWebSearchProvider(SESSION_ID)).toBe("parallel")
+      expect(selectWebSearchProvider()).toBe("parallel")
 
       process.env.VECTOR_WEBSEARCH_PROVIDER = "exa"
-      expect(selectWebSearchProvider(SESSION_ID)).toBe("exa")
+      expect(selectWebSearchProvider()).toBe("exa")
     } finally {
       if (original === undefined) delete process.env.VECTOR_WEBSEARCH_PROVIDER
       else process.env.VECTOR_WEBSEARCH_PROVIDER = original
@@ -44,11 +37,11 @@ describe("websearch provider", () => {
   })
 
   test("routes to Exa when the Exa flag is enabled", () => {
-    expect(selectWebSearchProvider(SESSION_ID, { exa: true, parallel: false })).toBe("exa")
+    expect(selectWebSearchProvider({ exa: true, parallel: false })).toBe("exa")
   })
 
   test("routes to Parallel when the Parallel flag is enabled", () => {
-    expect(selectWebSearchProvider(SESSION_ID, { exa: false, parallel: true })).toBe("parallel")
+    expect(selectWebSearchProvider({ exa: false, parallel: true })).toBe("parallel")
   })
 
   test("is enabled only by explicit websearch provider flags", () => {
@@ -61,17 +54,6 @@ describe("websearch provider", () => {
     expect(webSearchProviderLabel("parallel")).toBe("Parallel Web Search")
     expect(webSearchProviderLabel("exa")).toBe("Exa Web Search")
     expect(webSearchProviderLabel(undefined)).toBe("Web Search")
-  })
-
-  test("uses the provider API model id for Parallel analytics", () => {
-    expect(
-      webSearchModelName({
-        model: {
-          id: "claude-opus-4-7",
-          api: { id: "claude-opus-4.7" },
-        },
-      }),
-    ).toBe("claude-opus-4.7")
   })
 })
 

@@ -29,33 +29,29 @@ describe("WebSearchTool provider selection", () => {
     expect(() => decode({ query: "x", numResults: WebSearchTool.MAX_NUM_RESULTS + 1 })).toThrow()
     expect(() => decode({ query: "x", contextMaxCharacters: WebSearchTool.MAX_CONTEXT_CHARACTERS + 1 })).toThrow()
   })
-  test("has no random keyless default for any session", () => {
-    for (const id of [sessionID, "another-session", "odd", "even"])
-      expect(WebSearchTool.selectProvider(id)).toBeUndefined()
+  test("has no keyless default", () => {
+    expect(WebSearchTool.selectProvider()).toBeUndefined()
+    expect(WebSearchTool.selectProvider({ enableExa: false, enableParallel: false })).toBeUndefined()
   })
 
   test("supports an explicit operational override", () => {
-    expect(WebSearchTool.selectProvider(sessionID, { enableExa: false, enableParallel: false }, "parallel")).toBe(
-      "parallel",
-    )
-    expect(WebSearchTool.selectProvider(sessionID, { enableExa: false, enableParallel: false }, "exa")).toBe("exa")
+    expect(WebSearchTool.selectProvider({ enableExa: false, enableParallel: false }, "parallel")).toBe("parallel")
+    expect(WebSearchTool.selectProvider({ enableExa: false, enableParallel: false }, "exa")).toBe("exa")
   })
 
   test("prefers Parallel when both explicit flags are enabled", () => {
-    expect(WebSearchTool.selectProvider(sessionID, { enableExa: true, enableParallel: true })).toBe("parallel")
+    expect(WebSearchTool.selectProvider({ enableExa: true, enableParallel: true })).toBe("parallel")
   })
 
   test("prefers Exa when only its explicit flag is enabled", () => {
-    expect(WebSearchTool.selectProvider(sessionID, { enableExa: true, enableParallel: false })).toBe("exa")
+    expect(WebSearchTool.selectProvider({ enableExa: true, enableParallel: false })).toBe("exa")
   })
 
   test("an own key enables only its provider", () => {
-    expect(
-      WebSearchTool.selectProvider(sessionID, { enableExa: false, enableParallel: false, exaApiKey: "own-key" }),
-    ).toBe("exa")
-    expect(
-      WebSearchTool.selectProvider(sessionID, { enableExa: false, enableParallel: false, parallelApiKey: "own-key" }),
-    ).toBe("parallel")
+    expect(WebSearchTool.selectProvider({ enableExa: false, enableParallel: false, exaApiKey: "own-key" })).toBe("exa")
+    expect(WebSearchTool.selectProvider({ enableExa: false, enableParallel: false, parallelApiKey: "own-key" })).toBe(
+      "parallel",
+    )
   })
 })
 
@@ -186,7 +182,11 @@ describe("WebSearchTool registration", () => {
             },
           },
         }),
-      ).toEqual({ type: "text", value: "exa results" })
+      ).toEqual({
+        type: "text",
+        value:
+          '<untrusted_web_page title="Search: effect typescript" tool="websearch">\nexa results\n</untrusted_web_page>',
+      })
       expect(assertions).toMatchObject([
         {
           sessionID,
@@ -227,7 +227,7 @@ describe("WebSearchTool registration", () => {
     }),
   )
 
-  it.effect("calls Parallel with session ID and keeps bearer credentials out of output", () =>
+  it.effect("calls Parallel with the query only and keeps bearer credentials out of output", () =>
     Effect.gen(function* () {
       requests.length = 0
       assertions.length = 0
@@ -250,16 +250,20 @@ describe("WebSearchTool registration", () => {
           method: "tools/call",
           params: {
             name: "web_search",
-            arguments: { objective: "effect layers", search_queries: ["effect layers"], session_id: sessionID },
+            arguments: { objective: "effect layers", search_queries: ["effect layers"] },
           },
         },
       })
+      expect(requests[0]?.body).not.toHaveProperty("params.arguments.session_id")
       expect(requests[0]?.body).not.toHaveProperty("params.arguments.model_name")
+      expect(JSON.stringify(requests[0]?.body)).not.toContain(sessionID)
+      const fenced =
+        '<untrusted_web_page title="Search: effect layers" tool="websearch">\nparallel results\n</untrusted_web_page>'
       expect(settled).toEqual({
-        result: { type: "text", value: "parallel results" },
+        result: { type: "text", value: fenced },
         output: {
           structured: { provider: "parallel", text: "parallel results" },
-          content: [{ type: "text", text: "parallel results" }],
+          content: [{ type: "text", text: fenced }],
         },
       })
       expect(JSON.stringify(settled)).not.toContain("parallel-secret")
@@ -371,7 +375,11 @@ for (const provider of ["exa", "parallel"] as const) {
           ...toolIdentity,
           call: { type: "tool-call", id: "own-key", name: "websearch", input: { query: "own credential" } },
         })
-        expect(result).toEqual({ type: "text", value: "search results" })
+        expect(result).toEqual({
+          type: "text",
+          value:
+            '<untrusted_web_page title="Search: own credential" tool="websearch">\nsearch results\n</untrusted_web_page>',
+        })
         expect(requests[0]?.url).toBe(provider === "exa" ? WebSearchTool.EXA_URL : WebSearchTool.PARALLEL_URL)
         expect(requests[0]?.headers[provider === "exa" ? "x-api-key" : "authorization"]).toBe(
           provider === "exa" ? "rotated-key" : "Bearer rotated-key",

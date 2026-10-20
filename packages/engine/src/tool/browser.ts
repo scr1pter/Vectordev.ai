@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect"
+import { WebFence } from "@vectordevai/core/research/fence"
 
 import { Tool } from "./tool"
 
@@ -36,7 +37,7 @@ export const Parameters = Schema.Struct({
   deltaY: Schema.optional(Schema.Number).annotate({ description: "Vertical scroll amount" }),
 })
 
-type BrowserReport = {
+export type BrowserReport = {
   ok: boolean
   error?: string
   finalUrl: string
@@ -130,10 +131,11 @@ function bridgeRequest(input: Record<string, unknown>, signal: AbortSignal) {
   })
 }
 
-function formatReport(report: BrowserReport) {
+// Everything in a report comes from the page, its scripts or its requests, so all of it is fenced as web text.
+export function formatReport(report: BrowserReport) {
   const consoleErrors = report.console.filter((entry) => entry.level === "error").slice(-8)
   const networkErrors = report.networkErrors?.slice(-8) ?? []
-  return [
+  const text = [
     `Page: ${report.title || "Untitled"}`,
     `URL: ${safeReportUrl(report.finalUrl) || "No page open"}`,
     report.description ? `Description: ${report.description}` : undefined,
@@ -175,6 +177,7 @@ function formatReport(report: BrowserReport) {
   ]
     .filter((line): line is string => Boolean(line))
     .join("\n\n")
+  return WebFence.fenceWebPage({ url: safeReportUrl(report.finalUrl) || undefined, tool: "browser" }, text)
 }
 
 function safeReportUrl(value: string) {
