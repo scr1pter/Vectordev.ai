@@ -6,6 +6,7 @@ import { Effect } from "effect"
 import { BrainAnchor } from "@vectordevai/core/brain/anchor"
 import { BrainAnchorTable, BrainEventTable, BrainPendingTable } from "@vectordevai/core/brain/sql"
 import { tmpdir } from "../fixture/tmpdir"
+import { bundle } from "./fixture/bundle"
 import { added, text, withKnowledge, type Setup } from "./fixture/knowledge"
 
 // Links from documents to code, found with Ripgrep in a real (temporary) git working tree: definitions, uses, routes,
@@ -109,12 +110,10 @@ describe("BrainAnchor.names", () => {
   // runs of spaces as Bun's regex interpreter does.
   test.skipIf(!Bun.which("node"))("the definition check stays quick on a 500 KB line in V8", async () => {
     await using tmp = await tmpdir()
-    const built = await Bun.build({
-      entrypoints: [path.join(import.meta.dir, "../../src/brain/anchor.ts")],
-      target: "node",
-      format: "esm",
-    })
-    await Bun.write(path.join(tmp.path, "anchor.mjs"), built.outputs[0]!)
+    await Bun.write(
+      path.join(tmp.path, "anchor.mjs"),
+      await bundle(path.join(import.meta.dir, "../../src/brain/anchor.ts")),
+    )
     await Bun.write(
       path.join(tmp.path, "time.mjs"),
       [

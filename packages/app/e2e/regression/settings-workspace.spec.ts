@@ -58,12 +58,15 @@ test("full-screen Settings is searchable and returns to the active task", async 
   await expect(settings.getByRole("complementary", { name: "Settings categories" })).toBeVisible()
 
   const search = settings.getByRole("searchbox", { name: "Search settings" })
-  // Project rules, Appearance, Editor, Chat, Voice and Personalization are gone; Local memory stays in General.
+  // Project rules, Appearance, Editor, Chat, Voice and Personalization are gone; rules and local memory have the Memory
+  // page of their own.
   for (const removed of ["Project rules", "Appearance", "Editor", "Chat", "Voice", "Personalization"])
     await expect(settings.getByRole("tab", { name: removed, exact: true })).toHaveCount(0)
   await search.fill("memory")
-  await expect(settings.getByRole("tab", { name: "General", exact: true })).toBeVisible()
+  await expect(settings.getByRole("tab", { name: "Memory", exact: true })).toBeVisible()
+  await expect(settings.getByRole("tab", { name: "General", exact: true })).toHaveCount(0)
   await expect(settings.getByRole("tab", { name: "Notifications", exact: true })).toHaveCount(0)
+  await expect(settings.getByRole("tab")).toHaveCount(1)
   await search.fill("notifications")
   await settings.getByRole("tab", { name: "Notifications", exact: true }).click()
   await expect(settings.getByRole("tab", { name: "Notifications", exact: true })).toHaveAttribute(
