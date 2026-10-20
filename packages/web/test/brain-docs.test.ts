@@ -197,6 +197,14 @@ test("Search by meaning has its own page, from desktop 1.99.110, with the manife
   expect(meaning).toContain("never for a model that may train on prompts, or in a session a guest is in")
   expect(documents).toContain('<a href="/docs/search-by-meaning">Search by meaning</a>')
   expect(section).toContain("With the optional local search model, a one-time 24 MB download you ask for")
+  // The full-precision fallback has never been run with this build, so the page and the command say so.
+  expect(meaning).toContain(
+    "Not yet verified: it has not been run in this release, and the check it must pass on your computer has not been measured on it.",
+  )
+  expect(meaning).toContain("Settings offers the full-precision one instead, which is not yet verified.")
+  expect(modelCommandRows.find(([command]) => command === "vector memory model download")?.[1]).toContain(
+    "--full-precision the full-precision model, which is not yet verified.",
+  )
 })
 
 test("the meaning figures are the dated report's, run with the pinned model", () => {

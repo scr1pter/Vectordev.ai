@@ -139,7 +139,7 @@ export const modelCommandRows = [
   ],
   [
     "vector memory model download",
-    "Download it once, after it shows the size, license and source and asks; --yes skips the question, --code-aware takes the Code-aware preview, and --full-precision the full-precision model.",
+    "Download it once, after it shows the size, license and source and asks; --yes skips the question, --code-aware takes the Code-aware preview, and --full-precision the full-precision model, which is not yet verified.",
   ],
   [
     "vector memory model install --from <folder>",

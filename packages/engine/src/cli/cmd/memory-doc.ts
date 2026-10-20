@@ -565,7 +565,7 @@ const modelOptions = (yargs: Argv) =>
       default: false,
     })
     .option("full-precision", {
-      describe: "the full-precision graph (90 MB), for a computer where the int8 one fails its check",
+      describe: "the full-precision graph (90 MB, not yet verified), for a computer where the int8 one fails its check",
       type: "boolean",
       default: false,
     })
@@ -602,6 +602,10 @@ export const MemoryModelDownloadCommand = effectCmd({
       UI.println(`${model.description}`)
       UI.println(`${model.owner}, ${model.license}. Source: https://huggingface.co/${model.repo}/tree/${model.revision}`)
       if (model.preview) UI.println(`${UI.Style.TEXT_WARNING}${model.preview}${UI.Style.TEXT_NORMAL}`)
+      if (picked.variant === "fp32")
+        UI.println(
+          `${UI.Style.TEXT_WARNING}Not yet verified: the full-precision graph has not been run in this release, so it may not pass its check here either.${UI.Style.TEXT_NORMAL}`,
+        )
     }
     if (!args.yes) {
       if (!process.stdin.isTTY) return yield* fail("Run again with --yes to download it.")
@@ -703,7 +707,9 @@ function modelLines(status: BrainSchema.ModelStatus) {
     return [
       `${name} cannot be used on this computer: ${status.error ?? "it failed its check"}`,
       ...(status.fallback
-        ? ["Download the full-precision graph instead with `vector memory model download --full-precision`."]
+        ? [
+            "Download the full-precision graph instead with `vector memory model download --full-precision`. It is not yet verified, so it may not pass its check here either.",
+          ]
         : []),
       "Until then Vector searches documents by keywords and code links.",
     ]

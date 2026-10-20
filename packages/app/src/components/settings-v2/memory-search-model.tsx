@@ -4,6 +4,7 @@ import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import {
   MODEL_DONE,
   MODEL_DOWNLOADS_OFF,
+  MODEL_FALLBACK_UNVERIFIED,
   POLL,
   checkLabel,
   embeddedLabel,
@@ -163,7 +164,7 @@ function ModelRow(props: {
         </span>
         <span class="settings-memory-tag">
           {inUse()
-            ? `In use${props.status.variant === "fp32" ? " (full precision)" : ""}`
+            ? `In use${props.status.variant === "fp32" ? " (full precision, not yet verified)" : ""}`
             : megabytes(props.option.bytes)}
         </span>
       </div>
@@ -193,11 +194,20 @@ function ModelRow(props: {
         <Show when={inUse() && props.status.state === "failed" && props.status.fallback && props.option.fallback}>
           {(bytes) => (
             <ButtonV2 size="small" variant="outline" icon="download" onClick={() => props.onFallback()}>
-              Download the full-precision model ({megabytes(Number(bytes()))})
+              Download the full-precision model ({megabytes(Number(bytes()))}, not yet verified)
             </ButtonV2>
           )}
         </Show>
       </div>
+      <Show
+        when={
+          inUse() &&
+          ((props.status.state === "failed" && props.status.fallback && props.option.fallback) ||
+            props.status.variant === "fp32")
+        }
+      >
+        <p class="settings-memory-warning">{MODEL_FALLBACK_UNVERIFIED}</p>
+      </Show>
     </div>
   )
 }

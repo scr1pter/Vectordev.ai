@@ -57,6 +57,7 @@ import {
   warningLabel,
   MODEL_DONE,
   MODEL_DOWNLOADS_OFF,
+  MODEL_FALLBACK_UNVERIFIED,
   checkLabel,
   embeddedLabel,
   megabytes,
@@ -812,6 +813,12 @@ describe("the search model card", () => {
     expect(modelLicense(granite)).toBe("IBM (ONNX conversion by onnx-community) · Apache-2.0")
     expect(megabytes(91_100_713)).toBe("91 MB")
     expect(shortSha(arctic.sha256)).toBe("e6aa5e656466a73d…")
+  })
+
+  // The fallback's full-precision graph has never been run with this build, so where it is offered or in use, it says so.
+  test("labels the full-precision fallback as not yet verified", () => {
+    expect(MODEL_FALLBACK_UNVERIFIED).toStartWith("Not yet verified:")
+    expect(MODEL_DONE.fallback).toBe("Downloading the full-precision model, which is not yet verified.")
   })
 
   test("counts what is searchable by meaning, says when it is paused, and how the model was checked here", () => {
