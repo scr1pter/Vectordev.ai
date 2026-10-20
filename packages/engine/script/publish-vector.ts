@@ -156,7 +156,7 @@ try {
 } catch {}
 if (!binary) {
   console.error("Vector CLI: no prebuilt binary for " + process.platform + "/" + process.arch + " (expected " + pkg + ").")
-  console.error("Reinstall without --ignore-scripts / --no-optional, or file an issue at https://github.com/scr1pter/Vectordev.ai")
+  console.error("Reinstall without --ignore-scripts / --no-optional, or report it at https://vectordev.ai/support/report")
   process.exit(1)
 }
 
@@ -181,7 +181,7 @@ await Bun.file(`${out}/package.json`).write(
       description: "Vector CLI — the Vector agent in your terminal. Free with a Vector account.",
       license: "SEE LICENSE IN LICENSE",
       homepage: "https://vectordev.ai",
-      repository: { type: "git", url: "https://github.com/scr1pter/Vectordev.ai.git" },
+      bugs: { url: "https://vectordev.ai/support/report" },
       keywords: ["vector", "ai", "agent", "cli", "coding-agent", "terminal"],
       bin: { vector: "./bin/vector.cjs" },
       files: ["bin", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"],

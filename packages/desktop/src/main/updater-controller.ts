@@ -22,8 +22,7 @@ type UpdaterPersistence = {
   clear(): void | Promise<void>
 }
 
-const DOWNLOADS =
-  "vectordev.ai/download (sign in with a free Vector account) or https://github.com/scr1pter/Vectordev.ai/releases/latest"
+const DOWNLOADS = "vectordev.ai/download with your free Vector account"
 
 export function createUpdaterController(input: {
   enabled: boolean
