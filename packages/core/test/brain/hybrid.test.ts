@@ -194,6 +194,27 @@ describe("search by meaning", () => {
     expect(result?.stats.embedded).toBe(result!.stats.records + result!.stats.passages)
   }, 30_000)
 
+  test("forgetting a document forgets its vectors, so nothing of it is found by meaning again", async () => {
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          const kept = yield* added(setup, text("Rate limits.md", LIMITS))
+          yield* setup.knowledge.wait(setup.place, kept.document!.id, "ready", 10_000)
+          const before = yield* setup.db.get<{ count: number }>(sql`SELECT count(*) AS count FROM brain_vector`)
+          yield* setup.knowledge.remove(setup.place, kept.document!.id)
+          return {
+            before,
+            after: yield* setup.db.get<{ count: number }>(sql`SELECT count(*) AS count FROM brain_vector`),
+            recalled: yield* setup.knowledge.recall(setup.place, ask("ratelimiter settings")),
+          }
+        }),
+      { embed: BrainEmbed.layerHash() },
+    )
+    expect(result.before?.count).toBeGreaterThan(0)
+    expect(result.after?.count).toBe(0)
+    expect(result.recalled.tokens).toBe(0)
+  }, 30_000)
+
   test("removing the model removes its vectors, and documents are searchable by keywords again", async () => {
     await using tmp = await tmpdir()
     const source = await Fixture.write(path.join(tmp.path, "source"))
