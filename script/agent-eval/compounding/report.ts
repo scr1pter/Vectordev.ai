@@ -57,6 +57,7 @@ export function markdown(meta: Meta, arms: Partial<Record<Arm, readonly TaskRun[
   const change = (a: number, b: number, noun: string) =>
     a === 0 ? `the same ${noun}` : `${Math.abs(Math.round(((b - a) / a) * 100))}% ${b <= a ? "fewer" : "more"} ${noun}`
   const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`
+  const times = (count: number) => (count === 0 ? "never" : count === 1 ? "once" : count === 2 ? "twice" : `${count} times`)
   const thousands = (value: number) => value.toLocaleString("en-US")
   const offline = (text: string) => (meta.mode === "offline" ? text : "not seen live")
   const usd = (value: number) => `$${value.toFixed(meta.mode === "offline" ? 2 : 4)}`
@@ -70,6 +71,13 @@ export function markdown(meta: Meta, arms: Partial<Record<Arm, readonly TaskRun[
   })
   const delivered = carried.filter((item) => item.run.delivered.includes(item.fact)).length
   const right = carried.filter((item) => !item.run.mistakes.some((mistake) => mistake.fact === item.fact && !mistake.stale)).length
+  // Tasks from week 2 on whose recall brought a line about a fact the task neither needed, taught nor could act on.
+  const recalled = on.filter((run) => run.week > 1)
+  const noisy = recalled.filter((run) => {
+    const task = TASKS.find((item) => item.id === run.task)!
+    const relevant = new Set<FactID>([...task.needs, ...(task.misleads ?? []), ...task.teaches.map((item) => item.fact)])
+    return FACTS.some((item) => !relevant.has(item.id) && run.recall.some((line) => item.marker.test(line)))
+  })
   const misses = on.flatMap((run) => run.mistakes.filter((item) => item.repeated || item.stale).map((item) => ({ run, item })))
   const offLeaks = off.flatMap((run) => {
     const task = TASKS.find((item) => item.id === run.task)!
@@ -116,7 +124,7 @@ export function markdown(meta: Meta, arms: Partial<Record<Arm, readonly TaskRun[
               : ""
           }${changed && span(on, changed, last).tasks ? ` In week ${changed}, when facts changed, it sent ${change(span(off, changed, last).inputTokens, span(on, changed, last).inputTokens, "input tokens")} and took ${change(span(off, changed, last).steps, span(on, changed, last).steps, "tool steps")}.` : ""}`,
           "",
-          `**Misled.** Brain on acted on a fact after it had gone out of date ${plural(sum.on.misled, "time")} (see When facts change).`,
+          `**Misled.** Brain on acted on a fact after it had gone out of date ${times(sum.on.misled)} (see When facts change).`,
           "",
         ]
       : []),
@@ -289,7 +297,7 @@ export function markdown(meta: Meta, arms: Partial<Record<Arm, readonly TaskRun[
     "",
     "- **It measures context and repetition, not answer quality.** The scripted model writes the code the task script gives it; whether a real model writes good code with the brain's help is a live question. The live mode (below) asks it.",
     "- **The scripted model explores less than a strong model would, and brain off pays for that.** It never searches the repository on its own, and its reads are fixed per task, so it misses facts that sit in code it does not open: `REFUND_WINDOW_DAYS = 14` in `src/refunds.ts` (t15 does not read it), `emit(\"invoice.paid\")` in `src/invoice.ts` (t10 and t13 do not read it), and `packageManager: pnpm@9.12.0`, `pnpm-lock.yaml` and `CONTRIBUTING.md` (t08 and t14 read nothing before they install). A model that searched would find some of these without the brain, and the refund policy PDF is in `docs/specs/`, at the price of more reads and tokens. The checks are also literal: the window and money facts need the words \"14 days\" and \"integer cents\", so `REFUND_WINDOW_DAYS = 14` or a `Math.round` in code would not count even if it were read.",
-    "- **Memory can mislead only where this sequence lets it.** Before week 7 every lesson stays true and the scripted model acts only on the facts a task needs, so memory that does not apply can cost tokens there but never cause a mistake, though recall is noisy (the clock lesson comes back in most later tasks). Week 7 has two changed facts, one task each: too few to say how often memory misleads in general.",
+    `- **Memory can mislead only where this sequence lets it.** Before week 7 every lesson stays true and the scripted model acts only on the facts a task needs, so memory that does not apply can cost tokens there but never cause a mistake.${recalled.length ? ` Recall is noisy, though: in ${noisy.length} of the ${recalled.length} tasks from week 2 on it brought a line about a fact the task did not need.` : ""} Week 7 has two changed facts, one task each: too few to say how often memory misleads in general.`,
     "- **The fixture and the tasks were written alongside the brain, by the same team, knowing how recall matches.** Recall needs two words in common with a request, or a file the entry names. The memory lines the scripted model saves are written the way the memory tool asks (short, naming the commands, files and things they are about), and the teaching prompts are phrased the same way. Every prompt and memory line is in `report.json`, so the overlap between them can be checked.",
     "- **Time between tasks is not simulated.** All entries look recent to recall's recency weighting, and the linking pass is forced before each task as described above.",
     "- **Live results depend on the model.** A model may not save what it learns, may not read what the brain recalls, or may find the facts on its own.",
@@ -300,7 +308,7 @@ export function markdown(meta: Meta, arms: Partial<Record<Arm, readonly TaskRun[
     "bun script/agent-eval/compounding/run.ts --out <folder>",
     "```",
     "",
-    "It needs Bun and git, no network and no API key, and takes about two minutes on the machine above. The same revision gives the same numbers, apart from wall-clock times and a token or two where the test runner prints how long it took (on a loaded machine a time can gain a digit), wherever the work folder's real path has the same length (every request carries the repository's path, so a longer one adds a few tokens to each).",
+    `It needs Bun and git, no network and no API key, and takes ${meta.seconds < 75 ? "about a minute" : meta.seconds < 105 ? "about a minute and a half" : `about ${Math.round(meta.seconds / 60)} minutes`} on the machine above. The same revision gives the same numbers, apart from wall-clock times and a token or two where the test runner prints how long it took (on a loaded machine a time can gain a digit), wherever the work folder's real path has the same length (every request carries the repository's path, so a longer one adds a few tokens to each).`,
     "",
     "Against a real model, after a cost estimate and under a hard spend cap:",
     "",
