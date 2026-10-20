@@ -448,6 +448,39 @@ describe("pointers and the spec guard", () => {
     expect(result.hidden).toEqual([])
   }, 30_000)
 
+  // git reports a repository's real path, while a read or an edit can come through a symlinked one (macOS /tmp and
+  // /var, a linked folder of projects), and the other way round.
+  test("a file read through a symlinked path of its repository has its pointer, guard and links", async () => {
+    const result = await withKnowledge(
+      (setup) =>
+        Effect.gen(function* () {
+          yield* added(setup, text("Auth spec.md", SPEC))
+          const linked = path.join(setup.dir, "linked")
+          yield* Effect.promise(() => fs.symlink(setup.root, linked))
+          const request = { personal: true, exclude: new Set<string>() }
+          const read = (place: typeof setup.place, root: string) =>
+            Effect.gen(function* () {
+              return {
+                pointer: (yield* setup.knowledge.pointers(place, { ...request, file: path.join(root, "src/auth/session.ts") })).text,
+                guard: (yield* setup.knowledge.guard(place, { ...request, file: path.join(root, "src/api/users.ts") })).text,
+                links: (yield* setup.knowledge.links(place, path.join(root, "src/auth/session.ts"), { personal: true })).length,
+              }
+            })
+          return {
+            real: yield* read(setup.place, setup.root),
+            throughLink: yield* read(setup.place, linked),
+            fromLink: yield* read({ ...setup.place, root: linked }, setup.root),
+          }
+        }),
+      { files: CODE, git: true },
+    )
+    expect(result.real.pointer).toMatch(/^Documents linked to src\/auth\/session\.ts: /)
+    expect(result.real.guard).toMatch(/^Linked requirements: /)
+    expect(result.real.links).toBeGreaterThan(0)
+    expect(result.throughLink).toEqual(result.real)
+    expect(result.fromLink).toEqual(result.real)
+  }, 30_000)
+
   test("at most three ids in at most 60 tokens however many records a file has", async () => {
     const many = Array.from(
       { length: 8 },

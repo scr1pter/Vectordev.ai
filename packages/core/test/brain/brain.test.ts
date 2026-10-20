@@ -209,6 +209,29 @@ describe("Brain recall and attach", () => {
     expect(result.elsewhere.text).toBeUndefined()
   })
 
+  // git reports a repository's real path, while a read can come through a symlinked one (macOS /tmp and /var, a linked
+  // folder of projects), and the other way round.
+  test("memory about a file attaches when the repository is reached through a symlinked path", async () => {
+    const result = await run({ "outside/linked": "link:repo" }, ({ brain, place, root }) =>
+      Effect.gen(function* () {
+        const linked = path.join(path.dirname(root), "outside", "linked")
+        yield* brain.propose(place, {
+          kind: "lesson",
+          text: "Route handlers validate with the shared schema helpers.",
+          scope: "repository",
+          origin: "user",
+          paths: ["src/routes"],
+        })
+        return {
+          throughLink: yield* brain.attach(place, { file: path.join(linked, "src/routes/user.ts"), personal: true }),
+          fromLink: yield* brain.attach({ ...place, root: linked }, { file: path.join(root, "src/routes/user.ts"), personal: true }),
+        }
+      }),
+    )
+    expect(result.throughLink.text).toContain("shared schema helpers")
+    expect(result.fromLink.text).toContain("shared schema helpers")
+  })
+
   test("recall finds a relevant lesson within the budget and nothing for an unrelated request", async () => {
     const result = await run({}, ({ brain, place }) =>
       Effect.gen(function* () {

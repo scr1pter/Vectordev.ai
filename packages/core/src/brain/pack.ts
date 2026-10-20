@@ -2,8 +2,11 @@ export * as BrainPack from "./pack"
 
 // One budget per request for memory and documents alike: the knapsack. Candidates are taken greedily by what each adds
 // per token, where a second card from the same section or document adds less than the first did, so a request gets the
-// few lines that matter from several places rather than a page of one. The budget is a ceiling, never a target: when
-// what is left is worth little next to the best pick, packing stops, and nothing eligible costs nothing.
+// few lines that matter from several places rather than a page of one, and the caps per section and document bound how
+// many come from one place. The budget is a ceiling, never a target: a card worth little on its own next to the first
+// pick is left out, and nothing eligible costs nothing. The discount only orders the picks and never keeps a card out by
+// itself, or a section's second requirement, the one a request asks about, could miss the stop line with most of the
+// budget left.
 
 export type Candidate = {
   readonly id: string
@@ -24,7 +27,7 @@ export const SECTION = 0.5
 export const DOCUMENT = 0.8
 export const PER_SECTION = 2
 export const PER_DOCUMENT = 4
-/** Packing stops once the next pick would add less than this share of the first pick's worth. */
+/** A card worth less than this share of the first pick's worth, before the discount, is left out. */
 export const STOP = 0.15
 
 export function pack<C extends Candidate>(candidates: readonly C[], budget: number): C[] {
@@ -49,13 +52,13 @@ export function pack<C extends Candidate>(candidates: readonly C[], budget: numb
       const cost = bundle.reduce((sum, member) => sum + member.cost, 0)
       if (state.used + cost > budget) return []
       if (!bundle.every((member, index) => allowed(member, bundle.slice(0, index)))) return []
+      if (state.first > 0 && bundle.reduce((sum, member) => sum + member.value, 0) < STOP * state.first) return []
       return [{ bundle, cost, worth: bundle.reduce((sum, member) => sum + marginal(member), 0) }]
     })
     const best = options.toSorted(
       (a, b) => b.worth / b.cost - a.worth / a.cost || b.worth - a.worth || a.bundle[0]!.id.localeCompare(b.bundle[0]!.id),
     )[0]
     if (!best) break
-    if (state.first > 0 && best.worth < STOP * state.first) break
     for (const member of best.bundle) {
       picked.push(member)
       pool.delete(member.id)

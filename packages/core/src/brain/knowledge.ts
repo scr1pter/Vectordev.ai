@@ -2370,9 +2370,7 @@ function make(input: {
       personal: request.personal,
       exclude: request.exclude,
     })).slice(0, 5)
-    const relative = request.files.map((file) =>
-      (path.isAbsolute(file) ? path.relative(place.root, file) : file).split(path.sep).join("/"),
-    )
+    const relative = request.files.map((file) => BrainPaths.relative(place.root, file))
     const query = BrainLexical.terms([request.query, ...relative].join(" "))
     // The repository's other names for what the request names are searched too, at half weight.
     const expanded = BrainFuse.expand(query, yield* vocabularyOf(place, request.personal))
@@ -2534,7 +2532,7 @@ function make(input: {
   const ranked = Effect.fnUntraced(function* (place: Brain.Place, seeds: readonly BrainFuse.Seed[]) {
     const own = seeds
       .slice(0, BrainFuse.SEEDS)
-      .map((seed) => (seed.path ? { ...seed, path: relativeTo(place.root, seed.path) } : seed))
+      .map((seed) => (seed.path ? { ...seed, path: BrainPaths.relative(place.root, seed.path) } : seed))
     const built = yield* graphOf(place)
     const named = [...new Set(own.flatMap((seed) => (seed.symbol ? [seed.symbol] : [])))]
     const defined =
@@ -2701,7 +2699,7 @@ function make(input: {
   const activated = Effect.fnUntraced(function* (place: Brain.Place, seeds: readonly BrainFuse.Seed[]) {
     const own = seeds
       .slice(0, BrainFuse.SEEDS)
-      .map((seed) => (seed.path ? { ...seed, path: relativeTo(place.root, seed.path) } : seed))
+      .map((seed) => (seed.path ? { ...seed, path: BrainPaths.relative(place.root, seed.path) } : seed))
     const paths = [...new Set(own.flatMap((seed) => (seed.path ? [seed.path] : [])))]
     const symbols = [...new Set(own.flatMap((seed) => (seed.symbol ? [seed.symbol] : [])))]
     const out = new Map<string, { readonly value: number; readonly why: string }>()
@@ -4162,7 +4160,7 @@ function make(input: {
     owner: string,
     target: { readonly path: string; readonly symbol?: string },
   ) {
-    const file = relativeTo(place.root, target.path.trim())
+    const file = BrainPaths.relative(place.root, target.path.trim())
     const absolute = path.resolve(place.root, file)
     const root = yield* Effect.promise(() => fs.realpath(place.root).catch(() => place.root))
     const real = yield* Effect.promise(() => fs.realpath(absolute).catch(() => undefined))
@@ -4482,7 +4480,7 @@ function make(input: {
       .run()
       .pipe(Effect.orDie)
     const tracked = yield* Effect.promise(() => trackedFiles(place.root))
-    const mirrored = new Set(place.sources.map((source) => path.relative(place.root, source.path).split(path.sep).join("/")))
+    const mirrored = new Set(place.sources.map((source) => BrainPaths.relative(place.root, source.path)))
     const wanted = tracked.filter(
       (file) =>
         REPOSITORY_DOCS.some((pattern) => pattern.test(file)) &&
@@ -5676,7 +5674,7 @@ function make(input: {
     place: Brain.Place,
     request: { file: string; personal: boolean; exclude: ReadonlySet<string>; kinds?: readonly BrainSchema.RecordKind[] },
   ) {
-    const file = relativeTo(place.root, request.file)
+    const file = BrainPaths.relative(place.root, request.file)
     const anchors = yield* db
       .select()
       .from(BrainAnchorTable)
@@ -5795,7 +5793,7 @@ function make(input: {
   })
 
   const links = Effect.fn("BrainKnowledge.links")(function* (place: Brain.Place, file: string, options: { personal: boolean }) {
-    const relative = relativeTo(place.root, file)
+    const relative = BrainPaths.relative(place.root, file)
     const anchors = yield* db
       .select()
       .from(BrainAnchorTable)
@@ -6190,7 +6188,7 @@ function make(input: {
 
   // Records a passing run cited are linked to the files it changed, at half weight: where the requirement was applied.
   const applyOutcome = Effect.fnUntraced(function* (place: Brain.Place, owners: readonly string[], edited: readonly string[]) {
-    const files = [...new Set(edited.map((file) => relativeTo(place.root, file)))]
+    const files = [...new Set(edited.map((file) => BrainPaths.relative(place.root, file)))]
       .filter((file) => file && !file.startsWith("..") && !path.isAbsolute(file))
       .slice(0, 10)
     if (owners.length === 0 || files.length === 0) return [] as { owner: string; path: string }[]
@@ -7010,11 +7008,6 @@ function driftId(owner: string, file: string, symbol: string) {
 
 function conflictId(a: string, b: string) {
   return `v${createHash("sha256").update(`conflict\0${[a, b].toSorted().join("\0")}`).digest("hex").slice(0, 12)}`
-}
-
-/** A file as links name it: relative to the working tree's root, with forward slashes. */
-function relativeTo(root: string, file: string) {
-  return (path.isAbsolute(file) ? path.relative(root, file) : file).split(path.sep).join("/").replace(/^\.\//, "")
 }
 
 function claimOf(row: {
