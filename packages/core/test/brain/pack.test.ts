@@ -87,7 +87,7 @@ describe("BrainPack.pack", () => {
         card("scope", 0.809, { ...spec, section: "1" }),
         card("repeated-key", 0.765, { ...spec, section: "3" }),
         card("window-closed", 0.416, { ...spec, section: "2" }),
-        card("lesson", 0.219, { cost: 29 }),
+        card("lesson", 0.351, { cost: 29 }),
         card("post-refunds", 0.353, { ...spec, section: "3" }),
         // The document's fifth card: over its cap of four.
         card("window-days", 0.142, { ...spec, section: "2" }),
@@ -96,6 +96,6 @@ describe("BrainPack.pack", () => {
       ],
       410,
     )
-    expect(ids(picked)).toEqual(["scope", "repeated-key", "window-closed", "lesson", "post-refunds"])
+    expect(ids(picked)).toEqual(["scope", "repeated-key", "lesson", "window-closed", "post-refunds"])
   })
 })
