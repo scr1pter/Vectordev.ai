@@ -10,14 +10,16 @@
 // installs into its package cache, which Node must import from the package's real entry file rather than its
 // directory. A third turn has the model keep a generated PDF as a document through the memory tool, which reads it in
 // the brain's background reader: an eval worker started from the source the bundle carries, so the turn fails if the
-// worker cannot start under Node and reading falls back to the main thread. It uses node: APIs only and must run under
-// node, never bun:
+// worker cannot start under Node and reading falls back to the main thread. Then it checks that ONNX Runtime's wasm for
+// the search model ships beside the bundle and that /memory/model answers; given VECTOR_TEST_EMBED_DIR (a folder of the
+// pinned arctic-embed-xs files) it installs the model over HTTP and waits until the eval worker has embedded the PDF,
+// checked against the pinned canary vectors. It uses node: APIs only and must run under node, never bun:
 //
 //   bun script/build-node.ts && node script/smoke-node-bundle.ts [path/to/node.js]
 
 import { spawn } from "node:child_process"
 import { randomBytes } from "node:crypto"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { registerHooks } from "node:module"
@@ -65,6 +67,7 @@ async function smoke(bundle: string) {
         ...failures,
         ...(await runTurn(engine, project, marker, NPM_PROVIDER)).map((failure) => `${NPM_PACKAGE}: ${failure}`),
         ...(await runTurn(engine, project, marker, PROVIDER, KEEP)).map((failure) => `document: ${failure}`),
+        ...(await searchModel(engine, project, bundle)).map((failure) => `search model: ${failure}`),
       ])
       .catch((error) => [`the turn could not run: ${String(error)}`])
       .finally(engine.stop)
@@ -78,7 +81,7 @@ async function smoke(bundle: string) {
     ]
     if (failures.length === 0) {
       console.log(
-        `node bundle smoke passed on node ${process.version}: Read tool completed and the model replied, with a bundled and a cached provider SDK, and a PDF was kept as a document through the brain's eval worker`,
+        `node bundle smoke passed on node ${process.version}: Read tool completed and the model replied, with a bundled and a cached provider SDK, and a PDF was kept as a document through the brain's eval worker${process.env.VECTOR_TEST_EMBED_DIR ? ", then embedded by the search model there" : ", and the search model's wasm ships beside the bundle"}`,
       )
       return
     }
@@ -312,6 +315,51 @@ async function runTurn(
   })
   const messages: Message[] = await json(`/session/${sessionID}/message`)
   return [...outcome, ...(text === KEEP ? keptFailures(messages) : messageFailures(messages, marker))]
+}
+
+// The search model on the bundle: its wasm beside it, /memory/model answering, and with the pinned files at hand, the
+// model installed over HTTP, checked against its canaries and embedding the kept PDF in the eval worker.
+async function searchModel(engine: { url: URL; authorization: string }, project: string, bundle: string) {
+  const request = async (route: string, body?: unknown) => {
+    const response = await fetch(new URL(route, engine.url), {
+      method: body === undefined ? "GET" : "POST",
+      headers: {
+        authorization: engine.authorization,
+        "content-type": "application/json",
+        "x-vector-directory": encodeURIComponent(project),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    return { status: response.status, body: (await response.json().catch(() => undefined)) as ModelStatus | undefined }
+  }
+  const wasm = (await readdir(path.dirname(bundle))).filter((file) => /^ort-wasm-simd-threaded.*\.wasm$/.test(file))
+  const first = await request("/memory/model")
+  const failures = [
+    ...(wasm.length === 1 ? [] : [`expected ONNX Runtime's wasm beside the bundle, found ${JSON.stringify(wasm)}`]),
+    ...(first.status === 200 && first.body?.state === "absent" && first.body.options?.length === 2
+      ? []
+      : [`GET /memory/model answered ${first.status}: ${JSON.stringify(first.body)}`]),
+  ]
+  const from = process.env.VECTOR_TEST_EMBED_DIR
+  if (!from || failures.length > 0) return failures
+  const installed = await request("/memory/model", { action: "install", from })
+  if (installed.body?.state !== "ready" || installed.body.check?.by !== "vectors" || installed.body.check.lowest < 0.995)
+    return [`installing from ${from} answered ${installed.status}: ${JSON.stringify(installed.body)}`]
+  const deadline = Date.now() + TURN_TIMEOUT
+  for (;;) {
+    const status = (await request("/memory/model")).body
+    const embedded = status?.embedded
+    if (embedded && embedded.total > 0 && embedded.done === embedded.total) return []
+    if (Date.now() > deadline) return [`the kept PDF was not embedded in time: ${JSON.stringify(status)}`]
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+}
+
+type ModelStatus = {
+  state: string
+  options?: unknown[]
+  check?: { by: string; lowest: number }
+  embedded?: { done: number; total: number }
 }
 
 // The memory tool kept the PDF: read, structured and searchable, with the records its two sentences give.

@@ -4,7 +4,9 @@
 // The compiled binary carries the reader as one string, the virtual module brain-worker.gen.ts, and starts it as an
 // eval worker; from source the reader starts from entry.ts instead, so only a compiled binary can show the bundled
 // reader starts. This runs `vector memory doc extract` on a generated PDF with the binary, in a home of its own, and
-// fails unless the PDF was read in a worker thread from the bundle, not on the main thread.
+// fails unless the PDF was read in a worker thread from the bundle, not on the main thread. It also asks the binary
+// for its search model; with VECTOR_TEST_EMBED_DIR (a folder of the pinned arctic-embed-xs files) it installs the
+// model from there, which loads ONNX Runtime's wasm embedded in the binary, keeps the PDF, and searches it by meaning.
 //
 //   bun script/verify-brain-worker.ts dist/<platform>/bin/vector    (build.ts runs this after each native build)
 //   bun script/verify-brain-worker.ts                                (compiles a binary for this machine first)
@@ -13,7 +15,7 @@
 // package installs, into a temporary folder, so the smoke runs on its own in about a minute. Nothing leaves this
 // computer: the account, site, registry and model catalog all point at nothing.
 
-import { spawnSync } from "node:child_process"
+import { spawnSync, type SpawnSyncReturns } from "node:child_process"
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -37,7 +39,9 @@ try {
     process.exitCode = 1
   }
   if (failures.length === 0)
-    console.log("brain worker smoke passed: the compiled CLI read a PDF in its bundled background reader")
+    console.log(
+      `brain worker smoke passed: the compiled CLI read a PDF in its bundled background reader${process.env.VECTOR_TEST_EMBED_DIR ? ", and searched it by meaning with the search model on its embedded wasm" : ""}`,
+    )
 } finally {
   await rm(scratch, { recursive: true, force: true })
 }
@@ -70,9 +74,9 @@ async function smoke(binary: string, home: string) {
     }),
   )
   await writeFile(path.join(home, "models.json"), "{}")
-  const result = spawnSync(
+  const run = (args: string[]) => spawnSync(
     binary,
-    ["--print-logs", "--log-level", "INFO", "memory", "doc", "extract", "spec.pdf", "--json"],
+    ["--print-logs", "--log-level", "INFO", ...args],
     {
       cwd: repository,
       encoding: "utf8",
@@ -97,6 +101,7 @@ async function smoke(binary: string, home: string) {
       },
     },
   )
+  const result = run(["memory", "doc", "extract", "spec.pdf", "--json"])
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`
   if (result.error) return [`the binary could not run: ${result.error.message}`]
   if (result.status !== 0) return [`vector memory doc extract exited ${result.status}:\n${output.slice(-4_000)}`]
@@ -113,7 +118,42 @@ async function smoke(binary: string, home: string) {
       ? ["the background reader did not start from the bundled source"]
       : []),
     ...(output.includes(FALLBACK) ? ["the background reader fell back to the main thread"] : []),
+    ...(await meaning(run)),
   ]
+}
+
+// The search model in the binary: absent until asked for, and with the pinned files at hand, installed (its wasm
+// embedded in the binary, its load checked against the pinned canaries) and finding the PDF's sentence by meaning.
+async function meaning(run: (args: string[]) => SpawnSyncReturns<string>) {
+  const json = async (args: string[]) => {
+    const result = run([...args, "--json"])
+    const stdout = result.stdout ?? ""
+    return {
+      status: result.status,
+      value: await Promise.resolve()
+        .then(() => JSON.parse(stdout.slice(Math.max(0, stdout.search(/^[[{]/m)))) as Record<string, unknown> & unknown[])
+        .catch(() => undefined),
+      output: `${stdout}${result.stderr ?? ""}`.slice(-4_000),
+    }
+  }
+  const absent = await json(["memory", "model", "status"])
+  if (absent.value?.state !== "absent" || !Array.isArray(absent.value.options))
+    return [`vector memory model status did not say the model is absent: ${absent.output}`]
+  const from = process.env.VECTOR_TEST_EMBED_DIR
+  if (!from) return []
+  const installed = await json(["memory", "model", "install", "--from", from])
+  const check = installed.value?.check as { by?: string; lowest?: number } | undefined
+  if (installed.value?.state !== "ready" || check?.by !== "vectors" || (check.lowest ?? 0) < 0.995)
+    return [`vector memory model install did not leave a checked model: ${installed.output}`]
+  const added = await json(["memory", "doc", "add", "spec.pdf", "--wait=all"])
+  const document = (added.value?.[0] as { document?: { status?: string; stats?: { embedded?: number } } } | undefined)?.document
+  if (document?.status !== "ready" || !document.stats?.embedded)
+    return [`the PDF was not embedded by meaning: ${added.output}`]
+  const found = await json(["memory", "doc", "search", "how", "long", "do", "sessions", "last", "--why"])
+  const cards = Array.isArray(found.value) ? (found.value as { text: string }[]) : []
+  return cards.some((card) => card.text.includes("Refresh tokens expire after 14 days"))
+    ? []
+    : [`a search by meaning did not find the refresh token sentence: ${found.output}`]
 }
 
 // A binary for this machine, built as build.ts builds one, minus what the smoke does not need.

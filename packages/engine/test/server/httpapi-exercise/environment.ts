@@ -14,6 +14,8 @@ process.env.XDG_CACHE_HOME = path.join(exerciseGlobalRoot, "cache")
 // must not reach the developer's real one.
 process.env.VECTOR_TEST_HOME = path.join(exerciseGlobalRoot, "home")
 process.env.VECTOR_DISABLE_SHARE = "true"
+// The local search model is never downloaded by the exercise; POST /memory/model download is refused instead.
+process.env.VECTOR_BRAIN_EMBED = "off"
 export const exerciseConfigDirectory = path.join(exerciseGlobalRoot, "config", "vector")
 export const exerciseDataDirectory = path.join(exerciseGlobalRoot, "data", "vector")
 
