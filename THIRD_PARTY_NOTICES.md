@@ -961,6 +961,45 @@ Copyright 2012 Mozilla Foundation
    limitations under the License.
 ```
 
+## ONNX Runtime WebAssembly in the search model
+
+Source: https://github.com/microsoft/onnxruntime (MIT), release 1.30.0, from `onnxruntime-web@1.30.0`
+
+Vector's local search model runs on ONNX Runtime's WebAssembly build. The CLI binary and the desktop app ship its `ort-wasm-simd-threaded.wasm` (14,239,897 bytes, sha256 `3398c10d07d229bd91b364548e130e0e51a8e5704b88c7c083ebbeb78842dee2`) unchanged, and the JavaScript that loads it is bundled into the background reader; the npm package ships no license file, so its MIT license is reproduced here and in DEPENDENCY_NOTICES.md. The libraries compiled into the wasm are listed, with their licenses, in ONNX Runtime's `ThirdPartyNotices.txt` for release 1.30.0 (https://github.com/microsoft/onnxruntime/blob/v1.30.0/ThirdPartyNotices.txt).
+
+Copyright (c) Microsoft Corporation
+
+```text
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## Downloaded on request: search model weights
+
+Vector ships no model weights. When the user asks for search by meaning (Settings > Memory > Search model, or `vector memory model download`), it downloads one of these models, shows its license and source first, and accepts each file only at the size and sha256 pinned in `packages/core/src/brain/embed-manifest.ts`. The files come from Vector's copy of them (the GitHub release `knowledge-pack-1`) or from Hugging Face at the pinned revision, and stay in Vector's data folder under `models/embedding`.
+
+- **Snowflake Arctic Embed XS** (the default, int8 graph `onnx/model_quantized.onnx`, and on request the full-precision `onnx/model.onnx`), by Snowflake, Apache-2.0: https://huggingface.co/Snowflake/snowflake-arctic-embed-xs at revision `d8c86521100d3556476a063fc2342036d45c106f`.
+- **IBM Granite Embedding Small English R2**, ONNX conversion by onnx-community (the optional Code-aware preview), Apache-2.0: https://huggingface.co/onnx-community/granite-embedding-small-english-r2-ONNX at revision `1dc7835ba0cb9c76a3618d0bf0c427c97671b3c8`.
+
+Both are licensed under the Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0); the model repositories' own license files and model cards remain authoritative.
+
 ## Bundled dependencies and Electron
 
 DEPENDENCY_NOTICES.md is generated from the installed runtime dependency closure, including JavaScript bundled into the engine, TUI and renderer as well as external native packages. It lists package names, versions, declared licenses and the available license/copyright notices. Packages that omit a license file are explicitly marked and include their declared license text.

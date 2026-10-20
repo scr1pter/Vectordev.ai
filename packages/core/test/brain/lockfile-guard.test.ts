@@ -66,3 +66,31 @@ describe("document reader dependencies", () => {
     )
   })
 })
+
+describe("search model dependencies", () => {
+  test("ONNX Runtime's WASM build and the tokenizer are pinned, and nothing native comes with them", () => {
+    expect(manifest.dependencies["onnxruntime-web"]).toBe("1.30.0")
+    expect(manifest.dependencies["@huggingface/tokenizers"]).toBe("0.1.3")
+    // The native runtime, its prebuilt binaries and the image library transformers.js pulls in stay out of core.
+    for (const name of ["onnxruntime-node", "@huggingface/transformers", "sharp"]) expect(manifest.dependencies[name]).toBeUndefined()
+    for (const name of ["onnxruntime-web@1.30.0", "onnxruntime-common@1.30.0", "@huggingface/tokenizers@0.1.3"])
+      expect(
+        Object.values(lock.packages).some((entry) => entry[0] === name),
+        name,
+      ).toBe(true)
+  })
+
+  test("the wasm the builds ship is the one the notices name, byte for byte", async () => {
+    const require = createRequire(path.resolve(import.meta.dir, "../../package.json"))
+    const wasm = path.join(path.dirname(require.resolve("onnxruntime-web/package.json")), "dist/ort-wasm-simd-threaded.wasm")
+    const bytes = new Uint8Array(await Bun.file(wasm).arrayBuffer())
+    const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex")
+    const notices = await Bun.file(path.join(root, "THIRD_PARTY_NOTICES.md")).text()
+    const section = notices.slice(notices.indexOf("## ONNX Runtime WebAssembly in the search model"))
+    expect(section).toContain(`${bytes.byteLength.toLocaleString("en-US")} bytes, sha256 \`${digest}\``)
+    expect(section).toContain("release 1.30.0")
+    expect(notices).toContain("## Downloaded on request: search model weights")
+    expect(await Bun.file(path.join(root, "licenses/dependencies/onnxruntime-web@1.30.0.txt")).exists()).toBe(true)
+    expect(await Bun.file(path.join(root, "licenses/dependencies/onnxruntime-common@1.30.0.txt")).exists()).toBe(true)
+  })
+})
