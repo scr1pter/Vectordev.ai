@@ -24,17 +24,31 @@ class FakeSession {
   }
 }
 
-const contents = () => ({
-  on: () => undefined,
-  setWindowOpenHandler: () => undefined,
-  isDestroyed: () => false,
-  getURL: () => "",
-  getTitle: () => "",
-  close: () => undefined,
-  isLoading: () => false,
-  navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-  executeJavaScript: async () => undefined,
-})
+// While set, a page's scripts never answer, as a page in a busy loop or one that replaced its timers would not.
+const page = { stuck: false }
+const answer = () => (page.stuck ? new Promise<never>(() => undefined) : Promise.resolve(undefined))
+const worlds: { world: number; code: string }[] = []
+const contents = () => {
+  const state = { closed: false }
+  return {
+    on: () => undefined,
+    setWindowOpenHandler: () => undefined,
+    isDestroyed: () => state.closed,
+    getURL: () => "",
+    getTitle: () => "",
+    close: () => {
+      state.closed = true
+    },
+    isLoading: () => false,
+    navigationHistory: { canGoBack: () => false, canGoForward: () => false, goBack: () => undefined },
+    executeJavaScript: answer,
+    // Only the wait helpers run in their own world.
+    executeJavaScriptInIsolatedWorld: (world: number, scripts: { code: string }[]) => {
+      worlds.push({ world, code: scripts[0]!.code })
+      return answer()
+    },
+  }
+}
 
 // Every view the agent creates, newest last.
 const created: FakeView[] = []
@@ -204,6 +218,19 @@ describe("dialogs over the agent browser", () => {
     expect(view.visible).toBe(false)
     expect(windows.get(event.sender)).toBe(window)
   })
+
+  test("a show request that does not come from the panel waits for the dialog to close too", async () => {
+    const { event } = panel()
+    await run({ contextId: "ses_bridge_show", command: "attach" }, event)
+    const view = created.at(-1)!
+    await run({ contextId: "modal", command: "setVisible", visible: false }, event)
+    expect(view.visible).toBe(false)
+    // The browser bridge has no IPC event: its show leaves the view hidden under the dialog.
+    await run({ contextId: "ses_bridge_show", command: "setVisible", visible: true })
+    expect(view.visible).toBe(false)
+    await run({ contextId: "modal", command: "setVisible", visible: true }, event)
+    expect(view.visible).toBe(true)
+  })
 })
 
 describe("commands on one page", () => {
@@ -223,6 +250,106 @@ describe("commands on one page", () => {
     expect(failed.ok).toBe(false)
     const after = await run({ contextId: "ses_queue_fail", command: "wait", milliseconds: 0 })
     expect(after.ok).toBe(true)
+  })
+
+  test("a page that never answers gives the queue up at the deadline, and the next command runs", async () => {
+    const page = { queue: Promise.resolve() as Promise<unknown>, closing: new AbortController() }
+    const order: string[] = []
+    const stuck = agent.queueTurn(
+      page,
+      () => new Promise<string>(() => undefined),
+      (reason) => reason,
+      20,
+    )
+    const next = agent.queueTurn(
+      page,
+      async () => "next",
+      (reason) => reason,
+      20,
+    )
+    void stuck.then((result) => order.push(result))
+    void next.then((result) => order.push(result))
+    expect(await stuck).toBe("timeout")
+    expect(await next).toBe("next")
+    expect(order).toEqual(["timeout", "next"])
+  })
+
+  test("closing a page ends its running command and every waiting one at once", async () => {
+    const page = { queue: Promise.resolve() as Promise<unknown>, closing: new AbortController() }
+    const stuck = agent.queueTurn(
+      page,
+      () => new Promise<string>(() => undefined),
+      (reason) => reason,
+    )
+    const waiting = agent.queueTurn(
+      page,
+      async () => "ran",
+      (reason) => reason,
+    )
+    page.closing.abort()
+    expect(await Promise.all([stuck, waiting])).toEqual(["closed", "closed"])
+    expect(
+      await agent.queueTurn(
+        page,
+        async () => "ran",
+        (reason) => reason,
+      ),
+    ).toBe("closed")
+  })
+
+  test("a command that finishes in time keeps its own result and leaves no timer behind", async () => {
+    const page = { queue: Promise.resolve() as Promise<unknown>, closing: new AbortController() }
+    const ended: string[] = []
+    const end = (reason: string) => {
+      ended.push(reason)
+      return reason
+    }
+    expect(await agent.queueTurn(page, async () => "done", end, 30)).toBe("done")
+    page.closing.abort()
+    await Bun.sleep(60)
+    expect(ended).toEqual([])
+  })
+
+  test("Close and the Preview's own buttons never wait behind a page that stopped answering", async () => {
+    const pending = Symbol("still waiting")
+    const settled = <T>(promise: Promise<T>) => Promise.race([promise, Bun.sleep(500).then(() => pending)])
+    await run({ contextId: "ses_stuck", command: "wait", milliseconds: 0 })
+    page.stuck = true
+    try {
+      const hung = run({ contextId: "ses_stuck", command: "waitForSelector", selector: "#never" })
+      const behind = run({ contextId: "ses_stuck", command: "scroll", deltaY: 100 })
+      expect(await settled(hung)).toBe(pending)
+      // The wait helper ran in its own world, away from the page's globals.
+      expect(worlds.at(-1)?.code).toContain("#never")
+      expect(worlds.at(-1)!.world).toBeGreaterThan(0)
+
+      // The user's Back button in Preview runs alongside the stuck command.
+      expect(await settled(run({ contextId: "ses_stuck", command: "goBack" }, { sender: {} }))).not.toBe(pending)
+
+      // Close ends the stuck command and the one behind it at once.
+      expect(await settled(run({ contextId: "ses_stuck", command: "closeBrowser" }))).not.toBe(pending)
+      expect(await settled(hung)).toMatchObject({
+        ok: false,
+        error: "The browser was closed before waitForSelector finished.",
+      })
+      expect(await settled(behind)).toMatchObject({
+        ok: false,
+        error: "The browser was closed before scroll finished.",
+      })
+    } finally {
+      page.stuck = false
+    }
+    // The next command on that task opens a fresh page and runs at once.
+    expect(await settled(run({ contextId: "ses_stuck", command: "wait", milliseconds: 0 }))).toMatchObject({
+      ok: true,
+      browserStatus: "running",
+    })
+  })
+
+  test("a page waiting for its first command is not retired to make room for another", async () => {
+    const first = run({ contextId: "ses_new_a", command: "wait", milliseconds: 20 })
+    const second = run({ contextId: "ses_new_b", command: "wait", milliseconds: 0 })
+    expect(await Promise.all([first, second])).toMatchObject([{ ok: true }, { ok: true }])
   })
 
   test("sets no cap on pages", async () => {

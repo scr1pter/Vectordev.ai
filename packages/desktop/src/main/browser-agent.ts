@@ -31,8 +31,12 @@ export type BrowserContext = {
   hostWindow?: BrowserWindow
   /** Hidden because a dialog covers its window, so it shows again when the dialog closes. */
   covered?: boolean
-  /** The command running on this page; the next one starts when it settles. */
+  /** The command running on this page; the next one starts when it settles or runs past its deadline. */
   queue: Promise<unknown>
+  /** Aborted when the page is closed, which ends its running command and every waiting one at once. */
+  closing: AbortController
+  /** Commands on their way to this page, queued or running; a page with any is never retired to make room. */
+  busy: number
   lastBounds?: BrowserAgentBounds
   consoleLogs: BrowserAgentLog[]
   pageErrors: string[]
@@ -60,6 +64,17 @@ export const DOWNLOADS_OFF = "Downloads are off in the agent browser."
 // Commands that only place or show the panel's view. They never wait behind a page command, so resizing or opening
 // a dialog stays immediate while the agent waits on a page.
 const PANEL_COMMANDS = new Set(["attach", "setBounds", "detach", "setVisible"])
+// The Preview's own buttons, sent from the panel with an IPC event: the user's navigation never waits behind the
+// agent's command either. Close never waits, from anyone, and ends whatever the page is still running.
+const USER_COMMANDS = new Set(["openUrl", "goBack", "goForward", "reload"])
+/**
+ * The longest one command may hold its page. A page that never answers (a busy loop, or a script that replaces the
+ * timers and observers a wait relies on) would otherwise hold every later command on it for good.
+ */
+export const TURN_DEADLINE_MS = 60_000
+// The wait helpers run in their own JavaScript world, which shares the page's DOM but not its globals, so a page
+// cannot stop them by replacing setTimeout, MutationObserver or Promise.
+const WAIT_WORLD = 1_291
 
 function currentContext() {
   const context = contextStorage.getStore()
@@ -83,6 +98,8 @@ function getContext(id: string, create = true) {
     allowedExternalOrigins: new Set(),
     intent: navigationIntent(),
     queue: Promise.resolve(),
+    closing: new AbortController(),
+    busy: 0,
   }
   contexts.set(id, context)
   return context
@@ -101,6 +118,37 @@ export function refuseDownload(context: BrowserContext, url: string) {
   const shown = redactText(url)
   context.networkErrors = [...context.networkErrors, { url: shown, error: DOWNLOADS_OFF }].slice(-50)
   pushAction("Cancelled a download", false, DOWNLOADS_OFF, undefined, context)
+}
+
+/**
+ * Runs a command on a page once the page's earlier commands settle, so two calls never interleave their steps on it.
+ * A command that runs past the deadline gives the page up: the next one starts, and this one reports the timeout
+ * instead of waiting on. Closing the page ends the running command and every waiting one at once.
+ */
+export function queueTurn<T>(
+  page: { queue: Promise<unknown>; closing: AbortController },
+  run: () => Promise<T>,
+  end: (reason: "timeout" | "closed") => T,
+  ms = TURN_DEADLINE_MS,
+) {
+  const closing = page.closing.signal
+  const turn = page.queue.then(
+    () =>
+      new Promise<T>((resolve, reject) => {
+        if (closing.aborted) return resolve(end("closed"))
+        const closed = () => resolve(end("closed"))
+        const timer = setTimeout(() => resolve(end("timeout")), ms)
+        closing.addEventListener("abort", closed, { once: true })
+        run()
+          .then(resolve, reject)
+          .finally(() => {
+            clearTimeout(timer)
+            closing.removeEventListener("abort", closed)
+          })
+      }),
+  )
+  page.queue = turn.catch(() => undefined)
+  return turn
 }
 
 /**
@@ -148,7 +196,7 @@ function hardenSession(partition: Electron.Session) {
 // a live view is never closed to make room, and none is refused.
 function pruneContexts() {
   const oldest = Array.from(contexts.values())
-    .filter((context) => !context.view || context.view.webContents.isDestroyed())
+    .filter((context) => context.busy === 0 && (!context.view || context.view.webContents.isDestroyed()))
     .toSorted((a, b) => a.lastUsedAt - b.lastUsedAt)[0]
   if (oldest) destroyContext(oldest)
 }
@@ -388,6 +436,7 @@ async function closeBrowser() {
 function destroyContext(context: BrowserContext) {
   const active = context.view
   context.view = undefined
+  context.closing.abort()
   if (active) {
     if (context.hostWindow && !context.hostWindow.isDestroyed()) context.hostWindow.contentView.removeChildView(active)
     if (!active.webContents.isDestroyed()) active.webContents.close()
@@ -694,8 +743,13 @@ export async function wait(milliseconds: number) {
   pushAction(`Waited ${milliseconds}ms`)
 }
 
+async function runIsolatedScript<T>(script: string): Promise<T> {
+  const contents = ensureView()
+  return (await contents.executeJavaScriptInIsolatedWorld(WAIT_WORLD, [{ code: script }], true)) as T
+}
+
 export async function waitForSelector(selector: string) {
-  await runScript(`new Promise((resolve, reject) => {
+  await runIsolatedScript(`new Promise((resolve, reject) => {
     const selector = ${JSON.stringify(selector)};
     if (document.querySelector(selector)) return resolve(true);
     const observer = new MutationObserver(() => {
@@ -714,7 +768,7 @@ export async function waitForSelector(selector: string) {
 }
 
 export async function waitForText(text: string) {
-  await runScript(`new Promise((resolve, reject) => {
+  await runIsolatedScript(`new Promise((resolve, reject) => {
     const text = ${JSON.stringify(text)};
     const hasText = () => (document.body?.innerText || "").includes(text);
     if (hasText()) return resolve(true);
@@ -901,12 +955,19 @@ export async function runBrowserAgent(
       if (driving) endAutomation(context.intent, Date.now())
     }
   }
-  if (PANEL_COMMANDS.has(input.command ?? "")) return run()
-  // One command at a time on a page, so two calls never interleave their steps on it. The number of pages stays
-  // uncapped.
-  const turn = context.queue.then(run, run)
-  context.queue = turn.catch(() => undefined)
-  return turn
+  const command = input.command ?? ""
+  const immediate =
+    PANEL_COMMANDS.has(command) || command === "closeBrowser" || (event !== undefined && USER_COMMANDS.has(command))
+  context.busy++
+  // One command at a time on a page; the number of pages stays uncapped.
+  const report = immediate
+    ? run()
+    : queueTurn(context, run, (reason) =>
+        reason === "closed" ? closedReport(command) : timedOutReport(context, command),
+      )
+  return report.finally(() => {
+    context.busy--
+  })
 }
 
 async function runBrowserAgentInContext(
@@ -930,7 +991,10 @@ async function runBrowserAgentInContext(
         context.hostWindow &&
         !context.hostWindow.isDestroyed()
       ) {
-        context.view.setVisible(input.visible !== false)
+        // Under an open dialog the view waits, hidden, for the dialog to close, whoever asks to show it.
+        const show = input.visible !== false
+        context.covered = show && coveredWindows.has(context.hostWindow)
+        context.view.setVisible(show && !context.covered)
       }
       return stoppedReport()
     }
@@ -1096,6 +1160,41 @@ async function runBrowserAgentInContext(
     inputs: dom.inputs,
     browserStatus: alive ? "running" : "stopped",
     currentPage: dom.title || url || "No page open",
+  }
+}
+
+// A command still waiting, or still running, when its page was closed.
+function closedReport(command: string): BrowserAutomationRun {
+  return {
+    ...stoppedReport(),
+    ok: false,
+    status: 409,
+    error: `The browser was closed before ${command || "this command"} finished.`,
+  }
+}
+
+// What the page last showed, read from what Vector already holds: a page that stopped answering is not asked again.
+function timedOutReport(context: BrowserContext, command: string): BrowserAutomationRun {
+  const message = `The page did not answer within ${TURN_DEADLINE_MS / 1000} seconds, so Vector stopped waiting for ${command || "this command"}. Later commands on this page run again; close the browser if the page stays stuck.`
+  pushAction(`Stopped waiting for ${command || "a command"}`, false, message, undefined, context)
+  const contents = context.view?.webContents
+  const alive = Boolean(contents && !contents.isDestroyed())
+  const url = alive ? contents!.getURL() : ""
+  return {
+    ...stoppedReport(),
+    url,
+    finalUrl: url,
+    ok: false,
+    status: 504,
+    error: message,
+    title: context.currentPageTitle,
+    viewport: context.lastBounds ?? { x: 0, y: 0, width: 0, height: 0 },
+    console: context.consoleLogs.slice(-30),
+    pageErrors: context.pageErrors.slice(-30),
+    networkErrors: context.networkErrors.slice(-30),
+    actions: context.actionTimeline.slice(0, 40),
+    browserStatus: alive ? "running" : "stopped",
+    currentPage: context.currentPageTitle || url || "No page open",
   }
 }
 
