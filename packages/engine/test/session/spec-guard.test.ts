@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs"
 import os from "node:os"
 import path from "path"
 import { afterAll, expect } from "bun:test"
@@ -50,7 +50,7 @@ import { Truncate } from "@/tool/truncate"
 import { Format } from "../../src/format"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Auth } from "@/auth"
-import { TestInstance } from "../fixture/fixture"
+import { provideInstance, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestLLMServer } from "../lib/llm-server"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
@@ -65,7 +65,12 @@ import { execFileSync } from "node:child_process"
 
 // Memory lives in the user's config folder, so this test gets one of its own rather than the shared one.
 const config = mkdtempSync(path.join(os.tmpdir(), "vector-spec-guard-"))
-afterAll(() => rmSync(config, { recursive: true, force: true }))
+// Symlinked paths to test repositories, outside them.
+const links = mkdtempSync(path.join(os.tmpdir(), "vector-spec-guard-links-"))
+afterAll(() => {
+  rmSync(config, { recursive: true, force: true })
+  rmSync(links, { recursive: true, force: true })
+})
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -364,6 +369,42 @@ it.instance(
       const twice = yield* instruction.resolve([], file, messageID, asking({}))
       expect(once.filter((item) => item.link)).toHaveLength(1)
       expect(twice.filter((item) => item.link)).toEqual([])
+    }),
+  { git: true },
+  60_000,
+)
+
+// git reports a repository's real path, while Vector can be opened at a symlinked one (macOS /tmp and /var, a linked
+// folder of projects), and the agent then reads and edits through it, or through the real path.
+it.instance(
+  "a repository opened through a symlinked path still gets the pointer and the guard",
+  () =>
+    Effect.gen(function* () {
+      const { file, dir } = yield* setup()
+      const linked = path.join(links, path.basename(dir))
+      symlinkSync(dir, linked)
+      const through = path.join(linked, "src", "auth", "session.ts")
+      const asking: Instruction.Asking = { sessionID: "ses_spec_guard", personal: true, tier: "standard", exclude: new Set() }
+      const found = yield* Effect.gen(function* () {
+        const instruction = yield* Instruction.Service
+        const pointed = (target: string) =>
+          instruction
+            .resolve([], target, MessageID.ascending(), asking)
+            .pipe(Effect.map((loaded) => loaded.flatMap((item) => (item.link ? [item.link.file] : []))))
+        const guarded = (target: string) =>
+          instruction
+            .guard([], [target], MessageID.ascending(), asking)
+            .pipe(Effect.map((result) => result.links.map((item) => item.file)))
+        return {
+          root: (yield* instruction.place()).root,
+          pointer: { through: yield* pointed(through), real: yield* pointed(file) },
+          guard: { through: yield* guarded(through), real: yield* guarded(file) },
+        }
+      }).pipe(provideInstance(linked))
+      // The root is the real path, so a read through the link is under another spelling of it.
+      expect(found.root).toBe(dir)
+      expect(found.pointer).toEqual({ through: ["src/auth/session.ts"], real: ["src/auth/session.ts"] })
+      expect(found.guard).toEqual({ through: ["src/auth/session.ts"], real: ["src/auth/session.ts"] })
     }),
   { git: true },
   60_000,

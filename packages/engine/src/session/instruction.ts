@@ -377,7 +377,7 @@ const layer: Layer.Layer<
       // Documents linked to the file, in one line, once per file per request (T4).
       if (asking && asking.tier !== "chat") {
         const brainPlace = yield* place()
-        const file = relativeFile(brainPlace.root, target)
+        const file = BrainPaths.relative(brainPlace.root, target)
         if (!claimed.has(`${KNOWLEDGE_LOADED}${file}`) && !linkedSince(messages, "pointer").has(file)) {
           const pointer = yield* knowledge.pointers(brainPlace, {
             file,
@@ -413,7 +413,7 @@ const layer: Layer.Layer<
       const s = yield* InstanceState.get(state)
       const claimed = s.claims.get(messageID) ?? new Set<string>()
       const done = linkedSince(messages, "guard")
-      const links = yield* Effect.forEach([...new Set(files.map((file) => relativeFile(brainPlace.root, file)))], (file) =>
+      const links = yield* Effect.forEach([...new Set(files.map((file) => BrainPaths.relative(brainPlace.root, file)))], (file) =>
         Effect.gen(function* () {
           if (done.has(file) || claimed.has(`guard:${file}`)) return []
           // A requirement the conversation already has is still named: the guard asks for a check, not a read.
@@ -468,10 +468,6 @@ function linkedSince(messages: readonly SessionV1.WithParts[], mode: Link["mode"
 
 function requestOf(messages: readonly SessionV1.WithParts[]) {
   return messages.findLast((message) => message.info.role === "user")?.info.id
-}
-
-function relativeFile(root: string, file: string) {
-  return (path.isAbsolute(file) ? path.relative(root, file) : file).split(path.sep).join("/").replace(/^\.\//, "")
 }
 
 export const node = LayerNode.make({
