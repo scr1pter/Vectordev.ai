@@ -56,7 +56,7 @@ export function quantize(vector: Float32Array): Quantized {
   const q8 = Int8Array.from(vector, (value) => Math.max(-127, Math.min(127, Math.round(value / scale))))
   const bits = new Uint8Array(Math.ceil(vector.length / 8))
   vector.forEach((value, index) => {
-    if (value > 0) bits[index >> 3]! |= 1 << (index & 7)
+    if (value > 0) bits[index >> 3] |= 1 << (index & 7)
   })
   return { q8, bits, scale }
 }
@@ -67,7 +67,7 @@ export function dequantize(q8: Int8Array, scale: number) {
 }
 
 export function cosine(a: Float32Array, b: Float32Array) {
-  const dot = a.reduce((sum, value, index) => sum + value * b[index]!, 0)
+  const dot = a.reduce((sum, value, index) => sum + value * b[index], 0)
   const norms = Math.sqrt(
     a.reduce((sum, value) => sum + value * value, 0) * b.reduce((sum, value) => sum + value * value, 0),
   )
@@ -94,11 +94,11 @@ export function index(
     const values = new Int8Array(row.q8.buffer, row.q8.byteOffset, dims)
     q8.set(values, at * dims)
     scales[at] = row.scale
-    for (let dim = 0; dim < dims; dim++) sum[dim]! += values[dim]! * row.scale
+    for (let dim = 0; dim < dims; dim++) sum[dim] += values[dim] * row.scale
   })
   const prior = background && background.mean.length === dims ? background : undefined
   const count = usable.length + (prior?.weight ?? 0)
-  const mean = Float32Array.from(sum, (value, dim) => (count > 0 ? (value + (prior ? prior.mean[dim]! * prior.weight : 0)) / count : 0))
+  const mean = Float32Array.from(sum, (value, dim) => (count > 0 ? (value + (prior ? prior.mean[dim] * prior.weight : 0)) / count : 0))
   const square = mean.reduce((total, value) => total + value * value, 0)
   const offsets = new Float32Array(usable.length)
   const norms = new Float32Array(usable.length)
@@ -107,10 +107,10 @@ export function index(
     let along = 0
     let length = 0
     for (let dim = 0; dim < dims; dim++) {
-      const value = q8[row * dims + dim]! * scales[row]!
-      along += value * mean[dim]!
-      length += (value - mean[dim]!) ** 2
-      if (value > mean[dim]!) bits[row * words + (dim >> 5)]! |= 1 << (dim & 31)
+      const value = q8[row * dims + dim] * scales[row]
+      along += value * mean[dim]
+      length += (value - mean[dim]) ** 2
+      if (value > mean[dim]) bits[row * words + (dim >> 5)] |= 1 << (dim & 31)
     }
     offsets[row] = along
     norms[row] = Math.sqrt(length)
@@ -142,18 +142,18 @@ export function search(
       ? Array.from({ length: block.size }, (_, row) => row).filter(allow)
       : nearestBits(block, query, options.prefilter ?? PREFILTER, allow)
   // (q − μ)·(d − μ) = q·d − q·μ − d·μ + μ·μ, with d·μ and |d − μ| kept per row.
-  const along = query.reduce((total, value, dim) => total + value * block.mean[dim]!, 0)
-  const length = Math.sqrt(query.reduce((total, value, dim) => total + (value - block.mean[dim]!) ** 2, 0))
+  const along = query.reduce((total, value, dim) => total + value * block.mean[dim], 0)
+  const length = Math.sqrt(query.reduce((total, value, dim) => total + (value - block.mean[dim]) ** 2, 0))
   const by = options.by ?? "score"
   return rows
     .map((row) => {
-      const score = dot(block, row, quantized.q8) * quantized.scale * block.scales[row]!
-      const scale = length * block.norms[row]!
+      const score = dot(block, row, quantized.q8) * quantized.scale * block.scales[row]
+      const scale = length * block.norms[row]
       return {
-        item: block.items[row]!,
+        item: block.items[row],
         row,
         score,
-        centred: scale > 0 ? (score - along - block.offsets[row]! + block.square) / scale : 0,
+        centred: scale > 0 ? (score - along - block.offsets[row] + block.square) / scale : 0,
       }
     })
     .toSorted((a, b) => b[by] - a[by] || a.item - b.item)
@@ -163,7 +163,7 @@ export function search(
 function dot(block: Index, row: number, q8: Int8Array) {
   const offset = row * block.dims
   let sum = 0
-  for (let at = 0; at < block.dims; at++) sum += block.q8[offset + at]! * q8[at]!
+  for (let at = 0; at < block.dims; at++) sum += block.q8[offset + at] * q8[at]
   return sum
 }
 
@@ -173,19 +173,19 @@ function nearestBits(block: Index, vector: Float32Array, keep: number, allow: (r
   const words = Math.ceil(block.dims / 32)
   const query = new Uint32Array(words)
   vector.forEach((value, dim) => {
-    if (value > block.mean[dim]!) query[dim >> 5]! |= 1 << (dim & 31)
+    if (value > block.mean[dim]) query[dim >> 5] |= 1 << (dim & 31)
   })
   const heap: { row: number; distance: number }[] = []
   for (let row = 0; row < block.size; row++) {
     if (!allow(row)) continue
     let distance = 0
-    for (let word = 0; word < words; word++) distance += popcount(block.bits[row * words + word]! ^ query[word]!)
+    for (let word = 0; word < words; word++) distance += popcount(block.bits[row * words + word] ^ query[word])
     if (heap.length < keep) {
       heap.push({ row, distance })
       up(heap, heap.length - 1)
       continue
     }
-    if (distance >= heap[0]!.distance) continue
+    if (distance >= heap[0].distance) continue
     heap[0] = { row, distance }
     down(heap, 0)
   }
@@ -201,8 +201,8 @@ function popcount(value: number) {
 function up(heap: { distance: number }[], at: number) {
   for (let child = at; child > 0; ) {
     const parent = (child - 1) >> 1
-    if (heap[parent]!.distance >= heap[child]!.distance) return
-    ;[heap[parent], heap[child]] = [heap[child]!, heap[parent]!]
+    if (heap[parent].distance >= heap[child].distance) return
+    ;[heap[parent], heap[child]] = [heap[child], heap[parent]]
     child = parent
   }
 }
@@ -212,9 +212,9 @@ function down(heap: { distance: number }[], at: number) {
     const left = parent * 2 + 1
     const right = left + 1
     const largest =
-      right < heap.length && heap[right]!.distance > heap[left]!.distance ? right : left < heap.length ? left : parent
-    if (largest === parent || heap[largest]!.distance <= heap[parent]!.distance) return
-    ;[heap[parent], heap[largest]] = [heap[largest]!, heap[parent]!]
+      right < heap.length && heap[right].distance > heap[left].distance ? right : left < heap.length ? left : parent
+    if (largest === parent || heap[largest].distance <= heap[parent].distance) return
+    ;[heap[parent], heap[largest]] = [heap[largest], heap[parent]]
     parent = largest
   }
 }

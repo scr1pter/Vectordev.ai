@@ -103,8 +103,8 @@ async function one(loaded: Loaded, text: string, role: "query" | "passage") {
   const output = await loaded.session.run(feeds as Parameters<InferenceSession["run"]>[0])
   const hidden =
     output[
-      loaded.session.outputNames.includes("last_hidden_state") ? "last_hidden_state" : loaded.session.outputNames[0]!
-    ]!
+      loaded.session.outputNames.includes("last_hidden_state") ? "last_hidden_state" : loaded.session.outputNames[0]
+    ]
   const data = hidden.data as Float32Array
   const dims = settings.dims
   // [batch, sequence, dims] holds a vector per token; [batch, dims] one for the text.
@@ -116,7 +116,7 @@ async function one(loaded: Loaded, text: string, role: "query" | "passage") {
         : Float32Array.from({ length: dims }, (_, at) => {
             const tokens = Number(hidden.dims[1])
             return (
-              Array.from({ length: tokens }, (_, token) => data[token * dims + at]!).reduce(
+              Array.from({ length: tokens }, (_, token) => data[token * dims + at]).reduce(
                 (sum, value) => sum + value,
                 0,
               ) / tokens
@@ -135,7 +135,7 @@ export function cut(ids: readonly number[], max: number, role: "query" | "passag
   const inner = ids.slice(1, -1)
   const room = max - 2
   const head = role === "query" ? Math.ceil(room / 2) : room
-  return [ids[0]!, ...inner.slice(0, head), ...inner.slice(inner.length - (room - head)), ids.at(-1)!].slice(0, max)
+  return [ids[0], ...inner.slice(0, head), ...inner.slice(inner.length - (room - head)), ids.at(-1)!].slice(0, max)
 }
 
 function normalize(vector: Float32Array) {
@@ -145,7 +145,7 @@ function normalize(vector: Float32Array) {
 
 function cosine(a: Float32Array, b: Float32Array) {
   if (a.length !== b.length) return 0
-  const dot = a.reduce((sum, value, index) => sum + value * b[index]!, 0)
+  const dot = a.reduce((sum, value, index) => sum + value * b[index], 0)
   const norms = Math.sqrt(
     a.reduce((sum, value) => sum + value * value, 0) * b.reduce((sum, value) => sum + value * value, 0),
   )

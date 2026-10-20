@@ -210,7 +210,7 @@ export function hashed(text: string, dims = 256) {
   const vector = new Float32Array(dims)
   const add = (feature: string, weight: number) => {
     const hash = fnv(feature)
-    vector[hash % dims]! += (hash & 0x80000000 ? -1 : 1) * weight
+    vector[hash % dims] += (hash & 0x80000000 ? -1 : 1) * weight
   }
   for (const term of BrainLexical.terms(text).keys()) {
     add(`w:${term}`, 1)
@@ -736,7 +736,7 @@ function make(
     const same = pinned && pinned.revision === current.model.revision ? pinned : undefined
     const canaries = (current.variant === "fp32" ? (same?.fp32 ?? same?.int8) : same?.int8) ?? []
     const data = current.variant === "int8" ? current.model.files.data : undefined
-    const graph = BrainEmbedManifest.files(current.model, current.variant)[0]!
+    const graph = BrainEmbedManifest.files(current.model, current.variant)[0]
     const base = folder(current.model)
     return {
       key: current.key,
