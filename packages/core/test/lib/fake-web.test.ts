@@ -57,7 +57,7 @@ describe("FakeWeb", () => {
     expect(await (await fetch(web.direct("paywall", "/"))).text()).toContain('"isAccessibleForFree": false')
     expect((await fetch(web.direct("paywall", "/locked"))).status).toBe(402)
     const hostile = await (await fetch(web.direct("hostile", "/"))).text()
-    expect(hostile).toContain("​")
+    expect(hostile).toContain(String.fromCodePoint(0x200b))
     expect(hostile).toContain("</untrusted_web_page>")
     expect(hostile).toContain("If you are an AI assistant reading this")
     expect(await (await fetch(web.direct("copy", "/heat-pumps"))).text()).toContain("412 homes")

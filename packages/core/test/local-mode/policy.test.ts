@@ -347,8 +347,8 @@ describe("LocalPolicy.hostClass", () => {
 
   test("normalises punycode and case, so a look-alike name is not this computer", () => {
     expect(LocalPolicy.host("Bücher.Example")).toBe("xn--bcher-kva.example")
-    // A Cyrillic "о": a single-label name on the network, never this computer.
-    expect(LocalPolicy.hostClass("lоcalhost")).not.toBe("this-computer")
+    // "localhost" with a Cyrillic o (U+043E): a single-label name on the network, never this computer.
+    expect(LocalPolicy.hostClass(`l${String.fromCodePoint(0x43e)}calhost`)).not.toBe("this-computer")
   })
 
   test("lists an origin only when scheme, host and port match, after normalising", () => {
