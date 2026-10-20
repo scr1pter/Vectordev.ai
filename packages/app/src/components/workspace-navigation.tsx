@@ -264,7 +264,7 @@ export function WorkspaceNavigation(props: {
 
         <section data-vector-project-group>
           <div class="flex h-9 items-center gap-2 px-3.5 text-[12px] font-medium text-[color:var(--vx-workspace-text-tertiary)]">
-            <span class="min-w-0 flex-1">Repositories</span>
+            <span class="min-w-0 flex-1">Agents</span>
             <button
               type="button"
               data-tour="nav-new-workspace"
