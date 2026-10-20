@@ -71,7 +71,7 @@ import type { BrainWorkerProtocol } from "./worker/protocol"
 //   version keeps what the user did to them; unchanged passages keep theirs too.
 // - `recall` puts memory entries and document cards in one budget, found by keywords over a stored index that reads
 //   only the rows of a request's own terms, by code links, and by meaning once the local search model is downloaded.
-//   A repository with no documents recalls exactly as it did before, and so does one without the model.
+//   A repository with no documents recalls as it did before, and so does one without the model.
 // - With the model, records are embedded first and passages after, one batch at a time in the background, resting
 //   after each batch as long as it took (three times as long while a session is at work), until the user pauses it.
 // - Cards are rendered from ids for every request and never saved in a transcript, so forgetting a document takes it

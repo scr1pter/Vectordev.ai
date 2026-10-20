@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { BrainVector } from "@vectordevai/core/brain/vector"
 
-// The brain's vectors: int8 values with one scale and sign bits, scored exactly below 20,000 rows and through a
+// The brain's vectors: int8 values with one scale and sign bits, every one scored below 20,000 rows and through a
 // sign-bit prefilter above. Vectors here are clustered the way a model's are (passages about one subject sit near each
 // other), from a seeded generator, so every run scores the same rows.
 
