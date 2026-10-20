@@ -27,6 +27,7 @@ import { createPromptSubmissionState } from "./submission-state"
 import {
   classifyTaskDifficulty,
   isFreeModelSelection,
+  planPending,
   supportsImageInput,
   routeModelForImages,
   routeModelForTask,
@@ -70,8 +71,8 @@ export function resolveExecutionAgent(input: {
   // A greeting, thanks or a farewell takes the quick lane from here on every agent, with or without the judge, so an
   // engine that does not size requests itself (an older Vector, a remote server) also answers it with one small
   // request. A current engine sizes it as a build request and offers escalate there, so a message misread as social
-  // still goes on as Work. "ok", "yes" or "continue", and anything sent while work waits on the user, are not trivial:
-  // they continue the work before them, which the engine sizes.
+  // still goes on as Work. "yes" or "continue", a bare "ok" after a plan from Plan mode, and anything sent while work
+  // waits on the user, are not trivial: they continue the work before them, which the engine sizes.
   if (input.difficulty === "trivial") return "quick"
   return input.current === "quick" ? "build" : input.current
 }
@@ -124,10 +125,12 @@ const SYNTHETIC_SLOTS = 2
 export async function sendFollowupDraft(input: FollowupSendInput) {
   const text = draftText(input.draft.prompt)
   const images = draftImages(input.draft.prompt)
+  const messages = input.sync.data.message?.[input.draft.sessionID] ?? []
   const difficulty =
     input.draft.difficulty ??
     classifyTaskDifficulty(text, {
-      open: workOpen(input.sync.data.message?.[input.draft.sessionID] ?? [], (id) => input.sync.data.part?.[id]),
+      open: workOpen(messages, (id) => input.sync.data.part?.[id]),
+      plan: planPending(messages),
       ...attachments(input.draft.prompt, input.draft.context),
     })
   const agent = resolveExecutionAgent({
@@ -474,12 +477,14 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
-    // A social message takes the quick lane only when no work waits on the user; then it answers that work.
-    const open = params.id ? workOpen(sync().data.message?.[params.id] ?? [], (id) => sync().data.part?.[id]) : false
+    // A social message takes the quick lane only when no work waits on the user; then it answers that work. A bare "ok"
+    // after a plan from Plan mode carries the plan out.
+    const messages = params.id ? (sync().data.message?.[params.id] ?? []) : []
     const difficulty =
       mode === "normal" && !text.trim().startsWith("/")
         ? classifyTaskDifficulty(text, {
-            open,
+            open: workOpen(messages, (id) => sync().data.part?.[id]),
+            plan: planPending(messages),
             ...attachments([...currentPrompt.filter((part) => part.type !== "image"), ...images], context),
           })
         : ("standard" as const)

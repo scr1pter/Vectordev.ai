@@ -5,6 +5,7 @@ import {
   routeModelForImages,
   routeModelForTask,
   routeVariantForTask,
+  planPending,
   supportsImageInput,
   workOpen,
 } from "./task-intelligence"
@@ -124,7 +125,6 @@ describe("task intelligence", () => {
       "try again",
       "do it",
       "sure",
-      "ok",
       "no thanks",
       "sounds good",
       "lgtm",
@@ -142,6 +142,32 @@ describe("task intelligence", () => {
     // Only the user's own ask makes work complex.
     expect(classifyTaskDifficulty("be thorough: migrate the app to the new router")).toBe("complex")
     expect(classifyTaskDifficulty("migrate the app to the new router across 40 files")).toBe("standard")
+  })
+
+  test("a bare acknowledgement is social unless a plan from Plan mode or the agent's question waits on it", () => {
+    for (const text of ["ok", "okay", "got it"]) {
+      expect(classifyTaskDifficulty(text), text).toBe("trivial")
+      // After a plan nobody has carried out, "ok" approves it; while the agent waits on an answer, it is that answer.
+      expect(classifyTaskDifficulty(text, { plan: true }), text).toBe("standard")
+      expect(classifyTaskDifficulty(text, { open: true }), text).toBe("standard")
+    }
+    // An acknowledgement with an ask is the ask.
+    expect(classifyTaskDifficulty("ok, now add tests")).toBe("standard")
+  })
+
+  test("a plan waits on the user until a reply that is not a greeting's comes from another agent", () => {
+    const reply = (id: string, extra: object) => ({ id, role: "assistant", time: { created: 1, completed: 2 }, ...extra })
+    const user = { id: "u", role: "user", time: { created: 0 } }
+    expect(planPending([user, reply("p", { agent: "plan" })])).toBe(true)
+    // A thanks and its quick reply in between are not the work.
+    expect(planPending([user, reply("p", { agent: "plan" }), user, reply("q", { agent: "quick" })])).toBe(true)
+    expect(planPending([user, reply("p", { agent: "plan" }), user, reply("c", { agent: "build", size: "chat" })])).toBe(
+      true,
+    )
+    // Once another agent carried it out, it is done.
+    expect(planPending([user, reply("p", { agent: "plan" }), user, reply("b", { agent: "build" })])).toBe(false)
+    expect(planPending([user, reply("b", { agent: "build" })])).toBe(false)
+    expect(planPending([])).toBe(false)
   })
 
   test("work is open when the agent's last reply asked something or its run did not finish", () => {
