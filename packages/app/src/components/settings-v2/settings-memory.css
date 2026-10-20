@@ -569,3 +569,28 @@ button.settings-memory-doc-title:hover {
   color: inherit;
   box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--vector-accent) 45%, transparent);
 }
+
+/* Settings > Memory > Search model: the download's progress. */
+.settings-memory-progress {
+  height: 4px;
+  margin: 0 0 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--vx-line);
+}
+
+.settings-memory-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--v2-text-text-muted);
+  transition: width 0.3s ease;
+}
+
+[data-component="settings-memory-model"] .settings-memory-notice {
+  margin: 6px 0 0;
+}
+
+[data-component="settings-memory-search-model"] > .settings-v2-card-body > .settings-memory-notice,
+[data-component="settings-memory-search-model"] > .settings-v2-card-body > .settings-memory-error {
+  margin: 0 0 8px;
+}

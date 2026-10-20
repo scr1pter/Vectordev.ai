@@ -9,6 +9,8 @@ import type {
   MemoryDocumentDetail,
   MemoryDocumentList,
   MemoryDocumentPage,
+  MemoryModelOption,
+  MemoryModelStatus,
   MemoryRecord,
   MemoryReviewItem,
 } from "@vectordevai/sdk/v2/client"
@@ -302,10 +304,13 @@ export function documentsSummary(list: Pick<MemoryDocumentList, "documents" | "i
   ].join(" · ")
 }
 
-/** Whether the page keeps asking for progress: while anything is read, or the search model downloads. */
+/**
+ * Whether the page keeps asking for progress: while anything is read, the search model downloads, or documents are
+ * still being embedded (and the user has not paused that).
+ */
 export function polling(list: Pick<MemoryDocumentList, "indexing" | "model"> | undefined) {
   if (!list) return false
-  return list.indexing || list.model?.state === "downloading" || list.model?.state === "verifying"
+  return list.indexing || modelPolling(list.model)
 }
 
 /**
@@ -925,4 +930,112 @@ export function reviewRows(items: readonly MemoryReviewItem[]): ReviewRow[] {
       ],
     }
   })
+}
+
+// --- Search model -------------------------------------------------------------------------------------------------
+
+/** "24 MB", as the download is described before it starts. */
+export function megabytes(bytes: number) {
+  return `${Math.max(1, Math.round(bytes / 1_000_000))} MB`
+}
+
+/** The default model, the one the card offers first. */
+export function defaultModel(status: Pick<MemoryModelStatus, "options"> | undefined) {
+  return status?.options?.find((option) => !option.preview) ?? status?.options?.[0]
+}
+
+/** The model in use, or the one a download would fetch. */
+export function shownModel(status: Pick<MemoryModelStatus, "options" | "model"> | undefined) {
+  return status?.options?.find((option) => option.id === status.model) ?? defaultModel(status)
+}
+
+/** What the Search model card says first, in each state. */
+export function modelHeadline(status: MemoryModelStatus | undefined) {
+  if (!status) return "The search model is not available from this engine."
+  const option = shownModel(status)
+  if (status.state === "downloading")
+    return `Downloading ${Math.round((status.progress ?? 0) * 100)}% of ${megabytes(status.total ?? option?.bytes ?? 0)}…`
+  if (status.state === "verifying") return "Checking the model's files and its vectors on this computer…"
+  if (status.state === "failed")
+    return `The model cannot be used on this computer: ${status.error ?? "it failed its check"}. Until then Vector searches by keywords and code links.`
+  if (status.state === "ready") return "Searching documents by meaning, keywords and code links, all on this computer."
+  return `Searching by keywords and code links. Download the ${megabytes(option?.bytes ?? 0)} model to search by meaning.`
+}
+
+/** What a download is, said before it starts. */
+export function modelOffer(option: Pick<MemoryModelOption, "label" | "bytes">) {
+  return `${option.label}: a one-time ${megabytes(option.bytes)} download, then it runs on this computer with no network.`
+}
+
+/** Who made a model and under what license. */
+export function modelLicense(option: Pick<MemoryModelOption, "owner" | "license">) {
+  return `${option.owner} · ${option.license}`
+}
+
+/** A sha256 short enough for a row; the full one is the row's title. */
+export function shortSha(sha256: string) {
+  return sha256.length > 16 ? `${sha256.slice(0, 16)}…` : sha256
+}
+
+/** How much of the repository's documents is searchable by meaning. */
+export function embeddedLabel(status: Pick<MemoryModelStatus, "state" | "embedded" | "paused"> | undefined) {
+  const embedded = status?.embedded
+  if (status?.state !== "ready" || !embedded || embedded.total === 0) return undefined
+  const share = Math.min(100, Math.floor((embedded.done / embedded.total) * 100))
+  const counted = `${embedded.done.toLocaleString("en-US")} of ${embedded.total.toLocaleString("en-US")} passages and records in this repository searchable by meaning (${share}%)`
+  if (embedded.done >= embedded.total) return counted
+  return status.paused ? `${counted}. Paused: the rest waits until you resume.` : `${counted}. The rest is embedded in the background.`
+}
+
+/** How the model's last load was checked on this computer. */
+export function checkLabel(status: Pick<MemoryModelStatus, "check"> | undefined) {
+  const check = status?.check
+  if (!check) return undefined
+  if (check.by === "ranking") return "Checked on this computer by how it ranks its test sentences."
+  return `Checked on this computer against its pinned vectors: lowest match ${check.lowest.toFixed(3)}, needs ${check.needed}.`
+}
+
+/** Where the model runs, when it cannot run here. */
+export function runsLabel(status: Pick<MemoryModelStatus, "worker"> | undefined) {
+  if (status?.worker?.mode !== "in-process") return undefined
+  return `It does not run here: Vector's background reader is not running${status.worker.reason ? ` (${status.worker.reason})` : ""}.`
+}
+
+/** Where the files came from. */
+export function sourceLabel(status: Pick<MemoryModelStatus, "source"> | undefined) {
+  if (status?.source === "mirror") return "Downloaded from Vector's copy of the pinned files."
+  if (status?.source === "huggingface") return "Downloaded from Hugging Face at the pinned revision."
+  if (status?.source === "folder") return "Installed from a folder."
+  return undefined
+}
+
+/** Said where downloads are turned off, as in tests and CI. */
+export const MODEL_DOWNLOADS_OFF =
+  "Downloads are turned off here. In a terminal, install the model from a folder of its files with vector memory model install --from <folder>."
+
+/** What each model action says once the engine answered. */
+export const MODEL_DONE = {
+  download: "Downloading the search model. You can keep working; documents are searched by meaning once it is ready.",
+  fallback: "Downloading the full-precision model.",
+  remove: "Removed. Vector searches documents by keywords and code links until you download the model again.",
+  pause: "Paused. What is embedded is still searched by meaning; the rest waits until you resume.",
+  resume: "Resumed.",
+} as const
+
+/** Whether the page keeps asking about the model: while it downloads or checks, or embeds what is left. */
+export function modelPolling(status: Pick<MemoryModelStatus, "state" | "embedded" | "paused"> | undefined) {
+  if (!status) return false
+  if (status.state === "downloading" || status.state === "verifying") return true
+  return status.state === "ready" && !status.paused && !!status.embedded && status.embedded.done < status.embedded.total
+}
+
+/** The one-time offer on the Documents tab: shown once there are documents and no model, until the user answers. */
+export function offerModel(
+  list: Pick<MemoryDocumentList, "documents" | "model"> | undefined,
+  dismissed: boolean,
+) {
+  if (!list || dismissed || list.documents.length === 0) return undefined
+  if (list.model?.state !== "absent" || list.model.downloads === false) return undefined
+  const option = defaultModel(list.model)
+  return option ? `Search these documents by meaning too: a one-time ${megabytes(option.bytes)} download, then it runs on this computer.` : undefined
 }

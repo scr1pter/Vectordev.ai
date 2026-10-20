@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { MemoryDocument } from "@vectordevai/sdk/v2/client"
+import type { MemoryDocument, MemoryModelStatus } from "@vectordevai/sdk/v2/client"
 import {
   anchorLine,
   anchorMethodLabel,
@@ -55,6 +55,19 @@ import {
   uploadMode,
   visibilityLabel,
   warningLabel,
+  MODEL_DONE,
+  MODEL_DOWNLOADS_OFF,
+  checkLabel,
+  embeddedLabel,
+  megabytes,
+  modelHeadline,
+  modelLicense,
+  modelOffer,
+  modelPolling,
+  offerModel,
+  runsLabel,
+  shortSha,
+  sourceLabel,
   type DocumentHold,
   type DocumentStatus,
   type DocumentWarning,
@@ -750,6 +763,112 @@ describe("documents page model", () => {
     for (const word of [DISTILL, distillEstimateLabel(estimate), row!.text, ...history.map(historyLine)]) {
       expect(word.toLowerCase()).not.toContain("project")
       expect(word.toLowerCase()).not.toContain("exactly")
+    }
+  })
+})
+
+describe("the search model card", () => {
+  const arctic = {
+    id: "arctic-embed-xs-q8",
+    label: "Search by meaning",
+    description: "Snowflake Arctic Embed XS, int8: finds passages that say what a request means in other words.",
+    license: "Apache-2.0",
+    owner: "Snowflake",
+    source: "https://huggingface.co/Snowflake/snowflake-arctic-embed-xs/tree/d8c86521100d3556476a063fc2342036d45c106f",
+    revision: "d8c86521100d3556476a063fc2342036d45c106f",
+    bytes: 23_686_074,
+    fallback: 91_100_713,
+    sha256: "e6aa5e656466a73d7c3111e9a3378bd13e5b93af30eaac2b3f13fd56692589a1",
+    installed: false,
+  }
+  const granite = {
+    ...arctic,
+    id: "granite-small-r2-q8",
+    label: "Code-aware",
+    owner: "IBM (ONNX conversion by onnx-community)",
+    bytes: 54_633_923,
+    preview: "Preview: its check vectors are not pinned in this build.",
+  }
+  const options = [arctic, granite]
+
+  test("says what search uses in each state, and what the download is before it starts", () => {
+    expect(modelHeadline({ state: "absent", options })).toBe(
+      "Searching by keywords and code links. Download the 24 MB model to search by meaning.",
+    )
+    expect(modelHeadline({ state: "downloading", progress: 0.41, total: 23_686_074, options })).toBe(
+      "Downloading 41% of 24 MB…",
+    )
+    expect(modelHeadline({ state: "verifying", options })).toContain("Checking")
+    expect(modelHeadline({ state: "ready", model: "arctic-embed-xs-q8", options })).toBe(
+      "Searching documents by meaning, keywords and code links, all on this computer.",
+    )
+    expect(modelHeadline({ state: "failed", error: "it gave other vectors", options })).toBe(
+      "The model cannot be used on this computer: it gave other vectors. Until then Vector searches by keywords and code links.",
+    )
+    expect(modelHeadline(undefined)).toContain("not available")
+    expect(modelOffer(arctic)).toBe(
+      "Search by meaning: a one-time 24 MB download, then it runs on this computer with no network.",
+    )
+    expect(modelLicense(granite)).toBe("IBM (ONNX conversion by onnx-community) · Apache-2.0")
+    expect(megabytes(91_100_713)).toBe("91 MB")
+    expect(shortSha(arctic.sha256)).toBe("e6aa5e656466a73d…")
+  })
+
+  test("counts what is searchable by meaning, says when it is paused, and how the model was checked here", () => {
+    expect(embeddedLabel({ state: "ready", embedded: { done: 412, total: 1_000 } })).toBe(
+      "412 of 1,000 passages and records in this repository searchable by meaning (41%). The rest is embedded in the background.",
+    )
+    expect(embeddedLabel({ state: "ready", paused: true, embedded: { done: 412, total: 1_000 } })).toContain(
+      "Paused: the rest waits until you resume.",
+    )
+    expect(embeddedLabel({ state: "ready", embedded: { done: 3, total: 3 } })).toBe(
+      "3 of 3 passages and records in this repository searchable by meaning (100%)",
+    )
+    expect(embeddedLabel({ state: "absent", embedded: { done: 0, total: 3 } })).toBeUndefined()
+    expect(checkLabel({ check: { by: "vectors", lowest: 0.99987, needed: 0.995 } })).toBe(
+      "Checked on this computer against its pinned vectors: lowest match 1.000, needs 0.995.",
+    )
+    expect(checkLabel({ check: { by: "ranking", lowest: 1, needed: 0 } })).toContain("ranks its test sentences")
+    expect(runsLabel({ worker: { mode: "in-process", reason: "it did not start" } })).toBe(
+      "It does not run here: Vector's background reader is not running (it did not start).",
+    )
+    expect(runsLabel({ worker: { mode: "worker" } })).toBeUndefined()
+    expect(sourceLabel({ source: "mirror" })).toBe("Downloaded from Vector's copy of the pinned files.")
+  })
+
+  test("offers the download once there are documents, and never where downloads are off or once answered", () => {
+    const list = (model: MemoryModelStatus, documents = [{ id: "d1" } as MemoryDocument]) => ({ documents, model })
+    expect(offerModel(list({ state: "absent", options }), false)).toBe(
+      "Search these documents by meaning too: a one-time 24 MB download, then it runs on this computer.",
+    )
+    expect(offerModel(list({ state: "absent", options }), true)).toBeUndefined()
+    expect(offerModel(list({ state: "absent", options }, []), false)).toBeUndefined()
+    expect(offerModel(list({ state: "absent", downloads: false, options }), false)).toBeUndefined()
+    expect(offerModel(list({ state: "ready", options }), false)).toBeUndefined()
+  })
+
+  test("keeps asking while it downloads, checks or embeds, and stops when paused or done", () => {
+    expect(modelPolling({ state: "downloading" })).toBe(true)
+    expect(modelPolling({ state: "verifying" })).toBe(true)
+    expect(modelPolling({ state: "ready", embedded: { done: 1, total: 4 } })).toBe(true)
+    expect(modelPolling({ state: "ready", paused: true, embedded: { done: 1, total: 4 } })).toBe(false)
+    expect(modelPolling({ state: "ready", embedded: { done: 4, total: 4 } })).toBe(false)
+    expect(modelPolling({ state: "absent" })).toBe(false)
+    expect(polling({ indexing: false, model: { state: "ready", embedded: { done: 1, total: 4 } } })).toBe(true)
+  })
+
+  test("says repository, and makes no promise it cannot keep", () => {
+    const words = [
+      modelHeadline({ state: "absent", options }),
+      modelHeadline({ state: "ready", options }),
+      modelOffer(arctic),
+      MODEL_DOWNLOADS_OFF,
+      ...Object.values(MODEL_DONE),
+      embeddedLabel({ state: "ready", embedded: { done: 1, total: 2 } })!,
+    ]
+    for (const word of words) {
+      expect(word.toLowerCase()).not.toContain("project")
+      expect(word).not.toMatch(/\bexactly\b|never exceeds|absolute privacy|fully offline/i)
     }
   })
 })

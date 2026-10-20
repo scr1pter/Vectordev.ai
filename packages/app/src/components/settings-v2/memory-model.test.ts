@@ -149,7 +149,7 @@ describe("memory page model", () => {
   })
 
   test("splits the page into Memory and Documents", () => {
-    expect(MEMORY_TABS.map((item) => item.label)).toEqual(["Memory", "Documents"])
+    expect(MEMORY_TABS.map((item) => item.label)).toEqual(["Memory", "Documents", "Search model"])
     for (const item of MEMORY_TABS) expect(item.label.toLowerCase()).not.toContain("project")
   })
 })

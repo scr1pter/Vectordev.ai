@@ -7,6 +7,7 @@ import { useGlobal } from "@/context/global"
 import { useServer } from "@/context/server"
 import { LocalMemoryPanel } from "@/features/memory/local-memory-panel"
 import { SettingsMemoryDocuments } from "./memory-documents"
+import { SettingsMemorySearchModel } from "./memory-search-model"
 import {
   MEMORY_FILTERS,
   MEMORY_KINDS,
@@ -145,7 +146,11 @@ export function SettingsMemoryV2(props: { repositoryPath?: string; sessionDirect
       </div>
 
       <Show when={tab() === "documents"}>
-        <SettingsMemoryDocuments client={client} repository={!!directory()} />
+        <SettingsMemoryDocuments client={client} repository={!!directory()} onModel={() => setTab("model")} />
+      </Show>
+
+      <Show when={tab() === "model"}>
+        <SettingsMemorySearchModel client={client} />
       </Show>
 
       <Show when={tab() === "memory"}>

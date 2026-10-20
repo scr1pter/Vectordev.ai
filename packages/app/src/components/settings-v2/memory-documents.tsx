@@ -1,11 +1,13 @@
 import type { MemoryDocument, VectorClient } from "@vectordevai/sdk/v2/client"
 import { For, Show, createEffect, createResource, createSignal, onCleanup } from "solid-js"
+import { createStore } from "solid-js/store"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { IconButtonV2 } from "@vectordevai/ui/v2/icon-button-v2"
 import { Icon } from "@vectordevai/ui/v2/icon"
 import { MenuV2 } from "@vectordevai/ui/v2/menu-v2"
 import { Switch } from "@vectordevai/ui/v2/switch-v2"
 import { usePlatform } from "@/context/platform"
+import { Persist, persisted } from "@/utils/persist"
 import { ServerConnection, useServer } from "@/context/server"
 import { MemoryDocumentPage } from "./memory-document"
 import {
@@ -21,8 +23,10 @@ import {
   documentMeta,
   documentsSummary,
   forgottenLabel,
+  MODEL_DONE,
   needsLook,
   needsLookCount,
+  offerModel,
   pausable,
   polling,
   precheck,
@@ -45,7 +49,12 @@ type Note = { id: number; tone: "ok" | "error" | "ask"; text: string; retry?: ()
 // Settings > Memory > Documents: the documents Vector keeps for this repository. Files dropped here are read on this
 // computer into sections, passages and typed records; a request gets only the cards that bear on it. Progress is read
 // by polling while anything is being read, never pushed over the event stream.
-export function SettingsMemoryDocuments(props: { client: () => VectorClient | undefined; repository: boolean }) {
+export function SettingsMemoryDocuments(props: {
+  client: () => VectorClient | undefined
+  repository: boolean
+  /** Opens the Search model tab. */
+  onModel?: () => void
+}) {
   const platform = usePlatform()
   const server = useServer()
   const [version, setVersion] = createSignal(0)
@@ -53,6 +62,8 @@ export function SettingsMemoryDocuments(props: { client: () => VectorClient | un
   const [notes, setNotes] = createSignal<Note[]>([])
   const [over, setOver] = createSignal(false)
   const refresh = () => setVersion((value) => value + 1)
+  // The one-time offer of the search model, once there are documents: answered once, on this computer.
+  const [offer, setOffer] = persisted(Persist.global("memory.search-model-offer"), createStore({ answered: false }))
   let picker: HTMLInputElement | undefined
   let replacer: HTMLInputElement | undefined
   let replacing: MemoryDocument | undefined
@@ -241,6 +252,38 @@ export function SettingsMemoryDocuments(props: { client: () => VectorClient | un
                   Large documents need Vector's background reader, which could not start here
                   {list.latest?.worker?.reason ? `: ${list.latest.worker.reason}` : "."}
                 </p>
+              </Show>
+
+              <Show when={offerModel(list.latest, offer.answered)}>
+                {(text) => (
+                  <div class="settings-memory-note" data-tone="ask" data-component="settings-memory-model-offer">
+                    <span>{text()}</span>
+                    <ButtonV2
+                      size="small"
+                      variant="outline"
+                      onClick={() => {
+                        setOffer("answered", true)
+                        void change((client) => client.memory.model.update({ memoryModelPayload: { action: "download" } }), MODEL_DONE.download)
+                      }}
+                    >
+                      Download
+                    </ButtonV2>
+                    <Show when={props.onModel}>
+                      {(open) => (
+                        <ButtonV2 size="small" variant="ghost" onClick={() => open()()}>
+                          About the model
+                        </ButtonV2>
+                      )}
+                    </Show>
+                    <IconButtonV2
+                      size="small"
+                      variant="ghost-muted"
+                      icon={<Icon name="xmark-small" />}
+                      aria-label="Not now"
+                      onClick={() => setOffer("answered", true)}
+                    />
+                  </div>
+                )}
               </Show>
 
               <Show when={notes().length > 0}>
