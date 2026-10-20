@@ -69,15 +69,25 @@ test("Vector Brain and Documents and code links are pages of their own", async (
   for (const link of links) expect(link.page).toContain(`<h2 id="${link.anchor}">`)
 })
 
-test("both pages and their sidebar entries name desktop 1.99.110, and the brain page says what leaves the computer", () => {
+test("both pages and their sidebar entries name desktop 1.99.110, and the brain page says what leaves the computer", async () => {
   for (const id of ["brain", "documents"])
     expect(docsNav.flatMap((group) => group.links).find((link) => link.id === id)?.blurb).toStartWith(
       "From desktop 1.99.110:",
     )
   expect(brain).toContain("From desktop 1.99.110, Vector keeps a brain for each repository")
   expect(documents).toContain("From desktop 1.99.110, you can give Vector a repository's specs")
+  // The fixed part goes with every request but a greeting, so the privacy line names it before "only the few lines".
   expect(brain).toContain(
-    "All of it is stored and searched on this computer. For each request Vector sends your model only the few lines that bear on it. Private documents never go to a model that may train on prompts, or to a session a guest is in.",
+    "All of it is stored and searched on this computer. Beyond your rules, the start of <code>MEMORY.md</code> and the entries you pinned, which go with every request but a greeting, Vector sends your model only the few lines that bear on each request. Private documents never go to a free model labelled <strong>May train on your prompts</strong>, or to a session a guest is in.",
+  )
+  // Redaction is pattern-based, and a kept copy is the file as added, as the app's Keep copies toggle says.
+  for (const page of [brain, documents]) {
+    expect(page).toContain("Vector removes what looks like a secret from what it reads")
+    expect(page).toContain("is the file as you added it, secrets included")
+    expect(page).not.toMatch(/secrets (in a document )?are removed/)
+  }
+  expect(await read("packages/app/src/components/settings-v2/memory-documents-model.ts")).toContain(
+    "The copy is the file as you added it, secrets included",
   )
   // Readers still on 1.99.109 are told what they have.
   expect(brain).toContain("Desktop 1.99.109 and earlier keep one <code>MEMORY.md</code> file")
@@ -219,7 +229,9 @@ test("Search by meaning has its own page, from desktop 1.99.110, with the manife
   expect(BrainEmbedManifest.megabytes(BrainEmbedManifest.size(BrainEmbedManifest.MODELS["arctic-embed-xs-q8"]))).toBe("24 MB")
   expect(meaning).toContain("Nothing is downloaded until you ask")
   expect(meaning).toContain("Until you do, Vector searches documents by keywords and code links")
-  expect(meaning).toContain("never for a model that may train on prompts, or in a session a guest is in")
+  expect(meaning).toContain(
+    "never for a free model labelled <strong>May train on your prompts</strong>, or in a session a guest is in",
+  )
   expect(documents).toContain('<a href="/docs/search-by-meaning">Search by meaning</a>')
   expect(section).toContain("With the optional local search model, a one-time 24 MB download you ask for")
   // Only the preview's two tokenizer files have no pinned sha256, and every place that promises the hash says so.

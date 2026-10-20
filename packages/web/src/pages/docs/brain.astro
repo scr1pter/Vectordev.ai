@@ -10,8 +10,10 @@ export const prerender = true
           <p>
             From desktop 1.99.110, Vector keeps a brain for each repository and one for you: the rules you write, what
             you tell it about yourself, what it learns while it works, and the documents you give it. All of it is
-            stored and searched on this computer. For each request Vector sends your model only the few lines that
-            bear on it. Private documents never go to a model that may train on prompts, or to a session a guest is in.
+            stored and searched on this computer. Beyond your rules, the start of <code>MEMORY.md</code> and the entries
+            you pinned, which go with every request but a greeting, Vector sends your model only the few lines that bear
+            on each request. Private documents never go to a free model labelled <strong>May train on your
+            prompts</strong>, or to a session a guest is in.
           </p>
           <p>
             Desktop 1.99.109 and earlier keep one <code>MEMORY.md</code> file, shown in Settings → General, and send it
@@ -29,7 +31,9 @@ export const prerender = true
           <p>
             Files you write stay yours: Vector only reads them. What it learns and what it reads from documents live in
             <code>brain.db</code> in Vector's data folder, beside its sessions. A key pasted into a memory or rules file
-            is not sent to a provider, and secrets in a document are removed before anything is saved.
+            is not sent to a provider, and Vector removes what looks like a secret from what it reads of a document
+            before saving it. A copy kept with <a href="/docs/documents#adding">Keep copies of added files</a> is the
+            file as you added it, secrets included.
           </p>
 
           <h2 id="requests">What a request carries</h2>
