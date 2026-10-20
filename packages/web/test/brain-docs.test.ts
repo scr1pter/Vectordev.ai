@@ -70,10 +70,19 @@ test("the budgets the brain page gives are the ones recall uses", () => {
       `Up to ${Brain.recallBudget(tier)} tokens, or ${BrainKnowledge.budget(tier, { documents: true, tight: false })} in a repository with documents.`,
     )
   }
-  // The README's ceiling is the Thorough budget with documents.
+  // The README's ceiling is the Thorough budget with documents, and it bounds recall only: like the brain page, the
+  // README says every request but a greeting also carries the fixed part.
   expect(section).toContain(
-    `at most ${BrainKnowledge.budget("thorough", { documents: true, tight: false })} tokens for a Thorough request in a repository with documents`,
+    `On top of that, Vector recalls only the few lines that bear on the request, within a budget set by its size, at most ${BrainKnowledge.budget("thorough", { documents: true, tight: false })} tokens for a Thorough request in a repository with documents.`,
   )
+  expect(section).toContain(
+    `Every request but a greeting carries a fixed part: your rules, about ${Brain.BUDGET.memory} tokens of \`MEMORY.md\`, the entries you pinned (about ${Brain.BUDGET.pinned} tokens) and one line saying what else the brain holds`,
+  )
+  expect(section).toContain('A greeting such as "hi" carries none of it.')
+  expect(brain).toContain(
+    `Every request but a greeting carries your rules, the start of <code>MEMORY.md</code> (about ${Brain.BUDGET.memory} tokens of it), the entries you pinned (about ${Brain.BUDGET.pinned} tokens) and one line saying what else the brain holds.`,
+  )
+  expect(section).not.toMatch(/sends your model only the few lines/)
   // What the page says about the cached part, a file read and a subagent's brief.
   expect(brain).toContain(`about ${Brain.BUDGET.memory} tokens of it`)
   expect(brain).toContain(`(about ${Brain.BUDGET.pinned} tokens)`)
