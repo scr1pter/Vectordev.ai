@@ -2,20 +2,13 @@ import { describe, expect, test } from "bun:test"
 import path from "node:path"
 import { Effect, Exit, Layer } from "effect"
 import { BrainWorker } from "@vectordevai/core/brain/worker/host"
+import { bundle } from "./fixture/bundle"
 import { lines, pdf } from "./fixture/pdf"
 
 // The background reader, through the same eval start the engine's builds use: the worker body is bundled to one string
 // here, as the engine's build does, and handed to the host as its source.
 
 const ENTRY = path.join(import.meta.dir, "../../src/brain/worker/entry.ts")
-
-// Built once: a second Bun.build in the same process can fail to read the files the first one read.
-const built: { source?: Promise<string> } = {}
-const bundle = () =>
-  (built.source ??= Bun.build({ entrypoints: [ENTRY], target: "node", format: "esm", minify: true }).then((result) => {
-    if (!result.success) throw new Error(result.logs.join("\n"))
-    return result.outputs[0]!.text()
-  }))
 
 const run = <A, E>(
   source: string | undefined,
@@ -81,7 +74,7 @@ const settle = (worker: BrainWorker.Interface) =>
 
 describe("BrainWorker", () => {
   test("reads a PDF in an eval worker started from the bundled source", async () => {
-    const source = await bundle()
+    const source = await bundle(ENTRY, { minify: true })
     const result = await run(source, {}, (worker) =>
       Effect.gen(function* () {
         const read = yield* worker.extract(input)
@@ -100,7 +93,7 @@ describe("BrainWorker", () => {
   // Decoded streams live outside the heap, where the worker's resource limits never reach (and Bun has none), so the
   // bundled reader has to stop such a file itself.
   test("a small PDF that inflates to 600 MB is refused inside the eval worker", async () => {
-    const source = await bundle()
+    const source = await bundle(ENTRY, { minify: true })
     const bomb = pdf({
       pages: [
         {
