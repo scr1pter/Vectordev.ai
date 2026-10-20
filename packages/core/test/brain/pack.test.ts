@@ -76,4 +76,26 @@ describe("BrainPack.pack", () => {
     const picked = BrainPack.pack([card("best", 1), card("weak", 0.1)], 1_000)
     expect(ids(picked)).toEqual(["best"])
   })
+
+  test("the discount orders the picks but never keeps out a card worth having on its own", () => {
+    // Recall's values for "add a POST /refunds route ... which calls requestRefund": the spec's scope and the
+    // repeated-key requirement come first through their code links, and the requirement for POST /refunds, the second
+    // of its section and the fourth of the document, is still worth 44% of the first pick on its own.
+    const spec = { document: "refund policy", cost: 35 }
+    const picked = BrainPack.pack(
+      [
+        card("scope", 0.809, { ...spec, section: "1" }),
+        card("repeated-key", 0.765, { ...spec, section: "3" }),
+        card("window-closed", 0.416, { ...spec, section: "2" }),
+        card("lesson", 0.219, { cost: 29 }),
+        card("post-refunds", 0.353, { ...spec, section: "3" }),
+        // The document's fifth card: over its cap of four.
+        card("window-days", 0.142, { ...spec, section: "2" }),
+        // Under 15% of the first pick on its own: left out, with room to spare.
+        card("unrelated", 0.1, { document: "other", section: "x", cost: 20 }),
+      ],
+      410,
+    )
+    expect(ids(picked)).toEqual(["scope", "repeated-key", "window-closed", "lesson", "post-refunds"])
+  })
 })
