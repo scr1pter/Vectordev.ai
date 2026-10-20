@@ -84,7 +84,8 @@ export const prerender = true
             its task, for up to four subagents a request, and none for smaller requests. With the next CLI release, a
             <a href="/docs/vectorscope">Vectorscope</a> review you run in the terminal with <code>vector review</code>
             gets the requirements, constraints, contracts and decisions linked to the changed files, with any drift, in
-            at most 300 tokens: private documents only when the review model may not train on prompts, never in a
+            at most 300 tokens: private documents only when the review model is not a free model labelled <strong>May
+            train on your prompts</strong>, never in a
             review posted to a pull request, and never content that waits for your review. Vectorscope reviews in the
             desktop app do not get them yet.
           </p>

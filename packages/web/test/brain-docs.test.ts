@@ -285,4 +285,6 @@ test("the meaning floor's margin is the one the dated report's sweep measured", 
   const archive = await Bun.file(path.join(repo, `${knowledgeEval.report}/README.md`)).text()
   for (const text of [knowledgeEval.floor, manifest, archive]) expect(text).not.toContain("room to spare")
   expect(archive).toContain("## The meaning floor")
+  // The review only checks for free models labelled May train on your prompts, so no page claims more.
+  expect(await Bun.file(`${import.meta.dir}/../src/pages/docs/brain.astro`).text()).not.toMatch(/may not train on prompts/)
 })
