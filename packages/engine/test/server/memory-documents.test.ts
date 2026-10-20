@@ -262,6 +262,19 @@ describe("memory document routes", () => {
     expect((await get(tmp.path, "/memory/documents")).documents).toEqual([])
   }, 60_000)
 
+  test("a form that is not one file in the field named file is refused, saying what to send", async () => {
+    await using tmp = await tmpdir({ git: true, trusted: true, config: { formatter: false, lsp: false } })
+    const form = new FormData()
+    form.append("file", new File([SPEC], "a.md"))
+    form.append("file", new File([SPEC], "b.md"))
+    const refused = await call(at(tmp.path, "/memory/documents"), { method: "POST", headers: owner, body: form })
+    expect(refused.status).toBe(400)
+    expect(await refused.json()).toMatchObject({
+      data: { code: "refused", reason: "invalid", message: "Send one file, in the field named file." },
+    })
+    expect((await get(tmp.path, "/memory/documents")).documents).toEqual([])
+  }, 30_000)
+
   test("an upload is read into a document the app can page through, and a file of the same name asks first", async () => {
     await using tmp = await tmpdir({ git: true, trusted: true, config: { formatter: false, lsp: false } })
     const created = await upload(tmp.path, "Auth spec.md", SPEC, { title: "The auth spec" })
