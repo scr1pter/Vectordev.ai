@@ -88,6 +88,27 @@ test("the self-evolving section quotes the dated knowledge eval and keeps its ca
   expect(section).not.toMatch(/\bms\b|seconds|faster|cheaper|Codex/i)
 })
 
+// The owner's control line (20 October 2026), said only as far as the code backs it: brain.db sits in Vector's data
+// folder on this computer, the user picks the model, Settings → Memory lists what was learned with Undo and Tidy and
+// erase, and free models that may train carry their label. Memory in every agent is not built yet, so it stays off.
+test("the self-evolving section says whose prompts and data they are, and no more", async () => {
+  const section = lander.slice(
+    lander.indexOf('<section id="evolving"'),
+    lander.indexOf("</section>", lander.indexOf('<section id="evolving"')),
+  )
+  expect(await Bun.file(path.join(repo, "packages/core/src/brain/database.ts")).text()).toContain(
+    "BrainPaths.directory(Global.Path.data)",
+  )
+  const memory = await Bun.file(path.join(repo, "packages/app/src/components/settings-v2/memory.tsx")).text()
+  expect(memory).toContain('action: "undo"')
+  expect(memory).toContain("current.memory.erase(")
+  expect(section).toContain(
+    "Your prompts, your data, your Vector: the brain lives on your computer, you choose which model sees each request, and you can see, undo or erase what it learned. Free models labelled May train on your prompts are the exception.",
+  )
+  expect(page).not.toMatch(/\bfully\b|controlled only by you|only you control|your prompts never/i)
+  expect(section).not.toMatch(/every agent|Deep research|Vectorscope/i)
+})
+
 test("Vector Velocity is in development and branded by one size, 550B parameters", () => {
   expect(lander).toContain('"is building a 550B model of its own."')
   expect(lander).toContain("and is building a 550B-parameter model of its own.")

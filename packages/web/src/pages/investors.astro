@@ -29,7 +29,7 @@ export const prerender = true
 
   <section class="ip-thesis" aria-labelledby="thesis-title">
     <h1 id="thesis-title">The self-evolving AI <em>agentic harness</em>.</h1>
-    <p class="ip-lede">Over a quarter of organisations send different work to different models,<sup>1</sup> yet each lab builds its agent around its own. <strong>Vector is the neutral harness designed to build and ship applications:</strong> its own lean agent beside Claude Code, Codex and Cursor Agent, on any model, deploying to the team's own cloud. Its brain, {brainRelease.lede}, learns about you, your company and each repository, so Vector gets better with every task. The brain lives on your computer, and you choose which model sees each request.</p>
+    <p class="ip-lede">Over a quarter of organisations send different work to different models,<sup>1</sup> yet each lab builds its agent around its own. <strong>Vector is the neutral harness designed to build and ship applications:</strong> its own lean agent beside Claude Code, Codex and Cursor Agent, on any model, deploying to the team's own cloud. Its brain, {brainRelease.lede}, learns about you, your company and each repository, so Vector gets better with every task. Your prompts, your data, your Vector. The brain lives on your computer, and you choose which model sees each request.</p>
     <div class="ip-facts">
       <div class="ip-fact"><strong class="ip-num">67–75%</strong><span>less modelled spend than Claude Code in a first session, offline*</span></div>
       <div class="ip-fact"><strong class="ip-num">219</strong><span>model providers and 8,184 models, plus local ones</span></div>
@@ -43,7 +43,7 @@ export const prerender = true
     <div class="ip-reasons">
       <div class="ip-reason">
         <h3>The labs close ranks</h3>
-        <p>They sell their own agents and cut others off: Anthropic blocked third-party tools from Claude Pro and Max, and OpenAI says Cursor's access ends on 12 November 2026. Vector runs three of their agents and its own on any model, so if one door closes the work moves.</p>
+        <p>Anthropic blocked third-party tools from Claude Pro and Max, and OpenAI says Cursor's access ends on 12 November 2026. Vector runs three of their agents and its own on any model, so if one door closes the work moves.</p>
       </div>
       <div class="ip-reason">
         <h3>Good models are cheap and open</h3>
@@ -64,6 +64,11 @@ export const prerender = true
         <h3>Vector Brain</h3>
         <p>A local graph of each repository's rules, decisions, lessons and failures, plus the PDFs and docs a team feeds it, turned from unstructured text into structured knowledge linked to the code. Offline RAG gives each task only the facts it needs, and the agent adds to the graph as it works.</p>
       </div>
+      <div class="ip-milestone ip-lead">
+        <span class="ip-stage">In development</span>
+        <h3>Memory of you in every agent</h3>
+        <p>The moat: coding agents, subagents, Vectorscope reviews and Deep research act on what Vector has learned about you.</p>
+      </div>
       <div class="ip-milestone">
         <span class="ip-stage">Today</span>
         <h3>Tokenomics engine</h3>
@@ -72,7 +77,7 @@ export const prerender = true
       <div class="ip-milestone">
         <span class="ip-stage">Today</span>
         <h3>Subagent system</h3>
-        <p>Nine built-in subagents, from explore and review to security and migration, run in the background and count against the run's cap when one is set.</p>
+        <p>Nine built-in subagents, from explore to migration, run in the background and count against the run's cap when one is set.</p>
       </div>
       <div class="ip-milestone">
         <span class="ip-stage">Today</span>
@@ -99,7 +104,7 @@ export const prerender = true
 
   <section class="ip-section" aria-labelledby="markets-title">
     <h2 id="markets-title" class="ip-eyebrow">One brain, many markets</h2>
-    <p class="ip-muted ip-small">One brain serves every team that needs its code, documents and history in one place. None of these is a separate product or on sale yet.</p>
+    <p class="ip-muted ip-small">None of these is a separate product or on sale yet.</p>
     <div class="ip-reasons ip-markets">
       <div class="ip-reason">
         <h3>A record of AI-written code</h3>
@@ -152,7 +157,7 @@ export const prerender = true
   <footer class="ip-foot">
     <p class="ip-footnote"><strong>* Benchmark method.</strong> Vector's offline efficiency benchmark, archived at docs/benchmarks/vector-efficiency-2026-10: Vector's runtime at an 11 October 2026 revision (commit 6f7f3c2ea) and Claude Code 2.1.215 performed identical scripted tool steps against a local fake model server, with the same number of model requests, in three fix tasks. Medians of three repetitions at the same list rates ($3 per million input tokens, $3.75 cache write, $0.30 cache read, $15 output), with caching modelled and tokens estimated as characters ÷ 4; a second session, run as a new process, came out 75% lower. It measures what each agent sends, not the quality of answers or a provider's real bill, and it does not show that Vector is cheaper than other agents in general.</p>
     <p class="ip-footnote"><strong>Privacy.</strong> Vector itself never trains on prompts or code. Requests to free models whose providers don't train ask them not to, and free models whose providers may train are labelled May train on your prompts and sent only after the user accepts that once.</p>
-    <p class="ip-footnote"><strong>1.</strong> Stack Overflow 2026 Developer Survey, 6 October 2026. <strong>2.</strong> Epoch AI, LLM inference price trends, 12 March 2025: 9x to 900x a year, depending on the performance level.</p>
+    <p class="ip-footnote"><strong>1.</strong> Stack Overflow 2026 Developer Survey, 6 October 2026. <strong>2.</strong> Epoch AI, LLM inference price trends, 12 March 2025; the rate depends on the performance level.</p>
     <details class="ip-details ip-sources">
       <summary>Sources, checked 11–17 October 2026</summary>
       <div class="ip-source-groups">
@@ -296,7 +301,8 @@ export const prerender = true
   .ip-stage { display: inline-block; justify-self: start; vertical-align: middle; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 1px 8px; }
   .ip-stage.ip-intent { border-style: dashed; }
   .ip-milestone.ip-lead { grid-column: 1 / -1; border-left: 0; background: linear-gradient(160deg, var(--accent-soft), transparent 70%); }
-  @media (min-width: 761px) { .ip-milestone.ip-lead ~ .ip-milestone { border-top: 1px solid var(--line); } .ip-milestone.ip-lead ~ .ip-milestone:nth-child(3n + 2) { border-left: 0; } }
+  /* The brain and the memory-in-every-agent card span the grid, so each row of three cards starts at a multiple of three. */
+  @media (min-width: 761px) { .ip-milestone.ip-lead ~ .ip-milestone { border-top: 1px solid var(--line); } .ip-milestone.ip-lead ~ .ip-milestone:nth-child(3n) { border-left: 0; } }
   .ip-milestone.ip-lead h3 { font-size: 21px; }
   .ip-milestone.ip-lead p { font-size: 14.5px; max-width: 86ch; }
   /* Business + stage */

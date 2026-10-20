@@ -201,6 +201,17 @@ test("the README names the release the brain ships in, as coming until it is pub
   expect(section).toContain("with the next CLI release")
 })
 
+// The owner's control line (20 October 2026) sits in the README's paragraph on the brain's release, so it is labelled
+// with it, and says only what the brain does: it is stored on this computer, the model is the user's pick, and Memory
+// lists what it learned with Undo and erase. Free models that may train are named as the exception.
+test("the README's control line says what the brain lets you control, and the exception", () => {
+  const paragraph = readme.slice(readme.indexOf(brainRelease.readme), readme.indexOf("Vector is free."))
+  expect(paragraph).toContain(
+    'Your prompts, your data, your Vector: the brain lives on your computer, you choose which model sees each request, and you can see, undo or erase what it learned in Settings → Memory. Free models labelled "May train on your prompts" are the exception.',
+  )
+  expect(readme).not.toMatch(/\bfully\b|controlled only by you|only you control|your prompts never/i)
+})
+
 test("the brain's copy keeps to the owner's wording rules", () => {
   for (const text of [brain, documents, meaning, section, knowledgeEval.summary, knowledgeEval.caveat, knowledgeEval.meaning, knowledgeEval.floor]) {
     expect(text).not.toMatch(/\bexactly\b|never exceeds|absolute privacy|guaranteed/i)
