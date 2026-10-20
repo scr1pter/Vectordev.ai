@@ -7,11 +7,14 @@
 // whether the governing requirement came back by keywords alone, through code links by spreading activation, and
 // through the code graph by personalized PageRank, with the cards and tokens sent. Then it measures the tokens each
 // request size sends and how long the keyword stage takes: for the five specs, and for a generated 300-page PDF read
-// in the background reader. Search by meaning (local embeddings) is not in this build, so it has no figure.
+// in the background reader. Search by meaning runs the same requests with the local model: the pinned
+// arctic-embed-xs int8 files when --model (or VECTOR_TEST_EMBED_DIR) names a folder of them, otherwise a hash stand-in
+// that knows spelling, not meaning, and the report says which it was.
 //
 //   bun script/knowledge-eval.ts                print the report
 //   bun script/knowledge-eval.ts --out <dir>    also write <dir>/report.json and <dir>/README.md
 //   bun script/knowledge-eval.ts --pages 300    pages of the generated PDF (0 leaves that stage out)
+//   bun script/knowledge-eval.ts --model <dir>  search by meaning with the pinned model's files in <dir>
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -19,10 +22,12 @@ import { Effect, Layer } from "effect"
 import { Brain } from "../src/brain/brain"
 import { BrainDatabase } from "../src/brain/database"
 import { BrainEmbed } from "../src/brain/embed"
+import { BrainEmbedManifest } from "../src/brain/embed-manifest"
 import { BrainFuse } from "../src/brain/fuse"
 import { BrainKnowledge } from "../src/brain/knowledge"
 import { BrainWorker } from "../src/brain/worker/host"
 import { LayerNode } from "../src/effect/layer-node"
+import { FetchHttpClient } from "effect/unstable/http"
 import { Global } from "../src/global"
 import { Ripgrep } from "../src/ripgrep"
 import { added, text, withKnowledge } from "../test/brain/fixture/knowledge"
@@ -46,13 +51,21 @@ type Queries = {
 
 type Graph = "pagerank" | "activation"
 
-/** Recall on the fixture with each way of reaching code-linked records, summed up the way the report quotes it. */
-export async function evaluate() {
+/** The search model a run uses: none, the hash stand-in, or the pinned model's files in a folder. */
+type Meaning = { readonly type: "off" } | { readonly type: "hash" } | { readonly type: "model"; readonly dir: string }
+
+/**
+ * Recall on the fixture with each way of reaching code-linked records, and with search by meaning, summed up the way
+ * the report quotes it. `model` is a folder of the pinned arctic-embed-xs files; without one the hash stand-in runs.
+ */
+export async function evaluate(options: { readonly model?: string } = {}) {
   const queries: Queries = await Bun.file(path.join(FIXTURE, "queries.json")).json()
   const documents = await files(path.join(FIXTURE, "documents"))
   const repo = await files(path.join(FIXTURE, "repo"))
   const pagerank = await run(queries, documents, repo, "pagerank")
   const activation = await run(queries, documents, repo, "activation")
+  const meaning: Meaning = options.model ? { type: "model", dir: options.model } : { type: "hash" }
+  const dense = await run(queries, documents, repo, "pagerank", meaning)
   const count = (items: readonly { readonly found: boolean }[]) => items.filter((item) => item.found).length
   const keywords = (items: readonly { readonly keywords: boolean }[]) => items.filter((item) => item.keywords).length
   const found = (set: "working" | "hops") => ({
@@ -60,6 +73,9 @@ export async function evaluate() {
     keywords: keywords(pagerank[set]),
     activation: count(activation[set]),
     pagerank: count(pagerank[set]),
+    // Keywords and meaning with no code links, then every channel at once.
+    meaning: keywords(dense[set]),
+    all: count(dense[set]),
   })
   const light = pagerank.working.map((item) => item.tokens.light)
   return {
@@ -74,8 +90,17 @@ export async function evaluate() {
       irrelevant: queries.irrelevant.length,
     },
     found: { working: found("working"), hops: found("hops") },
-    // Search by meaning is not in this build.
-    dense: null,
+    dense: {
+      model:
+        meaning.type === "model"
+          ? `${BrainEmbedManifest.MODELS["arctic-embed-xs-q8"].repo}@${BrainEmbedManifest.MODELS["arctic-embed-xs-q8"].revision.slice(0, 12)} int8`
+          : "hash stand-in",
+      tokens: mean(dense.working.map((item) => item.tokens.light)),
+      irrelevant: dense.irrelevant.map((item) => item.tokens),
+      recall: { p50: percentile(dense.times, 0.5), p95: percentile(dense.times, 0.95) },
+      embedded: dense.embedded,
+      seconds: dense.embedSeconds,
+    },
     cards: mean(pagerank.working.map((item) => item.cards)),
     tokens: Object.fromEntries(
       TIERS.map((tier) => [
@@ -100,6 +125,7 @@ export async function evaluate() {
     missed: [...pagerank.working, ...pagerank.hops].filter((item) => !item.found).map((item) => item.query),
     cases: [...pagerank.working, ...pagerank.hops].map((item, index) => {
       const other = [...activation.working, ...activation.hops][index]!
+      const near = [...dense.working, ...dense.hops][index]!
       return {
         set: item.set,
         query: item.query,
@@ -107,6 +133,8 @@ export async function evaluate() {
         keywords: item.keywords,
         activation: other.found,
         pagerank: item.found,
+        meaning: near.keywords,
+        all: near.found,
         cards: item.cards,
         tokens: item.tokens.light,
       }
@@ -210,7 +238,8 @@ export function markdown(input: {
   const day = input.date.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
   const of = (found: number, tasks: number) => `${found} of ${tasks} (${share(found, tasks)})`
   const row = (label: string, set: Report["found"]["working"]) =>
-    `| ${label} | ${set.tasks} | ${of(set.keywords, set.tasks)} | ${of(set.activation, set.tasks)} | ${of(set.pagerank, set.tasks)} | not in this build |`
+    `| ${label} | ${set.tasks} | ${of(set.keywords, set.tasks)} | ${of(set.activation, set.tasks)} | ${of(set.pagerank, set.tasks)} | ${of(set.meaning, set.tasks)} | ${of(set.all, set.tasks)} |`
+  const real = report.dense.model !== "hash stand-in"
   const tier = (name: (typeof TIERS)[number]) =>
     `| ${name[0]!.toUpperCase()}${name.slice(1)} | ${report.tokens[name].budget} | ${report.tokens[name].mean.toFixed(0)} | ${report.tokens[name].max} |`
   const large = input.large
@@ -221,7 +250,7 @@ export function markdown(input: {
     "",
     "## What it measures",
     "",
-    `The fixture is a small invented repository of ${report.fixture.files} source files and ${report.fixture.documents} short specs for it (\`packages/core/test/fixtures/knowledge\`): ${thousands(report.fixture.characters)} characters, about ${thousands(report.fixture.tokens)} tokens, read into ${report.fixture.records} records. Recall runs the way a Light request does: the request's words, the files it touches, and at most the Light budget of cards. No model is called and nothing is embedded.`,
+    `The fixture is a small invented repository of ${report.fixture.files} source files and ${report.fixture.documents} short specs for it (\`packages/core/test/fixtures/knowledge\`): ${thousands(report.fixture.characters)} characters, about ${thousands(report.fixture.tokens)} tokens, read into ${report.fixture.records} records. Recall runs the way a Light request does: the request's words, the files it touches, and at most the Light budget of cards. No language model is called. ${real ? `Search by meaning used the local search model, ${report.dense.model}, on this computer: it embedded ${report.dense.embedded} records and passages in ${report.dense.seconds.toFixed(1)} s, running on the main thread as the test fixture runs it.` : "Search by meaning used a hash stand-in for the local model, which places words that share their letters near each other and knows nothing of meaning, so its column says little about the real model."}`,
     "",
     `- **${report.fixture.working} tasks** name the files they touch, mostly in words the governing requirement never uses ("change how long people stay signed in" while editing \`src/auth/session.ts\`).`,
     `- **${report.fixture.hops} tasks** edit a file that only imports the governed one, so no spec is linked to the edited file itself.`,
@@ -231,12 +260,12 @@ export function markdown(input: {
     "",
     "## Recall",
     "",
-    "| Tasks | Count | Keywords alone | Code links, spreading activation | Code graph, personalized PageRank | Search by meaning |",
-    "| --- | ---: | ---: | ---: | ---: | --- |",
+    "| Tasks | Count | Keywords alone | Code links, spreading activation | Code graph, personalized PageRank | Keywords and meaning | Every channel |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     row("Named files", report.found.working),
     row("Through an import", report.found.hops),
     "",
-    `With the code graph a Light request carried ${report.cards.toFixed(1)} cards and ${report.tokens.light.mean.toFixed(0)} tokens on average (median ${report.lightMedian.toFixed(0)}); with spreading activation it carried ${report.activationTokens.toFixed(0)}. The ${report.fixture.irrelevant} unrelated requests carried ${sum(report.irrelevant.pagerank)} tokens with the code graph and ${sum(report.irrelevant.activation)} with spreading activation.${report.missed.length > 0 ? ` Missed: ${report.missed.map((query) => `"${query}"`).join(", ")}.` : ""}`,
+    `"Keywords and meaning" is recall with no code links: the request's words and what it means. "Every channel" adds the code graph. With the code graph a Light request carried ${report.cards.toFixed(1)} cards and ${report.tokens.light.mean.toFixed(0)} tokens on average (median ${report.lightMedian.toFixed(0)}); with spreading activation it carried ${report.activationTokens.toFixed(0)}, and with every channel ${report.dense.tokens.toFixed(0)}. The ${report.fixture.irrelevant} unrelated requests carried ${sum(report.irrelevant.pagerank)} tokens with the code graph, ${sum(report.irrelevant.activation)} with spreading activation and ${sum(report.dense.irrelevant)} with every channel.${report.missed.length > 0 ? ` Missed: ${report.missed.map((query) => `"${query}"`).join(", ")}.` : ""}`,
     "",
     "## Tokens for each request size",
     "",
@@ -248,7 +277,7 @@ export function markdown(input: {
     "",
     "## Keyword stage",
     "",
-    `The ${report.fixture.documents} specs were searchable by keywords and linked to the code ${report.keyword.seconds.toFixed(2)} s after the first was added, read on the main thread as the test fixture reads them. A Light recall took ${report.keyword.recall.p50.toFixed(1)} ms at the median and ${report.keyword.recall.p95.toFixed(1)} ms at the 95th percentile.`,
+    `The ${report.fixture.documents} specs were searchable by keywords and linked to the code ${report.keyword.seconds.toFixed(2)} s after the first was added, read on the main thread as the test fixture reads them. A Light recall took ${report.keyword.recall.p50.toFixed(1)} ms at the median and ${report.keyword.recall.p95.toFixed(1)} ms at the 95th percentile; with every channel and the ${real ? "model" : "stand-in"} warm, ${report.dense.recall.p50.toFixed(1)} ms and ${report.dense.recall.p95.toFixed(1)} ms.`,
     ...(large
       ? [
           "",
@@ -260,7 +289,9 @@ export function markdown(input: {
     "",
     "- The fixture is small and was written alongside the feature it measures. It shows that code links reach requirements keywords miss; it is not an independent benchmark, and it does not measure the quality of a model's answers.",
     "- Times are from one run on the machine named above and change with the machine and its load.",
-    "- Search by meaning (local embeddings) is not in this build, so its column has no figure.",
+    real
+      ? "- Search by meaning ran the pinned int8 model on this computer's CPU through ONNX Runtime's WebAssembly build; another machine embeds at another speed."
+      : "- Search by meaning ran a hash stand-in, not the model: run it again with `--model <folder>` for the model's figures.",
     "- Token counts are Vector's estimate of what the recalled text costs, not a provider's count.",
     "",
     "Run it again with `cd packages/core && bun script/knowledge-eval.ts --out <folder>`.",
@@ -276,7 +307,8 @@ if (import.meta.main) {
   const pages = Number(flag("--pages") ?? 300)
   const date = new Date()
   const host = machine()
-  const report = await evaluate()
+  const model = flag("--model") ?? process.env.VECTOR_TEST_EMBED_DIR
+  const report = await evaluate(model ? { model: path.resolve(model) } : {})
   const large = pages > 0 ? await keywordStage(pages) : undefined
   const revision = Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: import.meta.dir })
     .stdout.toString()
@@ -300,10 +332,20 @@ if (import.meta.main) {
   }
 }
 
-async function run(queries: Queries, documents: Record<string, string>, repo: Record<string, string>, graph: Graph) {
+async function run(
+  queries: Queries,
+  documents: Record<string, string>,
+  repo: Record<string, string>,
+  graph: Graph,
+  meaning: Meaning = { type: "off" },
+) {
   return withKnowledge(
     (setup) =>
       Effect.gen(function* () {
+        if (meaning.type === "model") {
+          const installed = yield* setup.embed.install(meaning.dir).pipe(Effect.orDie)
+          if (installed.state !== "ready") return yield* Effect.die(new Error(`The search model is not ready: ${installed.error}`))
+        }
         const started = performance.now()
         const read = yield* Effect.forEach(Object.entries(documents), ([name, body]) =>
           Effect.gen(function* () {
@@ -315,6 +357,13 @@ async function run(queries: Queries, documents: Record<string, string>, repo: Re
           }),
         )
         const seconds = (performance.now() - started) / 1000
+        // With a model, every document is embedded before the requests, as it is once the background embedder is done.
+        const embedding = performance.now()
+        const ids = (yield* setup.knowledge.documents(setup.place, { personal: true })).map((document) => document.id)
+        if (meaning.type !== "off")
+          for (const id of ids) yield* setup.knowledge.wait(setup.place, id, "ready", 120_000)
+        const embedSeconds = (performance.now() - embedding) / 1000
+        const embedded = (yield* setup.knowledge.model(setup.place)).embedded?.done ?? 0
         const recall = (item: Case, tier: BrainKnowledge.Tier, seeded: boolean) =>
           Effect.gen(function* () {
             const at = performance.now()
@@ -369,9 +418,24 @@ async function run(queries: Queries, documents: Record<string, string>, repo: Re
             return { query: item.query, tokens: Math.max(...sizes.map((size) => size.tokens)) }
           }),
         )
-        return { documents: read, seconds, times, working, hops, irrelevant }
+        return { documents: read, seconds, times, working, hops, irrelevant, embedded, embedSeconds }
       }),
-    { files: repo, git: true, graph },
+    {
+      files: repo,
+      git: true,
+      graph,
+      ...(meaning.type === "hash" ? { embed: BrainEmbed.layerHash() } : {}),
+      ...(meaning.type === "model"
+        ? {
+            embed: (data: string) =>
+              BrainEmbed.layerWith({ dir: path.join(data, "models", "embedding"), downloads: false }).pipe(
+                Layer.provide(FetchHttpClient.layer),
+                Layer.provide(BrainWorker.layerInline),
+                Layer.provide(Layer.succeed(Global.Service, Global.make({ data }))),
+              ),
+          }
+        : {}),
+    },
   )
 }
 

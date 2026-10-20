@@ -6,7 +6,9 @@ import { evaluate, markdown } from "../../script/knowledge-eval"
 // governed one; ten ask about nothing the specs say. Code-anchored recall has to find the requirement for at least 80%
 // of the tasks, at least 20 points more than keywords alone, and send nothing at all for the other ten. The code graph
 // (personalized PageRank) replaced spreading activation over code links only because it does at least as well on both
-// sets of tasks. The same run is what the dated report, and every number published from it, comes from.
+// sets of tasks. Search by meaning (here the hash stand-in for the local model) must not cost what the other channels
+// found, nor send anything for the ten unrelated requests. The same run is what the dated report, and every number
+// published from it, comes from; with the real model it runs as `bun script/knowledge-eval.ts --model <folder>`.
 
 describe("knowledge eval", () => {
   test("anchor recall@5 is at least 0.8, 0.2 above keywords alone, PageRank at least activation, and irrelevant requests cost 0 tokens", async () => {
@@ -18,7 +20,7 @@ describe("knowledge eval", () => {
     const working = report.found.working
     const hops = report.found.hops
     console.log(
-      `knowledge eval: anchor recall@5 PageRank ${(working.pagerank / working.tasks).toFixed(2)}, activation ${(working.activation / working.tasks).toFixed(2)}, keywords alone ${(working.keywords / working.tasks).toFixed(2)} (${working.tasks} tasks); through an import PageRank ${(hops.pagerank / hops.tasks).toFixed(2)}, activation ${(hops.activation / hops.tasks).toFixed(2)}, keywords alone ${(hops.keywords / hops.tasks).toFixed(2)} (${hops.tasks} tasks); ${report.cards.toFixed(1)} cards and ${report.tokens.light.mean.toFixed(0)} tokens a request (activation ${report.activationTokens.toFixed(0)})${report.missed.length ? `; missed: ${report.missed.join(" | ")}` : ""}`,
+      `knowledge eval (meaning by ${report.dense.model}: keywords and meaning ${working.meaning}/${working.tasks}, every channel ${working.all}/${working.tasks} and ${hops.all}/${hops.tasks}): anchor recall@5 PageRank ${(working.pagerank / working.tasks).toFixed(2)}, activation ${(working.activation / working.tasks).toFixed(2)}, keywords alone ${(working.keywords / working.tasks).toFixed(2)} (${working.tasks} tasks); through an import PageRank ${(hops.pagerank / hops.tasks).toFixed(2)}, activation ${(hops.activation / hops.tasks).toFixed(2)}, keywords alone ${(hops.keywords / hops.tasks).toFixed(2)} (${hops.tasks} tasks); ${report.cards.toFixed(1)} cards and ${report.tokens.light.mean.toFixed(0)} tokens a request (activation ${report.activationTokens.toFixed(0)})${report.missed.length ? `; missed: ${report.missed.join(" | ")}` : ""}`,
     )
     expect(working.pagerank / working.tasks).toBeGreaterThanOrEqual(0.8)
     expect((working.pagerank - working.keywords) / working.tasks).toBeGreaterThanOrEqual(0.2)
@@ -29,6 +31,13 @@ describe("knowledge eval", () => {
     expect(hops.pagerank / hops.tasks).toBeGreaterThanOrEqual(0.75)
     expect(report.irrelevant.pagerank).toEqual(Array.from({ length: 10 }, () => 0))
     expect(report.irrelevant.activation).toEqual(Array.from({ length: 10 }, () => 0))
+    // Meaning adds to what keywords and code links find, and to nothing an unrelated request asks.
+    expect(report.dense.model).toBe("hash stand-in")
+    expect(report.dense.embedded).toBeGreaterThan(0)
+    expect(working.meaning).toBeGreaterThanOrEqual(working.keywords)
+    expect(working.all).toBeGreaterThanOrEqual(working.pagerank)
+    expect(hops.all).toBeGreaterThanOrEqual(hops.pagerank)
+    expect(report.dense.irrelevant).toEqual(Array.from({ length: 10 }, () => 0))
     // A greeting is sized Chat and recalls nothing; every other size stays inside its budget.
     expect(report.tokens.chat).toEqual({ mean: 0, max: 0, budget: 0 })
     for (const tier of ["light", "standard", "thorough"] as const)
@@ -44,7 +53,9 @@ describe("knowledge eval", () => {
     expect(text).toContain("# Knowledge eval, 19 October 2026")
     expect(text).toContain(`| Named files | 40 | ${working.keywords} of 40`)
     expect(text).toContain("it is not an independent benchmark")
-    expect(text).toContain("Search by meaning (local embeddings) is not in this build")
+    expect(text).toContain("| Keywords and meaning | Every channel |")
+    expect(text).toContain("hash stand-in")
+    expect(text).not.toContain("not in this build")
     expect(text).not.toMatch(/\bexactly\b|never exceeds|absolute privacy|\bprojects?\b/i)
   }, 110_000)
 })
