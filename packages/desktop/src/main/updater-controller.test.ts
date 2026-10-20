@@ -125,7 +125,9 @@ describe("updater controller", () => {
     expect(state.status).toBe("error")
     if (state.status !== "error") return
     expect(state.message).toContain("AppImage")
-    expect(state.message).toContain("https://github.com/scr1pter/Vectordev.ai/releases/latest")
+    // The source repository is private, so the only download route is the account page.
+    expect(state.message).toContain("vectordev.ai/download with your free Vector account")
+    expect(state.message).not.toContain("github.com")
     expect(app.calls).toEqual(["check"])
     expect(app.getReady()).toEqual({ version: "2.0.0" })
   })
@@ -155,7 +157,8 @@ describe("updater controller", () => {
     expect(state.status).toBe("error")
     if (state.status !== "error") return
     expect(state.message).toContain("Move Vector to your Applications folder.")
-    expect(state.message).toContain("vectordev.ai/download")
+    expect(state.message).toContain("vectordev.ai/download with your free Vector account")
+    expect(state.message).not.toContain("github.com")
   })
 
   test("brings Vector back and reports the error when the platform installer refuses after stopping", async () => {

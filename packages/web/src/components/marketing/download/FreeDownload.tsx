@@ -75,10 +75,7 @@ export function FreeDownload({ accessToken }: { accessToken?: string }) {
         </span>
       </button>
 
-      <p className="free-download-note">
-        Free with your Vector account. macOS, Windows and Linux. Every installer is also on{" "}
-        <a href="https://github.com/scr1pter/Vectordev.ai/releases/latest">GitHub releases</a>, no account needed.
-      </p>
+      <p className="free-download-note">Free with your Vector account. macOS, Windows and Linux.</p>
       {error && <p className="download-error">{error}</p>}
 
       {/* Preview builds are unsigned, so the operating system blocks the first

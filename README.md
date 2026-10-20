@@ -88,7 +88,7 @@ Run `vector` inside any repository to start the agent. `vector auth login` adds 
 
 From 1.99.99, GitHub workflows authenticate with `VECTOR_CLI_TOKEN`. Set `MODEL` to `provider/model` and pass its provider credential as a repository secret; a Vector account token is not a provider credential. Guarded personal OpenRouter free models use the separately configured `OPENROUTER_API_KEY`. `GITHUB_TOKEN` remains the default GitHub credential; the prepared Vector App mode requires owner setup and explicit opt-in. See [GitHub setup](https://vectordev.ai/docs/vectorscope#github) and [Vectorscope](https://vectordev.ai/docs/vectorscope).
 
-Desktop releases are not yet code-signed. Installed copies update from inside the app (Check now in Settings → Updates & about, or Check for Updates in the Vector menu on macOS); a new install is a download from your account page, or from [GitHub releases](https://github.com/scr1pter/Vectordev.ai/releases/latest) without an account, and macOS or Windows may show an unidentified-developer or unknown-publisher warning on first launch.
+Desktop releases are not yet code-signed. Installed copies update from inside the app (Check now in Settings → Updates & about, or Check for Updates in the Vector menu on macOS); a new install is a download from [vectordev.ai/download](https://vectordev.ai/download) with your free Vector account, and macOS or Windows may show an unidentified-developer or unknown-publisher warning on first launch.
 
 ## Configuration
 

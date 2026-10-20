@@ -5,7 +5,11 @@ import { publishedDesktopVersion, release199, upcomingRelease } from "../src/dat
 // so no later edit may present it, or anything before it, as upcoming. 1.99.107 was skipped and never published.
 const shipped = "1.99.108"
 const web = new URL("..", import.meta.url).pathname
-const noAccountDownload = "https://github.com/scr1pter/Vectordev.ai/releases/latest"
+// The source repository is private, so its releases and files 404 for visitors. Installers come from the account
+// download page, which needs a free Vector account.
+const accountDownload = 'href="/download"'
+const privateRepository = /github\.com\/scr1pter|githubusercontent\.com\/scr1pter|api\.github\.com\/repos\/scr1pter/i
+const noAccountInstallers = /\b(installers?|download)\b.*\b(without an account|no account needed)\b/i
 
 // Phrasings that called 1.99.99 unpublished or said Vector cannot update itself.
 const stale = [
@@ -106,21 +110,46 @@ test("Check for Updates is named only as the macOS menu item", () => {
   ).toEqual([])
 })
 
-test("the download page points installed copies at Check for Updates and offers a no-account download", async () => {
+test("no page or README links to the private source repository or offers installers without an account", () => {
+  expect(
+    sources.flatMap((source) =>
+      source.text
+        .split("\n")
+        .filter((line) => privateRepository.test(line))
+        .map((line) => `${source.file}: ${line.trim().slice(0, 120)}`),
+    ),
+  ).toEqual([])
+  // Copy wraps across lines and links, so read it as plain sentences.
+  expect(
+    sources.flatMap((source) =>
+      source.text
+        .replace(/<[^>]+>/g, "")
+        .replace(/\s+/g, " ")
+        .split(/(?<=[.;?!])\s/)
+        .filter((sentence) => noAccountInstallers.test(sentence))
+        .map((sentence) => `${source.file}: ${sentence.slice(0, 120)}`),
+    ),
+  ).toEqual([])
+})
+
+test("the download page points installed copies at Check for Updates and install docs offer the account download", async () => {
   const download = await Bun.file(`${web}src/components/marketing/download/FreeDownload.tsx`).text()
   expect(download).toContain("Check for Updates")
   expect(download).toContain("Updates & about")
-  expect(download).toContain(`href="${noAccountDownload}"`)
-  expect(await Bun.file(`${web}src/pages/docs/install.astro`).text()).toContain(`href="${noAccountDownload}"`)
+  const install = await Bun.file(`${web}src/pages/docs/install.astro`).text()
+  expect(install).toContain(accountDownload)
+  expect(install).toContain("free Vector account")
 })
 
-test("visitors without an account reach the GitHub installers from the footer and the sign-in page", async () => {
-  // /download and the footer's platform links send anonymous visitors to /login, so the no-account route
-  // has to be visible there rather than only on the signed-in download panel.
+test("visitors without an account reach the account download from the footer and the sign-in page", async () => {
+  // /download and the footer's platform links send anonymous visitors to /login, so the sign-in page has to say
+  // that a free account is the way to every installer.
   expect(await Bun.file(`${web}src/components/marketing/SiteFooter.astro`).text()).toContain(
-    `["All installers (GitHub)", "${noAccountDownload}"]`,
+    '["All installers", "/download"]',
   )
-  expect(await Bun.file(`${web}src/pages/login.astro`).text()).toContain(`href="${noAccountDownload}"`)
+  const login = await Bun.file(`${web}src/pages/login.astro`).text()
+  expect(login).toContain(accountDownload)
+  expect(login).toContain("Create a free one")
 })
 
 test("troubleshooting explains in-app updates and their fallbacks", async () => {
@@ -134,7 +163,7 @@ test("troubleshooting explains in-app updates and their fallbacks", async () => 
   expect(offers).toContain("before 1.99.2")
   expect(offers).toContain("Update Vector at the bottom of the left sidebar")
   expect(offers).toContain("in-app updates only work when you run the AppImage")
-  expect(offers).toContain(`href="${noAccountDownload}"`)
+  expect(offers).toContain(`${accountDownload}>vectordev.ai/download</a> with your free Vector account`)
 
   const mac = item("A macOS update does not install")
   // On macOS the menu's update dialog offers a plain Restart button, which hits the same unwritable-folder failure.
@@ -144,6 +173,8 @@ test("troubleshooting explains in-app updates and their fallbacks", async () => 
   expect(mac).toMatch(
     /quit Vector[\s\S]*download the DMG[\s\S]*drag Vector to Applications[\s\S]*open it from Applications/,
   )
-  expect(mac).toContain("your account page")
-  expect(mac).toContain(`href="${noAccountDownload}"`)
+  expect(mac).toContain(`${accountDownload}>vectordev.ai/download</a> with your free Vector account`)
+
+  const intel = item("Vector 1.99.99 does not open on an Intel Mac, Windows on Arm or Linux on Arm")
+  expect(intel).toContain(`${accountDownload}>vectordev.ai/download</a> with your free Vector account`)
 })

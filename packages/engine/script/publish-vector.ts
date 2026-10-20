@@ -156,7 +156,7 @@ try {
 } catch {}
 if (!binary) {
   console.error("Vector CLI: no prebuilt binary for " + process.platform + "/" + process.arch + " (expected " + pkg + ").")
-  console.error("Reinstall without --ignore-scripts / --no-optional, or file an issue at https://github.com/scr1pter/Vectordev.ai")
+  console.error("Reinstall without --ignore-scripts / --no-optional, or report it at https://vectordev.ai/support/report")
   process.exit(1)
 }
 

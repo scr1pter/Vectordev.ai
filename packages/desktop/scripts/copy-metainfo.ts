@@ -32,9 +32,8 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
 
   <content_rating type="oars-1.1" />
 
-  <url type="bugtracker">https://github.com/scr1pter/Vectordev.ai/issues</url>
+  <url type="bugtracker">https://vectordev.ai/support/report</url>
   <url type="homepage">https://vectordev.ai</url>
-  <url type="vcs-browser">https://github.com/scr1pter/Vectordev.ai</url>
 
 </component>
 `
