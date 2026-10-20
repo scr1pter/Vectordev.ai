@@ -3032,13 +3032,54 @@ export type MemorySettings = {
   keepOriginals: boolean
 }
 
+export type MemoryModelOption = {
+  id: string
+  label: string
+  description: string
+  license: string
+  owner: string
+  source: string
+  revision: string
+  bytes: number
+  fallback?: number
+  sha256: string
+  preview?: string
+  installed: boolean
+}
+
 export type MemoryModelStatus = {
   state: "absent" | "downloading" | "verifying" | "ready" | "failed"
   model?: string
+  variant?: "int8" | "fp32"
   progress?: number
   bytes?: number
   total?: number
   error?: string
+  paused?: boolean
+  fallback?: boolean
+  downloads?: boolean
+  source?: "mirror" | "huggingface" | "folder"
+  check?: {
+    lowest: number
+    needed: number
+    by: "vectors" | "ranking"
+  }
+  options?: Array<MemoryModelOption>
+  embedded?: {
+    done: number
+    total: number
+  }
+  worker?: {
+    mode: "worker" | "in-process"
+    reason?: string
+  }
+}
+
+export type MemoryModelPayload = {
+  action: "download" | "remove" | "install" | "pause" | "resume"
+  model?: "arctic-embed-xs-q8" | "granite-small-r2-q8"
+  variant?: "int8" | "fp32"
+  from?: string
 }
 
 export type MemoryDocumentLimits = {
@@ -12285,6 +12326,70 @@ export type MemorySettingsUpdateResponses = {
 }
 
 export type MemorySettingsUpdateResponse = MemorySettingsUpdateResponses[keyof MemorySettingsUpdateResponses]
+
+export type MemoryModelGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/model"
+}
+
+export type MemoryModelGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryModelGetError = MemoryModelGetErrors[keyof MemoryModelGetErrors]
+
+export type MemoryModelGetResponses = {
+  /**
+   * The local search model, and how much of the repository's documents it has embedded
+   */
+  200: MemoryModelStatus
+}
+
+export type MemoryModelGetResponse = MemoryModelGetResponses[keyof MemoryModelGetResponses]
+
+export type MemoryModelUpdateData = {
+  body?: MemoryModelPayload
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/model"
+}
+
+export type MemoryModelUpdateErrors = {
+  /**
+   * MemoryError | InvalidRequestError
+   */
+  400: MemoryError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type MemoryModelUpdateError = MemoryModelUpdateErrors[keyof MemoryModelUpdateErrors]
+
+export type MemoryModelUpdateResponses = {
+  /**
+   * The search model after the change
+   */
+  200: MemoryModelStatus
+}
+
+export type MemoryModelUpdateResponse = MemoryModelUpdateResponses[keyof MemoryModelUpdateResponses]
 
 export type MemoryDocumentsListData = {
   body?: never

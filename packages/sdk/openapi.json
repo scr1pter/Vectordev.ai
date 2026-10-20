@@ -6947,6 +6947,148 @@
         ]
       }
     },
+    "/memory/model": {
+      "get": {
+        "tags": ["memory"],
+        "operationId": "memory.model.get",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The local search model, and how much of the repository's documents it has embedded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryModelStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Whether the local model Vector searches documents by meaning with is downloaded, downloading, ready or failed its check on this computer, with every model it can download (size, license, source and sha256) and how much of the repository's documents it has embedded. Until it is ready, search uses keywords and code links.",
+        "summary": "Get the search model",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.model.get({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "tags": ["memory"],
+        "operationId": "memory.model.update",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The search model after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryModelStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "MemoryError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MemoryError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          }
+        },
+        "description": "download starts the one-time download in the background (poll GET /memory/model); install copies the pinned files from a folder on this computer, for one with no network; remove deletes every downloaded model and the vectors made with it; pause and resume hold or continue embedding in the background. Each file is used only at its pinned size and sha256.",
+        "summary": "Change the search model",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryModelPayload"
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.memory.model.update({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/memory/documents": {
       "get": {
         "tags": ["memory"],
@@ -32355,6 +32497,60 @@
         "required": ["learning", "repositoryDocs", "keepOriginals"],
         "additionalProperties": false
       },
+      "MemoryModelOption": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "license": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "bytes": {
+            "type": "number"
+          },
+          "fallback": {
+            "type": "number"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "preview": {
+            "type": "string"
+          },
+          "installed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "license",
+          "owner",
+          "source",
+          "revision",
+          "bytes",
+          "sha256",
+          "installed"
+        ],
+        "additionalProperties": false
+      },
       "MemoryModelStatus": {
         "type": "object",
         "properties": {
@@ -32364,6 +32560,10 @@
           },
           "model": {
             "type": "string"
+          },
+          "variant": {
+            "type": "string",
+            "enum": ["int8", "fp32"]
           },
           "progress": {
             "type": "number"
@@ -32376,9 +32576,94 @@
           },
           "error": {
             "type": "string"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "fallback": {
+            "type": "boolean"
+          },
+          "downloads": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["mirror", "huggingface", "folder"]
+          },
+          "check": {
+            "type": "object",
+            "properties": {
+              "lowest": {
+                "type": "number"
+              },
+              "needed": {
+                "type": "number"
+              },
+              "by": {
+                "type": "string",
+                "enum": ["vectors", "ranking"]
+              }
+            },
+            "required": ["lowest", "needed", "by"],
+            "additionalProperties": false
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryModelOption"
+            }
+          },
+          "embedded": {
+            "type": "object",
+            "properties": {
+              "done": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              }
+            },
+            "required": ["done", "total"],
+            "additionalProperties": false
+          },
+          "worker": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": ["worker", "in-process"]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["mode"],
+            "additionalProperties": false
           }
         },
         "required": ["state"],
+        "additionalProperties": false
+      },
+      "MemoryModelPayload": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["download", "remove", "install", "pause", "resume"]
+          },
+          "model": {
+            "type": "string",
+            "enum": ["arctic-embed-xs-q8", "granite-small-r2-q8"]
+          },
+          "variant": {
+            "type": "string",
+            "enum": ["int8", "fp32"]
+          },
+          "from": {
+            "type": "string"
+          }
+        },
+        "required": ["action"],
         "additionalProperties": false
       },
       "MemoryDocumentLimits": {

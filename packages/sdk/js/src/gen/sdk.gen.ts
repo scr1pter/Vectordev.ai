@@ -267,6 +267,12 @@ import type {
   MemoryListData,
   MemoryListErrors,
   MemoryListResponses,
+  MemoryModelGetData,
+  MemoryModelGetErrors,
+  MemoryModelGetResponses,
+  MemoryModelUpdateData,
+  MemoryModelUpdateErrors,
+  MemoryModelUpdateResponses,
   MemoryRecordsGetData,
   MemoryRecordsGetErrors,
   MemoryRecordsGetResponses,
@@ -2192,6 +2198,36 @@ export class Settings extends HeyApiClient {
   }
 }
 
+export class Model extends HeyApiClient {
+  /**
+   * Get the search model
+   *
+   * Whether the local model Vector searches documents by meaning with is downloaded, downloading, ready or failed its check on this computer, with every model it can download (size, license, source and sha256) and how much of the repository's documents it has embedded. Until it is ready, search uses keywords and code links.
+   */
+  public get<ThrowOnError extends boolean = false>(options?: Options<MemoryModelGetData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<MemoryModelGetResponses, MemoryModelGetErrors, ThrowOnError>({
+      url: "/memory/model",
+      ...options,
+    })
+  }
+
+  /**
+   * Change the search model
+   *
+   * download starts the one-time download in the background (poll GET /memory/model); install copies the pinned files from a folder on this computer, for one with no network; remove deletes every downloaded model and the vectors made with it; pause and resume hold or continue embedding in the background. Each file is used only at its pinned size and sha256.
+   */
+  public update<ThrowOnError extends boolean = false>(options?: Options<MemoryModelUpdateData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<MemoryModelUpdateResponses, MemoryModelUpdateErrors, ThrowOnError>({
+      url: "/memory/model",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    })
+  }
+}
+
 export class Documents extends HeyApiClient {
   /**
    * List documents
@@ -2583,6 +2619,11 @@ export class Memory extends HeyApiClient {
   private _settings?: Settings
   get settings(): Settings {
     return (this._settings ??= new Settings({ client: this.client }))
+  }
+
+  private _model?: Model
+  get model(): Model {
+    return (this._model ??= new Model({ client: this.client }))
   }
 
   private _documents?: Documents
@@ -4083,7 +4124,7 @@ export class Session3 extends HeyApiClient {
   }
 }
 
-export class Model extends HeyApiClient {
+export class Model2 extends HeyApiClient {
   /**
    * List models
    *
@@ -4603,9 +4644,9 @@ export class V2 extends HeyApiClient {
     return (this._session ??= new Session3({ client: this.client }))
   }
 
-  private _model?: Model
-  get model(): Model {
-    return (this._model ??= new Model({ client: this.client }))
+  private _model?: Model2
+  get model(): Model2 {
+    return (this._model ??= new Model2({ client: this.client }))
   }
 
   private _provider?: Provider2
