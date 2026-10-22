@@ -6,12 +6,14 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 
 // The backstop guard under Node, the runtime of the desktop's engine (Electron's utility process) and main process. The
-// fixture is bundled for Node the way the desktop build bundles them, then run with Node, and with Electron as Node
+// fixtures are bundled for Node the way the desktop build bundles them, then run with Node, and with Electron as Node
 // when this checkout has Electron's binary. The CLI's runtime, Bun, is covered by core's guard and egress tests.
 
 const MARK = "guard-smoke "
 const NODE = Bun.which(process.env.VECTOR_NODE ?? "node")
 const require = createRequire(import.meta.url)
+// The engine's own copy of the ws package, which Node loads as it is (Bun would serve its own instead).
+const WS = path.join(import.meta.dir, "../../../engine/node_modules/ws")
 
 // Electron's binary, when its install has downloaded it; a checkout installed without scripts has none.
 const electron = (() => {
@@ -24,15 +26,22 @@ const electron = (() => {
 
 const bundle = async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "vector-guard-smoke-"))
+  // The worker is bundled on its own, as the engine build bundles the brain's reader, and started from its source.
   const built = await Bun.build({
-    entrypoints: [path.join(import.meta.dir, "guard-smoke.fixture.ts")],
+    entrypoints: ["guard-smoke.fixture.ts", "guard-smoke-strict.fixture.ts", "guard-smoke.worker.ts"].map((name) =>
+      path.join(import.meta.dir, name),
+    ),
     target: "node",
     format: "esm",
     outdir: directory,
-    naming: "smoke.mjs",
+    naming: "[name].mjs",
   })
   if (!built.success) throw new AggregateError(built.logs, "The guard smoke did not bundle")
-  return { directory, file: path.join(directory, "smoke.mjs") }
+  return {
+    directory,
+    file: path.join(directory, "guard-smoke.fixture.mjs"),
+    strict: path.join(directory, "guard-smoke-strict.fixture.mjs"),
+  }
 }
 
 const run = async (command: string[], env: Record<string, string> = {}) => {
@@ -70,15 +79,23 @@ const expected = {
   proxyUnlabelled: "EgressBlocked",
   proxyUnlabelledFetch: "EgressBlocked",
   proxyLabelled: "proxied",
+  proxyLocalInference: "here",
+  proxyLoopbackFetch: "here",
+  proxyLoopbackHttp: "EgressBlocked",
+  // A model call's prompt, or anything else for this computer, never reaches the proxy.
   seenByProxy: ["CONNECT catalog.web.test:80"],
+  ws: "EgressBlocked",
+  worker: { net: "EgressBlocked", fetch: "EgressBlocked" },
+  researchProxy: ["HTTP/1.1 407 Proxy Authentication Required", "here"],
 }
+const local = { GUARD_SMOKE_WS: WS }
 
 describe("the backstop guard under Node", () => {
   test.skipIf(!NODE)(
     "blocks every client's unlabelled connection off this computer, and lets labelled ones through",
     async () => {
       const smoke = await bundle()
-      const results = await run([NODE!, smoke.file]).finally(() =>
+      const results = await run([NODE!, smoke.file], local).finally(() =>
         rm(smoke.directory, { recursive: true, force: true }),
       )
       expect(String(results.runtime)).toStartWith("node ")
@@ -87,7 +104,27 @@ describe("the backstop guard under Node", () => {
       const blocked = results.blocked as [string, string][]
       expect(blocked.filter(([source]) => source !== "unlabelled")).toEqual([])
       expect(blocked.filter(([, rule]) => rule === "resolved-outside")).toHaveLength(1)
-      expect(blocked).toHaveLength(11)
+      expect(blocked).toHaveLength(13)
+    },
+    60_000,
+  )
+
+  test.skipIf(!NODE)(
+    "installs the strict test guard, which runs no proxy of its own there",
+    async () => {
+      const smoke = await bundle()
+      const results = await run([NODE!, smoke.strict], { VECTOR_TEST_EGRESS: "strict" }).finally(() =>
+        rm(smoke.directory, { recursive: true, force: true }),
+      )
+      expect(results).toMatchObject({
+        installed: true,
+        proxyEnvironment: null,
+        fetch: "EgressBlocked",
+        https: "EgressBlocked",
+        net: "EgressBlocked",
+        here: "here",
+        worker: { net: "EgressBlocked", fetch: "EgressBlocked" },
+      })
     },
     60_000,
   )
@@ -96,7 +133,7 @@ describe("the backstop guard under Node", () => {
     "does the same in Electron's own Node",
     async () => {
       const smoke = await bundle()
-      const results = await run([electron!, smoke.file], { ELECTRON_RUN_AS_NODE: "1" }).finally(() =>
+      const results = await run([electron!, smoke.file], { ...local, ELECTRON_RUN_AS_NODE: "1" }).finally(() =>
         rm(smoke.directory, { recursive: true, force: true }),
       )
       expect(results.electron).not.toBeNull()

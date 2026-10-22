@@ -8,9 +8,11 @@ import { Egress } from "./egress"
 import { ForwardProxy } from "./forward-proxy"
 import { LocalPolicy } from "./policy"
 
-// Vector's loopback egress proxy, which every research browser's traffic goes through (the desktop points each
-// research partition at it with `session.setProxy`). For each request a browser sends it, a CONNECT tunnel or an
-// absolute http URL, the proxy:
+// Vector's loopback egress proxy for the research browsers (section 5.6a). Nothing starts it yet: phase W3 starts it
+// in desktop main, points each research partition at it with `session.setProxy`, and answers Electron's `login` for it
+// with the secret. Only a client that sends that per-launch secret may use it, since any program on this computer can
+// reach loopback, the ones the agent runs included (Web access None allows loopback). For each request a client with
+// the secret sends it, a CONNECT tunnel or an absolute http URL, the proxy:
 // 1. decides it as a `research-browser` request under Vector Local, before any lookup, and logs it;
 // 2. refuses a host that is on this computer or the user's network by its name or address;
 // 3. resolves the name itself and refuses it when any address it gets is loopback, private, link-local, CGNAT, ULA,
@@ -18,11 +20,17 @@ import { LocalPolicy } from "./policy"
 // 4. asks `admit`, such as the run's per-host rate limits;
 // 5. connects to the address it checked, not the name, so a second answer from DNS (rebinding) cannot change where it
 //    goes. A tunnel carries the browser's own TLS, so the site's certificate is still checked against its name.
-// Steps 2 to 4 apply whether Vector Local is on or off. If the proxy cannot start, research browsers do not open.
+// Steps 2 to 4 apply whether Vector Local is on or off. The secret is never passed on, and a site's 407 is answered as
+// 502. If the proxy cannot start, research browsers do not open.
 
 export type Refusal = ForwardProxy.Refusal
 
 export type Options = {
+  /**
+   * The per-launch secret every request must carry as the password of Basic `Proxy-Authorization` credentials (any user
+   * name); without it the proxy answers 407 and decides nothing. A long random value, such as 32 random bytes in hex.
+   */
+  readonly secret: string
   /** The registry source the requests are logged as. */
   readonly source?: string
   /** Who the browser works for: the research agent's session, its root and the agent. */
@@ -40,7 +48,9 @@ export type Options = {
 export const PRIVATE_REASON = "Research browsers never reach this computer, your network or a cloud metadata address."
 const CONNECT_TIMEOUT = 15_000
 
-export function start(options: Options = {}): ForwardProxy.Proxy {
+/** Starts the proxy on an ephemeral port of 127.0.0.1, and resolves once it is listening. */
+export function start(options: Options): Promise<ForwardProxy.Proxy> {
+  if (options.secret.length < 16) return Promise.reject(new Error("The research proxy needs a long random secret."))
   const source = options.source ?? "research-browser"
   const resolver: WebFetchRequest.DestinationResolver =
     options.resolver ?? ((hostname) => lookup(hostname, { all: true, verbatim: true }))
@@ -101,5 +111,7 @@ export function start(options: Options = {}): ForwardProxy.Proxy {
         ),
     }
   }
-  return ForwardProxy.start((destination) => EgressAttribution.run(attribution, () => route(destination)))
+  return ForwardProxy.start((destination) => EgressAttribution.run(attribution, () => route(destination)), {
+    secret: options.secret,
+  })
 }

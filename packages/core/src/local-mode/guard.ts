@@ -28,15 +28,24 @@ import { LocalPolicy } from "./policy"
 //   at the socket layer a connection to a configured proxy (HTTP(S)_PROXY, ALL_PROXY, a fetch's `proxy` option) counts
 //   as the internet, so an unlabelled request through a corporate proxy is still blocked. Node only uses the proxy
 //   environment once `http.setGlobalProxyFromEnv` ran; treating the proxy as the internet is right either way.
+// - Only a request for the internet may go through the proxy environment. One for this computer or your network (a
+//   local model's prompt included) goes direct: its host joins NO_PROXY before it is sent (`direct`), which fetch
+//   reads at each request, and the proxy is never granted to it, so a client that still sends it there (Node's
+//   node:http agent reads the environment once) is refused at the socket.
 // - A name allowed because its name says where it is (`localhost`, `nas.local`, `box.tail1.ts.net`) must resolve
 //   there: a socket's lookup that answers outside is refused before anything connects, and fetch and Bun.connect
-//   look the name up first.
+//   look the name up first. A name on the model server list is decided on the list instead, since a company's
+//   `gpu.internal` may sit on its own public range; a loopback name must still resolve to loopback.
+// - fetch reaches only http, https, file, data and blob addresses; any other scheme (Bun's s3:, whose name is a bucket
+//   and not where it connects) is refused while the guard decides connections.
 // With Vector Local off, each wrap costs one call and logs nothing.
 //
-// Strict mode, for tests (VECTOR_TEST_EGRESS=strict), refuses any connection off this computer and throws. It also runs
-// a proxy of its own on 127.0.0.1 and points the proxy environment at it, so Bun.fetch, a fetch captured before the
-// guard was installed, node:http and a Worker's fetch are refused too, and it preloads its wraps in Workers started
-// through the global `Worker` or the `node:worker_threads` module object.
+// Strict mode, for tests (VECTOR_TEST_EGRESS=strict), refuses any connection off this computer and throws. Under Bun it
+// also runs a proxy of its own on 127.0.0.1 and points the proxy environment at it, so Bun.fetch, a fetch captured
+// before the guard was installed, node:http and a Worker's fetch are refused too, and it preloads its wraps in Workers
+// started through the global `Worker` or the `node:worker_threads` module object. Node needs no such proxy: its fetch,
+// node:http and WebSocket all connect through net, which the socket wrap decides. Node has no preload either, so a
+// Node worker is guarded when its entry imports `backstop-worker.ts` first, as the brain's reader does.
 //
 // Neither mode covers:
 // - UDP and DNS lookups themselves, and the connections of child processes (the programs the agent runs make their
@@ -51,7 +60,13 @@ import { LocalPolicy } from "./policy"
 //   module loaded after install, since Bun does not update named imports of built-in modules. Its fetch still goes
 //   through the strict proxy. A worker entry that imports `backstop-worker.ts` first, as the brain's reader does, is
 //   guarded however it was started. Under Node, named imports loaded after install see the wrapped class;
-// - under Bun, the lookup of a name a node:http client request uses: that request is decided by its name only.
+// - under Bun, the lookup of a name a node:http client request uses: that request is decided by its name only;
+// - under Bun, the lookup fetch makes itself after the guard checked a name allowed by its name: Bun's fetch cannot be
+//   told to connect to the address the guard checked without changing the URL the caller sees, so a resolver that
+//   answers differently the second time is not caught there (Node's sockets connect to the address they checked);
+// - under Bun, the npm `ws` package: Bun replaces it with its own client, which keeps a WebSocket class of its own and
+//   reads no global, so a `ws` socket is never seen here. Its call sites (the OpenAI plugin's ws.ts and ws-pool.ts)
+//   are decided by their labelled gate instead (phase L5). Under Node, `ws` connects through net and is decided.
 
 export class EgressBlocked extends Error {
   override readonly name = "EgressBlocked"
@@ -100,8 +115,9 @@ export type StrictOptions = {
   /** Names the caller pins to this computer itself, such as a test resolver's `*.web.test`. */
   readonly names?: readonly string[]
   /**
-   * Whether to run the guard's own proxy and point the proxy environment at it. Off in a Worker, which reaches its
-   * parent's proxy through the environment it shares.
+   * Whether to run the guard's own proxy and point the proxy environment at it, under Bun. Off in a Worker, which
+   * reaches its parent's proxy through the environment it shares. Under Node there is never one: everything there
+   * connects through the socket wrap, and Node binds a server only after `listen` returns.
    */
   readonly proxy?: boolean
   /**
@@ -129,6 +145,8 @@ export const ENVIRONMENT = {
 const PROXY_VARIABLES = ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"]
 const NO_PROXY_VARIABLES = ["NO_PROXY", "no_proxy"]
 const WEB_PROTOCOLS = new Set(["http:", "https:", "ws:", "wss:"])
+// Schemes fetch reads on this computer itself.
+const LOCAL_PROTOCOLS = new Set(["file:", "data:", "blob:"])
 const REDIRECTS = new Set([301, 302, 303, 307, 308])
 export const MAX_REDIRECTS = 20
 const MAX_ATTEMPTS = 2_000
@@ -136,7 +154,7 @@ const BODY_HEADERS = ["content-type", "content-length", "content-encoding", "con
 const WORKER_PRELOAD = fileURLToPath(new URL("./guard-worker.ts", import.meta.url))
 const RESOLVED_OUTSIDE = "Its name says it is on this computer or your network, but it resolved to an address outside."
 const PROXY_HOP =
-  "It is a proxy, which can pass a request anywhere; only a request a part of Vector labelled may use it."
+  "It is a proxy, which can pass a request anywhere; only a request for the internet that a part of Vector labelled may use it. A request for this computer or your network goes direct: add its host to NO_PROXY."
 // Only this guard's own frames are skipped when the log names the code that made a blocked connection.
 const OWN_FRAME = /local-mode[\\/](?:guard|attribution|egress|http-client|forward-proxy)\.[jt]s/
 
@@ -204,6 +222,15 @@ export function within(host: string): EgressAttribution.Within | undefined {
   return undefined
 }
 
+/**
+ * Where a destination's name must resolve before it is reached: `within` for a name allowed by its name alone. For
+ * an origin on the model server list only a loopback name keeps its check; the list decides the rest.
+ */
+function checkedPlace(host: string, listed: boolean) {
+  const place = within(host)
+  return listed && place !== "loopback" ? undefined : place
+}
+
 /** Whether a resolved address is where `within` says its name must be. */
 export function inside(address: string, place: EgressAttribution.Within) {
   const found = LocalPolicy.hostClass(address)
@@ -213,16 +240,47 @@ export function inside(address: string, place: EgressAttribution.Within) {
   return place === "tailnet" && Number(octets?.[1]) === 100 && Number(octets?.[2]) >= 64 && Number(octets?.[2]) <= 127
 }
 
-/** The hosts and ports a request to `url` connects to: its own, and any proxy that would carry it. */
-export function destinations(url: URL, proxy?: FetchInit["proxy"]) {
-  const given = typeof proxy === "string" ? proxy : proxy?.url
-  const proxies = (given ? [given] : environmentProxies(url))
+/**
+ * The hosts and ports a request to `url` connects to: its own, and any proxy that would carry it. The proxy
+ * environment carries only a request for the internet; one for this computer or your network goes direct (`direct`).
+ * A `proxy` the caller gives is its own choice. For an origin on the model server list (`listed`), where its name
+ * resolves is not checked, except that a loopback name must stay on loopback.
+ */
+export function destinations(
+  url: URL,
+  options: { readonly proxy?: FetchInit["proxy"]; readonly listed?: boolean } = {},
+): EgressAttribution.Grant[] {
+  const given = typeof options.proxy === "string" ? options.proxy : options.proxy?.url
+  const internet = LocalPolicy.hostClass(url.hostname) === "internet"
+  const proxies = (given ? [given] : internet ? environmentProxies(url) : [])
     .filter((item) => URL.canParse(item))
     .map((item) => new URL(item))
   return [
-    { host: url.hostname, port: portOf(url), within: within(url.hostname) },
+    { host: url.hostname, port: portOf(url), within: checkedPlace(url.hostname, options.listed === true) },
     ...proxies.map((item) => ({ host: item.hostname, port: portOf(item) })),
-  ] satisfies EgressAttribution.Grant[]
+  ]
+}
+
+/**
+ * Sends requests for `host` around the proxy environment when it is on this computer or your network: the host joins
+ * NO_PROXY and no_proxy (one list, the union of both, so a client that prefers either spelling keeps every entry). Bun
+ * and Node read them at each fetch, so a corporate proxy never sees a local model's prompt. The strict guard's own
+ * proxy is left to decide what it carries.
+ */
+export function direct(host: string) {
+  const name = LocalPolicy.host(host)
+  if (!name || LocalPolicy.hostClass(name) === "internet") return
+  const own = process.env[ENVIRONMENT.proxy]
+  if (!PROXY_VARIABLES.some((key) => process.env[key] && process.env[key] !== own)) return
+  const entry = name.includes(":") ? `[${name}]` : name
+  const list = NO_PROXY_VARIABLES.flatMap((key) => (process.env[key] ?? "").split(","))
+    .map((item) => item.trim())
+    .filter(Boolean)
+  if (bypassed(new URL(`http://${entry}`), "80", list.join(","))) return
+  const joined = [...new Set([...list, entry])].join(",")
+  NO_PROXY_VARIABLES.forEach((key) => {
+    process.env[key] = joined
+  })
 }
 
 export function installed() {
@@ -251,7 +309,7 @@ export function install(options: Options): Handle {
       return keep(attempts, outcome, {
         blocked: new EgressBlocked(attempt.host, attempt.kind, verdict.rule, verdict.reason),
       })
-    return keep(attempts, outcome, { within: within(attempt.host) })
+    return keep(attempts, outcome, { within: checkedPlace(attempt.host, verdict.class === "listed") })
   }
   // A name that resolved outside where it said it was is logged as its own refusal.
   const outside = (attempt: Omit<Attempt, "allowed">) => {
@@ -327,9 +385,9 @@ export function installStrict(options: StrictOptions = {}): Handle {
 
   const originalConnect = net.Socket.prototype.connect as unknown as Connect
   const proxy =
-    options.proxy === false
+    options.proxy === false || !process.versions.bun
       ? undefined
-      : ForwardProxy.start((destination) => {
+      : ForwardProxy.startSync((destination) => {
           const judged = judge({
             kind: "proxied",
             host: destination.host,
@@ -388,12 +446,13 @@ export function installStrict(options: StrictOptions = {}): Handle {
     stop: () => {
       proxy?.stop()
       // Bun's fetch reads the proxy environment at each request, and deleting a variable does not reach it, so a
-      // variable that was unset is emptied first.
+      // variable that was unset is emptied first. NO_PROXY stays, empty: Bun never sees a variable set again once it
+      // was deleted, and `direct` may need it later.
       if (ownProxy)
-        for (const [key, value] of saved) {
+        saved.forEach(([key, value]) => {
           process.env[key] = value ?? ""
-          if (value === undefined) delete process.env[key]
-        }
+          if (value === undefined && !NO_PROXY_VARIABLES.includes(key)) delete process.env[key]
+        })
     },
   })
   return handle
@@ -472,14 +531,16 @@ function wrap(input: Wrap): Handle {
     return { attempt, judged, blocked: judged.blocked ?? input.proxied(url, init) }
   }
   // An allowed unlabelled request runs with its own destinations granted, so the socket it opens through Node's fetch,
-  // or the proxy that carries it, passes as this request.
-  const send = (target: URL, init: FetchInit | undefined, run: () => Promise<Response>) => {
+  // or the proxy that carries it, passes as this request. A request for this computer or your network goes direct.
+  const send = (target: URL, init: FetchInit | undefined, judged: Judged, run: () => Promise<Response>) => {
+    direct(target.hostname)
     const scope = EgressAttribution.current()
+    const [own, ...proxies] = destinations(target, { proxy: init?.proxy })
     return EgressAttribution.granted(
       {
         source: scope?.source ?? "unlabelled",
         purpose: scope?.purpose ?? "unknown",
-        grants: [...(scope?.grants ?? []), ...destinations(target, init?.proxy)],
+        grants: [...(scope?.grants ?? []), { ...own!, within: judged.within }, ...proxies],
       },
       run,
     )
@@ -497,7 +558,12 @@ function wrap(input: Wrap): Handle {
     if (checked.blocked) throw checked.blocked
     const outside = await resolved(checked.attempt, checked.judged.within)
     if (outside) throw outside
-    return follow(await send(next, following, () => originalFetch(next, following)), next, following, count + 1)
+    return follow(
+      await send(next, following, checked.judged, () => originalFetch(next, following)),
+      next,
+      following,
+      count + 1,
+    )
   }
   const fetch = ((target: Parameters<Fetch>[0], init?: FetchInit) => {
     if (!input.active()) return originalFetch(target, init)
@@ -505,16 +571,22 @@ function wrap(input: Wrap): Handle {
     // A Unix socket, a data: or blob: URL and an address fetch cannot parse never leave the computer through here.
     if (init?.unix || !URL.canParse(address)) return originalFetch(target, init)
     const url = new URL(address)
-    if (!WEB_PROTOCOLS.has(url.protocol)) return originalFetch(target, init)
+    if (LOCAL_PROTOCOLS.has(url.protocol)) return originalFetch(target, init)
+    // Any other scheme fetch reaches itself is decided as an address with no http or https host, which is refused.
+    if (!WEB_PROTOCOLS.has(url.protocol))
+      return Promise.reject(
+        input.judge({ kind: "fetch", host: `${url.protocol}//${url.host}`, url: `${url.protocol}//${url.host}` })
+          .blocked ?? new EgressBlocked(url.protocol, "fetch"),
+      )
     const first = firstHop(target, init)
     const checked = decide(url, init, first.method)
     if (checked.blocked) return Promise.reject(checked.blocked)
     const mode = init?.redirect ?? (target instanceof Request ? target.redirect : "follow")
     return resolved(checked.attempt, checked.judged.within).then((outside) => {
       if (outside) throw outside
-      if (mode !== "follow") return send(url, init, () => originalFetch(target, init))
-      return send(url, init, () => originalFetch(target, { ...init, redirect: "manual" })).then((response) =>
-        follow(response, url, first, 0),
+      if (mode !== "follow") return send(url, init, checked.judged, () => originalFetch(target, init))
+      return send(url, init, checked.judged, () => originalFetch(target, { ...init, redirect: "manual" })).then(
+        (response) => follow(response, url, first, 0),
       )
     })
   }) as Fetch
@@ -572,18 +644,18 @@ function wrap(input: Wrap): Handle {
   const methods = process.versions.bun ? ["end", "write", "flushHeaders"] : []
   const own = Object.fromEntries(methods.map((key) => [key, Object.getOwnPropertyDescriptor(request, key)]))
   const decided = new WeakSet<object>()
-  for (const key of methods) {
+  methods.forEach((key) => {
     const original = request[key] as (...input: unknown[]) => unknown
     request[key] = function (this: http.ClientRequest & { socketPath?: string; port?: unknown }, ...args: unknown[]) {
       if (!input.active() || decided.has(this) || this.socketPath) return original.apply(this, args)
       decided.add(this)
-      const judged = input.judge({
-        kind: "http",
-        host: String(this.host ?? "localhost"),
-        port: numberOf(this.port),
-        method: this.method,
-      })
-      if (!judged.blocked) return original.apply(this, args)
+      const host = String(this.host ?? "localhost")
+      const judged = input.judge({ kind: "http", host, port: numberOf(this.port), method: this.method })
+      if (!judged.blocked) {
+        // Bun's client reads the proxy environment the way its fetch does.
+        direct(host)
+        return original.apply(this, args)
+      }
       if (input.throws) throw judged.blocked
       // Bun's request emits nothing when it is destroyed before it starts, so the refusal is its error event.
       const blocked = judged.blocked
@@ -593,12 +665,13 @@ function wrap(input: Wrap): Handle {
       })
       return key === "write" ? false : this
     }
-  }
+  })
 
   // Strict mode preloads these same wraps in every Worker it sees started, with the names and the proxy it reads from
-  // its environment. Under Node, named imports of node:worker_threads loaded after this see the wrapped class too.
-  const threads = workerThreads as unknown as { Worker: typeof workerThreads.Worker }
-  const OriginalWorker = globalThis.Worker
+  // its environment (Bun's `preload`; Node ignores it, and its workers get the environment). Node has no global
+  // Worker, only node:worker_threads' one, so only the classes this runtime has are wrapped.
+  const threads = workerThreads as unknown as { Worker?: typeof workerThreads.Worker }
+  const OriginalWorker = globalThis.Worker as typeof globalThis.Worker | undefined
   const OriginalThreadWorker = threads.Worker
   const worker = input.worker
   if (worker) {
@@ -607,16 +680,18 @@ function wrap(input: Wrap): Handle {
       preload: [WORKER_PRELOAD, ...[options?.preload ?? []].flat()],
       ...(options?.env && typeof options.env === "object" ? { env: { ...options.env, ...worker } } : {}),
     })
-    globalThis.Worker = class extends OriginalWorker {
-      constructor(url: string | URL, options?: WorkerOptions) {
-        super(url, guarded(options) as never)
+    if (OriginalWorker)
+      globalThis.Worker = class extends OriginalWorker {
+        constructor(url: string | URL, options?: WorkerOptions) {
+          super(url, guarded(options) as never)
+        }
+      } as typeof globalThis.Worker
+    if (OriginalThreadWorker)
+      threads.Worker = class extends OriginalThreadWorker {
+        constructor(file: string | URL, options?: WorkerOptions) {
+          super(file, guarded(options) as never)
+        }
       }
-    } as typeof globalThis.Worker
-    threads.Worker = class extends OriginalThreadWorker {
-      constructor(file: string | URL, options?: WorkerOptions) {
-        super(file, guarded(options) as never)
-      }
-    }
     syncBuiltinESMExports()
   }
 
@@ -625,17 +700,15 @@ function wrap(input: Wrap): Handle {
     uninstall: () => {
       globalThis.fetch = originalFetch
       if (OriginalWebSocket) globalThis.WebSocket = OriginalWebSocket
-      if (worker) {
-        globalThis.Worker = OriginalWorker
-        threads.Worker = OriginalThreadWorker
-        syncBuiltinESMExports()
-      }
+      if (worker && OriginalWorker) globalThis.Worker = OriginalWorker
+      if (worker && OriginalThreadWorker) threads.Worker = OriginalThreadWorker
+      if (worker) syncBuiltinESMExports()
       if (sockets && originalBunConnect) sockets.connect = originalBunConnect
       socket.connect = originalConnect
-      for (const [key, descriptor] of Object.entries(own)) {
-        if (descriptor) Object.defineProperty(request, key, descriptor)
-        else delete request[key]
-      }
+      // A method Bun's prototype did not have of its own goes back to the one it inherits.
+      Object.entries(own).forEach(([key, descriptor]) =>
+        descriptor ? Object.defineProperty(request, key, descriptor) : delete request[key],
+      )
       input.stop?.()
       state.handle = undefined
     },
@@ -657,10 +730,12 @@ function guardedWebSocket(Original: typeof globalThis.WebSocket, input: Wrap) {
           url: target.origin,
         })
         if (judged.blocked) throw judged.blocked
-        // Bun's WebSocket takes a `proxy` of its own in its options; the proxy environment it does not read.
+        // Bun's WebSocket takes a `proxy` of its own in its options; the proxy environment it does not read. Node's
+        // reads it once its global proxy is set, so a WebSocket to this computer or your network goes direct.
         const proxy = proxyOption(protocols)
         const blocked = proxy === undefined ? undefined : input.proxied(target, { proxy })
         if (blocked) throw blocked
+        direct(target.hostname)
       }
       super(url, protocols as never)
     }

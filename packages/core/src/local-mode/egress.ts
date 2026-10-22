@@ -17,10 +17,12 @@ import { LocalSources } from "./sources"
 // one call site that asks `decide` or sends through `fetch` (or EgressHttpClient, which sends through `fetch`), and the
 // backstop guard (`backstop()`) decides whatever else connects.
 //
-// The policy starts as Vector Local off: everything passes and nothing is logged. Config sets the policy it resolves at
-// start with `resolve` or `configure`, and from then on every decision reads it. While Vector Local is on, each
-// decision is an event: in memory (the last 2,000), on disk when a log directory is configured, and in the counters
-// the pane shows.
+// The policy starts as Vector Local off: everything passes and nothing is logged. When the environment already turns
+// Vector Local on (VECTOR_LOCAL=1, which Vector's children inherit), or config calls `pending` because its managed or
+// user config does, it starts pending instead: only this computer is reachable, for every purpose, until config sets
+// the policy it resolves at start with `resolve` or `configure`. From then on every decision reads it. While Vector
+// Local is on, each decision is an event: in memory (the last 2,000), on disk when a log directory is configured, and
+// in the counters the pane shows.
 
 export type Request = {
   /** The registry source making the request (LocalSources). An id the registry does not have is purpose `unknown`. */
@@ -32,6 +34,8 @@ export type Request = {
   readonly tool?: string
   /** A block the user caused, which the app tells them about (coalesced) rather than only listing it. */
   readonly notify?: boolean
+  /** The size of the request's body, when it is known before it is sent. */
+  readonly bytes?: number
 }
 
 export type Decided = LocalPolicy.Verdict & {
@@ -109,6 +113,15 @@ export function policy() {
 }
 
 /**
+ * Holds every request but those to this computer until the policy is resolved: config calls this before anything
+ * else when its managed or user config turns Vector Local on, then `resolve` once it has read the rest.
+ */
+export function pending() {
+  state.policy = LocalPolicy.PENDING
+  return state.policy
+}
+
+/**
  * Sets the policy in effect. With a log directory, the log is written there while Vector Local is on; turning Vector
  * Local off stops writing it and keeps what was written until it is erased.
  */
@@ -172,6 +185,7 @@ export function record(request: Request, verdict: LocalPolicy.Verdict) {
       method: request.method ?? "GET",
       verdict,
       tool: request.tool,
+      bytes: request.bytes,
     },
     request.notify,
   )
@@ -202,12 +216,14 @@ export async function fetch(
   const mode = inference ? "error" : (options.redirect ?? (input instanceof Request ? input.redirect : "follow"))
   const first = EgressGuard.firstHop(input, options)
   const hop = async (url: URL, current: EgressGuard.Hop, count: number): Promise<Response> => {
-    const decided = decide({ source, url, method: current.method, manual, tool })
+    const decided = decide({ source, url, method: current.method, manual, tool, bytes: bodySize(current.body) })
     if (decided.decision !== "allow")
       throw new EgressGuard.EgressBlocked(url.hostname, "fetch", decided.rule, decided.reason)
-    const response = await EgressAttribution.granted(
-      { source, purpose: decided.purpose, grants: EgressGuard.destinations(url, options.proxy) },
-      () => send(count === 0 ? input : url, count === 0 ? { ...options, redirect: "manual" } : current),
+    // A request for this computer or your network, such as a local model's prompt, never goes through a proxy.
+    EgressGuard.direct(url.hostname)
+    const grants = EgressGuard.destinations(url, { proxy: options.proxy, listed: decided.class === "listed" })
+    const response = await EgressAttribution.granted({ source, purpose: decided.purpose, grants }, () =>
+      send(count === 0 ? input : url, count === 0 ? { ...options, redirect: "manual" } : current),
     )
     const next = mode === "manual" ? undefined : EgressGuard.redirectTarget(response, url)
     if (!next) {
@@ -321,9 +337,11 @@ export function report(event: LocalMode.Event) {
 /**
  * Installs the backstop guard for this process with this service's policy and log. Strict mode (tests,
  * VECTOR_TEST_EGRESS=strict) installs the strict guard instead. Nothing happens when a guard is already installed.
+ * When the environment turns Vector Local on, the policy starts pending until config resolves it.
  */
 export function backstop() {
   if (EgressGuard.installed()) return undefined
+  if (!state.policy.enabled && LocalPolicy.resolve({ env: process.env }).enabled) pending()
   if (process.env[EgressGuard.ENVIRONMENT.strict] === "strict")
     return EgressGuard.installStrict({
       names: (process.env[EgressGuard.ENVIRONMENT.names] ?? "").split(",").filter(Boolean),
@@ -357,6 +375,7 @@ function push(
     readonly verdict: LocalPolicy.Verdict
     readonly tool?: string
     readonly frame?: string
+    readonly bytes?: number
   },
   notify = false,
 ) {
@@ -369,6 +388,8 @@ function push(
     class: input.verdict.class,
     origin: input.origin,
     method: input.method.toUpperCase(),
+    // What came back is not known when a request is decided, so only what it sends is counted.
+    ...(input.bytes !== undefined ? { bytes_out: input.bytes } : {}),
     decision: input.verdict.decision,
     rule: input.verdict.rule,
     reason: input.verdict.reason,
@@ -385,7 +406,7 @@ function push(
 function remember(event: LocalMode.Event, notify: boolean, agent?: string) {
   state.ring.push(event)
   state.store?.append(event)
-  for (const key of new Set(["*", event.root_session_id ?? "*"])) count(key, event, agent)
+  new Set(["*", event.root_session_id ?? "*"]).forEach((key) => count(key, event, agent))
   state.listeners.forEach((listener) => listener(event))
   if (!notify || event.decision === "allow") return
   const last = state.noticed.get(event.source)
@@ -424,6 +445,15 @@ function count(key: string, event: LocalMode.Event, agent: string | undefined) {
   totals.carried.personal += event.carried.personal
   totals.carried.documents += event.carried.documents
   totals.carried.repository += event.carried.repository
+}
+
+// A body's size in bytes when it is known without reading it: text, bytes, a Blob or form fields.
+function bodySize(body: BodyInit | null | undefined) {
+  if (typeof body === "string") return Buffer.byteLength(body)
+  if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) return body.byteLength
+  if (body instanceof Blob) return body.size
+  if (body instanceof URLSearchParams) return Buffer.byteLength(body.toString())
+  return undefined
 }
 
 function take(source: string) {

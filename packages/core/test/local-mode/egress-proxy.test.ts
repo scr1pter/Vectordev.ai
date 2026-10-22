@@ -11,7 +11,17 @@ import { NetworkGuard } from "../lib/network-guard"
 // refuses a fetch that names a proxy of its own. The resolver is the test's: no name reaches DNS.
 
 const guard = NetworkGuard.use()
-const web = FakeWeb.start({ sites: { article: { "/": { body: "article" }, "/next": { body: "next" } } } })
+const web = FakeWeb.start({
+  sites: {
+    article: { "/": { body: "article" }, "/next": { body: "next" } },
+    // A site that answers as a proxy asking for credentials would.
+    asking: { "/": { status: 407, headers: { "proxy-authenticate": 'Basic realm="site"' }, body: "credentials" } },
+  },
+})
+const SECRET = "research-proxy-secret-for-tests"
+const credentials = (secret: string) =>
+  `Proxy-Authorization: Basic ${Buffer.from(`vector:${secret}`).toString("base64")}`
+const AUTH = credentials(SECRET)
 afterEach(async () => {
   Egress.configure(LocalPolicy.OFF)
   await Egress.erase()
@@ -52,12 +62,14 @@ const send = (port: number, text: string) =>
       done()
     }, 1_500)
   })
-const get = (port: number, url: string) => send(port, `GET ${url} HTTP/1.1\r\nHost: ${new URL(url).host}\r\n\r\n`)
+const get = (port: number, url: string, auth = AUTH) =>
+  send(port, `GET ${url} HTTP/1.1\r\nHost: ${new URL(url).host}\r\n${auth ? `${auth}\r\n` : ""}\r\n`)
 
 describe("EgressProxy", () => {
   test("reaches a site at the address it resolved, once, and logs it as research-browser under Vector Local", async () => {
     Egress.configure(LocalPolicy.resolve({ global: { enabled: true } }))
-    const proxy = EgressProxy.start({
+    const proxy = await EgressProxy.start({
+      secret: SECRET,
       resolver,
       privateHosts: [FakeWeb.DOMAIN],
       attribution: { sessionID: "ses_researcher", rootID: "ses_lead", agent: "researcher" },
@@ -71,7 +83,7 @@ describe("EgressProxy", () => {
       const host = new URL(web.url("article", "/")).host
       const tunnel = await send(
         proxy.port,
-        `CONNECT ${host} HTTP/1.1\r\nHost: ${host}\r\n\r\nGET /next HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`,
+        `CONNECT ${host} HTTP/1.1\r\nHost: ${host}\r\n${AUTH}\r\n\r\nGET /next HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`,
       )
       expect(tunnel).toStartWith("HTTP/1.1 200 Connection Established")
       expect(tunnel).toEndWith("next")
@@ -93,14 +105,14 @@ describe("EgressProxy", () => {
   for (const local of [false, true])
     test(`refuses loopback, private, link-local, CGNAT, ULA and metadata addresses after resolving, Local ${local ? "on" : "off"}`, async () => {
       if (local) Egress.configure(LocalPolicy.resolve({ global: { enabled: true } }))
-      const proxy = EgressProxy.start({ resolver })
+      const proxy = await EgressProxy.start({ secret: SECRET, resolver })
       const before = guard.attempts().length
       try {
         for (const name of Object.keys(ADDRESSES)) {
           const reply = await get(proxy.port, `http://${name}/`)
           expect({ name, reply: reply.split("\r\n")[0] }).toEqual({ name, reply: "HTTP/1.1 403 Forbidden" })
           expect(reply).toContain(EgressProxy.PRIVATE_REASON)
-          const tunnel = await send(proxy.port, `CONNECT ${name}:443 HTTP/1.1\r\nHost: ${name}:443\r\n\r\n`)
+          const tunnel = await send(proxy.port, `CONNECT ${name}:443 HTTP/1.1\r\nHost: ${name}:443\r\n${AUTH}\r\n\r\n`)
           expect({ name, tunnel: tunnel.split("\r\n")[0] }).toEqual({ name, tunnel: "HTTP/1.1 403 Forbidden" })
         }
         // Addresses written out are refused without a lookup.
@@ -123,7 +135,7 @@ describe("EgressProxy", () => {
     })
 
   test("refuses a name its own name places on this computer or your network, before any lookup", async () => {
-    const proxy = EgressProxy.start({ resolver })
+    const proxy = await EgressProxy.start({ secret: SECRET, resolver })
     try {
       asked.length = 0
       for (const name of ["localhost", "app.localhost", "printer.local", "intranet", "nas.home.arpa"])
@@ -136,7 +148,7 @@ describe("EgressProxy", () => {
   })
 
   test("follows Web access under Vector Local, deciding before any lookup", async () => {
-    const proxy = EgressProxy.start({ resolver, privateHosts: [FakeWeb.DOMAIN] })
+    const proxy = await EgressProxy.start({ secret: SECRET, resolver, privateHosts: [FakeWeb.DOMAIN] })
     const before = web.count("article")
     try {
       asked.length = 0
@@ -159,7 +171,8 @@ describe("EgressProxy", () => {
 
   test("asks the run's own limits before each request", async () => {
     const seen: string[] = []
-    const proxy = EgressProxy.start({
+    const proxy = await EgressProxy.start({
+      secret: SECRET,
       resolver,
       privateHosts: [FakeWeb.DOMAIN],
       admit: (destination) => {
@@ -179,14 +192,60 @@ describe("EgressProxy", () => {
   })
 
   test("answers a request it cannot read with 400, and a name it cannot find with 502", async () => {
-    const proxy = EgressProxy.start({ resolver })
+    const proxy = await EgressProxy.start({ secret: SECRET, resolver })
     try {
-      expect((await send(proxy.port, "GET /relative HTTP/1.1\r\nHost: x\r\n\r\n")).split("\r\n")[0]).toBe(
+      expect((await send(proxy.port, `GET /relative HTTP/1.1\r\nHost: x\r\n${AUTH}\r\n\r\n`)).split("\r\n")[0]).toBe(
         "HTTP/1.1 400 Bad Request",
       )
       expect((await get(proxy.port, "http://missing.example/")).split("\r\n")[0]).toBe("HTTP/1.1 502 Bad Gateway")
     } finally {
       await proxy.stop()
     }
+  })
+
+  test("answers 407 to a request without its secret, or with another, before deciding anything", async () => {
+    Egress.configure(LocalPolicy.resolve({ global: { enabled: true } }))
+    const proxy = await EgressProxy.start({ secret: SECRET, resolver, privateHosts: [FakeWeb.DOMAIN] })
+    const before = web.count("article")
+    try {
+      asked.length = 0
+      const host = new URL(web.url("article", "/")).host
+      const replies = [
+        await get(proxy.port, web.url("article", "/"), ""),
+        await get(proxy.port, web.url("article", "/"), credentials("another-secret-of-this-size")),
+        await get(proxy.port, web.url("article", "/"), `Proxy-Authorization: Bearer ${SECRET}`),
+        await send(proxy.port, `CONNECT ${host} HTTP/1.1\r\nHost: ${host}\r\n\r\n`),
+      ]
+      for (const reply of replies) {
+        expect(reply.split("\r\n")[0]).toBe("HTTP/1.1 407 Proxy Authentication Required")
+        expect(reply).toContain('Proxy-Authenticate: Basic realm="Vector"')
+      }
+      // Nothing was decided, looked up, logged or reached.
+      expect(asked).toEqual([])
+      expect(Egress.events()).toEqual([])
+      expect(web.count("article")).toBe(before)
+    } finally {
+      await proxy.stop()
+    }
+  })
+
+  test("never passes its secret on, and answers a site's own 407 as 502", async () => {
+    const proxy = await EgressProxy.start({ secret: SECRET, resolver, privateHosts: [FakeWeb.DOMAIN] })
+    try {
+      expect(await get(proxy.port, web.url("article", "/"))).toEndWith("article")
+      const hit = web.hits().at(-1)!
+      expect(Object.keys(hit.headers).filter((name) => name.toLowerCase().startsWith("proxy-"))).toEqual([])
+      expect(JSON.stringify(hit.headers)).not.toContain(Buffer.from(`vector:${SECRET}`).toString("base64"))
+      const asking = await get(proxy.port, web.url("asking", "/"))
+      expect(asking.split("\r\n")[0]).toBe("HTTP/1.1 502 Bad Gateway")
+      expect(asking).not.toContain("Proxy-Authenticate")
+      expect(web.count("asking")).toBe(1)
+    } finally {
+      await proxy.stop()
+    }
+  })
+
+  test("refuses to start without a long secret", async () => {
+    await expect(EgressProxy.start({ secret: "short" })).rejects.toThrow("long random secret")
   })
 })

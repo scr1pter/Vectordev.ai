@@ -169,6 +169,48 @@ describe("Egress.decide", () => {
   })
 })
 
+describe("Egress before the policy is resolved", () => {
+  test("reaches only this computer while pending, for every purpose", async () => {
+    Egress.pending()
+    expect(Egress.policy().pending).toBe(true)
+    expect(await (await Egress.fetch("local-inference", `${MODEL}/v1`)).text()).toBe("completion")
+    expect(await (await fetch(`${MODEL}/v1`)).text()).toBe("completion")
+    for (const [source, url] of [
+      ["local-inference", "http://10.0.0.5:8000/v1"],
+      ["webfetch", "https://example.org/"],
+      ["model-catalog", "https://vectordev.ai/api/models"],
+    ] as const)
+      expect({ source, rule: Egress.decide({ source, url }).rule }).toEqual({ source, rule: "pending" })
+    await expect(fetch(`http://${OUTSIDE}/`)).rejects.toThrow("Vector Local is starting")
+    // Once config resolves the policy, it is the one in effect.
+    Egress.configure(on())
+    expect(Egress.decide({ source: "local-inference", url: `${MODEL}/v1` }).rule).toBe("listed")
+  })
+
+  test("starts pending when the environment turns Vector Local on, as a nested vector inherits it", async () => {
+    await using dir = await tmpdir()
+    const script = path.join(dir.path, "pending.ts")
+    await Bun.write(
+      script,
+      `import { Egress } from ${JSON.stringify(path.join(import.meta.dir, "../../src/local-mode/egress.ts"))}
+Egress.backstop()
+const pending = Egress.policy().pending === true
+const before = Egress.decide({ source: "local-inference", url: "http://10.0.0.5:8000/v1" }).rule
+Egress.resolve({ env: process.env, global: { endpoints: ["http://10.0.0.5:8000"] } })
+const after = Egress.decide({ source: "local-inference", url: "http://10.0.0.5:8000/v1" }).rule
+console.log(JSON.stringify({ pending, before, after, enabled: Egress.policy().enabled }))
+`,
+    )
+    const run = (env: Record<string, string>) =>
+      Bun.spawn([process.execPath, script], { env: { PATH: process.env.PATH ?? "", ...env }, stdout: "pipe" })
+    const on = run({ VECTOR_LOCAL: "1" })
+    const off = run({})
+    const [started, plain] = await Promise.all([new Response(on.stdout).text(), new Response(off.stdout).text()])
+    expect(JSON.parse(started)).toEqual({ pending: true, before: "pending", after: "listed", enabled: true })
+    expect(JSON.parse(plain)).toMatchObject({ pending: false, before: "local-off" })
+  })
+})
+
 describe("the network log on disk", () => {
   test("is written while Vector Local is on, exported, and erased", async () => {
     await using dir = await tmpdir()
@@ -274,6 +316,43 @@ describe("Egress.fetch under the backstop guard", () => {
       root_session_id: "ses_parent",
       carried,
     })
+  })
+
+  test("sends a model call to a listed server on this computer direct, never through the proxy environment", async () => {
+    Egress.configure(on())
+    const seenByProxy: string[] = []
+    const proxy = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: async (request) => {
+        seenByProxy.push(`${request.url} ${await request.text()}`)
+        return new Response("proxied")
+      },
+    })
+    const saved = ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "no_proxy"].map((key) => [key, process.env[key]] as const)
+    process.env.HTTP_PROXY = `http://127.0.0.1:${proxy.port}`
+    process.env.HTTPS_PROXY = `http://127.0.0.1:${proxy.port}`
+    // Emptied, never deleted: Bun's fetch never sees a variable that was deleted set again.
+    process.env.NO_PROXY = ""
+    process.env.no_proxy = ""
+    try {
+      const labelled = await Egress.fetch("local-inference", `${MODEL}/v1/chat/completions`, {
+        method: "POST",
+        body: "secret prompt",
+      })
+      expect(await labelled.text()).toBe("completion")
+      expect(await (await fetch(`${MODEL}/v1`)).text()).toBe("completion")
+      expect(seenByProxy).toEqual([])
+      // What it sent is counted; what came back is not known when it is decided.
+      const call = Egress.events().find((event) => event.source === "local-inference")
+      expect(call).toMatchObject({ decision: "allow", method: "POST", bytes_out: 13 })
+      expect(call?.bytes_in).toBeUndefined()
+    } finally {
+      saved.forEach(([key, value]) => {
+        process.env[key] = value ?? ""
+      })
+      proxy.stop(true)
+    }
   })
 
   test("passes straight through with Vector Local off", async () => {

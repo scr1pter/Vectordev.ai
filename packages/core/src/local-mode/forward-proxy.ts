@@ -1,5 +1,6 @@
 export * as ForwardProxy from "./forward-proxy"
 
+import { timingSafeEqual } from "node:crypto"
 import net from "node:net"
 
 // An HTTP forward proxy on 127.0.0.1 that decides each request a client sends it on its own, a later one on a
@@ -7,6 +8,9 @@ import net from "node:net"
 // answered with its status and a plain-text reason. An allowed one is connected where the decision says, and its
 // request and body are passed on and the response relayed. It never keeps a process alive. The strict test guard and
 // the research browsers' egress proxy are both built on it.
+//
+// With a secret, only a client that sends it may use the proxy: any program on this computer can reach loopback, the
+// ones the agent runs included, so an open proxy would be a way around the network guard.
 
 export type Destination = {
   readonly host: string
@@ -19,7 +23,13 @@ export type Destination = {
   readonly path?: string
 }
 
-export type Refusal = { readonly status: number; readonly reason: string; readonly message: string }
+export type Refusal = {
+  readonly status: number
+  readonly reason: string
+  readonly message: string
+  /** Header lines the answer carries besides its own. */
+  readonly headers?: readonly string[]
+}
 
 /** Where an allowed request goes: `connect` starts the upstream socket and calls `connected` once it is open. */
 export type Route =
@@ -28,15 +38,48 @@ export type Route =
 
 export type Proxy = { readonly url: string; readonly port: number; readonly stop: () => Promise<void> }
 
+export type Options = {
+  /**
+   * A per-launch secret each request must carry as the password of Basic `Proxy-Authorization` credentials (any user
+   * name). A request without it, or with another, is answered 407 before anything about it is decided. The
+   * credentials are never passed on, and an upstream's 407 is answered as 502, so a client is never asked for the
+   * secret on a site's behalf.
+   */
+  readonly secret?: string
+}
+
+type Decide = (destination: Destination) => Route | Promise<Route>
+
 const MAX_HEAD_BYTES = 64 * 1024
+const AUTHENTICATE = 'Proxy-Authenticate: Basic realm="Vector", charset="UTF-8"'
 
 export const FORBIDDEN = (message: string): Route => ({ refuse: { status: 403, reason: "Forbidden", message } })
 
+/** Starts the proxy on an ephemeral port of 127.0.0.1, and resolves once it is listening. */
+export function start(decide: Decide, options: Options = {}): Promise<Proxy> {
+  const made = create(decide, options)
+  return new Promise((resolve, reject) => {
+    made.server.once("error", reject)
+    made.server.listen(0, "127.0.0.1", () => {
+      made.server.off("error", reject)
+      resolve(made.proxy())
+    })
+  })
+}
+
 /**
- * Starts the proxy on an ephemeral port of 127.0.0.1. It is listening when this returns: Bun and Node bind a TCP
- * server synchronously, which the strict guard relies on while it installs.
+ * Starts the proxy and returns it listening, for the strict test guard, which installs synchronously. Only Bun binds a
+ * server before `listen` returns; Node looks the host up first and binds later, so under Node this throws.
  */
-export function start(decide: (destination: Destination) => Route | Promise<Route>): Proxy {
+export function startSync(decide: Decide, options: Options = {}): Proxy {
+  const made = create(decide, options)
+  made.server.listen(0, "127.0.0.1")
+  if (made.server.address()) return made.proxy()
+  made.server.close()
+  throw new Error("The proxy could not start here: this runtime binds a server only after listen returns.")
+}
+
+function create(decide: Decide, options: Options) {
   // Every open connection, so stopping the proxy also ends the tunnels and requests it is carrying.
   const open = new Set<net.Socket>()
   const server = net.createServer((client) => {
@@ -54,6 +97,13 @@ export function start(decide: (destination: Destination) => Route | Promise<Rout
       current.upstream = undefined
       previous?.destroy()
       const [line = "", ...fields] = head.split("\r\n")
+      if (options.secret !== undefined && !authorized(fields, options.secret))
+        return refuse(client, {
+          status: 407,
+          reason: "Proxy Authentication Required",
+          message: "This proxy is only for Vector's own browsers.",
+          headers: [AUTHENTICATE],
+        })
       const [method = "", target = "", version = "HTTP/1.1"] = line.split(" ")
       const tunnel = method.toUpperCase() === "CONNECT"
       const parsed = tunnel ? authority(target) : absolute(target)
@@ -77,9 +127,23 @@ export function start(decide: (destination: Destination) => Route | Promise<Rout
             return
           }
           upstream.write(originForm(method, destination, version, fields))
-          upstream.pipe(client, { end: false })
           upstream.on("end", () => {
             if (current.upstream === upstream) client.end()
+          })
+          statusLine(upstream, (status, read) => {
+            // With a secret, a site's 407 would read as this proxy asking for it again.
+            if (status === "407" && options.secret !== undefined) {
+              // Let go first, so a body still on its way to it does not close the client before the answer is sent.
+              current.upstream = undefined
+              upstream.destroy()
+              return refuse(client, {
+                status: 502,
+                reason: "Bad Gateway",
+                message: `${destination.host} asked for proxy credentials, which this proxy never passes on.`,
+              })
+            }
+            client.write(read)
+            upstream.pipe(client, { end: false })
           })
           // Only this request's body goes on to this destination; the bytes after it are the client's next request.
           forwardBody(client, upstream, fields, rest, (next) => readHead(client, serve, next))
@@ -108,19 +172,48 @@ export function start(decide: (destination: Destination) => Route | Promise<Rout
     }
     readHead(client, serve)
   })
-  server.listen(0, "127.0.0.1")
   server.unref()
-  const address = server.address()
-  if (!address || typeof address === "string") throw new Error("The proxy could not start.")
   return {
-    url: `http://127.0.0.1:${address.port}`,
-    port: address.port,
-    stop: () =>
-      new Promise<void>((done) => {
-        server.close(() => done())
-        open.forEach((socket) => socket.destroy())
-      }),
+    server,
+    proxy: (): Proxy => {
+      const port = (server.address() as net.AddressInfo).port
+      return {
+        url: `http://127.0.0.1:${port}`,
+        port,
+        stop: () =>
+          new Promise<void>((done) => {
+            server.close(() => done())
+            open.forEach((socket) => socket.destroy())
+          }),
+      }
+    },
   }
+}
+
+// Basic credentials whose password is the secret, compared in constant time.
+function authorized(fields: readonly string[], secret: string) {
+  const value = fields.find((field) => /^proxy-authorization\s*:/i.test(field))?.replace(/^[^:]*:\s*/, "") ?? ""
+  const [scheme = "", token = ""] = value.split(/\s+/)
+  const decoded = Buffer.from(token, "base64").toString("utf8")
+  if (scheme.toLowerCase() !== "basic" || !decoded.includes(":")) return false
+  const given = Buffer.from(decoded.slice(decoded.indexOf(":") + 1))
+  const expected = Buffer.from(secret)
+  return given.length === expected.length && timingSafeEqual(given, expected)
+}
+
+// Reads an upstream response until its status line is in, then hands back the status and the bytes read so far, with
+// the upstream paused.
+function statusLine(upstream: net.Socket, done: (status: string | undefined, read: Buffer) => void) {
+  const chunks: Buffer[] = []
+  const take = (chunk: Buffer) => {
+    chunks.push(chunk)
+    const all = Buffer.concat(chunks)
+    if (all.indexOf("\r\n") < 0 && all.length < MAX_HEAD_BYTES) return
+    upstream.off("data", take)
+    upstream.pause()
+    done(/^HTTP\/\d(?:\.\d)? (\d{3})/.exec(all.toString("latin1", 0, 64))?.[1], all)
+  }
+  upstream.on("data", take)
 }
 
 function readHead(client: net.Socket, done: (head: string, rest: Buffer) => void, first: Buffer = Buffer.alloc(0)) {
@@ -244,8 +337,9 @@ function originForm(method: string, destination: Destination, version: string, f
 
 // The refusal, then the connection is closed once it is sent: nothing else is read from a client that was refused.
 function refuse(client: net.Socket, refusal: Refusal) {
+  const headers = (refusal.headers ?? []).map((line) => `${line}\r\n`).join("")
   client.end(
-    `HTTP/1.1 ${refusal.status} ${refusal.reason}\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: ${Buffer.byteLength(refusal.message)}\r\nconnection: close\r\n\r\n${refusal.message}`,
+    `HTTP/1.1 ${refusal.status} ${refusal.reason}\r\n${headers}content-type: text/plain; charset=utf-8\r\ncontent-length: ${Buffer.byteLength(refusal.message)}\r\nconnection: close\r\n\r\n${refusal.message}`,
     () => client.destroy(),
   )
 }

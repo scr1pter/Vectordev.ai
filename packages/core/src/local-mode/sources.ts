@@ -570,8 +570,8 @@ export const SOURCES: readonly Source[] = [
     local: "allowed",
     where: ["desktop"],
     callSites: ["packages/core/src/local-mode/egress-proxy.ts"],
-    planned: ["packages/desktop/src/main/research-browser.ts"],
-    note: "Goes through Vector's network guard, which never reaches private or cloud metadata addresses; follows Web access",
+    planned: ["packages/desktop/src/main/research-browser.ts", "packages/desktop/src/main/research-proxy.ts"],
+    note: "Not live yet: research browsers will go through Vector's research proxy, which never reaches private or cloud metadata addresses and follows Web access",
   },
   {
     id: "external-agents",
@@ -593,7 +593,7 @@ export const SOURCES: readonly Source[] = [
     local: "blocked",
     where: ["engine", "desktop"],
     callSites: ["packages/core/src/local-mode/guard.ts"],
-    note: "Reaches only this computer and the model servers on your list; anything else is blocked and logged with the code that made it",
+    note: "Reaches only this computer and the model servers on your list; anything else the guard sees is blocked and logged with the code that made it. Under Bun it does not see Bun.fetch, a fetch or WebSocket kept from before it started, or the ws package",
   },
   {
     id: "agent-programs",

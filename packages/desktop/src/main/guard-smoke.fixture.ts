@@ -1,13 +1,17 @@
 // The body of guard-smoke.test.ts, bundled for Node and run there: the desktop's engine and main process run on Node
-// (Electron's utility process and main process), where fetch, WebSocket and node:https all go through Node's own
-// sockets. It installs the backstop the way an entry point does, with Vector Local on, and prints what each client got
-// as one line of JSON. Nothing here leaves this computer: refused connections are refused before they connect, and the
-// others go to servers on 127.0.0.1.
+// (Electron's utility process and main process), where fetch, WebSocket, node:https and the ws package all go through
+// Node's own sockets. It installs the backstop the way an entry point does, with Vector Local on, and prints what each
+// client got as one line of JSON. Nothing here leaves this computer: refused connections are refused before they
+// connect, and the others go to servers on 127.0.0.1.
+import { readFileSync } from "node:fs"
 import http from "node:http"
 import https from "node:https"
+import { createRequire } from "node:module"
 import net from "node:net"
+import { Worker } from "node:worker_threads"
 import { EgressAttribution } from "@vectordevai/core/local-mode/attribution"
 import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressProxy } from "@vectordevai/core/local-mode/egress-proxy"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 
 // A documentation address (TEST-NET-2): never routed.
@@ -80,6 +84,34 @@ const thrown = (make: () => unknown) => {
 const answer =
   (address: string) => (_hostname: string, options: { all?: boolean }, callback: (...input: unknown[]) => void) =>
     options.all ? callback(null, [{ address, family: 4 }]) : callback(null, address, 4)
+// What a raw client of a proxy on this computer reads back, as a browser would send it.
+const raw = (port: number, text: string) =>
+  new Promise<string>((resolve) => {
+    const chunks: Buffer[] = []
+    const socket = net.connect(port, "127.0.0.1", () => socket.write(text))
+    socket.on("data", (chunk: Buffer) => chunks.push(chunk))
+    socket.on("close", () => resolve(Buffer.concat(chunks).toString()))
+    socket.on("error", () => resolve(Buffer.concat(chunks).toString()))
+  })
+// The ws package from the engine's dependencies, which the test names; under Node it connects through net.
+const WebSocketClient = process.env.GUARD_SMOKE_WS
+  ? (createRequire(import.meta.url)(process.env.GUARD_SMOKE_WS) as new (url: string) => {
+      on: (event: string, listener: (error: Error) => void) => void
+    })
+  : undefined
+// The research browsers' proxy, as desktop main will start it, with its secret.
+const SECRET = "guard-smoke-research-proxy-secret"
+const CREDENTIALS = `Proxy-Authorization: Basic ${Buffer.from(`vector:${SECRET}`).toString("base64")}\r\n`
+const research = await EgressProxy.start({
+  secret: SECRET,
+  resolver: async () => [{ address: "127.0.0.1", family: 4 }],
+  privateHosts: ["web.test"],
+})
+const ask = (auth: string) =>
+  raw(
+    research.port,
+    `GET http://article.web.test:${port}/ HTTP/1.1\r\nHost: article.web.test:${port}\r\n${auth}Connection: close\r\n\r\n`,
+  )
 
 const results: Record<string, unknown> = {
   runtime: process.versions.bun ? "bun" : `node ${process.versions.node}`,
@@ -105,7 +137,28 @@ const results: Record<string, unknown> = {
     http.get({ host: "catalog.web.test", port, path: "/", lookup: answer("127.0.0.1") as never }),
   ),
   resolvedOutside: await socketOutcome(net.connect({ host: "localhost", port, lookup: answer(OUTSIDE) as never })),
+  ws: WebSocketClient
+    ? await new Promise<string>((resolve) => {
+        const socket = new WebSocketClient(`ws://${OUTSIDE}/`)
+        socket.on("error", (error) => resolve(error.name))
+        socket.on("open", () => resolve("reached"))
+      })
+    : "no ws package",
+  // The brain's background reader starts this way; its first import guards it.
+  worker: await new Promise<unknown>((resolve) => {
+    const thread = new Worker(readFileSync(new URL("./guard-smoke.worker.mjs", import.meta.url), "utf8"), {
+      eval: true,
+    })
+    thread.once("message", (message) => {
+      resolve(message)
+      void thread.terminate()
+    })
+    thread.once("error", (error) => resolve(`worker error: ${error.message}`))
+  }),
+  // Its status line without the secret, and the page's body with it.
+  researchProxy: [(await ask("")).split("\r\n")[0], (await ask(CREDENTIALS)).split("\r\n\r\n")[1]],
 }
+await research.stop()
 
 // With the proxy environment on, as the desktop's engine sets it, an unlabelled connection to the proxy is the
 // internet, and a labelled request goes through it.
@@ -119,6 +172,14 @@ const viaProxy = await Egress.fetch("model-catalog", "http://catalog.web.test/mo
   (error: unknown) => (error instanceof Error ? `${error.name}: ${error.message}` : String(error)),
 )
 results.proxyLabelled = viaProxy
+// A model call to a listed server on this computer, and an unlabelled request there, go direct, never to the proxy.
+results.proxyLocalInference = await Egress.fetch("local-inference", `${here}/v1/chat/completions`, {
+  method: "POST",
+  body: "secret prompt",
+}).then((response) => response.text())
+results.proxyLoopbackFetch = await (await fetch(`${here}/v1`)).text()
+// Node's node:http agent read the proxy environment once, so its request for this computer is refused at the socket.
+results.proxyLoopbackHttp = await socketOutcome(http.get(`${here}/v1`))
 results.seenByProxy = seenByProxy
 results.blocked = Egress.events({ blocked: true }).map((event) => [event.source, event.rule])
 

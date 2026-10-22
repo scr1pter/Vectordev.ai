@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import http from "node:http"
 import https from "node:https"
+import { createRequire } from "node:module"
 import net from "node:net"
 import os from "node:os"
 import path from "node:path"
@@ -128,6 +129,11 @@ describe("EgressGuard.installStrict", () => {
 
   test("blocks a WebSocket to an outside address", () => {
     expect(() => new WebSocket(`wss://${OUTSIDE}/`)).toThrow(EgressGuard.EgressBlocked)
+  })
+
+  test("refuses a fetch scheme that is not on this computer, such as Bun's s3:", async () => {
+    await expect(fetch("s3://bucket/key")).rejects.toBeInstanceOf(EgressGuard.EgressBlocked)
+    expect(await (await fetch("data:,inline")).text()).toBe("inline")
   })
 
   test("lets loopback through every path and lists each attempt", async () => {
@@ -359,7 +365,11 @@ parentPort.postMessage({ connect: await outcome(Bun.connect({ hostname: "${OUTSI
     expect(workerThreads.Worker).toBe(original.ThreadWorker)
     expect(Bun.connect).toBe(original.connect_)
     expect(Object.hasOwn(http.ClientRequest.prototype, "end")).toBe(false)
-    expect(Object.fromEntries(Object.keys(original.env).map((key) => [key, process.env[key]]))).toEqual(original.env)
+    // NO_PROXY is left empty rather than removed: Bun's fetch never sees a variable that was deleted set again.
+    expect(Object.fromEntries(Object.keys(original.env).map((key) => [key, process.env[key]]))).toEqual({
+      ...original.env,
+      NO_PROXY: original.env.NO_PROXY ?? "",
+    })
   })
 })
 
@@ -442,16 +452,49 @@ describe("EgressGuard.install with Vector Local on", () => {
   test("refuses a name that says it is here or on your network but resolves outside, before connecting", async () => {
     current.policy = listed
     recorded.length = 0
-    for (const host of ["nas.local", "localhost"]) {
-      const error = await errorOf(net.connect({ host, port: 8000, lookup: answer(OUTSIDE) as never }))
-      expect(error).toBeInstanceOf(EgressGuard.EgressBlocked)
-      expect((error as EgressGuard.EgressBlocked).rule).toBe("resolved-outside")
-    }
+    // What the socket's lookup answered. The socket is destroyed there, so nothing connects whatever the answer; the
+    // answer comes on a later tick, so the listener is in place before it.
+    const later =
+      (address: string) => (hostname: string, options: { all?: boolean }, callback: (...input: unknown[]) => void) =>
+        setTimeout(() => answer(address)(hostname, options, callback), 0)
+    const lookedUp = (socket: net.Socket) =>
+      new Promise<{ error?: unknown; address?: unknown }>((resolve) => {
+        socket.on("lookup", (error: unknown, address: unknown) => {
+          socket.destroy()
+          resolve(error ? { error } : { address })
+        })
+        socket.on("error", (error: unknown) => resolve({ error }))
+      })
+    const local = await lookedUp(net.connect({ host: "localhost", port: 8000, lookup: later(OUTSIDE) as never }))
+    expect(local.error).toBeInstanceOf(EgressGuard.EgressBlocked)
+    expect((local.error as EgressGuard.EgressBlocked).rule).toBe("resolved-outside")
+    // A name a labelled request may reach because of where its name says it is keeps the check.
+    const printer = await EgressAttribution.granted(
+      { source: "webfetch", purpose: "web-page", grants: [{ host: "printer.local", port: 80, within: "private" }] },
+      () => lookedUp(net.connect({ host: "printer.local", port: 80, lookup: later(OUTSIDE) as never })),
+    )
+    expect((printer.error as EgressGuard.EgressBlocked).rule).toBe("resolved-outside")
+    // A listed model server is decided on the list: a company's internal name may sit on its own public range.
+    expect(await lookedUp(net.connect({ host: "nas.local", port: 8000, lookup: later(OUTSIDE) as never }))).toEqual({
+      address: OUTSIDE,
+    })
+    // A listed loopback name must still stay on loopback.
+    current.policy = LocalPolicy.resolve({ global: { enabled: true, endpoints: ["http://localhost:8000"] } })
+    const listedLocal = await lookedUp(net.connect({ host: "localhost", port: 8000, lookup: later(OUTSIDE) as never }))
+    expect((listedLocal.error as EgressGuard.EgressBlocked).rule).toBe("resolved-outside")
     expect(recorded.map((item) => [item.attempt.host, item.verdict.rule])).toEqual([
+      ["localhost", "resolved-outside"],
+      ["printer.local", "resolved-outside"],
       ["nas.local", "listed"],
-      ["nas.local", "resolved-outside"],
+      ["localhost", "listed"],
       ["localhost", "resolved-outside"],
     ])
+  })
+
+  test("grants a labelled request's checks the same way: listed names on the list, loopback names on loopback", () => {
+    const at = (url: string, listed?: boolean) => EgressGuard.destinations(new URL(url), { listed })[0]!.within
+    expect([at("http://gpu.internal:8000/"), at("http://gpu.internal:8000/", true)]).toEqual(["private", undefined])
+    expect([at("http://localhost:11434/", true), at("http://box.tail1.ts.net/", true)]).toEqual(["loopback", undefined])
   })
 
   test("lets only the destinations a labelled scope granted through, never an unrelated host", async () => {
@@ -514,6 +557,91 @@ describe("EgressGuard.install with Vector Local on", () => {
       }
       proxy.stop(true)
     }
+  })
+
+  test("sends what it allows to this computer around the proxy environment, so a proxy never sees it", async () => {
+    current.policy = listed
+    const seenByProxy: string[] = []
+    const proxy = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) => {
+        seenByProxy.push(request.url)
+        return new Response("proxied")
+      },
+    })
+    const saved = ["HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "no_proxy"].map((key) => [key, process.env[key]] as const)
+    process.env.HTTPS_PROXY = `http://127.0.0.1:${proxy.port}`
+    process.env.HTTP_PROXY = `http://127.0.0.1:${proxy.port}`
+    process.env.NO_PROXY = "intranet.example"
+    process.env.no_proxy = ""
+    const body = (request: http.ClientRequest) =>
+      new Promise<string>((resolve, reject) => {
+        request.on("response", (response: http.IncomingMessage) => {
+          const chunks: Buffer[] = []
+          response.on("data", (chunk: Buffer) => chunks.push(chunk))
+          response.on("end", () => resolve(Buffer.concat(chunks).toString()))
+        })
+        request.on("error", reject)
+      })
+    try {
+      expect(await (await fetch(at("/v1"))).text()).toBe("here")
+      expect(await (await fetch(`http://localhost:${server.port}/v1`)).text()).toBe("here")
+      expect(await body(http.get(at("/v1")))).toBe("here")
+      expect(seenByProxy).toEqual([])
+      // Both spellings hold one list, the user's own entries kept.
+      expect(process.env.NO_PROXY).toBe("intranet.example,127.0.0.1,localhost")
+      expect(process.env.no_proxy).toBe(process.env.NO_PROXY)
+      // The proxy environment is granted only to a request for the internet.
+      expect(EgressGuard.destinations(new URL("https://models.example/v1")).map((item) => item.host)).toEqual([
+        "models.example",
+        "127.0.0.1",
+      ])
+      expect(EgressGuard.destinations(new URL("http://gpu-box:8000/v1")).map((item) => item.host)).toEqual(["gpu-box"])
+    } finally {
+      // Emptied, not deleted: Bun's fetch never sees a variable that was deleted set again.
+      saved.forEach(([key, value]) => {
+        process.env[key] = value ?? ""
+      })
+      proxy.stop(true)
+    }
+  })
+
+  test("refuses a fetch scheme that is not on this computer, such as Bun's s3:, and logs it", async () => {
+    current.policy = listed
+    recorded.length = 0
+    await expect(fetch("s3://bucket/key")).rejects.toThrow("no http or https address")
+    expect(recorded.map((item) => [item.attempt.host, item.verdict.rule])).toEqual([["s3://bucket", "unlabelled"]])
+    expect(recorded[0]!.frame).toContain("guard.test.ts")
+    expect(await (await fetch("data:,inline")).text()).toBe("inline")
+    expect(await (await fetch(Bun.pathToFileURL(path.join(import.meta.dir, "guard.test.ts")))).text()).toContain(
+      "EgressGuard",
+    )
+  })
+
+  test("does not see the ws package under Bun, which replaces it with a client that reads no global", async () => {
+    current.policy = listed
+    // Bun serves `ws` itself, whatever node_modules holds; its call sites are decided by their labelled gate instead.
+    const Client = createRequire(import.meta.url)("ws") as new (url: string) => {
+      on: (event: string, listener: () => void) => void
+      terminate: () => void
+    }
+    const target = `ws://127.0.0.1:${server.port}/socket`
+    const before = state.handle!.attempts().length
+    const client = new Client(target)
+    client.on("error", () => undefined)
+    const seenBy = state.handle!.attempts().slice(before)
+    const global = new WebSocket(target)
+    global.onerror = () => undefined
+    expect(seenBy).toEqual([])
+    expect(
+      state
+        .handle!.attempts()
+        .slice(before)
+        .map((item) => [item.kind, item.allowed]),
+    ).toEqual([["websocket", true]])
+    client.terminate()
+    global.close()
   })
 })
 

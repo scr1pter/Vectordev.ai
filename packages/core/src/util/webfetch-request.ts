@@ -281,6 +281,7 @@ export function pinnedFetch(addresses: readonly string[]): typeof globalThis.fet
       }
       request.end()
     })) as typeof globalThis.fetch
-  fetch.preconnect = globalThis.fetch.preconnect
+  // Bun's fetch has preconnect; Node's has none, and its types say so where this is checked without Bun's.
+  ;(fetch as { preconnect?: unknown }).preconnect = (globalThis.fetch as { preconnect?: unknown }).preconnect
   return fetch
 }
