@@ -63,6 +63,7 @@ export const PRIVATE_ASK =
   "The address is on your own computer or network, which research does not read without asking."
 
 // Cloud metadata services by name. Their addresses, and every link-local one, are refused by `metadata` below.
+const METADATA_ADDRESSES = new Set(["100.100.100.200", "168.63.129.16"])
 const METADATA_NAMES = new Set([
   "metadata.google.internal",
   "metadata.goog",
@@ -574,9 +575,10 @@ function named(host: string, names: readonly string[] | undefined) {
 }
 
 // A cloud metadata service or a link-local address: 169.254.0.0/16 (AWS, Azure, Google and most others), Alibaba's
-// 100.100.100.200, fe80::/10 and AWS's fd00:ec2::254, and the IPv4 ones written as IPv6 (mapped, NAT64 or 6to4).
+// 100.100.100.200, Azure's WireServer 168.63.129.16 (a public address that only answers inside Azure), fe80::/10 and
+// AWS's fd00:ec2::254, and the IPv4 ones written as IPv6 (mapped, NAT64 or 6to4).
 function metadata(host: string) {
-  if (isIP(host) === 4) return host.startsWith("169.254.") || host === "100.100.100.200"
+  if (isIP(host) === 4) return host.startsWith("169.254.") || METADATA_ADDRESSES.has(host)
   if (isIP(host) !== 6) return METADATA_NAMES.has(host)
   const groups = ipv6(host.split("%", 1)[0]!)
   if (!groups) return false
