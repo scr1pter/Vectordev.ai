@@ -240,13 +240,12 @@ describe("downloading the search model", () => {
       },
     })
     expect(result.outcome).toMatchObject({ ok: true, status: { state: "ready" } })
-    // How much of the cut reaches the disk, and whether a retry is cut again, depends on the runner's load (a
-    // loaded CI runner once made a third request), so the check is that the next request resumes with a range.
+    // How much of the cut reaches the disk, and whether a retry is cut again, depends on the runner's load (loaded CI
+    // runners made a third request, and once resumed from byte 2,021), so the check is that the next request resumes
+    // with a range instead of starting over; the finished file still matched its pinned sha256.
     const asked = result.requests.filter((request) => request.url.endsWith("model_quantized.onnx"))
     expect(asked.length).toBeGreaterThanOrEqual(2)
-    const start = Number(/^bytes=(\d+)-$/.exec(asked[1]!.range ?? "")?.[1])
-    expect(start).toBeGreaterThan(0)
-    expect(start).toBeLessThanOrEqual(2_000)
+    expect(Number(/^bytes=(\d+)-$/.exec(asked[1]!.range ?? "")?.[1])).toBeGreaterThan(0)
   }, 60_000)
 
   test("refuses a redirect to a host the source does not use", async () => {

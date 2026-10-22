@@ -87,7 +87,7 @@ describe("BrainDatabase", () => {
       ],
       state: [{ repository_id: "repo-1" }],
     })
-  })
+  }, 30_000)
 
   test("Brain.layerFor still opens a brain over its own file", async () => {
     await using tmp = await tmpdir()

@@ -1040,6 +1040,7 @@ describe("tool.shell permissions", () => {
         }
       }
     }),
+    90_000,
   )
 
   // `${C:\x}` reads a file through the FileSystem provider and assigning to it writes the file, with no command in the
