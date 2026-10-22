@@ -33,8 +33,11 @@ import { Locale } from "@/util/locale"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
 import { RunBudget } from "@vectordevai/schema/run-budget"
 import { TaskMailbox } from "@vectordevai/core/task-mailbox"
+import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import path from "path"
 import { isFreeModelRef } from "@vectordevai/schema/free-model"
+import { SessionMemory } from "../session/memory"
+import { ResearchRun } from "./research-run"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -368,6 +371,9 @@ export const TaskTool = Tool.define(
     const truncate = yield* Truncate.Service
     const statuses = yield* SessionStatus.Service
     const guard = yield* SpendGuard.Service
+    // Briefs for the research agents are checked and shaped by the research run. Without it (a test that builds the
+    // task tool on its own) they are refused rather than sent unchecked.
+    const research = yield* Effect.serviceOption(ResearchRun.Service)
     // Notes waiting to reach each parent, so tasks that end close together reach it as one message.
     const notes = new Map<
       SessionID,
@@ -765,6 +771,33 @@ export const TaskTool = Tool.define(
         }
       }
 
+      // The research lead starts with only what this brief says, and a researcher's searches leave the machine: both
+      // briefs pass the outbound check before the child starts, and a researcher's is cut to its sub-question and the
+      // run's public preferences (sections 5.6a and 6.4a). Refused before anything is asked.
+      const researching = subagentType === ResearchRun.LEAD || subagentType === ResearchRun.RESEARCHER
+      const brief = !researching
+        ? undefined
+        : Option.isNone(research)
+          ? ({ type: "refused", message: "Research is not available in this engine." } satisfies ResearchRun.Brief)
+          : yield* research.value.brief({
+              agent: subagentType,
+              ctx,
+              prompt: params.prompt,
+              extra: [
+                ...(params.success_criteria ?? []),
+                ...(params.context_pack ? [JSON.stringify(params.context_pack)] : []),
+              ],
+              ...(params.task_id ? { resume: params.task_id } : {}),
+            })
+      if (brief?.type === "refused") return yield* Effect.fail(new Error(brief.message))
+      const briefed =
+        brief?.type !== "ok"
+          ? params
+          : subagentType === ResearchRun.RESEARCHER
+            ? { ...params, prompt: brief.prompt, success_criteria: undefined, context_pack: undefined }
+            : { ...params, prompt: brief.prompt }
+      const budget = params.budget ?? (brief?.type === "ok" ? brief.budget : undefined)
+
       if (!invoked) {
         yield* ctx.ask({
           permission: id,
@@ -780,6 +813,12 @@ export const TaskTool = Tool.define(
       const next = yield* agent.get(subagentType)
       if (!next) {
         return yield* Effect.fail(new Error(`Unknown agent type: ${subagentType} is not a valid agent type`))
+      }
+      // A hidden built-in subagent (the research judge) is Vector's to launch, when it checks a report.
+      if (next.native && next.hidden && next.mode === "subagent" && !invoked) {
+        return yield* Effect.fail(
+          new Error(`${subagentType} runs only when Vector checks a report; it cannot be launched with task.`),
+        )
       }
       // A primary agent runs sessions of its own and is not in the task tool's list; only the user can hand it a
       // subtask, by naming it in a command.
@@ -907,7 +946,7 @@ export const TaskTool = Tool.define(
           ownedPaths,
           dependsOn: dependencies,
           successCriteria: params.success_criteria ? [...params.success_criteria] : undefined,
-          budget: params.budget,
+          budget,
           model: modelRef,
           background: runInBackground,
           status: dependencies.length > 0 ? "queued" : "running",
@@ -975,7 +1014,10 @@ export const TaskTool = Tool.define(
         // on every write of this call's tool part, so the part and the child's
         // record agree.
         const outcome: SubagentLifecycle.Outcome = { status: record.status }
-        const partMetadata = () => ({ ...metadata, ...outcome })
+        // What the child took in, once it settles: a parent whose subagent read the web is held as web, not subagent
+        // (RC8), so its memory writes wait for the user for the right reason.
+        const held: { [SessionMemory.HOLD]?: BrainSchema.Hold } = {}
+        const partMetadata = () => ({ ...metadata, ...outcome, ...held })
         // Once the call has returned (background launch or promotion), its tool
         // part is settled and later changes must patch the stored part.
         let detached = runInBackground
@@ -1032,6 +1074,12 @@ export const TaskTool = Tool.define(
           )
           yield* guard.release(nextSession.id)
           Object.assign(outcome, SubagentLifecycle.defined(settled))
+          const hold = SessionMemory.taint(
+            yield* sessions
+              .messages({ sessionID: nextSession.id })
+              .pipe(Effect.catch(() => Effect.succeed([] as SessionV1.WithParts[]))),
+          )
+          if (hold) held[SessionMemory.HOLD] = hold
           if (persist) yield* persistPart()
           else if (batch) yield* ctx.metadata({ title, metadata: partMetadata() })
         }, claimLock.withPermits(1))
@@ -1066,7 +1114,7 @@ export const TaskTool = Tool.define(
           if (dependencies.length > 0) yield* transition({ status: "running" })
           // A brief is the parent model's text, so @names in it attach files but never invoke agents in the child.
           const parts = (yield* ops.resolvePromptParts(
-            [assignmentPrompt(params, ownedPaths), ...prerequisites].join("\n\n"),
+            [assignmentPrompt(briefed, subagentType === ResearchRun.RESEARCHER ? [] : ownedPaths), ...prerequisites].join("\n\n"),
           )).filter((part) => part.type !== "agent")
           return yield* ops.prompt({
             messageID: MessageID.ascending(),
@@ -1228,6 +1276,12 @@ export const TaskTool = Tool.define(
           runTask().pipe(
             Effect.onInterrupt(() => ops.cancel(nextSession.id)),
             Effect.flatMap(settleRun),
+            // A researcher hands back 1,500 characters at most, and the notes it saved in the run.
+            Effect.flatMap((text) =>
+              next.name === ResearchRun.RESEARCHER && Option.isSome(research)
+                ? research.value.returned(nextSession.id, text)
+                : Effect.succeed(text),
+            ),
           )
         // A message for a background task that is mid-run joins the child's running loop, as a prompt sent to a busy
         // session does, so the child reads it at its next step. One that is queued behind its dependencies, or between
@@ -1246,7 +1300,7 @@ export const TaskTool = Tool.define(
             if (ctx.abort.aborted)
               return yield* Effect.fail(new Error("Stopped before the message reached the background task."))
             yield* assertDependencies(nextSession.id, dependencies)
-            yield* guard.link(nextSession.id, ctx.sessionID, { budget: params.budget })
+            yield* guard.link(nextSession.id, ctx.sessionID, { budget })
             const busy = dependencies.length === 0 && (yield* statuses.get(nextSession.id)).type !== "idle"
             const claim = { taskID: nextSession.id, dependencies }
             const release = Effect.sync(() => dependencyClaims.delete(claim))
@@ -1330,7 +1384,7 @@ export const TaskTool = Tool.define(
               metadata.attempt = attempt
             }
             yield* guard.link(nextSession.id, ctx.sessionID, {
-              budget: params.budget,
+              budget,
               ...(batch ? { batch: { id: batchID, budget: batch.budget } } : {}),
               renew: session !== undefined && (yield* background.get(nextSession.id))?.status !== "running",
             })

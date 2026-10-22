@@ -112,6 +112,10 @@ const RESEARCH_AGENTS: Record<string, { readonly tools: readonly string[]; reado
   // The judge gets the cited passages in its brief and answers in plain lines.
   [RESEARCH_JUDGE]: { tools: [], subagents: [] },
 }
+/** The tools a research agent may be offered at all, whatever any rule allows; nothing for any other agent. */
+export function researchTools(agent: string): readonly string[] | undefined {
+  return RESEARCH_AGENTS[agent]?.tools
+}
 // Coding and outside tools no user or repository rule may hand a research agent. They are denied last.
 const RESEARCH_DENIED = [
   "edit",

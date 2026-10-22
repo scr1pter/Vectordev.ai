@@ -1,0 +1,7 @@
+Researches a question across the web and this repository's brain, as part of your work, and returns the answer with the notes it rests on. A research lead plans the run, searches, reads, saves quotes found in their sources and writes a report the user can open; it makes no code changes.
+
+Use it when the work needs facts from outside the repository: how a library or a standard behaves, what changed in a release, how others solve a problem, a comparison of options. Do not use it for questions the repository answers.
+
+- question: write it in public terms. The lead sees only this question, and Vector refuses one that carries names, numbers, identifiers or sentences from files, documents or memory this session read. Ask the user to type a term if the research needs it.
+- depth: focused by default; deep (researchers and a judge that checks the citations) only on Thorough requests.
+- The run counts toward this request's spend and steps; research's own caps apply when the user has set none.
