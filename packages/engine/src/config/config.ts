@@ -500,11 +500,22 @@ function writableGlobal(info: Info) {
 // other VECTOR_AGENT_CONFIG_DIR can only tighten it, and a repository's own local block is never read. Config.local()
 // is the only reader of it: the merged config (Config.get()) carries no local block.
 //
-// A change to the user's config that would loosen it waits for the owner. It is compared with the user's block the
-// owner last let apply: the one in effect while this process runs, and at start the copy the last process saved in
-// Vector's state folder, so an edit made while Vector was closed is held too. That copy is the user's to change, so it
-// is read only at start and never watched, and a missing or unreadable copy counts as no user block, which still holds
-// back an edit that adds to what the environment or the company turned on.
+// A change that would loosen it waits for the owner: an edit to the user's config, and a change to an override, whose
+// files are read at start and may only tighten what was in effect after it. The parts of a change that tighten apply
+// at once: the policy in effect is the stricter of what the owner last let apply and the change, setting by setting.
+// The baseline is what is in effect while this process runs and, at start, the copy of the user's block the last
+// process saved in Vector's state folder, so an edit made while Vector was closed is held too. A missing or unreadable
+// copy counts as the user's block at start.
+//
+// The copy is the user's to change, like the config itself, so it is a check and not a boundary: whatever can write
+// the state folder can rewrite or delete it, and what stops the agent there is the ask on its own writes to these
+// files. What the copy does stop is a nested vector laundering an edit. A process under the agent marker, which every
+// untrusted child of Vector carries (a program the agent started, or Vector's own terminal), never reads or writes it,
+// cannot confirm, and adds no model server from VECTOR_LOCAL_POLICY, so the user's config can only tighten the floor it
+// inherited. And an edit the environment or the company's policy hides, such as turning the user's own block off while
+// VECTOR_LOCAL keeps Local on, is held as well, so it never becomes the block a later start compares with. The floor and
+// the marker live in the environment, so a program that clears it (env -i) drops them: they are advisory, and the
+// network asks and the sandbox are the boundary.
 
 export type LocalChange =
   | { readonly type: "updated"; readonly policy: LocalMode.Policy }
@@ -521,6 +532,7 @@ const LOCAL_DIRECTORY_FILES = ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FI
 const LOCAL_FAIL_CLOSED: ConfigLocalV1.Info = { enabled: true, web: "none" }
 const LOCAL_WEB_LABELS: Record<LocalMode.Web, string> = { ask: "Ask", network: "Your network only", none: "None" }
 const LocalConfirmed = Schema.Struct({ local: Schema.NullOr(ConfigLocalV1.Info) })
+const LOCAL_OFF = "turns Vector Local off"
 
 type LocalBlock = {
   readonly source: string
@@ -528,19 +540,27 @@ type LocalBlock = {
   /** "block": the file's local block does not decode. "file": Vector could not read the file at all. */
   readonly unreadable?: "block" | "file"
 }
+/** What Vector Local is resolved from besides the company's policy and the environment. */
+type LocalInputs = {
+  readonly user: ConfigLocalV1.Info | undefined
+  /** VECTOR_CONFIG_CONTENT and the config-path overrides, which may only tighten it. */
+  readonly overrides: readonly LocalBlock[]
+}
 type LocalPending = {
   readonly proposed: LocalMode.Policy
   readonly changes: readonly string[]
-  readonly block: ConfigLocalV1.Info | undefined
+  readonly inputs: LocalInputs
 }
 
 const localState: {
   policy: LocalMode.Policy
-  /** The user's block the owner last let apply, once the first resolution has run. */
-  confirmed: { readonly block: ConfigLocalV1.Info | undefined } | undefined
-  /** That block as the state folder holds it, as JSON, so it is written only when it changes. */
+  /** The inputs in effect: what the owner last let apply, with what has tightened it since. Set at the first resolution. */
+  confirmed: LocalInputs | undefined
+  /** The user's block as the state folder holds it, as JSON, so it is written only when it changes. */
   saved: string | undefined
   pending: LocalPending | undefined
+  /** The held change a repository's config load last announced, so each one is announced there once. */
+  announced: string | undefined
   watchers: number
   stop: (() => void) | undefined
   readonly listeners: Set<(change: LocalChange) => void>
@@ -549,6 +569,7 @@ const localState: {
   confirmed: undefined,
   saved: undefined,
   pending: undefined,
+  announced: undefined,
   watchers: 0,
   stop: undefined,
   listeners: new Set(),
@@ -579,21 +600,18 @@ export function localConfirmedFile() {
 }
 
 /**
- * Reads Vector Local's sources again and applies them, except an edit to the user's config that would loosen it: that
- * keeps the policy the owner last let apply until `confirmLocal`. The watcher calls this, and so should anything that
- * has just written the user's config.
+ * Reads Vector Local's sources again and applies them, except the part of a change that would loosen it: that keeps
+ * the stricter setting in effect until `confirmLocal`. The watcher calls this, and so should anything that has just
+ * written the user's config.
  */
 export function refreshLocal() {
   const next = evaluateLocal()
   const changed = JSON.stringify(next.policy) !== JSON.stringify(localState.policy)
-  const asked =
-    next.pending !== undefined &&
-    JSON.stringify([next.pending.changes, next.pending.proposed]) !==
-      JSON.stringify(localState.pending && [localState.pending.changes, localState.pending.proposed])
+  const asked = next.pending !== undefined && pendingKey(next.pending) !== pendingKey(localState.pending)
   localState.policy = next.policy
   localState.pending = next.pending
-  localState.confirmed = { block: next.confirmed }
-  saveLocalConfirmed(next.confirmed)
+  localState.confirmed = next.confirmed
+  saveLocalConfirmed(next.confirmed.user)
   // Children inherit the floor of the policy in effect, and the agent marker: every untrusted child of this process
   // may be the agent or a program it started.
   ChildEnvironment.inherit({ local: next.policy, agent: true })
@@ -603,31 +621,60 @@ export function refreshLocal() {
     localState.listeners.forEach((listener) =>
       listener({ type: "loosening", policy: next.policy, proposed: pending.proposed, changes: pending.changes }),
     )
-    GlobalBus.emit("event", {
-      directory: "global",
-      payload: {
-        type: TuiEvent.ToastShow.type,
-        properties: {
-          title: "Vector Local change held",
-          // Nothing can confirm it yet: the app's dialog and `vector local` come with the Local API (next release).
-          message: `A change to your config would loosen Vector Local: it ${pending.changes.join(", ")}. Vector keeps the stricter setting. Confirming a change like this in the app or a terminal comes in the next release.`,
-          variant: "warning",
-          duration: 15_000,
-        },
-      },
-    })
+    toastHeldLocal(pending)
   }
   return next.policy
 }
 
 /**
- * Lets the held edit apply. Only the owner's own answer may lead here, from the app's confirmation dialog or a prompt
- * in a terminal, never the agent: `vector local` refuses under the agent marker.
+ * Lets the held change apply. Only the owner's own answer may lead here, from the app's confirmation dialog or a
+ * prompt in a terminal, never the agent: a process under the agent marker cannot confirm, and `vector local` refuses
+ * there too.
  */
 export function confirmLocal() {
   const pending = localState.pending
-  if (pending) localState.confirmed = { block: pending.block }
+  if (pending && !agentMarked()) localState.confirmed = pending.inputs
   return refreshLocal()
+}
+
+/**
+ * Announces a held change once a repository's config loads. The first resolution runs when this module loads, before
+ * anything listens, so a change held at start would otherwise go unannounced.
+ */
+function announceHeldLocal() {
+  const pending = localState.pending
+  if (!pending || pendingKey(pending) === localState.announced) return
+  localState.announced = pendingKey(pending)
+  toastHeldLocal(pending)
+}
+
+function toastHeldLocal(pending: LocalPending) {
+  // Confirming in the app or with `vector local` comes with the Local API; until then the owner applies a held change
+  // by starting again without the copy the next start compares with.
+  const apply = agentMarked()
+    ? "An agent or Vector's own terminal started this Vector, so it cannot apply a change like this."
+    : `To apply it, quit Vector, delete ${localConfirmedFile()} and start Vector again.`
+  GlobalBus.emit("event", {
+    directory: "global",
+    payload: {
+      type: TuiEvent.ToastShow.type,
+      properties: {
+        title: "Vector Local change held",
+        message: `A change to your config would loosen Vector Local: it ${pending.changes.join(", ")}. Vector applies the parts that make it stricter and holds the rest. ${apply}`,
+        variant: "warning",
+        duration: 15_000,
+      },
+    },
+  })
+}
+
+function pendingKey(pending: LocalPending | undefined) {
+  return pending && JSON.stringify([pending.changes, pending.proposed])
+}
+
+// Every untrusted child of a process that runs agents carries the marker, whatever its value.
+function agentMarked() {
+  return process.env[ChildEnvironment.AGENT_MARKER] !== undefined
 }
 
 export function subscribeLocal(listener: (change: LocalChange) => void) {
@@ -658,15 +705,30 @@ export function watchLocal() {
 function evaluateLocal() {
   const sources = readLocalSources()
   const start = localState.confirmed === undefined
-  const confirmed = localState.confirmed ? localState.confirmed.block : startConfirmed()
-  const proposed = resolveLocal(sources, sources.user)
+  const confirmed = localState.confirmed ?? startConfirmed(sources)
+  // A user block Vector cannot decode applies its fail-closed policy at once, and while a user file cannot be read at
+  // all the block in effect stays. Neither counts as let apply, so fixing it needs no confirmation.
+  const current = {
+    user: sources.failed || sources.readable ? sources.user : confirmed.user,
+    overrides: sources.overrides,
+  }
+  const proposed = resolveLocal(sources, current)
   const kept = resolveLocal(sources, confirmed)
-  // A user block Vector cannot decode applies its fail-closed policy (proposed) at once, and while a user file cannot be
-  // read at all the block the owner last let apply stays in effect. Neither counts as let apply, so fixing it needs no
-  // confirmation.
-  const changes = sources.readable ? loosening(kept, proposed) : []
+  const changes = sources.failed ? [] : heldChanges(kept, proposed, confirmed.user, current.user)
   const held = changes.length > 0
-  const policy = held || (!sources.readable && !sources.failed) ? kept : proposed
+  // A held change still applies where it tightens: on if either turns Local on, the stricter Web access, only what
+  // both list, and every site either denies.
+  const effect = held
+    ? {
+        user: stricterLocal(confirmed.user, current.user),
+        overrides: [
+          ...new Map(
+            [...confirmed.overrides, ...current.overrides].map((item) => [JSON.stringify(item), item]),
+          ).values(),
+        ],
+      }
+    : current
+  const policy = held ? resolveLocal(sources, effect) : proposed
   // A source Vector could not read at all might say anything, so where Vector Local was on it stays on with no web.
   const on = [policy, kept, ...(start ? [] : [localState.policy])].some((item) => item.enabled)
   return {
@@ -682,19 +744,69 @@ function evaluateLocal() {
             ],
           }
         : policy,
-    confirmed: held || !sources.readable ? confirmed : sources.user,
-    pending: held ? { proposed, changes, block: sources.user } : undefined,
+    confirmed: sources.failed ? confirmed : effect,
+    pending: held ? { proposed, changes, inputs: current } : undefined,
   }
 }
 
-// The block the last process let apply, read once, at start.
-function startConfirmed() {
+// What the last process let apply, read once, at start: the saved copy of the user's block, or the user's block as it
+// is now where there is no copy Vector can read. The overrides are read at start too. Under the agent marker the copy
+// is neither trusted nor read and the user's block counts for nothing, so the user's config (wherever XDG_CONFIG_HOME
+// points) can only tighten what this process inherited.
+function startConfirmed(sources: ReturnType<typeof readLocalSources>) {
+  if (agentMarked()) return { user: undefined, overrides: sources.overrides }
   const text = readLocalText(localConfirmedFile())
   const saved = text
     ? Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(LocalConfirmed))(text))
     : undefined
   localState.saved = saved && JSON.stringify(saved.local)
-  return saved?.local ?? undefined
+  if (saved) return { user: saved.local ?? undefined, overrides: sources.overrides }
+  return { user: sources.readable ? sources.user : undefined, overrides: sources.overrides }
+}
+
+/**
+ * What a change loosens: in the policy in effect, and in the user's own block as if it alone turned Vector Local on,
+ * so a change the environment or the company's policy hides today is held too. Nothing is held while Local is off.
+ */
+function heldChanges(
+  kept: LocalMode.Policy,
+  proposed: LocalMode.Policy,
+  before: ConfigLocalV1.Info | undefined,
+  after: ConfigLocalV1.Info | undefined,
+) {
+  if (!kept.enabled) return []
+  const own = (block: ConfigLocalV1.Info | undefined) => LocalPolicy.resolve({ global: { ...block, enabled: true } })
+  const changes = [
+    ...new Set([
+      ...loosening(kept, proposed),
+      ...(before?.enabled === true && after?.enabled !== true ? [LOCAL_OFF] : []),
+      ...loosening(own(before), own(after)),
+    ]),
+  ]
+  return changes.includes(LOCAL_OFF) ? [LOCAL_OFF] : changes
+}
+
+// The stricter of two user blocks, setting by setting. The rest of the block (pins, checks) is the newer one's.
+function stricterLocal(before: ConfigLocalV1.Info | undefined, after: ConfigLocalV1.Info | undefined) {
+  const endpoints = new Set((before?.endpoints ?? []).map((item) => LocalPolicy.origin(item) ?? item))
+  const allows = new Set((before?.allow ?? []).map(allowedKey))
+  const sites = new Set(before?.web_domains?.allow ?? [])
+  const web = before?.web || after?.web ? LocalPolicy.stricter(before?.web ?? "ask", after?.web) : undefined
+  return {
+    ...after,
+    enabled: before?.enabled === true || after?.enabled === true,
+    ...(web ? { web } : {}),
+    endpoints: (after?.endpoints ?? []).filter((item) => endpoints.has(LocalPolicy.origin(item) ?? item)),
+    allow: (after?.allow ?? []).filter((item) => allows.has(allowedKey(item))),
+    web_domains: {
+      allow: (after?.web_domains?.allow ?? []).filter((pattern) => sites.has(pattern)),
+      deny: [...new Set([...(before?.web_domains?.deny ?? []), ...(after?.web_domains?.deny ?? [])])],
+    },
+  } satisfies ConfigLocalV1.Info
+}
+
+function allowedKey(item: LocalMode.Allowed) {
+  return JSON.stringify([item.source, [...(item.hosts ?? [])].sort()])
 }
 
 function readLocalSources() {
@@ -710,17 +822,21 @@ function readLocalSources() {
     ...files.overrides.map(localFile),
   ].filter((item) => item !== undefined)
   const undecodable = (blocks: readonly LocalBlock[]) => blocks.some((item) => item.unreadable === "block")
-  const unread = [...managedBlocks, ...userBlocks, ...overrides].filter((item) => item.unreadable === "file")
+  const unreadFile = (blocks: readonly LocalBlock[]) => blocks.filter((item) => item.unreadable === "file")
+  // Company policy Vector cannot read, or cannot check who may change, might say anything, as one it cannot decode
+  // might: either keeps Vector Local on with Web access None, for every user, until it is fixed.
+  const managedUnread = [
+    ...managed.ignored.filter((item) => item.kind === "unreadable").map((item) => item.source),
+    ...unreadFile(managedBlocks).map((item) => item.source),
+  ]
   return {
-    managed: undecodable(managedBlocks) ? LOCAL_FAIL_CLOSED : mergeLocalBlocks(managedBlocks),
+    managed:
+      undecodable(managedBlocks) || managedUnread.length > 0 ? LOCAL_FAIL_CLOSED : mergeLocalBlocks(managedBlocks),
     user: undecodable(userBlocks) ? LOCAL_FAIL_CLOSED : mergeLocalBlocks(userBlocks),
     failed: undecodable(userBlocks),
-    // While a user file cannot be read, the block the owner last let apply stays the one to compare with.
+    // While a user file cannot be read, the block in effect stays the one to compare with.
     readable: !userBlocks.some((item) => item.unreadable),
-    unread: [
-      ...managed.ignored.filter((item) => item.kind === "unreadable").map((item) => item.source),
-      ...unread.map((item) => item.source),
-    ],
+    unread: unreadFile([...userBlocks, ...overrides]).map((item) => item.source),
     overrides: overrides.filter((item) => item.unreadable !== "file"),
     warnings: [
       ...managed.ignored.map((item) =>
@@ -736,7 +852,14 @@ function readLocalSources() {
           (item) =>
             `Vector could not read the local block in ${item.source}, so Vector Local stays on with Web access None until it is fixed.`,
         ),
-      ...unread.map((item) => `Vector could not read ${item.source}.`),
+      ...unreadFile([...managedBlocks, ...userBlocks, ...overrides]).map(
+        (item) => `Vector could not read ${item.source}.`,
+      ),
+      ...(managedUnread.length > 0
+        ? [
+            `Vector Local stays on with Web access None until Vector can read ${managedUnread.join(", ")}, which may hold your company's policy.`,
+          ]
+        : []),
     ],
   }
 }
@@ -826,12 +949,30 @@ function mergeLocalBlocks(blocks: readonly LocalBlock[]) {
   )
 }
 
-function resolveLocal(sources: ReturnType<typeof readLocalSources>, user: ConfigLocalV1.Info | undefined) {
-  const resolved = sources.overrides.reduce(
+function resolveLocal(sources: ReturnType<typeof readLocalSources>, inputs: LocalInputs) {
+  const resolved = inputs.overrides.reduce(
     tightenLocal,
-    LocalPolicy.resolve({ managed: sources.managed, global: user, env: process.env }),
+    LocalPolicy.resolve({ managed: sources.managed, global: inputs.user, env: process.env }),
   )
-  return { ...resolved, warnings: [...sources.warnings, ...resolved.warnings] }
+  // Only the desktop sets VECTOR_LOCAL_POLICY, for an engine it starts in WSL, and the desktop never runs under the
+  // agent marker. Under it anything could have set it, so it may still turn Local on and tighten Web access but adds
+  // no model server.
+  const forged = agentMarked() ? resolved.endpoints.filter((item) => item.from === "environment") : []
+  return {
+    ...resolved,
+    endpoints: resolved.endpoints.filter((item) => !forged.includes(item)),
+    warnings: [
+      ...new Set([
+        ...sources.warnings,
+        ...resolved.warnings,
+        ...(forged.length > 0
+          ? [
+              "Ignored the model servers in VECTOR_LOCAL_POLICY: an agent or Vector's own terminal started this Vector, so it cannot add one.",
+            ]
+          : []),
+      ]),
+    ],
+  }
 }
 
 // VECTOR_CONFIG_CONTENT and the config-path overrides may turn Vector Local on, pick a stricter Web access and add
@@ -882,11 +1023,10 @@ function tightenLocal(policy: LocalMode.Policy, override: LocalBlock): LocalMode
  */
 export function loosening(before: LocalMode.Policy, after: LocalMode.Policy) {
   if (!before.enabled) return []
-  if (!after.enabled) return ["turns Vector Local off"]
+  if (!after.enabled) return [LOCAL_OFF]
   const endpoint = (item: LocalMode.Endpoint) => `${item.from} ${LocalPolicy.origin(item.origin) ?? item.origin}`
-  const allowed = (item: LocalMode.Allowed) => JSON.stringify([item.source, [...(item.hosts ?? [])].sort()])
   const endpoints = new Set(before.endpoints.map(endpoint))
-  const allows = new Set(before.allow.map(allowed))
+  const allows = new Set(before.allow.map(allowedKey))
   return [
     ...(LocalPolicy.stricter(after.web, before.web) !== after.web
       ? [`sets Web access to ${LOCAL_WEB_LABELS[after.web]}`]
@@ -894,7 +1034,7 @@ export function loosening(before: LocalMode.Policy, after: LocalMode.Policy) {
     ...after.endpoints
       .filter((item) => !endpoints.has(endpoint(item)))
       .map((item) => `adds the model server ${item.origin}`),
-    ...after.allow.filter((item) => !allows.has(allowed(item))).map((item) => `allows ${item.source}`),
+    ...after.allow.filter((item) => !allows.has(allowedKey(item))).map((item) => `allows ${item.source}`),
     ...after.web_domains.allow
       .filter((pattern) => !before.web_domains.allow.includes(pattern))
       .map((pattern) => `lets web pages reach ${pattern}`),
@@ -906,7 +1046,9 @@ export function loosening(before: LocalMode.Policy, after: LocalMode.Policy) {
 
 function saveLocalConfirmed(block: ConfigLocalV1.Info | undefined) {
   const text = JSON.stringify(block ?? null)
-  if (text === localState.saved) return
+  // A process under the agent marker never writes the copy a later start trusts: it never read it, and the user's
+  // config it read may be the agent's.
+  if (agentMarked() || text === localState.saved) return
   const file = localConfirmedFile()
   const temporary = `${file}.${process.pid}.${Date.now()}.tmp`
   // Best effort: a copy that cannot be written only means the next start compares with an older block, or with none.
@@ -1610,6 +1752,7 @@ const layer = Layer.effect(
         }
 
         if (ignoredRunBudgets.length) yield* noticeIgnoredRunBudgets(workspace, ctx.project.id, ignoredRunBudgets)
+        announceHeldLocal()
 
         const settings = WorkspaceTrust.hasInputs(trustSnapshot)
         const desktop = Flag.VECTOR_CLIENT === "desktop"
