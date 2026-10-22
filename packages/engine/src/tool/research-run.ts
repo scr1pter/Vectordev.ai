@@ -260,7 +260,8 @@ const layer = Layer.effect(
         !entry.private && (entry.kind === "preference" || entry.kind === "review")
       const files = brain.files()
       const memory = guest ? "" : yield* text(files.memory)
-      const rules = yield* text(files.rules)
+      // The owner's rules and the repository's own rules files, which every digest carries.
+      const rules = yield* Effect.forEach([files.rules, ...where.sources.map((source) => source.path)], text)
 
       // Document cards and passages the run was shown: a private document's are private, the repository's the work.
       const cards = [
@@ -308,7 +309,7 @@ const layer = Layer.effect(
           ...sources.closed,
         ].filter(Boolean),
         work: [
-          rules,
+          ...rules,
           ...entries.filter(habit).map((entry) => entry.text),
           ...card(false),
           ...outputs(["read", "grep", "glob", "list"]),
