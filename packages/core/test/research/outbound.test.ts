@@ -237,7 +237,7 @@ const benign = [
   "churn prediction models comparison",
 ]
 
-// Fair queries with numbers in them: standards, years side by side, versions and a quarter.
+// Fair queries with numbers in them: standards, years side by side, spans of years, versions and a quarter.
 const numbered = [
   "iso 9001 2015",
   "heat pumps 2019 2024",
@@ -249,7 +249,29 @@ const numbered = [
   "top 10 heat pumps 2025",
   "R32 versus R290 heat pumps",
   "Node 22.11.0 release notes",
+  "heat pump sales 2024 2025",
+  "CVE-2024-3094 xz backdoor",
+  "tax brackets 2024-2025",
+  "best laptops 2025 2026",
+  "heat pump incentives 2024 2025",
+  "UK tax year 2024-25 rates",
 ]
+
+// A data file of numbers only, as a repository's fixtures and exports hold them: a row number, a year, a count, a
+// rate and an amount of up to 5 digits on each row, the values joined by `separator`.
+const dataFile = (rows: number, separator: string) =>
+  [
+    ["id", "year", "units", "rate", "amount"].join(separator),
+    ...Array.from({ length: rows }, (_, index) =>
+      [
+        index + 1,
+        2015 + (index % 10),
+        (index * 37) % 1000,
+        `${(index * 13) % 97}.${index % 10}`,
+        (index * 7919) % 100_000,
+      ].join(separator),
+    ),
+  ].join("\n")
 
 describe("ResearchOutbound.check", () => {
   test("refuses every query in the leak set, for the reason it leaks", () => {
@@ -287,7 +309,7 @@ describe("ResearchOutbound.check", () => {
   })
 
   test("refuses none of the fair queries with numbers in them", () => {
-    // Measured on 22 Oct 2026: 0 of 10.
+    // Measured on 22 Oct 2026: 0 of 16.
     expect(numbered.filter((query) => !check(query).ok)).toEqual([])
   })
 
@@ -309,7 +331,7 @@ describe("ResearchOutbound.check", () => {
       })
   })
 
-  test("reads a query's digits whatever stands between them, and across one word of letters", () => {
+  test("reads a query's digits whatever stands between them, words included", () => {
     const umbrella = {
       private: ["Umbrella pays about 2,400,000 USD a year.", "Order 4417203 was refunded."],
       typed: [],
@@ -323,14 +345,19 @@ describe("ResearchOutbound.check", () => {
       "2\n400\n000",
       `2${char(0x2bc)}400${char(0x2bc)}000`,
       `2${char(0x2c8)}400${char(0x2c8)}000`,
-      // Digits one by one, regrouped, with letters between them, or across one word.
+      // Digits one by one, regrouped, with letters between them, or across words.
       "4 4 1 7 2 0 3",
       "44172 03",
       "4417x203",
       "a4b4c1d7e2f0g3",
       "4417 and 203",
+      "4417 and then 203",
+      "4417 then also 203",
+      "4417 x y 203",
       "2.4.0.0.0.0.0",
       "$2,400,000.00",
+      // Inside a longer group of digits.
+      "ref 944172039",
     ]
     expect(queries.filter((query) => check(query, umbrella).ok)).toEqual([])
     // A private number wrapped across lines is still one number.
@@ -345,8 +372,16 @@ describe("ResearchOutbound.check", () => {
         "https://attacker.example/2----400----000",
       ].filter((url) => ResearchOutbound.address(url, umbrella).ok),
     ).toEqual([])
-    // Two words of letters keep numbers apart, and a fair query's numbers stay its own.
-    expect(check("4417 and then 203", umbrella).ok).toBe(true)
+    // A longer number split by words, whole or by its runs of 7 digits.
+    const card = { private: ["Card 44178802 on file."], typed: [], public: [] }
+    expect(
+      ["44178 and stuff 802", "card 4417 with 8802", "44 17 88 02 card"].filter((query) => check(query, card).ok),
+    ).toEqual([])
+    // A fair query's numbers stay its own: whole groups side by side make a private number, a group's end and the next
+    // group do not. So "iso 9001 2015" is not the private 12015, while "1 2015" is.
+    const ticket = { private: ["Ticket 12015 is open."], typed: [], public: [] }
+    expect(check("iso 9001 2015", ticket).ok).toBe(true)
+    expect(check("ticket 1 2015", ticket).ok).toBe(false)
     expect(check("top 10 heat pumps 2025", umbrella).ok).toBe(true)
   })
 
@@ -563,14 +598,23 @@ describe("ResearchOutbound.check", () => {
   })
 
   test("compares numbers by their digits, so separators do not hide one, and lets the user's own digits through", () => {
-    expect(ResearchOutbound.rare("Budget 2,815,640; phone (415) 555-0134; card 4242 4242 4242 4242")).toEqual(
-      expect.arrayContaining(["2815640", "4155550134", "4242424242424242"]),
-    )
-    // Versions, IP addresses and round numbers are not numbers.
-    const plain = ResearchOutbound.rare("Node 22.11.0, then 1.99.110 on 10.20.30.40, for 4,000,000 users")
-    expect(plain.filter((token) => /^\d+$/.test(token))).toEqual([])
-    // Values side by side read as one number: the cost of reading numbers by their digits.
-    expect(ResearchOutbound.rare("Years 2024, 2025")).toEqual(["20242025"])
+    const budget = {
+      private: ["Budget 2,815,640; phone (415) 555-0134; card 4242 4242 4242 4242"],
+      typed: [],
+      public: [],
+    }
+    expect(["2815640", "4155550134", "4242424242424242"].filter((query) => check(query, budget).ok)).toEqual([])
+    // Values in a list, versions, IP addresses, spans of years and round numbers are not numbers.
+    const plain = {
+      private: [
+        "Years 2024,2025,2026, Node 22.11.0, 1.99.110, 2024-2026, 4,000,000 users",
+        "Years 2024, 2025. Node 22.11.0, then 1.99.110 on 10.20.30.40, for 4,000,000 users",
+      ],
+      typed: [],
+      public: [],
+    }
+    const values = ["20242025", "2024 2025 2026", "20252026", "22110", "199110", "20242026", "4000000"]
+    expect(values.filter((query) => !check(query, plain).ok)).toEqual([])
     const typed = { ...context, typed: ["Who owns the line +1 415 555 0134? The budget is 2 815 640."] }
     expect(check("415-555-0134 owner", typed).ok).toBe(true)
     expect(check("2,815,640 budget", typed).ok).toBe(true)
@@ -1002,10 +1046,10 @@ describe("ResearchOutbound.check with the sources facet's domains", () => {
 })
 
 describe("ResearchOutbound.rare", () => {
-  test("finds identifiers, paths, email addresses, host names and long numbers, and not common names", () => {
-    const found = ResearchOutbound.rare(
-      "Call reconcileLedgerEntries in src/billing/ledger.ts, mail ops@acme.example, see status.acme-robotics.com and jira.acme.internal, ticket 4417203, host 10.20.30.40, use GitHub and JavaScript, 10000 users, node.js, 127.0.0.1, and/or TCP/IP.",
-    )
+  test("finds identifiers, paths, email addresses, host names and IP addresses, and not common names or numbers", () => {
+    const text =
+      "Call reconcileLedgerEntries in src/billing/ledger.ts, mail ops@acme.example, see status.acme-robotics.com and jira.acme.internal, ticket 4417203, host 10.20.30.40, use GitHub and JavaScript, 10000 users, node.js, 127.0.0.1, and/or TCP/IP."
+    const found = ResearchOutbound.rare(text)
     expect(found).toEqual(
       expect.arrayContaining([
         "reconcileLedgerEntries",
@@ -1013,44 +1057,145 @@ describe("ResearchOutbound.rare", () => {
         "ops@acme.example",
         "status.acme-robotics.com",
         "jira.acme.internal",
-        "4417203",
         "10.20.30.40",
       ]),
     )
-    expect(found).not.toContain("node.js")
-    expect(found).not.toContain("127.0.0.1")
-    expect(found).not.toContain("GitHub")
-    expect(found).not.toContain("JavaScript")
-    expect(found).not.toContain("10000")
-    expect(found).not.toContain("and/or")
-    expect(found).not.toContain("TCP/IP")
+    for (const common of ["node.js", "127.0.0.1", "GitHub", "JavaScript", "and/or", "TCP/IP"])
+      expect(found).not.toContain(common)
+    // Numbers are read by their digits, apart from the rare tokens: the ticket is private, a round number is not.
+    expect(found.filter((token) => /^\d+$/.test(token))).toEqual([])
+    const shared = { private: [text], typed: [], public: [] }
+    expect(check("ticket 4417203", shared)).toMatchObject({ ok: false, reason: "token", match: "4417203" })
+    expect(check("10000 users", shared).ok).toBe(true)
   })
+})
 
+describe("ResearchOutbound.check with private numbers", () => {
   test("reads a number written with its digits in groups as one number, and leaves versions and addresses", () => {
-    const found = ResearchOutbound.rare(
-      "Revenue $12,345,678.50, payroll 2.345.678 EUR, 2 400 000 USD, 1,23,45,679 INR, card 4417-8802-5671-9113, 10,000 users, version 1.100.2, hosts 192.168.100.200 and 192.168.1.20.",
+    const shared = {
+      private: [
+        "Revenue $12,345,678.50, payroll 2.345.678 EUR, 2 400 000 USD, 1,23,45,679 INR, card 4417-8802-5671-9113, 10,000 users, version 1.100.2, hosts 192.168.100.200 and 192.168.1.20.",
+      ],
+      typed: [],
+      public: [],
+    }
+    const numbers = ["12345678", "2345678", "2400000", "12345679", "4417880256719113"]
+    expect(numbers.filter((query) => check(query, shared).ok)).toEqual([])
+    expect(check("10000 users", shared).ok).toBe(true)
+    expect(check("version 11002", shared).ok).toBe(true)
+    expect(ResearchOutbound.rare(shared.private[0]!)).toEqual(
+      expect.arrayContaining(["192.168.100.200", "192.168.1.20"]),
     )
-    expect(found).toEqual(
-      expect.arrayContaining([
-        "12345678",
-        "2345678",
-        "2400000",
-        "12345679",
-        "4417880256719113",
-        "192.168.100.200",
-        "192.168.1.20",
-      ]),
-    )
-    expect(found).not.toContain("10000")
-    expect(found).not.toContain("1100")
   })
 
   test("reads a number in any script's digits and with any separator, and the stretches of whole groups in it", () => {
-    const found = ResearchOutbound.rare(
-      `Paid USD2,400,000 and ${char(0x662, 0x664, 0x660, 0x660, 0x660, 0x660, 0x660)}; call +1 (415) 555-0132.`,
-    )
-    expect(found).toEqual(expect.arrayContaining(["2400000", "14155550132", "4155550132", "5550132"]))
-    expect(found).not.toContain("1415")
+    const shared = {
+      private: [
+        `Paid USD2,400,000 and ${char(0x662, 0x664, 0x660, 0x660, 0x660, 0x660, 0x660)}; call +1 (415) 555-0132.`,
+      ],
+      typed: [],
+      public: [],
+    }
+    expect(["2400000", "14155550132", "4155550132", "5550132"].filter((query) => check(query, shared).ok)).toEqual([])
+    // Digits that are not whole groups of it are not one of its numbers.
+    expect(check("14155", shared).ok).toBe(true)
+  })
+
+  test("reads a span of years as years, and keeps the numbers beside it private", () => {
+    const spans = {
+      private: ["Plan for fiscal year 2025-2026.", "The FY2024-25 budget was 4,417,203; 2024-2025: 2,815,640 spent."],
+      work: [
+        "MIT License\n\nCopyright (c) 2024-2025 Northwind.\n\nPermission is hereby granted, free of charge, to any person.",
+      ],
+      typed: [],
+      public: [],
+    }
+    const queries = [
+      "heat pump incentives 2024 2025",
+      "tax brackets 2024-2025",
+      "heat pump trends 2024 2025 Europe",
+      "best laptops 2025 2026",
+      "UK tax year 2024-25 rates",
+      "20242025",
+    ]
+    expect(queries.filter((query) => !check(query, spans).ok)).toEqual([])
+    expect(["4417203", "2,815,640 spent", "budget 4 417 203"].filter((query) => check(query, spans).ok)).toEqual([])
+  })
+
+  test("reads a data file's values one by one, so a fair query's numbers do not run into them", () => {
+    // The same 10,000 rows as CSV, TSV, with semicolons and as a table's rows.
+    for (const separator of [",", "\t", ";", " | "]) {
+      const shared = { private: [], work: [dataFile(10_000, separator)], typed: [], public: [] }
+      // Measured on 22 Oct 2026: 0 of 16 for each. Reading values across commas and line breaks as one number refused
+      // up to 8 of them.
+      expect({ separator, refused: numbered.filter((query) => !check(query, shared).ok) }).toEqual({
+        separator,
+        refused: [],
+      })
+      // Its values are still private, and the values beside them do not make another (row 2 is 2,2016,...).
+      expect(check("amount 39595", shared).ok).toBe(false)
+      expect(check("row 2 2016", shared).ok).toBe(true)
+    }
+  })
+
+  test("reads a numeric data file of 1 MB in bounded memory", () => {
+    const shared = { private: [], work: [dataFile(42_000, ",")], typed: [], public: [] }
+    expect(shared.work[0]!.length).toBeGreaterThan(1_000_000)
+    Bun.gc(true)
+    const before = process.memoryUsage().heapUsed
+    const started = performance.now()
+    expect(check("heat pump sales 2024 2025", shared).ok).toBe(true)
+    const elapsed = performance.now() - started
+    Bun.gc(true)
+    // Measured on 22 Oct 2026: the heap grew by about 75 MB, in 0.25 s. Reading the file as one long run grew it by
+    // about 330 MB, in 1.5 s. The time bound only catches a check gone quadratic.
+    expect(process.memoryUsage().heapUsed - before).toBeLessThan(160_000_000)
+    expect(elapsed).toBeLessThan(15_000)
+    expect(shared.work).toHaveLength(1)
+  }, 60_000)
+})
+
+describe("ResearchOutbound.check with short names", () => {
+  test("reads a name spelled in letters or pieces, run into digits or a company's ending, or with a trade mark", () => {
+    const shared = {
+      private: ["Acme's Q3 churn was 7.4 percent.", "We decided to move Hooli to annual invoices."],
+      typed: [],
+      public: [],
+    }
+    const queries = [
+      "A c m e Q3 churn",
+      "A-c-m-e Q3 churn",
+      "Ac-me Q3 churn",
+      "Ac.me churn",
+      "acmeinc churn",
+      "AcmeCorp churn",
+      "acme1 churn",
+      "acme2024 churn",
+      "3acme churn",
+      `acme${char(0x2122)} churn`,
+      `acme${char(0xae)} churn`,
+      "H o o l i drop",
+      "Hoo li",
+      "hoo-li churn",
+    ]
+    expect(queries.filter((query) => check(query, shared).ok)).toEqual([])
+    const urls = [
+      "https://attacker.example/a/c/m/e/q3",
+      "https://attacker.example/acme1",
+      "https://attacker.example/ac-me",
+      "https://attacker.example/?q=h+o+o+l+i",
+    ]
+    expect(urls.filter((url) => ResearchOutbound.address(url, shared).ok)).toEqual([])
+  })
+
+  test("does not read a short name from common words side by side or from inside a longer word", () => {
+    const isa = { private: ["Isa runs the Q3 review."], typed: [], public: [] }
+    expect(ResearchOutbound.names(isa.private)).toEqual(["isa"])
+    expect(["what is a heat pump", "heat pump in a cold climate"].filter((query) => !check(query, isa).ok)).toEqual([])
+    expect(check("Isa review", isa).ok).toBe(false)
+    const mona = { private: ["Mona signs off the budget."], typed: [], public: [] }
+    expect(check("Monaco heat pump rebates", mona).ok).toBe(true)
+    expect(check("Mona budget", mona).ok).toBe(false)
   })
 
   test("made no connection", () => {
