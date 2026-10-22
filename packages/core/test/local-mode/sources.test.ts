@@ -130,6 +130,40 @@ describe("LocalSources registry", () => {
     expect(LocalPolicy.hostMatches("my-aiplatform.googleapis.com", "*-aiplatform.googleapis.com")).toBe(true)
   })
 
+  test("refuses the cloud AI hosts the foundations review found accepted, and keeps a company's own server", () => {
+    const hosts = [
+      "https://api.individual.githubcopilot.com",
+      "https://api.business.githubcopilot.com",
+      "https://codestral.mistral.ai",
+      "https://ai-gateway.vercel.sh",
+      "https://api.together.ai",
+      "https://bedrock-agent-runtime.us-east-1.amazonaws.com",
+      "https://vpce-0a1b2c3d-4e5f.bedrock-runtime.us-east-1.vpce.amazonaws.com",
+      "https://my-endpoint.eastus.inference.ai.azure.com",
+      "https://api.replicate.com",
+      "https://api.studio.nebius.com",
+      "https://api.siliconflow.cn",
+      "https://api.moonshot.cn",
+      "https://dashscope-intl.aliyuncs.com",
+      "https://bedrock-mantle.us-east-1.api.aws",
+      "https://us-central1-aiplatform.googleapis.com",
+      "https://aiplatform.us-central1.rep.googleapis.com",
+    ]
+    const own = ["https://kimi.inference.corp.example.com", "https://gpu.example.com", "http://10.0.0.5:8000"]
+    const policy = LocalPolicy.resolve({ global: { enabled: true, endpoints: [...hosts, ...own] } })
+    expect(policy.endpoints.map((endpoint) => endpoint.origin)).toEqual(own)
+    expect(policy.warnings).toHaveLength(hosts.length)
+    // A general cloud is listed by its AI services' names, so a company's own server there is still its own.
+    for (const host of ["ec2-3-4-5-6.compute-1.amazonaws.com", "myapp.azurewebsites.net", "storage.googleapis.com"])
+      expect({
+        host,
+        refused: LocalSources.CLOUD_INFERENCE_HOSTS.some((pattern) => LocalPolicy.hostMatches(host, pattern)),
+      }).toEqual({
+        host,
+        refused: false,
+      })
+  })
+
   test("adds every cloud provider address in the model catalog, and none on this computer or the network", () => {
     const hosts = LocalSources.cloudHosts({
       newcloud: { api: "https://api.newcloud.example/v1" },

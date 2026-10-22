@@ -347,6 +347,15 @@ describe("LocalPolicy.hostClass", () => {
       expect({ host, class: LocalPolicy.hostClass(host) }).toEqual({ host, class: "internet" })
   })
 
+  test("judges a whole name: a % is a zone on an IPv6 address and nowhere else", () => {
+    for (const host of ["localhost%.evil.example", "127.0.0.1%evil.example", "localhost%25", "fe80::1%en0%x", "::1%"])
+      expect({ host, name: LocalPolicy.host(host) }).toEqual({ host, name: undefined })
+    for (const host of ["localhost%.evil.example", "127.0.0.1%evil.example"])
+      expect({ host, class: LocalPolicy.hostClass(host) }).toEqual({ host, class: "internet" })
+    expect(LocalPolicy.host("fe80::1%en0")).toBe("fe80::1")
+    expect(LocalPolicy.hostClass("[::1%lo0]")).toBe("this-computer")
+  })
+
   test("normalises punycode and case, so a look-alike name is not this computer", () => {
     expect(LocalPolicy.host("Bücher.Example")).toBe("xn--bcher-kva.example")
     // "localhost" with a Cyrillic o (U+043E): a single-label name on the network, never this computer.
