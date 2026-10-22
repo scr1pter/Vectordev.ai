@@ -1689,9 +1689,10 @@ const layer = Layer.effect(
       Effect.gen(function* () {
         const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
-        const modelCatalog = Object.fromEntries(
-          Object.entries(yield* modelCatalogSvc.get()).filter(([id]) => providerAllowed(id)),
-        )
+        const loaded = yield* modelCatalogSvc.get()
+        // Under Vector Local, a catalog provider's cloud address cannot be listed as one of the user's model servers.
+        Config.localCatalog(loaded)
+        const modelCatalog = Object.fromEntries(Object.entries(loaded).filter(([id]) => providerAllowed(id)))
         const catalogIDs = Object.fromEntries(Object.keys(modelCatalog).map((id) => [id, true as const]))
         const catalog = new Map<string, Info>()
         const freeCatalog = yield* freeModels.catalog()

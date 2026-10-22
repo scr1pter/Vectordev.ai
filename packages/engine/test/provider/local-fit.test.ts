@@ -1,14 +1,19 @@
 import { afterEach, expect } from "bun:test"
+import { rmSync, writeFileSync } from "fs"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
+import path from "path"
 import { streamText } from "ai"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { Global } from "@vectordevai/core/global"
 import { Effect } from "effect"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { disposeAllInstances, provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { Config } from "@/config/config"
 import { Env } from "@/env"
 import { Plugin } from "@/plugin"
 import { Provider } from "@/provider/provider"
@@ -242,6 +247,39 @@ it.live("a cloud API gets no permits, no new timeouts and no reply limit of its 
       }),
     { trusted: true, config: config("http://127.0.0.1:1/v1", { cloud: true }) },
   ),
+)
+
+it.live(
+  "a cloud AI service in the model catalog stops being one of the user's model servers once providers load",
+  () => {
+    // In the test catalog (scaleway) and not in the registry's own list of cloud AI hosts.
+    const scaleway = "https://api.scaleway.ai"
+    const globalFile = path.join(Global.Path.config, "vector.json")
+    expect(LocalPolicy.resolve({ global: { endpoints: [scaleway] } }).endpoints).toEqual([
+      { origin: scaleway, from: "user" },
+    ])
+    return provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          writeFileSync(globalFile, JSON.stringify({ local: { endpoints: [scaleway] } }))
+          Config.refreshLocal()
+          const provider = yield* Provider.Service
+          yield* provider.list()
+          expect(Config.local().endpoints).toEqual([])
+          expect(Config.local().warnings).toContain(
+            `Ignored ${scaleway}: it is a cloud AI service, not a server you host. Your company's policy can list it.`,
+          )
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              rmSync(globalFile, { force: true })
+              Config.refreshLocal()
+            }),
+          ),
+        ),
+      { trusted: true },
+    )
+  },
 )
 
 // One streamed request through the provider; resolves with the reply's text. `priority` is what the session processor

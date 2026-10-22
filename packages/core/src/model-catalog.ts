@@ -29,6 +29,14 @@ export const modeSupported = ModelCatalog.modeSupported
 
 declare const VECTOR_MODEL_CATALOG: Record<string, Provider> | undefined
 
+/**
+ * The catalog this build carries, undefined in a build without one. The build substitutes an object literal for the
+ * name, so this is the only place that names it: one copy in the bundle, allocated only when something asks for it.
+ */
+export function bundled() {
+  return typeof VECTOR_MODEL_CATALOG === "undefined" ? undefined : VECTOR_MODEL_CATALOG
+}
+
 export interface Interface {
   readonly get: () => Effect.Effect<Record<string, Provider>>
   readonly refresh: (force?: boolean) => Effect.Effect<void>
@@ -163,10 +171,11 @@ const layer = Layer.effect(
       }),
     )
 
-    // The build substitutes an object literal; allocate it only when disk data is unavailable.
-    const loadSnapshot = Effect.suspend(() =>
-      typeof VECTOR_MODEL_CATALOG === "undefined" ? Effect.succeed(undefined) : decode(VECTOR_MODEL_CATALOG),
-    )
+    // Allocate the bundled catalog only when disk data is unavailable.
+    const loadSnapshot = Effect.suspend(() => {
+      const snapshot = bundled()
+      return snapshot === undefined ? Effect.succeed(undefined) : decode(snapshot)
+    })
 
     const store = Effect.fn("ModelCatalog.store")(function* (response: string) {
       const catalog = yield* decodeJson(response).pipe(Effect.flatMap(decode))
