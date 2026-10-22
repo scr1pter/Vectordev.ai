@@ -1087,8 +1087,10 @@ const layer = Layer.effect(
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "vector.json"), env))
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "vector.jsonc"), env))
 
-      // Config.local() is the only reader of Vector Local's settings.
-      return omit(result, ["local"])
+      // The user's own files as written, local block included: an update replaces a list, so adding a model server to
+      // the user's list starts from this one, and the servers they listed have no per-token price. What Vector Local
+      // is in effect comes only from Config.local(), and merge() keeps the block out of the merged config.
+      return result
     })
 
     const [cachedGlobal, invalidateGlobal] = yield* Effect.cachedInvalidateWithTTL(

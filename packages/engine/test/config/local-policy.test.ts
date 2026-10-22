@@ -297,6 +297,33 @@ describe("Egress decides with the policy in effect", () => {
   )
 })
 
+describe("the user's global config", () => {
+  it.instance(
+    "keeps its local block, so adding a model server keeps the others on the list",
+    Effect.gen(function* () {
+      const pins = { [SERVER]: { kind: "ollama" } }
+      writeGlobal({ endpoints: [SERVER], pins })
+      // GET /global/config serves this, and the app's Add server writes back the list it holds plus the new server,
+      // since an update replaces a list.
+      const global = yield* Config.use.getGlobal()
+      expect(global.local).toEqual({ endpoints: [SERVER], pins })
+      yield* Config.use.updateGlobal({
+        local: {
+          endpoints: [...(global.local?.endpoints ?? []), GPU_BOX],
+          pins: { ...global.local?.pins, [GPU_BOX]: { kind: "vllm" } },
+        },
+      })
+      expect(JSON.parse(readFileSync(globalFile, "utf8")).local.endpoints).toEqual([SERVER, GPU_BOX])
+      expect(Config.local().endpoints).toEqual([
+        { origin: SERVER, from: "user" },
+        { origin: GPU_BOX, from: "user" },
+      ])
+      // Only Config.local() says what Vector Local is: the merged config still carries no local block.
+      expect((yield* Config.use.get()).local).toBe(undefined)
+    }),
+  )
+})
+
 describe("repository config", () => {
   const repository = { local: { enabled: false, web: "ask" as const, endpoints: [GPU_BOX] } }
 
