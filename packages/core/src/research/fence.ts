@@ -47,9 +47,10 @@ const LESS_THAN =
 // and dropped inside a name.
 const SLASH = /[\\/\u2044\u2215\u2216\u2571\u29F5\u29F8\u29F9\uFE68\uFF0F\uFF3C]/
 // What a page can put between "<" and a name, or between the letters of one, that a model reads past: spaces,
-// slashes and backslashes, and characters that show nothing (joiners and every other default-ignorable one).
+// slashes and backslashes, characters that show nothing (joiners and every other default-ignorable one), and accents
+// and other combining marks over a name's letters, which a model reads the letters through.
 const SKIPPED_FIRST = /[\s\p{Default_Ignorable_Code_Point}]/u
-const DROPPED = /\p{Default_Ignorable_Code_Point}/u
+const DROPPED = /[\p{Default_Ignorable_Code_Point}\p{M}]/u
 
 // Letters from other scripts that look like the Latin ones Vector's tag names use. NFKC folds full-width and
 // mathematical letters already. Written by code point, so this file shows every character it holds.
@@ -262,8 +263,9 @@ function note(lines: readonly number[], what: "page" | "file") {
 }
 
 // The name a tag would have as a model reads it, from the text after a "<": spaces, slashes (a closing tag) and
-// backslashes before it skipped, characters that show nothing and Markdown's backslashes dropped from it, full-width
-// and other compatibility forms folded, look-alike letters read as Latin, and spaces and dashes read as underscores.
+// backslashes before it skipped, characters that show nothing, combining marks and Markdown's backslashes dropped from
+// it, full-width and other compatibility forms folded, accented letters read without their accents, look-alike letters
+// read as Latin, and spaces and dashes read as underscores.
 // It reads at most TAG_WINDOW characters of the name itself, so each "<" costs a bounded amount past what it skips.
 function tagName(text: string, start: number) {
   const chars: string[] = []
@@ -279,7 +281,7 @@ function tagName(text: string, start: number) {
   const after = chars.join("")
   const folded = /^[\x00-\x7f]*$/.test(after)
     ? after.toLowerCase()
-    : [...after.normalize("NFKC").toLowerCase()].map((char) => LOOK_ALIKE[char] ?? char).join("")
+    : [...after.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase()].map((char) => LOOK_ALIKE[char] ?? char).join("")
   return folded.replace(/[\s\u2010-\u2015\u2212\uFE58\uFE63-]+/g, "_")
 }
 

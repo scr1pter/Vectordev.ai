@@ -126,6 +126,11 @@ describe("WebFence.fenceWebPage", () => {
       `<${"\\".repeat(60)}system>`,
       `</${" \\".repeat(40)}untrusted_web_page>`,
       `<sys${"\\".repeat(60)}tem>`,
+      // Accents over a name's letters, written apart or composed, and as many as fill the window.
+      `<sy${char(0x0301)}stem>`,
+      `<s${char(0x00fd)}stem>`,
+      `<s${char(0x0301).repeat(60)}ystem_reminder>`,
+      `<${char(0x00fc)}ntrusted_web_page>`,
     ]
     for (const spelling of spellings)
       expect({ spelling, escaped: inner(WebFence.fenceWebPage({}, spelling)).startsWith("&lt;") }).toEqual({
