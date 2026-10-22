@@ -4,8 +4,8 @@ import {
   freeModelMayTrain,
   freeModelName,
   freeModelSource,
+  FREE_MODEL_TRAINING_DISCLAIMER,
   FREE_MODEL_TRAINING_SCOPE,
-  freeModelTrainingDisclaimer,
   freeModelTrainingLabel,
   freeModelTrainingRefusal,
   freeModelChoices,
@@ -55,7 +55,7 @@ export function DialogModel(props: { providerID?: string }) {
         if (!provider || isHiddenProvider(provider.id, provider)) return []
         const model = provider.models[item.modelID]
         if (!model || model.freeModel) return []
-        const title = freeModelName({ name: model.name ?? item.modelID })
+        const title = freeModelName({ id: model.id, name: model.name ?? item.modelID })
         return [
           {
             key: item,
@@ -90,7 +90,7 @@ export function DialogModel(props: { providerID?: string }) {
           filter(([_, info]) => info.status !== "deprecated"),
           filter(([_, info]) => (props.providerID ? info.providerID === props.providerID : true)),
           map(([model, info]) => {
-            const title = freeModelName({ name: info.name ?? model })
+            const title = freeModelName({ id: model, name: info.name ?? model })
             return {
               id: model,
               name: title,
@@ -264,7 +264,7 @@ export async function confirmFreeModelChoice(input: {
   if (!freeModelMayTrain(input.model)) return true
   const consent = await input.freeModels.consent().catch(() => undefined)
   if (consent?.data?.training === true) return true
-  const message = `${freeModelTrainingDisclaimer(input.model) ?? ""} ${FREE_MODEL_TRAINING_SCOPE}`
+  const message = `${FREE_MODEL_TRAINING_DISCLAIMER} ${FREE_MODEL_TRAINING_SCOPE}`
   if (!(await input.ask(freeModelTrainingLabel(input.model) ?? FREE_MODEL_TRAINING_LABEL, message))) return false
   const recorded = await input.freeModels.setConsent({ freeModelConsent: { training: true } }).catch(() => undefined)
   if (recorded?.data?.training === true) return true

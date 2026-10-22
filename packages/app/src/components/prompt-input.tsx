@@ -84,7 +84,7 @@ import { ImagePreview } from "@vectordevai/ui/image-preview"
 import type { ReferenceInfo } from "@vectordevai/sdk/v2/client"
 import { modelVariantDescription, modelVariantLabel, visibleModelVariants } from "@/context/model-variant"
 import { modelDisplayName } from "@/utils/provider-brand"
-import { freeModelTrainingLabel, freeModelTrainingNotice } from "@vectordevai/core/free-model-choice"
+import { freeModelTrainingLabel } from "@vectordevai/core/free-model-choice"
 import { detectParallelIntent } from "@/features/delegation/delegation"
 import { holdsHandoff } from "@/utils/composer-handoff"
 import { createOutcomes } from "@/features/economics/economics-repository"
@@ -1857,10 +1857,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return training ? `${language.t("command.model.choose")} · ${training}` : language.t("command.model.choose")
   }
 
-  // While a free model labelled "May train on your prompts" is selected, its disclaimer stays in view under the composer.
-  const trainingNotice = createMemo(() => {
+  // While a free model labelled "May train on your prompts" is selected, that label alone stays under the composer.
+  const trainingLabel = createMemo(() => {
     const current = props.controls.model.selection.current()
-    return current ? freeModelTrainingNotice(current) : undefined
+    return current ? freeModelTrainingLabel(current) : undefined
   })
 
   const modelControlState = createMemo<ComposerModelControlState>(() => ({
@@ -2683,11 +2683,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           </Show>
         </Match>
       </Switch>
-      <Show when={store.mode !== "shell" && trainingNotice()}>
-        {(notice) => (
-          <div data-component="free-model-training-notice" class="px-3 pt-2 text-12-regular text-text-weak" role="note">
-            <div>{notice().summary}</div>
-            <div>{notice().disclaimer}</div>
+      <Show when={store.mode !== "shell" && trainingLabel()}>
+        {(label) => (
+          <div data-component="free-model-training-notice" class="px-3 pt-2 text-12-regular" role="note">
+            {label()}
           </div>
         )}
       </Show>

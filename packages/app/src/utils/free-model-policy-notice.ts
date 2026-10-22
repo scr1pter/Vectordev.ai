@@ -5,7 +5,6 @@ import {
   FREE_MODELS_DATA_POLICY,
   FREE_MODELS_TITLE,
   freeModelMayTrain,
-  freeModelTrainingDisclaimer,
   freeModelTrainingRefusal,
   type FreeModelChoice,
 } from "@vectordevai/core/free-model-choice"
@@ -33,14 +32,16 @@ export function firstFreeModelPolicyNotice(
   return true
 }
 
-/** The one-time question before the first prompt to a free model whose provider may train on prompts. */
-export function freeModelTrainingNotice(model: Pick<FreeModelChoice, "freeModel">) {
-  return {
-    title: FREE_MODEL_TRAINING_LABEL,
-    description: `${freeModelTrainingDisclaimer(model) ?? FREE_MODEL_TRAINING_DISCLAIMER} ${FREE_MODEL_TRAINING_SCOPE}`,
-    accept: "Accept and send",
-    cancel: "Don't send",
-  }
+/**
+ * The one-time question before the first prompt to a free model whose provider may train on prompts. It is the one place
+ * that explains the label; every list and notice shows the label alone. The free router and unreviewed models are asked
+ * about the same way, since the acceptance covers every labelled model.
+ */
+export const FREE_MODEL_TRAINING_QUESTION = {
+  title: FREE_MODEL_TRAINING_LABEL,
+  description: `${FREE_MODEL_TRAINING_DISCLAIMER} ${FREE_MODEL_TRAINING_SCOPE}`,
+  accept: "Accept and send",
+  cancel: "Don't send",
 }
 
 /**

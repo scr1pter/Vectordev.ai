@@ -1249,7 +1249,7 @@ test("OpenRouter free reviews have an explicit no-charge estimate", () => {
   expect(costKindOf({ id: "openrouter" }, { input: 1, output: 0 }, "acme/coder:free")).toBe("priced")
   expect(costKindOf({ id: "vector" }, { input: 0, output: 0 }, "acme/coder:free")).toBe("free")
   expect(estimateText({ files: 51, model: "openrouter/acme/coder:free", costKind: "free" })).toBe(
-    "This pull request changes 51 files. It runs on openrouter/acme/coder through OpenRouter at no charge.",
+    "This pull request changes 51 files. It runs on openrouter/acme/coder at no charge.",
   )
 })
 

@@ -2036,8 +2036,7 @@ export function estimateText(estimate: ReviewEstimate) {
   const model = estimate.model ?? "your default model"
   if (estimate.low !== undefined && estimate.high !== undefined)
     return `${size} With ${model} a review costs about ${formatUsd(estimate.low)}–${formatUsd(estimate.high)}.`
-  if (estimate.costKind === "free")
-    return `${size} It runs on ${model.replace(/:free$/, "")} through OpenRouter at no charge.`
+  if (estimate.costKind === "free") return `${size} It runs on ${model.replace(/:free$/, "")} at no charge.`
   if (estimate.costKind === "plan")
     return `${size} It runs on ${model} through your subscription sign-in, with no per-token price.`
   return `${size} No price is listed for ${model}, so Vector cannot estimate what it costs.`

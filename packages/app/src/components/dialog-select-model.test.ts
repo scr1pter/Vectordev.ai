@@ -10,12 +10,32 @@ import {
   modelAriaLabel,
   modelDisplayName,
   modelTitle,
+  pickerHeaderKey,
+  pickerKeyAction,
   pickerKeys,
   pickerModelKey,
+  pickerNavigation,
+  pickerSectionViews,
+  readOpenSections,
   releaseTitle,
   showRowAccess,
+  toggleOpenSection,
+  writeOpenSections,
   type PickerModel,
 } from "../utils/provider-brand"
+import {
+  FREE_MODEL_TRAINING_LABEL,
+  FREE_MODELS_SHARED_COPY,
+  FREE_MODELS_SIGN_IN,
+  FREE_MODELS_UNAVAILABLE,
+  FREE_MODEL_TRAINING_CONSENT_REQUIRED,
+  FREE_MODEL_UNLISTED,
+  FREE_ROUTER_NAME,
+  freeModelName,
+  freeModelsLimitMessage,
+  freeModelTrainingLabel,
+} from "@vectordevai/core/free-model-choice"
+import { FREE_MODEL_TRAINING_QUESTION } from "../utils/free-model-policy-notice"
 
 const DAY = 86_400_000
 const NOW = Date.UTC(2026, 8, 11)
@@ -574,20 +594,24 @@ describe("Free models inside of Vector", () => {
       [shared, own],
       [own, shared],
     ]) {
-      const sections = buildModelSections({
+      const sections = buildModelSections({ models, now: NOW })
+      expect(sections.map((section) => section.label)).toEqual(["Free models inside of Vector"])
+      expect(pickerKeys(sections)).toEqual([pickerModelKey(shared), pickerModelKey(own)])
+      // The current one sits in Recently used, on top, and is not repeated below.
+      const recent = buildModelSections({
         models,
         now: NOW,
         currentKey: pickerModelKey(shared),
         recentKeys: [pickerModelKey(shared)],
       })
-      expect(sections.map((section) => section.label)).toEqual(["Free models inside of Vector"])
-      expect(pickerKeys(sections)).toEqual([pickerModelKey(shared), pickerModelKey(own)])
+      expect(recent.map((section) => section.label)).toEqual(["Recently used", "Free models inside of Vector"])
+      expect(pickerKeys(recent)).toEqual([pickerModelKey(shared), pickerModelKey(own)])
     }
     expect(modelDisplayName(own)).toBe("Maker Coder")
     expect(modelTitle(own)).toContain("Your OpenRouter account")
     expect(modelTitle(shared)).toContain("Provided by Vector")
   })
-  test('a model whose provider may train says "May train on your prompts" on its row, tooltip and spoken label', () => {
+  test('a model whose provider may train shows only "May train on your prompts", on its row, tooltip and spoken label', () => {
     const laguna = {
       ...own,
       id: "poolside/laguna-s-2.1:free",
@@ -599,18 +623,238 @@ describe("Free models inside of Vector", () => {
     // The section claims one policy only when every row has it.
     expect(mixed.policy).toBeUndefined()
     expect(modelTitle(laguna)).toContain("May train on your prompts")
-    expect(modelTitle(laguna)).toContain("Vector itself never trains on your prompts.")
     expect(modelAriaLabel(laguna, NOW)).toContain("May train on your prompts")
+    // No disclaimer paragraph anywhere in the row: the one-time acceptance question explains the label.
+    for (const text of [modelTitle(laguna), modelAriaLabel(laguna, NOW)]) {
+      expect(text).not.toContain("Vector itself never trains")
+      expect(text).not.toContain("may log your prompts")
+    }
+    expect(FREE_MODEL_TRAINING_QUESTION.description).toContain("Vector itself never trains on your prompts.")
     expect(modelTitle(noTraining)).not.toContain("May train")
     const [clean] = buildModelSections({ models: [noTraining], now: NOW })
     expect(clean.policy?.label).toBe("No-training policy")
-    // An unreviewed model is labelled the same way, never as no-training.
+    // An unreviewed model, and the free router, carry the same yellow label and nothing more.
     const unreviewed = { ...laguna, freeModel: { source: "openrouter" as const, dataPolicy: "unreviewed" as const } }
     expect(buildModelSections({ models: [unreviewed], now: NOW })[0].policy).toBeUndefined()
-    expect(modelTitle(unreviewed)).toContain("has not reviewed")
+    expect(freeModelTrainingLabel(unreviewed)).toBe(FREE_MODEL_TRAINING_LABEL)
+    expect(modelTitle(unreviewed)).not.toContain("has not reviewed")
+    const router = { ...shared, id: "openrouter/free", name: "Free Models Router", freeModel: laguna.freeModel }
+    expect(freeModelTrainingLabel(router)).toBe(FREE_MODEL_TRAINING_LABEL)
+    expect(modelTitle(router)).not.toContain("at random")
   })
   test("OFF metadata removal hides the section; ordinary zero-price models do not recreate it", () => {
     const sections = buildModelSections({ models: [{ ...own, freeModel: undefined }], now: NOW })
     expect(sections.some((section) => section.kind === "free")).toBe(false)
+  })
+
+  test("no included model's row, label, notice or user-visible error names OpenRouter", () => {
+    const vector: Provider = { id: "vector", name: "Vector", source: "custom" }
+    const free = (id: string, name: string, dataPolicy: "may-train" | "no-training" | "unreviewed") =>
+      model(vector, id, name, { freeModel: { source: "shared", dataPolicy }, cost: { input: 0, output: 0 } })
+    const included = [
+      free("openrouter/free", "Free Models Router", "may-train"),
+      free("maker/prefixed:free", "OpenRouter: Maker Prefixed (free)", "may-train"),
+      free("maker/suffixed:free", "Maker Suffixed (OpenRouter)", "unreviewed"),
+      free("cohere/north-mini-code:free", "Cohere: North Mini Code", "no-training"),
+    ]
+    expect(modelDisplayName(included[0])).toBe(FREE_ROUTER_NAME)
+    expect(FREE_ROUTER_NAME).toBe("Auto (free)")
+    expect(modelDisplayName(included[1])).toBe("Maker Prefixed")
+    expect(modelDisplayName(included[2])).toBe("Maker Suffixed")
+    // An engine that already names the router "Auto (free)" keeps that name, suffix and all.
+    expect(freeModelName({ name: FREE_ROUTER_NAME })).toBe(FREE_ROUTER_NAME)
+    const sections = buildModelSections({
+      models: included,
+      now: NOW,
+      currentKey: pickerModelKey(included[0]),
+      recentKeys: [pickerModelKey(included[1])],
+    })
+    const shown = [
+      ...sections.flatMap((section) => [
+        section.label,
+        section.access?.label ?? "",
+        section.access?.title ?? "",
+        section.policy?.label ?? "",
+        section.policy?.title ?? "",
+      ]),
+      ...included.flatMap((item) => [
+        modelDisplayName(item),
+        modelTitle(item),
+        modelAriaLabel(item, NOW),
+        freeModelTrainingLabel(item) ?? "",
+      ]),
+      FREE_MODEL_TRAINING_QUESTION.title,
+      FREE_MODEL_TRAINING_QUESTION.description,
+      FREE_MODELS_SHARED_COPY,
+      FREE_MODELS_SIGN_IN,
+      FREE_MODELS_UNAVAILABLE,
+      FREE_MODEL_TRAINING_CONSENT_REQUIRED,
+      FREE_MODEL_UNLISTED,
+      ...(["user_daily", "user_minute", "shared_daily", "upstream", "balance"] as const).flatMap((reason) => [
+        freeModelsLimitMessage({ reason, resetAt: NOW }),
+        freeModelsLimitMessage({ reason, resetAt: NOW }, { terminal: true }),
+      ]),
+    ]
+    expect(shown.filter((text) => /openrouter/i.test(text))).toEqual([])
+  })
+})
+
+describe("Recently used on top", () => {
+  const vector: Provider = { id: "vector", name: "Vector", source: "custom" }
+  const free = model(vector, "maker/coder:free", "Maker Coder", {
+    freeModel: { source: "shared", dataPolicy: "no-training" },
+    cost: { input: 0, output: 0 },
+  })
+  const opus = model(anthropicKey, "claude-opus-5", "Claude Opus 5", { cost: { input: 5 } })
+  const sonnet = model(anthropicKey, "claude-sonnet-5", "Claude Sonnet 5", { cost: { input: 2 } })
+  const gpt = model(openaiKey, "gpt-5.5", "GPT-5.5", { cost: { input: 2 } })
+  const models = [gpt, sonnet, opus, free]
+  const popular = ["anthropic", "openai"]
+
+  test("comes first, above every provider and above the free models, and is not repeated below", () => {
+    const sections = buildModelSections({
+      models,
+      now: NOW,
+      popular,
+      currentKey: pickerModelKey(gpt),
+      recentKeys: [pickerModelKey(free), pickerModelKey(opus)],
+    })
+    expect(sections.map((section) => section.id)).toEqual(["recent", "provider:anthropic"])
+    expect(keysOfSection(sections[0])).toEqual([pickerModelKey(gpt), pickerModelKey(free), pickerModelKey(opus)])
+    expect(keysOfSection(sections[1])).toEqual([pickerModelKey(sonnet)])
+    // With models left over, the free models follow the top section and lead the providers.
+    const fewer = buildModelSections({ models, now: NOW, popular, currentKey: pickerModelKey(opus) })
+    expect(fewer.map((section) => section.id)).toEqual(["recent", "free", "provider:anthropic", "provider:openai"])
+    expect(fewer[0].label).toBe("Current model")
+  })
+
+  test("the top section is always open and first in keyboard order; the rest start closed", () => {
+    const sections = buildModelSections({ models, now: NOW, popular, currentKey: pickerModelKey(opus) })
+    const views = pickerSectionViews(sections, new Set(), "")
+    expect(views.map((view) => [view.section.id, view.toggle, view.open])).toEqual([
+      ["recent", false, true],
+      ["free", true, false],
+      ["provider:anthropic", true, false],
+      ["provider:openai", true, false],
+    ])
+    expect(pickerNavigation(views).keys).toEqual([
+      pickerModelKey(opus),
+      "section:free",
+      "section:provider:anthropic",
+      "section:provider:openai",
+    ])
+  })
+
+  function keysOfSection(section: { items: PickerModel[] }) {
+    return section.items.map(pickerModelKey)
+  }
+})
+
+describe("provider headers open and close their models", () => {
+  const vector: Provider = { id: "vector", name: "Vector", source: "custom" }
+  const free = model(vector, "maker/coder:free", "Maker Coder", {
+    freeModel: { source: "shared", dataPolicy: "may-train" },
+    cost: { input: 0, output: 0 },
+  })
+  const opus = model(anthropicKey, "claude-opus-5", "Claude Opus 5", { cost: { input: 5 } })
+  const sonnet = model(anthropicKey, "claude-sonnet-5", "Claude Sonnet 5", { cost: { input: 2 } })
+  const gpt = model(openaiKey, "gpt-5.5", "GPT-5.5", { cost: { input: 2 } })
+  const sections = (term = "") =>
+    buildModelSections({ models: [gpt, sonnet, opus, free], term, now: NOW, popular: ["anthropic", "openai"] })
+  const anthropic = "provider:anthropic"
+
+  test("clicking Anthropic shows its models, and clicking it again closes them", () => {
+    const opened = toggleOpenSection(new Set(), anthropic)
+    expect([...opened]).toEqual([anthropic])
+    const views = pickerSectionViews(sections(), opened, "")
+    expect(views.find((view) => view.section.id === anthropic)?.open).toBe(true)
+    expect(pickerNavigation(views).keys).toEqual([
+      "section:free",
+      "section:provider:anthropic",
+      pickerModelKey(opus),
+      pickerModelKey(sonnet),
+      "section:provider:openai",
+    ])
+    const closed = toggleOpenSection(opened, anthropic)
+    expect([...closed]).toEqual([])
+    expect(pickerNavigation(pickerSectionViews(sections(), closed, "")).keys).toEqual([
+      "section:free",
+      "section:provider:anthropic",
+      "section:provider:openai",
+    ])
+    // Toggling makes a new set, so the remembered one is never changed under a picker.
+    expect([...opened]).toEqual([anthropic])
+  })
+
+  test("while searching every section with a match is open, and clearing the search restores what was open", () => {
+    const open = new Set([anthropic])
+    const searching = pickerSectionViews(sections("5"), open, "5")
+    expect(searching.every((view) => view.open && !view.toggle)).toBe(true)
+    // Headers drop out of keyboard order while searching, so Enter selects the best match.
+    const navigation = pickerNavigation(searching)
+    expect(navigation.headers.size).toBe(0)
+    expect(navigation.keys).toEqual(pickerKeys(sections("5")))
+    const cleared = pickerSectionViews(sections(), open, "")
+    expect(cleared.filter((view) => view.open).map((view) => view.section.id)).toEqual([anthropic])
+  })
+
+  test("a section that is the only one with a header stays open", () => {
+    const only = buildModelSections({ models: [opus, sonnet], now: NOW, currentKey: pickerModelKey(opus) })
+    expect(pickerSectionViews(only, new Set(), "").map((view) => [view.section.id, view.toggle, view.open])).toEqual([
+      ["recent", false, true],
+      [anthropic, false, true],
+    ])
+  })
+
+  test("the arrow keys move through visible headers and rows; Enter or Space on a header toggles it", () => {
+    const views = pickerSectionViews(sections(), new Set([anthropic]), "")
+    const visible = pickerNavigation(views)
+    const navigation = { keys: [...visible.keys, "action:connect-provider"], headers: visible.headers }
+    const header = pickerHeaderKey({ id: anthropic })
+    expect(pickerKeyAction({ key: "ArrowDown" }, navigation, "section:free")).toEqual({ move: header })
+    expect(pickerKeyAction({ key: "ArrowDown" }, navigation, header)).toEqual({ move: pickerModelKey(opus) })
+    expect(pickerKeyAction({ key: "ArrowUp" }, navigation, header)).toEqual({ move: "section:free" })
+    // Wraps at either end, through Connect provider.
+    expect(pickerKeyAction({ key: "ArrowUp" }, navigation, "section:free")).toEqual({
+      move: "action:connect-provider",
+    })
+    expect(pickerKeyAction({ key: "Enter" }, navigation, header)).toEqual({ toggle: anthropic })
+    expect(pickerKeyAction({ key: " " }, navigation, header)).toEqual({ toggle: anthropic })
+    expect(pickerKeyAction({ key: "Enter" }, navigation, pickerModelKey(opus))).toEqual({
+      select: pickerModelKey(opus),
+    })
+    // Space on a row types into search; Enter while composing text does nothing.
+    expect(pickerKeyAction({ key: " " }, navigation, pickerModelKey(opus))).toBeUndefined()
+    expect(pickerKeyAction({ key: "Enter", isComposing: true }, navigation, header)).toBeUndefined()
+    expect(pickerKeyAction({ key: "a" }, navigation, header)).toBeUndefined()
+    // A provider whose id looks like a header's key is still a row.
+    const lookalike = { keys: ["section:free"], headers: new Map<string, string>() }
+    expect(pickerKeyAction({ key: "Enter" }, lookalike, "section:free")).toEqual({ select: "section:free" })
+  })
+
+  test("which sections are open is remembered, and blocked or unreadable storage still works", () => {
+    const store = new Map<string, string>()
+    const storage = {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+    }
+    expect([...readOpenSections(() => storage)]).toEqual([])
+    writeOpenSections(new Set([anthropic, "free"]), () => storage)
+    expect([...readOpenSections(() => storage)]).toEqual([anthropic, "free"])
+    const blocked = {
+      getItem: (): string | null => {
+        throw new Error("blocked")
+      },
+      setItem: () => {
+        throw new Error("blocked")
+      },
+    }
+    expect([...readOpenSections(() => blocked)]).toEqual([])
+    expect(() => writeOpenSections(new Set([anthropic]), () => blocked)).not.toThrow()
+    expect([...readOpenSections(() => undefined)]).toEqual([])
+    for (const value of ["not json", '{"a":1}', '[1, "free", null]']) {
+      store.set([...store.keys()][0], value)
+      expect([...readOpenSections(() => storage)]).toEqual(value.startsWith("[") ? ["free"] : [])
+    }
   })
 })

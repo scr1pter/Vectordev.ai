@@ -30,6 +30,7 @@ import {
   FREE_MODEL_UNLISTED,
   FREE_MODELS_SIGN_IN,
   FREE_MODELS_SIGN_IN_TERMINAL,
+  freeModelCatalogName,
   freeModelMayTrain,
 } from "@vectordevai/core/free-model-choice"
 import { ProviderUnavailable, providerRetired, providerUnavailable } from "@vectordevai/schema/provider-unavailable"
@@ -1465,7 +1466,7 @@ export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "ve
         {
           id: ModelV2.ID.make(model.id),
           providerID: ProviderV2.ID.make(providerID),
-          name: model.name,
+          name: freeModelCatalogName(model),
           freeModel: {
             source: providerID === "vector" ? "shared" : "openrouter",
             dataPolicy: freeModelDataPolicy(model),

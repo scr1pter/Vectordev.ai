@@ -4,7 +4,6 @@ import {
   freeModelMayTrain,
   freeModelName,
   freeModelSource,
-  freeModelTrainingDisclaimer,
   freeModelTrainingLabel,
   freeModelChoices,
 } from "@vectordevai/core/free-model-choice"
@@ -250,7 +249,6 @@ export function modelTitle(model: PickerModel) {
     releaseTitle(model),
     freeModelSource(model) ?? access.title,
     freeModelTrainingLabel(model) ?? "",
-    model.freeModel ? (freeModelTrainingDisclaimer(model) ?? FREE_MODELS_DATA_POLICY) : "",
   ]
     .filter(Boolean)
     .join("\n")
@@ -299,7 +297,8 @@ function pickerSection<T extends PickerModel>(section: Omit<PickerSection<T>, "r
   return { ...section, rowAccess: !section.access && showRowAccess(section.items) }
 }
 
-/** Group connected coding models by provider, with recent choices first when not searching. */
+/** Group connected coding models by provider. Without a search, the recent choices come first, above every provider
+    and above Free models inside of Vector; a model listed there is not repeated below. */
 export function buildModelSections<T extends PickerModel>(input: {
   models: readonly T[]
   term?: string
@@ -315,27 +314,6 @@ export function buildModelSections<T extends PickerModel>(input: {
   )
   const sections: PickerSection<T>[] = []
   const taken = new Set<string>()
-  const free = models.filter((model) => model.freeModel && matchRank(model, term, input.now) !== undefined)
-  if (free.length) {
-    sections.push(
-      pickerSection({
-        id: "free",
-        kind: "free",
-        label: FREE_MODELS_TITLE,
-        // The section names one policy only when every row has it; otherwise each may-train row carries its label.
-        policy: free.some(freeModelMayTrain)
-          ? undefined
-          : { label: "No-training policy", title: FREE_MODELS_DATA_POLICY },
-        items: free.sort(
-          (a, b) =>
-            byRelease(a, b) ||
-            Number(a.freeModel?.source === "openrouter") - Number(b.freeModel?.source === "openrouter"),
-        ),
-      }),
-    )
-    free.forEach((model) => taken.add(pickerModelKey(model)))
-  }
-
   if (!term) {
     const byKey = new Map(models.map((model) => [pickerModelKey(model), model]))
     const history = new Set(input.recentKeys)
@@ -357,6 +335,29 @@ export function buildModelSections<T extends PickerModel>(input: {
           items: recent,
         }),
       )
+  }
+
+  const free = models.filter(
+    (model) => model.freeModel && !taken.has(pickerModelKey(model)) && matchRank(model, term, input.now) !== undefined,
+  )
+  if (free.length) {
+    sections.push(
+      pickerSection({
+        id: "free",
+        kind: "free",
+        label: FREE_MODELS_TITLE,
+        // The section names one policy only when every row has it; otherwise each may-train row carries its label.
+        policy: free.some(freeModelMayTrain)
+          ? undefined
+          : { label: "No-training policy", title: FREE_MODELS_DATA_POLICY },
+        items: free.sort(
+          (a, b) =>
+            byRelease(a, b) ||
+            Number(a.freeModel?.source === "openrouter") - Number(b.freeModel?.source === "openrouter"),
+        ),
+      }),
+    )
+    free.forEach((model) => taken.add(pickerModelKey(model)))
   }
 
   const ranks = new Map<T, number>()
@@ -407,4 +408,105 @@ export function buildModelSections<T extends PickerModel>(input: {
 /** Keyboard order: every row, in render order. */
 export function pickerKeys(sections: readonly PickerSection[]) {
   return sections.flatMap((section) => section.items.map(pickerModelKey))
+}
+
+/* ---- Open and closed sections ------------------------------------------------
+   Each section below the top one has a header that opens and closes its rows. */
+
+export type PickerSectionView<T extends PickerModel = PickerModel> = {
+  section: PickerSection<T>
+  /** The header is a button that opens and closes the section. */
+  toggle: boolean
+  /** The section's rows are shown. */
+  open: boolean
+}
+
+/** How each section shows. Recently used (or Current model) is always open. While searching, every section with a
+    match is open and no header toggles, which leaves `open` as it was for when the search is cleared. A section that is
+    the only one with a header is open too, since closing it would leave nothing to choose from. */
+export function pickerSectionViews<T extends PickerModel>(
+  sections: readonly PickerSection<T>[],
+  open: ReadonlySet<string>,
+  term: string,
+): PickerSectionView<T>[] {
+  const searching = term.trim() !== ""
+  const headers = sections.filter((section) => section.kind !== "recent").length
+  return sections.map((section) => {
+    const toggle = !searching && section.kind !== "recent" && headers > 1
+    return { section, toggle, open: !toggle || open.has(section.id) }
+  })
+}
+
+export const pickerHeaderKey = (section: Pick<PickerSection, "id">) => `section:${section.id}`
+
+/** Keyboard order, in render order: each header that toggles, then its section's rows when it is open. `headers` maps
+    a header's key to its section, so a model key can never be mistaken for one. */
+export function pickerNavigation(views: readonly PickerSectionView[]) {
+  const headers = new Map(
+    views.filter((view) => view.toggle).map((view) => [pickerHeaderKey(view.section), view.section.id]),
+  )
+  const keys = views.flatMap((view) => [
+    ...(view.toggle ? [pickerHeaderKey(view.section)] : []),
+    ...(view.open ? view.section.items.map(pickerModelKey) : []),
+  ])
+  return { keys, headers }
+}
+
+export type PickerKeyAction = { move: string } | { toggle: string } | { select: string }
+
+/** What a key pressed in the picker's search box does. The arrow keys move through the visible rows and headers,
+    wrapping at either end; Enter or Space on a header toggles that section; Enter on anything else selects it. Space
+    on a row types into search, so it returns nothing. `keys` is the whole keyboard order, Connect provider included. */
+export function pickerKeyAction(
+  event: { key: string; isComposing?: boolean },
+  navigation: { keys: readonly string[]; headers: ReadonlyMap<string, string> },
+  active: string,
+): PickerKeyAction | undefined {
+  const keys = navigation.keys
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    if (keys.length === 0) return
+    const index = keys.indexOf(active)
+    const start = index === -1 ? 0 : index
+    const delta = event.key === "ArrowDown" ? 1 : -1
+    return { move: keys[(start + delta + keys.length) % keys.length] }
+  }
+  if (event.isComposing) return
+  const section = navigation.headers.get(active)
+  if (section && (event.key === "Enter" || event.key === " ")) return { toggle: section }
+  if (event.key === "Enter" && active) return { select: active }
+  return undefined
+}
+
+const OPEN_SECTIONS_KEY = "vector.model-picker.open-sections.v1"
+
+/** The sections a picker last left open. Storage that refuses reads, or holds something else, opens none, so the
+    picker still works. */
+export function readOpenSections(
+  storage: () => Pick<Storage, "getItem"> | undefined = () => localStorage,
+): Set<string> {
+  try {
+    const value: unknown = JSON.parse(storage()?.getItem(OPEN_SECTIONS_KEY) ?? "[]")
+    return new Set(Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [])
+  } catch {
+    return new Set()
+  }
+}
+
+/** Remembers the open sections for the next picker. Storage that refuses writes only forgets them. */
+export function writeOpenSections(
+  open: ReadonlySet<string>,
+  storage: () => Pick<Storage, "setItem"> | undefined = () => localStorage,
+) {
+  try {
+    storage()?.setItem(OPEN_SECTIONS_KEY, JSON.stringify([...open]))
+  } catch {
+    // Blocked storage: this picker still opens and closes sections; the next one starts with them closed.
+  }
+}
+
+/** `open` with one section opened or closed. */
+export function toggleOpenSection(open: ReadonlySet<string>, id: string) {
+  const next = new Set(open)
+  if (!next.delete(id)) next.add(id)
+  return next
 }

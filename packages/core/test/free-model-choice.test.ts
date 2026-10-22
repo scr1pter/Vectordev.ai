@@ -6,15 +6,17 @@ import {
   FREE_MODEL_TRAINING_LABEL,
   FREE_MODELS_DATA_POLICY,
   FREE_MODELS_TITLE,
+  freeModelCatalogName,
   freeModelMayTrain,
-  freeModelTrainingDisclaimer,
   freeModelTrainingLabel,
   freeModelName,
   freeModelSource,
   freeModelChoices,
-  freeModelTrainingNotice,
   FREE_MODEL_RESUME_UNAVAILABLE,
-  FREE_ROUTER_DISCLAIMER,
+  FREE_MODEL_TRAINING_CONSENT_REQUIRED,
+  FREE_MODEL_UNLISTED,
+  FREE_MODEL_UNREVIEWED_BLOCKED,
+  FREE_ROUTER_NAME,
   FREE_MODELS_OWN_KEYS,
   FREE_MODELS_OWN_KEYS_TERMINAL,
   FREE_MODELS_SHARED_COPY,
@@ -80,10 +82,9 @@ test('may-train and unreviewed free models carry "May train on your prompts"; no
   expect(freeModelTrainingLabel(free("no-training"))).toBeUndefined()
   expect(freeModelTrainingLabel({})).toBeUndefined()
   expect(freeModelMayTrain(free("unreviewed"))).toBe(true)
-  expect(freeModelTrainingDisclaimer(free("may-train"))).toBe(FREE_MODEL_TRAINING_DISCLAIMER)
+  // The acceptance question explains the label; nothing else repeats that paragraph.
   expect(FREE_MODEL_TRAINING_DISCLAIMER).toContain("Vector itself never trains on your prompts.")
-  expect(freeModelTrainingDisclaimer(free("unreviewed"))).toContain("has not reviewed")
-  expect(freeModelTrainingDisclaimer(free("no-training"))).toBeUndefined()
+  expect(FREE_MODEL_TRAINING_CONSENT_REQUIRED).toStartWith(FREE_MODEL_TRAINING_DISCLAIMER)
 })
 
 test("an invited guest whose acceptance the engine refuses is told only the owner can use these models", () => {
@@ -97,9 +98,7 @@ test("an invited guest whose acceptance the engine refuses is told only the owne
 test("limit notices say when free models provided by Vector are available again and offer the user's own keys, never an OpenRouter account", () => {
   const limit = { reason: "user_daily" as const, resetAt: Date.UTC(2030, 0, 1, 12) }
   const desktop = freeModelsLimitMessage(limit, { locale: "en-US" })
-  expect(desktop).toStartWith(
-    `${freeModelsLimitTitle(limit)}. They are expected to be available again at`,
-  )
+  expect(desktop).toStartWith(`${freeModelsLimitTitle(limit)}. They are expected to be available again at`)
   expect(desktop).toContain(freeModelsResetLabel(limit, "en-US"))
   expect(desktop).toEndWith(FREE_MODELS_OWN_KEYS)
   expect(freeModelsLimitMessage(limit, { terminal: true })).toEndWith(FREE_MODELS_OWN_KEYS_TERMINAL)
@@ -116,34 +115,43 @@ test("limit notices say when free models provided by Vector are available again 
   expect(FREE_MODELS_SIGN_IN).toBe("Sign in to Vector to use free models.")
 })
 
-test("OpenRouter's free router carries its own notice, which says the model is picked at random", () => {
-  const router = { id: "openrouter/free", freeModel: { source: "shared" as const, dataPolicy: "may-train" as const } }
-  expect(freeModelTrainingLabel(router)).toBe(FREE_MODEL_TRAINING_LABEL)
-  expect(freeModelTrainingDisclaimer(router)).toBe(FREE_ROUTER_DISCLAIMER)
-  expect(FREE_ROUTER_DISCLAIMER).toContain("at random")
-  expect(FREE_ROUTER_DISCLAIMER).toContain("Vector itself never trains on your prompts")
-  expect(freeModelTrainingDisclaimer({ ...router, id: "poolside/laguna-s-2.1:free" })).toBe(
-    FREE_MODEL_TRAINING_DISCLAIMER,
-  )
-})
-
-test("the in-use notice names the source and label of a model that may train, and nothing for one that does not", () => {
-  const laguna = {
-    id: "poolside/laguna-s-2.1:free",
+test("the free router runs under Vector's own name, with the same label as every model that may train", () => {
+  const router = {
+    id: "openrouter/free",
+    name: "Free Models Router",
     freeModel: { source: "shared" as const, dataPolicy: "may-train" as const },
   }
-  expect(freeModelTrainingNotice(laguna)).toEqual({
-    summary: "Provided by Vector · May train on your prompts",
-    disclaimer: FREE_MODEL_TRAINING_DISCLAIMER,
-  })
-  expect(
-    freeModelTrainingNotice({ ...laguna, freeModel: { source: "openrouter", dataPolicy: "unreviewed" } })?.summary,
-  ).toBe("Your OpenRouter account · May train on your prompts")
-  expect(freeModelTrainingNotice({ id: "openrouter/free", freeModel: laguna.freeModel })?.disclaimer).toBe(
-    FREE_ROUTER_DISCLAIMER,
-  )
-  expect(freeModelTrainingNotice({ ...laguna, freeModel: { source: "shared", dataPolicy: "no-training" } })).toBe(
-    undefined,
-  )
-  expect(freeModelTrainingNotice({ id: "maker/paid" })).toBeUndefined()
+  expect(freeModelTrainingLabel(router)).toBe(FREE_MODEL_TRAINING_LABEL)
+  expect(freeModelCatalogName(router)).toBe(FREE_ROUTER_NAME)
+  expect(freeModelName(router)).toBe("Auto (free)")
+  // The engine already names it, so a client that passes only the name keeps it whole.
+  expect(freeModelName({ name: FREE_ROUTER_NAME })).toBe("Auto (free)")
+})
+
+test("catalog names lose OpenRouter's own prefix or suffix, and nothing else", () => {
+  expect(freeModelCatalogName({ id: "maker/a:free", name: "OpenRouter: Maker A (free)" })).toBe("Maker A (free)")
+  expect(freeModelCatalogName({ id: "maker/b:free", name: "Maker B (OpenRouter)" })).toBe("Maker B")
+  expect(freeModelCatalogName({ id: "maker/c:free", name: "Poolside: Laguna S 2.1" })).toBe("Poolside: Laguna S 2.1")
+  expect(freeModelName({ id: "maker/a:free", name: "openrouter: Maker A (free)" })).toBe("Maker A")
+})
+
+test("what Vector says about the included models never names OpenRouter", () => {
+  for (const text of [
+    FREE_MODELS_SHARED_COPY,
+    FREE_MODELS_SIGN_IN,
+    FREE_MODELS_UNAVAILABLE,
+    FREE_MODELS_OWN_KEYS,
+    FREE_MODELS_OWN_KEYS_TERMINAL,
+    FREE_MODEL_TRAINING_DISCLAIMER,
+    FREE_MODEL_TRAINING_CONSENT_REQUIRED,
+    FREE_MODEL_TRAINING_OWNER_ONLY,
+    FREE_MODEL_UNLISTED,
+    FREE_MODEL_UNREVIEWED_BLOCKED,
+    FREE_ROUTER_NAME,
+    freeModelSource({ id: "maker/a:free", freeModel: { source: "shared" } }) ?? "",
+    ...(["user_daily", "user_minute", "shared_daily", "upstream", "balance"] as const).map((reason) =>
+      freeModelsLimitMessage({ reason, resetAt: Date.UTC(2030, 0, 1) }, { terminal: true }),
+    ),
+  ])
+    expect(text).not.toMatch(/openrouter/i)
 })
