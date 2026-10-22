@@ -63,6 +63,32 @@ describe("Brain.digest for an outward role", () => {
     expect(outward).not.toContain("Small diffs")
   })
 
+  test("screens pinned lessons, and for an untrusted pull request keeps only pinned preferences", async () => {
+    const { trusted, untrusted } = await run((brain, place) =>
+      Effect.gen(function* () {
+        const pins = [
+          yield* personal(brain, place, "preference", "Keep review comments to one sentence each"),
+          yield* personal(brain, place, "decision", "Review migrations before handlers"),
+          yield* personal(brain, place, "lesson", "The deploy to Hooli staging broke when the queue was empty"),
+          yield* personal(brain, place, "lesson", "The retry loop never stopped when the queue was empty"),
+        ]
+        for (const id of pins) yield* brain.update(place, id, { pinned: true }, "user")
+        const digest = (kinds?: readonly Brain.HabitKind[]) =>
+          brain
+            .digest(place, { personal: true, index: false, audience: "outward", ...(kinds ? { kinds } : {}) })
+            .pipe(Effect.map((result) => result.text ?? ""))
+        return { trusted: yield* digest(), untrusted: yield* digest(["preference", "review"]) }
+      }),
+    )
+    expect(trusted).toContain("Review migrations before handlers")
+    expect(trusted).toContain("The retry loop never stopped")
+    expect(trusted).not.toContain("Hooli")
+    expect(untrusted).toContain("Never force-push to main")
+    expect(untrusted).toContain("one sentence each")
+    expect(untrusted).not.toContain("Review migrations before handlers")
+    expect(untrusted).not.toContain("retry loop")
+  })
+
   test("a guest's or a training model's digest still carries the personal RULES.md, and nothing learned", async () => {
     const text = await run((brain, place) =>
       Effect.gen(function* () {
@@ -140,6 +166,9 @@ describe("Brain.habits", () => {
       Effect.gen(function* () {
         yield* personal(brain, place, "preference", "Flag missing error handling in review, let naming nits pass")
         yield* personal(brain, place, "decision", "Drop the Initech integration in Q3 2027 to save $40k")
+        yield* personal(brain, place, "decision", "We drop Acme in Q3")
+        yield* personal(brain, place, "lesson", "Never tell Bob from Globex about the merger")
+        yield* personal(brain, place, "decision", "Use the staging box at 10.0.0.12 for review checks")
         yield* personal(brain, place, "decision", "Review migrations before handlers")
         yield* personal(brain, place, "lesson", "Review the auth checks first", { private: true })
         return yield* brain.habits(place, {
@@ -154,6 +183,9 @@ describe("Brain.habits", () => {
     expect(result.text).toContain("let naming nits pass")
     expect(result.text).toContain("Review migrations before handlers")
     expect(result.text).not.toContain("Initech")
+    expect(result.text).not.toContain("Acme")
+    expect(result.text).not.toContain("Globex")
+    expect(result.text).not.toContain("10.0.0.12")
     expect(result.text).not.toContain("auth checks first")
   })
 

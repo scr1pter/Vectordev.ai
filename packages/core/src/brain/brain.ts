@@ -275,6 +275,11 @@ export interface Interface {
       readonly documents?: string
       /** outward: no MEMORY.md, no pinned fact or private entry, and pinned decisions and lessons screened. */
       readonly audience?: Audience
+      /**
+       * outward only: the owner's own pinned kinds it keeps besides their rules, all by default. A reviewer of a pull
+       * request Vector cannot trust keeps their preferences only (6.4a).
+       */
+      readonly kinds?: readonly HabitKind[]
     },
   ) => Effect.Effect<Injection>
   /**
@@ -301,8 +306,8 @@ export interface Interface {
   ) => Effect.Effect<Injection>
   /**
    * What the posting check compares a post with (BrainPosting): how the owner works (personal rules, preferences,
-   * decisions, lessons and review notes) and private facts (MEMORY.md, personal facts, and entries learned beside a
-   * private document here), whoever they reached, plus the document cards recalled in `sessionIDs`.
+   * decisions, lessons, past failures and review notes) and private facts (MEMORY.md, personal facts, and entries
+   * learned beside a private document here), whoever they reached, plus the document cards recalled in `sessionIDs`.
    */
   readonly posting: (
     place: Place,
@@ -674,10 +679,11 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
 
   const digest = Effect.fn("Brain.digest")(function* (
     place: Place,
-    options: { personal: boolean; index: boolean; documents?: string; audience?: Audience },
+    options: { personal: boolean; index: boolean; documents?: string; audience?: Audience; kinds?: readonly HabitKind[] },
   ) {
     yield* sync(place)
     const outward = options.audience === "outward"
+    const kinds = new Set<string>(["rule", ...(options.kinds ?? [...HABIT_KINDS, "failure"])])
     const paths = [
       personalFiles.rules,
       ...place.sources.filter((source) => source.type === "rules").map((source) => source.path),
@@ -689,12 +695,14 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
       ),
     )
     // An outward role hears how the owner works, never about them: no MEMORY.md item, no fact and nothing learned
-    // beside a private document, and only the decisions and lessons with nothing particular in them.
+    // beside a private document, only the decisions, lessons and past failures with nothing particular in them, and of
+    // the owner's own entries only the kinds it was given.
     const rows = (yield* visibleRows(place, options.personal, ["active"])).filter(
       (row) =>
         !outward ||
         (row.source_file !== personalFiles.memory &&
           row.kind !== "fact" &&
+          (row.repository_id !== PERSONAL || kinds.has(row.kind)) &&
           BrainPrivate.screened({ kind: row.kind, text: row.body, private: row.private })),
     )
     const pinned = rows
@@ -980,9 +988,8 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
         )
       : new Set<string>()
     return {
-      habits: rows
-        .filter((row) => !fact(row) && ["rule", ...HABIT_KINDS, "review"].includes(row.kind))
-        .map((row) => row.body),
+      // Rules, preferences, decisions, lessons, past failures and review notes: everything that is not about them.
+      habits: rows.filter((row) => !fact(row)).map((row) => row.body),
       facts: rows.filter(fact).map((row) => row.body),
       // What else those sessions were shown is document cards: the caller checks which are private.
       cards: seen.filter((id) => !entries.has(id)),
