@@ -64,6 +64,7 @@ import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainEmbed } from "@vectordevai/core/brain/embed"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { ResearchStore } from "@vectordevai/core/research/store"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { Npm } from "@vectordevai/core/npm"
 import { PermissionSaved } from "@vectordevai/core/permission/saved"
@@ -245,6 +246,7 @@ const app = LayerNode.group([
   Brain.node,
   BrainKnowledge.node,
   BrainEmbed.node,
+  ResearchStore.node,
   Provider.node,
   ProviderAuth.node,
   Agent.node,

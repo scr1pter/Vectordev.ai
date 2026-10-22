@@ -250,8 +250,8 @@ export interface Interface {
   ) => Effect.Effect<{ readonly type: "kept"; readonly run: Research.Run } | { readonly type: "refused"; readonly message: string } | undefined>
   readonly forget: (place: Brain.Place, runID: string) => Effect.Effect<boolean>
   readonly forgetSource: (place: Brain.Place, runID: string, ref: string) => Effect.Effect<boolean>
-  /** Every run of the repository; how many there were. */
-  readonly forgetAll: (place: Brain.Place) => Effect.Effect<number>
+  /** Every run of the repository, or with `everywhere` of every repository (Erase all); how many there were. */
+  readonly forgetAll: (place: Brain.Place, options?: { readonly everywhere?: boolean }) => Effect.Effect<number>
   readonly export: (place: Brain.Place, runID: string, format: "markdown" | "json") => Effect.Effect<Exported | undefined>
   /** An invited guest acted in the run's session: what the run holds leaves the brain for this process's memory. */
   readonly guest: (place: Brain.Place, runID: string) => Effect.Effect<void>
@@ -1215,16 +1215,23 @@ function make(input: {
     )
   })
 
-  const forgetAll = Effect.fn("ResearchStore.forgetAll")(function* (place: Brain.Place) {
+  const forgetAll = Effect.fn("ResearchStore.forgetAll")(function* (
+    place: Brain.Place,
+    options: { readonly everywhere?: boolean } = {},
+  ) {
     return yield* lock.withPermit(
       Effect.gen(function* () {
         const rows = yield* db
-          .select({ id: ResearchRunTable.id })
+          .select({ id: ResearchRunTable.id, repository: ResearchRunTable.repository_id })
           .from(ResearchRunTable)
-          .where(eq(ResearchRunTable.repository_id, place.repository))
+          .where(options.everywhere ? undefined : eq(ResearchRunTable.repository_id, place.repository))
           .all()
           .pipe(Effect.orDie)
-        const dropped = yield* Effect.forEach(rows, (row) => drop(place, row.id, { tombstones: true }))
+        const dropped = yield* Effect.forEach(rows, (row) =>
+          drop(row.repository === place.repository ? place : { ...place, repository: row.repository }, row.id, {
+            tombstones: true,
+          }),
+        )
         return dropped.filter(Boolean).length
       }),
     )

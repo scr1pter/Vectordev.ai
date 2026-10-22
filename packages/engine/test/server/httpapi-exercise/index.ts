@@ -837,6 +837,48 @@ const scenarios: Scenario[] = [
     .get("/memory/links", "memory.links")
     .at((ctx) => ({ path: "/memory/links?file=src/none.ts", headers: ctx.headers() }))
     .json(200, (body) => check(Array.isArray(body) && body.length === 0, "a file nothing is linked to has no links")),
+  http.protected.get("/memory/research", "memory.research.list").json(200, (body) => {
+    object(body)
+    check(Array.isArray(body.runs), "the research list should return runs")
+    check(typeof body.limit === "number" && typeof body.retain === "number", "the research list should say its limits")
+  }),
+  http.protected
+    .delete("/memory/research", "memory.research.forgetAll")
+    .mutating()
+    .json(200, (body) => check(typeof body === "number", "forgetting all research should return a count"), "status"),
+  http.protected
+    .get("/memory/research/{runID}", "memory.research.get")
+    .at((ctx) => ({ path: route("/memory/research/{runID}", { runID: "run_none" }), headers: ctx.headers() }))
+    .json(400, object, "status"),
+  http.protected
+    .delete("/memory/research/{runID}", "memory.research.forget")
+    .mutating()
+    .at((ctx) => ({ path: route("/memory/research/{runID}", { runID: "run_none" }), headers: ctx.headers() }))
+    .json(400, object, "status"),
+  http.protected
+    .post("/memory/research/{runID}/keep", "memory.research.keep")
+    .mutating()
+    .at((ctx) => ({ path: route("/memory/research/{runID}/keep", { runID: "run_none" }), headers: ctx.headers() }))
+    .json(400, object, "status"),
+  http.protected
+    .get("/memory/research/{runID}/export", "memory.research.export")
+    .at((ctx) => ({ path: route("/memory/research/{runID}/export", { runID: "run_none" }), headers: ctx.headers() }))
+    .json(400, object, "status"),
+  http.protected
+    .get("/memory/research/{runID}/sources/{sourceID}", "memory.research.source")
+    .at((ctx) => ({
+      path: route("/memory/research/{runID}/sources/{sourceID}", { runID: "run_none", sourceID: "S1" }),
+      headers: ctx.headers(),
+    }))
+    .json(400, object, "status"),
+  http.protected
+    .delete("/memory/research/{runID}/sources/{sourceID}", "memory.research.forgetSource")
+    .mutating()
+    .at((ctx) => ({
+      path: route("/memory/research/{runID}/sources/{sourceID}", { runID: "run_none", sourceID: "S1" }),
+      headers: ctx.headers(),
+    }))
+    .json(400, object, "status"),
   http.protected.get("/memory/review", "memory.review.list").json(200, array),
   http.protected
     .patch("/memory/review/{itemID}", "memory.review.resolve")
