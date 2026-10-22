@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { Effect, Exit } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { ResearchOutbound } from "../../src/research/outbound"
 import { ResearchSearch } from "../../src/research/search"
 import { FakeWeb } from "../lib/fake-web"
 import { NetworkGuard } from "../lib/network-guard"
@@ -35,7 +36,7 @@ const http = Effect.runSync(
 )
 
 // What the run holds privately, for the outbound check every search passes.
-const context = {
+const context: ResearchOutbound.Context = {
   private: [
     "Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change.",
     "// Tickets are on jira.acme.internal.",
@@ -270,6 +271,43 @@ describe("ResearchSearch.searxng", () => {
     )
     expect(filtered).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
     expect(web.count("searxng")).toBe(before)
+  })
+
+  test("sends a site filter on a domain the user prefers, though a private line names it", async () => {
+    // A learned preference names its domains, and they exist to become site: filters (section 6.4a).
+    const preferring = {
+      ...context,
+      work: ["Prefer primary sources such as nature.com and nejm.org."],
+      domains: ["nature.com", "nejm.org"],
+    }
+    const before = web.count("searxng")
+    const authorized: string[] = []
+    const sent = await search(
+      "searxng",
+      { query: "heat pumps", site: "nature.com" },
+      (url) =>
+        Effect.sync(() => {
+          authorized.push(url)
+        }),
+      preferring,
+    )
+    expect(Exit.isSuccess(sent)).toBe(true)
+    expect(authorized).toEqual([web.url("searxng", "/search?q=heat+pumps+site%3Anature.com&format=json")])
+    expect(web.count("searxng")).toBe(before + 1)
+    // Without the preference the private line keeps the domain out, and the preference clears no name.
+    expect(
+      failure(
+        await search("searxng", { query: "heat pumps", site: "nature.com" }, () => Effect.void, {
+          ...preferring,
+          domains: [],
+        }),
+      ),
+    ).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
+    expect(
+      failure(await search("searxng", { query: "Acme churn", site: "nejm.org" }, () => Effect.void, preferring)),
+    ).toMatchObject({ _tag: "ResearchSearchRefused" })
+    expect(web.count("searxng")).toBe(before + 1)
+    expect(guard.outside()).toEqual([])
   })
 
   test("takes only a host name as the site filter", async () => {
