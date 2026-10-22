@@ -120,7 +120,8 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
   if (refusal) return yield* new ReviewModelError({ message: refusal })
 
   const signIn = yield* auth.get(model.providerID).pipe(Effect.catch(() => Effect.succeed(undefined)))
-  // A review on a server on this computer, or on a private one the user listed, has no per-token price.
+  // A review on a server on this computer, or on a private one on the model server list in effect (the user's or the
+  // company's, without an edit still held for the owner), has no per-token price.
   const costKind = SpendGuard.costKindOf({
     free: isFreeModel(model),
     oauthPlan:
@@ -129,10 +130,7 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
     listed: model.cost.input > 0 || model.cost.output > 0,
     local:
       !model.freeModel &&
-      ModelSlots.local(
-        Provider.serverURL(model, yield* provider.getProvider(model.providerID)),
-        (yield* config.getGlobal()).local?.endpoints,
-      ),
+      ModelSlots.local(Provider.serverURL(model, yield* provider.getProvider(model.providerID)), Config.local()),
   })
 
   return {

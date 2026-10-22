@@ -192,13 +192,12 @@ const layer = Layer.effect(
       }
       // How this model's steps count against a run budget. A plan, such as a ChatGPT plan, pays for them only when
       // the credential llm.ts actually sends is the stored OAuth sign-in, so this applies the same credential rule.
-      // A server on this computer, or a private one the user listed, has no per-token price. The sign-in and the
-      // server list are read from disk while the request is sent, off the request path.
-      const costKind = yield* Effect.all([
-        auth.get(input.model.providerID).pipe(Effect.catch(() => Effect.succeed(undefined))),
-        hosted ? config.getGlobal().pipe(Effect.map((global) => global.local?.endpoints ?? [])) : Effect.succeed([]),
-      ]).pipe(
-        Effect.map(([signIn, listed]) =>
+      // A server on this computer, or a private one on the model server list in effect (the user's or the company's,
+      // without an edit still held for the owner), has no per-token price. The sign-in is read from disk while the
+      // request is sent, off the request path.
+      const costKind = yield* auth.get(input.model.providerID).pipe(
+        Effect.catch(() => Effect.succeed(undefined)),
+        Effect.map((signIn) =>
           SpendGuard.costKindOf({
             free: isFreeModel(input.model) || input.model.freeModel !== undefined,
             oauthPlan:
@@ -209,7 +208,7 @@ const layer = Layer.effect(
                 providerUsable(input.model.providerID, { npm: input.model.api.npm, api: input.model.api.url }),
               ),
             listed: input.model.cost.input > 0 || input.model.cost.output > 0,
-            local: ModelSlots.local(url, listed),
+            local: ModelSlots.local(url, hosted ? Config.local() : undefined),
           }),
         ),
         Effect.forkIn(scope),

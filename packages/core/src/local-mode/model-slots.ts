@@ -1,6 +1,7 @@
 export * as ModelSlots from "./model-slots"
 
 import { Context, Effect, Layer, type Scope } from "effect"
+import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { makeGlobalNode } from "../effect/app-node"
 import { LocalPolicy } from "./policy"
 
@@ -205,12 +206,13 @@ export function server(url: string | URL | undefined) {
 
 /**
  * Whether a model server's steps have no per-token price: one on this computer, or one at a private address on the
- * user's server list (`local.endpoints`). A server elsewhere on the network may pass requests on to a paid service, so
- * it counts only once it is listed, and a company endpoint on the internet never does.
+ * model server list of the Vector Local policy in effect, which the user or their company set (a company may list a
+ * range or a wildcard). A server elsewhere on the network may pass requests on to a paid service, so it counts only
+ * once it is listed, and a company endpoint on the internet never does.
  */
-export function local(url: string | URL | undefined, listed: readonly string[] = []) {
+export function local(url: string | URL | undefined, policy: LocalMode.Policy = LocalPolicy.OFF) {
   const origin = server(url)
   if (!origin) return false
   if (LocalPolicy.loopback(new URL(origin).hostname)) return true
-  return listed.some((item) => LocalPolicy.origin(item) === origin)
+  return LocalPolicy.listed(policy, origin)
 }

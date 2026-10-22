@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs"
 import path from "path"
 import { Effect, Layer } from "effect"
 import { HttpClient } from "effect/unstable/http"
@@ -10,6 +10,7 @@ import { Npm } from "@vectordevai/core/npm"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Global } from "@vectordevai/core/global"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { Config } from "@/config/config"
 import { GlobalBus, type GlobalEvent } from "@/bus/global"
@@ -43,9 +44,14 @@ const saved = Object.fromEntries(ENVIRONMENT.map((key) => [key, process.env[key]
 
 const SERVER = "http://127.0.0.1:11434"
 const GPU_BOX = "http://10.0.0.5:8000"
+const OTHER_BOX = "http://10.0.0.9:8000"
 const GITHUB = { source: "github", reason: "PRs", added_at: 1, added_by: "cli" as const }
 const CATALOG = { source: "catalog", reason: "Models", added_at: 1, added_by: "app" as const }
 const CONFIG = JSON.stringify(new URL("../../src/config/config.ts", import.meta.url).href)
+const EGRESS = JSON.stringify(new URL("../../../core/src/local-mode/egress.ts", import.meta.url).href)
+const PAGE = { source: "webfetch", url: "https://docs.example.com/guide" }
+const DAY = 24 * 60 * 60 * 1000
+const logDirectory = path.join(Global.Path.data, "local")
 
 const it = testEffect(
   LayerNode.compile(LayerNode.group([Config.node, FSUtil.node, Env.node, CrossSpawnSpawner.node]), [
@@ -97,8 +103,13 @@ function nextChange(type: Config.LocalChange["type"]) {
   return change.promise
 }
 
-async function run(script: string, env: Record<string, string | undefined>, cwd = engineDirectory) {
-  const child = Bun.spawn([process.execPath, "--eval", script], {
+async function run(
+  script: string,
+  env: Record<string, string | undefined>,
+  cwd = engineDirectory,
+  flags: readonly string[] = [],
+) {
+  const child = Bun.spawn([process.execPath, ...flags, "--eval", script], {
     cwd,
     env: Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
     stdout: "pipe",
@@ -114,7 +125,7 @@ async function run(script: string, env: Record<string, string | undefined>, cwd 
 }
 
 // What a fresh process resolves at start, with this environment.
-function start(env: Record<string, string | undefined>, cwd?: string) {
+function start(env: Record<string, string | undefined>, cwd?: string, flags?: readonly string[]) {
   return run(
     `
     const { Config } = await import(${CONFIG})
@@ -123,7 +134,36 @@ function start(env: Record<string, string | undefined>, cwd?: string) {
     `,
     env,
     cwd,
+    flags,
   )
+}
+
+// What a fresh process decides at start: the policy, the held changes, a model call to each server and a web page.
+function decisions(env: Record<string, string | undefined>) {
+  return run(
+    `
+    const { Config } = await import(${CONFIG})
+    const { Egress } = await import(${EGRESS})
+    const inference = (origin) => Egress.decide({ source: "local-inference", url: origin + "/v1/chat/completions" }).decision
+    process.stdout.write(JSON.stringify({
+      policy: Config.local(),
+      pending: Config.localPending()?.changes ?? null,
+      servers: [${JSON.stringify(SERVER)}, ${JSON.stringify(GPU_BOX)}, ${JSON.stringify(OTHER_BOX)}].map(inference),
+      page: Egress.decide(${JSON.stringify(PAGE)}).decision,
+    }) + "\\n")
+    process.exit(0)
+    `,
+    env,
+  )
+}
+
+function inference(origin: string) {
+  return Egress.decide({ source: "local-inference", url: `${origin}/v1/chat/completions` }).decision
+}
+
+// A network log file of `days` ago.
+function dated(days: number) {
+  return path.join(logDirectory, `egress-${new Date(Date.now() - days * DAY).toISOString().slice(0, 10)}.jsonl`)
 }
 
 describe("resolved at start", () => {
@@ -142,18 +182,23 @@ describe("resolved at start", () => {
       },
     })
     const url = (file: string) => JSON.stringify(new URL(file, import.meta.url).href)
-    // The engine's runtime is imported and nothing has run yet: no layer is built and the catalog has not been asked
-    // for. The floor children get is set when the policy is resolved, so it shows the policy was already in effect.
+    // The backstop comes first, as in the CLI's entry, then the engine's runtime, and nothing has run yet: no layer is
+    // built and the catalog has not been asked for. The floor children get and the policy Egress decides with are both
+    // set when the policy is resolved, so they show it was already in effect.
     const result = await run(
       `
+      await import(${url("../../../core/src/local-mode/backstop.ts")})
       const { ConfigManaged } = await import(${url("../../src/config/managed.ts")})
       ConfigManaged.useTestDirectory(${JSON.stringify(managed)})
       const { untrustedChildEnvironment } = await import(${url("../../../core/src/child-environment.ts")})
+      const { Egress } = await import(${url("../../../core/src/local-mode/egress.ts")})
       const { AppRuntime } = await import(${url("../../src/effect/app-runtime.ts")})
+      const { Config } = await import(${CONFIG})
       const floor = untrustedChildEnvironment({})
+      const egress = { same: Egress.policy() === Config.local(), policy: Egress.policy() }
       const { ModelCatalog } = await import(${url("../../../core/src/model-catalog.ts")})
       await AppRuntime.runPromise(ModelCatalog.Service.use((catalog) => catalog.get()))
-      process.stdout.write(JSON.stringify({ floor }) + "\\n")
+      process.stdout.write(JSON.stringify({ floor, egress }) + "\\n")
       await AppRuntime.dispose()
       process.exit(0)
       `,
@@ -169,7 +214,57 @@ describe("resolved at start", () => {
       },
     )
     expect(result.floor).toEqual({ VECTOR_AGENT_SESSION: "1", VECTOR_LOCAL: "1", VECTOR_LOCAL_WEB: "none" })
+    expect(result.egress.same).toBe(true)
+    expect(result.egress.policy).toMatchObject({ enabled: true, web: "none" })
+    expect(result.egress.policy.pending).toBe(undefined)
     expect(requests).toContain("/models/api.json")
+  }, 30_000)
+
+  test("Vector Local the environment turned on stops holding everything once its policy is resolved", async () => {
+    await using dir = await tmpdir()
+    const managed = path.join(dir.path, "managed")
+    mkdirSync(managed)
+    writeFileSync(path.join(managed, "vector.json"), JSON.stringify({ local: { endpoints: [GPU_BOX] } }))
+    const url = (file: string) => JSON.stringify(new URL(file, import.meta.url).href)
+    // VECTOR_LOCAL=1, as a nested vector inherits it: the backstop holds everything but this computer from the first
+    // import, and resolving the policy lets the company's model server through, which nothing else may reach.
+    const result = await run(
+      `
+      await import(${url("../../../core/src/local-mode/backstop.ts")})
+      const { Egress } = await import(${url("../../../core/src/local-mode/egress.ts")})
+      const inference = { source: "local-inference", url: ${JSON.stringify(`${GPU_BOX}/v1/chat/completions`)} }
+      const before = { pending: Egress.policy().pending, decision: Egress.decide(inference).decision }
+      const { ConfigManaged } = await import(${url("../../src/config/managed.ts")})
+      ConfigManaged.useTestDirectory(${JSON.stringify(managed)})
+      const { Config } = await import(${CONFIG})
+      const after = {
+        same: Egress.policy() === Config.local(),
+        policy: Egress.policy(),
+        decision: Egress.decide(inference).decision,
+        elsewhere: Egress.decide({ ...inference, url: "http://10.0.0.6:8000/v1/chat/completions" }).decision,
+      }
+      process.stdout.write(JSON.stringify({ before, after }) + "\\n")
+      process.exit(0)
+      `,
+      {
+        ...process.env,
+        VECTOR_LOCAL: "1",
+        XDG_CONFIG_HOME: path.join(dir.path, "config"),
+        XDG_STATE_HOME: path.join(dir.path, "state"),
+        XDG_DATA_HOME: path.join(dir.path, "data"),
+        XDG_CACHE_HOME: path.join(dir.path, "cache"),
+      },
+    )
+    expect(result.before).toEqual({ pending: true, decision: "block" })
+    expect(result.after.same).toBe(true)
+    expect(result.after.policy).toMatchObject({
+      enabled: true,
+      web: "ask",
+      endpoints: [{ origin: GPU_BOX, from: "managed" }],
+    })
+    expect(result.after.policy.pending).toBe(undefined)
+    expect(result.after.decision).toBe("allow")
+    expect(result.after.elsewhere).toBe("block")
   }, 30_000)
 
   test("resolving it is synchronous and waits on no other service", () => {
@@ -179,6 +274,66 @@ describe("resolved at start", () => {
     expect(policy.pending).toBe(undefined)
     expect(Config.local()).toBe(policy)
   })
+})
+
+describe("Egress decides with the policy in effect", () => {
+  const page = { source: "webfetch", url: "https://docs.example.com/guide" }
+
+  test("an edit that loosens Vector Local does not reach Egress until the owner confirms it", () => {
+    writeGlobal({ enabled: true, web: "none" })
+    Config.refreshLocal()
+    expect(Egress.policy()).toBe(Config.local())
+    expect(Egress.decide(page).decision).toBe("block")
+    writeGlobal({ enabled: true, web: "ask" })
+    Config.refreshLocal()
+    expect(Config.localPending()?.changes).toEqual(["sets Web access to Ask"])
+    expect(Egress.policy()).toBe(Config.local())
+    expect(Egress.decide(page).decision).toBe("block")
+    Config.confirmLocal()
+    expect(Egress.policy()).toMatchObject({ enabled: true, web: "ask" })
+    expect(Egress.decide(page).decision).toBe("allow")
+  })
+
+  test("turning Vector Local off reaches Egress at once when the company turned it on", () => {
+    writeManaged({ local: { enabled: true, web: "none" } })
+    Config.refreshLocal()
+    expect(Egress.decide(page).decision).toBe("block")
+    rmSync(managedDirectory, { recursive: true, force: true })
+    Config.refreshLocal()
+    expect(Config.localPending()).toBe(undefined)
+    expect(Egress.policy()).toBe(Config.local())
+    expect(Egress.decide(page)).toMatchObject({ decision: "allow", rule: "local-off" })
+  })
+
+  test.skipIf(process.platform === "win32")(
+    "while Vector Local is on, the network log is in Vector's data folder for the user only, kept as long as the company says",
+    async () => {
+      const DAY = 24 * 60 * 60 * 1000
+      const directory = path.join(Global.Path.data, "local")
+      const dated = (days: number) =>
+        path.join(directory, `egress-${new Date(Date.now() - days * DAY).toISOString().slice(0, 10)}.jsonl`)
+      mkdirSync(directory, { recursive: true })
+      writeFileSync(dated(10), "")
+      writeFileSync(dated(40), "")
+      writeGlobal({ enabled: true, web: "none" })
+      Config.refreshLocal()
+      Egress.decide({ source: "model-catalog", url: "https://models.dev/api.json" })
+      const logged = await Egress.exported()
+      expect(logged.at(-1)).toMatchObject({ source: "model-catalog", decision: "block", origin: "https://models.dev" })
+      expect(statSync(directory).mode & 0o777).toBe(0o700)
+      expect(statSync(dated(0)).mode & 0o777).toBe(0o600)
+      // 30 days by default.
+      expect(existsSync(dated(10))).toBe(true)
+      expect(existsSync(dated(40))).toBe(false)
+      // The company's policy shortens it, and the log applies it at once.
+      writeManaged({ local: { log: { retain_days: 5 } } })
+      Config.refreshLocal()
+      expect(existsSync(dated(10))).toBe(false)
+      expect(existsSync(dated(0))).toBe(true)
+      await Egress.erase()
+      rmSync(directory, { recursive: true, force: true })
+    },
+  )
 })
 
 describe("repository config", () => {
@@ -508,7 +663,7 @@ describe("loosening edits wait for the owner", () => {
       expect(untrustedChildEnvironment({}).VECTOR_LOCAL).toBe("1")
       expect(Config.localPending()?.proposed.enabled).toBe(false)
       expect(toasts.map((event) => event.payload.properties.message)).toEqual([
-        "A change to your config would loosen Vector Local: it turns Vector Local off. Vector keeps the stricter setting. Confirming a change like this in the app or a terminal comes in the next release.",
+        "A change to your config would loosen Vector Local: it turns Vector Local off. Vector keeps the stricter setting for these and applies the rest of the change. Confirming a change like this in the app or a terminal comes in the next release.",
       ])
 
       const applied = nextChange("updated")
@@ -594,9 +749,14 @@ describe("loosening edits wait for the owner", () => {
     expect(Config.refreshLocal()).toMatchObject({ enabled: true, web: "network" })
     expect(Config.localPending()?.changes).toEqual(["turns Vector Local off"])
     writeFileSync(Config.localConfirmedFile(), "garbage")
+    // The held edit took the server off the list, which applied, so listing it again waits too.
     writeGlobal({ enabled: true, web: "ask", endpoints: [SERVER], allow: [GITHUB] })
-    expect(Config.refreshLocal()).toMatchObject({ enabled: true, web: "network", allow: [] })
-    expect(Config.localPending()?.changes).toEqual(["sets Web access to Ask", "allows github"])
+    expect(Config.refreshLocal()).toMatchObject({ enabled: true, web: "network", endpoints: [], allow: [] })
+    expect(Config.localPending()?.changes).toEqual([
+      "sets Web access to Ask",
+      `adds the model server ${SERVER}`,
+      "allows github",
+    ])
   })
 
   for (const via of ["VECTOR_LOCAL", "company policy"] as const)
@@ -688,6 +848,202 @@ describe("sources Vector cannot read", () => {
       chmodSync(file, 0o644)
     }
   })
+})
+
+describe("an edit that loosens one part and tightens another", () => {
+  test("replacing a model server blocks the old one at once and holds the new one", () => {
+    writeGlobal({ enabled: true, endpoints: [GPU_BOX] })
+    Config.refreshLocal()
+    expect(inference(GPU_BOX)).toBe("allow")
+
+    writeGlobal({ enabled: true, endpoints: [OTHER_BOX] })
+    Config.refreshLocal()
+    expect(Config.localPending()?.changes).toEqual([`adds the model server ${OTHER_BOX}`])
+    expect(Config.local().endpoints).toEqual([])
+    expect(Egress.policy()).toBe(Config.local())
+    expect(inference(GPU_BOX)).toBe("block")
+    expect(inference(OTHER_BOX)).toBe("block")
+
+    Config.confirmLocal()
+    expect(Config.local().endpoints).toEqual([{ origin: OTHER_BOX, from: "user" }])
+    expect(inference(OTHER_BOX)).toBe("allow")
+    expect(inference(GPU_BOX)).toBe("block")
+  })
+
+  test("Web access None with a new model server: None applies at once and the server waits", () => {
+    writeGlobal({ enabled: true, endpoints: [SERVER] })
+    Config.refreshLocal()
+    expect(Egress.decide(PAGE).decision).toBe("allow")
+
+    writeGlobal({ enabled: true, web: "none", endpoints: [SERVER, GPU_BOX] })
+    Config.refreshLocal()
+    expect(Config.localPending()?.changes).toEqual([`adds the model server ${GPU_BOX}`])
+    expect(Config.local()).toMatchObject({ enabled: true, web: "none", endpoints: [{ origin: SERVER, from: "user" }] })
+    expect(Egress.decide(PAGE).decision).toBe("block")
+    expect(inference(GPU_BOX)).toBe("block")
+    expect(untrustedChildEnvironment({}).VECTOR_LOCAL_WEB).toBe("none")
+  })
+
+  test("a site the edit denies and a service it allows: the denial applies at once", () => {
+    writeGlobal({ enabled: true, web_domains: { deny: ["ads.example"] } })
+    Config.refreshLocal()
+    writeGlobal({ enabled: true, web_domains: { deny: ["docs.example.com"] }, allow: [GITHUB] })
+    Config.refreshLocal()
+    expect(Config.localPending()?.changes).toEqual(["allows github", "stops blocking ads.example"])
+    expect(Config.local()).toMatchObject({ allow: [], web_domains: { deny: ["ads.example", "docs.example.com"] } })
+    expect(Egress.decide(PAGE).decision).toBe("block")
+  })
+
+  test("listing a server again that a held edit removed is held too", () => {
+    writeGlobal({ enabled: true, endpoints: [GPU_BOX] })
+    Config.refreshLocal()
+    writeGlobal({ enabled: true, endpoints: [OTHER_BOX] })
+    Config.refreshLocal()
+    writeGlobal({ enabled: true, endpoints: [GPU_BOX, OTHER_BOX] })
+    Config.refreshLocal()
+    expect(Config.local().endpoints).toEqual([])
+    expect(Config.localPending()?.changes).toEqual([
+      `adds the model server ${GPU_BOX}`,
+      `adds the model server ${OTHER_BOX}`,
+    ])
+  })
+
+  test("what applied still applies after a restart, and what was held is still held", async () => {
+    writeGlobal({ enabled: true, endpoints: [SERVER, GPU_BOX] })
+    Config.refreshLocal()
+    writeGlobal({ enabled: true, web: "none", endpoints: [SERVER, OTHER_BOX] })
+    Config.refreshLocal()
+    expect(JSON.parse(readFileSync(Config.localConfirmedFile(), "utf8")).local).toMatchObject({
+      enabled: true,
+      web: "none",
+      endpoints: [SERVER],
+    })
+
+    const next = await decisions(process.env)
+    expect(next.policy).toMatchObject({ enabled: true, web: "none", endpoints: [{ origin: SERVER, from: "user" }] })
+    expect(next.pending).toEqual([`adds the model server ${OTHER_BOX}`])
+    expect(next.servers).toEqual(["allow", "block", "block"])
+    expect(next.page).toBe("block")
+  }, 30_000)
+})
+
+describe("the network log", () => {
+  test("a folder Vector cannot use keeps Vector Local on, logs in memory and says so, at start and later", async () => {
+    rmSync(logDirectory, { recursive: true, force: true })
+    mkdirSync(path.dirname(logDirectory), { recursive: true })
+    writeFileSync(logDirectory, "not a folder")
+    const warning = `Vector could not write its network log in ${logDirectory}`
+    try {
+      writeGlobal({ enabled: true, web: "none" })
+      const started = await start(process.env)
+      expect(started.policy).toMatchObject({ enabled: true, web: "none" })
+      expect(started.policy.warnings).toHaveLength(1)
+      expect(started.policy.warnings[0]).toStartWith(warning)
+
+      // The watcher's path: the edit applies, and the warning is part of the policy in effect.
+      const policy = Config.refreshLocal()
+      expect(policy).toMatchObject({ enabled: true, web: "none" })
+      expect(policy.warnings).toHaveLength(1)
+      expect(policy.warnings[0]).toStartWith(warning)
+      expect(policy.warnings[0]).toEndWith(
+        "so it keeps this session's log in memory only. It tries again the next time it reads its settings.",
+      )
+      expect(Egress.policy()).toBe(Config.local())
+      Egress.decide({ source: "model-catalog", url: "https://models.dev/api.json" })
+      expect((await Egress.exported()).at(-1)).toMatchObject({ source: "model-catalog", decision: "block" })
+
+      // Once the folder can be used, the next read of the settings writes the log there.
+      rmSync(logDirectory)
+      expect(Config.refreshLocal().warnings).toEqual([])
+      Egress.decide({ source: "model-catalog", url: "https://models.dev/api.json" })
+      await Egress.exported()
+      expect(existsSync(dated(0))).toBe(true)
+    } finally {
+      await Egress.erase()
+      rmSync(logDirectory, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  test.skipIf(process.platform === "win32")(
+    "a shorter log in the user's config waits for the owner, and a longer one applies at once",
+    async () => {
+      mkdirSync(logDirectory, { recursive: true })
+      try {
+        writeGlobal({ enabled: true, web: "none" })
+        Config.refreshLocal()
+        writeFileSync(dated(10), "")
+        writeGlobal({ enabled: true, web: "none", log: { retain_days: 1 } })
+        Config.refreshLocal()
+        expect(Config.localPending()?.changes).toEqual(["keeps the network log 1 day instead of 30 days"])
+        expect(existsSync(dated(10))).toBe(true)
+
+        writeFileSync(dated(45), "")
+        writeFileSync(dated(70), "")
+        writeGlobal({ enabled: true, web: "none", log: { retain_days: 60 } })
+        Config.refreshLocal()
+        expect(Config.localPending()).toBe(undefined)
+        expect(existsSync(dated(45))).toBe(true)
+        expect(existsSync(dated(70))).toBe(false)
+      } finally {
+        await Egress.erase()
+        rmSync(logDirectory, { recursive: true, force: true })
+      }
+    },
+  )
+
+  test.skipIf(process.platform === "win32")("under a company lock, the user's log setting does not apply", async () => {
+    mkdirSync(logDirectory, { recursive: true })
+    try {
+      writeManaged({ local: { lock: true } })
+      writeGlobal({ log: { retain_days: 1 } })
+      Config.refreshLocal()
+      writeFileSync(dated(10), "")
+      writeGlobal({ log: { retain_days: 2 } })
+      Config.refreshLocal()
+      expect(Config.localPending()).toBe(undefined)
+      expect(existsSync(dated(10))).toBe(true)
+    } finally {
+      await Egress.erase()
+      rmSync(logDirectory, { recursive: true, force: true })
+    }
+  })
+})
+
+describe("cloud AI services the model catalog lists", () => {
+  const LLAMA = "https://api.llama.com"
+
+  test("cannot be one of the user's model servers, and a catalog Vector loads applies that at once", () => {
+    writeGlobal({ enabled: true, endpoints: [GPU_BOX, LLAMA] })
+    // Not in the registry's list, and this build carries no catalog of its own.
+    expect(Config.refreshLocal().endpoints.map((item) => item.origin)).toEqual([GPU_BOX, LLAMA])
+    expect(inference(LLAMA)).toBe("allow")
+
+    Config.localCatalog({ llama: { api: `${LLAMA}/compat/v1/` } })
+    expect(Config.localPending()).toBe(undefined)
+    expect(Config.local().endpoints).toEqual([{ origin: GPU_BOX, from: "user" }])
+    expect(Config.local().warnings).toContain(
+      `Ignored ${LLAMA}: it is a cloud AI service, not a server you host. Your company's policy can list it.`,
+    )
+    expect(inference(LLAMA)).toBe("block")
+    expect(inference(GPU_BOX)).toBe("allow")
+
+    // A company can still list it.
+    writeManaged({ local: { endpoints: [LLAMA] } })
+    expect(Config.refreshLocal().endpoints).toContainEqual({ origin: LLAMA, from: "managed" })
+    expect(inference(LLAMA)).toBe("allow")
+  })
+
+  test("the catalog a build carries applies from the start", async () => {
+    writeGlobal({ enabled: true, endpoints: [GPU_BOX, LLAMA] })
+    // A build substitutes its catalog for VECTOR_MODEL_CATALOG, as --define does here.
+    const catalog = JSON.stringify({ llama: { api: `${LLAMA}/compat/v1/` } })
+    const next = await start(process.env, undefined, ["--define", `VECTOR_MODEL_CATALOG=${catalog}`])
+    expect(next.policy.endpoints).toEqual([{ origin: GPU_BOX, from: "user" }])
+    expect(next.policy.warnings).toContain(
+      `Ignored ${LLAMA}: it is a cloud AI service, not a server you host. Your company's policy can list it.`,
+    )
+    expect(next.pending).toBe(null)
+  }, 30_000)
 })
 
 describe("what counts as loosening", () => {

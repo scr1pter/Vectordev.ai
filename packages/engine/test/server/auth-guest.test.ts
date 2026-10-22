@@ -17,6 +17,7 @@ import { httpApiLayer, requestInDirectory } from "./httpapi-layer"
 import { testProviderConfig } from "../lib/test-provider"
 import { Server } from "../../src/server/server"
 import { Flag } from "@vectordevai/core/flag/flag"
+import { Global } from "@vectordevai/core/global"
 import { SessionV2 } from "@vectordevai/core/session"
 
 const credential = (username: string, password: string) => ({ username, password: Redacted.make(password) })
@@ -1327,6 +1328,74 @@ test("a guest reads its repository's trust but is told only the owner can approv
     expect(await ownerStatus.json()).toMatchObject({ trusted: false, ignored: true, settings: true, approvable: true })
   } finally {
     Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 30_000)
+
+test("a guest's global config leaves out the owner's Vector Local block", async () => {
+  await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const files = ["vector.jsonc", "vector.json", "config.json"].map((name) => path.join(Global.Path.config, name))
+  const originals = await Promise.all(
+    files.map(async (file) => ((await Bun.file(file).exists()) ? Bun.file(file).text() : undefined)),
+  )
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
+  const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
+  const call = (route: string, init: RequestInit = {}) =>
+    fetch(new URL(route, listener.url), { ...init, keepalive: false })
+  const local = { endpoints: ["http://10.0.0.5:8000"], pins: { "http://10.0.0.5:8000": { kind: "vllm" } } }
+  try {
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+    const saved = await call("/global/config", { method: "PATCH", headers: owner, body: JSON.stringify({ local }) })
+    expect(saved.status).toBe(200)
+    const read = async (headers: Record<string, string>) => {
+      const response = await call("/global/config", { headers })
+      expect(response.status).toBe(200)
+      return (await response.json()) as { local?: unknown; $schema?: string }
+    }
+    // The owner's Add server starts from this list; a guest, which cannot change it, never sees it.
+    expect((await read(owner)).local).toEqual(local)
+    const forGuest = await read(guest)
+    expect(forGuest.local).toBeUndefined()
+    expect(JSON.stringify(forGuest)).not.toContain("10.0.0.5")
+  } finally {
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    const restore = () =>
+      Promise.all(
+        files.map((file, index) => {
+          const original = originals[index]
+          return original === undefined ? fs.rm(file, { force: true }) : Bun.write(file, original)
+        }),
+      )
+    await restore()
+    // A real change through the route loads the restored files, then they are restored once more.
+    await call("/global/config", { method: "PATCH", headers: owner, body: JSON.stringify({ username: "restored" }) })
+    await restore()
     await listener.stop(true)
     for (const key of keys) {
       const value = previous[key]

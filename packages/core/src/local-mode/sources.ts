@@ -29,7 +29,8 @@ const VECTOR = ["vectordev.ai"]
 // such as a private Azure OpenAI deployment, which is then labelled as listed by the company. Each entry covers the
 // names under it, and a `*` inside a name stands for one label, such as a region or a resource name, so a vendor
 // that only serves AI is listed by its domain and a general cloud by the names of its AI services. `cloudHosts` adds
-// every provider address in the model catalog; `Egress.resolve` passes it when the policy is resolved.
+// every provider address in a model catalog: the engine's config resolution passes the bundled catalog's at start and
+// adds each catalog the engine loads (`Config.localCatalog`), and `Egress.resolve` takes a catalog too.
 export const CLOUD_INFERENCE_HOSTS = [
   "openai.com",
   "chatgpt.com",

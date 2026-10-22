@@ -1,9 +1,13 @@
-import { describe, expect } from "bun:test"
+import { afterEach, describe, expect } from "bun:test"
+import { mkdirSync, rmSync, writeFileSync } from "fs"
+import path from "path"
 import { Effect, Layer } from "effect"
+import { Global } from "@vectordevai/core/global"
 import { ModelV2 } from "@vectordevai/core/model"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { Auth } from "@/auth"
+import { Config } from "@/config/config"
 import { Provider } from "@/provider/provider"
 import { ReviewModel } from "../../src/review/model"
 import { TestConfig } from "../fixture/config"
@@ -13,12 +17,15 @@ const it = testEffect(Layer.empty)
 
 const modalities = { text: true, audio: false, image: false, video: false, pdf: false }
 
-function model(name: string, input: { context?: number; input?: number; output?: number; cacheRead?: number } = {}) {
+function model(
+  name: string,
+  input: { context?: number; input?: number; output?: number; cacheRead?: number; url?: string } = {},
+) {
   const ref = Provider.parseModel(name)
   return {
     id: ref.modelID,
     providerID: ref.providerID,
-    api: { id: ref.modelID, url: "https://models.invalid/v1", npm: "@ai-sdk/openai-compatible" },
+    api: { id: ref.modelID, url: input.url ?? "https://models.invalid/v1", npm: "@ai-sdk/openai-compatible" },
     name,
     capabilities: {
       temperature: true,
@@ -51,6 +58,8 @@ const MODELS = [
   model("vector/acme/coder:free"),
   model("openrouter/acme/coder:free"),
   model("tiny/small", { context: 16_000, input: 1, output: 1 }),
+  model("gpu/kimi", { url: "http://10.0.0.5:8000/v1" }),
+  model("gpu/held", { url: "http://10.0.0.9:8000/v1" }),
 ]
 
 interface Setup {
@@ -207,6 +216,39 @@ describe("ReviewModel.resolveReviewModel cost", () => {
       expect(priced.costKind).toBe("priced")
       expect(priced.price).toEqual({ input: 1.25, output: 10, cacheRead: 0.125 })
       expect(priced.context).toBe(128_000)
+    }),
+  )
+})
+
+describe("ReviewModel.resolveReviewModel on servers someone hosts", () => {
+  const globalFile = path.join(Global.Path.config, "vector.json")
+  const managedDirectory = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
+
+  afterEach(() => {
+    rmSync(globalFile, { force: true })
+    rmSync(managedDirectory, { recursive: true, force: true })
+    rmSync(Config.localConfirmedFile(), { force: true })
+    Config.refreshLocal()
+    Config.confirmLocal()
+  })
+
+  it.effect("a private server the company lists has no per-token price, and one an edit still held adds has one", () =>
+    Effect.gen(function* () {
+      mkdirSync(managedDirectory, { recursive: true })
+      writeFileSync(
+        path.join(managedDirectory, "vector.json"),
+        JSON.stringify({ local: { endpoints: ["http://10.0.0.5:8000"] } }),
+      )
+      writeFileSync(globalFile, JSON.stringify({ local: { enabled: true } }))
+      Config.refreshLocal()
+      writeFileSync(globalFile, JSON.stringify({ local: { enabled: true, endpoints: ["http://10.0.0.9:8000"] } }))
+      Config.refreshLocal()
+      expect(Config.localPending()?.changes).toEqual(["adds the model server http://10.0.0.9:8000"])
+
+      expect((yield* resolve({ trigger: "command", env: { MODEL: "gpu/kimi" } })).costKind).toBe("local")
+      expect((yield* resolve({ trigger: "command", env: { MODEL: "gpu/held" } })).costKind).toBe("unknown")
+      Config.confirmLocal()
+      expect((yield* resolve({ trigger: "command", env: { MODEL: "gpu/held" } })).costKind).toBe("local")
     }),
   )
 })
