@@ -17,6 +17,8 @@ import {
   type LocalReviewOptions,
 } from "../../src/cli/cmd/review"
 import { Git } from "../../src/git"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { ReviewModel, type ResolvedModel } from "../../src/review/model"
 import { Review } from "../../src/review/run"
 import { tmpdir } from "../fixture/fixture"
@@ -573,6 +575,21 @@ describe("vector review: pull requests and --checks", () => {
       expect(yield* Effect.promise(() => Bun.file(path.join(repo.dir, "src/list.ts")).text())).toBe(LIST)
       expect(yield* Effect.promise(() => input.knownPath("docs/NOTES.md"))).toBe(true)
       expect(run.out()).toStartWith("Vectorscope review · pull request #7 vs origin/main")
+    }),
+  )
+
+  it.live("with Vector Local on and Web access None, --pr is refused before git reaches the remote", () =>
+    Effect.gen(function* () {
+      const repo = yield* branched
+      yield* git(repo.dir, "remote", "add", "origin", "https://github.com/vectordevai/vector.git")
+      Egress.configure(LocalPolicy.resolve({ global: { enabled: true, web: "none" } }))
+      const result = yield* review({ directory: repo.dir, pr: 7 }, fake().deps).pipe(
+        Effect.ensuring(Effect.sync(() => Egress.configure(LocalPolicy.OFF))),
+      )
+      expect(result.exitCode).toBe(2)
+      expect(result.error).toContain(
+        "Vector Local blocked a git request to github.com. Web access is set to None, so git reaches no internet server.",
+      )
     }),
   )
 

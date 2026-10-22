@@ -11,8 +11,7 @@ import { Slug } from "@vectordevai/core/util/slug"
 import { errorMessage } from "../util/error"
 import { GlobalBus } from "@/bus/global"
 import { Git } from "@/git"
-import { gitEnvironment, remoteRefusal } from "@vectordevai/core/git"
-import { Egress } from "@vectordevai/core/local-mode/egress"
+import { gitEnvironment, refusal } from "@vectordevai/core/git"
 import { Effect, Layer, Path, Schema, Scope, Context } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { FSUtil } from "@vectordevai/core/fs-util"
@@ -153,8 +152,17 @@ const layer: Layer.Layer<
     const project = yield* Project.Service
     const store = yield* InstanceStore.Service
 
+    // With Vector Local on, a git command that connects (a fetch, a submodule update) is decided on each remote it would
+    // reach before git starts, and with Web access None git may use only file remotes.
     const git = Effect.fnUntraced(
       function* (args: string[], opts?: { cwd?: string }) {
+        const query = (more: string[]) =>
+          appProcess.run(ChildProcess.make("git", more, { cwd: opts?.cwd, extendEnv: true, stdin: "ignore" })).pipe(
+            Effect.map((result) => (result.exitCode === 0 ? result.stdout.toString("utf8") : "")),
+            Effect.catch(() => Effect.succeed("")),
+          )
+        const refused = yield* refusal(args, query)
+        if (refused) return { code: 128, text: "", stderr: refused } satisfies GitResult
         const result = yield* appProcess.run(
           ChildProcess.make("git", args, { cwd: opts?.cwd, extendEnv: true, stdin: "ignore", env: gitEnvironment() }),
         )
@@ -557,11 +565,6 @@ const layer: Layer.Layer<
       if (base.ref !== base.name && sep > 0) {
         const remote = base.ref.slice(0, sep)
         const branch = base.ref.slice(sep + 1)
-        // Vector Local decides the fetch by the URL git would use for the remote, before git starts.
-        const refused = Egress.policy().enabled
-          ? remoteRefusal((yield* git(["ls-remote", "--get-url", remote], { cwd: ctx.worktree })).text.trim() || remote)
-          : undefined
-        if (refused) return yield* new ResetFailedError({ message: refused })
         yield* gitExpect(
           ["fetch", remote, branch],
           { cwd: ctx.worktree },

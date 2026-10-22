@@ -260,30 +260,12 @@ const layer = Layer.effect(
       })
     })
 
-    // Vector Local decides each of Vector's own requests to a remote before git starts, by the host of the URL git
-    // would use (a name resolved through url.insteadOf, every remote for --all). Nothing is decided with it off.
-    const decideRemotes = Effect.fnUntraced(function* (
-      operation: OperationError["operation"],
-      directory: AbsolutePath,
-      remotes: readonly string[],
-    ) {
-      if (!Egress.policy().enabled) return
-      const urls = yield* Effect.forEach(remotes, (remote) =>
-        remoteAddress(remote) === undefined && !remote.includes("/") && !remote.includes("\\")
-          ? run(directory, proc)(["ls-remote", "--get-url", remote]).pipe(Effect.map((result) => result.text.trim()))
-          : Effect.succeed(remote),
-      )
-      const refused = urls.map(remoteRefusal).find((reason) => reason !== undefined)
-      if (refused) return yield* new OperationError({ operation, directory, message: refused })
-    })
-
     const clone = Effect.fn("Git.repo.clone")(function* (input: {
       remote: string
       directory: AbsolutePath
       branch?: string
       depth?: number
     }) {
-      yield* decideRemotes("clone", AbsolutePath.make(path.dirname(input.directory)), [input.remote])
       yield* operation("clone", AbsolutePath.make(path.dirname(input.directory)), [
         "clone",
         "--depth",
@@ -306,15 +288,6 @@ const layer = Layer.effect(
       repository: Repository,
       input: { prune?: boolean; remoteUrl?: string } = {},
     ) {
-      yield* decideRemotes(
-        "fetch",
-        repository.worktree,
-        input.remoteUrl
-          ? [input.remoteUrl]
-          : Egress.policy().enabled
-            ? (yield* run(repository.worktree, proc)(["remote"])).text.split(/\r?\n/).filter(Boolean)
-            : [],
-      )
       yield* operation("fetch", repository.worktree, [
         "fetch",
         ...(input.prune === false ? [] : ["--prune"]),
@@ -328,7 +301,6 @@ const layer = Layer.effect(
     ) {
       const remoteName = input.remote ?? "origin"
       const spec = `refs/heads/${input.branch}:refs/remotes/${remoteName}/${input.branch}`
-      yield* decideRemotes("fetch", repository.worktree, [input.remoteUrl ?? remoteName])
       yield* operation("fetch", repository.worktree, [
         "fetch",
         input.remoteUrl ?? remoteName,
@@ -1014,8 +986,10 @@ function run(cwd: string, proc: AppProcess.Interface) {
     execute(cwd, proc)(args).pipe(Effect.catch(() => Effect.succeed({ exitCode: 1, text: "", stderr: "" })))
 }
 
+// Every git command Vector runs itself goes through here, so with Vector Local on one that connects is decided on each
+// remote it would reach before git starts (refusal), and with Web access None git may use only file remotes.
 function execute(cwd: string, proc: AppProcess.Interface) {
-  return (args: string[]) =>
+  const spawn = (args: string[]) =>
     proc
       .run(
         ChildProcess.make("git", args, {
@@ -1035,6 +1009,17 @@ function execute(cwd: string, proc: AppProcess.Interface) {
             }) satisfies Result,
         ),
       )
+  const query = (args: string[]) =>
+    spawn(args).pipe(
+      Effect.map((result) => (result.exitCode === 0 ? result.text : "")),
+      Effect.catch(() => Effect.succeed("")),
+    )
+  return (args: string[]) =>
+    Effect.gen(function* () {
+      const refused = yield* refusal(args, query)
+      if (refused) return { exitCode: 128, text: "", stderr: refused } satisfies Result
+      return yield* spawn(args)
+    })
 }
 
 /**
@@ -1070,6 +1055,166 @@ export function remoteRefusal(remote: string) {
   if (decided.decision === "allow") return undefined
   const host = URL.canParse(address) ? new URL(address).hostname : remote.trim()
   return `Vector Local blocked a git request to ${host}. ${decided.reason}`
+}
+
+/**
+ * Why Vector Local blocks one of Vector's own git commands before git starts, or undefined when it may run. A command
+ * that connects (a fetch, pull, push, clone or ls-remote, a submodule update or add, and a remote update, prune, show
+ * or set-head that asks the remote) is decided on every remote it would reach, each read as the URL git would use: a
+ * configured remote's name, a slash in it or not, gives its fetch URLs and, for a push, its push URLs, and a URL goes
+ * through `ls-remote --get-url`, so url.insteadOf (an alias such as `gh:org/repo`) applies. A command that names no
+ * remote is decided on every remote the repository has, and a fetch or pull that may recurse into submodules on their
+ * URLs too. `query` runs a git command that does not connect in the same directory and returns what it printed, or ""
+ * when it failed. Nothing is decided with Vector Local off.
+ */
+export const refusal = Effect.fnUntraced(function* (
+  args: readonly string[],
+  query: (args: string[]) => Effect.Effect<string>,
+) {
+  if (!Egress.policy().enabled) return undefined
+  const command = connects(args)
+  if (!command) return undefined
+  // The options before the subcommand (-C, -c), so the queries read the same repository and config.
+  const git = (more: string[]) => query([...command.global, ...more])
+  const list = (text: string) =>
+    text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+  const names = list(yield* git(["remote"]))
+  const urls = (remote: string) =>
+    Effect.gen(function* () {
+      if (names.includes(remote)) {
+        const fetched = list(yield* git(["remote", "get-url", "--all", remote]))
+        const pushed = command.push ? list(yield* git(["remote", "get-url", "--push", "--all", remote])) : []
+        if (fetched.length + pushed.length > 0) return [...fetched, ...pushed]
+      }
+      return [(yield* git(["ls-remote", "--get-url", remote])).trim() || remote]
+    })
+  // A later word that is a remote's name or a URL is decided too, in case an option this does not know took a value.
+  const remotes = [
+    ...(command.remotes === "all" ? names : command.remotes),
+    ...command.extra.filter((word) => names.includes(word) || /:\/\/|::/.test(word)),
+  ]
+  const submodules = command.submodules
+    ? yield* Effect.gen(function* () {
+        const top = (yield* git(["rev-parse", "--show-toplevel"])).trim()
+        const configured = [
+          ...(top
+            ? list(yield* git(["config", "--file", path.join(top, ".gitmodules"), "--get-regexp", SUBMODULE_URL]))
+            : []),
+          ...list(yield* git(["config", "--get-regexp", SUBMODULE_URL])),
+        ].flatMap((line) => line.split(/\s+/).slice(1, 2))
+        // A relative submodule URL is resolved against the superproject's remote.
+        return configured.some((url) => /^\.\.?\//.test(url))
+          ? [...configured.filter((url) => !/^\.\.?\//.test(url)), ...names]
+          : configured
+      })
+    : []
+  const resolved = (yield* Effect.forEach([...new Set([...remotes, ...submodules])], urls)).flat()
+  return [...new Set(resolved)].map(remoteRefusal).find((reason) => reason !== undefined)
+})
+
+const SUBMODULE_URL = "^submodule\\..*\\.url$"
+
+// git's own options that take the next argument as their value, before the subcommand.
+const GLOBAL_VALUED = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix"])
+
+// Options of the subcommands that connect that take the next argument as their value. Any other option is a flag or
+// carries its value after "=".
+const FETCH_VALUED = [
+  ...["--depth", "--deepen", "--shallow-since", "--shallow-exclude", "--refmap", "-o", "--server-option"],
+  ...["--upload-pack", "--negotiation-tip", "-j", "--jobs", "--filter", "--recurse-submodules-default"],
+  "--submodule-prefix",
+]
+const VALUED: Readonly<Record<string, ReadonlySet<string>>> = {
+  fetch: new Set(FETCH_VALUED),
+  pull: new Set([...FETCH_VALUED, "-s", "--strategy", "-X", "--strategy-option"]),
+  push: new Set(["--repo", "--receive-pack", "--exec", "-o", "--push-option"]),
+  clone: new Set([
+    ...["-o", "--origin", "-b", "--branch", "-u", "--upload-pack", "--reference", "--reference-if-able"],
+    ...["--separate-git-dir", "--depth", "--shallow-since", "--shallow-exclude", "-c", "--config", "--server-option"],
+    ...["-j", "--jobs", "--filter", "--template", "--bundle-uri", "--ref-format", "--revision"],
+  ]),
+  "ls-remote": new Set(["--upload-pack", "--sort", "-o", "--server-option"]),
+  submodule: new Set(["-b", "--branch", "--name", "--reference", "--depth", "-j", "--jobs", "--filter"]),
+  remote: new Set(["-t", "-m"]),
+}
+
+/**
+ * The remotes a git command connects to: the options before its subcommand, the remotes (names or URLs, or every
+ * remote), whether it pushes, and whether it may reach submodules' own remotes. Undefined for a command that does not
+ * connect. The first word after the options is the remote; a later one is too when it is a configured remote's name
+ * or a URL, which covers an option this does not know taking a value.
+ */
+function connects(args: readonly string[]) {
+  const start = globalEnd(args)
+  const subcommand = args[start]
+  if (subcommand === undefined) return undefined
+  const valued = VALUED[subcommand] ?? new Set<string>()
+  const rest = args.slice(start + 1)
+  const parsed = rest.reduce<{ options: string[]; words: string[]; value: boolean; ended: boolean }>(
+    (state, word) => {
+      if (state.value)
+        return { ...state, value: false, options: [...state.options.slice(0, -1), `${state.options.at(-1)}=${word}`] }
+      if (state.ended || !word.startsWith("-") || word === "-") return { ...state, words: [...state.words, word] }
+      if (word === "--") return { ...state, ended: true }
+      return { ...state, options: [...state.options, word], value: valued.has(word) }
+    },
+    { options: [], words: [], value: false, ended: false },
+  )
+  const option = (...names: string[]) =>
+    parsed.options.some((item) => names.some((name) => item === name || item.startsWith(`${name}=`)))
+  const value = (name: string) => parsed.options.find((item) => item.startsWith(`${name}=`))?.slice(name.length + 1)
+  const global = args.slice(0, start)
+  const named = (words: readonly string[]) => (words.length === 0 ? "all" : words)
+  const recurse = !option("--no-recurse-submodules")
+  const words = parsed.words
+  const reach = (
+    remotes: readonly string[] | "all",
+    push = false,
+    submodules = false,
+    extra: readonly string[] = [],
+  ) => ({
+    global,
+    remotes,
+    push,
+    submodules,
+    extra,
+  })
+  if (subcommand === "fetch" || subcommand === "pull") {
+    if (option("--all")) return reach("all", false, recurse)
+    if (option("--multiple")) return reach(named(words), false, recurse)
+    return reach(named(words.slice(0, 1)), false, recurse, words.slice(1))
+  }
+  if (subcommand === "push") {
+    const repo = value("--repo")
+    return reach(repo ? [repo] : named(words.slice(0, 1)), true, false, words.slice(repo ? 0 : 1))
+  }
+  if (subcommand === "clone") return words[0] ? reach([words[0]]) : undefined
+  if (subcommand === "ls-remote") return option("--get-url") ? undefined : reach(named(words.slice(0, 1)))
+  if (subcommand === "submodule") {
+    const action = words[0]
+    // `foreach` runs the command it is given in each submodule, and the ones Vector gives it stay on this computer.
+    if (action === "update") return reach([], false, true)
+    if (action === "add" && words[1]) return reach(/^\.\.?\//.test(words[1]) ? "all" : [words[1]])
+    return undefined
+  }
+  if (subcommand === "remote") {
+    const action = words[0]
+    if (action === "update") return reach(named(words.slice(1)))
+    if (action === "prune" || (action === "show" && !option("-n"))) return reach(named(words.slice(1)))
+    if (action === "set-head" && option("-a", "--auto")) return reach(words.slice(1, 2))
+    if (action === "add" && option("-f", "--fetch") && words[2]) return reach([words[2]])
+    return undefined
+  }
+  return undefined
+}
+
+// Where the subcommand starts: past git's own options, and the value of each that takes one.
+function globalEnd(args: readonly string[]): number {
+  const at = args.findIndex((word, index) => !word.startsWith("-") && !GLOBAL_VALUED.has(args[index - 1] ?? ""))
+  return at < 0 ? args.length : at
 }
 
 /**
