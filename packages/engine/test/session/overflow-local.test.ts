@@ -10,8 +10,8 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Provider } from "@/provider/provider"
 import { expect } from "bun:test"
-import { tool } from "ai"
-import { Effect, Layer, Stream } from "effect"
+import { streamText, tool } from "ai"
+import { Effect, Fiber, Layer, Stream } from "effect"
 import path from "path"
 import z from "zod"
 import type { Agent } from "../../src/agent/agent"
@@ -186,6 +186,60 @@ it.live("an agent whose prompt fits runs, and its steps on this computer have no
         expect(run?.costKind).toBe("local")
         expect(run?.unpricedSteps).toBe(0)
         expect(guard.outside()).toEqual([])
+      }),
+    { trusted: true, config: (url) => providerCfg(url, 32_768) },
+  ),
+)
+
+it.live("a root session's new prompt drops a helper waiting for the same server", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const processors = yield* SessionProcessor.Service
+        const session = yield* Session.Service
+        const provider = yield* Provider.Service
+        const model = yield* provider.getModel(ref.providerID, ref.modelID)
+        const gate = Promise.withResolvers<void>()
+        yield* llm.hold("first answer", gate.promise)
+
+        const first = yield* session.create({})
+        const asked = yield* user(first.id, "fix the bug")
+        const turn = yield* processors.create({
+          assistantMessage: yield* assistant(first.id, asked.id, path.resolve(dir)),
+          sessionID: first.id,
+          model,
+        })
+        const running = yield* turn.process(input(first.id, asked.id, model, agent("build"), "")).pipe(Effect.forkChild)
+        yield* llm.wait(1)
+
+        // A request the session processor did not make, such as a title, waits while the turn holds the server.
+        const failed: { error?: unknown } = {}
+        const title = streamText({
+          model: yield* provider.getLanguage(model),
+          onError: ({ error }) => {
+            failed.error = error
+          },
+          messages: [{ role: "user", content: "Generate a title for this conversation" }],
+        })
+        const dropped = Promise.resolve(title.text).then(
+          () => undefined,
+          () => failed.error,
+        )
+        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 50)))
+        expect(yield* llm.calls).toBe(1)
+
+        // Another root session starts on a new prompt.
+        const second = yield* session.create({})
+        const next = yield* user(second.id, "add a test")
+        yield* processors.create({
+          assistantMessage: yield* assistant(second.id, next.id, path.resolve(dir)),
+          sessionID: second.id,
+          model,
+        })
+        expect(yield* Effect.promise(() => dropped)).toMatchObject({ name: "AbortError" })
+        gate.resolve()
+        expect(yield* Fiber.join(running)).toBe("continue")
+        expect(yield* llm.calls).toBe(1)
       }),
     { trusted: true, config: (url) => providerCfg(url, 32_768) },
   ),
