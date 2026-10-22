@@ -5,6 +5,7 @@ import { Effect, Fiber } from "effect"
 import { BrainEmbed } from "@vectordevai/core/brain/embed"
 import { BrainEmbedManifest } from "@vectordevai/core/brain/embed-manifest"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { BrainPaths } from "@vectordevai/core/brain/paths"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Flag } from "@vectordevai/core/flag/flag"
 import { Instruction } from "@/session/instruction"
@@ -448,7 +449,9 @@ export const MemoryLinksCommand = effectCmd({
   handler: Effect.fn("Cli.memory.links")(function* (args) {
     const memory = yield* where
     const linked = args.relink ? yield* memory.knowledge.link(memory.place) : undefined
-    const file = path.relative(memory.place.root, path.resolve(process.cwd(), args.file)).split(path.sep).join("/")
+    // The root comes from git, which spells it as it really is; the working folder may be a link to it or, on Windows,
+    // its short name, so the file is named the way the brain names files.
+    const file = BrainPaths.relative(memory.place.root, path.resolve(process.cwd(), args.file))
     const links = yield* memory.knowledge.links(memory.place, file, { personal: true })
     if (args.json) return print(linked ? { links, linked } : links)
     if (linked)

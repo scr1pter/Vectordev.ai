@@ -172,7 +172,8 @@ jobs:
         run: GITHUB_ACTIONS=false bun turbo run build --filter='@vectordevai/engine^...' --log-order=stream
 
       - name: Run Engine shard
-        timeout-minutes: 20
+        # Windows shards take 14 to 16 minutes on hosted runners, and one passed 20 on 22 Oct.
+        timeout-minutes: 30
         working-directory: packages/engine
         # Whole-file shards retain the configured preloads and per-test deadlines; print passes to locate any stall.
         run: GITHUB_ACTIONS=false bun test --timeout 30000 --shard=${{ matrix.shard }}/4
