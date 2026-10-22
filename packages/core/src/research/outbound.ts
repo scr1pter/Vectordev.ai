@@ -4,6 +4,8 @@ import { isIP } from "node:net"
 import { parse } from "tldts"
 import { BrainScan } from "../brain/scan"
 import { ResearchCanonical } from "./canonical"
+import { ResearchEnglish } from "./english"
+import { WebFence } from "./fence"
 
 // The check on every search query and address research sends out. The research lead holds private context (recalled
 // personal lines, private document passages, repository files it read), and a hostile page can try to steer it into
@@ -19,13 +21,17 @@ import { ResearchCanonical } from "./canonical"
 //   host name or number of a company to clear them all.
 //
 // A name is a capitalised word of prose that the private prose never writes in lower case and that is not a common
-// word: "Acme", "Falcon" and "Fremont", but not "Heat" at the start of a sentence about heat pumps. Code is left out,
-// since it is full of capitalised words ("Effect", "Schema") that say nothing about anyone. Names cost some fair
-// queries: a private line about Germany keeps "Germany" out of queries until the user types it.
+// word: "Acme", "Falcon" and "Fremont", and "Kestrel" or "Globex" opening a remembered fact ("Kestrel ships in May",
+// "Employer: Globex"), but not "Heat" at the start of a sentence about heat pumps. Code is left out, since it is full
+// of capitalised words ("Effect", "Schema") that say nothing about anyone. Names cost some fair queries: a private line
+// about Germany keeps "Germany" out of queries until the user types it.
 //
-// Text is compared after NFKC folding with invisible characters (soft hyphens, zero-width spaces) taken out, so they
-// cannot split a token. It catches literal overlap only: a model can still paraphrase. The queries go to the search
-// service the user set up and are shown in the Sources tab, so a paraphrase is at least visible.
+// Text is compared the way a reader sees it, on both sides: folded by NFKD, without accents and invisible characters
+// (soft hyphens, zero-width spaces), with letters from other scripts that look like Latin ones read as Latin
+// ("Аcme" with a Cyrillic "А" is "Acme"), and with numbers written in groups read whole (2,400,000, 2.400.000,
+// 2 400 000 and 24,00,000 are all 2400000, and a card number written in fours is one number). It catches literal
+// overlap only: a model can still paraphrase. The queries go to the search service the user set up and are shown in
+// the Sources tab, so a paraphrase is at least visible.
 
 export const REFUSAL = "That search would send text from your private files. Rephrase it with public terms."
 
@@ -40,6 +46,12 @@ export type Context = {
   readonly typed: readonly string[]
   /** Public text seen in this run: search results and the pages read. */
   readonly public: readonly string[]
+  /**
+   * The preferred and avoided domains of the sources facet (section 6.4a). They exist to become site: filters, so
+   * they may go out as a host name or a site: value. Anywhere else in a query (an address, a path, a longer host) they
+   * are checked like any other private text. Only public host names count, never a word or an intranet name.
+   */
+  readonly domains?: readonly string[]
 }
 
 export type Reason = "secret" | "words" | "token"
@@ -187,7 +199,16 @@ const CODE = /[{}]|;\s*$|=>|\w\(|\s=\s|^\s*(?:\/\/|\/\*)|^\s+\*(?:\s|\/|$)|<\/?[
 // a bounded amount of work at each place and the check stays linear in the size of the private context.
 const MAX_RUN = 128
 const TOKEN_RUN = /[\w.+\-/@~:]+/g
-const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu
+// What a reader reads past: accents and other combining marks once NFKD has split them off, and invisible characters.
+const UNSEEN = /[\p{M}\p{Default_Ignorable_Code_Point}]/gu
+// A number with its digits in groups: of three, with one separator throughout (a comma, a dot, an apostrophe, an
+// underscore or a space; NFKD has made no-break and thin spaces plain ones), or in lakhs and crores (24,00,000 and
+// 1,23,45,678). A group does not start inside another number or a word.
+const GROUPED =
+  /(?<![\p{L}\p{N}_])(?<!\d[.,])(?:\d{1,3}([,.'\u2019_ ])\d{3}(?:\1\d{3})*|\d{1,2}(?:,\d{2})+,\d{3})(?!\p{N})/gu
+// A card number written in groups: four of four (a last group may be shorter, and a fifth may follow), or 4-6-5 and
+// 4-6-4. One separator throughout, a space or a hyphen.
+const CARD = /(?<![\p{L}\p{N}_])\d{4}([ -])(?:\d{4}\1\d{4}\1\d{1,4}(?:\1\d{1,3})?|\d{6}\1\d{4,5})(?![\p{L}\p{N}_])/gu
 
 /** Whether a search query may leave, given the run's private context. */
 export function check(query: string, context: Context): Result {
@@ -204,16 +225,19 @@ export function check(query: string, context: Context): Result {
     .map((gram) => gram.join(" "))
     .find((gram) => known.named.has(gram) && !known.allowedWords.includes(` ${gram} `))
   if (named) return refused("words", named)
-  const lower = fold(query).toLowerCase()
+  // Rare tokens and names are read with the sources facet's domains taken out where they stand as a host name or a
+  // site: value. Runs of words were read whole above.
+  const sent = known.exempt(fold(query))
+  const lower = sent.toLowerCase()
   // Both ways round: a rare token of the query that the private text holds, and a rare token of the private text that
   // the query holds, which catches one the query wrote in lower case or ran into other letters.
   const token =
-    rare(query).find(
-      (item) => known.raw.includes(item.toLowerCase()) && !known.typedRaw.includes(item.toLowerCase()),
-    ) ?? known.tokens.find((item) => lower.includes(item))
+    rare(sent).find((item) => known.raw.includes(item.toLowerCase()) && !known.typedRaw.includes(item.toLowerCase())) ??
+    known.tokens.find((item) => lower.includes(item))
   if (token) return refused("token", token)
   // A name as a word of the query, or, from 6 letters, run into other letters ("acmerobotics").
-  const name = known.names.find((item) => words.includes(item) || (item.length >= 6 && lower.includes(item)))
+  const shown = wordsOf(sent)
+  const name = known.names.find((item) => shown.includes(item) || (item.length >= 6 && lower.includes(item)))
   if (name) return refused("token", name)
   return { ok: true }
 }
@@ -263,16 +287,17 @@ export function rare(text: string) {
       ...(value.match(/\b[a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)+\b/g) ?? []).filter((token) => token.length >= 6),
       ...(value.match(/\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+\b/g) ?? []).filter((token) => token.length >= 6),
       ...(value.match(/\b(?=[A-Za-z]*\d)(?=\d*[A-Za-z])[A-Za-z0-9]{8,}\b/g) ?? []),
-      // A round number (10000, 250000) says nothing about anyone's files.
-      ...(value.match(/\b\d{5,}\b/g) ?? []).filter((number) => !/^\d{1,2}0+$/.test(number)),
+      // A number of one significant figure (10000, 300000) says nothing about anyone's files. 2,400,000 does.
+      ...(value.match(/\b\d{5,}\b/g) ?? []).filter((number) => !/^\d0+$/.test(number)),
     ])
   return [...new Set(found)].filter((token) => !COMMON.has(token.toLowerCase()))
 }
 
 /**
  * The names in the prose of some texts: capitalised words the prose never writes in lower case, and no common word. A
- * sentence's first word is capitalised anyway, so it counts only when it reads as a name: possessive ("Acme's") or
- * followed by another capitalised word ("Acme Robotics").
+ * sentence's first word, or the first after a label's colon, is capitalised anyway, so it counts only when it reads as
+ * a name: possessive ("Acme's"), followed by another capitalised word ("Acme Robotics"), or not a common English word
+ * ("Kestrel ships in May", "Employer: Globex", but not "Heat pumps are loud").
  */
 export function names(texts: readonly string[]) {
   const words = prose(texts)
@@ -281,7 +306,7 @@ export function names(texts: readonly string[]) {
       const found = [...sentence.matchAll(/([\p{L}\p{N}]+)(['\u2019]s(?![\p{L}\p{N}]))?/gu)]
       return found.map((match, index) => ({
         word: match[1]!,
-        named: index > 0 || !!match[2] || CAPITALISED.test(found[1]?.[1] ?? ""),
+        named: index > 0 || !!match[2] || CAPITALISED.test(found[1]?.[1] ?? "") || !ResearchEnglish.common(match[1]!),
       }))
     })
   // Only a word written on its own shows the prose uses it in lower case: "acme" in jira.acme.internal or
@@ -327,7 +352,16 @@ function refused(reason: Reason, match: string): Result {
 }
 
 function fold(text: string) {
-  return text.replace(IGNORABLE, "").normalize("NFKC").replace(IGNORABLE, "")
+  return WebFence.latin(text.normalize("NFKD").replace(UNSEEN, ""))
+    .replace(CARD, (number) => number.replace(/\D/g, ""))
+    .replace(GROUPED, (number: string, separator: string | undefined, at: number, whole: string) => {
+      // An IPv4 address stays as written, and so does a chain that goes on with its separator and a digit (1.100.2,
+      // 192.168.1.20): a version or an address, not a number. "2,400,000.00" is a number with its decimals.
+      const after = whole.slice(at + number.length, at + number.length + 2)
+      if (isIP(number) === 4 || (separator && separator !== " " && after[0] === separator && /\d/.test(after[1] ?? "")))
+        return number
+      return number.replace(/\D/g, "")
+    })
 }
 
 function wordsOf(text: string) {
@@ -397,5 +431,31 @@ function build(context: Context) {
       (token) => token.length >= 5 && !typedRaw.includes(token),
     ),
     names: found.filter((name) => !typedWords.has(name)),
+    exempt: exempting(context.domains ?? []),
   }
+}
+
+// The text with each of the domains blanked where it stands alone as a host name or as a site: value ("nature.com",
+// "site:nature.com", "-site:nature.com"), and nowhere else: not in "jane@nature.com", "nature.com/acme",
+// "acme.nature.com" or "inurl:nature.com". Only host names on a public suffix count, so a word or an intranet name
+// passed as a domain exempts nothing.
+function exempting(domains: readonly string[]) {
+  const hosts = domains
+    .map((domain) => fold(domain).trim().toLowerCase())
+    .filter((domain) => {
+      const parsed = parse(domain, { allowPrivateDomains: true })
+      return (
+        /^[a-z0-9.-]+$/.test(domain) &&
+        parsed.hostname === domain &&
+        !!parsed.domain &&
+        (!!parsed.isIcann || !!parsed.isPrivate)
+      )
+    })
+    .map((domain) => domain.replaceAll(".", "\\."))
+  if (hosts.length === 0) return (text: string) => text
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}_.@/:+~-])(?:-?site:)?(?:${hosts.join("|")})(?![\\p{L}\\p{N}_@/:-]|\\.[\\p{L}\\p{N}])`,
+    "giu",
+  )
+  return (text: string) => text.replace(pattern, " ")
 }

@@ -272,6 +272,41 @@ describe("ResearchSearch.searxng", () => {
     expect(web.count("searxng")).toBe(before)
   })
 
+  test("sends the sources facet's preferred domain as the site filter, and checks every other host", async () => {
+    const facet = {
+      ...context,
+      private: [...context.private, "Krishna prefers primary sources from nature.com and avoids dailymail.co.uk."],
+    }
+    const before = web.count("searxng")
+    expect(
+      failure(await search("searxng", { query: "heat pumps", site: "nature.com" }, () => Effect.void, facet)),
+    ).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
+    expect(web.count("searxng")).toBe(before)
+    const exempt = { ...facet, domains: ["nature.com", "dailymail.co.uk"] }
+    const authorized: string[] = []
+    const sent = await search(
+      "searxng",
+      { query: "heat pumps", site: "nature.com" },
+      (url) =>
+        Effect.sync(() => {
+          authorized.push(url)
+        }),
+      exempt,
+    )
+    expect(Exit.isSuccess(sent)).toBe(true)
+    expect(authorized).toEqual([web.url("searxng", "/search?q=heat+pumps+site%3Anature.com&format=json")])
+    expect(web.count("searxng")).toBe(before + 1)
+    expect(
+      failure(
+        await search("searxng", { query: "outage reports", site: "jira.acme.internal" }, () => Effect.void, exempt),
+      ),
+    ).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
+    expect(
+      failure(await search("searxng", { query: "jane@nature.com heat pumps" }, () => Effect.void, exempt)),
+    ).toMatchObject({ _tag: "ResearchSearchRefused", reason: "token" })
+    expect(web.count("searxng")).toBe(before + 1)
+  })
+
   test("takes only a host name as the site filter", async () => {
     const before = web.count("searxng")
     for (const site of ["nature.com OR acme", "nature.com/path", "-site", ""]) {

@@ -13,6 +13,14 @@ const context: ResearchOutbound.Context = {
     "Krishna prefers primary sources and is preparing the Falcon account renewal for Acme Robotics.",
     "Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change, according to the internal board memo dated 12 August.",
     "Krishna's daughter goes to Lincoln Elementary in Fremont.",
+    // Memory-of-you lines as the brain keeps personal facts: short, subject first, a label and its value.
+    "Initech is the user's employer.",
+    "Employer: Globex.",
+    "Kestrel ships before the Q4 board meeting.",
+    "Umbrella pays about 2,400,000 USD a year.",
+    // Figures as documents write them, with their digits in groups.
+    "Annual revenue was $12,345,678 last year and payroll is 2.345.678 EUR.",
+    "The renewal goes on the card 4417880256719113.",
     [
       'import { reconcileLedgerEntries } from "./ledger"',
       'const BILLING_URL = "https://billing.acme-internal.io/v2/invoices"',
@@ -65,6 +73,36 @@ const leaks: readonly (readonly [string, ResearchOutbound.Reason])[] = [
   [`reconcile${char(0x200b)}ledger${char(0x200b)}entries`, "token"],
   [`settle${char(0x200b)}_partner_payouts`, "token"],
   [`44172${char(0x2060)}03 refund`, "token"],
+  // Numbers written with their digits in groups, either side: the private text's 2,400,000 and 2.345.678, the
+  // private 4417203 written 4,417,203 or 4 417 203, and a card number written in fours.
+  ["2,400,000 USD", "token"],
+  ["2400000 USD", "token"],
+  ["$12,345,678 revenue", "token"],
+  ["12,345,678", "token"],
+  ["12345678", "token"],
+  ["2.345.678 EUR payroll", "token"],
+  [`2${char(0xa0)}345${char(0xa0)}678 payroll`, "token"],
+  ["2'400'000 contract", "token"],
+  ["$2,400,000.00 contract", "token"],
+  ["24,00,000 USD", "token"],
+  ["4,417,203 refund", "token"],
+  ["4 417 203", "token"],
+  ["4417 8802 5671 9113", "token"],
+  ["4417-8802-5671-9113 renewal", "token"],
+  // Names that open a memory-of-you line, or follow its label.
+  ["Initech procurement", "token"],
+  ["Globex procurement", "token"],
+  ["Kestrel launch", "token"],
+  ["Umbrella contract value", "token"],
+  // Look-alike letters from other scripts, small capitals and accents over the letters.
+  [`${char(0x410)}cme churn`, "token"],
+  [`Acm${char(0x435)} churn`, "token"],
+  [`${char(0x391)}cme renewal`, "token"],
+  [`${char(0x1d00, 0x1d04, 0x1d0d, 0x1d07)} renewal`, "token"],
+  [`A${char(0x301)}cme renewal`, "token"],
+  [`K${char(0x435)}strel launch`, "token"],
+  [`F${char(0x430)}lcon pricing change`, "words"],
+  [`the F${char(0x430)}lcon account renewal`, "words"],
 ]
 
 // Queries a research agent writes for public questions, some on the same subjects as the private context. At most
@@ -150,8 +188,9 @@ describe("ResearchOutbound.check", () => {
   test("refuses no more than two of 50 benign queries", () => {
     const refused = benign.filter((query) => !check(query).ok)
     expect(benign).toHaveLength(50)
-    // Measured on 22 Oct 2026, with names and 3-word runs from prose: 0 of 50. With nothing typed, 3 of 50 are
-    // refused, all for "robotics", which "Acme Robotics" makes a name.
+    // Measured on 22 Oct 2026, with names and 3-word runs from prose: 0 of 50, and still 0 with the memory-of-you
+    // lines, grouped figures and look-alike folding added. With nothing typed, 3 of 50 are refused, all for
+    // "robotics", which "Acme Robotics" makes a name.
     expect(refused).toEqual([])
   })
 
@@ -190,6 +229,41 @@ describe("ResearchOutbound.check", () => {
       expect.arrayContaining(["acme", "falcon", "robotics", "krishna", "lincoln", "elementary", "fremont"]),
     )
     expect(ResearchOutbound.names(context.private)).not.toContain("august")
+  })
+
+  test("reads a name that opens a sentence or follows a label, and not a common word there", () => {
+    expect(
+      ResearchOutbound.names([
+        "Initech is the user's employer.",
+        "Employer: Globex.",
+        "Kestrel ships before the Q4 board meeting.",
+        "Umbrella pays about 2,400,000 USD a year.",
+        "Invoices go out monthly. Lives in Fremont. Works late most weeks. Status: Shipped.",
+      ]),
+    ).toEqual(["initech", "globex", "kestrel", "umbrella", "fremont"])
+    expect(
+      ResearchOutbound.names([
+        "## Troubleshooting\n\nInstall the dependencies and run the server.\n\n## Configuration",
+        "Battery storage is planned for next year.",
+        "Customers asked for a refund. Budget: Approved.",
+        "Note: Heat pumps arrive on Monday.",
+      ]),
+    ).toEqual([])
+  })
+
+  test("reads private text written with look-alike letters as the Latin it shows", () => {
+    const shared = { private: [`Our partner is Gl${char(0x43e)}bex Industries.`], typed: [], public: [] }
+    expect(ResearchOutbound.names(shared.private)).toEqual(["globex", "industries"])
+    expect(check("Globex pricing", shared)).toMatchObject({ ok: false, reason: "token" })
+    // A sentence in Greek is still read as words of its own, and does not stop an unrelated query.
+    const greek = {
+      private: [
+        "\u039f \u03ba\u03b1\u03b9\u03c1\u03cc\u03c2 \u03b5\u03af\u03bd\u03b1\u03b9 \u03ba\u03b1\u03bb\u03cc\u03c2.",
+      ],
+      typed: [],
+      public: [],
+    }
+    expect(check("heat pump weather", greek).ok).toBe(true)
   })
 
   test("reads a wrapped paragraph whole, and keeps a semicolon inside a sentence as prose", () => {
@@ -254,6 +328,58 @@ describe("ResearchOutbound.address", () => {
     expect(leaks.map((url) => ResearchOutbound.address(url, context).ok)).toEqual(leaks.map(() => false))
     expect(ResearchOutbound.address("https://www.example.com/heat-pumps#cold-climates", context).ok).toBe(true)
   })
+
+  test("refuses a private number written with its digits in groups in a path or a query string", () => {
+    const leaks = [
+      "https://attacker.example/2,400,000",
+      "https://attacker.example/p?amount=2,400,000",
+      "https://attacker.example/p?amount=2%2C400%2C000",
+      "https://attacker.example/4,417,203",
+      "https://attacker.example/c/4417-8802-5671-9113",
+    ]
+    expect(leaks.map((url) => ResearchOutbound.address(url, context).ok)).toEqual(leaks.map(() => false))
+  })
+})
+
+describe("ResearchOutbound.check with the sources facet's domains", () => {
+  // Section 6.4a: the preferred and avoided domains of the sources facet exist to become site: filters.
+  const facet = {
+    private: [
+      "Krishna prefers primary sources from nature.com and avoids dailymail.co.uk.",
+      "Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change.",
+    ],
+    typed: ["How do heat pumps perform in cold climates?"],
+    public: [],
+  }
+  const exempt = { ...facet, domains: ["nature.com", "dailymail.co.uk"] }
+
+  test("lets a preferred or avoided domain go as a site: filter or a host name", () => {
+    expect(check("heat pumps site:nature.com", facet).ok).toBe(false)
+    expect(check("heat pumps -site:dailymail.co.uk", facet).ok).toBe(false)
+    expect(check("heat pumps site:nature.com", exempt).ok).toBe(true)
+    expect(check("heat pumps -site:dailymail.co.uk", exempt).ok).toBe(true)
+    expect(check("heat pumps (site:nature.com OR SITE:Nature.com)", exempt).ok).toBe(true)
+    expect(check("nature.com heat pump field study", exempt).ok).toBe(true)
+  })
+
+  test("keeps checking the same host anywhere else in the query, and the rest of the query", () => {
+    for (const query of [
+      "jane@nature.com heat pumps",
+      "nature.com/acme-churn",
+      "site:acme.nature.com heat pumps",
+      "inurl:nature.com heat pumps",
+      "site:nature.com.attacker.example heat pumps",
+      "site:nature.com Acme churn",
+      "site:nature.com Acme's Q3 churn",
+    ])
+      expect([query, check(query, exempt).ok]).toEqual([query, false])
+  })
+
+  test("exempts host names only, never a word or an intranet host", () => {
+    const words = { ...facet, private: [...facet.private, "// Tickets are on jira.acme.internal."] }
+    expect(check("Acme churn", { ...words, domains: ["acme", "Acme"] }).ok).toBe(false)
+    expect(check("site:jira.acme.internal", { ...words, domains: ["jira.acme.internal"] }).ok).toBe(false)
+  })
 })
 
 describe("ResearchOutbound.rare", () => {
@@ -279,6 +405,25 @@ describe("ResearchOutbound.rare", () => {
     expect(found).not.toContain("10000")
     expect(found).not.toContain("and/or")
     expect(found).not.toContain("TCP/IP")
+  })
+
+  test("reads a number written with its digits in groups as one number, and leaves versions and addresses", () => {
+    const found = ResearchOutbound.rare(
+      "Revenue $12,345,678.50, payroll 2.345.678 EUR, 2 400 000 USD, 1,23,45,679 INR, card 4417-8802-5671-9113, 10,000 users, version 1.100.2, hosts 192.168.100.200 and 192.168.1.20.",
+    )
+    expect(found).toEqual(
+      expect.arrayContaining([
+        "12345678",
+        "2345678",
+        "2400000",
+        "12345679",
+        "4417880256719113",
+        "192.168.100.200",
+        "192.168.1.20",
+      ]),
+    )
+    expect(found).not.toContain("10000")
+    expect(found).not.toContain("1100")
   })
 
   test("made no connection", () => {
