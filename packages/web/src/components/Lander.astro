@@ -40,10 +40,12 @@ import { brainRelease } from "../data/vector-releases"
 
 // The landing page is the whole product tour: the hero and its one interactive
 // picture, the workspace in one screen, and the card shelf of what Vector does,
-// each card linked to the docs page that covers it in full. The hero names Vector the self-evolving, low-cost AI
-// agentic harness and the technology it is built on, with the brain's release from brainRelease; its cost note quotes
-// the offline efficiency archive, docs/benchmarks/vector-efficiency-2026-10, with its caveats (test/landing-copy.test.ts
-// recomputes the range, as test/investor-page.test.ts does for the investor page).
+// each card linked to the docs page that covers it in full. The hero stays as short as it was: it says what Vector is,
+// with one emphasis line that labels the brain from brainRelease. The detail lives in the sections below: the
+// tokenomics engine in the workspace cards, with the cost note under them, and Vector Brain in the self-evolving
+// section. The cost note quotes the offline efficiency archive, docs/benchmarks/vector-efficiency-2026-10, with its
+// revision and caveats (test/landing-copy.test.ts recomputes the range, as test/investor-page.test.ts does for the
+// investor page).
 
 // The work Vector does in one window. Six, so the grid fills two even rows.
 const workspaceFacts = [
@@ -69,7 +71,7 @@ const workspaceFacts = [
   },
   {
     title: "A tokenomics engine",
-    text: 'Each request is sized first, so "hi" gets one small, direct reply. Runs are priced from the tokens the provider reported, at catalog rates where the model has a price, and a Run Guard in the desktop app stops a run within one step of the cap you set.',
+    text: 'Runs are priced from the tokens the provider reported, at catalog rates where the model has a price. In the desktop app, each request is sized first, so "hi" gets one small, direct reply, and a Run Guard stops a run within one step of the cap you set.',
   },
 ]
 
@@ -341,13 +343,12 @@ const trustCards = [
           <p class="headline">
             <span class="headline-lead">The self-evolving AI agentic harness&nbsp;that</span>{" "}
             <span class="headline-rotate" data-scramble aria-hidden="true">has an agent of its own.</span>
-            <span class="sr-only">The self-evolving AI agentic harness that has an agent of its own, can have a judge check its work before calling it done, sets up your database and deploys it, runs subagents in batches of up to eight, lets a trusted teammate join from the terminal, runs in your terminal too, prices each run from the tokens your provider reported, stops a run within one step of the cap you set, hosts Claude, Codex and Cursor alongside its own agent, and is building a 550B-parameter model of its own.</span>
+            <span class="sr-only">The self-evolving AI agentic harness that has an agent of its own, can have a judge check its work before calling it done, sets up your database and deploys it, runs subagents in batches of up to eight, lets a trusted teammate join from the terminal, runs in your terminal too, prices each run from the tokens your provider reported, hosts Claude, Codex and Cursor alongside its own agent, and is building a 550B-parameter model of its own.</span>
           </p>
 
           <p class="hero-deck simple-deck">
-            Low-cost by design and built on proprietary technology. Vector Brain, {brainRelease.lede}, links your specs,
-            PDFs and docs to the code and recalls only what a request needs, offline. In the desktop app, the tokenomics
-            engine sizes each request and stops a run within a step of your cap, and subagents split the hard parts.
+            An AI agentic harness for the repository on your computer: plan, edit, run and ship with Vector's own agent.
+            Low-cost by design, and self-evolving with Vector Brain, {brainRelease.lede}.
           </p>
 
           <div class="simple-actions">
@@ -358,12 +359,6 @@ const trustCards = [
             <a class="simple-secondary" href="/docs/terminal-agent#install-the-cli">Install the CLI</a>
           </div>
           <p class="hero-note">Free with a Vector account. macOS, Windows, and Linux.</p>
-          <p class="hero-note">
-            Low cost, measured: in Vector's offline efficiency benchmark of October 2026, its modelled spend on three
-            scripted fix tasks in a first session was 67–75% below Claude Code 2.1.215's, at the same list rates. It
-            measures what each agent sends, not the quality of answers or your provider's bill, and does not show that
-            Vector is cheaper than other agents in general.
-          </p>
         </div>
 
         <div class="showcase simple-showcase" aria-label="Interactive preview of the Vector interface" data-ambient>
@@ -397,6 +392,14 @@ const trustCards = [
             ))
           }
         </ul>
+        <p class="story-body" data-reveal>
+          Low cost, measured: Vector's offline efficiency benchmark, archived at docs/benchmarks/vector-efficiency-2026-10,
+          ran Vector's runtime at an 11 October 2026 revision (commit 6f7f3c2ea) and Claude Code 2.1.215 through identical
+          scripted tool steps against a local fake model server, with the same number of model requests, on three fix
+          tasks. In a first session, Vector's modelled spend was 67–75% below Claude Code's at the same list rates. The
+          benchmark measures what each agent sends, not the quality of answers or your provider's bill, and does not show
+          that Vector is cheaper than other agents in general.
+        </p>
         <ul class="story-models" data-reveal aria-label="A few of the plugins you can turn on">
           {pluginNames.map((name) => <li>{name}</li>)}
         </ul>
@@ -577,7 +580,8 @@ const trustCards = [
     if (!node) return () => {}
     // Each phrase completes the same opening clause, so the headline always
     // reads as one sentence rather than a label with a caption. None names the
-    // brain: a phrase cannot carry its release label.
+    // brain, whose release label a phrase cannot carry, or a desktop-only
+    // feature such as the Run Guard.
     const phrases = [
       "has an agent of its own.",
       "can have a judge check its work.",
@@ -586,7 +590,6 @@ const trustCards = [
       "lets a teammate join from the terminal.",
       "runs in your terminal too.",
       "prices each run from reported tokens.",
-      "stops a run within a step of your cap.",
       "hosts Claude, Codex, and Cursor too.",
       "is building a 550B model of its own.",
     ]
