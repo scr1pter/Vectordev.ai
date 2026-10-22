@@ -1,10 +1,9 @@
-import { EgressGuard } from "./guard"
+import { isMainThread } from "node:worker_threads"
+import { Egress } from "./egress"
 
-// What the strict egress guard preloads in every Worker it sees started, so the worker's own fetches and sockets are
-// decided as its parent's are. The worker's HTTP already reaches the parent's guard proxy through the proxy
-// environment it shares, so it starts no proxy of its own.
-if (process.env[EgressGuard.ENVIRONMENT.strict] === "strict")
-  EgressGuard.installStrict({
-    names: (process.env[EgressGuard.ENVIRONMENT.names] ?? "").split(",").filter(Boolean),
-    proxy: false,
-  })
+// What the egress guard preloads, under Bun, in every Worker it sees started, before the worker's own code runs: the
+// same guard its parent has. In strict mode (tests) that is the strict guard, whose HTTP reaches the parent's guard
+// proxy through the environment it shares, so it starts no proxy of its own. Otherwise it is Vector Local's, with the
+// policy the parent handed it in its environment; the threads of the process keep it current and share one log
+// (egress.ts), so a Worker's blocked connection is logged where the app reads it.
+if (!isMainThread) Egress.backstop()

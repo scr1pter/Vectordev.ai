@@ -89,8 +89,9 @@ const VECTOR_SERVICES = new Set<LocalMode.Purpose>([
 const WEB = new Set<LocalMode.Purpose>(["web-page", "browser", "research-reader", "research-browser"])
 const DOWNLOADS = new Set<LocalMode.Purpose>(["model-download", "tool-download", "plugin", "lsp-install"])
 const CONNECTED = new Set<LocalMode.Purpose>(["integration", "mcp", "config-remote"])
-// Vector's own inference (free models and Vector Codium) is never allowable under Vector Local.
+// Vector's own inference (free models and Vector Codium) is never allowable under Vector Local, and no list holds it.
 const VECTOR_HOSTS = ["vectordev.ai"]
+const VECTOR_REFUSED = "Vector's own models run on vectordev.ai, outside the servers you host."
 const WEB_ORDER: Record<LocalMode.Web, number> = { ask: 0, network: 1, none: 2 }
 const WEB_SETTINGS = ["ask", "network", "none"] as const satisfies readonly LocalMode.Web[]
 
@@ -165,6 +166,19 @@ export function listed(policy: LocalMode.Policy, input: string | URL) {
   const url = parse(input)
   if (!url) return false
   return policy.endpoints.some((endpoint) => endpointMatches(endpoint, url))
+}
+
+/**
+ * Whether a listed origin may be reached wherever its name resolves: a company's own endpoint always, since its
+ * `gpu.internal` may sit on its own public range, and the user's while no lock limits the user to their network.
+ * Under a lock, a name the user listed that says it is on their network must resolve there.
+ */
+export function exempt(policy: LocalMode.Policy, input: string | URL) {
+  const url = parse(input)
+  if (!url) return false
+  return policy.endpoints.some(
+    (endpoint) => endpointMatches(endpoint, url) && (endpoint.from === "managed" || !policy.lock),
+  )
 }
 
 /** Whether a host is `pattern` or under it. A leading "*." is the same as none. */
@@ -247,8 +261,7 @@ export function decide(policy: LocalMode.Policy, request: Request): Verdict {
     )
 
   if (request.purpose === "inference") {
-    if (VECTOR_HOSTS.some((item) => domainMatches(name, item)))
-      return verdict("block", "not-allowable", "Vector's own models run on vectordev.ai, outside the servers you host.")
+    if (VECTOR_HOSTS.some((item) => domainMatches(name, item))) return verdict("block", "not-allowable", VECTOR_REFUSED)
     if (onList) return verdict("allow", "listed", "This model server is on your list.")
     return verdict("block", "not-listed", "Model calls go only to the model servers on your list.")
   }
@@ -486,8 +499,15 @@ function prefix(range: readonly number[], value: readonly number[], bits: number
 }
 
 function managedEndpoint(item: string, warnings: string[]): LocalMode.Endpoint[] {
-  if (cidr(item) || /^https?:\/\/\*\./i.test(item.trim()) || origin(item))
-    return [{ origin: item.trim(), from: "managed" }]
+  const normal = origin(item)
+  const wildcard = /^https?:\/\/\*\.([^/:]+)/i.exec(item.trim())?.[1]
+  const name = wildcard ?? (normal ? new URL(normal).hostname : undefined)
+  // Vector's own models are never a server the company hosts, so no policy can list them.
+  if (name && VECTOR_HOSTS.some((pattern) => domainMatches(name, pattern))) {
+    warnings.push(`Ignored ${item.trim()} in your company's policy: ${VECTOR_REFUSED}`)
+    return []
+  }
+  if (cidr(item) || wildcard || normal) return [{ origin: item.trim(), from: "managed" }]
   warnings.push(`Ignored a model server in your company's policy that is not an http or https address: ${item}`)
   return []
 }
@@ -507,7 +527,11 @@ function userEndpoint(
     return []
   }
   const name = new URL(normal).hostname
-  if (rules.cloud.some((pattern) => hostMatches(name, pattern))) {
+  if (VECTOR_HOSTS.some((pattern) => domainMatches(name, pattern))) {
+    warnings.push(`Ignored ${normal}: ${VECTOR_REFUSED}`)
+    return []
+  }
+  if (rules.cloud.some((pattern) => hostMatches(name, pattern)) || LocalSources.digestListed(name)) {
     warnings.push(
       `Ignored ${normal}: it is a cloud AI service, not a server you host. Your company's policy can list it.`,
     )

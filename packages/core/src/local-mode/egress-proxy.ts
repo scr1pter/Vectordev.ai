@@ -17,11 +17,13 @@ import { LocalPolicy } from "./policy"
 // 2. refuses a host that is on this computer or the user's network by its name or address;
 // 3. resolves the name itself and refuses it when any address it gets is loopback, private, link-local, CGNAT, ULA,
 //    a cloud metadata address or another address that is not public (WebFetchRequest.isPrivateAddress);
-// 4. asks `admit`, such as the run's per-host rate limits;
-// 5. connects to the address it checked, not the name, so a second answer from DNS (rebinding) cannot change where it
+// 4. refuses a port that is not a web port (80, 443, 8080 or 8443), so a tunnel never reaches another kind of server;
+// 5. asks `admit`, such as the run's per-host rate limits;
+// 6. connects to the address it checked, not the name, so a second answer from DNS (rebinding) cannot change where it
 //    goes. A tunnel carries the browser's own TLS, so the site's certificate is still checked against its name.
-// Steps 2 to 4 apply whether Vector Local is on or off. The secret is never passed on, and a site's 407 is answered as
-// 502. If the proxy cannot start, research browsers do not open.
+// Steps 2 to 5 apply whether Vector Local is on or off. The secret is never passed on, and a site's 407 is answered as
+// 502. If the proxy cannot start, research browsers do not open. Phase W3 wires this one into desktop main and writes
+// no second proxy.
 
 export type Refusal = ForwardProxy.Refusal
 
@@ -37,7 +39,7 @@ export type Options = {
   readonly attribution?: EgressAttribution.Info
   /** Resolves a name to its addresses. Default: the system resolver. */
   readonly resolver?: WebFetchRequest.DestinationResolver
-  /** Tests only: names whose private addresses the proxy may reach, such as the fake web's `web.test`. */
+  /** Tests only: names whose private addresses, on any port, the proxy may reach, such as the fake web's `web.test`. */
   readonly privateHosts?: readonly string[]
   /** Checked before each request is made; a refusal is sent to the browser as it is. */
   readonly admit?: (destination: ForwardProxy.Destination) => Refusal | undefined | Promise<Refusal | undefined>
@@ -46,6 +48,8 @@ export type Options = {
 }
 
 export const PRIVATE_REASON = "Research browsers never reach this computer, your network or a cloud metadata address."
+export const PORT_REASON = "Research browsers reach web ports only: 80, 443, 8080 and 8443."
+const WEB_PORTS = new Set([80, 443, 8080, 8443])
 const CONNECT_TIMEOUT = 15_000
 
 /** Starts the proxy on an ephemeral port of 127.0.0.1, and resolves once it is listening. */
@@ -77,6 +81,16 @@ export function start(options: Options): Promise<ForwardProxy.Proxy> {
     const host = destination.host.replace(/^\[|\]$/g, "")
     const test = pinned(host)
     if (!test && LocalPolicy.hostClass(host) !== "internet") return refusePrivate(host)
+    if (!test && !WEB_PORTS.has(destination.port)) {
+      Egress.record(request, {
+        decision: "block",
+        rule: "web-port",
+        class: LocalPolicy.hostClass(host),
+        reason: PORT_REASON,
+        allowable: false,
+      })
+      return ForwardProxy.FORBIDDEN(PORT_REASON)
+    }
     const addresses = net.isIP(host)
       ? [host]
       : await resolver(host).then(

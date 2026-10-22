@@ -1,5 +1,6 @@
 export * as LocalSources from "./sources"
 
+import { createHash } from "node:crypto"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { LocalPolicy } from "./policy"
 
@@ -120,8 +121,22 @@ export const CLOUD_INFERENCE_HOSTS = [
   "ollama.com",
 ]
 
+// Cloud AI services a user may not list either, by the SHA-256 of their domain, so the name stays out of this
+// repository: the Zen gateway. Each covers the names under it, as CLOUD_INFERENCE_HOSTS' entries do.
+const CLOUD_INFERENCE_DIGESTS = new Set(["15f3d522b114416a3a7cacfa7426bb80a64c3dcd6bb6ed5cf490037bb78d28c9"])
+
 // What a `${VARIABLE}` in a catalog address is read as while the address is parsed.
 const PLACEHOLDER = "vector-variable"
+
+/** Whether a host is, or is under, a cloud AI service listed by its digest. */
+export function digestListed(input: string, digests: ReadonlySet<string> = CLOUD_INFERENCE_DIGESTS) {
+  const name = LocalPolicy.host(input)
+  if (!name) return false
+  const labels = name.split(".")
+  return labels.some((_, index) =>
+    digests.has(createHash("sha256").update(labels.slice(index).join(".")).digest("hex")),
+  )
+}
 
 /**
  * The cloud AI hosts with every provider address in a model catalog added: a provider's `api`, and a model's own. A
@@ -173,7 +188,11 @@ export const SOURCES: readonly Source[] = [
     why: "Runs models from cloud AI services you connected",
     local: "not-allowable",
     where: ["engine"],
-    callSites: ["packages/engine/src/provider/provider.ts", "packages/llm/src/route/executor.ts"],
+    callSites: [
+      "packages/engine/src/provider/provider.ts",
+      "packages/llm/src/route/executor.ts",
+      "packages/engine/src/plugin/openai/ws.ts",
+    ],
     note: "Allowed only when your company's policy lists the host, labelled Company endpoint (listed by your company)",
   },
   {
@@ -593,7 +612,7 @@ export const SOURCES: readonly Source[] = [
     local: "blocked",
     where: ["engine", "desktop"],
     callSites: ["packages/core/src/local-mode/guard.ts"],
-    note: "Reaches only this computer and the model servers on your list; anything else the guard sees is blocked and logged with the code that made it. Under Bun it does not see Bun.fetch, a fetch or WebSocket kept from before it started, or the ws package",
+    note: "Reaches only this computer and the model servers on your list; anything else the guard sees is blocked and logged with the code that made it, in a worker thread too. Under Bun it does not see Bun.fetch, a fetch or WebSocket kept from before it started, or the ws package, whose one call site decides its own sockets",
   },
   {
     id: "agent-programs",

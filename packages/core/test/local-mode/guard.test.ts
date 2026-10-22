@@ -16,7 +16,14 @@ const OUTSIDE = "198.51.100.7"
 // Taken before the guard is installed, as a module that kept its own reference would.
 const capturedFetch = globalThis.fetch
 
-const seen: { path: string; method: string; authorization: string | null; body: string }[] = []
+const seen: {
+  path: string
+  method: string
+  authorization: string | null
+  body: string
+  cookie: string | null
+  proxyAuthorization: string | null
+}[] = []
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
@@ -27,6 +34,8 @@ const server = Bun.serve({
       method: request.method,
       authorization: request.headers.get("authorization"),
       body: await request.text(),
+      cookie: request.headers.get("cookie"),
+      proxyAuthorization: request.headers.get("proxy-authorization"),
     })
     if (url.pathname === "/out") return Response.redirect(`http://${OUTSIDE}/collect`, 302)
     if (url.pathname === "/hop") return Response.redirect("/landed", 302)
@@ -253,6 +262,16 @@ describe("EgressGuard.installStrict", () => {
       },
     })
     await expect(fetch(at("/keep"), { method: "PUT", body: stream })).rejects.toThrow("streamed request body")
+  })
+
+  test("resends a Request object's body on a 307, as fetch does", async () => {
+    seen.length = 0
+    const response = await fetch(new Request(at("/keep"), { method: "POST", body: "payload" }))
+    expect({ status: response.status, redirected: response.redirected }).toEqual({ status: 200, redirected: true })
+    expect(seen.map((item) => [item.path, item.method, item.body])).toEqual([
+      ["/keep", "POST", "payload"],
+      ["/landed", "POST", "payload"],
+    ])
   })
 
   test("treats any proxy but its own as a way off this computer", async () => {
@@ -491,8 +510,44 @@ describe("EgressGuard.install with Vector Local on", () => {
     ])
   })
 
+  test("checks where a name the user listed resolves once a company lock limits the user to their network", async () => {
+    const later =
+      (address: string) => (hostname: string, options: { all?: boolean }, callback: (...input: unknown[]) => void) =>
+        setTimeout(() => answer(address)(hostname, options, callback), 0)
+    const lookedUp = (socket: net.Socket) =>
+      new Promise<{ error?: unknown; address?: unknown }>((resolve) => {
+        socket.on("lookup", (error: unknown, address: unknown) => {
+          socket.destroy()
+          resolve(error ? { error } : { address })
+        })
+        socket.on("error", (error: unknown) => resolve({ error }))
+      })
+    const locked = LocalPolicy.resolve({
+      managed: { lock: true, user_may: ["endpoints"], endpoints: ["http://gpu.internal:8000"] },
+      global: { endpoints: ["http://nas.local:8000"] },
+    })
+    expect(locked.endpoints).toEqual([
+      { origin: "http://gpu.internal:8000", from: "managed" },
+      { origin: "http://nas.local:8000", from: "user" },
+    ])
+    current.policy = locked
+    // A name on the user's network that answers with an internet address is refused, listed or not, under a lock.
+    const nas = await lookedUp(net.connect({ host: "nas.local", port: 8000, lookup: later(OUTSIDE) as never }))
+    expect((nas.error as EgressGuard.EgressBlocked).rule).toBe("resolved-outside")
+    // The company's own endpoint is reached wherever its name resolves.
+    expect(await lookedUp(net.connect({ host: "gpu.internal", port: 8000, lookup: later(OUTSIDE) as never }))).toEqual({
+      address: OUTSIDE,
+    })
+    // A labelled request's grant is checked the same way.
+    expect([
+      LocalPolicy.exempt(locked, "http://nas.local:8000/v1"),
+      LocalPolicy.exempt(locked, "http://gpu.internal:8000/v1"),
+    ]).toEqual([false, true])
+    expect(LocalPolicy.exempt(listed, "http://nas.local:8000/v1")).toBe(true)
+  })
+
   test("grants a labelled request's checks the same way: listed names on the list, loopback names on loopback", () => {
-    const at = (url: string, listed?: boolean) => EgressGuard.destinations(new URL(url), { listed })[0]!.within
+    const at = (url: string, exempt?: boolean) => EgressGuard.destinations(new URL(url), { exempt })[0]!.within
     expect([at("http://gpu.internal:8000/"), at("http://gpu.internal:8000/", true)]).toEqual(["private", undefined])
     expect([at("http://localhost:11434/", true), at("http://box.tail1.ts.net/", true)]).toEqual(["loopback", undefined])
   })
@@ -520,6 +575,29 @@ describe("EgressGuard.install with Vector Local on", () => {
         http.get({ host: "catalog.web.test", port: server.port, path: "/", lookup: answer("127.0.0.1") as never }),
       ),
     ).toBeInstanceOf(EgressGuard.EgressBlocked)
+  })
+
+  test("follows a redirect to another origin without its cookies or credentials, as fetch does", async () => {
+    current.policy = listed
+    seen.length = 0
+    const credentials = { authorization: "Bearer x", cookie: "sid=secret", "proxy-authorization": "Basic eQ==" }
+    await fetch(at("/hop"), { headers: credentials })
+    await fetch(at("/elsewhere"), { headers: credentials })
+    // Only these routes: a request an earlier test left open may still land on "/".
+    const routes = () => seen.filter((item) => item.path !== "/")
+    expect(routes().map((item) => [item.path, item.authorization, item.cookie, item.proxyAuthorization])).toEqual([
+      ["/hop", "Bearer x", "sid=secret", "Basic eQ=="],
+      ["/landed", "Bearer x", "sid=secret", "Basic eQ=="],
+      ["/elsewhere", "Bearer x", "sid=secret", "Basic eQ=="],
+      ["/landed", null, null, null],
+    ])
+    // A Request object's body is resent on a 307 too.
+    seen.length = 0
+    expect(await (await fetch(new Request(at("/keep"), { method: "POST", body: "payload" }))).text()).toBe("here")
+    expect(routes().map((item) => [item.path, item.body])).toEqual([
+      ["/keep", "payload"],
+      ["/landed", "payload"],
+    ])
   })
 
   test("stops an unlabelled redirect at the hop that leaves this computer", async () => {
@@ -607,6 +685,64 @@ describe("EgressGuard.install with Vector Local on", () => {
     }
   })
 
+  test("sends a request for this computer around a proxy that NO_PROXY covers only for other clients", async () => {
+    // The desktop writes `::1`, and companies write `*.internal`: Bun's fetch honours neither.
+    const seenByProxy: string[] = []
+    const proxy = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: async (request) => {
+        seenByProxy.push(`${request.url} ${await request.text()}`)
+        return new Response("proxied")
+      },
+    })
+    const ipv6 = Object.values(os.networkInterfaces())
+      .flat()
+      .some((item) => item?.address === "::1")
+    const six = ipv6
+      ? Bun.serve({ hostname: "::1", port: 0, fetch: async (request) => new Response(`six ${await request.text()}`) })
+      : undefined
+    const saved = ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "no_proxy"].map((key) => [key, process.env[key]] as const)
+    process.env.HTTP_PROXY = `http://127.0.0.1:${proxy.port}`
+    process.env.HTTPS_PROXY = `http://127.0.0.1:${proxy.port}`
+    try {
+      if (six) {
+        current.policy = LocalPolicy.resolve({ global: { enabled: true, endpoints: [`http://[::1]:${six.port}`] } })
+        process.env.NO_PROXY = "localhost,127.0.0.1,::1"
+        process.env.no_proxy = "localhost,127.0.0.1,::1"
+        const reply = await fetch(`http://[::1]:${six.port}/v1/chat/completions`, { method: "POST", body: "prompt" })
+        expect(await reply.text()).toBe("six prompt")
+        expect(process.env.NO_PROXY).toBe("localhost,127.0.0.1,::1,[::1]")
+        expect(process.env.no_proxy).toBe(process.env.NO_PROXY)
+      }
+      // A listed server on the company's network, by a name only a wildcard covered.
+      current.policy = LocalPolicy.resolve({ global: { enabled: true, endpoints: ["http://gpu.internal:8000"] } })
+      process.env.NO_PROXY = "*.internal"
+      process.env.no_proxy = ""
+      const gpu = new URL("http://gpu.internal:8000/v1/chat/completions")
+      expect(EgressGuard.carried(gpu)).toBe(true)
+      EgressGuard.direct(gpu.hostname)
+      expect([process.env.NO_PROXY, process.env.no_proxy]).toEqual([
+        "*.internal,gpu.internal",
+        "*.internal,gpu.internal",
+      ])
+      expect(EgressGuard.carried(gpu)).toBe(false)
+      // A request for the internet may use the proxy, and so may one the caller gave a proxy of its own.
+      expect(EgressGuard.carried(new URL("https://models.example/v1"))).toBe(false)
+      process.env.NO_PROXY = ""
+      process.env.no_proxy = ""
+      expect(EgressGuard.carried(gpu, `http://127.0.0.1:${proxy.port}`)).toBe(false)
+      expect(seenByProxy).toEqual([])
+    } finally {
+      // Emptied, not deleted: Bun's fetch never sees a variable that was deleted set again.
+      saved.forEach(([key, value]) => {
+        process.env[key] = value ?? ""
+      })
+      proxy.stop(true)
+      six?.stop(true)
+    }
+  })
+
   test("refuses a fetch scheme that is not on this computer, such as Bun's s3:, and logs it", async () => {
     current.policy = listed
     recorded.length = 0
@@ -661,20 +797,78 @@ describe("EgressGuard.environmentProxies", () => {
       }),
     ).toEqual(["http://tls:2", "http://all:3"])
     expect(EgressGuard.environmentProxies(target("http://a.example/"), {})).toEqual([])
+    // Node's fetch falls back to HTTP_PROXY for https, so it is listed too; Bun does not, and over-listing is safe.
+    expect(EgressGuard.environmentProxies(target("https://a.example/"), { HTTP_PROXY: "http://web-proxy:1" })).toEqual([
+      "http://web-proxy:1",
+    ])
+    // NO_PROXY as Bun reads it, checked against Bun 1.3's fetch: the narrowest reading of the clients Vector runs.
     for (const [list, url, bypassed] of [
       ["*", "http://a.example/", true],
+      ["a, *", "http://a.example/", true],
       ["xample", "http://a.example/", false],
       ["a.example", "http://a.example/", true],
+      ["A.EXAMPLE", "http://a.example/", true],
+      ["example", "http://a.example/", true],
       [".example", "http://deep.a.example/", true],
-      ["*.example", "http://a.example/", true],
+      // Bun honours neither a `*.` wildcard nor a bare IPv6 address, nor a list split by spaces.
+      ["*.example", "http://a.example/", false],
+      ["::1", "http://[::1]:3000/", false],
+      ["[::1]", "http://[::1]:3000/", true],
+      ["[::1]:3000", "http://[::1]:3000/", true],
+      ["b.example a.example", "http://a.example/", false],
+      ["127.0.0.0/8", "http://127.0.0.2/", false],
       ["a.example:8080", "http://a.example/", false],
       ["a.example:8080", "http://a.example:8080/", true],
-      ["127.0.0.1, ::1", "http://[::1]:3000/", true],
+      ["a.example.", "http://a.example/", false],
     ] as const)
       expect({
         list,
         url,
         proxies: EgressGuard.environmentProxies(target(url), { HTTP_PROXY: "http://web-proxy:1", NO_PROXY: list }),
       }).toEqual({ list, url, proxies: bypassed ? [] : ["http://web-proxy:1"] })
+    // Bun reads no_proxy first, and an empty one as unset.
+    const both = (lower: string) =>
+      EgressGuard.environmentProxies(target("http://a.example/"), {
+        HTTP_PROXY: "http://web-proxy:1",
+        NO_PROXY: "a.example",
+        no_proxy: lower,
+      })
+    expect([both(""), both("b.example")]).toEqual([[], ["http://web-proxy:1"]])
+  })
+})
+
+describe("EgressGuard.strictFromEnvironment", () => {
+  test("reads strict mode from a test's environment in a source checkout only", () => {
+    const env = { VECTOR_TEST_EGRESS: "strict", VECTOR_TEST_EGRESS_NAMES: "web.test,198.51.100.7" }
+    expect(EgressGuard.strictFromEnvironment(env, true)).toEqual({
+      names: ["web.test", "198.51.100.7"],
+      proxy: undefined,
+    })
+    expect(
+      EgressGuard.strictFromEnvironment({ ...env, VECTOR_TEST_EGRESS_PROXY: "http://127.0.0.1:1" }, true)?.proxy,
+    ).toBe("http://127.0.0.1:1")
+    // A release build and the desktop app never read it.
+    expect(EgressGuard.strictFromEnvironment(env, false)).toBeUndefined()
+    // Nor does a process the environment turns Vector Local on for: the names would loosen it.
+    expect(EgressGuard.strictFromEnvironment({ ...env, VECTOR_LOCAL: "1" }, true)).toBeUndefined()
+    expect(
+      EgressGuard.strictFromEnvironment({ ...env, VECTOR_LOCAL_POLICY: JSON.stringify({ enabled: true }) }, true),
+    ).toBeUndefined()
+    expect(EgressGuard.strictFromEnvironment({ VECTOR_TEST_EGRESS: "on" }, true)).toBeUndefined()
+  })
+})
+
+describe("Vector's own code", () => {
+  // Bun makes Bun.fetch read-only, so no guard can wrap it: Vector's code reaches the network through fetch instead.
+  test("never calls Bun.fetch, which the guard cannot see", async () => {
+    const root = path.join(import.meta.dir, "../../..")
+    const files = await Array.fromAsync(new Bun.Glob("*/src/**/*.{ts,tsx}").scan({ cwd: root }))
+    const calls = await Promise.all(
+      files.map(async (file) => {
+        const text = await Bun.file(path.join(root, file)).text()
+        return /\bBun\.fetch\s*\(|import\s*\{[^}]*\bfetch\b[^}]*\}\s*from\s*["']bun["']/.test(text) ? [file] : []
+      }),
+    )
+    expect(calls.flat()).toEqual([])
   })
 })

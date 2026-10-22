@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import path from "node:path"
 import { LocalMode } from "@vectordevai/schema/local-mode"
 import { LocalPolicy } from "../../src/local-mode/policy"
@@ -191,6 +192,39 @@ describe("LocalSources registry", () => {
       cloudHosts: hosts,
     })
     expect(policy.endpoints).toEqual([{ origin: "http://localhost:11434", from: "user" }])
+  })
+
+  test("never lists Vector's own hosts, from any source", () => {
+    const user = LocalPolicy.resolve({
+      global: { enabled: true, endpoints: ["https://vectordev.ai", "https://api.vectordev.ai"] },
+    })
+    expect(user.endpoints).toEqual([])
+    expect(user.warnings).toHaveLength(2)
+    const managed = LocalPolicy.resolve({
+      managed: {
+        enabled: true,
+        endpoints: ["https://vectordev.ai", "https://*.vectordev.ai", "https://gpu.corp.example"],
+      },
+    })
+    expect(managed.endpoints).toEqual([{ origin: "https://gpu.corp.example", from: "managed" }])
+    expect(managed.warnings.filter((warning) => warning.includes("vectordev.ai"))).toHaveLength(2)
+    // So an unlabelled request to them is never `listed`.
+    expect(LocalPolicy.decide(user, { purpose: "unknown", url: "https://api.vectordev.ai/" }).decision).toBe("block")
+  })
+
+  test("refuses a cloud AI host known by its domain's digest, and the names under it", () => {
+    // A stand-in for the gateway whose name stays out of this repository.
+    const digests = new Set([createHash("sha256").update("gateway.example").digest("hex")])
+    expect(
+      [
+        "gateway.example",
+        "api.gateway.example",
+        "GATEWAY.EXAMPLE.",
+        "gateway.example.evil.test",
+        "agateway.example",
+      ].map((host) => LocalSources.digestListed(host, digests)),
+    ).toEqual([true, true, true, false, false])
+    expect(LocalSources.digestListed("api.vectordev.ai")).toBe(false)
   })
 
   test("refuses the cloud AI hosts as a user's model servers by default", () => {
