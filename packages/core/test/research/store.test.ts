@@ -233,6 +233,29 @@ describe("ResearchStore sources", () => {
     expect(result.detail?.run.pages).toBe(1)
   })
 
+  test("a page first skipped as built by script is filled in, as the same source, by a read that has its text", async () => {
+    const result = await withStore((setup) =>
+      Effect.gen(function* () {
+        const run = yield* setup.store.start(setup.place, RUN)
+        const skipped = yield* setup.store.addSource(setup.place, run.id, {
+          ...page("app", []),
+          status: "needs-render",
+          reason: "This page is built by script.",
+        })
+        const rendered = yield* setup.store.addSource(setup.place, run.id, page("app", STUDY))
+        const again = yield* setup.store.addSource(setup.place, run.id, page("app", REVIEW))
+        return { skipped, rendered, again, saved: yield* setup.store.source(setup.place, run.id, "S1"), detail: yield* setup.store.get(setup.place, run.id) }
+      }),
+    )
+    expect(result.skipped).toMatchObject({ type: "added", source: { id: "S1", status: "needs-render" } })
+    expect(result.rendered).toMatchObject({ type: "added", source: { id: "S1", status: "read" } })
+    expect(result.rendered.type === "added" && result.rendered.source.reason).toBeUndefined()
+    expect(result.again).toMatchObject({ type: "known", source: { id: "S1" } })
+    expect(result.saved?.chunks.map((chunk) => chunk.text)).toEqual(STUDY)
+    expect(result.detail?.sources.map((source) => source.id)).toEqual(["S1"])
+    expect(result.detail?.run.pages).toBe(1)
+  })
+
   test("a run keeps at most its sources, its page text and its page budget, and says so", async () => {
     const result = await withStore(
       (setup) =>

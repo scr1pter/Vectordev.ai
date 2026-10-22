@@ -308,7 +308,6 @@ export const node = makeGlobalNode({
 type Database = BrainDatabase.Database
 type RunRow = typeof ResearchRunTable.$inferSelect
 type SourceRow = typeof ResearchSourceTable.$inferSelect
-type NoteRow = typeof ResearchNoteTable.$inferSelect
 type Found = { readonly db: Database; readonly row: RunRow; readonly guest: boolean }
 
 /** A document the store writes: a page a run read, or a version of its report. */
@@ -624,18 +623,21 @@ function make(input: {
         if (!found) return { type: "refused" as const, message: NO_RUN }
         const store = found.db
         const sources = yield* sourcesOf(store, runID)
+        const text = page.chunks.map((chunk) => chunk.text).join("\n\n")
+        const readable = (page.status === "read" || page.status === "paywalled") && text.trim().length > 0
+        // An address the run read is free to read again. One it read with no text (skipped, failed, built by script) is
+        // filled in, as the same S#, by a later read that has text, such as the desktop browser's.
         const same = sources.find((source) => source.canonical_url === page.canonical)
-        if (same) return { type: "known" as const, source: toSource(same) }
-        if (sources.length >= limits.sources)
+        const blank = same !== undefined && same.document_id === null && !forgottenOf(same) && same.status !== "duplicate"
+        if (same && !(blank && readable)) return { type: "known" as const, source: toSource(same) }
+        if (!same && sources.length >= limits.sources)
           return {
             type: "refused" as const,
             message: `This run has ${limits.sources} sources, the most one run keeps: write the report from what you have.`,
           }
-        const text = page.chunks.map((chunk) => chunk.text).join("\n\n")
-        const readable = (page.status === "read" || page.status === "paywalled") && text.trim().length > 0
         const budget = found.row.limits?.pages
         if (readable && budget !== undefined && found.row.pages >= budget) return { type: "refused" as const, message: PAGES }
-        const ordinal = (sources.at(-1)?.ordinal ?? 0) + 1
+        const ordinal = same?.ordinal ?? (sources.at(-1)?.ordinal ?? 0) + 1
         const row = (extra: Partial<SourceRow>): typeof ResearchSourceTable.$inferInsert => ({
           id: `src_${BrainStructure.base32(randomBytes(8))}`,
           run_id: runID,
@@ -657,8 +659,16 @@ function make(input: {
           ...extra,
         })
         const insert = Effect.fnUntraced(function* (values: typeof ResearchSourceTable.$inferInsert) {
-          yield* store.insert(ResearchSourceTable).values(values).run().pipe(Effect.orDie)
-          return toSource((yield* store.select().from(ResearchSourceTable).where(eq(ResearchSourceTable.id, values.id)).get().pipe(Effect.orDie))!)
+          const id = same?.id ?? values.id
+          if (same)
+            yield* store
+              .update(ResearchSourceTable)
+              .set({ ...values, id, ordinal: same.ordinal, created_at: same.created_at })
+              .where(eq(ResearchSourceTable.id, id))
+              .run()
+              .pipe(Effect.orDie)
+          else yield* store.insert(ResearchSourceTable).values(values).run().pipe(Effect.orDie)
+          return toSource((yield* store.select().from(ResearchSourceTable).where(eq(ResearchSourceTable.id, id)).get().pipe(Effect.orDie))!)
         })
         // Skipped pages (robots.txt, built by script, failed) are kept as a line in Sources and the Method, with no text.
         if (!readable) {
