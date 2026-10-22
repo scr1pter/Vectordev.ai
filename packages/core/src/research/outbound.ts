@@ -1,6 +1,7 @@
 export * as ResearchOutbound from "./outbound"
 
 import { isIP } from "node:net"
+import { domainToUnicode } from "node:url"
 import { parse } from "tldts"
 import { BrainScan } from "../brain/scan"
 import { ResearchCanonical } from "./canonical"
@@ -22,16 +23,29 @@ import { WebFence } from "./fence"
 //
 // A name is a capitalised word of prose that the private prose never writes in lower case and that is not a common
 // word: "Acme", "Falcon" and "Fremont", and "Kestrel" or "Globex" opening a remembered fact ("Kestrel ships in May",
-// "Employer: Globex"), but not "Heat" at the start of a sentence about heat pumps. Code is left out, since it is full
-// of capitalised words ("Effect", "Schema") that say nothing about anyone. Names cost some fair queries: a private line
-// about Germany keeps "Germany" out of queries until the user types it.
+// "Employer: Globex"), but not "Heat" at the start of a sentence about heat pumps, nor a public tool a README names
+// ("Docker builds the image"). Code is left out, since it is full of capitalised words ("Effect", "Schema") that say
+// nothing about anyone. Names cost some fair queries: a private line about Germany keeps "Germany" out of queries
+// until the user types it. And some names are missed: a company named with a common word ("Target pays about
+// 2,400,000 USD a year" lets "Target vendor contract" through, since "Target" opening a sentence is the word) and a
+// name written in capitals ("Uses ACME for invoicing", which reads as an acronym such as USD).
 //
-// Text is compared the way a reader sees it, on both sides: folded by NFKD, without accents and invisible characters
-// (soft hyphens, zero-width spaces), with letters from other scripts that look like Latin ones read as Latin
-// ("Аcme" with a Cyrillic "А" is "Acme"), and with numbers written in groups read whole (2,400,000, 2.400.000,
-// 2 400 000 and 24,00,000 are all 2400000, and a card number written in fours is one number). It catches literal
-// overlap only: a model can still paraphrase. The queries go to the search service the user set up and are shown in
-// the Sources tab, so a paraphrase is at least visible.
+// Text is compared the way a reader sees it, on both sides:
+// - folded by NFKD, without accents and invisible characters (soft hyphens, zero-width spaces);
+// - with letters that look like Latin ones read as Latin, through Unicode's confusables data: "Аcme" with a Cyrillic
+//   "А", Cherokee "\u13AAcme", Lisu "\uA4EEcme" and "Ac\u2C98e" with a Coptic "\u2C98" are all "Acme";
+// - for names and rare tokens, with ASCII's own look-alikes read alike (I, l and 1; 0 and O; rn and m; vv and w), so
+//   "GIobex", "Gl0bex" and "Acrne" are Globex and Acme;
+// - with numbers read by their digits. A digit of any script is its ASCII digit (Arabic-Indic \u0662 and Devanagari
+//   \u0968 are 2), and digit groups with one to three characters of space or punctuation between them are one number:
+//   2,400,000, 2.400.000, 2 400 000, 2, 400, 000, USD2,400,000 and 24,00,000 are all 2400000, and 415-555-0132,
+//   (415) 555-0132 and a card number in fours are one number each. A query is refused when one of its numbers holds
+//   a number of 5 or more digits from the private text, or is one of 5 or more digits inside one, so a phone number
+//   goes neither with its country code nor without it. Versions and IPv4 addresses (1.100.2, 192.168.1.20) are not
+//   numbers, and a group glued to a letter joins the next only as a group of three, so "Q3 2026" is two numbers. The
+//   cost is that two numbers written side by side are read as one: a private "2019, 2024" keeps "2019 2024" out.
+// It catches literal overlap only: a model can still paraphrase. The queries go to the search service the user set up
+// and are shown in the Sources tab, so a paraphrase is at least visible.
 
 export const REFUSAL = "That search would send text from your private files. Rephrase it with public terms."
 
@@ -48,8 +62,9 @@ export type Context = {
   readonly public: readonly string[]
   /**
    * The preferred and avoided domains of the sources facet (section 6.4a). They exist to become site: filters, so
-   * they may go out as a host name or a site: value. Anywhere else in a query (an address, a path, a longer host) they
-   * are checked like any other private text. Only public host names count, never a word or an intranet name.
+   * they may go out in a search query as a host name or a site: value. Anywhere else in a query (a path, a longer
+   * host, an email address), and anywhere in an address `address` checks, they are checked like any other private
+   * text. Only public host names count, never a word or an intranet name.
    */
   readonly domains?: readonly string[]
 }
@@ -60,7 +75,9 @@ export type Result =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: Reason; readonly match: string; readonly message: string }
 
-// Words of mixed case that are names everyone uses, not identifiers from someone's code.
+// Words of mixed case that are names everyone uses, not identifiers from someone's code, and the public tools a
+// repository's README names ("Docker builds the image", "Postgres stores the sessions"), which say nothing about
+// anyone. Tools named with an English word (Swift, Rust, Express) are left out, since a code name is often one.
 const COMMON = new Set([
   "javascript",
   "typescript",
@@ -120,6 +137,77 @@ const COMMON = new Set([
   "autocad",
   "solidworks",
   "matlab",
+  "android",
+  "ansible",
+  "babel",
+  "bigquery",
+  "chromium",
+  "clang",
+  "clickhouse",
+  "cloudflare",
+  "cmake",
+  "datadog",
+  "debian",
+  "deno",
+  "django",
+  "docker",
+  "elasticsearch",
+  "emacs",
+  "esbuild",
+  "eslint",
+  "fedora",
+  "figma",
+  "firebase",
+  "firefox",
+  "golang",
+  "gradle",
+  "grafana",
+  "grpc",
+  "heroku",
+  "huggingface",
+  "jupyter",
+  "kafka",
+  "kotlin",
+  "kubectl",
+  "kubernetes",
+  "laravel",
+  "linux",
+  "llvm",
+  "macos",
+  "matplotlib",
+  "minikube",
+  "neovim",
+  "netlify",
+  "nginx",
+  "npm",
+  "nuxt",
+  "ollama",
+  "openapi",
+  "pnpm",
+  "podman",
+  "postgres",
+  "protobuf",
+  "pydantic",
+  "pytest",
+  "python",
+  "rabbitmq",
+  "redis",
+  "redux",
+  "scala",
+  "sqlalchemy",
+  "supabase",
+  "sveltekit",
+  "tailwindcss",
+  "terraform",
+  "twilio",
+  "ubuntu",
+  "vercel",
+  "vite",
+  "vitest",
+  "vscode",
+  "vuejs",
+  "webpack",
+  "xcode",
 ])
 
 // Hosts so common that naming one says nothing about anyone's files.
@@ -201,17 +289,53 @@ const MAX_RUN = 128
 const TOKEN_RUN = /[\w.+\-/@~:]+/g
 // What a reader reads past: accents and other combining marks once NFKD has split them off, and invisible characters.
 const UNSEEN = /[\p{M}\p{Default_Ignorable_Code_Point}]/gu
-// A number with its digits in groups: of three, with one separator throughout (a comma, a dot, an apostrophe, an
-// underscore or a space; NFKD has made no-break and thin spaces plain ones), or in lakhs and crores (24,00,000 and
-// 1,23,45,678). A group does not start inside another number or a word.
-const GROUPED =
-  /(?<![\p{L}\p{N}_])(?<!\d[.,])(?:\d{1,3}([,.'\u2019_ ])\d{3}(?:\1\d{3})*|\d{1,2}(?:,\d{2})+,\d{3})(?!\p{N})/gu
-// A card number written in groups: four of four (a last group may be shorter, and a fifth may follow), or 4-6-5 and
-// 4-6-4. One separator throughout, a space or a hyphen.
-const CARD = /(?<![\p{L}\p{N}_])\d{4}([ -])(?:\d{4}\1\d{4}\1\d{1,4}(?:\1\d{1,3})?|\d{6}\1\d{4,5})(?![\p{L}\p{N}_])/gu
+// A decimal digit of any script. NFKD has made full-width and mathematical digits ASCII ones already.
+const DIGIT = /\p{Nd}/gu
+const ONE_DIGIT = /^\p{Nd}$/u
+// A group of digits, and what may stand between two groups of one number: one to three characters that are not
+// letters, digits, marks or line breaks (",", ".", " ", "-", ", ", ") ", a tab, "\u066C" in Arabic).
+const GROUP = /\d+/g
+const BETWEEN = /^[^\p{L}\p{N}\p{M}\n\r\u2028\u2029]{1,3}$/u
+const LETTER_BEFORE = /\p{L}$/u
+const LETTER_AFTER = /^\p{L}/u
+const DIGITS = /^\d+$/
+// The most groups one number is read from, so a long list of numbers costs a bounded amount per group.
+const MAX_GROUPS = 8
 
 /** Whether a search query may leave, given the run's private context. */
 export function check(query: string, context: Context): Result {
+  return inspect(query, context, true)
+}
+
+/**
+ * Whether an address may be read, by the same check on its path, query and fragment, and on the part of its host
+ * before its site, whole and label by label: the site came from provenance, but a name such as
+ * acme-q3-churn.attacker.example or jira.initech.internal.attacker.example carries text the way a path does. The
+ * sources facet's domains are not exempt here, since they are site: filters, not words of a path or a host's labels.
+ */
+export function address(url: string, context: Context): Result {
+  if (!URL.canParse(url)) return refused("token", url)
+  const parsed = new URL(url)
+  // The host as a reader sees it, not its punycode, so look-alike letters in it are read.
+  const subdomain = domainToUnicode(parse(parsed.hostname, { allowPrivateDomains: true }).subdomain ?? "")
+  const text = [
+    subdomain,
+    ...subdomain.split("."),
+    ...parsed.pathname.split("/"),
+    ...[...parsed.searchParams].flatMap(([key, value]) => [key, value]),
+    parsed.hash.slice(1),
+  ]
+    .map(ResearchCanonical.decoded)
+    .join(" ")
+  // As written, for identifiers and paths, and with a slug's dashes read as spaces, for runs of words.
+  const written = inspect(text, context, false)
+  if (!written.ok) return written
+  return inspect(text.replace(/[-+_]+(?=\p{L})/gu, " "), context, false)
+}
+
+// The check, with the sources facet's domains exempt where they stand as a host name or a site: value when `sites`
+// holds: in a search query, where they become site: filters, and not in an address.
+function inspect(query: string, context: Context, sites: boolean): Result {
   if (BrainScan.credential(query) || BrainScan.redact(query).redacted)
     return refused("secret", "a password, key or token")
   const known = prepare(context)
@@ -225,51 +349,51 @@ export function check(query: string, context: Context): Result {
     .map((gram) => gram.join(" "))
     .find((gram) => known.named.has(gram) && !known.allowedWords.includes(` ${gram} `))
   if (named) return refused("words", named)
-  // Rare tokens and names are read with the sources facet's domains taken out where they stand as a host name or a
-  // site: value. Runs of words were read whole above.
-  const sent = known.exempt(fold(query))
-  const lower = sent.toLowerCase()
+  // Numbers, rare tokens and names are read with the sources facet's domains taken out where they may stand. Runs of
+  // words were read whole above.
+  const sent = sites ? known.exempt(fold(query)) : fold(query)
+  const number = numberIn(sent, known)
+  if (number) return refused("token", number)
+  const seen = alike(sent)
   // Both ways round: a rare token of the query that the private text holds, and a rare token of the private text that
   // the query holds, which catches one the query wrote in lower case or ran into other letters.
   const token =
-    rare(sent).find((item) => known.raw.includes(item.toLowerCase()) && !known.typedRaw.includes(item.toLowerCase())) ??
-    known.tokens.find((item) => lower.includes(item))
+    rare(sent).find(
+      (item) => !DIGITS.test(item) && known.raw.includes(alike(item)) && !known.typedRaw.includes(alike(item)),
+    ) ?? known.tokens.find((item) => seen.includes(item.key))?.token
   if (token) return refused("token", token)
-  // A name as a word of the query, or, from 6 letters, run into other letters ("acmerobotics").
-  const shown = wordsOf(sent)
-  const name = known.names.find((item) => shown.includes(item) || (item.length >= 6 && lower.includes(item)))
-  if (name) return refused("token", name)
+  // A name as a word of the query, as a plural too ("Acmes"), or, from 6 letters, run into other letters
+  // ("acmerobotics").
+  const shown = new Set(wordsOf(sent).map(alike))
+  const name = known.names.find(
+    (item) =>
+      shown.has(item.key) ||
+      shown.has(`${item.key}s`) ||
+      shown.has(`${item.key}es`) ||
+      (item.name.length >= 6 && seen.includes(item.key)),
+  )
+  if (name) return refused("token", name.name)
   return { ok: true }
 }
 
-/**
- * Whether an address may be read, by the same check on its path, query and fragment, and on the labels of its host
- * before its site: the site came from provenance, but a name such as acme-q3-churn.attacker.example carries text the
- * way a path does.
- */
-export function address(url: string, context: Context): Result {
-  if (!URL.canParse(url)) return refused("token", url)
-  const parsed = new URL(url)
-  const text = [
-    ...(parse(parsed.hostname, { allowPrivateDomains: true }).subdomain ?? "").split("."),
-    ...parsed.pathname.split("/"),
-    ...[...parsed.searchParams].flatMap(([key, value]) => [key, value]),
-    parsed.hash.slice(1),
-  ]
-    .map(ResearchCanonical.decoded)
-    .join(" ")
-  // As written, for identifiers and paths, and with a slug's dashes read as spaces, for runs of words.
-  const written = check(text, context)
-  if (!written.ok) return written
-  return check(text.replace(/[-+_]+(?=\p{L})/gu, " "), context)
+// A number of the private text inside one of the query's, or one of the query's of 5 or more digits inside one of the
+// private text's, by their digits alone: "+1 415-555-0132" holds the private 415-555-0132, and "0532 0130" is part of
+// the private 0044 0532 0130.
+function numberIn(text: string, known: ReturnType<typeof build>) {
+  const numbers = runs(text).map((run) => run.groups.join(""))
+  return (
+    known.numbers.find((number) => numbers.some((digits) => digits.includes(number))) ??
+    numbers.find((digits) => figure(digits) && known.digits.includes(digits) && !known.typedDigits.includes(digits))
+  )
 }
 
 /**
  * The rare tokens in a text: identifiers, paths, email addresses, host names, IP addresses and numbers of 5 or more
- * digits.
+ * digits, by their digits, with each stretch of whole groups in them (415-555-0132 gives 4155550132 and 5550132).
  */
 export function rare(text: string) {
-  const found = (fold(text).match(TOKEN_RUN) ?? [])
+  const folded = fold(text)
+  const found = (folded.match(TOKEN_RUN) ?? [])
     .flatMap((run) =>
       Array.from({ length: Math.ceil(run.length / MAX_RUN) }, (_, index) =>
         run.slice(index * MAX_RUN, (index + 1) * MAX_RUN),
@@ -287,10 +411,11 @@ export function rare(text: string) {
       ...(value.match(/\b[a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)+\b/g) ?? []).filter((token) => token.length >= 6),
       ...(value.match(/\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+\b/g) ?? []).filter((token) => token.length >= 6),
       ...(value.match(/\b(?=[A-Za-z]*\d)(?=\d*[A-Za-z])[A-Za-z0-9]{8,}\b/g) ?? []),
-      // A number of one significant figure (10000, 300000) says nothing about anyone's files. 2,400,000 does.
-      ...(value.match(/\b\d{5,}\b/g) ?? []).filter((number) => !/^\d0+$/.test(number)),
     ])
-  return [...new Set(found)].filter((token) => !COMMON.has(token.toLowerCase()))
+  const numbers = runs(folded)
+    .filter((run) => !dotted(run))
+    .flatMap(figures)
+  return [...new Set([...found, ...numbers])].filter((token) => !COMMON.has(token.toLowerCase()))
 }
 
 /**
@@ -352,16 +477,105 @@ function refused(reason: Reason, match: string): Result {
 }
 
 function fold(text: string) {
-  return WebFence.latin(text.normalize("NFKD").replace(UNSEEN, ""))
-    .replace(CARD, (number) => number.replace(/\D/g, ""))
-    .replace(GROUPED, (number: string, separator: string | undefined, at: number, whole: string) => {
-      // An IPv4 address stays as written, and so does a chain that goes on with its separator and a digit (1.100.2,
-      // 192.168.1.20): a version or an address, not a number. "2,400,000.00" is a number with its decimals.
-      const after = whole.slice(at + number.length, at + number.length + 2)
-      if (isIP(number) === 4 || (separator && separator !== " " && after[0] === separator && /\d/.test(after[1] ?? "")))
-        return number
-      return number.replace(/\D/g, "")
-    })
+  return WebFence.latin(text.normalize("NFKD").replace(UNSEEN, "").replace(DIGIT, ascii))
+}
+
+// A decimal digit of any script as its ASCII digit. Unicode gives each script's digits 0 to 9 in order, in blocks of
+// ten that may follow one another, so a digit's value is the count of digits straight before it, modulo ten.
+function ascii(digit: string) {
+  const code = digit.codePointAt(0)!
+  if (code < 0x80) return digit
+  const before = Array.from({ length: 60 }, (_, index) => code - index - 1).findIndex(
+    (at) => !ONE_DIGIT.test(String.fromCodePoint(at)),
+  )
+  return String(before % 10)
+}
+
+// Text as ASCII's own look-alikes read, for names and rare tokens: in lower case, with I, l and 1 one letter, 0 and O
+// one, rn read as m and vv as w (Unicode's prototypes for them).
+function alike(text: string) {
+  return text.toLowerCase().replace(/rn/g, "m").replace(/vv/g, "w").replace(/[i1]/g, "l").replace(/0/g, "o")
+}
+
+type Run = { readonly groups: readonly string[]; readonly separators: readonly string[] }
+
+// The numbers of a folded text, as runs of digit groups. A group joins the one before it across what BETWEEN allows,
+// unless one of the two is glued to a letter ("Q3", "3rd") and the later one is not a group of three: USD2,400,000 is
+// one number, "Q3 2026" two.
+function runs(text: string): Run[] {
+  return [...text.matchAll(GROUP)]
+    .reduce<{ groups: string[]; separators: string[]; start: number; end: number }[]>((all, match) => {
+      const last = all.at(-1)
+      const start = match.index
+      const end = start + match[0].length
+      const glued =
+        (last?.groups.length === 1 && LETTER_BEFORE.test(text.slice(Math.max(0, last.start - 2), last.start))) ||
+        LETTER_AFTER.test(text.slice(end, end + 2))
+      if (last && BETWEEN.test(text.slice(last.end, start)) && (!glued || match[0].length === 3)) {
+        last.groups.push(match[0])
+        last.separators.push(text.slice(last.end, start))
+        last.end = end
+        return all
+      }
+      all.push({ groups: [match[0]], separators: [], start, end })
+      return all
+    }, [])
+    .flatMap(apart)
+}
+
+// A version or an IPv4 address in a run stands on its own, so "1.2.3, 1.3.0" is two versions and not one number.
+// The run is cut where a separator is not a dot, and the pieces that are not versions or addresses join again.
+function apart(run: Run): Run[] {
+  const cuts = [
+    0,
+    ...run.separators.flatMap((separator, index) => (separator === "." ? [] : [index + 1])),
+    run.groups.length,
+  ]
+  const pieces = cuts
+    .slice(0, -1)
+    .map((from, index) => ({ from, to: cuts[index + 1]!, dotted: dotted(part(run, from, cuts[index + 1]!)) }))
+  if (!pieces.some((piece) => piece.dotted)) return [run]
+  return pieces
+    .reduce<typeof pieces>((all, piece) => {
+      const last = all.at(-1)
+      if (last && !last.dotted && !piece.dotted) {
+        last.to = piece.to
+        return all
+      }
+      all.push({ ...piece })
+      return all
+    }, [])
+    .map((piece) => part(run, piece.from, piece.to))
+}
+
+function part(run: Run, from: number, to: number): Run {
+  return { groups: run.groups.slice(from, to), separators: run.separators.slice(from, to - 1) }
+}
+
+// A version or an IPv4 address, which the rare tokens read as written: an IPv4 address, or three or more groups of at
+// most three digits joined by dots alone, unless every group after the first has three (2.345.678 is a number).
+function dotted(run: Run) {
+  if (run.separators.length < 2 || !run.separators.every((separator) => separator === ".")) return false
+  if (run.groups.length === 4 && isIP(run.groups.join(".")) === 4) return true
+  return run.groups.every((group) => group.length <= 3) && !run.groups.slice(1).every((group) => group.length === 3)
+}
+
+// The rare numbers a run holds: each stretch of whole groups that is a figure, so +1 415-555-0132 holds
+// 415-555-0132 and 555-0132 as well as the whole.
+function figures(run: Run) {
+  return run.groups
+    .flatMap((_, start) =>
+      run.groups
+        .slice(start, start + MAX_GROUPS)
+        .map((_, index) => run.groups.slice(start, start + index + 1).join("")),
+    )
+    .filter(figure)
+}
+
+// A number of 5 or more digits, and more than one significant figure: 10000 and 300000 say nothing about anyone's
+// files, 2,400,000 does.
+function figure(digits: string) {
+  return digits.length >= 5 && !/^\d0+$/.test(digits)
 }
 
 function wordsOf(text: string) {
@@ -394,9 +608,9 @@ function prose(texts: readonly string[]) {
 }
 
 // The context as the check reads it, worked out once per context object: its words joined for the 6-word runs, the
-// 3-word runs of its prose with a name or a number in them, its text in lower case, and the rare tokens and names of
-// the private text that the user did not type. Tokens match without case, so lowercasing an identifier or a host name
-// does not get it past the check.
+// 3-word runs of its prose with a name or a number in them, its text as look-alikes read, the numbers of its private
+// text, and the rare tokens and names of the private text that the user did not type. Tokens match without case, so
+// lowercasing an identifier or a host name does not get it past the check.
 const PREPARED = new WeakMap<Context, ReturnType<typeof build>>()
 
 function prepare(context: Context) {
@@ -408,8 +622,13 @@ function prepare(context: Context) {
 }
 
 function build(context: Context) {
-  const typedRaw = context.typed.map(fold).join("\n").toLowerCase()
-  const typedWords = new Set(context.typed.flatMap(wordsOf))
+  const typedRaw = alike(context.typed.map(fold).join("\n"))
+  const typedWords = new Set(context.typed.flatMap(wordsOf).map(alike))
+  const typedDigits = context.typed
+    .flatMap((text) => runs(fold(text)))
+    .map((run) => run.groups.join(""))
+    .join("\n")
+  const counted = context.private.flatMap((text) => runs(fold(text))).filter((run) => !dotted(run))
   const found = names(context.private)
   const named = new Set(found)
   return {
@@ -425,12 +644,16 @@ function build(context: Context) {
           .map((gram) => gram.join(" ")),
       ),
     ),
-    raw: context.private.map(fold).join("\n").toLowerCase(),
+    raw: alike(context.private.map(fold).join("\n")),
     typedRaw,
-    tokens: [...new Set(context.private.flatMap(rare).map((token) => token.toLowerCase()))].filter(
-      (token) => token.length >= 5 && !typedRaw.includes(token),
-    ),
-    names: found.filter((name) => !typedWords.has(name)),
+    tokens: [...new Set(context.private.flatMap(rare).filter((token) => !DIGITS.test(token)))]
+      .map((token) => ({ token: token.toLowerCase(), key: alike(token) }))
+      .filter((item) => item.token.length >= 5 && !typedRaw.includes(item.key)),
+    names: found.map((name) => ({ name, key: alike(name) })).filter((item) => !typedWords.has(item.key)),
+    // The rare numbers of the private text the user did not type, and the digits of all its numbers.
+    numbers: [...new Set(counted.flatMap(figures))].filter((number) => !typedDigits.includes(number)),
+    digits: counted.map((run) => run.groups.join("")).join("\n"),
+    typedDigits,
     exempt: exempting(context.domains ?? []),
   }
 }

@@ -2,6 +2,7 @@ export * as WebFence from "./fence"
 
 import path from "path"
 import { BrainScan } from "../brain/scan"
+import { ResearchConfusable } from "./confusable"
 
 // One fence for every web tool's output: webfetch, websearch and the browser in both runtimes, and research later.
 // Web text is what a page's author wrote, so it is placed in an `<untrusted_web_page nonce="…">` block. The nonce is
@@ -52,10 +53,12 @@ const SLASH = /[\\/\u2044\u2215\u2216\u2571\u29F5\u29F8\u29F9\uFE68\uFF0F\uFF3C]
 const SKIPPED_FIRST = /[\s\p{Default_Ignorable_Code_Point}]/u
 const DROPPED = /[\p{Default_Ignorable_Code_Point}\p{M}]/u
 
-// Letters from other scripts that look like Latin ones: the small letters Vector's tag names use, and the capitals the
-// research outbound check reads names through. NFKC folds full-width and mathematical letters already. Written by
-// code point, so this file shows every character it holds.
-const LOOK_ALIKE: Readonly<Record<string, string>> = {
+// Letters from other scripts that look like Latin ones: Unicode's confusables data (ResearchConfusable, generated from
+// UTS #39), which covers whole alphabets such as Cherokee, Lisu and Coptic, and these, which win over it. They are
+// letters a reader takes for Latin ones whatever their size, which Unicode leaves out (small capitals, Cyrillic "\u043a"
+// and "\u0442", Greek "\u03ba" and "\u03c4"), and one it reads otherwise (Armenian "\u0584" as "q", not "f"). NFKC folds
+// full-width and mathematical letters already. Written by code point, so this file shows every character it holds.
+const READ_AS: Readonly<Record<string, string>> = {
   // Cyrillic
   "\u0430": "a",
   "\u0432": "b",
@@ -173,6 +176,7 @@ const LOOK_ALIKE: Readonly<Record<string, string>> = {
   "\u0555": "O",
   "\u054d": "U",
 }
+const LOOK_ALIKE: Readonly<Record<string, string>> = { ...ResearchConfusable.LATIN, ...READ_AS }
 const LOOKS_LATIN = new RegExp(`[${Object.keys(LOOK_ALIKE).join("")}]`, "gu")
 
 // Characters a reader would not see: every default-ignorable code point (soft hyphen, zero-width space, direction
@@ -325,9 +329,11 @@ function tagName(text: string, start: number) {
     chars.push(char)
   }
   const after = chars.join("")
+  // Look-alikes are read before and after lower case, since the confusables data has only the capitals of some
+  // alphabets (Cherokee).
   const folded = /^[\x00-\x7f]*$/.test(after)
     ? after.toLowerCase()
-    : latin(after.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase())
+    : latin(latin(after.normalize("NFKD").replace(/\p{M}/gu, "")).toLowerCase())
   return folded.replace(/[\s\u2010-\u2015\u2212\uFE58\uFE63-]+/g, "_")
 }
 

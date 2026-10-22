@@ -22,7 +22,12 @@ const found = (quote: string) => ResearchQuote.found({ source: "S3", parts, quot
 
 describe("ResearchQuote.found", () => {
   test("finds a quote copied from the source, with its chunk and page", () => {
-    expect(found("Delivered heating energy fell by 61 percent")).toEqual({ ok: true, chunk: 2, page: 2 })
+    expect(found("Delivered heating energy fell by 61 percent")).toEqual({
+      ok: true,
+      chunk: 2,
+      page: 2,
+      quote: "Delivered heating energy fell by 61 percent",
+    })
   })
 
   test("compares after normalising spacing, curly quotes, dashes, ligatures and soft hyphens", () => {
@@ -30,6 +35,59 @@ describe("ResearchQuote.found", () => {
     expect(found('61 percent - the "measured" figure')).toMatchObject({ ok: true, chunk: 2 })
     expect(found("read every fifteen minutes, officially")).toMatchObject({ ok: true, chunk: 3 })
     expect(found(`fell${char(0x200b)} by 61 percent`)).toMatchObject({ ok: true })
+  })
+
+  test("gives the source's own words for the quote, not the agent's copy", () => {
+    expect(found("The study   followed 412 homes through two winters")).toMatchObject({
+      quote: "The study followed 412 homes through two winters",
+    })
+    expect(found('61 percent - the "measured" figure')).toMatchObject({
+      quote: `61 percent ${char(0x2014)} the “measured” figure`,
+    })
+    expect(found("read every fifteen minutes, officially")).toMatchObject({
+      quote: `read every fifteen minutes, of${char(0xfb01)}cially`,
+    })
+    expect(found("through two winters. Results. Delivered")).toMatchObject({
+      quote: "through two winters. Results. Delivered",
+    })
+    // An accent written apart from its letter stays with the letter that ends the quote.
+    const cafe = [{ chunk: 1, text: `We sat in the cafe${char(0x0301)}, then left.` }]
+    expect(ResearchQuote.found({ source: "S1", parts: cafe, quote: `We sat in the caf${char(0xe9)}` })).toMatchObject({
+      ok: true,
+      quote: `We sat in the caf${char(0xe9)}`,
+    })
+  })
+
+  test("keeps superscripts, subscripts and fractions, so a different number is not word for word", () => {
+    const trial = [
+      {
+        chunk: 1,
+        text: `The trial enrolled 10${char(0x2074)} patients and the dose was 5${char(0xd7)}10${char(0x207b, 0x2076)} mol per kg.`,
+      },
+      {
+        chunk: 2,
+        text: `Area grew to 3 km${char(0xb2)} by 2020. Efficacy was ${char(0xbd)} of placebo. CO${char(0x2082)} fell.`,
+      },
+    ]
+    const quoted = (quote: string) => ResearchQuote.found({ source: "S2", parts: trial, quote })
+    for (const quote of [
+      "enrolled 104 patients and the dose",
+      `dose was 5${char(0xd7)}10-6 mol per kg`,
+      "Area grew to 3 km2 by 2020",
+      `Efficacy was 1${char(0x2044)}2 of placebo`,
+      "Efficacy was 1/2 of placebo",
+      "of placebo. CO2 fell.",
+    ])
+      expect({ quote, ok: quoted(quote).ok }).toEqual({ quote, ok: false })
+    // The source's own form passes, and a superscript written after a caret reads as one.
+    expect(quoted(`enrolled 10${char(0x2074)} patients`)).toMatchObject({ ok: true, chunk: 1 })
+    expect(quoted("enrolled 10^4 patients")).toMatchObject({ ok: true, quote: `enrolled 10${char(0x2074)} patients` })
+    expect(quoted(`dose was 5${char(0xd7)}10^-6 mol per kg`)).toMatchObject({
+      ok: true,
+      quote: `dose was 5${char(0xd7)}10${char(0x207b, 0x2076)} mol per kg`,
+    })
+    expect(quoted(`Efficacy was ${char(0xbd)} of placebo`)).toMatchObject({ ok: true, chunk: 2 })
+    expect(quoted(`placebo. CO_2 fell.`)).toMatchObject({ ok: true, quote: `placebo. CO${char(0x2082)} fell.` })
   })
 
   test("keeps case, so a quote with its capitals changed is not word for word", () => {

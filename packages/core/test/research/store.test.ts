@@ -321,6 +321,38 @@ describe("ResearchStore notes", () => {
     expect(result.focus.map((part) => part.chunk)).toEqual([3])
   })
 
+  test("a note keeps the source's own words for its quote, and a different number is not one", async () => {
+    const result = await withStore((setup) =>
+      Effect.gen(function* () {
+        const run = yield* setup.store.start(setup.place, RUN)
+        yield* setup.store.addSource(
+          setup.place,
+          run.id,
+          page("trial", [
+            "Results. Delivered heating energy fell by 61\u00a0percent \u2014 the \u201cmeasured\u201d figure at the meter.",
+            "Scale. The trial enrolled 10\u2074 homes in three countries.",
+          ]),
+        )
+        return {
+          typed: yield* setup.store.note(setup.place, run.id, {
+            ...NOTE,
+            quote: 'Delivered heating energy fell by 61 percent - the "measured" figure',
+          }),
+          different: yield* setup.store.note(setup.place, run.id, {
+            ...NOTE,
+            claim: "The trial enrolled 104 homes",
+            quote: "The trial enrolled 104 homes",
+          }),
+        }
+      }),
+    )
+    expect(result.typed).toMatchObject({
+      type: "saved",
+      note: { quote: "Delivered heating energy fell by 61 percent \u2014 the \u201cmeasured\u201d figure", support: true },
+    })
+    expect(result.different).toEqual({ type: "refused", message: "That quote is not in S1. Copy the words from S1 chunk 2." })
+  })
+
   test("only noted passages and the report get vectors, when idle, and they go with their document", async () => {
     const result = await withStore(
       (setup) =>
