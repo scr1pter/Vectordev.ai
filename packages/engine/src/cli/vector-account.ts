@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import fs from "fs/promises"
 import path from "path"
 import open from "open"
@@ -49,6 +50,28 @@ async function load(): Promise<StoredAuth | undefined> {
   return undefined
 }
 
+// VECTOR_CLI_TOKEN values vectordev.ai accepted, by their SHA-256, so Vector Local can tell a token checked once from
+// one that never was without keeping the token itself. One it rejected later comes off the list.
+const CHECKED_FILE = path.join(Global.Path.data, "cli-token-checked.json")
+
+const tokenHash = (token: string) => createHash("sha256").update(token).digest("hex")
+
+async function checkedTokens() {
+  const hashes: unknown = await Bun.file(CHECKED_FILE)
+    .json()
+    .catch(() => [])
+  return Array.isArray(hashes) ? hashes.filter((item): item is string => typeof item === "string") : []
+}
+
+async function recordCheck(token: string, accepted: boolean) {
+  const hash = tokenHash(token)
+  const hashes = await checkedTokens()
+  if (hashes.includes(hash) === accepted) return
+  const next = accepted ? [...hashes.slice(-19), hash] : hashes.filter((item) => item !== hash)
+  await fs.mkdir(path.dirname(CHECKED_FILE), { recursive: true })
+  await fs.writeFile(CHECKED_FILE, JSON.stringify(next), { mode: 0o600 })
+}
+
 async function save(auth: StoredAuth) {
   await fs.mkdir(path.dirname(AUTH_FILE), { recursive: true })
   await fs.writeFile(AUTH_FILE, JSON.stringify(auth, undefined, 2), { mode: 0o600 })
@@ -58,6 +81,7 @@ export async function signOut() {
   const { VectorTeams } = await import("@/teams")
   await VectorTeams.runtime.runPromise((teams) => teams.clear())
   await fs.rm(AUTH_FILE, { force: true })
+  await fs.rm(CHECKED_FILE, { force: true })
 }
 
 export async function currentUser(): Promise<CliUser | undefined> {
@@ -209,8 +233,16 @@ export async function ensureVectorAccount(): Promise<void> {
   const envToken = process.env.VECTOR_CLI_TOKEN
   if (envToken) {
     const verified = await verifyToken(envToken)
+    if (verified.status === "ok" || verified.status === "invalid") await recordCheck(envToken, verified.status === "ok")
     if (verified.status === "ok") scheduleUsageReport(envToken)
-    if (verified.status === "ok" || verified.status === "offline" || verified.status === "local") return
+    if (verified.status === "ok" || verified.status === "offline") return
+    // Signed in once: with Vector Local on, a token vectordev.ai accepted before (the stored sign-in, or this variable
+    // checked with Vector Local off) is not checked again. One never checked is not a sign-in.
+    if (verified.status === "local") {
+      if ((await load())?.token === envToken || (await checkedTokens()).includes(tokenHash(envToken))) return
+      UI.error(`A free Vector account is required, and VECTOR_CLI_TOKEN has not been checked yet. ${LOCAL_SIGN_IN}`)
+      process.exit(1)
+    }
     UI.error("VECTOR_CLI_TOKEN is not valid. Generate a new token at " + `${SITE}/auth/cli`)
     process.exit(1)
   }

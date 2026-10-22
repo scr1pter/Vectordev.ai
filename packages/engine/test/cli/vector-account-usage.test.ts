@@ -119,3 +119,35 @@ test("a stored token is verified again at the first command of each UTC day, not
     await rm(home, { recursive: true, force: true })
   }
 }, 60_000)
+
+test("with Vector Local on, VECTOR_CLI_TOKEN counts only once vectordev.ai accepted it", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "vector-cli-local-"))
+  const site = verifyServer()
+  // Vector Local blocks an internet site; a .invalid name could not be reached even if a request were made.
+  const offline = "https://vectordev.invalid"
+  const paths = (input: { site: string; token: string; local: boolean }) =>
+    vector({
+      home,
+      site: input.site,
+      args: ["debug", "paths"],
+      env: { VECTOR_CLI_TOKEN: input.token, VECTOR_DISABLE_USAGE: "1", ...(input.local ? { VECTOR_LOCAL: "1" } : {}) },
+    })
+  try {
+    const unchecked = await paths({ site: offline, token: TOKEN, local: true })
+    expect(unchecked.code).toBe(1)
+    expect(unchecked.stderr).toContain("VECTOR_CLI_TOKEN has not been checked yet")
+
+    // Checked once with Vector Local off, the token then works with it on, without checking again.
+    const checked = await paths({ site: site.server.url.origin, token: TOKEN, local: false })
+    expect(checked.code, checked.stderr).toBe(0)
+    expect(site.requests).toHaveLength(1)
+    const trusted = await paths({ site: offline, token: TOKEN, local: true })
+    expect(trusted.code, trusted.stderr).toBe(0)
+    const other = await paths({ site: offline, token: `${TOKEN}-other`, local: true })
+    expect(other.code).toBe(1)
+    expect(site.requests).toHaveLength(1)
+  } finally {
+    site.server.stop(true)
+    await rm(home, { recursive: true, force: true })
+  }
+}, 60_000)
