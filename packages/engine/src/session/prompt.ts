@@ -74,6 +74,7 @@ import { SessionReminders } from "./reminders"
 import { SessionMemory } from "./memory"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { ownerBlock, scopeOf, scopeQuery } from "@vectordevai/core/review/prompt"
 import { Git } from "@/git"
 import { DOCUMENTS as MEMORY_DOCUMENTS } from "@/tool/memory"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
@@ -95,6 +96,18 @@ const decodeMessagePart = Schema.decodeUnknownExit(SessionV1.Part)
 const MAX_MCP_RESOURCE_BLOB_BYTES = 10 * 1024 * 1024
 // Sessions whose instruction files are kept between requests; an evicted session reads its files again.
 const MAX_INSTRUCTION_SNAPSHOTS = 256
+// Vectorscope's reviewers and its judge run as hidden sessions named `vectorscope.<pass>`.
+const VECTORSCOPE = "vectorscope."
+// Agents whose output leaves the machine or reaches the web: research workers and the research judge.
+const OUTWARD_AGENTS = new Set(["researcher", "research-judge"])
+
+/**
+ * Who a session's memory is for (section 6.4a). A role whose output leaves the machine or reaches the web gets the
+ * outward digest: how the owner works, and no MEMORY.md, fact or entry learned beside a private document.
+ */
+export function audienceOf(session: Pick<Session.Info, "internal">, agent: string): Brain.Audience {
+  return session.internal?.startsWith(VECTORSCOPE) || OUTWARD_AGENTS.has(agent) ? "outward" : "owner"
+}
 const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
   "application/pdf",
   "image/gif",
@@ -223,10 +236,10 @@ const layer = Layer.effect(
       sessionID: SessionID,
       key: string,
       cold: boolean,
-      memory: { readonly personal: boolean; readonly index: boolean },
+      memory: { readonly personal: boolean; readonly index: boolean; readonly audience: Brain.Audience },
     ) {
       const snapshot = instructionSnapshots.get(sessionID)
-      const full = `${key}|${memory.personal ? "personal" : "shared"}|${memory.index ? "index" : "plain"}`
+      const full = `${key}|${memory.personal ? "personal" : "shared"}|${memory.index ? "index" : "plain"}|${memory.audience}`
       // Re-inserting keeps the most recently used sessions at the end; the oldest go once there are too many.
       instructionSnapshots.delete(sessionID)
       if (snapshot && snapshot.key === full && !cold) {
@@ -1919,8 +1932,10 @@ const layer = Layer.effect(
         // budget its size allows. It is saved on the message, so later steps send the same bytes and the cache holds.
         if (!quick && sized && sized.tier !== "chat" && !session.parentID && !session.internal)
           msgs = yield* recallFor({ sessionID, msgs, user: lastUser, tier: sized.tier, personal })
-        // A subagent a Thorough request launched starts with a brief, saved on its first message as ids.
-        if (session.parentID && !session.internal) msgs = yield* briefFor({ session, msgs, personal })
+        // A subagent starts with how the owner works, and one a Thorough request launched with a brief besides, saved
+        // on its first message as ids. A Vectorscope reviewer starts with how the owner reviews.
+        if (session.parentID && !session.internal) msgs = yield* briefFor({ session, msgs, personal, agent: agent.name })
+        if (session.internal?.startsWith(VECTORSCOPE)) msgs = yield* reviewFor({ session, msgs, personal })
         msgs = yield* withheldRecall(sessionID, msgs, personal)
         msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
           Effect.provideService(RuntimeFlags.Service, flags),
@@ -2079,7 +2094,7 @@ const layer = Layer.effect(
                   `${msgs[0]?.info.id}|${model.providerID}/${model.id}`,
                   // Past the provider's cache lifetime the prefix is written again regardless.
                   Date.now() - (lastFinished?.time.completed ?? 0) > ProviderTransform.cacheLifetime(model),
-                  { personal, index: offered.includes("memory") },
+                  { personal, index: offered.includes("memory"), audience: audienceOf(session, agent.name) },
                 ).pipe(Effect.orDie),
             quick ? Effect.succeed(undefined) : sys.mcp(agent, session.permission),
             // The quick lane sends this request's own messages; autocomplete only the newest one, below.
@@ -2259,15 +2274,17 @@ const layer = Layer.effect(
       )
     })
 
-    // A subagent's brief: a Thorough request's subagents (at most 4 of them) start with up to 200 tokens of the cards
-    // and memory that bear on their task, recalled once from the task they were given. It is saved on the subagent's
-    // first message as ids, as a request's recall is, so each of its requests renders it again where that is allowed
-    // (a forgotten document is gone from it, and a private one stays out of a model that may train). A subagent of a
-    // smaller request starts with none.
+    // A subagent's brief (section 6.4a): every subagent starts with up to 100 tokens of how the owner works, recalled
+    // with its task as the query, and a Thorough request's subagents (at most 4 of them) also with up to 200 tokens of
+    // the cards and memory that bear on the task, so a subagent's share is at most 300 tokens. It is saved on the
+    // subagent's first message as ids, as a request's recall is, so each of its requests renders it again where that
+    // is allowed (a forgotten document is gone from it, and a private one stays out of a model that may train). A role
+    // whose output leaves the machine gets only screened preferences.
     const briefFor = Effect.fn("SessionPrompt.brief")(function* (input: {
       session: Session.Info
       msgs: SessionV1.WithParts[]
       personal: boolean
+      agent: string
     }) {
       const first = input.msgs.find((message) => message.info.role === "user")
       if (!first || SessionMemory.recalled(first) || recallsTried.has(first.info.id)) return input.msgs
@@ -2283,14 +2300,80 @@ const layer = Layer.effect(
         Effect.provideService(Database.Service, database),
         Effect.catch(() => Effect.succeed(undefined)),
       )
-      if (launcher?.role !== "assistant" || launcher.size !== "thorough") return input.msgs
+      const requestID = launcher?.role === "assistant" ? launcher.parentID : undefined
       const place = yield* instruction.place()
-      const result = yield* knowledge.brief(place, {
-        query,
-        personal: input.personal,
-        exclude: new Set(),
+      const outward = audienceOf(input.session, input.agent) === "outward"
+      const habits = input.personal
+        ? yield* brain.habits(place, {
+            query,
+            budget: Brain.HABITS.subagent,
+            audience: outward ? "outward" : "owner",
+            kinds: outward ? ["preference"] : Brain.HABIT_KINDS,
+            sessionID: input.session.id,
+            ...(requestID ? { requestID } : {}),
+            tier: "brief",
+          })
+        : { ids: [], tokens: 0 }
+      const result =
+        launcher?.role === "assistant" && launcher.size === "thorough" && !outward
+          ? yield* knowledge.brief(place, {
+              query,
+              personal: input.personal,
+              exclude: new Set(habits.ids),
+              sessionID: input.session.id,
+              requestID: launcher.parentID,
+            })
+          : undefined
+      if (!habits.text && !result?.text) return input.msgs
+      const part = yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: first.info.id,
         sessionID: input.session.id,
-        requestID: launcher.parentID,
+        type: "text",
+        text: result?.shared ?? "",
+        synthetic: true,
+        metadata: {
+          [SessionMemory.RECALL]: {
+            ids: [...habits.ids, ...(result?.ids ?? [])],
+            tokens: habits.tokens + (result?.tokens ?? 0),
+            personal: [...(habits.personal ?? []), ...(result?.personal ?? [])],
+            ...(result?.newest ? { newest: true } : {}),
+            ...(result?.cards.length ? { cards: [...result.cards], why: result.why } : {}),
+            brief: true,
+          },
+        },
+      } satisfies SessionV1.TextPart)
+      first.parts.push(part)
+      return input.msgs
+    })
+
+    // How the owner reviews, for a Vectorscope reviewer or its judge: screened how-you-work lines and the owner's review
+    // notes, chosen with the changed paths and their file types that the review's prompt carries (never its pull request
+    // text, so the pull request's author cannot choose which lines load). On a pull request from someone it cannot
+    // trust, only preferences and review notes go. Saved as ids, so the transcript never holds them.
+    const reviewFor = Effect.fn("SessionPrompt.review")(function* (input: {
+      session: Session.Info
+      msgs: SessionV1.WithParts[]
+      personal: boolean
+    }) {
+      const first = input.msgs.find((message) => message.info.role === "user")
+      if (!first || !input.personal || SessionMemory.recalled(first) || recallsTried.has(first.info.id)) return input.msgs
+      recallsTried.add(first.info.id)
+      if (recallsTried.size > MAX_INSTRUCTION_SNAPSHOTS * 4) recallsTried.delete(recallsTried.values().next().value!)
+      const scope = first.parts.flatMap((part) => (part.type === "text" ? [scopeOf(part.metadata)] : [])).find(Boolean) ?? {
+        paths: [],
+        trust: "untrusted" as const,
+      }
+      const place = yield* instruction.place()
+      const result = yield* brain.habits(place, {
+        query: scopeQuery(scope.paths),
+        files: scope.paths.map((file) => path.join(place.root, file)),
+        budget: Brain.HABITS.review,
+        audience: "outward",
+        kinds: scope.trust === "trusted" ? [...Brain.HABIT_KINDS, "review"] : ["preference", "review"],
+        wrap: ownerBlock,
+        sessionID: input.session.id,
+        tier: "review",
       })
       if (!result.text) return input.msgs
       const part = yield* sessions.updatePart({
@@ -2298,17 +2381,10 @@ const layer = Layer.effect(
         messageID: first.info.id,
         sessionID: input.session.id,
         type: "text",
-        text: result.shared ?? "",
+        text: "",
         synthetic: true,
         metadata: {
-          [SessionMemory.RECALL]: {
-            ids: [...result.ids],
-            tokens: result.tokens,
-            personal: [...(result.personal ?? [])],
-            ...(result.newest ? { newest: true } : {}),
-            ...(result.cards.length ? { cards: [...result.cards], why: result.why } : {}),
-            brief: true,
-          },
+          [SessionMemory.RECALL]: { ids: [...result.ids], tokens: result.tokens, personal: [...result.ids], review: true },
         },
       } satisfies SessionV1.TextPart)
       first.parts.push(part)
@@ -2480,10 +2556,12 @@ const layer = Layer.effect(
             return [
               {
                 ...part,
-                text: Brain.recallText(lines, {
-                  newest: recall.newest,
-                  documents: recall.ids.some((id) => cards.has(id)),
-                }),
+                text: recall.review
+                  ? ownerBlock(lines)
+                  : Brain.recallText(lines, {
+                      newest: recall.newest,
+                      documents: recall.ids.some((id) => cards.has(id)),
+                    }),
               },
             ]
           }

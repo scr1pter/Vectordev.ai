@@ -36,6 +36,7 @@ import {
   buildReviewPrompt,
   buildSecurityPrompt,
   buildVerifyPrompt,
+  SCOPE,
   type PromptInput,
 } from "@vectordevai/core/review/prompt"
 import {
@@ -186,6 +187,7 @@ export const run: (
     checks: input.checks,
     truncateGlob: input.trust === "untrusted" ? undefined : Truncate.GLOB,
   })
+  const reviewed = { paths: input.files.map((file) => file.path), trust: input.trust }
   const tracks = new Map<string, Track>()
   const reservations = new Map<Name, { turn: number; finalize: number }>()
   const sessionIDs: SessionID[] = []
@@ -412,7 +414,8 @@ export const run: (
               ...(spec.model.variant ? { variant: spec.model.variant } : {}),
               // A class instance: the stored user message only accepts the schema class, not a plain object.
               format: new SessionV1.OutputFormatJsonSchema({ type: "json_schema", schema: spec.schema, retryCount: 0 }),
-              parts: [{ type: "text", text }],
+              // The changed paths and the trust choose how the owner reviews (section 6.4a), never the PR's own text.
+              parts: [{ type: "text", text, metadata: { [SCOPE]: reviewed } }],
             })
             .pipe(
               Effect.provideService(SessionAdmission.Current, policy),

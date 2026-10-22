@@ -234,6 +234,8 @@ export function recall(part: SessionV1.Part) {
     newest: "newest" in value && value.newest === true,
     /** Which of `ids` are document cards, which the saved text never holds. */
     cards: "cards" in value ? strings(value.cards) : [],
+    /** How the owner reviews, for a Vectorscope reviewer: rendered as its own fenced block. */
+    review: "review" in value && value.review === true,
   }
 }
 
