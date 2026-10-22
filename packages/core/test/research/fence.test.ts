@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { WebFence } from "../../src/research/fence"
+import { NetworkGuard } from "../lib/network-guard"
+
+const guard = NetworkGuard.use()
 
 // Invisible and look-alike characters are built from their code points, so this file shows every character it tests.
 const char = (...codes: number[]) => String.fromCodePoint(...codes)
@@ -258,7 +261,11 @@ describe("WebFence saved pages", () => {
       "C:\\Users\\a\\tool-output\\tool_abc.web::$DATA",
     ])
       expect({ file, saved: WebFence.savedFile(file) }).toEqual({ file, saved: true })
-    for (const file of ["/repo/tool-output/../tool_abc.web", "/data/tool-output/tool_abc.web/extra", "/data/tool-outputs/tool_abc.web"])
+    for (const file of [
+      "/repo/tool-output/../tool_abc.web",
+      "/data/tool-output/tool_abc.web/extra",
+      "/data/tool-outputs/tool_abc.web",
+    ])
       expect({ file, saved: WebFence.savedFile(file) }).toEqual({ file, saved: false })
   })
 
@@ -299,5 +306,9 @@ describe("WebFence.invisible", () => {
     for (const style of ["display: block", "font-size: 12px", "opacity: 0.5", "color: white; background: black", ""])
       expect({ style, hidden: WebFence.invisible({ hidden: false, style }) }).toEqual({ style, hidden: false })
     expect(WebFence.invisible({ hidden: false, style: null })).toBe(false)
+  })
+
+  test("made no connection", () => {
+    expect(guard.attempts()).toEqual([])
   })
 })
