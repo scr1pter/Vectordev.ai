@@ -5,6 +5,7 @@ import path from "node:path"
 import { Schema } from "effect"
 import { CliRelease } from "@vectordevai/schema/cli-release"
 import { WindowsPowerShell } from "@vectordevai/core/util/windows-powershell"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 
 export type Receipt = {
   directory: string
@@ -64,7 +65,10 @@ export async function receipt(executable = process.execPath): Promise<Receipt | 
   }
 }
 
-export async function latest(value: Receipt, request: typeof fetch = fetch) {
+export async function latest(
+  value: Receipt,
+  request: (url: string, init: RequestInit) => Promise<Response> = (url, init) => fetch(url, init),
+) {
   const response = await request(
     `https://vectordev.ai/api/cli-release?version=${value.channel}&target=${value.target}`,
     { redirect: "error", signal: AbortSignal.timeout(30_000) },
@@ -98,9 +102,11 @@ export async function upgrade(value: Receipt, version: string, run: Run): Promis
   await mkdir(directory, { mode: 0o700 })
   const windows = process.platform === "win32"
   const script = path.join(directory, windows ? "install.ps1" : "install")
-  const response = await fetch(`https://vectordev.ai/${windows ? "install.ps1" : "install"}`, {
+  // An upgrade is one the user started; with Vector Local on it goes once they confirmed the check (vector upgrade).
+  const response = await Egress.fetch("updates", `https://vectordev.ai/${windows ? "install.ps1" : "install"}`, {
     redirect: "error",
     signal: AbortSignal.timeout(30_000),
+    manual: true,
   })
   if (!response.ok) {
     await response.body?.cancel()
