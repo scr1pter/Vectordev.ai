@@ -611,6 +611,40 @@ describe("ResearchStore guests", () => {
     expect(result.detail?.sources.map((source) => source.id)).toEqual(["S1", "S2"])
     expect(result.detail?.notes.map((note) => note.id)).toEqual(["N1"])
   })
+
+  test("forgetting all research, or the retention, also clears runs a guest acted in from memory", async () => {
+    const result = await withStore((setup) =>
+      Effect.gen(function* () {
+        const guest = (yield* reported(setup, { guest: true, sessionID: "ses_guest_one" })).run
+        const owner = (yield* reported(setup)).run
+        const all = yield* setup.store.forgetAll(setup.place)
+        // Still reading when the process has run past the retention.
+        const old = yield* setup.store.start(setup.place, { ...RUN, guest: true, sessionID: "ses_guest_two" })
+        yield* setup.store.addSource(setup.place, old.id, page("homes", STUDY))
+        const fresh = yield* setup.store.sweep()
+        const before = yield* setup.store.active(setup.place, "ses_guest_two")
+        const swept = yield* setup.store.sweep(Date.now() + 31 * 24 * 60 * 60 * 1000)
+        return {
+          all,
+          fresh,
+          before,
+          swept,
+          guest: yield* setup.store.get(setup.place, guest.id),
+          owner: yield* setup.store.get(setup.place, owner.id),
+          old: yield* setup.store.get(setup.place, old.id),
+          after: yield* setup.store.active(setup.place, "ses_guest_two"),
+        }
+      }),
+    )
+    expect(result.all).toBe(2)
+    expect(result.guest).toBeUndefined()
+    expect(result.owner).toBeUndefined()
+    expect(result.fresh).toBe(0)
+    expect(result.before).toMatchObject({ id: expect.any(String), status: "running" })
+    expect(result.swept).toBe(1)
+    expect(result.old).toBeUndefined()
+    expect(result.after).toBeUndefined()
+  })
 })
 
 describe("research migration", () => {

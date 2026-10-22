@@ -1286,16 +1286,18 @@ function make(input: {
   ) {
     return yield* lock.withPermit(
       Effect.gen(function* () {
-        const rows = yield* db
-          .select({ id: ResearchRunTable.id, repository: ResearchRunTable.repository_id })
-          .from(ResearchRunTable)
-          .where(options.everywhere ? undefined : eq(ResearchRunTable.repository_id, place.repository))
-          .all()
-          .pipe(Effect.orDie)
+        const runsOf = (store: Database) =>
+          store
+            .select({ id: ResearchRunTable.id, repository: ResearchRunTable.repository_id })
+            .from(ResearchRunTable)
+            .where(options.everywhere ? undefined : eq(ResearchRunTable.repository_id, place.repository))
+            .all()
+            .pipe(Effect.orDie)
+        // Runs a guest acted in go too: their pages are in this process's memory, not the brain, but they are research.
+        const rows = [...(yield* runsOf(db)), ...(state.guests.size > 0 ? yield* runsOf(yield* input.ephemeral) : [])]
         const dropped = yield* Effect.forEach(rows, (row) =>
-          drop(row.repository === place.repository ? place : { ...place, repository: row.repository }, row.id, {
-            tombstones: true,
-          }),
+          // Another repository's run has no working tree here, so its event names none rather than this one.
+          drop(row.repository === place.repository ? place : rootless(row.repository), row.id, { tombstones: true }),
         )
         return dropped.filter(Boolean).length
       }),
@@ -1306,20 +1308,32 @@ function make(input: {
     return yield* lock.withPermit(
       Effect.gen(function* () {
         state.swept = now
+        const cutoff = now - limits.retain * DAY
         const old = yield* db
           .select()
           .from(ResearchRunTable)
-          .where(and(eq(ResearchRunTable.kept, false), lt(ResearchRunTable.updated_at, now - limits.retain * DAY)))
+          .where(and(eq(ResearchRunTable.kept, false), lt(ResearchRunTable.updated_at, cutoff)))
           .all()
           .pipe(Effect.orDie)
+        // A run a guest acted in cannot be kept, and a server with invited guests may run for months: its pages leave
+        // this process's memory after the same time.
+        const guests =
+          state.guests.size > 0
+            ? yield* (yield* input.ephemeral)
+                .select({ id: ResearchRunTable.id, repository: ResearchRunTable.repository_id })
+                .from(ResearchRunTable)
+                .where(lt(ResearchRunTable.updated_at, cutoff))
+                .all()
+                .pipe(Effect.orDie)
+            : []
         const swept = yield* Effect.forEach(old, (row) =>
           Effect.gen(function* () {
             if (yield* keptOf(db, row)) return false
-            // The sweep is not given a working tree; the run's own repository is all it needs.
-            return yield* drop({ repository: row.repository_id, root: "", sources: [], held: false }, row.id, { tombstones: false })
+            return yield* drop(rootless(row.repository_id), row.id, { tombstones: false })
           }),
         )
-        return swept.filter(Boolean).length
+        const gone = yield* Effect.forEach(guests, (row) => drop(rootless(row.repository), row.id, { tombstones: false }))
+        return [...swept, ...gone].filter(Boolean).length
       }),
     )
   })
@@ -1758,6 +1772,11 @@ function toNote(row: typeof ResearchNoteTable.$inferInsert, source: number): Res
     ...(row.verdict ? { verdict: row.verdict } : {}),
     created_at: row.created_at,
   }
+}
+
+/** A repository with no working tree: what the sweep, and Erase for other repositories, need of a run's place. */
+function rootless(repository: string) {
+  return { repository, root: "", sources: [], held: false }
 }
 
 /** A page that had text in the brain, which was forgotten since. */
