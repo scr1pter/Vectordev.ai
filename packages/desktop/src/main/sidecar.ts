@@ -1,3 +1,4 @@
+import "@vectordevai/core/local-mode/backstop"
 import * as http from "node:http"
 import * as tls from "node:tls"
 import { join } from "node:path"

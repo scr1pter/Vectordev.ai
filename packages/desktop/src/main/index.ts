@@ -1,3 +1,4 @@
+import "@vectordevai/core/local-mode/backstop"
 import { randomUUID } from "node:crypto"
 import { mkdirSync, rmSync } from "node:fs"
 import { writeFile } from "node:fs/promises"
