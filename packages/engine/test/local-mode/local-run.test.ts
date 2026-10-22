@@ -1,4 +1,4 @@
-import { afterEach, describe, expect } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { rmSync, writeFileSync } from "node:fs"
 import path from "path"
 import { Cause, Effect, Exit, Layer } from "effect"
@@ -19,6 +19,8 @@ import { Egress } from "@vectordevai/core/local-mode/egress"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { Git as CoreGit } from "@vectordevai/core/git"
 import { SessionRunnerModel } from "@vectordevai/core/session/runner/model"
+import { makeShareTransport } from "@vectordevai/core/share/transport"
+import { FreeModels } from "@vectordevai/core/free-models"
 import { AbsolutePath } from "@vectordevai/core/schema"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { LSP } from "@/lsp/lsp"
@@ -677,6 +679,36 @@ describe("the agent's own actions under Vector Local", () => {
       expect(guard.outside()).toEqual([])
     }),
   )
+})
+
+describe("Vector's own services under Vector Local", () => {
+  test("are skipped without an attempt, and work as before with it off", async () => {
+    const sent: string[] = []
+    const fetch = Object.assign(
+      async (input: RequestInfo | URL) => {
+        sent.push(String(input))
+        return Response.json({ enabled: false, models: [] })
+      },
+      { preconnect: () => undefined },
+    )
+    const share = makeShareTransport({ token: async () => undefined, fetch })
+    const link = `https://vectordev.ai/s/${"a".repeat(32)}`
+    const free = FreeModels.createClient({ request: fetch, local: () => Egress.policy().enabled })
+
+    Egress.configure(LocalPolicy.resolve({ global: { enabled: true } }))
+    const refused = await share.read(link).catch((error: unknown) => error)
+    expect(refused).toMatchObject({
+      code: "UNAVAILABLE",
+      message: "Vector Local blocks share links, which publish the session on vectordev.ai.",
+    })
+    expect((await free.catalog(true)).enabled).toBe(false)
+    expect(sent).toEqual([])
+
+    Egress.configure(LocalPolicy.OFF)
+    await share.read(link).catch(() => undefined)
+    await free.catalog(true)
+    expect(sent).toEqual([`https://vectordev.ai/api/shares/${"a".repeat(32)}`, FreeModels.CATALOG_URL])
+  })
 })
 
 describe("Vector's own git and the V2 runner under Vector Local", () => {
