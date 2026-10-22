@@ -85,6 +85,16 @@ const services = (setup: Setup) =>
               }
             : {},
         ),
+      // No provider here sets a base URL, so each model's requests go to its catalog address.
+      getProvider: (providerID) =>
+        Effect.succeed({
+          id: providerID,
+          name: providerID,
+          env: [],
+          source: "config" as const,
+          options: {},
+          models: {},
+        }),
       getModel: (providerID, modelID) => {
         const found = MODELS.find((item) => item.providerID === providerID && item.id === modelID)
         return found ? Effect.succeed(found) : Effect.fail(new Provider.ModelNotFoundError({ providerID, modelID }))

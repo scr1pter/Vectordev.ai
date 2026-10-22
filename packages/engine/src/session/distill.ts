@@ -8,6 +8,7 @@ import { Flag } from "@vectordevai/core/flag/flag"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { providerCredentialAllowed } from "@vectordevai/core/provider-policy"
 import { SpendGuard } from "@vectordevai/core/spend-guard"
+import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import type { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { isFreeModel } from "@vectordevai/schema/free-model"
@@ -148,6 +149,9 @@ const layer = Layer.effect(
           signIn?.type === "oauth" &&
           providerCredentialAllowed(model.providerID, signIn, Boolean(model.api.npm || model.api.url)),
         listed: model.cost.input > 0 || model.cost.output > 0,
+        // A server on this computer has no per-token price. A private server elsewhere counts as unpriced here, since
+        // the server list is not read on this path.
+        local: !model.freeModel && ModelSlots.local(Provider.serverURL(model, Option.getOrUndefined(info))),
       })
       return {
         type: "plan" as const,
