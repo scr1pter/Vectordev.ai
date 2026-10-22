@@ -1,7 +1,9 @@
 import { afterAll, expect } from "bun:test"
 import path from "path"
 import { Effect } from "effect"
+import { Brain } from "@vectordevai/core/brain/brain"
 import { FSUtil } from "@vectordevai/core/fs-util"
+import { Instruction } from "../../src/session/instruction"
 import { Session } from "@/session/session"
 import { SessionMemory } from "../../src/session/memory"
 import { ResearchRun } from "../../src/tool/research-run"
@@ -24,6 +26,8 @@ afterAll(async () => {
 })
 
 const NOTES = "The Falcon migration moves the ledger to the reconcileLedgerEntries service before the March freeze."
+const HABIT = "Prefer migration guides that show a rollback plan"
+const FACT = "My badge number at Hooli is 44172 and my manager is Dana Whitfield"
 const lead = (hit: { body: Record<string, unknown> }) =>
   JSON.stringify(hit.body).includes("Plan the run with research_plan")
 const names = (body: string) =>
@@ -36,6 +40,13 @@ it.instance(
       const { dir, llm } = yield* setup(web)
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(path.join(dir, "notes", "plan.md"), `# Plan\n\n${NOTES}\n`)
+      const brain = yield* Brain.Service
+      const place = yield* (yield* Instruction.Service).place()
+      for (const [kind, text] of [
+        ["preference", HABIT],
+        ["fact", FACT],
+      ] as const)
+        yield* brain.propose(place, { kind, text, scope: "personal", origin: "user", evidence: { type: "user" } })
       const sessions = yield* Session.Service
       const build = yield* sessions.create({ title: "Build" })
       yield* llm.tool("read", { filePath: path.join(dir, "notes", "plan.md") })
@@ -83,7 +94,14 @@ it.instance(
       // The lead got the question alone, never the file build read.
       const leadBodies = bodies.filter((body) => body.includes("Plan the run with research_plan"))
       expect(leadBodies.length).toBeGreaterThan(0)
-      for (const body of leadBodies) expect(body).not.toContain("reconcileLedgerEntries")
+      // Of the owner's memory it hears how they work, screened, and nothing about them: no fact, no MEMORY.md.
+      expect(leadBodies[0]).toContain(HABIT)
+      expect(leadBodies[0]).toContain("Never force-push to main")
+      for (const body of leadBodies) {
+        expect(body).not.toContain("reconcileLedgerEntries")
+        expect(body).not.toContain("badge number")
+        expect(body).not.toContain("Hooli")
+      }
       expect(guard.outside()).toEqual([])
     }),
   120_000,

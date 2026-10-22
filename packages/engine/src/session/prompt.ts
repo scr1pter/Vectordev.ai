@@ -105,8 +105,11 @@ const OUTWARD_AGENTS = new Set(["researcher", "research-judge"])
  * Who a session's memory is for (section 6.4a). A role whose output leaves the machine or reaches the web gets the
  * outward digest: how the owner works, and no MEMORY.md, fact or entry learned beside a private document.
  */
-export function audienceOf(session: Pick<Session.Info, "internal">, agent: string): Brain.Audience {
-  return session.internal?.startsWith(VECTORSCOPE) || OUTWARD_AGENTS.has(agent) ? "outward" : "owner"
+export function audienceOf(session: Pick<Session.Info, "internal" | "parentID">, agent: string): Brain.Audience {
+  if (session.internal?.startsWith(VECTORSCOPE) || OUTWARD_AGENTS.has(agent)) return "outward"
+  // A research lead the build agent started works from build's request alone and sends queries to the web: it hears
+  // how the owner works, screened, and nothing about them. The lead of the user's own Deep research is the owner's.
+  return agent === "research" && session.parentID ? "outward" : "owner"
 }
 
 /**
