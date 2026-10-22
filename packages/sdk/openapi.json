@@ -1411,7 +1411,13 @@
                           },
                           "reason": {
                             "type": "string",
-                            "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                            "enum": [
+                              "sign-in-paused",
+                              "provider-not-configured",
+                              "disabled",
+                              "no-models",
+                              "off-in-local"
+                            ]
                           },
                           "message": {
                             "type": "string"
@@ -10484,7 +10490,13 @@
                           },
                           "reason": {
                             "type": "string",
-                            "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                            "enum": [
+                              "sign-in-paused",
+                              "provider-not-configured",
+                              "disabled",
+                              "no-models",
+                              "off-in-local"
+                            ]
                           },
                           "message": {
                             "type": "string"
@@ -25494,7 +25506,7 @@
       },
       "CostKind": {
         "type": "string",
-        "enum": ["free", "priced", "plan", "unknown"]
+        "enum": ["free", "priced", "plan", "local", "unknown"]
       },
       "QuestionOption": {
         "type": "object",
@@ -25655,7 +25667,7 @@
                       },
                       "reason": {
                         "type": "string",
-                        "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                        "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models", "off-in-local"]
                       },
                       "message": {
                         "type": "string"
@@ -29356,6 +29368,10 @@
               "chunkTimeout": {
                 "type": "integer",
                 "exclusiveMinimum": 0
+              },
+              "concurrency": {
+                "type": "integer",
+                "exclusiveMinimum": 0
               }
             },
             "additionalProperties": {}
@@ -29681,6 +29697,300 @@
             "maximum": 1
           },
           "unpricedSteps": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "LocalWeb": {
+        "type": "string",
+        "enum": ["ask", "network", "none"]
+      },
+      "LocalAllowed": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          },
+          "added_at": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "added_by": {
+            "type": "string",
+            "enum": ["app", "cli", "managed"]
+          }
+        },
+        "required": ["source", "reason", "added_at", "added_by"],
+        "additionalProperties": false
+      },
+      "LocalPinConfig": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "The kind of server Vector found, such as ollama or vllm"
+          },
+          "version": {
+            "type": "string"
+          },
+          "models": {
+            "type": "string"
+          },
+          "spki": {
+            "type": "string"
+          }
+        },
+        "required": ["kind"],
+        "additionalProperties": false
+      },
+      "LocalCheckedConfig": {
+        "type": "object",
+        "properties": {
+          "server_version": {
+            "type": "string"
+          },
+          "checked_at": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "result": {
+            "type": "string",
+            "enum": ["works", "no-tools", "schema-rejected", "context-too-small", "failed"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "ttft_ms": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["checked_at", "result"],
+        "additionalProperties": false
+      },
+      "LocalConfig": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "web": {
+            "$ref": "#/components/schemas/LocalWeb"
+          },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "web_domains": {
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "deny": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "allow": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LocalAllowed"
+            }
+          },
+          "pins": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LocalPinConfig"
+            }
+          },
+          "checked": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LocalCheckedConfig"
+            }
+          },
+          "ca": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "log": {
+            "type": "object",
+            "properties": {
+              "retain_days": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "lock": {
+            "type": "boolean"
+          },
+          "user_may": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["endpoints", "allow", "web_domains", "web"]
+            }
+          },
+          "locked_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "endpoint_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "updates": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "models_dir": {
+            "type": "string"
+          },
+          "catalog_path": {
+            "type": "string"
+          },
+          "recommend": {}
+        },
+        "additionalProperties": false
+      },
+      "ResearchSearchProvider": {
+        "type": "string",
+        "enum": ["auto", "searxng", "exa", "parallel", "browser", "none"]
+      },
+      "ResearchDepthConfig": {
+        "type": "string",
+        "enum": ["auto", "focused", "deep"]
+      },
+      "ResearchToolConfig": {
+        "type": "string",
+        "enum": ["work", "thorough", "off"]
+      },
+      "ResearchLimitsConfig": {
+        "type": "object",
+        "properties": {
+          "usd": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "steps": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "pages": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "searches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "researchers": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4
+          }
+        },
+        "additionalProperties": false
+      },
+      "ResearchConfig": {
+        "type": "object",
+        "properties": {
+          "search": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "$ref": "#/components/schemas/ResearchSearchProvider"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "depth": {
+            "$ref": "#/components/schemas/ResearchDepthConfig"
+          },
+          "tool": {
+            "$ref": "#/components/schemas/ResearchToolConfig"
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "focused": {
+                "$ref": "#/components/schemas/ResearchLimitsConfig"
+              },
+              "deep": {
+                "$ref": "#/components/schemas/ResearchLimitsConfig"
+              }
+            },
+            "additionalProperties": false
+          },
+          "domains": {
+            "type": "object",
+            "properties": {
+              "prefer": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "avoid": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "robots": {
+            "type": "boolean"
+          },
+          "browser_search": {
+            "type": "boolean"
+          },
+          "retain_days": {
             "type": "integer",
             "exclusiveMinimum": 0
           }
@@ -30141,6 +30451,12 @@
               }
             },
             "additionalProperties": false
+          },
+          "local": {
+            "$ref": "#/components/schemas/LocalConfig"
+          },
+          "research": {
+            "$ref": "#/components/schemas/ResearchConfig"
           },
           "experimental": {
             "type": "object",
@@ -45196,7 +45512,7 @@
               },
               "reason": {
                 "type": "string",
-                "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models", "off-in-local"]
               },
               "message": {
                 "type": "string"
@@ -48392,7 +48708,7 @@
               },
               "reason": {
                 "type": "string",
-                "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models", "off-in-local"]
               },
               "message": {
                 "type": "string"
