@@ -98,6 +98,9 @@ export const resolveReviewModel = Effect.fn("ReviewModel.resolve")(function* (in
   const model = yield* provider.getModel(ref.providerID, ref.modelID).pipe(
     Effect.catch((error) =>
       Effect.gen(function* () {
+        // Vector Local keeps the model off: say why, rather than asking for a key.
+        if (!ci && error.unavailable?.reason === "off-in-local")
+          return yield* new ReviewModelError({ message: `${name} cannot review: ${error.unavailable.message}` })
         if (!ci)
           return yield* new ReviewModelError({ message: `${name} is not available. Check the provider and its key.` })
         const listed = (yield* catalog.get())[ref.providerID]

@@ -2582,7 +2582,7 @@ const layer = Layer.effect(
           const target = input instanceof Request ? input.url : String(input)
           const res = ResponseTerminal.wrap(
             await Egress.fetch(
-              inferenceSource(model, target, Egress.policy()),
+              Egress.policy().enabled ? inferenceSource(model, target, Egress.policy()) : "local-inference",
               input,
               {
                 ...opts,

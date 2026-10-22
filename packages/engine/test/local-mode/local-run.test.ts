@@ -31,6 +31,9 @@ import { Env } from "../../src/env"
 import { Plugin } from "../../src/plugin"
 import { Agent } from "../../src/agent/agent"
 import { Provider } from "@/provider/provider"
+import { Auth } from "@/auth"
+import { ModelCatalog } from "@vectordevai/core/model-catalog"
+import { ReviewModel } from "../../src/review/model"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SessionSummary } from "../../src/session/summary"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
@@ -170,6 +173,28 @@ describe("the provider under Vector Local", () => {
             message:
               "ollama: off in Vector Local. It is an Ollama cloud model: the Ollama app passes its prompts on to ollama.com. Choose a model that runs on your server, or turn Vector Local off to use it.",
           })
+        }),
+      ),
+    { trusted: true, config },
+  )
+
+  const review = testEffect(
+    LayerNode.compile(
+      LayerNode.group([Provider.node, Env.node, Plugin.node, Config.node, Auth.node, ModelCatalog.node]),
+    ),
+  )
+  review.instance(
+    "tells Vectorscope why a model off in Vector Local cannot review",
+    () =>
+      withLocal({ enabled: true, endpoints: [BOX] }, () =>
+        Effect.gen(function* () {
+          const refused = yield* ReviewModel.resolveReviewModel({ trigger: "local", flag: "cloud/big" }).pipe(
+            Effect.flip,
+          )
+          expect(refused.message).toBe(
+            "cloud/big cannot review: cloud: off in Vector Local, because its server is not on your list of model servers. Add the server to the list, or turn Vector Local off to use it.",
+          )
+          expect((yield* ReviewModel.resolveReviewModel({ trigger: "local", flag: "box/qwen" })).costKind).toBe("local")
         }),
       ),
     { trusted: true, config },
