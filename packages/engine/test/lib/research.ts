@@ -173,9 +173,12 @@ const root = LayerNode.group([
 /**
  * The test runtime for a file. `client` decides whether a root plan card asks (the app does) or the plan is approved
  * on its own (a client that cannot answer). Background subagents are off, so a task's report comes back in its call.
- * The user's personal memory files live in a folder of the file's own.
+ * The user's personal memory files live in a folder of the file's own. MCP has no server unless `mcp` gives one.
  */
-export function runtime(web: FakeWeb.Web, options: { readonly client?: string } = {}) {
+export function runtime(
+  web: FakeWeb.Web,
+  options: { readonly client?: string; readonly mcp?: Layer.Layer<MCP.Service> } = {},
+) {
   const config = mkdtempSync(path.join(os.tmpdir(), "vector-research-"))
   writeFileSync(path.join(config, "RULES.md"), "- Never force-push to main\n")
   writeFileSync(path.join(config, "MEMORY.md"), "- I work at Hooli on the payments team in Lisbon\n")
@@ -183,7 +186,7 @@ export function runtime(web: FakeWeb.Web, options: { readonly client?: string } 
     LayerNode.compile(root, [
       [SessionSummary.node, summary],
       [LSP.node, lsp],
-      [MCP.node, mcp],
+      [MCP.node, options.mcp ?? mcp],
       [
         RuntimeFlags.node,
         RuntimeFlags.layer({
@@ -199,15 +202,17 @@ export function runtime(web: FakeWeb.Web, options: { readonly client?: string } 
       ],
     ]),
   )
-  return { it, cleanup: () => rmSync(config, { recursive: true, force: true }) }
+  return {
+    it,
+    cleanup: () => {
+      rmSync(config, { recursive: true, force: true })
+      rmSync(userConfig, { force: true })
+    },
+  }
 }
 
-/** The repository's config: the fake LLM server as the model, SearXNG on the fake web as research's search. */
-export function repositoryConfig(
-  llm: string,
-  web: FakeWeb.Web,
-  extra: Partial<ConfigV1.Info> = {},
-): Partial<ConfigV1.Info> {
+/** The repository's config: the fake LLM server as the model. */
+export function repositoryConfig(llm: string, extra: Partial<ConfigV1.Info> = {}): Partial<ConfigV1.Info> {
   return {
     provider: {
       lmstudio: {
@@ -232,17 +237,29 @@ export function repositoryConfig(
         options: { apiKey: "test-key", baseURL: llm },
       },
     },
-    research: { search: { provider: "searxng", url: web.url("searxng", "/") } },
     ...extra,
   }
 }
 
-/** Writes the repository's config and trusts it, as the user would. */
+// The user's own config file, where research's settings live: a repository's config may not set them.
+const userConfig = path.join(Global.Path.config, "vector.json")
+
+/**
+ * Writes the repository's config and trusts it, as the user would, and research's settings to the user's own config:
+ * SearXNG on the fake web as research's search, with `research` laid over it.
+ */
 export const setup = Effect.fn("ResearchTest.setup")(function* (web: FakeWeb.Web, extra: Partial<ConfigV1.Info> = {}) {
   const dir = (yield* TestInstance).directory
   const llm = yield* TestLLMServer
   const fs = yield* FSUtil.Service
-  yield* fs.writeWithDirs(path.join(dir, "vector.json"), JSON.stringify(repositoryConfig(llm.url, web, extra)))
+  const config = yield* Config.Service
+  const { research, ...repository } = extra
+  yield* fs.writeWithDirs(
+    userConfig,
+    JSON.stringify({ research: { search: { provider: "searxng", url: web.url("searxng", "/") }, ...research } }),
+  )
+  yield* config.invalidate()
+  yield* fs.writeWithDirs(path.join(dir, "vector.json"), JSON.stringify(repositoryConfig(llm.url, repository)))
   const snapshot = yield* Effect.promise(() => WorkspaceTrust.snapshot(dir, [path.join(dir, "vector.json")]))
   yield* Effect.promise(() => WorkspaceTrust.approve(Global.Path.state, snapshot))
   return { dir, llm }

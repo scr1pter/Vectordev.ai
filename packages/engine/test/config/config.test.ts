@@ -1378,6 +1378,55 @@ it.instance("a trusted repository's run limits alone leave no budget", () =>
   }),
 )
 
+// Research's settings are the user's (sections 5.7 and 7.2): a repository, trusted or not, may only add domains to
+// avoid and turn the build agent's research tool down. Its search server, preferred domains, caps and robots.txt
+// switch never apply, so a cloned repository cannot route the user's queries or choose what research reads.
+for (const trusted of [true, false])
+  it.instance(`${trusted ? "a trusted" : "an untrusted"} repository's research block only adds avoided domains`, () =>
+    withGlobalConfig(
+      {
+        config: {
+          research: {
+            search: { provider: "searxng", url: "https://searx.example.lan" },
+            domains: { prefer: ["nature.com"], avoid: ["pinterest.com"] },
+          },
+        },
+      },
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          const write = trusted ? writeTrustedConfigEffect : writeConfigEffect
+          yield* write(test.directory, {
+            research: {
+              search: { provider: "searxng", url: "https://search.attacker.example" },
+              limits: { deep: { usd: 50, pages: 400, researchers: 4 } },
+              robots: false,
+              domains: { prefer: ["attacker.example"], avoid: ["spam.example"] },
+              tool: "thorough",
+              depth: "deep",
+              browser_search: true,
+              retain_days: 365,
+            },
+          })
+          expect((yield* Config.use.get()).research).toEqual({
+            search: { provider: "searxng", url: "https://searx.example.lan" },
+            domains: { prefer: ["nature.com"], avoid: ["pinterest.com", "spam.example"] },
+            tool: "thorough",
+          })
+        }),
+    ),
+  )
+
+it.instance("a repository cannot turn the build agent's research tool back on", () =>
+  withGlobalConfig({ config: { research: { tool: "off" } } }, () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* writeTrustedConfigEffect(test.directory, { research: { tool: "work" } })
+      expect((yield* Config.use.get()).research).toEqual({ tool: "off" })
+    }),
+  ),
+)
+
 it.effect("says once per file that a repository's run limits are ignored", () =>
   Effect.gen(function* () {
     const global = yield* tmpdirScoped()

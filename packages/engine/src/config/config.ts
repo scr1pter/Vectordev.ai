@@ -90,6 +90,14 @@ function projectExecutableConfig(config: Info, trusted: boolean, base: Info): In
     if (Object.keys(budget).length) next.budget = budget
     else delete next.budget
   }
+  // Research's settings are the user's too, trusted or not (sections 5.7 and 7.2): where it searches, the domains it
+  // prefers (which clear host names from the outbound check), its caps and robots.txt. Otherwise a cloned repository
+  // could send the user's queries to a search server its author runs and choose what research reads.
+  if (next.research) {
+    const research = repositoryResearch(next.research, base.research)
+    if (research) next.research = research
+    else delete next.research
+  }
   if (!trusted) {
     const permission = authorityNarrowingPermission(next.permission)
     if (permission) next.permission = permission
@@ -150,6 +158,21 @@ function projectExecutableConfig(config: Info, trusted: boolean, base: Info): In
     )
   }
   return next
+}
+
+// What a repository's research block may set: domains to avoid, added to the user's, and a research tool setting
+// narrower than the user's ("off" is narrower than "thorough", which is narrower than the default "work").
+function repositoryResearch(research: NonNullable<Info["research"]>, base: Info["research"]) {
+  const avoid = research.domains?.avoid?.length
+    ? [...new Set([...(base?.domains?.avoid ?? []), ...research.domains.avoid])]
+    : undefined
+  const widths = ["off", "thorough", "work"]
+  const tool =
+    research.tool !== undefined && widths.indexOf(research.tool) < widths.indexOf(base?.tool ?? "work")
+      ? research.tool
+      : undefined
+  if (!avoid && !tool) return undefined
+  return { ...(avoid ? { domains: { avoid } } : {}), ...(tool ? { tool } : {}) }
 }
 
 function bindTrustedProjectExecutables(

@@ -1093,11 +1093,11 @@
         },
         "depth": {
           "$ref": "#/$defs/ResearchDepthConfig",
-          "description": "Focused uses one agent; deep adds researchers (default: auto)"
+          "description": "Focused: one agent, plus up to 2 researchers when the question has independent parts. Deep: up to 4 researchers and a citation judge (default: auto)"
         },
         "tool": {
           "$ref": "#/$defs/ResearchToolConfig",
-          "description": "When the build agent may research as a tool on its own requests: work (Work and Thorough requests), thorough (Thorough only) or off. Default: work."
+          "description": "When the build agent may research as a tool on its own requests: work (Work and Thorough requests), thorough (Thorough only) or off. Default: work. A repository's config may only turn it down."
         },
         "limits": {
           "type": "object",
@@ -1110,7 +1110,7 @@
             }
           },
           "additionalProperties": false,
-          "description": "Caps for one research run, used when you have no spend cap of your own"
+          "description": "Caps for one research run, used when you have no spend cap of your own. Read from your user config only."
         },
         "domains": {
           "type": "object",
@@ -1133,7 +1133,7 @@
         },
         "robots": {
           "type": "boolean",
-          "description": "Respect robots.txt for links Vector finds itself (default: true)"
+          "description": "Respect robots.txt for links Vector finds itself (default: true). Read from your user config only."
         },
         "browser_search": {
           "type": "boolean",
@@ -1716,7 +1716,7 @@
         },
         "research": {
           "$ref": "#/$defs/ResearchConfig",
-          "description": "Deep research (in development; this version does not apply these settings yet): where research searches go, how deep it goes and what one run may spend."
+          "description": "Deep research (in development): where research searches go (a SearXNG server for now), when the build agent may research as a tool, what one run may spend and read, the sites it prefers or avoids, and robots.txt. depth, browser_search and retain_days do not apply yet. Read from your user config; a repository's config may only add sites to avoid and turn the research tool down."
         },
         "experimental": {
           "type": "object",

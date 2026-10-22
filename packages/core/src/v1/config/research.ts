@@ -4,9 +4,10 @@ import { Schema } from "effect"
 import type { TaskSize } from "@vectordevai/schema/task-size"
 import { NonNegativeInt, PositiveInt } from "../../schema"
 
-// The `research` block: Deep research's settings. `search` is read from user or global config only, so a checked-in
-// repository config cannot send the user's queries to a server its author runs; a repository may only add avoided
-// domains.
+// The `research` block: Deep research's settings. They are read from user, global and managed config only, so a
+// checked-in repository config can neither send the user's queries to a server its author runs, nor clear host names
+// from the outbound check with preferred domains, nor raise the caps or turn robots.txt off. A repository may only add
+// domains to avoid and turn the build agent's research tool down (the engine's projectExecutableConfig).
 
 const Strings = Schema.mutable(Schema.Array(Schema.String))
 
@@ -41,20 +42,22 @@ export const Info = Schema.Struct({
     }),
   ).annotate({ description: "Where research searches go. Read from your user config only. Default: none set up." }),
   depth: Schema.optional(Depth).annotate({
-    description: "Focused uses one agent; deep adds researchers (default: auto)",
+    description:
+      "Focused: one agent, plus up to 2 researchers when the question has independent parts. Deep: up to 4 researchers and a citation judge (default: auto)",
   }),
   tool: Schema.optional(Tool).annotate({
     description:
-      "When the build agent may research as a tool on its own requests: work (Work and Thorough requests), thorough (Thorough only) or off. Default: work.",
+      "When the build agent may research as a tool on its own requests: work (Work and Thorough requests), thorough (Thorough only) or off. Default: work. A repository's config may only turn it down.",
   }),
   limits: Schema.optional(Schema.Struct({ focused: Schema.optional(Limits), deep: Schema.optional(Limits) })).annotate({
-    description: "Caps for one research run, used when you have no spend cap of your own",
+    description:
+      "Caps for one research run, used when you have no spend cap of your own. Read from your user config only.",
   }),
   domains: Schema.optional(
     Schema.Struct({ prefer: Schema.optional(Strings), avoid: Schema.optional(Strings) }),
   ).annotate({ description: "Sites research prefers or avoids. A repository's config may only add to avoid." }),
   robots: Schema.optional(Schema.Boolean).annotate({
-    description: "Respect robots.txt for links Vector finds itself (default: true)",
+    description: "Respect robots.txt for links Vector finds itself (default: true). Read from your user config only.",
   }),
   browser_search: Schema.optional(Schema.Boolean).annotate({
     description: "Let the desktop app load a search engine's results page as a search provider (default: false)",
