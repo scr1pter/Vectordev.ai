@@ -1,9 +1,11 @@
 export * as EgressHttpClient from "./http-client"
 
 import { Context, Effect, Layer } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientError } from "effect/unstable/http"
 import { EgressAttribution } from "./attribution"
 import { Egress } from "./egress"
+import type { LocalProbe } from "./probe"
+import { LocalSources } from "./sources"
 
 // The Effect HttpClient for Vector Local: FetchHttpClient, with each request labelled by the registry source its call
 // site provides (`Label`) and attributed by the fiber's EgressAttribution.Reference, which is copied into a scope
@@ -41,6 +43,40 @@ export const make = (client: HttpClient.HttpClient) =>
       return yield* effect.pipe(Effect.provideService(FetchHttpClient.Fetch, fetch))
     }),
   )
+
+/**
+ * Wraps the HTTP client model calls go through (the request executor of @vectordevai/llm, which the V2 runner and the
+ * native runtime send with), so with Vector Local on each request is decided as a model call: labelled by the source
+ * its route provides, or else by where it goes (LocalSources.inference), sent with no redirect followed, and refused
+ * before anything is sent while the server it goes to is held because its identity changed. With Vector Local off a
+ * request goes as it is.
+ */
+export const models = (client: HttpClient.HttpClient, holds: LocalProbe.Holds) =>
+  HttpClient.transform(make(client), (effect, request) =>
+    Effect.gen(function* () {
+      if (!Egress.policy().enabled) return yield* effect
+      const held = holds.held(request.url)
+      if (held)
+        return yield* new HttpClientError.HttpClientError({
+          reason: new HttpClientError.TransportError({ request, description: held }),
+        })
+      const source = (yield* Label) ?? LocalSources.inference(request.url)
+      return yield* effect.pipe(Effect.provideService(Label, source))
+    }),
+  )
+
+/**
+ * An HttpClient whose every request is `source`'s, for a client that sends from fibers of its own, where no call site
+ * can label its requests (the OpenTelemetry log exporter).
+ */
+export const layerFor = (source: string) =>
+  Layer.effect(
+    HttpClient.HttpClient,
+    Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient
+      return HttpClient.transform(make(client), (effect) => effect.pipe(Effect.provideService(Label, source)))
+    }),
+  ).pipe(Layer.provide(FetchHttpClient.layer))
 
 export const layer = Layer.effect(
   HttpClient.HttpClient,

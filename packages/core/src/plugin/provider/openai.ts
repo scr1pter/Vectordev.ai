@@ -12,6 +12,7 @@ import { OauthCallbackPage } from "../../oauth/page"
 import { ProviderV2 } from "../../provider"
 import { ProviderRemotePolicy } from "../../provider-remote-policy"
 import type { PluginInternal } from "../internal"
+import { Egress } from "../../local-mode/egress"
 
 const issuer = "https://auth.openai.com"
 const callbackPort = 1455
@@ -132,7 +133,7 @@ const headless = {
           while (true) {
             const response = yield* Effect.tryPromise({
               try: (signal) =>
-                fetch(`${issuer}/api/accounts/deviceauth/token`, {
+                Egress.fetch("chatgpt-signin", `${issuer}/api/accounts/deviceauth/token`, {
                   method: "POST",
                   headers: headers("application/json"),
                   body: JSON.stringify({ device_auth_id: device.device_auth_id, user_code: device.user_code }),
@@ -256,7 +257,8 @@ function refresh(methodID: Integration.MethodID, value: Pick<Credential.OAuth, "
 function request<A>(url: string, init: RequestInit) {
   return Effect.tryPromise({
     try: async (signal) => {
-      const response = await fetch(url, { ...init, signal })
+      // ChatGPT sign-in, labelled so Vector Local refuses it by name: it sends the sign-in to auth.openai.com.
+      const response = await Egress.fetch("chatgpt-signin", url, { ...init, signal })
       if (!response.ok) throw new Error(`Request failed: ${response.status}`)
       return response.json() as Promise<A>
     },

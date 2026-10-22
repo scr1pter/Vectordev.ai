@@ -8,6 +8,7 @@ import type { GitHubPrFile } from "@vectordevai/core/review/diff"
 import type { CreateReviewPayload } from "@vectordevai/core/review/github-payload"
 import { parseReviewMarker } from "@vectordevai/core/review/state"
 import type { Side } from "@vectordevai/core/review/types"
+import { githubFetch } from "./github.shared"
 
 export type Permission = "admin" | "maintain" | "write" | "triage" | "read" | "none"
 export const WRITE_PERMISSIONS: readonly Permission[] = ["admin", "maintain", "write"]
@@ -323,7 +324,7 @@ export function createReviewGitHub(options: ReviewGitHubOptions): ReviewGitHub {
   const octokit = new Octokit({
     auth: options.token,
     userAgent: "vector-review",
-    request: { signal: options.signal },
+    request: { signal: options.signal, fetch: githubFetch },
     ...(options.baseUrl ? { baseUrl: options.baseUrl.replace(/\/+$/, "") } : {}),
     // Expected 404s (a missing review.json) are handled here; Octokit would print each one.
     log: { debug: () => {}, info: () => {}, warn: (message: string) => log(`GitHub: ${message}`), error: () => {} },

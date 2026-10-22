@@ -1,6 +1,7 @@
 export * as ModelPlanStatus from "./model-plan-status"
 
 import { Option, Schema } from "effect"
+import { Egress } from "./local-mode/egress"
 
 export const SITE = "https://vectordev.ai"
 export const API_URL = `${SITE}/api/model-plans`
@@ -8,6 +9,10 @@ export const STATUS_URL = `${API_URL}/status`
 export const CONFIG_URL = `${API_URL}/config`
 export const PURCHASE_URL = `${SITE}/codium`
 export const MANAGE_URL = `${SITE}/account`
+
+// Codium's status and offers come from vectordev.ai, labelled so Vector Local decides them (blocked unless allowed).
+const send = (url: string, init: RequestInit) => Egress.fetch("plans-catalog", url, init)
+
 // The stable internal ID stays "vector-plan"; people see the provider as Vector Codium.
 export const PROVIDER_ID = "vector-plan"
 
@@ -86,7 +91,7 @@ const PURCHASED = { available: "Available", low: "Running low", used: "Used up" 
 /** Reads the signed-in account's Codium plan and balances. The token is only ever sent to vectordev.ai. */
 export async function fetchStatus(
   token: string | undefined,
-  request: (url: string, init: RequestInit) => Promise<Response> = fetch,
+  request: (url: string, init: RequestInit) => Promise<Response> = send,
 ): Promise<Status> {
   if (!token) return EMPTY
   const response = await request(STATUS_URL, {
@@ -107,7 +112,7 @@ export async function fetchStatus(
  * Whether vectordev.ai sells Codium now, from its public configuration, for someone who is not signed in; undefined
  * when it cannot tell. Nothing should point at the purchase page while it only says Codium is coming soon.
  */
-export async function salesOpen(request: (url: string, init: RequestInit) => Promise<Response> = fetch) {
+export async function salesOpen(request: (url: string, init: RequestInit) => Promise<Response> = send) {
   const response = await request(CONFIG_URL, {
     headers: { accept: "application/json" },
     redirect: "error",
@@ -137,7 +142,7 @@ export type Offers = { enabled: boolean; plans: Offer[]; topups: Offer[] }
 
 /** The plans and top-ups vectordev.ai lists publicly, for buying inside Vector; undefined when they cannot be read. */
 export async function fetchOffers(
-  request: (url: string, init: RequestInit) => Promise<Response> = fetch,
+  request: (url: string, init: RequestInit) => Promise<Response> = send,
 ): Promise<Offers | undefined> {
   const response = await request(CONFIG_URL, {
     headers: { accept: "application/json" },

@@ -14,6 +14,7 @@ import { Global } from "@vectordevai/core/global"
 import { modify, applyEdits } from "jsonc-parser"
 import { Filesystem } from "@/util/filesystem"
 import { Effect } from "effect"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 
 function getAuthStatusIcon(status: MCP.AuthStatus): string {
   switch (status) {
@@ -750,7 +751,8 @@ export const McpDebugCommand = effectCmd({
 
       // Test basic HTTP connectivity first
       try {
-        const response = await fetch(serverConfig.url, {
+        // Labelled as a remote MCP server, so Vector Local decides it as it decides the server's own connections.
+        const response = await Egress.fetch("mcp-remote", serverConfig.url, {
           method: "POST",
           headers: {
             ...serverConfig.headers,

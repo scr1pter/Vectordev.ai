@@ -5,7 +5,7 @@ import WebSocket from "ws"
 import { APICallError } from "ai"
 import { Egress } from "@vectordevai/core/local-mode/egress"
 import { EgressGuard } from "@vectordevai/core/local-mode/guard"
-import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { LocalSources } from "@vectordevai/core/local-mode/sources"
 import { ProviderError } from "@/provider/error"
 import { errorMessage } from "@/util/error"
 import { ProxyEnv } from "@/util/proxy-env"
@@ -96,8 +96,7 @@ export function connectResponsesWebSocket(options: ConnectResponsesWebSocketOpti
     // Bun serves the ws package itself, past the egress guard, so Vector Local decides the socket here, before it
     // opens, as the model call it carries: only a model server on the list may get it.
     const target = options.url.replace(/^ws/i, "http")
-    const cloud = LocalPolicy.classify(Egress.policy(), target) === "internet"
-    const decided = Egress.decide({ source: cloud ? "cloud-inference" : "local-inference", url: target })
+    const decided = Egress.decide({ source: LocalSources.inference(target), url: target })
     if (decided.decision !== "allow") {
       reject(new EgressGuard.EgressBlocked(new URL(target).hostname, "websocket", decided.rule, decided.reason))
       return

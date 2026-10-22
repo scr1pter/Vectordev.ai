@@ -505,16 +505,7 @@ function localRefusal(model: ModelV2.Info, policy: LocalMode.Policy) {
   if (!url) return "Vector cannot tell which server its requests go to."
   if (ModelSlots.server(url, policy) && OllamaServer.cloud({ name: model.api.id }))
     return "It is an Ollama cloud model: the Ollama app passes its prompts on to ollama.com."
-  const host = URL.canParse(url) ? new URL(url).hostname : ""
-  const cloud =
-    LocalPolicy.classify(policy, url) === "internet" &&
-    (LocalSources.CLOUD_INFERENCE_HOSTS.some((pattern) => LocalPolicy.hostMatches(host, pattern)) ||
-      LocalSources.digestListed(host))
-  const verdict = LocalPolicy.decide(policy, {
-    purpose: "inference",
-    url,
-    source: cloud ? "cloud-inference" : "local-inference",
-  })
+  const verdict = LocalPolicy.decide(policy, { purpose: "inference", url, source: LocalSources.inference(url) })
   return verdict.decision === "allow" ? undefined : verdict.reason
 }
 

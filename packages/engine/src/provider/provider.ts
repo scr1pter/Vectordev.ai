@@ -87,6 +87,7 @@ import { EgressAttribution } from "@vectordevai/core/local-mode/attribution"
 import { EgressGuard } from "@vectordevai/core/local-mode/guard"
 import { OllamaServer } from "@vectordevai/core/local-mode/servers/ollama"
 import { LocalSources } from "@vectordevai/core/local-mode/sources"
+import { LocalProbe } from "@vectordevai/core/local-mode/probe"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
@@ -173,32 +174,35 @@ const SDK_ORIGINS: Record<string, string> = {
   "@ai-sdk/google": "https://generativelanguage.googleapis.com",
 }
 
-// The origin a model's requests go to: a plugin that sends them elsewhere names it in the `preconnect` option.
-function requestOrigin(
+// The origins a model's requests count as going to, first the one they wait in line for: the origin of the base URL
+// the SDK sends to (variables filled in, or the SDK's own), and, before it, the one a plugin that sends them elsewhere
+// names in the `preconnect` option (ChatGPT sign-in's Codex endpoint). Config can set `preconnect` too, so it only adds
+// an address: a model counts as on a server someone hosts, or on the list, only when every address is, and a base URL
+// nobody can tell leaves none. A repository therefore cannot make a cloud API on the user's key count as a free local
+// server, or as one on the list, by naming a loopback `preconnect`.
+function requestOrigins(
   model: Model,
   options: Record<string, unknown>,
   loader: CustomVarsLoader | undefined,
   envs: Record<string, string | undefined>,
 ) {
-  const url =
-    typeof options["preconnect"] === "string"
-      ? options["preconnect"]
-      : (resolveBaseURL(model, options, loader, envs) ?? SDK_ORIGINS[model.api.npm])
-  if (!url || !URL.canParse(url)) return
-  const parsed = new URL(url)
-  return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.origin : undefined
+  const origin = (url: string | undefined) => {
+    if (!url || !URL.canParse(url)) return
+    const parsed = new URL(url)
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.origin : undefined
+  }
+  const sent = origin(resolveBaseURL(model, options, loader, envs) ?? SDK_ORIGINS[model.api.npm])
+  if (!sent) return []
+  const named = typeof options["preconnect"] === "string" ? origin(options["preconnect"]) : undefined
+  return named && named !== sent ? [named, sent] : [sent]
 }
 
 // The registry source a model call to `target` is decided as (LocalSources): an Ollama cloud model, which the server
-// passes on to ollama.com, a cloud AI service no list holds, or a model server someone hosts, listed or not.
+// passes on to ollama.com, a cloud AI service by its host (listed by a company or not), or a model server someone
+// hosts, listed or not.
 function inferenceSource(model: Model, target: string, policy: LocalMode.Policy) {
   if (ModelSlots.server(target, policy) && OllamaServer.cloud({ name: model.api.id })) return "ollama-cloud-models"
-  if (LocalPolicy.classify(policy, target) !== "internet" || !URL.canParse(target)) return "local-inference"
-  const host = new URL(target).hostname
-  const cloud =
-    LocalSources.CLOUD_INFERENCE_HOSTS.some((pattern) => LocalPolicy.hostMatches(host, pattern)) ||
-    LocalSources.digestListed(host)
-  return cloud ? "cloud-inference" : "local-inference"
+  return LocalSources.inference(target)
 }
 
 // The notice for a model Vector Local keeps off, or undefined when its requests go to a model server on the list. It
@@ -219,14 +223,18 @@ function offInLocal(
   })
   if (model.providerID === ProviderV2.ID.vector || model.providerID === ModelPlans.PROVIDER_ID || model.freeModel)
     return notice(LOCAL_OFF.vector)
-  const origin = requestOrigin(model, options, loader, envs)
-  if (!origin) return notice(LOCAL_OFF.unknown)
-  const source = inferenceSource(model, origin, policy)
-  if (source === "ollama-cloud-models") return notice(LOCAL_OFF.ollama)
-  const verdict = LocalPolicy.decide(policy, { purpose: "inference", url: origin, source })
-  if (verdict.decision === "allow") return undefined
-  if (verdict.rule === "not-allowable") return notice(LOCAL_OFF.cloud(origin))
-  return providerUnavailable(model.providerID, "off-in-local")
+  const origins = requestOrigins(model, options, loader, envs)
+  if (origins.length === 0) return notice(LOCAL_OFF.unknown)
+  // The first address Vector Local would not let a model call reach decides the notice.
+  const refused = origins.flatMap((origin) => {
+    const source = inferenceSource(model, origin, policy)
+    if (source === "ollama-cloud-models") return [notice(LOCAL_OFF.ollama)]
+    const verdict = LocalPolicy.decide(policy, { purpose: "inference", url: origin, source })
+    if (verdict.decision === "allow") return []
+    if (verdict.rule === "not-allowable") return [notice(LOCAL_OFF.cloud(origin))]
+    return [providerUnavailable(model.providerID, "off-in-local")]
+  })
+  return refused[0]
 }
 
 /** Why Vector Local keeps a model off, after "<provider>: off in Vector Local." */
@@ -1815,6 +1823,8 @@ const layer = Layer.effect(
     const guests = yield* FreeModelGuests.Service
     const events = yield* EventV2Bridge.Service
     const slots = yield* ModelSlots.Service
+    // Servers whose identity changed since they were added: their model calls are refused until the user confirms them.
+    const holds = yield* LocalProbe.HoldsService
     const runtimeBridge = yield* EffectBridge.make()
     const planID = ProviderV2.ID.make(ModelPlans.PROVIDER_ID)
 
@@ -2562,6 +2572,10 @@ const layer = Layer.effect(
               throw new Error("Plugin OAuth approval or credential changed. Reconnect to continue.")
             opts.redirect = "error"
           }
+          // With Vector Local on, no model call goes to a server whose identity changed since it was added
+          // (LocalProbe.verify) until the user confirms the server.
+          const target = input instanceof Request ? input.url : String(input)
+          if (Egress.policy().enabled) holds.gate(target)
           const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
           const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout
           const headerTimeoutCtl = typeof headerTimeoutMs === "number" ? timeoutController(headerTimeoutMs) : undefined
@@ -2579,7 +2593,6 @@ const layer = Layer.effect(
           // Vector Local decides every model call here, before a plugin's own fetch runs or its WebSocket opens (ChatGPT
           // sign-in's Responses transport starts inside that fetch): only a model server on the list gets it, and it
           // follows no redirect. With Vector Local off it goes to fetchFn as it is.
-          const target = input instanceof Request ? input.url : String(input)
           const res = ResponseTerminal.wrap(
             await Egress.fetch(
               Egress.policy().enabled ? inferenceSource(model, target, Egress.policy()) : "local-inference",
@@ -2751,7 +2764,8 @@ const layer = Layer.effect(
       const provider = s.providers[model.providerID]
       // Free models and Vector Codium choose their route per request and are never on a server someone hosts.
       if (!provider || model.providerID === "vector" || model.providerID === planID || model.freeModel) return undefined
-      const origin = requestOrigin(model, provider.options, s.varsLoaders[model.providerID], envs)
+      const origins = requestOrigins(model, provider.options, s.varsLoaders[model.providerID], envs)
+      const origin = origins[0]
       if (!origin) return undefined
       const policy = Config.local()
       const hosted = ModelSlots.server(origin, policy)
@@ -2772,11 +2786,9 @@ const layer = Layer.effect(
         origin: hosted ?? origin,
         hosted: hosted !== undefined,
         permits,
-        local: ModelSlots.local(origin, {
-          policy,
-          model: model.api.id,
-          forwards: provider.options["forwards"] === true,
-        }),
+        local: origins.every((item) =>
+          ModelSlots.local(item, { policy, model: model.api.id, forwards: provider.options["forwards"] === true }),
+        ),
       }
     }
 
@@ -2791,7 +2803,7 @@ const layer = Layer.effect(
       // Free models choose their route per request, so there is no one connection to open ahead of it.
       if (!provider || model.providerID === "vector" || model.freeModel) return
       const envs = yield* env.all()
-      const origin = requestOrigin(model, provider.options, s.varsLoaders[model.providerID], envs)
+      const origin = requestOrigins(model, provider.options, s.varsLoaders[model.providerID], envs)[0]
       // A speculative connection must never prevent the SDK from making its actual request.
       if (origin) yield* Effect.sync(() => preconnectOrigin(origin, envs)).pipe(Effect.catchDefect(() => Effect.void))
     })
@@ -3047,6 +3059,7 @@ export const node = LayerNode.make({
     FreeModelGuests.node,
     EventV2Bridge.node,
     ModelSlots.node,
+    LocalProbe.holdsNode,
   ],
 })
 

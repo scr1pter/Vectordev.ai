@@ -26,7 +26,6 @@ const PRIMITIVES: readonly RegExp[] = [
 
 // Files that connect, or hold the HTTP client, but make no request a source would name.
 const WITHOUT_SOURCE: Readonly<Record<string, string>> = {
-  "packages/core/src/effect/app-node-platform.ts": "Provides the HTTP client layer; it sends nothing itself.",
   "packages/core/src/plugin/internal.ts": "Hands plugins the HTTP client; it sends nothing itself.",
   "packages/engine/src/util/effect-http-client.ts": "Retry helpers for the HTTP client; it sends nothing itself.",
   "packages/engine/src/server/shared/ui.ts": "Takes the HTTP client but serves the embedded web UI from disk.",
@@ -48,12 +47,25 @@ const WITHOUT_SOURCE: Readonly<Record<string, string>> = {
     "Experimental remote workspaces' routing, decided by the backstop guard.",
 }
 
-// Sources whose call sites in the engine do not consult Vector Local yet. The backstop guard decides their requests
-// as unlabelled, so with Vector Local on they reach only this computer and the model servers on the list.
-const UNGATED: Readonly<Record<string, string>> = {
-  telemetry: "packages/core/src/observability.ts sends to the OpenTelemetry endpoint the user configured.",
-  "embedding-model": "packages/core/src/brain/embed.ts downloads the memory-search model once.",
-  github: "packages/engine/src/cli/cmd/github.handler.ts and review.ts reach GitHub for vector github.",
+// Call sites of the registry that consult Vector Local through another file, and how. Every other call site of an
+// engine source consults it itself.
+const DECIDED_ELSEWHERE: Readonly<Record<string, string>> = {
+  "packages/llm/src/route/executor.ts":
+    "Sends through the HTTP client LayerNodePlatform.requestExecutor gives it, which decides each request as a model call (EgressHttpClient.models).",
+  "packages/core/src/local-mode/servers/ollama.ts":
+    "Asks the user's own Ollama server, on this computer or on the list, for a larger-context copy when they click; the backstop lets an unlabelled request reach only those.",
+  "packages/core/src/plugin/provider/google-vertex.ts":
+    "A V2 route's model calls are refused before the route is built (SessionRunnerModel.allowedInLocal); a V1 call goes through provider.ts's fetch first.",
+  "packages/core/src/npm.ts":
+    "Installs what its callers decided: plugin/index.ts and provider.ts (npm-plugins), and lsp/server.ts, which installs nothing under Vector Local (lsp-install).",
+  "packages/engine/src/tool/mcp-websearch.ts":
+    "Sends with the client tool/websearch.ts labels with the provider's source.",
+  "packages/engine/src/git/index.ts":
+    "Decides each git command that connects with Git.refusal (core git.ts) before git starts: the review's and the GitHub handler's fetches and pushes.",
+  "packages/engine/src/review/source.ts":
+    "Fetches a review's commits through Git.run (git/index.ts), which decides each fetch.",
+  "packages/engine/src/worktree/index.ts":
+    "Decides each git command that connects with Git.refusal (core git.ts) before git starts: a reset's fetch, a submodule update.",
 }
 
 const strip = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:\\])\/\/.*$/gm, "$1")
@@ -90,20 +102,20 @@ describe("Vector Local's connection inventory", () => {
     expect(stale).toEqual([])
   })
 
-  test("every engine source has a call site that consults Vector Local", async () => {
+  test("every call site of an engine source consults Vector Local, or says which file does", async () => {
     const all = new Map((await sources()).map((item) => [item.file, item.text]))
-    // webAccess (tool/webfetch.ts) is how the browser tool decides a page under Vector Local.
-    const gated = (file: string) => /local-mode\/|LocalPolicy|Egress|webAccess\(/.test(all.get(file) ?? "")
-    const missing = LocalSources.SOURCES.filter(
-      (source) =>
-        source.where.includes("engine") &&
-        source.callSites.some((file) => all.has(file)) &&
-        !source.callSites.some(gated) &&
-        !Object.hasOwn(UNGATED, source.id),
-    ).map((source) => source.id)
-    expect(missing).toEqual([])
-    // A source this lists as ungated that has since gained a gate comes off the list.
-    const gainedGate = Object.keys(UNGATED).filter((id) => LocalSources.get(id)?.callSites.some(gated))
-    expect(gainedGate).toEqual([])
+    // webAccess (tool/webfetch.ts) is how the browser tool decides a page, and githubFetch (cli/cmd/github.shared.ts)
+    // how Vector's own GitHub requests are labelled.
+    const gated = (file: string) => /local-mode\/|LocalPolicy|Egress|webAccess\(|githubFetch/.test(all.get(file) ?? "")
+    const sites = LocalSources.SOURCES.filter((source) => source.where.includes("engine")).flatMap((source) =>
+      source.callSites.filter((file) => all.has(file)).map((file) => ({ source: source.id, file })),
+    )
+    expect(sites.length).toBeGreaterThan(20)
+    expect(sites.filter((site) => !gated(site.file) && !Object.hasOwn(DECIDED_ELSEWHERE, site.file))).toEqual([])
+    // An excuse names a call site that still exists and has not gained a gate of its own.
+    const stale = Object.keys(DECIDED_ELSEWHERE).filter(
+      (file) => !sites.some((site) => site.file === file) || gated(file),
+    )
+    expect(stale).toEqual([])
   })
 })

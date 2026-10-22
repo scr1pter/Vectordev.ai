@@ -182,6 +182,7 @@ export const SOURCES: readonly Source[] = [
     callSites: [
       "packages/engine/src/provider/provider.ts",
       "packages/llm/src/route/executor.ts",
+      "packages/core/src/effect/app-node-platform.ts",
       "packages/core/src/local-mode/probe.ts",
       "packages/core/src/local-mode/servers/ollama.ts",
     ],
@@ -197,6 +198,7 @@ export const SOURCES: readonly Source[] = [
     callSites: [
       "packages/engine/src/provider/provider.ts",
       "packages/llm/src/route/executor.ts",
+      "packages/core/src/effect/app-node-platform.ts",
       "packages/engine/src/plugin/openai/ws.ts",
       "packages/core/src/plugin/provider/google-vertex.ts",
       "packages/engine/src/plugin/snowflake-cortex.ts",
@@ -380,6 +382,7 @@ export const SOURCES: readonly Source[] = [
     callSites: [
       "packages/desktop/src/main/updater.ts",
       "packages/engine/src/cli/upgrade.ts",
+      "packages/engine/src/cli/cmd/upgrade.ts",
       "packages/engine/src/installation/standalone.ts",
       "packages/engine/src/installation/index.ts",
     ],
@@ -490,6 +493,7 @@ export const SOURCES: readonly Source[] = [
     local: "allow-with-reason",
     where: ["engine", "desktop"],
     callSites: [
+      "packages/engine/src/cli/cmd/github.shared.ts",
       "packages/engine/src/cli/cmd/github.handler.ts",
       "packages/engine/src/cli/cmd/review.ts",
       "packages/desktop/src/main/github-pr.ts",
@@ -527,6 +531,7 @@ export const SOURCES: readonly Source[] = [
     where: ["engine"],
     callSites: [
       "packages/core/src/git.ts",
+      "packages/engine/src/git/index.ts",
       "packages/engine/src/worktree/index.ts",
       "packages/engine/src/review/source.ts",
     ],
@@ -656,6 +661,19 @@ export const SOURCES: readonly Source[] = [
 ]
 
 const BY_ID = new Map(SOURCES.map((source) => [source.id, source]))
+
+/**
+ * The registry source a model call to `url` is decided and logged as: a cloud AI service, known by its host whether or
+ * not a company lists it (cloud-inference, which only the company's own listing lets through, labelled as listed by
+ * the company), or else a model server someone hosts (local-inference), listed or not. An Ollama cloud model, which a
+ * server on the list passes on, is told apart by its name where the model is known.
+ */
+export function inference(url: string | URL) {
+  const name = URL.canParse(String(url)) ? new URL(String(url)).hostname : ""
+  if (!name || LocalPolicy.hostClass(name) !== "internet") return "local-inference"
+  const cloud = CLOUD_INFERENCE_HOSTS.some((pattern) => LocalPolicy.hostMatches(name, pattern)) || digestListed(name)
+  return cloud ? "cloud-inference" : "local-inference"
+}
 
 export function get(id: string) {
   return BY_ID.get(id)

@@ -227,6 +227,22 @@ describe("LocalSources registry", () => {
     expect(LocalSources.digestListed("api.vectordev.ai")).toBe(false)
   })
 
+  test("logs a model call to a cloud AI host as cloud-inference, even when the company lists it", () => {
+    const azure = "https://acme.openai.azure.com/openai/v1/chat/completions"
+    expect(LocalSources.inference(azure)).toBe("cloud-inference")
+    expect(LocalSources.inference("https://llm.example.com/v1/chat/completions")).toBe("local-inference")
+    expect(LocalSources.inference("http://127.0.0.1:11434/v1/chat/completions")).toBe("local-inference")
+    expect(LocalSources.inference("http://gpu-box:8000/v1")).toBe("local-inference")
+    // The company's listing lets it through, labelled as its endpoint; a user cannot list it.
+    const company = LocalPolicy.resolve({ managed: { enabled: true, endpoints: ["https://acme.openai.azure.com"] } })
+    expect(
+      LocalPolicy.decide(company, { purpose: "inference", url: azure, source: LocalSources.inference(azure) }),
+    ).toMatchObject({ decision: "allow", class: "listed" })
+    expect(
+      LocalPolicy.decide(on, { purpose: "inference", url: azure, source: LocalSources.inference(azure) }),
+    ).toMatchObject({ decision: "block", rule: "not-allowable" })
+  })
+
   test("refuses the cloud AI hosts as a user's model servers by default", () => {
     const policy = LocalPolicy.resolve({
       global: { enabled: true, endpoints: LocalSources.CLOUD_INFERENCE_HOSTS.map((host) => `https://${host}`) },

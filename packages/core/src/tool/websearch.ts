@@ -16,6 +16,7 @@ import { Tools } from "./tools"
 import { collectBoundedResponseBody } from "./http-body"
 import { Credential } from "../credential"
 import { ToolRegistry } from "./registry"
+import { EgressHttpClient } from "../local-mode/http-client"
 
 export const name = "websearch"
 export const NO_RESULTS = "No search results found. Please try a different query."
@@ -211,7 +212,8 @@ const Output = Schema.Struct({
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
-    const http = yield* HttpClient.HttpClient
+    // Each search is decided and logged as its provider's source while Vector Local is on.
+    const http = EgressHttpClient.make(yield* HttpClient.HttpClient)
     const config = yield* ConfigService
     const credentials = yield* CredentialsService
     const permission = yield* PermissionV2.Service
@@ -296,6 +298,7 @@ const layer = Layer.effectDiscard(
                   text: text ?? NO_RESULTS,
                 }
               }).pipe(
+                EgressHttpClient.labelled(provider === "exa" ? "websearch-exa" : "websearch-parallel"),
                 Effect.mapError(() => new ToolFailure({ message: `Unable to search the web for ${input.query}` })),
               )
             }),

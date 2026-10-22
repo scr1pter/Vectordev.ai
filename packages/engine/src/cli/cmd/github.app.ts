@@ -1,5 +1,6 @@
 import { Octokit } from "@octokit/rest"
 import { z } from "zod"
+import { githubFetch } from "./github.shared"
 
 export async function githubAppInstallation(request: (url: string, init: RequestInit) => Promise<Response> = fetch) {
   const response = await request("https://vectordev.ai/api/github/installation", {
@@ -64,7 +65,7 @@ export async function verifyAppPullRequest(
     head: { repo: { id: number } | null }
   }> = async (repository, pr, token, signal) => {
     const [owner, repo] = repository.split("/")
-    const response = await new Octokit({ auth: token }).rest.pulls.get({
+    const response = await new Octokit({ auth: token, request: { fetch: githubFetch } }).rest.pulls.get({
       owner,
       repo,
       pull_number: pr,

@@ -13,6 +13,7 @@ import { collectBoundedResponseBody } from "./http-body"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
+import { EgressHttpClient } from "../local-mode/http-client"
 
 export const name = "webfetch"
 export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024
@@ -99,7 +100,8 @@ const siteAlways = (url: string) => {
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
-    const http = yield* HttpClient.HttpClient
+    // Every hop is decided and logged as webfetch while Vector Local is on (Web access, the site lists).
+    const http = EgressHttpClient.make(yield* HttpClient.HttpClient)
     const permission = yield* PermissionV2.Service
 
     yield* tools
@@ -151,6 +153,7 @@ const layer = Layer.effectDiscard(
                   duration: Duration.seconds(input.timeout ?? DEFAULT_TIMEOUT_SECONDS),
                   orElse: () => Effect.fail(new Error("Request timed out")),
                 }),
+                EgressHttpClient.labelled("webfetch"),
               )
               const content = new TextDecoder().decode(body)
               const output = yield* Effect.tryPromise({
