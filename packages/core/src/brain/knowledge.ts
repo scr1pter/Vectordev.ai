@@ -929,10 +929,17 @@ function make(input: {
     state.added = [...state.added.filter((at) => now - at < MINUTE), now]
     if (state.added.length > LIMIT.perMinute)
       return refuse("busy", "Vector is reading many documents at once; add this one again in a minute.")
+    // Pages Deep research read have caps of their own (ResearchStore.LIMIT), so they take no room from documents.
     const kept = yield* db
       .select({ origin: BrainDocumentTable.origin, count: sql<number>`count(*)` })
       .from(BrainDocumentTable)
-      .where(and(eq(BrainDocumentTable.repository_id, place.repository), ne(BrainDocumentTable.status, "superseded")))
+      .where(
+        and(
+          eq(BrainDocumentTable.repository_id, place.repository),
+          ne(BrainDocumentTable.status, "superseded"),
+          ne(BrainDocumentTable.origin, "web"),
+        ),
+      )
       .groupBy(BrainDocumentTable.origin)
       .all()
       .pipe(Effect.orDie)
@@ -1766,6 +1773,7 @@ function make(input: {
 
   // --- Reading what is stored -------------------------------------------------------------------------------------
 
+  // Pages Deep research read are listed under their run (GET /memory/research), not one by one with documents.
   const documents = Effect.fn("BrainKnowledge.documents")(function* (place: Brain.Place, options: { personal: boolean }) {
     const rows = yield* db
       .select()
@@ -1774,6 +1782,7 @@ function make(input: {
         and(
           eq(BrainDocumentTable.repository_id, place.repository),
           ne(BrainDocumentTable.status, "superseded"),
+          ne(BrainDocumentTable.origin, "web"),
           visibility(options.personal),
         ),
       )
@@ -5864,11 +5873,18 @@ function make(input: {
       .limit(REVIEW)
       .all()
       .pipe(Effect.orDie)
-    // Held content is listed from where it waits, so approving or rejecting it anywhere settles it here too.
+    // Held content is listed from where it waits, so approving or rejecting it anywhere settles it here too. A page
+    // Deep research read waits with its run, whose report is what the user looks at here.
     const documents = yield* db
       .select()
       .from(BrainDocumentTable)
-      .where(and(eq(BrainDocumentTable.repository_id, place.repository), eq(BrainDocumentTable.status, "held")))
+      .where(
+        and(
+          eq(BrainDocumentTable.repository_id, place.repository),
+          eq(BrainDocumentTable.status, "held"),
+          ne(BrainDocumentTable.origin, "web"),
+        ),
+      )
       .orderBy(desc(BrainDocumentTable.updated_at))
       .limit(REVIEW)
       .all()
