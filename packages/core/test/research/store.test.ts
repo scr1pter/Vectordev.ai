@@ -444,6 +444,25 @@ describe("ResearchStore reports", () => {
     expect(json.report).toContain("## Sources")
     expect(result.none).toBeUndefined()
   })
+
+  test("the Markdown export leaves a page's title inert, backslashes and brackets included", async () => {
+    const exported = await withStore((setup) =>
+      Effect.gen(function* () {
+        const run = yield* setup.store.start(setup.place, RUN)
+        yield* setup.store.addSource(
+          setup.place,
+          run.id,
+          page("homes", STUDY, { title: "\\<img src=x onerror=alert(1)> ![x](https://evil.web.test/p.png) [click](https://evil.web.test)" }),
+        )
+        return yield* setup.store.export(setup.place, run.id, "markdown")
+      }),
+    )
+    const line = exported?.body.split("\n").find((text) => text.startsWith("- S1."))
+    expect(line).toMatch(/ Read \d{4}-\d{2}-\d{2}\.$/)
+    expect(line?.replace(/ Read \d{4}-\d{2}-\d{2}\.$/, "")).toBe(
+      "- S1. \\\\\\<img src=x onerror=alert(1)> !\\[x\\](https://evil.web.test/p.png) \\[click\\](https://evil.web.test). homes.web.test. <https://homes.web.test/article>.",
+    )
+  })
 })
 
 describe("ResearchStore forgetting", () => {

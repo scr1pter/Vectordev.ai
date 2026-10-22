@@ -1813,7 +1813,9 @@ function chunks<T>(items: readonly T[], size: number) {
 function markdownOf(detail: Detail) {
   const read = detail.sources.filter((source) => source.status === "read" || source.status === "paywalled")
   const date = (at: number | undefined) => (at === undefined ? "" : ` Read ${new Date(at).toISOString().slice(0, 10)}.`)
-  const escape = (text: string) => text.replace(/</g, "\\<").replace(/!\[/g, "!\\[").replace(/\s+/g, " ").trim()
+  // A page's title is its author's words: its backslashes, brackets and angle brackets are escaped, as the report's
+  // Sources table escapes them, so a backslash before "<" cannot leave raw HTML live and "[" cannot start a link.
+  const escape = (text: string) => text.replace(/[\\[\]<]/g, "\\$&").replace(/\s+/g, " ").trim()
   return [
     detail.report?.trim() ?? `# ${escape(detail.run.question)}\n\nThis run has no report yet.`,
     "## Bibliography",
