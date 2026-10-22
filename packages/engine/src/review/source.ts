@@ -6,6 +6,8 @@
 import path from "path"
 import { Effect, Option, Schema } from "effect"
 import { Git } from "@/git"
+import { gitEnvironment, remoteRefusal } from "@vectordevai/core/git"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import {
   focusHunks,
   focusOfFiles,
@@ -51,7 +53,10 @@ export interface FetchInput {
 export const ensureObjects = Effect.fn("ReviewSource.ensureObjects")(function* (input: FetchInput) {
   const git = yield* Git.Service
   const remote = input.remote ?? "origin"
-  const env = input.authEnvironment ?? (input.token ? authEnv(input.token, input.server) : undefined)
+  // With Web access None, git may reach only this computer's file remotes, whatever starts a request.
+  const auth = input.authEnvironment ?? (input.token ? authEnv(input.token, input.server) : undefined)
+  const local = gitEnvironment()
+  const env = auth || local ? { ...auth, ...local } : undefined
   const fetch = (depth: number, refs: string[]) =>
     git.run(["fetch", "--no-tags", "--no-recurse-submodules", `--depth=${depth}`, remote, ...refs], {
       cwd: input.directory,
@@ -64,6 +69,12 @@ export const ensureObjects = Effect.fn("ReviewSource.ensureObjects")(function* (
   )
   const unsafe = revs.find((value) => value.startsWith("-"))
   if (unsafe) return yield* new ReviewGitError({ message: `Refusing the revision ${unsafe}.` })
+  // Vector Local decides the review's fetches by the URL git would use for the remote, before git starts.
+  if (Egress.policy().enabled) {
+    const url = (yield* git.run(["ls-remote", "--get-url", remote], { cwd: input.directory })).text().trim()
+    const refused = remoteRefusal(url || remote)
+    if (refused) return yield* new ReviewGitError({ message: refused })
+  }
 
   const base = yield* fetch(BASE_DEPTH, [input.base])
   if (base.exitCode !== 0)

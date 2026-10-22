@@ -11,6 +11,8 @@ import { Slug } from "@vectordevai/core/util/slug"
 import { errorMessage } from "../util/error"
 import { GlobalBus } from "@/bus/global"
 import { Git } from "@/git"
+import { gitEnvironment, remoteRefusal } from "@vectordevai/core/git"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import { Effect, Layer, Path, Schema, Scope, Context } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { FSUtil } from "@vectordevai/core/fs-util"
@@ -154,7 +156,7 @@ const layer: Layer.Layer<
     const git = Effect.fnUntraced(
       function* (args: string[], opts?: { cwd?: string }) {
         const result = yield* appProcess.run(
-          ChildProcess.make("git", args, { cwd: opts?.cwd, extendEnv: true, stdin: "ignore" }),
+          ChildProcess.make("git", args, { cwd: opts?.cwd, extendEnv: true, stdin: "ignore", env: gitEnvironment() }),
         )
         return {
           code: result.exitCode,
@@ -555,6 +557,11 @@ const layer: Layer.Layer<
       if (base.ref !== base.name && sep > 0) {
         const remote = base.ref.slice(0, sep)
         const branch = base.ref.slice(sep + 1)
+        // Vector Local decides the fetch by the URL git would use for the remote, before git starts.
+        const refused = Egress.policy().enabled
+          ? remoteRefusal((yield* git(["ls-remote", "--get-url", remote], { cwd: ctx.worktree })).text.trim() || remote)
+          : undefined
+        if (refused) return yield* new ResetFailedError({ message: refused })
         yield* gitExpect(
           ["fetch", remote, branch],
           { cwd: ctx.worktree },

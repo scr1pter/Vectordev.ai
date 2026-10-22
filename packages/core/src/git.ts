@@ -10,6 +10,7 @@ import { AppProcess } from "./process"
 import { makeGlobalNode } from "./effect/app-node"
 import { File } from "./file"
 import { KeyedMutex } from "./effect/keyed-mutex"
+import { Egress } from "./local-mode/egress"
 
 export class Repository extends Schema.Class<Repository>("Git.Repository")({
   worktree: AbsolutePath,
@@ -259,12 +260,30 @@ const layer = Layer.effect(
       })
     })
 
+    // Vector Local decides each of Vector's own requests to a remote before git starts, by the host of the URL git
+    // would use (a name resolved through url.insteadOf, every remote for --all). Nothing is decided with it off.
+    const decideRemotes = Effect.fnUntraced(function* (
+      operation: OperationError["operation"],
+      directory: AbsolutePath,
+      remotes: readonly string[],
+    ) {
+      if (!Egress.policy().enabled) return
+      const urls = yield* Effect.forEach(remotes, (remote) =>
+        remoteAddress(remote) === undefined && !remote.includes("/") && !remote.includes("\\")
+          ? run(directory, proc)(["ls-remote", "--get-url", remote]).pipe(Effect.map((result) => result.text.trim()))
+          : Effect.succeed(remote),
+      )
+      const refused = urls.map(remoteRefusal).find((reason) => reason !== undefined)
+      if (refused) return yield* new OperationError({ operation, directory, message: refused })
+    })
+
     const clone = Effect.fn("Git.repo.clone")(function* (input: {
       remote: string
       directory: AbsolutePath
       branch?: string
       depth?: number
     }) {
+      yield* decideRemotes("clone", AbsolutePath.make(path.dirname(input.directory)), [input.remote])
       yield* operation("clone", AbsolutePath.make(path.dirname(input.directory)), [
         "clone",
         "--depth",
@@ -287,6 +306,15 @@ const layer = Layer.effect(
       repository: Repository,
       input: { prune?: boolean; remoteUrl?: string } = {},
     ) {
+      yield* decideRemotes(
+        "fetch",
+        repository.worktree,
+        input.remoteUrl
+          ? [input.remoteUrl]
+          : Egress.policy().enabled
+            ? (yield* run(repository.worktree, proc)(["remote"])).text.split(/\r?\n/).filter(Boolean)
+            : [],
+      )
       yield* operation("fetch", repository.worktree, [
         "fetch",
         ...(input.prune === false ? [] : ["--prune"]),
@@ -300,6 +328,7 @@ const layer = Layer.effect(
     ) {
       const remoteName = input.remote ?? "origin"
       const spec = `refs/heads/${input.branch}:refs/remotes/${remoteName}/${input.branch}`
+      yield* decideRemotes("fetch", repository.worktree, [input.remoteUrl ?? remoteName])
       yield* operation("fetch", repository.worktree, [
         "fetch",
         input.remoteUrl ?? remoteName,
@@ -993,6 +1022,7 @@ function execute(cwd: string, proc: AppProcess.Interface) {
           cwd,
           extendEnv: true,
           stdin: "ignore",
+          env: gitEnvironment(),
         }),
       )
       .pipe(
@@ -1005,6 +1035,51 @@ function execute(cwd: string, proc: AppProcess.Interface) {
             }) satisfies Result,
         ),
       )
+}
+
+/**
+ * Where a git remote connects, as an address Vector Local decides by its host (purpose git-remote): an http or https
+ * URL keeps its scheme, and ssh, git and scp-like remotes (`git@github.com:org/repo.git`) read as https on their host.
+ * Undefined for a remote on this computer: a path or a file: URL. A remote helper (`ext::…`, `<transport>::…`) or an
+ * address that does not parse is returned as written, which no rule allows.
+ */
+export function remoteAddress(remote: string) {
+  const text = remote.trim()
+  if (!text || /^file:/i.test(text)) return undefined
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+    if (!URL.canParse(text)) return text
+    const url = new URL(text)
+    return `${url.protocol === "http:" ? "http:" : "https:"}//${url.host}/`
+  }
+  if (text.includes("::")) return text
+  // A Windows path (C:\repo or C:/repo) is a path; `host:path` with no slash before the colon is scp-like.
+  if (/^[a-z]:[\\/]/i.test(text)) return undefined
+  const scp = /^(?:[^@/\\]+@)?(\[[^\]]+\]|[^:/\\]+):/.exec(text)
+  return scp ? `https://${scp[1]}/` : undefined
+}
+
+/**
+ * Why Vector Local blocks one of Vector's own git requests to `remote` (a URL, as git would use it), or undefined when
+ * it may run. Each decision is logged while Vector Local is on; nothing is decided with it off.
+ */
+export function remoteRefusal(remote: string) {
+  if (!Egress.policy().enabled) return undefined
+  const address = remoteAddress(remote)
+  if (address === undefined) return undefined
+  const decided = Egress.decide({ source: "git-remote", url: address })
+  if (decided.decision === "allow") return undefined
+  const host = URL.canParse(address) ? new URL(address).hostname : remote.trim()
+  return `Vector Local blocked a git request to ${host}. ${decided.reason}`
+}
+
+/**
+ * The environment Vector's own git commands add: with Web access None, git may reach only this computer's file
+ * remotes (GIT_ALLOW_PROTOCOL=file), whatever starts a request. Undefined otherwise.
+ */
+export function gitEnvironment() {
+  const policy = Egress.policy()
+  if (!policy.enabled || policy.web !== "none") return undefined
+  return { GIT_ALLOW_PROTOCOL: "file" }
 }
 
 function resolvePath(cwd: string, value: string) {
