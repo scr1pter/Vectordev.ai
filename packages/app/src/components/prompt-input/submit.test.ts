@@ -1065,8 +1065,8 @@ describe("image attachments", () => {
 })
 
 describe("included model data notice", () => {
-  test("tells the person once how included models handle their data", async () => {
-    globalThis.localStorage?.removeItem("vector.notice.free-model-policy.v2")
+  test("sending to an included model shows no data disclaimer toast", async () => {
+    // Free models show their label alone; the one-time acceptance question is the one place that explains it.
     currentModel = {
       id: "maker/coder:free",
       provider: { id: "vector" },
@@ -1092,13 +1092,16 @@ describe("included model data notice", () => {
       onNewSessionWorktreeReset: () => undefined,
       onSubmit: () => undefined,
     })
-    const notices = () => toasts.filter((toast) => toast.title === "How Free models inside of Vector handle your data")
 
     await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
-    expect(notices()).toHaveLength(1)
-    expect(notices()[0]?.description).toContain("Vector doesn't request zero data retention")
-    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
-    expect(notices()).toHaveLength(1)
+    // The prompt went on past where the toast used to show: its optimistic message is in the new session.
+    expect(createdSessions).toHaveLength(1)
+    expect(optimistic).toHaveLength(1)
+    expect(
+      toasts.filter((toast) =>
+        /handle your data|retention|train/i.test(`${toast.title ?? ""} ${toast.description ?? ""}`),
+      ),
+    ).toEqual([])
   })
 })
 

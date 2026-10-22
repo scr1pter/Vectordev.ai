@@ -175,12 +175,11 @@ async function setup(
   await expect(page.locator("#vector-launch")).toHaveCount(0)
 }
 
-/** A section's header opens and closes its rows; every section below Recently used starts closed, except one that is
-    the only section with a header, which is always open and has no button. */
+/** A section's header opens and closes its rows. Every section below Recently used starts closed, and its header is a
+    button even when it is the only one. */
 async function openSection(page: Page, label: string) {
-  await expect(page.locator('[data-slot="model-section-name"]').filter({ hasText: label })).toBeVisible()
   const header = page.locator("button[data-model-section-toggle]").filter({ hasText: label })
-  if ((await header.count()) === 0) return
+  await expect(header).toBeVisible()
   if ((await header.getAttribute("aria-expanded")) !== "true") await header.click()
   await expect(header).toHaveAttribute("aria-expanded", "true")
 }
@@ -215,8 +214,15 @@ test("lists both copies of a free model once each, under Recently used first, an
   await expect(
     page.locator('[data-slot="model-section-name"]').filter({ hasText: "Free models inside of Vector" }),
   ).toHaveCount(0)
-  // The account's own copy is the current model here, so it sits in the top section, which is always open.
+  // OpenRouter is now the only section with a header. It still starts closed and opens when clicked.
+  const lone = page.locator("button[data-model-section-toggle]").filter({ hasText: "OpenRouter" })
+  await expect(page.locator("button[data-model-section-toggle]")).toHaveCount(1)
+  await expect(lone).toHaveAttribute("aria-expanded", "false")
+  await openSection(page, "OpenRouter")
   await expect(page.locator('[data-option-key="openrouter:maker/coder:free"]')).toBeVisible()
+  await lone.click()
+  await expect(lone).toHaveAttribute("aria-expanded", "false")
+  await expect(page.locator('[data-option-key="openrouter:maker/coder:free"]')).toHaveCount(0)
 })
 
 test("clicking a provider's header shows its models, clicking it again hides them, and the picker remembers", async ({

@@ -28,6 +28,11 @@ export const FREE_ROUTER_NAME = "Auto (free)"
  * unreviewed ones, until it is withdrawn.
  */
 export const FREE_MODEL_TRAINING_SCOPE = `Accepting covers every free model labelled "${FREE_MODEL_TRAINING_LABEL}", including ones Vector has not reviewed yet, now and later. Withdraw it any time with "vector models --decline-training", or with Withdraw in the desktop app's Help panel.`
+/**
+ * What `vector models` says under its list while a labelled model is listed and the acceptance was never given: the
+ * label and the command, with no disclaimer. The explanation comes with the acceptance itself.
+ */
+export const FREE_MODEL_TRAINING_REFUSED_TERMINAL = `Prompts to models labelled "${FREE_MODEL_TRAINING_LABEL}" are refused until you run "vector models --accept-training".`
 /** Shown, and sent as the error, when a prompt to such a model is stopped because it was never accepted. */
 export const FREE_MODEL_TRAINING_CONSENT_REQUIRED = `${FREE_MODEL_TRAINING_DISCLAIMER} Nothing was sent. Accept it once when Vector asks, or run "vector models --accept-training", then send again.`
 /**

@@ -2,41 +2,10 @@ import { describe, expect, test } from "bun:test"
 import { FREE_MODEL_TRAINING_OWNER_ONLY } from "@vectordevai/core/free-model-choice"
 import { createVectorClient } from "@vectordevai/sdk/v2/client"
 import {
-  FREE_MODEL_POLICY_NOTICE,
   FREE_MODEL_TRAINING_QUESTION,
   acceptFreeModelTraining,
-  firstFreeModelPolicyNotice,
   freeModelTrainingGate,
 } from "./free-model-policy-notice"
-
-describe("free model policy notice", () => {
-  test("shows once per device", () => {
-    const values = new Map<string, string>()
-    const storage = {
-      getItem: (key: string) => values.get(key) ?? null,
-      setItem: (key: string, value: string) => void values.set(key, value),
-    }
-    expect(firstFreeModelPolicyNotice(() => storage)).toBe(true)
-    expect(firstFreeModelPolicyNotice(() => storage)).toBe(false)
-  })
-
-  test("still shows when storage refuses access", () => {
-    const storage = {
-      getItem: () => {
-        throw new Error("blocked")
-      },
-      setItem: () => undefined,
-    }
-    expect(firstFreeModelPolicyNotice(() => storage)).toBe(true)
-    expect(firstFreeModelPolicyNotice(() => undefined)).toBe(true)
-  })
-
-  test("says Vector does not request zero data retention and that may-train models ask first", () => {
-    expect(FREE_MODEL_POLICY_NOTICE.title).toBe("How Free models inside of Vector handle your data")
-    expect(FREE_MODEL_POLICY_NOTICE.description).toContain("Vector doesn't request zero data retention")
-    expect(FREE_MODEL_POLICY_NOTICE.description).toContain('"May train on your prompts" ask before your first prompt')
-  })
-})
 
 describe("may-train consent gate", () => {
   const mayTrain = { freeModel: { source: "shared" as const, dataPolicy: "may-train" as const } }

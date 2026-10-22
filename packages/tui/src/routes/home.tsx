@@ -1,6 +1,4 @@
 import {
-  FREE_MODEL_TRAINING_LABEL,
-  FREE_MODELS_DATA_POLICY,
   FREE_MODELS_SHARED_COPY,
   FREE_MODELS_SIGN_IN_TERMINAL,
   FREE_MODELS_TITLE,
@@ -9,7 +7,7 @@ import { DialogProvider } from "../component/dialog-provider"
 import { useDialog } from "../ui/dialog"
 import { useTheme } from "../context/theme"
 import { Prompt, type PromptRef } from "../component/prompt"
-import { createEffect, createMemo, createSignal, onMount, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js"
 import { Logo } from "../component/logo"
 import { useSync } from "../context/sync"
 import { Toast } from "../ui/toast"
@@ -95,17 +93,11 @@ export function Home() {
             <Prompt ref={bind} right={<pluginRuntime.Slot name="home_prompt_right" />} placeholders={placeholder} />
           </pluginRuntime.Slot>
         </box>
-        <Show when={freeModelsStartHint(sync.data)}>
-          {(hint) => (
+        <Show when={freeModelsStartNotice(sync.data)}>
+          {(lines) => (
             <box width="100%" maxWidth={promptMaxWidth()} paddingTop={1} gap={1}>
               <text fg={theme.text}>{FREE_MODELS_TITLE}</text>
-              <text fg={theme.textMuted}>{hint()}</text>
-              <text fg={theme.textMuted}>{FREE_MODELS_SHARED_COPY}</text>
-              <text fg={theme.textMuted}>{FREE_MODELS_DATA_POLICY}</text>
-              <text fg={theme.textMuted}>
-                Providers of free models labelled "{FREE_MODEL_TRAINING_LABEL}" may use your prompts to train their
-                models. Vector asks once before sending to one, and never trains on your prompts itself.
-              </text>
+              <For each={lines()}>{(line) => <text fg={theme.textMuted}>{line}</text>}</For>
               <text fg={theme.primary} onMouseUp={() => dialog.replace(() => <DialogProvider />)}>
                 Connect a provider with your own key
               </text>
@@ -124,19 +116,22 @@ export function Home() {
 }
 
 /**
- * The free-model hint under the home prompt, shown while no provider is connected. Free models run on Vector's shared
- * allowance for every signed-in Vector account, so the free way to start is signing in to Vector, never connecting an
- * OpenRouter account (owner decision, 17 October 2026). The shared models are listed, still disconnected, while the
- * catalog serves them and nobody is signed in; with none listed, the shared allowance serves nothing right now.
+ * The free-model notice under the home prompt, between its title and the connect link, shown while no provider is
+ * connected: how to start, then the shared-allowance sentence. It holds no disclaimer; the one-time acceptance question
+ * is the one place that explains the "May train on your prompts" label. Free models run on Vector's shared allowance
+ * for every signed-in Vector account, so the free way to start is signing in to Vector, never connecting an OpenRouter
+ * account (owner decision, 17 October 2026). The shared models are listed, still disconnected, while the catalog serves
+ * them and nobody is signed in; with none listed, the shared allowance serves nothing right now.
  */
-export function freeModelsStartHint(data: {
+export function freeModelsStartNotice(data: {
   provider: readonly unknown[]
   provider_next: { all: readonly { models: Readonly<Record<string, { freeModel?: { source: string } }>> }[] }
 }) {
   if (data.provider.length) return undefined
-  return data.provider_next.all.some((provider) =>
+  const hint = data.provider_next.all.some((provider) =>
     Object.values(provider.models).some((model) => model.freeModel?.source === "shared"),
   )
     ? `${FREE_MODELS_SIGN_IN_TERMINAL} Or use /connect to connect a provider with your own key.`
     : `${FREE_MODELS_TITLE} are unavailable right now. Use /connect to connect a provider with your own key.`
+  return [hint, FREE_MODELS_SHARED_COPY]
 }

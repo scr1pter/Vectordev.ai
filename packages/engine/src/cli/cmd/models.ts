@@ -1,5 +1,6 @@
 import {
   FREE_MODEL_TRAINING_LABEL,
+  FREE_MODEL_TRAINING_REFUSED_TERMINAL,
   FREE_MODELS_SIGN_IN_TERMINAL,
   FREE_MODELS_TITLE,
   freeModelMayTrain,
@@ -17,8 +18,6 @@ import { ModelPlans } from "@vectordevai/core/model-plans"
 import { effectCmd, fail } from "../effect-cmd"
 import { UI } from "../ui"
 import { ProviderV2 } from "@vectordevai/core/provider"
-
-const TRAINING_NOTE = `Free models labelled "${FREE_MODEL_TRAINING_LABEL}": their providers may log your prompts, code and outputs and use them to train their models. Vector itself never trains on your prompts.`
 
 export const ModelsCommand = effectCmd({
   command: "models [provider]",
@@ -55,7 +54,8 @@ export const ModelsCommand = effectCmd({
       const accepted = yield* Effect.promise(() => consent.setTrainingConsent(!!args.acceptTraining))
       UI.println(
         accepted
-          ? `Accepted. ${TRAINING_NOTE} Run "vector models --decline-training" to withdraw.`
+          ? // The one place here that explains the label; the list below shows the label alone.
+            `Accepted. Free models labelled "${FREE_MODEL_TRAINING_LABEL}": their providers may log your prompts, code and outputs and use them to train their models. Vector itself never trains on your prompts. Run "vector models --decline-training" to withdraw.`
           : `Withdrawn. Prompts to free models labelled "${FREE_MODEL_TRAINING_LABEL}" are refused until you accept again.`,
       )
     }
@@ -87,7 +87,7 @@ export const ModelsCommand = effectCmd({
         ),
       )
       if (free.some(freeModelMayTrain) && !(yield* Effect.promise(() => consent.trainingConsent())))
-        UI.println(`  ${TRAINING_NOTE} Prompts to them are refused until you run "vector models --accept-training".`)
+        UI.println(`  ${FREE_MODEL_TRAINING_REFUSED_TERMINAL}`)
     }
     // Signed out, the shared models are missing rather than listed, even beside an OpenRouter account's own copies, so
     // say how to get them.

@@ -28,8 +28,9 @@ describe("vector run's notice for a free model labelled May train on your prompt
     expect(freeModelRunNotice(providers, { providerID: "vector", modelID: laguna.id })).toBe(
       "Free models inside of Vector: Poolside: Laguna S 2.1 · May train on your prompts",
     )
+    // A copy on the user's own OpenRouter account is not one of the free models provided by Vector.
     expect(freeModelRunNotice(providers, { providerID: "openrouter", modelID: laguna.id })).toBe(
-      "Free models inside of Vector: Poolside: Laguna S 2.1 · May train on your prompts",
+      "Poolside: Laguna S 2.1 · May train on your prompts",
     )
     // The free router runs under Vector's own name.
     expect(freeModelRunNotice(providers, { providerID: "vector", modelID: router.id })).toBe(

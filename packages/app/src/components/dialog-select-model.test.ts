@@ -798,11 +798,28 @@ describe("provider headers open and close their models", () => {
     expect(cleared.filter((view) => view.open).map((view) => view.section.id)).toEqual([anthropic])
   })
 
-  test("a section that is the only one with a header stays open", () => {
+  test("a provider that is the only one with a header still opens and closes when clicked", () => {
+    // Signed out with only Anthropic connected, there is no free-models section: clicking Anthropic must still work.
     const only = buildModelSections({ models: [opus, sonnet], now: NOW, currentKey: pickerModelKey(opus) })
-    expect(pickerSectionViews(only, new Set(), "").map((view) => [view.section.id, view.toggle, view.open])).toEqual([
+    const view = (open: ReadonlySet<string>) =>
+      pickerSectionViews(only, open, "").map((view) => [view.section.id, view.toggle, view.open])
+    expect(view(new Set())).toEqual([
       ["recent", false, true],
-      [anthropic, false, true],
+      [anthropic, true, false],
+    ])
+    const opened = toggleOpenSection(new Set(), anthropic)
+    expect(view(opened)).toEqual([
+      ["recent", false, true],
+      [anthropic, true, true],
+    ])
+    expect(pickerNavigation(pickerSectionViews(only, opened, "")).keys).toEqual([
+      pickerModelKey(opus),
+      "section:provider:anthropic",
+      pickerModelKey(sonnet),
+    ])
+    expect(view(toggleOpenSection(opened, anthropic))).toEqual([
+      ["recent", false, true],
+      [anthropic, true, false],
     ])
   })
 

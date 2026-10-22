@@ -421,18 +421,17 @@ export type PickerSectionView<T extends PickerModel = PickerModel> = {
   open: boolean
 }
 
-/** How each section shows. Recently used (or Current model) is always open. While searching, every section with a
-    match is open and no header toggles, which leaves `open` as it was for when the search is cleared. A section that is
-    the only one with a header is open too, since closing it would leave nothing to choose from. */
+/** How each section shows. Recently used (or Current model) is always open. Every other header opens and closes its
+    section, even when it is the only one, so clicking a provider always does something. While searching, every
+    section with a match is open and no header toggles, which leaves `open` as it was for when the search is cleared. */
 export function pickerSectionViews<T extends PickerModel>(
   sections: readonly PickerSection<T>[],
   open: ReadonlySet<string>,
   term: string,
 ): PickerSectionView<T>[] {
   const searching = term.trim() !== ""
-  const headers = sections.filter((section) => section.kind !== "recent").length
   return sections.map((section) => {
-    const toggle = !searching && section.kind !== "recent" && headers > 1
+    const toggle = !searching && section.kind !== "recent"
     return { section, toggle, open: !toggle || open.has(section.id) }
   })
 }

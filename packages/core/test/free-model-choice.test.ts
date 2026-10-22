@@ -14,6 +14,7 @@ import {
   freeModelChoices,
   FREE_MODEL_RESUME_UNAVAILABLE,
   FREE_MODEL_TRAINING_CONSENT_REQUIRED,
+  FREE_MODEL_TRAINING_REFUSED_TERMINAL,
   FREE_MODEL_UNLISTED,
   FREE_MODEL_UNREVIEWED_BLOCKED,
   FREE_ROUTER_NAME,
@@ -85,6 +86,14 @@ test('may-train and unreviewed free models carry "May train on your prompts"; no
   // The acceptance question explains the label; nothing else repeats that paragraph.
   expect(FREE_MODEL_TRAINING_DISCLAIMER).toContain("Vector itself never trains on your prompts.")
   expect(FREE_MODEL_TRAINING_CONSENT_REQUIRED).toStartWith(FREE_MODEL_TRAINING_DISCLAIMER)
+})
+
+test("vector models names the label and the accept command under its list, with no disclaimer", () => {
+  expect(FREE_MODEL_TRAINING_REFUSED_TERMINAL).toBe(
+    'Prompts to models labelled "May train on your prompts" are refused until you run "vector models --accept-training".',
+  )
+  expect(FREE_MODEL_TRAINING_REFUSED_TERMINAL).not.toContain(FREE_MODEL_TRAINING_DISCLAIMER)
+  expect(FREE_MODEL_TRAINING_REFUSED_TERMINAL).not.toMatch(/log your prompts|never trains|openrouter/i)
 })
 
 test("an invited guest whose acceptance the engine refuses is told only the owner can use these models", () => {
