@@ -95,6 +95,36 @@ const get = async (directory: string, route: string) => {
   return (await response.json()) as any
 }
 
+// The directory's event stream, from its first event: `act` runs once it is connected, and the first event of `type`
+// is returned, or nothing after `ms`.
+const awaitEvent = async (directory: string, type: string, act: () => Promise<unknown>, ms = 5_000) => {
+  const controller = new AbortController()
+  const response = await call(at(directory, "/event"), { headers: owner, signal: controller.signal })
+  const reader = response.body!.getReader()
+  const state = { text: "", acted: false }
+  const deadline = Date.now() + ms
+  try {
+    while (Date.now() < deadline) {
+      const chunk = await Promise.race([reader.read(), Bun.sleep(deadline - Date.now()).then(() => undefined)])
+      if (!chunk || chunk.done) return undefined
+      state.text += new TextDecoder().decode(chunk.value)
+      if (!state.acted && state.text.includes("server.connected")) {
+        state.acted = true
+        await act()
+      }
+      const found = state.text
+        .split("\n")
+        .filter((line) => line.startsWith("data: "))
+        .map((line) => JSON.parse(line.slice("data: ".length)) as { type: string; properties: unknown })
+        .find((event) => event.type === type)
+      if (found) return found
+    }
+    return undefined
+  } finally {
+    controller.abort()
+  }
+}
+
 // The brain place the routes use for a repository: its key is the repository's id.
 const place = async (directory: string): Promise<Brain.Place> => {
   const project = (await get(directory, "/project/current")) as { id: string }
@@ -210,6 +240,13 @@ describe("memory research routes", () => {
     expect(await gone.json()).toMatchObject({ name: "MemoryError", data: { code: "not-found" } })
     expect(missing.status).toBe(400)
     expect(guard.outside()).toEqual([])
+  }, 30_000)
+
+  test("keeping a run tells the app through the directory's event stream", async () => {
+    await using tmp = await tmpdir({ git: true, trusted: true, config: { formatter: false, lsp: false } })
+    const run = await seed(await place(tmp.path))
+    const event = await awaitEvent(tmp.path, "research.updated", () => send(tmp.path, `/memory/research/${run}/keep`, "POST"))
+    expect(event).toMatchObject({ type: "research.updated", properties: { runID: run, status: "done" } })
   }, 30_000)
 
   test("forgetting all research, or erasing the repository's memory, leaves no run", async () => {

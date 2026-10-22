@@ -2,7 +2,7 @@ export * as ResearchStore from "./store"
 
 import { createHash, randomBytes } from "node:crypto"
 import { and, asc, desc, eq, inArray, isNotNull, lt, sql } from "drizzle-orm"
-import { Context, Effect, Layer, Queue, Scope, Semaphore } from "effect"
+import { Context, Effect, Layer, Option, Queue, Scope, Semaphore } from "effect"
 import { Research } from "@vectordevai/schema/research"
 import type { Brain } from "../brain/brain"
 import { BrainCard } from "../brain/card"
@@ -32,6 +32,8 @@ import { BrainStructure } from "../brain/structure"
 import { BrainVector } from "../brain/vector"
 import { makeGlobalNode } from "../effect/app-node"
 import { EventV2 } from "../event"
+import { Location } from "../location"
+import { AbsolutePath } from "../schema"
 import { Token } from "../util/token"
 import { ResearchDedupe } from "./dedupe"
 import { ResearchQuote } from "./quote"
@@ -377,8 +379,21 @@ function make(input: {
     embedder: false,
   }
 
-  const publish = (runID: string, status: Research.RunStatus | "forgotten", extra: { sourceID?: string; noteID?: string } = {}) =>
-    input.events.publish(Research.Updated, { runID, status, ...extra }).pipe(Effect.asVoid)
+  // An event takes the caller's location when it has one (a V2 request or session). The engine's V1 routes and tools
+  // carry none, so it is then the repository's working tree, which is the directory the app opened it at.
+  const publish = Effect.fnUntraced(function* (
+    place: Brain.Place,
+    runID: string,
+    status: Research.RunStatus | "forgotten",
+    extra: { sourceID?: string; noteID?: string } = {},
+  ) {
+    const located = Option.isSome(yield* Effect.serviceOption(Location.Service))
+    yield* input.events.publish(
+      Research.Updated,
+      { runID, status, ...extra },
+      located || !place.root ? undefined : { location: { directory: AbsolutePath.make(place.root) } },
+    )
+  })
 
   const locate = Effect.fnUntraced(function* (place: Brain.Place, runID: string) {
     const guest = state.guests.has(runID)
@@ -504,7 +519,7 @@ function make(input: {
       .run()
       .pipe(Effect.orDie)
     if (request.guest) state.guests.add(id)
-    yield* publish(id, "planned")
+    yield* publish(place, id, "planned")
     return (yield* runOf(store, id))!
   })
 
@@ -544,7 +559,7 @@ function make(input: {
       scope: next.scope,
       ...(status ? { status } : {}),
     })
-    yield* publish(runID, status ?? found.row.status)
+    yield* publish(place, runID, status ?? found.row.status)
     return yield* runOf(found.db, runID)
   })
 
@@ -556,7 +571,7 @@ function make(input: {
     const found = yield* locate(place, runID)
     if (!found) return undefined
     yield* touch(found.db, runID, { status })
-    yield* publish(runID, status)
+    yield* publish(place, runID, status)
     return yield* runOf(found.db, runID)
   })
 
@@ -648,7 +663,7 @@ function make(input: {
         // Skipped pages (robots.txt, built by script, failed) are kept as a line in Sources and the Method, with no text.
         if (!readable) {
           const source = yield* insert(row({}))
-          yield* publish(runID, found.row.status, { sourceID: source.id })
+          yield* publish(place, runID, found.row.status, { sourceID: source.id })
           return { type: "added" as const, source }
         }
         const fingerprint = page.fingerprint ?? ResearchDedupe.fingerprint(text)
@@ -669,7 +684,7 @@ function make(input: {
               .pipe(Effect.orDie)
         if (forgotten.length > 0) {
           const source = yield* insert(row({ status: "failed", reason: FORGOTTEN, signals: null }))
-          yield* publish(runID, found.row.status, { sourceID: source.id })
+          yield* publish(place, runID, found.row.status, { sourceID: source.id })
           return { type: "added" as const, source }
         }
         const copy = ResearchDedupe.duplicateOf({ ...fingerprint, canonical: page.canonical }, yield* knownOf(store, runID, sources))
@@ -682,7 +697,7 @@ function make(input: {
               signals: page.signals ? { ...page.signals, duplicate_of: of } : null,
             }),
           )
-          yield* publish(runID, found.row.status, { sourceID: source.id })
+          yield* publish(place, runID, found.row.status, { sourceID: source.id })
           return { type: "duplicate" as const, source, of }
         }
         const bytes = Buffer.byteLength(text)
@@ -752,7 +767,7 @@ function make(input: {
           ...(state.fingerprints.get(runID) ?? []),
           { ...fingerprint, id: source.id, canonical: page.canonical },
         ])
-        yield* publish(runID, found.row.status === "planned" ? "running" : found.row.status, { sourceID: source.id })
+        yield* publish(place, runID, found.row.status === "planned" ? "running" : found.row.status, { sourceID: source.id })
         return { type: "added" as const, source, ...(room.evicted.length > 0 ? { evicted: room.evicted } : {}) }
       }),
     )
@@ -913,7 +928,7 @@ function make(input: {
         yield* touch(found.db, runID, {})
         if (!found.guest) yield* wake()
         const saved = toNote(values, row.ordinal)
-        yield* publish(runID, found.row.status, { noteID: saved.id })
+        yield* publish(place, runID, found.row.status, { noteID: saved.id })
         return { type: "saved" as const, note: saved }
       }),
     )
@@ -941,7 +956,7 @@ function make(input: {
         )
     })
     yield* touch(found.db, runID, {})
-    yield* publish(runID, found.row.status)
+    yield* publish(place, runID, found.row.status)
     return changed.reduce((sum, value) => sum + value, 0)
   })
 
@@ -1007,7 +1022,7 @@ function make(input: {
           kept: false,
         })
         if (!found.guest) yield* wake()
-        yield* publish(runID, "done")
+        yield* publish(place, runID, "done")
         return {
           type: "saved" as const,
           rendered,
@@ -1135,7 +1150,7 @@ function make(input: {
     yield* touch(db, runID, { kept: true })
     if (found.row.report_document_id)
       yield* knowledge.update(place, found.row.report_document_id, { action: "approve" })
-    yield* publish(runID, found.row.status)
+    yield* publish(place, runID, found.row.status)
     return { type: "kept" as const, run: (yield* runOf(db, runID))! }
   })
 
@@ -1189,7 +1204,7 @@ function make(input: {
     yield* found.db.delete(ResearchRunTable).where(eq(ResearchRunTable.id, runID)).run().pipe(Effect.orDie)
     state.guests.delete(runID)
     state.fingerprints.delete(runID)
-    yield* publish(runID, "forgotten")
+    yield* publish(place, runID, "forgotten")
     return true
   })
 
@@ -1209,7 +1224,7 @@ function make(input: {
         if (row.document_id) yield* removeDocument(place, found, row.document_id)
         yield* touch(found.db, runID, {})
         state.fingerprints.delete(runID)
-        yield* publish(runID, found.row.status, { sourceID: `S${row.ordinal}` })
+        yield* publish(place, runID, found.row.status, { sourceID: `S${row.ordinal}` })
         return true
       }),
     )
@@ -1329,7 +1344,7 @@ function make(input: {
         yield* Effect.forEach(ids, (id) => knowledge.remove(place, id), { discard: true })
         yield* db.delete(ResearchRunTable).where(eq(ResearchRunTable.id, runID)).run().pipe(Effect.orDie)
         state.guests.add(runID)
-        yield* publish(runID, run.status)
+        yield* publish(place, runID, run.status)
       }),
     )
   })
