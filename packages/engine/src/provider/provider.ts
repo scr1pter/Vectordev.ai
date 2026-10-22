@@ -82,6 +82,11 @@ import { ProviderError } from "./error"
 import { ResponseTerminal } from "./response-terminal"
 import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressAttribution } from "@vectordevai/core/local-mode/attribution"
+import { EgressGuard } from "@vectordevai/core/local-mode/guard"
+import { OllamaServer } from "@vectordevai/core/local-mode/servers/ollama"
+import type { LocalMode } from "@vectordevai/schema/local-mode"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
 // A server someone hosts may load the model before it answers, which can take minutes on the first request, and a
@@ -181,6 +186,53 @@ function requestOrigin(
   if (!url || !URL.canParse(url)) return
   const parsed = new URL(url)
   return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.origin : undefined
+}
+
+// The registry source a model call to `target` is decided as (LocalSources): an Ollama cloud model, which the server
+// passes on to ollama.com, a model server someone hosts, or a cloud AI service.
+function inferenceSource(model: Model, target: string, policy: LocalMode.Policy) {
+  if (ModelSlots.server(target, policy) && OllamaServer.cloud({ name: model.api.id })) return "ollama-cloud-models"
+  return LocalPolicy.classify(policy, target) === "internet" ? "cloud-inference" : "local-inference"
+}
+
+// The notice for a model Vector Local keeps off, or undefined when its requests go to a model server on the list. It
+// reads where the requests go as the fetch below sends them (a plugin's `preconnect`, variables filled in), and decides
+// without logging: the network log records requests, not lists. The saved credential stays, so no notice says to remove
+// it.
+function offInLocal(
+  model: Model,
+  options: Record<string, unknown>,
+  loader: CustomVarsLoader | undefined,
+  envs: Record<string, string | undefined>,
+  policy: LocalMode.Policy,
+): ProviderUnavailable | undefined {
+  const notice = (why: string) => ({
+    id: model.providerID,
+    reason: "off-in-local" as const,
+    message: `${model.providerID}: off in Vector Local. ${why}`,
+  })
+  if (model.providerID === ProviderV2.ID.vector || model.providerID === ModelPlans.PROVIDER_ID || model.freeModel)
+    return notice(LOCAL_OFF.vector)
+  const origin = requestOrigin(model, options, loader, envs)
+  if (!origin) return notice(LOCAL_OFF.unknown)
+  const source = inferenceSource(model, origin, policy)
+  if (source === "ollama-cloud-models") return notice(LOCAL_OFF.ollama)
+  const verdict = LocalPolicy.decide(policy, { purpose: "inference", url: origin, source })
+  if (verdict.decision === "allow") return undefined
+  if (verdict.rule === "not-allowable") return notice(LOCAL_OFF.cloud(origin))
+  return providerUnavailable(model.providerID, "off-in-local")
+}
+
+/** Why Vector Local keeps a model off, after "<provider>: off in Vector Local." */
+export const LOCAL_OFF = {
+  vector:
+    "Vector's free models and Vector Codium run on vectordev.ai, outside the model servers you host. Turn Vector Local off to use them.",
+  ollama:
+    "It is an Ollama cloud model: the Ollama app passes its prompts on to ollama.com. Choose a model that runs on your server, or turn Vector Local off to use it.",
+  unknown:
+    "Vector cannot tell which server its requests go to. Set its baseURL to a model server on your list, or turn Vector Local off to use it.",
+  cloud: (origin: string) =>
+    `${origin} is a cloud AI service, not a server you host. Your company's policy can list it, or turn Vector Local off to use it.`,
 }
 
 // The lane a model's requests take in a server's line. The session processor names the user's turn and its
@@ -340,6 +392,24 @@ function preconnectOrigin(origin: string, envs: Record<string, string | undefine
   // client without resolving, connecting or sending anything.
   void fetch(origin, { signal: AbortSignal.abort() }).catch(() => undefined)
   fetch.preconnect(origin)
+}
+
+const NPM_REGISTRY = "https://registry.npmjs.org/"
+
+// A provider package from npm. With Vector Local on, the download is decided as one of the npm packages the config
+// names (npm-plugins): one the user allowed reaches the registry, and otherwise only a package installed earlier
+// loads, since the backstop guard refuses the registry, and the error says why.
+async function installProviderPackage(pkg: string) {
+  if (!Egress.policy().enabled) return Npm.add(pkg)
+  const decided = Egress.decide({ source: "npm-plugins", url: NPM_REGISTRY })
+  if (decided.decision === "allow")
+    return EgressAttribution.granted(
+      { source: "npm-plugins", purpose: decided.purpose, grants: EgressGuard.destinations(new URL(NPM_REGISTRY)) },
+      () => Npm.add(pkg),
+    )
+  return Npm.add(pkg).catch((cause: unknown) => {
+    throw new Error(`Vector Local did not install the provider package ${pkg}. ${decided.reason}`, { cause })
+  })
 }
 
 function googleVertexAnthropicBaseURL(project: string | undefined, location: string | undefined) {
@@ -1407,6 +1477,10 @@ interface State {
   models: Map<string, LanguageModelV3>
   providers: Record<ProviderV2.ID, Info>
   unavailable: ProviderUnavailable[]
+  // Models Vector Local keeps off, by "provider/model", with the notice choosing one fails with, and the policy that
+  // decided it.
+  withheld: Map<string, ProviderUnavailable>
+  local: LocalMode.Policy
   // Every provider ID configuration or a plugin names, whether or not it loaded.
   declared: Set<string>
   catalogIDs: Record<string, true>
@@ -2179,20 +2253,46 @@ const layer = Layer.effect(
           }
         }
 
-        const unavailable = Object.entries(auths).flatMap(([id, credential]) => {
-          if (credential.type === "wellknown") return []
-          const rejected = providerCredentialUnavailable(id, credential, userProviders.has(id))
-          if (rejected) return [rejected]
-          if (disabled.has(id) || (enabled && !enabled.has(id))) return [providerUnavailable(id, "disabled")]
-          if (!providers[ProviderV2.ID.make(id)]) return [providerUnavailable(id, "no-models")]
-          return []
-        })
+        // Vector Local keeps every model call on the model servers on the list, read from the policy in effect, which
+        // is resolved before any provider loads. A model whose requests would go anywhere else is not offered, and a
+        // provider left with none is listed off-in-local with why, so choosing either fails before a stream starts.
+        const policy = Config.local()
+        const withheld = new Map<string, ProviderUnavailable>()
+        if (policy.enabled)
+          for (const [id, item] of Object.entries(providers)) {
+            const providerID = ProviderV2.ID.make(id)
+            for (const [modelID, model] of Object.entries(item.models)) {
+              const notice = offInLocal(model, item.options, varsLoaders[providerID], envs, policy)
+              if (!notice) continue
+              withheld.set(`${providerID}/${modelID}`, notice)
+              delete item.models[modelID]
+            }
+            if (Object.keys(item.models).length === 0) delete providers[providerID]
+          }
+        const off = [...new Map([...withheld.values()].map((notice) => [notice.id, notice])).values()].filter(
+          (notice) => !providers[ProviderV2.ID.make(notice.id)],
+        )
+
+        const unavailable = [
+          ...Object.entries(auths).flatMap(([id, credential]) => {
+            if (credential.type === "wellknown") return []
+            const rejected = providerCredentialUnavailable(id, credential, userProviders.has(id))
+            if (rejected) return [rejected]
+            if (disabled.has(id) || (enabled && !enabled.has(id))) return [providerUnavailable(id, "disabled")]
+            if (off.some((notice) => notice.id === id)) return []
+            if (!providers[ProviderV2.ID.make(id)]) return [providerUnavailable(id, "no-models")]
+            return []
+          }),
+          ...off,
+        ]
         for (const notice of unavailable) yield* Effect.logWarning(notice.message)
 
         return {
           models: languages,
           providers,
           unavailable,
+          withheld,
+          local: policy,
           declared: new Set([
             ...Object.keys(cfg.provider ?? {}),
             ...(cfg.disabled_providers ?? []),
@@ -2222,15 +2322,26 @@ const layer = Layer.effect(
       Stream.runForEach(() => InstanceState.invalidateAll(state)),
       Effect.forkScoped({ startImmediately: true }),
     )
+    // Which models Vector Local keeps off follows the policy in effect: state built under another one is built again on
+    // its next read. With Vector Local off before and now, nothing is compared.
+    const providerState = Effect.gen(function* () {
+      const s = yield* InstanceState.get(state)
+      const policy = Config.local()
+      if (!s.local.enabled && !policy.enabled) return s
+      if (JSON.stringify(policy) === JSON.stringify(s.local)) return s
+      yield* InstanceState.invalidate(state)
+      return yield* InstanceState.get(state)
+    })
 
     // A plan bought, a sign-in or a sign-out must not require restarting the local engine.
     const refreshCodium = Effect.fn("Provider.refreshCodium")(function* (options?: ModelPlans.CatalogOptions) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       const current = yield* modelPlans.catalog(yield* freeCredentials.get("vector"), options)
       const cfg = yield* config.get()
       delete s.providers[planID]
       if (
         current.enabled &&
+        !Config.local().enabled &&
         !cfg.disabled_providers?.includes(planID) &&
         (!cfg.enabled_providers || cfg.enabled_providers.includes(planID))
       )
@@ -2240,7 +2351,7 @@ const layer = Layer.effect(
 
     const list = Effect.fn("Provider.list")(() => refreshCodium())
 
-    const unavailable = Effect.fn("Provider.unavailable")(() => InstanceState.use(state, (s) => s.unavailable))
+    const unavailable = Effect.fn("Provider.unavailable")(() => Effect.map(providerState, (s) => s.unavailable))
 
     // Every session request names its session (LLMRequestPrep), and so does every model call a guest can cause: prompts,
     // compaction, titles, summaries, subagents and retries all run inside one. A request with none, such as generating
@@ -2303,7 +2414,7 @@ const layer = Layer.effect(
                   }),
                   route.url === FreeModels.SHARED_CHAT_URL,
                 )
-                return fetch(route.url, {
+                return Egress.fetch("vector-free-models", route.url, {
                   method: "POST",
                   redirect: "error",
                   signal: init?.signal,
@@ -2459,12 +2570,21 @@ const layer = Layer.effect(
           const combined = signals.length === 0 ? null : signals.length === 1 ? signals[0] : AbortSignal.any(signals)
           if (combined) opts.signal = combined
 
+          // Vector Local decides every model call here, before a plugin's own fetch runs or its WebSocket opens (ChatGPT
+          // sign-in's Responses transport starts inside that fetch): only a model server on the list gets it, and it
+          // follows no redirect. With Vector Local off it goes to fetchFn as it is.
+          const target = input instanceof Request ? input.url : String(input)
           const res = ResponseTerminal.wrap(
-            await fetchFn(input, {
-              ...opts,
-              // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
-              timeout: false,
-            }).finally(() => headerTimeoutCtl?.clear()),
+            await Egress.fetch(
+              inferenceSource(model, target, Egress.policy()),
+              input,
+              {
+                ...opts,
+                // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
+                timeout: false,
+              },
+              fetchFn,
+            ).finally(() => headerTimeoutCtl?.clear()),
           )
 
           if (!chunkAbortCtl) return res
@@ -2486,7 +2606,7 @@ const layer = Layer.effect(
           if (model.api.npm.startsWith("file://")) {
             return model.api.npm
           }
-          const item = await Npm.add(model.api.npm)
+          const item = await installProviderPackage(model.api.npm)
           if (!item.entrypoint) throw new Error(`Package ${model.api.npm} has no import entrypoint`)
           return item.entrypoint
         })()
@@ -2509,13 +2629,26 @@ const layer = Layer.effect(
     }
 
     const getProvider = Effect.fn("Provider.getProvider")((providerID: ProviderV2.ID) =>
-      InstanceState.use(state, (s) => s.providers[providerID]),
+      Effect.map(providerState, (s) => s.providers[providerID]),
     )
 
     const getModel = Effect.fn("Provider.getModel")(function* (providerID: ProviderV2.ID, modelID: ModelV2.ID) {
+      // Vector Local keeps Vector's own models off; that is the reason to give, not a sign-in or credits.
+      if (Config.local().enabled && (providerID === planID || providerID === ProviderV2.ID.vector))
+        return yield* new ModelNotFoundError({
+          providerID,
+          modelID,
+          unavailable: {
+            id: providerID,
+            reason: "off-in-local",
+            message: `${providerID}: off in Vector Local. ${LOCAL_OFF.vector}`,
+          },
+        })
       // A turn waits for vectordev.ai's answer when this account has no Codium catalog yet.
       if (providerID === planID) yield* refreshCodium({ wait: true })
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
+      const withheld = s.withheld.get(`${providerID}/${modelID}`)
+      if (withheld) return yield* new ModelNotFoundError({ providerID, modelID, unavailable: withheld })
       const provider = Object.hasOwn(s.providers, providerID) ? s.providers[providerID] : undefined
       // Never move a Codium conversation to another provider; say why it cannot run and what fixes it.
       if (!provider && providerID === planID) {
@@ -2565,7 +2698,7 @@ const layer = Layer.effect(
     })
 
     const getLanguage = Effect.fn("Provider.getLanguage")(function* (model: Model) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       const envs = yield* env.all()
       const key = `${model.providerID}/${model.id}`
       const provider = s.providers[model.providerID]
@@ -2642,12 +2775,12 @@ const layer = Layer.effect(
     }
 
     const line = Effect.fn("Provider.line")(function* (model: Model) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       return lineOf(model, s, yield* env.all())
     })
 
     const preconnect = Effect.fn("Provider.preconnect")(function* (model: Model) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       const provider = s.providers[model.providerID]
       // Free models choose their route per request, so there is no one connection to open ahead of it.
       if (!provider || model.providerID === "vector" || model.freeModel) return
@@ -2658,7 +2791,7 @@ const layer = Layer.effect(
     })
 
     const closest = Effect.fn("Provider.closest")(function* (providerID: ProviderV2.ID, query: string[]) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       const provider = s.providers[providerID]
       if (!provider) return undefined
       for (const item of query) {
@@ -2673,7 +2806,7 @@ const layer = Layer.effect(
       providerID: ProviderV2.ID,
       primaryID?: ModelV2.ID,
     ) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       const provider = s.providers[providerID]
       if (!provider) return undefined
       const primary = primaryID ? provider.models[primaryID] : undefined
@@ -2766,7 +2899,7 @@ const layer = Layer.effect(
     })
 
     const savedModel = Effect.fn("Provider.savedModel")(function* (model: { providerID: string; modelID: string }) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       // A saved Vector model stays on the shared allowance, even when the user's own OpenRouter account lists it too.
       const current = renamedModel(model)
       if (providerRetired(current.providerID, (id) => s.declared.has(id) || id in s.providers)) return
@@ -2791,7 +2924,7 @@ const layer = Layer.effect(
       const saved = cfg.model ? yield* savedModel(parseModel(cfg.model)) : undefined
       if (saved && providerEnabled(saved.providerID)) return saved
 
-      const s = yield* InstanceState.get(state)
+      const s = yield* providerState
       const recent = yield* fs.readJson(path.join(Global.Path.state, "model.json")).pipe(
         Effect.map((x): { providerID: ProviderV2.ID; modelID: ModelV2.ID }[] => {
           if (!isRecord(x) || !Array.isArray(x.recent)) return []
@@ -2807,8 +2940,9 @@ const layer = Layer.effect(
       )
       for (const entry of recent) {
         const provider = s.providers[entry.providerID]
-        // A vanished free choice must fail as unavailable, never quietly select a paid model.
-        if (isFreeModelRef(entry)) return entry
+        // A vanished free choice must fail as unavailable, never quietly select a paid model. With Vector Local on, free
+        // models are off and every model left runs on a server on the list, so the next recent choice is taken.
+        if (isFreeModelRef(entry) && !Config.local().enabled) return entry
         if (!provider) continue
         if (!provider.models[entry.modelID]) continue
         return { providerID: entry.providerID, modelID: entry.modelID }

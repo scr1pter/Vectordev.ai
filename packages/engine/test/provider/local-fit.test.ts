@@ -527,7 +527,7 @@ it.live("a company endpoint on the model server list is fitted like a server som
   ),
 )
 
-it.live("a private server the company lists has no per-token price, and one an edit still held adds has one", () => {
+it.live("a private server the company lists has no per-token price, and one an edit still held adds is off until confirmed", () => {
   const globalFile = path.join(Global.Path.config, "vector.json")
   const managedDirectory = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
   // A repository's config may not point a provider at the user's network, so, as a plugin can, `preconnect` names the
@@ -556,7 +556,9 @@ it.live("a private server the company lists has no per-token price, and one an e
         const line = (providerID: string) =>
           provider.getModel(ProviderV2.ID.make(providerID), MODEL).pipe(Effect.flatMap((model) => provider.line(model)))
         expect(yield* line("kimi")).toMatchObject({ hosted: true, local: true })
-        expect(yield* line("held")).toMatchObject({ hosted: true, local: false })
+        // Until the owner confirms the edit, its server is not on the list in effect, so Vector Local keeps it off.
+        const held = yield* line("held").pipe(Effect.flip)
+        expect(held.unavailable?.reason).toBe("off-in-local")
         Config.confirmLocal()
         expect(yield* line("held")).toMatchObject({ hosted: true, local: true })
         expect(guard.outside()).toEqual([])
