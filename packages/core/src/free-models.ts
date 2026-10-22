@@ -21,6 +21,7 @@ import { Flag } from "./flag/flag"
 import { Global } from "./global"
 import { VectorAccount } from "./vector-account"
 import { makeGlobalNode } from "./effect/app-node"
+import { Egress } from "./local-mode/egress"
 import {
   FreeModelMetadata,
   freeModelDataPolicy,
@@ -61,6 +62,11 @@ export function createClient(
     request?: (url: string, init: RequestInit) => Promise<Response>
     now?: () => number
     disabled?: () => boolean
+    /**
+     * Whether Vector Local is on: free models run on vectordev.ai and openrouter.ai, outside the model servers the user
+     * hosts, so the catalog is OFF and nothing is fetched.
+     */
+    local?: () => boolean
     /** How long a non-forced catalog read waits for vectordev.ai before answering without it. */
     wait?: number
   } = {},
@@ -85,6 +91,7 @@ export function createClient(
     return value
   }
   const catalog = async (force = false): Promise<FreeModelCatalog> => {
+    if (input.local?.()) return serve(OFF)
     // The desktop engine, the terminal and "vector models" share the cache file: when another of them wrote a newer
     // catalog, this client reads that instead of serving its own copy until it expires.
     if (input.file && state.value && !state.pending) {
@@ -173,7 +180,7 @@ export function createClient(
     return pending
   }
   const forKey = async (key: string, force = false) => {
-    if (!key || input.disabled?.()) return []
+    if (!key || input.disabled?.() || input.local?.()) return []
     const digest = createHash("sha256").update(key).digest("hex")
     const cached = users.get(digest)
     if (!force && cached && cached.expires > now()) return cached.models
@@ -303,6 +310,7 @@ export const node = makeGlobalNode({
         file: path.join(Global.Path.cache, "free-models-v2.json"),
         consentFile: trainingConsentFile(),
         disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH,
+        local: () => Egress.policy().enabled,
       }),
     ),
   ),

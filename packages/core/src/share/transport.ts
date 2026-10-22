@@ -1,5 +1,10 @@
 import { PublicSession } from "@vectordevai/schema/public-session"
 import { Option, Schema } from "effect"
+import { Egress } from "../local-mode/egress"
+import { LocalPolicy } from "../local-mode/policy"
+import { LocalSources } from "../local-mode/sources"
+
+const LOCAL_SOURCE = LocalSources.get("share")!
 
 export function shareID(url: string) {
   const match = /^https:\/\/vectordev\.ai\/s\/([a-f0-9]{32})$/.exec(url)
@@ -40,7 +45,14 @@ export function makeShareTransport(input: { token: () => Promise<string | undefi
   const request = async (method: string, id?: string, body?: unknown) => {
     const token = method === "GET" ? undefined : await input.token()
     if (method !== "GET") accountOwner(token)
-    const response = await (input.fetch ?? fetch)(`https://vectordev.ai/api/shares${id ? `/${id}` : ""}`, {
+    // Vector Local blocks share links unless the user allowed them, so nothing is sent.
+    if (LocalPolicy.blocks(Egress.policy(), LOCAL_SOURCE))
+      throw new PublicSession.Error({
+        code: "UNAVAILABLE",
+        message: "Vector Local blocks share links, which publish the session on vectordev.ai.",
+      })
+    const send = input.fetch ?? ((url: string, init: RequestInit) => Egress.fetch(LOCAL_SOURCE.id, url, init))
+    const response = await send(`https://vectordev.ai/api/shares${id ? `/${id}` : ""}`, {
       method,
       redirect: "error",
       signal: AbortSignal.timeout(8_000),

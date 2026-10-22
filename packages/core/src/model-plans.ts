@@ -5,6 +5,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { createHash, randomUUID } from "node:crypto"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { makeGlobalNode } from "./effect/app-node"
+import { Egress } from "./local-mode/egress"
 import { Flag } from "./flag/flag"
 import { Global } from "./global"
 import { ModelPlanStatus } from "./model-plan-status"
@@ -165,11 +166,14 @@ export const node = makeGlobalNode({
   layer: Layer.sync(Service, () => {
     const client = createClient({
       file: path.join(Global.Path.cache, "codium-models.json"),
-      disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH,
+      // Vector Local keeps Vector Codium off, so its plans are not read either.
+      disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH || Egress.policy().enabled,
+      request: (url, init) => Egress.fetch("plans-catalog", url, init),
     })
     return Service.of({
       catalog: (token, options) => Effect.promise(() => client.catalog(token, options)),
-      request: (url, init) => fetch(url, init),
+      // A Codium model call is decided as one: refused while Vector Local is on.
+      request: (url, init) => Egress.fetch("vector-codium", url, init),
     })
   }),
   deps: [],
