@@ -132,6 +132,30 @@ const LOCAL_TOOLS = new Set([
   "StructuredOutput",
 ])
 
+// Tools whose output is the web's: pages, search results, the browsers, Vector Cloud's logs, and every research tool
+// (a research run reads the web by design, and its notes and reports quote pages; research_browser is the research
+// agents' own browser, and research is the build agent's way to start a run).
+const WEB_TOOLS = new Set([
+  "webfetch",
+  "websearch",
+  "browser",
+  "vector_cloud",
+  "research",
+  "research_plan",
+  "research_search",
+  "research_read",
+  "research_browser",
+  "research_note",
+  "research_report",
+])
+
+// Agents whose sessions take in the web by design: the research lead and its workers. Their writes wait for the user
+// from the first step, before any research tool has run.
+const WEB_AGENTS = new Set(["research", "researcher"])
+
+/** Metadata key of a task call's part that says what the subagent it ran took in, so its hold passes up. */
+export const HOLD = "hold"
+
 /**
  * What the user typed in a message, without Vector's synthetic notes or attached file contents. A slash command's text
  * is someone else's words (a template, an MCP server's prompt, a skill, a snippet's output), so of it only the
@@ -532,14 +556,16 @@ export function touched(messages: readonly SessionV1.WithParts[], file: string, 
  * skill came from the web), holds
  * text from outside (an imported transcript, an issue or pull request), used the browser or Vector Cloud, ran an MCP
  * tool or an MCP server's prompt, or took a subagent's report. Memory poisoning works by planting text the agent later
- * saves as its own, so once outside content is in the history, every write is held for review.
+ * saves as its own, so once outside content is in the history, every write is held for review. A research session is
+ * held as web throughout, and a subagent that read the web passes that up: its parent is held as web, not subagent.
  */
 export function taint(messages: readonly SessionV1.WithParts[]): BrainSchema.Hold | undefined {
   const calls = messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part] : [])))
   const tools = calls.map((part) => part.tool)
   const commands = messages.flatMap((message) => message.parts.flatMap((part) => command(part)?.outside ?? []))
-  if (tools.some((tool) => tool === "webfetch" || tool === "websearch" || tool === "browser" || tool === "vector_cloud"))
-    return "web"
+  if (tools.some((tool) => WEB_TOOLS.has(tool))) return "web"
+  if (messages.some((message) => WEB_AGENTS.has(message.info.agent))) return "web"
+  if (calls.some((part) => part.state.status !== "pending" && part.state.metadata?.[HOLD] === "web")) return "web"
   // A local file an editor embedded is this computer's, like what the read tool returns; other outside text is not.
   if (
     messages.some((message) =>
