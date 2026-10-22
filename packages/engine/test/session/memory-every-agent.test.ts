@@ -495,3 +495,26 @@ it.instance(
     }),
   60_000,
 )
+
+it.instance(
+  "a headless post drops what repeats the owner's memory and logs how many sentences went, never which",
+  () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const lines: string[] = []
+      const parts = yield* SessionPosting.headless({
+        parts: [`Fixed the retry loop. ${FACT}.`],
+        typed: false,
+        log: (line) => lines.push(line),
+      })
+      expect(parts).toEqual(["Fixed the retry loop."])
+      expect(lines).toEqual(["Left out 1 sentence that repeats what Vector knows about you."])
+      expect(lines.join("\n")).not.toContain("badge")
+      // Text the user typed is never changed, and nobody is there to ask, so it is not posted.
+      const typed = yield* SessionPosting.headless({ parts: [`Release. ${FACT}.`], typed: true, log: (line) => lines.push(line) }).pipe(
+        Effect.flip,
+      )
+      expect(typed.message).toContain("Vector did not post this")
+    }),
+  60_000,
+)

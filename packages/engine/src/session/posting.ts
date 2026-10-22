@@ -55,11 +55,11 @@ export const headless = Effect.fn("SessionPosting.headless")(function* (
   const result = yield* check(input)
   if (result.status === "ask")
     return yield* new Refused({
-      message: `Vector did not post this: ${result.dropped.length} ${result.dropped.length === 1 ? "sentence" : "sentences"} of your text repeat what Vector knows about you.`,
+      message: `Vector did not post this: ${result.dropped.length === 1 ? "1 sentence of your text repeats" : `${result.dropped.length} sentences of your text repeat`} what Vector knows about you.`,
     })
   if (result.dropped.length)
     input.log(
-      `Left out ${result.dropped.length} ${result.dropped.length === 1 ? "sentence" : "sentences"} that repeat what Vector knows about you.`,
+      `Left out ${result.dropped.length === 1 ? "1 sentence that repeats" : `${result.dropped.length} sentences that repeat`} what Vector knows about you.`,
     )
   if (result.links) input.log(`Left out ${result.links} ${result.links === 1 ? "link" : "links"} that point off GitHub.`)
   return result.parts

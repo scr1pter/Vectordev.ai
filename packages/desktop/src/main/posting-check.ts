@@ -73,7 +73,7 @@ export async function checkPost(input: Post): Promise<string[] | undefined> {
     return choice === 0 ? input.parts : undefined
   }
   const choice = await state.ask({
-    message: `Vector took out ${count(result.dropped.length)} that repeat what it knows about you.`,
+    message: `Vector took out ${result.dropped.length === 1 ? "1 sentence that repeats" : `${result.dropped.length} sentences that repeat`} what it knows about you.`,
     detail,
     buttons: [result.dropped.length === 1 ? "Post without it" : "Post without them", "Post as is", "Cancel"],
     cancel: 2,
