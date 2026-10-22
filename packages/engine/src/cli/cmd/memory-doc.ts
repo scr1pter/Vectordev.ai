@@ -453,11 +453,13 @@ export const MemoryLinksCommand = effectCmd({
     // The root comes from git in its full spelling, while the working folder may be spelled another way: through a
     // link, or on Windows by its short name (RUNNER~1). Git's own prefix for the working folder places a relative file
     // in the repository however the folder is spelled.
-    const prefix = path.isAbsolute(args.file)
-      ? undefined
-      : (yield* Effect.promise(() => UntrustedGit.run(process.cwd(), ["rev-parse", "--show-prefix"]))).trim()
-    const file = prefix
-      ? path.posix.normalize(prefix + args.file.split(path.sep).join("/"))
+    // The prefix is empty at the root, so the root is asked for too: it says whether git answered at all.
+    const [top, prefix] = path.isAbsolute(args.file)
+      ? []
+      : (yield* Effect.promise(() => UntrustedGit.run(process.cwd(), ["rev-parse", "--show-toplevel", "--show-prefix"])))
+          .split(/\r?\n/)
+    const file = top
+      ? path.posix.normalize((prefix ?? "") + args.file.split(path.sep).join("/"))
       : BrainPaths.relative(memory.place.root, path.resolve(process.cwd(), args.file))
     const links = yield* memory.knowledge.links(memory.place, file, { personal: true })
     if (args.json) return print(linked ? { links, linked } : links)
