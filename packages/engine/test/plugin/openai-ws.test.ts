@@ -4,6 +4,10 @@ import { createServer, type IncomingMessage, type Server as HttpServer, type Ser
 import net, { type AddressInfo, type Socket } from "node:net"
 import WebSocket, { WebSocketServer } from "ws"
 import { APICallError } from "ai"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressGuard } from "@vectordevai/core/local-mode/guard"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { NetworkGuard } from "../../../core/test/lib/network-guard"
 import { ProviderError } from "../../src/provider/error"
 import { OpenAIWebSocket } from "../../src/plugin/openai/ws"
 import { OpenAIWebSocketPool, TITLE_HEADER } from "../../src/plugin/openai/ws-pool"
@@ -28,6 +32,43 @@ describe("plugin.openai.ws", () => {
     expect(headers?.["openai-beta"]).toBe(OpenAIWebSocket.PROTOCOL_HEADER)
     expect(headers?.["content-length"]).toBeUndefined()
     socket.terminate()
+  })
+
+  test("decides the socket under Vector Local before it opens: only a model server on the list gets it", async () => {
+    // Strict for this test, so a socket the gate failed to stop would be refused before it left this computer.
+    const strict = NetworkGuard.strict()
+    await using hanging = await createHangingTcpServer()
+    let opened = 0
+    await using listed = await createWebSocketServer(() => {
+      opened += 1
+    })
+    try {
+      Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: [new URL(listed.url).origin] } }))
+      // ChatGPT's own transport, as a signed-in model uses it: a cloud AI service, never on the list.
+      const chatgpt = OpenAIWebSocket.connectResponsesWebSocket({
+        url: "wss://chatgpt.com/backend-api/codex/responses",
+        headers: { authorization: "Bearer test" },
+      })
+      await expect(chatgpt).rejects.toBeInstanceOf(EgressGuard.EgressBlocked)
+      // A server on this computer that is not on the list is refused too, before anything connects.
+      await expect(OpenAIWebSocket.connectResponsesWebSocket({ url: hanging.wsUrl, headers: {} })).rejects.toThrow(
+        "Model calls go only to the model servers on your list.",
+      )
+      expect(hanging.connections()).toBe(0)
+      const socket = await OpenAIWebSocket.connectResponsesWebSocket({ url: listed.wsUrl, headers: {} })
+      socket.terminate()
+      expect(opened).toBe(1)
+      expect(Egress.events().map((event) => [event.source, event.decision, event.rule])).toEqual([
+        ["cloud-inference", "block", "not-allowable"],
+        ["local-inference", "block", "not-listed"],
+        ["local-inference", "allow", "listed"],
+      ])
+      expect(strict.attempts().filter((attempt) => attempt.host === "chatgpt.com")).toEqual([])
+    } finally {
+      Egress.configure(LocalPolicy.OFF)
+      await Egress.erase()
+      strict.uninstall()
+    }
   })
 
   test("enforces websocket connect timeout", async () => {
