@@ -330,13 +330,18 @@ export async function submitPullRequestReview(input: {
   const cwd = requirePullRequestDirectory(input.cwd)
   const sessionIDs = (input.sessionIDs ?? []).filter((id) => typeof id === "string").slice(0, 50)
   const { access, repo } = await pullRequestContext(cwd)
-  return postPullRequestReview(access, repo, number, { body, event, head, comments, fallbackBody }, (parts) =>
-    checkPost({ cwd, parts, typed: false, sessionIDs, untrusted: input.untrusted === true }),
+  // The renderer can only make the review stricter: GitHub says whether the pull request is a fork or another
+  // author's, and either makes it one Vector cannot trust.
+  return postPullRequestReview(access, repo, number, { body, event, head, comments, fallbackBody }, (parts, untrusted) =>
+    checkPost({ cwd, parts, typed: false, sessionIDs, untrusted: untrusted || input.untrusted === true }),
   )
 }
 
-/** The posting check a review goes through: the parts to post, or undefined when nothing is posted. */
-export type ReviewCheck = (parts: string[]) => Promise<string[] | undefined>
+/**
+ * The posting check a review goes through: the parts to post, or undefined when nothing is posted. `untrusted` says,
+ * from GitHub, that the pull request comes from a fork or from someone other than the signed-in account (6.4a).
+ */
+export type ReviewCheck = (parts: string[], untrusted: boolean) => Promise<string[] | undefined>
 
 export async function postPullRequestReview(
   access: GithubAccess,
@@ -352,13 +357,17 @@ export async function postPullRequestReview(
   check: ReviewCheck,
 ) {
   const head = review.head
-  if (head && (await currentHead(access, repo, number)) !== head) {
+  const pull = await githubJson<RawPull>(access, `${repoPath(repo)}/pulls/${number}`)
+  if (head && pull.head?.sha?.toLowerCase() !== head) {
     throw new Error("This pull request changed after the review started. Run Review with Vector again before posting.")
   }
   // Everything the review sends is checked as one text, so a sentence split across two comments is still found. A
   // line comment that loses all its text is not sent.
   const sent = head ? (review.comments ?? []) : []
-  const checked = await check([review.body, ...sent.map((comment) => comment.body), review.fallbackBody ?? review.body])
+  const checked = await check(
+    [review.body, ...sent.map((comment) => comment.body), review.fallbackBody ?? review.body],
+    await fromSomeoneElse(access, pull),
+  )
   if (!checked) return { posted: false, inline: 0 }
   const body = checked[0] ?? ""
   const fallbackBody = checked.at(-1) ?? body
@@ -785,6 +794,25 @@ function autoReviewBody(workflow: AutoReviewWorkflow) {
 // A branch name in a URL path: each segment encoded, its slashes kept.
 function refPath(branch: string) {
   return branch.split("/").map(encodeURIComponent).join("/")
+}
+
+type RawPull = {
+  head?: { sha?: string; repo?: { full_name?: string } | null }
+  base?: { repo?: { full_name?: string } }
+  user?: { login?: string } | null
+}
+
+// Whether the pull request comes from a fork (its head repository is another, or deleted) or was opened by someone
+// other than the signed-in account. Either way the owner did not write it (section 6.4a). A login GitHub does not
+// give counts as someone else.
+async function fromSomeoneElse(access: GithubAccess, pull: RawPull) {
+  const head = pull.head?.repo?.full_name?.toLowerCase()
+  if (!head || head !== pull.base?.repo?.full_name?.toLowerCase()) return true
+  const viewer = await githubJson<{ login?: string }>(access, "/user", { timeoutMs: 15_000 }).then(
+    (user) => user.login?.toLowerCase(),
+    () => undefined,
+  )
+  return !viewer || viewer !== pull.user?.login?.toLowerCase()
 }
 
 async function currentHead(access: GithubAccess, repo: GithubRepoRef, number: number) {

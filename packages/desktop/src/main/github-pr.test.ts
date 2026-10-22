@@ -32,7 +32,8 @@ const HEAD = "a".repeat(40)
 const PUSHED = "c".repeat(40)
 const requests: { method: string; path: string; body?: Record<string, unknown> }[] = []
 // The pull request's newest commit as the stand-in reports it, and a push that lands while its diff is being read.
-const live = { head: HEAD, pushDuringDiff: false }
+// The pull request's head repository and author, and who is signed in: the same repository and person by default.
+const live = { head: HEAD, pushDuringDiff: false, headRepo: "acme/app", author: "sam", viewer: "sam" }
 const node = (number: number) => ({
   number,
   title: `Change ${number}`,
@@ -154,7 +155,12 @@ const server = Bun.serve({
       return new Response("diff --git a/a.ts b/a.ts\n")
     }
     if (url.pathname === "/repos/acme/app/pulls/7" && request.method === "GET")
-      return Response.json({ head: { sha: live.head } })
+      return Response.json({
+        head: { sha: live.head, repo: { full_name: live.headRepo } },
+        base: { repo: { full_name: "acme/app" } },
+        user: { login: live.author },
+      })
+    if (url.pathname === "/user") return Response.json({ login: live.viewer })
     if (url.pathname === "/repos/acme/app/pulls/7/reviews") {
       // GitHub refuses the whole review when any line comment falls outside the diff, here past line 100.
       const comments = (body?.comments ?? []) as { line: number }[]
@@ -806,20 +812,51 @@ describe("the posting check before Vector posts", () => {
     expect(questions).toHaveLength(2)
   })
 
-  test("a Parallel Workspace pull request is checked, body and task included, before anything is committed", async () => {
+  test("a Parallel Workspace pull request is checked before anything is committed: the typed task asked about, the summary cut", async () => {
     reset()
     const dir = await mkdtemp(join(tmpdir(), "vector-workspace-"))
+    const pullRequest = { projectPath: dir, title: "Retry fix", body: `Fixed the retry loop. ${FACT}.`, task: `Ship it. ${HABIT}.` }
     try {
-      const result = await createPullRequest({
-        projectPath: dir,
-        title: "Retry fix",
-        body: `Fixed the retry loop.\n\nVector task: ${FACT}`,
-      })
-      expect(result).toEqual({ ok: false, log: "", error: "Nothing was posted." })
-      expect(checks[0]?.body.parts).toEqual(["Retry fix", `Fixed the retry loop.\n\nVector task: ${FACT}`])
-      expect(checks[0]?.body.typed).toBe(false)
+      // The task is the user's own words: the check asks, and Cancel posts nothing.
+      expect(await createPullRequest(pullRequest)).toEqual({ ok: false, log: "", error: "Nothing was posted." })
+      expect(checks[0]?.body).toMatchObject({ parts: [`Ship it. ${HABIT}.`], typed: true })
+      expect(questions[0]).toMatchObject({ buttons: ["Post as is", "Cancel"] })
+      // Posting the task as is goes on to Vector's own title and summary, which lose what repeats the owner's memory.
+      answers.push(0, 2)
+      expect(await createPullRequest(pullRequest)).toEqual({ ok: false, log: "", error: "Nothing was posted." })
+      expect(checks[2]?.body).toMatchObject({ parts: ["Retry fix", `Fixed the retry loop. ${FACT}.`], typed: false })
+      expect(questions[2]).toMatchObject({ buttons: ["Post without it", "Post as is", "Cancel"] })
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+
+  test("a review of a fork's or another author's pull request is checked as untrusted, whatever the renderer said", async () => {
+    reset()
+    const said: boolean[] = []
+    const trusting: ReviewCheck = (parts, untrusted) => (said.push(untrusted), Promise.resolve(parts))
+    const post = () => postWith(trusting, { body: "One finding", event: "comment", head: HEAD })
+    try {
+      await post()
+      live.headRepo = "stranger/app"
+      await post()
+      live.headRepo = "acme/app"
+      live.author = "someone-else"
+      await post()
+      live.viewer = "someone-else"
+      await post()
+    } finally {
+      Object.assign(live, { headRepo: "acme/app", author: "sam", viewer: "sam" })
+    }
+    expect(said).toEqual([false, true, true, false])
+  })
+
+  test("Post as is says it also puts back the links a fork's review lost", async () => {
+    reset()
+    answers.push(2)
+    const body = `Found one issue. ${FACT}. See ![x](https://evil.example.net/a.png).`
+    expect(await postWith(review, { body, event: "comment", head: HEAD })).toEqual({ posted: false, inline: 0 })
+    // The fallback body repeats the body, and the sentence is shown once.
+    expect(questions[0]?.detail).toBe(`• ${FACT}.\n\nPost as is also puts back the links and images that point off GitHub.`)
   })
 })

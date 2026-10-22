@@ -72,9 +72,12 @@ export async function checkPost(input: Post): Promise<string[] | undefined> {
     })
     return choice === 0 ? input.parts : undefined
   }
+  // Posting as is sends the reviewers' own text, so it puts back the links a fork's review lost too, and says so. A
+  // review's fallback body repeats its body, so the links are not counted.
+  const restored = result.links ? "\n\nPost as is also puts back the links and images that point off GitHub." : ""
   const choice = await state.ask({
     message: `Vector took out ${result.dropped.length === 1 ? "1 sentence that repeats" : `${result.dropped.length} sentences that repeat`} what it knows about you.`,
-    detail,
+    detail: `${detail}${restored}`,
     buttons: [result.dropped.length === 1 ? "Post without it" : "Post without them", "Post as is", "Cancel"],
     cancel: 2,
     default: 0,
@@ -126,9 +129,11 @@ function readable(value: unknown, parts: number): value is Result {
   )
 }
 
+// Each sentence once: a review's fallback body repeats what its body and comments say.
 function shown(dropped: Result["dropped"]) {
-  const lines = dropped.slice(0, SHOWN).map((item) => `• ${item.text.length > 200 ? `${item.text.slice(0, 199)}…` : item.text}`)
-  return dropped.length > SHOWN ? [...lines, `…and ${dropped.length - SHOWN} more`].join("\n") : lines.join("\n")
+  const texts = [...new Set(dropped.map((item) => item.text))]
+  const lines = texts.slice(0, SHOWN).map((text) => `• ${text.length > 200 ? `${text.slice(0, 199)}…` : text}`)
+  return texts.length > SHOWN ? [...lines, `…and ${texts.length - SHOWN} more`].join("\n") : lines.join("\n")
 }
 
 function count(sentences: number) {

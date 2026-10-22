@@ -3362,7 +3362,8 @@ export async function openParallelWorkspacePullRequest(id: string) {
   const result = await createPullRequest({
     projectPath: record.isolatedPath,
     title: record.name,
-    body: [record.finalSummary, "", `Vector task: ${record.taskPrompt}`].filter(Boolean).join("\n"),
+    ...(record.finalSummary ? { body: record.finalSummary } : {}),
+    ...(record.taskPrompt ? { task: record.taskPrompt } : {}),
   })
   if (!result.ok || !result.url) throw new Error(result.error || "GitHub did not return a pull request URL.")
   const updated = updateRecord(id, (current) => ({

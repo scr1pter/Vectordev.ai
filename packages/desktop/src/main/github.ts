@@ -34,6 +34,8 @@ export type GithubPullRequestInput = {
   projectPath: string
   title: string
   body?: string
+  // The task the user typed, added to the body after Vector's own text: it is asked about, never changed.
+  task?: string
 }
 
 export type GithubPullRequestResult = { ok: boolean; url?: string; error?: string; log: string }
@@ -159,14 +161,20 @@ export async function createPullRequest(input: GithubPullRequestInput): Promise<
   const stats = input.projectPath ? await stat(input.projectPath).catch(() => undefined) : undefined
   if (!stats?.isDirectory()) return { ok: false, log: "", error: "The isolated workspace no longer exists." }
   // The title becomes the commit message too, and the body carries the agent's summary and the task, so all of it is
-  // checked against what Vector knows about the owner before anything is committed or posted.
-  const checked = await checkPost({
-    cwd: input.projectPath,
-    parts: [input.title, input.body?.trim() || "Created from an isolated Vector agent workspace."],
-    typed: false,
-  })
+  // checked against what Vector knows about the owner before anything is committed or posted. The task is the user's
+  // own words, which are only asked about; Vector's title and summary lose what repeats their memory.
+  const task = input.task?.trim()
+  const asked = task ? await checkPost({ cwd: input.projectPath, parts: [task], typed: true }) : []
+  const checked = asked
+    ? await checkPost({
+        cwd: input.projectPath,
+        parts: [input.title, input.body?.trim() || (task ? "" : "Created from an isolated Vector agent workspace.")],
+        typed: false,
+      })
+    : undefined
   if (!checked) return { ok: false, log: "", error: "Nothing was posted." }
-  const [title, body] = checked as [string, string]
+  const [title, summary] = checked as [string, string]
+  const body = [summary, ...(task ? [`Vector task: ${task}`] : [])].filter(Boolean).join("\n\n")
 
   const github = await detectGithub()
   if (!github.ghInstalled || !github.authenticated) {
