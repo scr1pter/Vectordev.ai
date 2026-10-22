@@ -21,6 +21,10 @@ export interface Options {
    * configured themselves allows it.
    */
   readonly authorizePrivate?: (url: string) => Effect.Effect<void, unknown>
+  /** Resolves each destination's name. Without it the system resolver does; tests pass the fake web's. */
+  readonly resolver?: DestinationResolver
+  /** The User-Agent sent first, in place of `userAgent`. A challenge page still gets one retry as `Vector/<version>`. */
+  readonly userAgent?: string
 }
 
 export type Destination = {
@@ -63,7 +67,7 @@ export const execute = (
       request: HttpClientRequest.HttpClientRequest,
       addresses: readonly string[],
     ) {
-      const first = yield* send(request, userAgent, addresses)
+      const first = yield* send(request, options?.userAgent ?? userAgent, addresses)
       if (first.response.status !== 403 || first.response.headers["cf-mitigated"]?.toLowerCase() !== "challenge")
         return first
       // Abort the challenge body before retrying, including bodies that never finish.
@@ -77,7 +81,7 @@ export const execute = (
     ): Effect.fn.Return<HttpClientResponse.HttpClientResponse, unknown, Scope.Scope> {
       const destination = yield* parseDestination(request.url)
       if (options) yield* options.authorize(request.url)
-      const resolved = yield* resolveDestination(destination)
+      const resolved = yield* resolveDestination(destination, options?.resolver)
       if (resolved.private) {
         if (!options?.authorizePrivate) return yield* Effect.fail(privateDestinationError())
         yield* options.authorizePrivate(request.url)
