@@ -3,6 +3,9 @@
 
 import WebSocket from "ws"
 import { APICallError } from "ai"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressGuard } from "@vectordevai/core/local-mode/guard"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { ProviderError } from "@/provider/error"
 import { errorMessage } from "@/util/error"
 import { ProxyEnv } from "@/util/proxy-env"
@@ -96,11 +99,22 @@ export function connectResponsesWebSocket(options: ConnectResponsesWebSocketOpti
     }
     delete headers["content-length"]
 
-    // Bun does not apply HTTP(S)_PROXY to WebSockets unless the proxy is supplied explicitly.
+    // Bun serves the ws package itself, past the egress guard, so this model call is decided here the way Egress
+    // decides any other; under Node the guard sees its socket too.
+    const target = options.url.replace(/^wss:/, "https:").replace(/^ws:/, "http:")
+    const host = URL.canParse(target) ? new URL(target).hostname : ""
+    const place = LocalPolicy.hostClass(host)
+    const decided = Egress.decide({ source: place === "internet" ? "cloud-inference" : "local-inference", url: target })
+    if (decided.decision !== "allow") {
+      reject(new EgressGuard.EgressBlocked(host, "websocket", decided.rule, decided.reason))
+      return
+    }
+    // Bun does not apply HTTP(S)_PROXY to WebSockets unless the proxy is supplied explicitly. With Vector Local on, a
+    // model call for this computer or your network never goes through one.
     const proxy =
-      typeof Bun === "undefined"
+      typeof Bun === "undefined" || (decided.rule !== "local-off" && place !== "internet")
         ? undefined
-        : ProxyEnv.getProxyForUrl(options.url.replace(/^wss:/, "https:").replace(/^ws:/, "http:"))
+        : ProxyEnv.getProxyForUrl(target)
     const connect = { headers, ...(proxy ? { proxy } : {}) }
     const socket = new WebSocket(options.url, connect)
     const timeout = options.timeout

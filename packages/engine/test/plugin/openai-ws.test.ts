@@ -9,6 +9,10 @@ import { OpenAIWebSocket } from "../../src/plugin/openai/ws"
 import { OpenAIWebSocketPool, TITLE_HEADER } from "../../src/plugin/openai/ws-pool"
 import { OpenAITransport } from "../../src/plugin/openai/transport"
 import { isRecord } from "../../src/util/record"
+import { Egress } from "@vectordevai/core/local-mode/egress"
+import { EgressGuard } from "@vectordevai/core/local-mode/guard"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
 describe("plugin.openai.ws", () => {
   test("derives websocket URLs and sends auth plus protocol headers", async () => {
@@ -153,6 +157,35 @@ describe("plugin.openai.ws", () => {
       onConnectionInvalid: () => socket.terminate(),
     })
     expect((await readTextError(response.text())).message).toBe("Invalid WebSocket response event")
+  })
+})
+
+describe("plugin.openai.ws under Vector Local", () => {
+  // Bun serves the ws package itself, past the egress guard; in strict mode a socket the gate let through would go to
+  // the strict guard's own proxy, which refuses anything off this computer, so nothing here leaves it.
+  NetworkGuard.use()
+
+  test("decides a model call over a WebSocket before it connects, and sends one to a listed server direct", async () => {
+    await using server = await createWebSocketServer(() => {})
+    Egress.configure(LocalPolicy.resolve({ global: { enabled: true, endpoints: [new URL(server.url).origin] } }))
+    try {
+      const refused = await OpenAIWebSocket.connectResponsesWebSocket({
+        url: "wss://198.51.100.7/v1/responses",
+        headers: {},
+        timeout: 2_000,
+      }).catch((error: unknown) => error)
+      expect(refused).toBeInstanceOf(EgressGuard.EgressBlocked)
+      expect((refused as EgressGuard.EgressBlocked).rule).toBe("not-allowable")
+      const socket = await OpenAIWebSocket.connectResponsesWebSocket({ url: server.wsUrl, headers: {} })
+      socket.terminate()
+      expect(Egress.events().map((event) => [event.source, event.decision])).toEqual([
+        ["cloud-inference", "block"],
+        ["local-inference", "allow"],
+      ])
+    } finally {
+      Egress.configure(LocalPolicy.OFF)
+      await Egress.erase()
+    }
   })
 })
 

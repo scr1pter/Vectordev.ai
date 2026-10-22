@@ -10,6 +10,7 @@ import { Npm } from "@vectordevai/core/npm"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Global } from "@vectordevai/core/global"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { Config } from "@/config/config"
 import { GlobalBus, type GlobalEvent } from "@/bus/global"
@@ -232,6 +233,19 @@ describe("repository config", () => {
     }),
     { trusted: true, config: { model: "repository/model" } },
   )
+})
+
+describe("the egress guard", () => {
+  test("decides under the policy config resolves, from the moment it is resolved", () => {
+    writeGlobal({ enabled: true, endpoints: [GPU_BOX] })
+    const policy = Config.refreshLocal()
+    expect(Egress.policy()).toBe(policy)
+    expect(Egress.decide({ source: "local-inference", url: `${GPU_BOX}/v1` }).rule).toBe("listed")
+    rmSync(globalFile, { force: true })
+    Config.refreshLocal()
+    Config.confirmLocal()
+    expect(Egress.policy().enabled).toBe(false)
+  })
 })
 
 describe("the environment only tightens", () => {

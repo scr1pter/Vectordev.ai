@@ -45,6 +45,7 @@ import { withTransientReadRetry } from "@/util/effect-http-client"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import type { LocalMode } from "@vectordevai/schema/local-mode"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
+import { Egress } from "@vectordevai/core/local-mode/egress"
 import { ConfigLocalV1 } from "@vectordevai/core/v1/config/local"
 import { ChildEnvironment } from "@vectordevai/core/child-environment"
 
@@ -594,6 +595,9 @@ export function refreshLocal() {
   localState.pending = next.pending
   localState.confirmed = { block: next.confirmed }
   saveLocalConfirmed(next.confirmed)
+  // The egress guard has held everything but this computer since the backstop saw a source turn Vector Local on
+  // (LocalStartup); from here it decides under the policy resolved here.
+  Egress.configure(next.policy)
   // Children inherit the floor of the policy in effect, and the agent marker: every untrusted child of this process
   // may be the agent or a program it started.
   ChildEnvironment.inherit({ local: next.policy, agent: true })
