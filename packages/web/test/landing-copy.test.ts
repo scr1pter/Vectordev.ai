@@ -109,6 +109,84 @@ test("the self-evolving section says whose prompts and data they are, and no mor
   expect(section).not.toMatch(/every agent|Deep research|Vectorscope/i)
 })
 
+// The owner's emphasis (22 October 2026): Vector is the self-evolving, low-cost AI agentic harness, built on technology
+// of its own. The hero, the page's title and description and the README's opening say so, with the brain's release
+// from brainRelease, since the brain is what makes it self-evolving.
+test("the hero, the title and the README call Vector the self-evolving, low-cost AI agentic harness", async () => {
+  const source = await Bun.file(path.join(web, "src/pages/index.astro")).text()
+  const readme = (await Bun.file(path.join(repo, "README.md")).text()).replace(/\s+/g, " ")
+  expect(lander).toContain('<span class="headline-lead">The self-evolving AI agentic harness&nbsp;that</span>')
+  expect(lander).toContain('<span class="sr-only">The self-evolving AI agentic harness that has an agent of its own,')
+  expect(lander).toContain(
+    "Low-cost by design and built on proprietary technology. Vector Brain, {brainRelease.lede}, links your specs, PDFs and docs to the code and recalls only what a request needs, offline.",
+  )
+  expect(lander).toContain(
+    "In the desktop app, the tokenomics engine sizes each request and stops a run within a step of your cap",
+  )
+  expect(source).toContain('title="Vector — the self-evolving, low-cost AI agentic harness"')
+  expect(source).toContain(
+    "description={`The self-evolving, low-cost AI agentic harness. Vector Brain, ${brainRelease.lede},",
+  )
+  expect(readme).toContain(
+    "**The self-evolving, low-cost AI agentic harness for planning, building, reviewing and shipping software.**",
+  )
+  expect(readme).toContain("It is built on proprietary technology: the **tokenomics engine**")
+  // The brain's own name, everywhere.
+  expect([page, readme].filter((text) => /gbrain/i.test(text))).toEqual([])
+})
+
+// "Low-cost" rests on one published benchmark, quoted with its caveats: the integrated HTTP cells of the efficiency
+// archive, Vector on the Messages API against Claude Code at the same rates, as the investor page quotes it.
+test("the cost claim quotes the efficiency archive's first-session range against Claude Code, with its caveats", async () => {
+  const summary = await Bun.file(path.join(repo, "docs/benchmarks/vector-efficiency-2026-10/summary.json")).json()
+  const readme = (await Bun.file(path.join(repo, "README.md")).text()).replace(/\s+/g, " ")
+  const cell = (
+    runtime: string,
+    scenario: string,
+    session: number,
+  ): { costUsd: number; requests: number } | undefined =>
+    summary.cells.find(
+      (item: { state: string; transport: string; runtime: string; scenario: string; session: number }) =>
+        item.state === "integrated" &&
+        item.transport === "http" &&
+        item.runtime === runtime &&
+        item.scenario === scenario &&
+        item.session === session,
+    )
+  // long-loop is left out for the reason test/investor-page.test.ts gives: its fixture lacks a file the script reads.
+  const scenarios = ["solo-fix", "delegate-explore", "delegate-general"]
+  const range = (session: number) => {
+    const savings = scenarios.map((scenario) => {
+      const vector = cell("vector", scenario, session)
+      const claude = cell("claude-code", scenario, session)
+      expect(vector?.requests).toBe(claude?.requests)
+      return Math.round((1 - (vector?.costUsd ?? 0) / (claude?.costUsd ?? 1)) * 100)
+    })
+    if (Math.min(...savings) === Math.max(...savings)) return `${savings[0]}%`
+    return `${Math.min(...savings)}–${Math.max(...savings)}%`
+  }
+  expect(lander).toContain(
+    `Low cost, measured: in Vector's offline efficiency benchmark of October 2026, its modelled spend on three scripted fix tasks in a first session was ${range(1)} below Claude Code 2.1.215's, at the same list rates. It measures what each agent sends, not the quality of answers or your provider's bill, and does not show that Vector is cheaper than other agents in general.`,
+  )
+  expect(readme).toContain(
+    `Vector's modelled spend was ${range(1)} lower in a first session and ${range(2)} lower in a second, run as a new process`,
+  )
+  ;[
+    "docs/benchmarks/vector-efficiency-2026-10/README.md",
+    "(commit 6f7f3c2ea) and Claude Code 2.1.215",
+    "identical scripted tool steps against a local fake model server",
+    "the same number of model requests",
+    "medians of three repetitions",
+    "characters ÷ 4",
+    "not the quality of answers",
+    "does not show that Vector is cheaper than other agents in general",
+  ].forEach((caveat) => expect(readme).toContain(caveat))
+  // Never a bare superlative, and nothing from the archive where Claude Code or Codex comes out ahead.
+  expect(
+    [page, readme].filter((text) => /\bcheapest\b|\blowest[- ]cost\b|MiB|wall[- ]time|Codex [^,.]*cheaper/i.test(text)),
+  ).toEqual([])
+})
+
 test("Vector Velocity is in development and branded by one size, 550B parameters", () => {
   expect(lander).toContain('"is building a 550B model of its own."')
   expect(lander).toContain("and is building a 550B-parameter model of its own.")

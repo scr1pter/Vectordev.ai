@@ -1,13 +1,14 @@
 ---
 import Lander from "../components/Lander.astro"
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import { brainRelease } from "../data/vector-releases"
 
 export const prerender = true
 ---
 
 <MarketingLayout
-  title="Vector — the agentic workspace for builders"
-  description="Free with a Vector account, free models included. Direct parallel AI builders, operate the browser, review every change, and ship from one local-first workspace."
+  title="Vector — the self-evolving, low-cost AI agentic harness"
+  description={`The self-evolving, low-cost AI agentic harness. Vector Brain, ${brainRelease.lede}, links your docs to your code offline; the tokenomics engine sizes each request and stops a run within a step of your cap. Free with a Vector account, free models included.`}
 >
   <Lander />
 </MarketingLayout>
