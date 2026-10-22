@@ -54,7 +54,7 @@ import { Npm } from "@vectordevai/core/npm"
 import { Hash } from "@vectordevai/core/util/hash"
 import { Plugin } from "../plugin"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
-import { type LanguageModelV3 } from "@ai-sdk/provider"
+import { type LanguageModelV3, type LanguageModelV3CallOptions } from "@ai-sdk/provider"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { OAUTH_DUMMY_KEY } from "@/auth"
 import { Auth } from "../auth"
@@ -80,8 +80,14 @@ import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
 import { ResponseTerminal } from "./response-terminal"
+import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
+import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
+// A server someone hosts may load the model before it answers, which can take minutes on the first request, and a
+// large prompt can keep it busy between chunks. A provider's own headerTimeout or chunkTimeout replaces these.
+export const LOCAL_HEADER_TIMEOUT = 600_000
+export const LOCAL_CHUNK_TIMEOUT = 120_000
 
 function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   if (typeof ms !== "number" || ms <= 0) return res
@@ -175,6 +181,105 @@ function requestOrigin(
   if (!url || !URL.canParse(url)) return
   const parsed = new URL(url)
   return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.origin : undefined
+}
+
+// The line a model's requests wait in at a server someone hosts. The session processor names the user's turn and its
+// subagents; any other request, such as a title, a summary or a generated agent, is a helper.
+const priorities = new WeakMap<Model, ModelSlots.Priority>()
+
+/** A copy of `model` whose requests to a model server someone hosts wait in line as `priority`. */
+export function withPriority(model: Model, priority: ModelSlots.Priority): Model {
+  const copy = { ...model }
+  priorities.set(copy, priority)
+  return copy
+}
+
+/**
+ * Where a model's requests go as configured, its provider's base URL else the catalog's, without the variables the
+ * SDK fills in later. Enough to tell a model server on this computer from a cloud API.
+ */
+export function serverURL(model: Model, provider: Pick<Info, "options"> | undefined) {
+  const configured = provider?.options?.["baseURL"]
+  if (typeof configured === "string" && configured !== "") return configured
+  return model.api.url || SDK_ORIGINS[model.api.npm]
+}
+
+// Holds each request to a server someone hosts to a permit, and keeps its reply inside the server's context. The permit
+// is taken before the SDK calls fetch, where the header timeout starts, and given back when the reply ends, fails, is
+// cancelled or its request is aborted. `context` is 0 for a server whose context is not known, or a cloud API that
+// configures `concurrency`: neither has its reply limit changed.
+function fitted(
+  language: LanguageModelV3,
+  input: {
+    readonly slots: ModelSlots.Interface
+    readonly origin: string
+    readonly permits: number
+    readonly priority: ModelSlots.Priority
+    readonly context: number
+  },
+): LanguageModelV3 {
+  const acquire = (options: LanguageModelV3CallOptions) =>
+    input.slots.acquire({
+      origin: input.origin,
+      permits: input.permits,
+      priority: input.priority,
+      signal: options.abortSignal,
+    })
+  const clamp = (options: LanguageModelV3CallOptions) => {
+    if (input.context <= 0 || options.maxOutputTokens === undefined) return options
+    const room = input.context - promptTokens(options)
+    // A request that does not fit at all keeps its limit; the server's refusal starts compaction.
+    if (room < 1) return options
+    return { ...options, maxOutputTokens: Math.min(options.maxOutputTokens, room) }
+  }
+  // Everything else, such as the model's name and supported URLs, reads through to the SDK's own model.
+  const wrapped: LanguageModelV3 = Object.create(language)
+  return Object.assign(wrapped, {
+    doGenerate: async (options: LanguageModelV3CallOptions) => {
+      const release = await acquire(options)
+      return Promise.resolve(language.doGenerate(clamp(options))).finally(release)
+    },
+    doStream: async (options: LanguageModelV3CallOptions) => {
+      const release = await acquire(options)
+      options.abortSignal?.addEventListener("abort", release, { once: true })
+      const result = await Promise.resolve(language.doStream(clamp(options))).catch((error: unknown) => {
+        release()
+        throw error
+      })
+      return { ...result, stream: releasing(result.stream, release) }
+    },
+  })
+}
+
+// Prompts with code and JSON run nearer three characters a token than four, so this leans high: a reply cut a little
+// short is better than a request the server refuses. File contents are left out; they are not sent as text.
+function promptTokens(options: LanguageModelV3CallOptions) {
+  const text = JSON.stringify([options.prompt, options.tools ?? []], (key, value) =>
+    value instanceof Uint8Array || value instanceof URL || (key === "data" && typeof value === "string") ? "" : value,
+  )
+  return Math.ceil(text.length / 3)
+}
+
+function releasing<T>(stream: ReadableStream<T>, release: () => void) {
+  const reader = stream.getReader()
+  return new ReadableStream<T>({
+    async pull(controller) {
+      const part = await reader.read().catch((error: unknown) => {
+        release()
+        throw error
+      })
+      if (part.done) {
+        release()
+        controller.close()
+        return
+      }
+      controller.enqueue(part.value)
+    },
+    cancel(reason) {
+      release()
+      return reader.cancel(reason)
+    },
+  })
 }
 
 // Opens the connection a model's first request will use, so its DNS lookup and TCP and TLS handshakes overlap the
@@ -1576,6 +1681,7 @@ const layer = Layer.effect(
     const freeCredentials = yield* FreeModels.CredentialsService
     const guests = yield* FreeModelGuests.Service
     const events = yield* EventV2Bridge.Service
+    const slots = yield* ModelSlots.Service
     const runtimeBridge = yield* EffectBridge.make()
     const planID = ProviderV2.ID.make(ModelPlans.PROVIDER_ID)
 
@@ -2229,11 +2335,15 @@ const layer = Layer.effect(
         if (existing) return existing
 
         const customFetch = options["fetch"]
-        const chunkTimeout = options["chunkTimeout"]
-        const headerTimeout = options["headerTimeout"]
+        const hosted =
+          ModelSlots.server(typeof options["preconnect"] === "string" ? options["preconnect"] : baseURL) !== undefined
+        const chunkTimeout = options["chunkTimeout"] ?? (hosted ? LOCAL_CHUNK_TIMEOUT : undefined)
+        const headerTimeout = options["headerTimeout"] ?? (hosted ? LOCAL_HEADER_TIMEOUT : undefined)
         delete options["chunkTimeout"]
         delete options["headerTimeout"]
         delete options["preconnect"]
+        // Read by getLanguage for the server's permits; the SDK has no use for it.
+        delete options["concurrency"]
 
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
           const fetchFn = customFetch ?? fetch
@@ -2400,31 +2510,55 @@ const layer = Layer.effect(
       const s = yield* InstanceState.get(state)
       const envs = yield* env.all()
       const key = `${model.providerID}/${model.id}`
-      if (s.models.has(key)) return s.models.get(key)!
-
       const provider = s.providers[model.providerID]
-      return yield* EffectPromise.refineRejection(
-        async () => {
-          const sdk = await resolveSDK(model, s, envs)
-          const language = s.modelLoaders[model.providerID]
-            ? await s.modelLoaders[model.providerID](
-                sdk,
-                model.api.id,
-                {
-                  ...provider.options,
-                  ...model.options,
-                },
-                model,
-              )
-            : sdk.languageModel(model.api.id)
-          s.models.set(key, language)
-          return language
-        },
-        (cause) =>
-          cause instanceof NoSuchModelError
-            ? new ModelNotFoundError({ modelID: model.id, providerID: model.providerID, cause })
-            : undefined,
-      )
+      const language =
+        s.models.get(key) ??
+        (yield* EffectPromise.refineRejection(
+          async () => {
+            const sdk = await resolveSDK(model, s, envs)
+            const loaded = s.modelLoaders[model.providerID]
+              ? await s.modelLoaders[model.providerID](
+                  sdk,
+                  model.api.id,
+                  {
+                    ...provider.options,
+                    ...model.options,
+                  },
+                  model,
+                )
+              : sdk.languageModel(model.api.id)
+            s.models.set(key, loaded)
+            return loaded
+          },
+          (cause) =>
+            cause instanceof NoSuchModelError
+              ? new ModelNotFoundError({ modelID: model.id, providerID: model.providerID, cause })
+              : undefined,
+        ))
+      // Free models and Vector Codium choose their route per request and are never on a server someone hosts.
+      if (!provider || model.providerID === "vector" || model.providerID === planID || model.freeModel) return language
+      const origin = requestOrigin(model, provider.options, s.varsLoaders[model.providerID], envs)
+      const hosted = ModelSlots.server(origin)
+      // How many requests the server takes: this provider's concurrency, else the smallest one another provider
+      // pointing at the same server configures, since they share it.
+      const own = provider.options["concurrency"]
+      const shared = Object.values(s.providers).flatMap((item) => {
+        const value = item.options["concurrency"]
+        const at = typeof item.options["baseURL"] === "string" ? LocalPolicy.origin(item.options["baseURL"]) : undefined
+        return item !== provider && typeof value === "number" && at && at === LocalPolicy.origin(origin ?? "")
+          ? [value]
+          : []
+      })
+      const permits = typeof own === "number" ? own : shared.length ? Math.min(...shared) : ModelSlots.DEFAULT_PERMITS
+      // A cloud API is left as it is unless a provider configures how many requests it takes.
+      if (!origin || (!hosted && permits === ModelSlots.DEFAULT_PERMITS)) return language
+      return fitted(language, {
+        slots,
+        origin: hosted ?? origin,
+        permits,
+        priority: priorities.get(model) ?? "helper",
+        context: hosted ? model.limit.context : 0,
+      })
     })
 
     const preconnect = Effect.fn("Provider.preconnect")(function* (model: Model) {
@@ -2686,6 +2820,7 @@ export const node = LayerNode.make({
     FreeModels.credentialsNode,
     FreeModelGuests.node,
     EventV2Bridge.node,
+    ModelSlots.node,
   ],
 })
 

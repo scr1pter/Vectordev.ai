@@ -6,7 +6,7 @@ import * as AnthropicMessages from "@vectordevai/llm/protocols/anthropic-message
 import * as OpenAICompatibleChat from "@vectordevai/llm/protocols/openai-compatible-chat"
 import * as OpenAIResponses from "@vectordevai/llm/protocols/openai-responses"
 import { Auth, type AnyRoute } from "@vectordevai/llm/route"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import { produce } from "immer"
 import { FreeModels } from "../../free-models"
 import { FreeModelGuests } from "../../free-model-guests"
@@ -30,6 +30,7 @@ import { WorkspaceTrust } from "../../workspace-trust/workspace-trust"
 import { SpendGuard } from "../../spend-guard"
 import { NEXT_STEP_SLACK } from "../../review/plan"
 import { isFreeModel } from "@vectordevai/schema/free-model"
+import { ModelSlots } from "../../local-mode/model-slots"
 
 export class ModelNotSelectedError extends Schema.TaggedErrorClass<ModelNotSelectedError>()(
   "SessionRunnerModel.ModelNotSelectedError",
@@ -188,6 +189,8 @@ export const spendStep = (
       oauthPlan: false,
       listed:
         reportedUsd(model, settlement.providerMetadata) !== undefined || (costUsd !== undefined && price !== undefined),
+      // V2 does not read the server list yet, so only a server on this computer counts.
+      local: ModelSlots.local(model.route.endpoint.baseURL),
     }),
     price,
     contextTokens,
@@ -232,14 +235,23 @@ const apiKey = (model: ModelV2.Info, credential?: Credential.Value) => {
   if (typeof value === "string") return Auth.value(value)
 }
 
-const withDefaults = (model: ModelV2.Info, route: AnyRoute, mayTrain: Effect.Effect<boolean>) => {
+/** The line a session's requests wait in at a model server someone hosts. */
+export type Slots = { readonly slots: ModelSlots.Interface; readonly priority: ModelSlots.Priority }
+
+const withDefaults = (
+  model: ModelV2.Info,
+  route: AnyRoute,
+  mayTrain: Effect.Effect<boolean>,
+  slots: Slots | undefined,
+) => {
   const body = model.request.body
   const httpBody = Object.hasOwn(body, "apiKey")
     ? Object.fromEntries(Object.entries(body).filter(([key]) => key !== "apiKey"))
     : body
-  const routed = sendsToOpenRouter({ providerID: model.providerID, destinations: destinations(model) })
+  const trained = sendsToOpenRouter({ providerID: model.providerID, destinations: destinations(model) })
     ? withoutUnconsentedTraining(route, model.api.id, mayTrain)
     : route
+  const routed = withSlots(trained, slots, model.api.url)
   return routed.with({
     provider: model.providerID,
     endpoint: model.api.url === undefined ? undefined : { baseURL: model.api.url },
@@ -275,6 +287,27 @@ const withoutUnconsentedTraining = (route: AnyRoute, modelID: string, mayTrain: 
     },
   })
 
+// A request to a server on this computer or the user's network holds its place in the server's line until its reply
+// ends, fails or is interrupted, so helpers on that server wait for it. V2 reads no configured concurrency yet, so its
+// own requests never wait.
+const withSlots = (route: AnyRoute, slots: Slots | undefined, url: string | undefined) => {
+  const origin = ModelSlots.server(url)
+  if (!slots || !origin) return route
+  return route.with({
+    transport: {
+      ...route.transport,
+      frames: (...input: Parameters<AnyRoute["transport"]["frames"]>) =>
+        Stream.unwrap(
+          slots.slots.take({ origin, permits: ModelSlots.DEFAULT_PERMITS, priority: slots.priority }).pipe(
+            // Only helpers are dropped for a new prompt, and a session's turn is never one.
+            Effect.orDie,
+            Effect.as(route.transport.frames(...input)),
+          ),
+        ),
+    },
+  })
+}
+
 const withVariant = (
   model: ModelV2.Info,
   variantID: ModelV2.VariantID | undefined,
@@ -307,6 +340,7 @@ export const fromCatalogModel = (
   credential?: Credential.Value,
   /** Whether the user accepted the "May train on your prompts" notice and no invited guest has worked in the session. */
   mayTrain: Effect.Effect<boolean> = Effect.succeed(false),
+  slots?: Slots,
 ): Effect.Effect<Model, UnsupportedApiError | UnsafeEndpointError> => {
   const resolved =
     credential?.type !== "key" || credential.metadata === undefined
@@ -323,7 +357,7 @@ export const fromCatalogModel = (
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai") {
     return Effect.succeed(
       withPricing(
-        withDefaults(resolved, OpenAIResponses.route, mayTrain)
+        withDefaults(resolved, OpenAIResponses.route, mayTrain, slots)
           .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
           .model({ id: resolved.api.id }),
         resolved.cost,
@@ -333,7 +367,7 @@ export const fromCatalogModel = (
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/anthropic") {
     return Effect.succeed(
       withPricing(
-        withDefaults(resolved, AnthropicMessages.route, mayTrain)
+        withDefaults(resolved, AnthropicMessages.route, mayTrain, slots)
           .with({ auth: key === undefined ? Auth.none : Auth.header("x-api-key", key) })
           .model({ id: resolved.api.id }),
         resolved.cost,
@@ -343,7 +377,7 @@ export const fromCatalogModel = (
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai-compatible" && resolved.api.url) {
     return Effect.succeed(
       withPricing(
-        withDefaults(resolved, OpenAICompatibleChat.route, mayTrain)
+        withDefaults(resolved, OpenAICompatibleChat.route, mayTrain, slots)
           .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
           .model({ id: resolved.api.id }),
         resolved.cost,
@@ -364,9 +398,17 @@ export const resolve = (
   model: ModelV2.Info,
   credential?: Credential.Value,
   mayTrain?: Effect.Effect<boolean>,
+  slots?: ModelSlots.Interface,
 ) =>
   withVariant(model, session.model?.variant).pipe(
-    Effect.flatMap((model) => fromCatalogModel(model, credential, mayTrain)),
+    Effect.flatMap((model) =>
+      fromCatalogModel(
+        model,
+        credential,
+        mayTrain,
+        slots ? { slots, priority: session.parentID ? "subagent" : "user" } : undefined,
+      ),
+    ),
   )
 
 export const supported = (model: ModelV2.Info) =>
@@ -408,6 +450,8 @@ export const locationLayer = Layer.effect(
     const modelPlans = yield* ModelPlans.Service
     const freeCredentials = yield* FreeModels.CredentialsService
     const guests = yield* FreeModelGuests.Service
+    // Optional so a resolver built without the process's lines, as in tests, sends requests as they come.
+    const slots = Option.getOrUndefined(yield* Effect.serviceOption(ModelSlots.Service))
     return Service.of({
       resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
         const selected = yield* select(catalog, session)
@@ -429,6 +473,7 @@ export const locationLayer = Layer.effect(
           guests
             .marked(session.id)
             .pipe(Effect.flatMap((guest) => (guest ? Effect.succeed(false) : freeModels.trainingConsent()))),
+          slots,
         )
       }),
     })
@@ -445,6 +490,7 @@ export const node = makeLocationNode({
     FreeModels.credentialsNode,
     FreeModelGuests.node,
     ModelPlans.node,
+    ModelSlots.node,
   ],
 })
 

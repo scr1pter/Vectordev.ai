@@ -16,6 +16,41 @@ const LONG_CONTEXT_TIER = 200_000
 // A ceiling under this would leave little more room than the fixed system prompt and tools take.
 const MIN_MAX_CONTEXT = 64_000
 
+// Room an agent needs beyond its fixed prompt, for the conversation and the reply: a quarter of the fixed prompt, and
+// never less than this.
+export const HEADROOM = 4_096
+
+/**
+ * The context an agent needs on a model: its fixed prompt (the system prompt and tool definitions, measured for that
+ * agent on that model) plus headroom. An agent with no fixed prompt has nothing that must fit.
+ */
+export function requirement(fixed: number) {
+  if (fixed <= 0) return 0
+  return fixed + Math.max(HEADROOM, Math.ceil(fixed / 4))
+}
+
+/**
+ * Why a model cannot run an agent whose fixed prompt takes `fixed` tokens, or undefined when it can. A model with no
+ * listed context is refused too: its window is unknown, so it would never compact and Vector cannot tell what fits.
+ */
+export function refusal(input: { model: Provider.Model; fixed: number; agent: string }) {
+  const needed = requirement(input.fixed)
+  const context = input.model.limit.input || input.model.limit.context
+  if (needed === 0 || context >= needed) return undefined
+  const about = (Math.ceil(needed / 1_000) * 1_000).toLocaleString("en-US")
+  const role = MAIN_AGENTS.has(input.agent) ? "Vector's agent" : `Vector's ${input.agent} agent`
+  if (context === 0)
+    return `${input.model.id} has no listed context size. ${role} needs about ${about} tokens. Set limit.context for this model in your config, or pick another model.`
+  const size = context.toLocaleString("en-US")
+  // "an 8,192-token context", "an 11,000-token context", "a 16,384-token context".
+  const article = /^(8|1[18](,|$))/.test(size) ? "an" : "a"
+  return `${input.model.id} has ${article} ${size}-token context. ${role} needs about ${about}. Raise the context size (Ollama: num_ctx) or pick another model.`
+}
+
+const MAIN_AGENTS = new Set(["build", "plan", "quick", "research"])
+
+// There is no fallback window for a model with no listed context: guessing one (8K was proposed) would compact on
+// every step for most models. Such a model never compacts on its own; the agent refuses it on a server someone hosts.
 export function usable(input: { cfg: ConfigV1.Info; model: Provider.Model; outputTokenMax?: number }) {
   const context = input.model.limit.context
   if (context === 0) return 0
