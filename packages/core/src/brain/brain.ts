@@ -209,7 +209,7 @@ export type Injection = {
   readonly text?: string
   readonly ids: readonly string[]
   readonly tokens: number
-  /** Recall only: which of `ids` are the user's personal memory. */
+  /** Which of `ids` are the user's personal memory (recall and the digest). */
   readonly personal?: readonly string[]
   /** Recall only: the text without personal memory, which is all a session's saved transcript may keep. */
   readonly shared?: string
@@ -741,7 +741,12 @@ function make(db: BrainDatabase.Database, dirs: { readonly data: string; readonl
     ]
       .filter((part): part is string => part !== undefined)
       .join("\n")
-    return { text, ids: [...shown], tokens: Token.estimate(text) }
+    // Which of the entries shown are the owner's own (their rules, MEMORY.md and personal entries) or were learned
+    // beside a private document, for Vector Local's count of what a request carries.
+    const personal = rows
+      .filter((row) => shown.has(row.id) && (row.repository_id === PERSONAL || row.private))
+      .map((row) => row.id)
+    return { text, ids: [...shown], tokens: Token.estimate(text), personal }
   })
 
   const recallable = Effect.fnUntraced(function* (place: Place, personal: boolean, exclude: ReadonlySet<string>) {
