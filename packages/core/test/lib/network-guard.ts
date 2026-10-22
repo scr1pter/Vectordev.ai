@@ -11,12 +11,12 @@ import { FakeWeb } from "./fake-web"
 // tests import this by relative path, as they do core's other test fixtures.
 
 /** Installs the strict guard now. Call `uninstall()` when the test is done; `use()` does both for a file. */
-export function strict(options: EgressGuard.Options = {}) {
+export function strict(options: EgressGuard.StrictOptions = {}) {
   return EgressGuard.installStrict({ names: [FakeWeb.DOMAIN, ...(options.names ?? [])] })
 }
 
 /** Installs the strict guard for the calling test file's tests, and removes it after them. */
-export function use(options: EgressGuard.Options = {}) {
+export function use(options: EgressGuard.StrictOptions = {}) {
   const state: { handle?: EgressGuard.Handle } = {}
   beforeAll(() => {
     state.handle = strict(options)
