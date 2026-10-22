@@ -12,6 +12,7 @@ import { Provider } from "@/provider/provider"
 import { expect } from "bun:test"
 import { streamText, tool } from "ai"
 import { Effect, Fiber, Layer, Stream } from "effect"
+import { createServer } from "node:net"
 import path from "path"
 import z from "zod"
 import type { Agent } from "../../src/agent/agent"
@@ -244,6 +245,56 @@ it.live("a root session's new prompt drops a helper waiting for the same server"
     { trusted: true, config: (url) => providerCfg(url, 32_768) },
   ),
 )
+
+it.live("a server on this computer that nothing answers at says how to fix it while Vector retries", () =>
+  Effect.gen(function* () {
+    const port = yield* Effect.promise(closedPort)
+    const origin = `http://127.0.0.1:${port}`
+    return yield* provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const processors = yield* SessionProcessor.Service
+          const session = yield* Session.Service
+          const provider = yield* Provider.Service
+          const status = yield* SessionStatus.Service
+          const model = yield* provider.getModel(ref.providerID, ref.modelID)
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "fix the bug")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model })
+          const running = yield* handle
+            .process(input(chat.id, parent.id, model, agent("build"), ""))
+            .pipe(Effect.forkChild)
+
+          const retrying = yield* Effect.gen(function* () {
+            for (const _ of Array.from({ length: 500 })) {
+              const info = yield* status.get(chat.id)
+              if (info.type === "retry") return info
+              yield* Effect.sleep("20 millis")
+            }
+            return yield* Effect.die(new Error("the session never retried"))
+          })
+          expect(retrying.message).toStartWith(
+            `Nothing answered at ${origin}. Start the model server, or check its address and port. The error was: `,
+          )
+          yield* Fiber.interrupt(running)
+          expect(yield* llm.calls).toBe(0)
+          expect(guard.outside()).toEqual([])
+        }),
+      { trusted: true, config: () => providerCfg(`${origin}/v1`, 32_768) },
+    )
+  }),
+)
+
+// A loopback port nothing listens on: one the system just handed out and took back.
+async function closedPort() {
+  const server = createServer()
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const address = server.address()
+  await new Promise<void>((resolve) => server.close(() => resolve()))
+  if (!address || typeof address === "string") throw new Error("no port was handed out")
+  return address.port
+}
 
 function providerCfg(url: string, context: number) {
   return {

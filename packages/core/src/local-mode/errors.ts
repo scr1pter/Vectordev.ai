@@ -53,9 +53,10 @@ const RULES: readonly { kind: Kind; test: RegExp; fix: (input: Input) => string 
       `The conversation no longer fits the context ${input.model ?? "this model"} was loaded with. Raise the context size (Ollama: num_ctx) or pick another model.`,
   },
   {
-    // Bun: "Unable to connect. Is the computer able to access the url?"; Node: "connect ECONNREFUSED".
+    // Bun: "Unable to connect. Is the computer able to access the url?"; Node: "connect ECONNREFUSED". Behind Vector's
+    // own egress proxy (the strict guard), the proxy answers 502 with "Could not reach 127.0.0.1." instead.
     kind: "connection-refused",
-    test: /ECONNREFUSED|ConnectionRefused|Unable to connect|connection refused|Cannot connect to API/i,
+    test: /ECONNREFUSED|ConnectionRefused|Unable to connect|connection refused|Cannot connect to API|Could not reach \S+\./i,
     fix: (input) =>
       `Nothing answered at ${input.origin ?? "the model server's address"}. Start the model server, or check its address and port.`,
   },

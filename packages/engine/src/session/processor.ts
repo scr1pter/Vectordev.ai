@@ -25,6 +25,7 @@ import { SessionSummary } from "./summary"
 import { Provider } from "@/provider/provider"
 import { Question } from "@/question"
 import { errorMessage } from "@/util/error"
+import { NamedError } from "@vectordevai/core/util/error"
 import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@vectordevai/core/database/database"
@@ -911,22 +912,7 @@ const layer = Layer.effect(
           yield* events.publish(Session.Event.Error, { sessionID: ctx.sessionID, error })
           return
         }
-        // A server someone hosts says what went wrong in its own terms; the common failures get their fix in front.
-        const explained =
-          hosted && SessionV1.APIError.isInstance(error)
-            ? LocalErrors.explain({
-                text: [error.data.message, error.data.responseBody ?? ""].join(" "),
-                model: ctx.model.id,
-                origin: hosted,
-              })
-            : undefined
-        ctx.assistantMessage.error =
-          explained && SessionV1.APIError.isInstance(error)
-            ? new SessionV1.APIError({
-                ...error.data,
-                message: `${explained.fix} The server said: ${LocalErrors.plain(error.data.message)}`,
-              }).toObject()
-            : error
+        ctx.assistantMessage.error = hosted ? explain(error, ctx.model.id, hosted) : error
         yield* events.publish(Session.Event.Error, {
           sessionID: ctx.assistantMessage.sessionID,
           error: ctx.assistantMessage.error,
@@ -1081,7 +1067,8 @@ const layer = Layer.effect(
                   return status.set(ctx.sessionID, {
                     type: "retry",
                     attempt: info.attempt,
-                    message: info.message,
+                    // A server someone hosts that is not running is retried too, with the fix in front meanwhile.
+                    message: hosted ? fixed(info.message, ctx.model.id, hosted) : info.message,
                     action: info.action,
                     next: info.next,
                   })
@@ -1112,6 +1099,27 @@ const layer = Layer.effect(
     return Service.of({ create, settle })
   }),
 )
+
+// A server someone hosts says what went wrong in its own terms; the common failures get their fix in front. When nothing
+// answered at all, the words are the runtime's rather than the server's.
+function fixed(message: string, model: string, origin: string, body = "") {
+  const explained = LocalErrors.explain({ text: `${message} ${body}`, model, origin })
+  if (!explained) return message
+  const said = explained.kind === "connection-refused" ? "The error was" : "The server said"
+  return `${explained.fix} ${said}: ${LocalErrors.plain(message)}`
+}
+
+// The error a step ends with. Besides the server's own refusals, an unknown error is how the runtime's fetch can report
+// that nothing answered.
+function explain(error: ReturnType<typeof MessageV2.fromError>, model: string, origin: string) {
+  if (SessionV1.APIError.isInstance(error)) {
+    const message = fixed(error.data.message, model, origin, error.data.responseBody)
+    return message === error.data.message ? error : new SessionV1.APIError({ ...error.data, message }).toObject()
+  }
+  if (!NamedError.Unknown.isInstance(error)) return error
+  const message = fixed(error.data.message, model, origin)
+  return message === error.data.message ? error : new NamedError.Unknown({ message }).toObject()
+}
 
 // The part of every request an agent makes that does not change from step to step: the system prompt LLMRequestPrep
 // builds (the agent's own prompt or the model's, then the stable and per-session parts) and the tool definitions.
