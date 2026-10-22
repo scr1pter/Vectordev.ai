@@ -641,7 +641,7 @@ export const dict = {
   "home.empty.title": "No repositories yet",
   "home.empty.description": "Open a codebase or start a task in a clean workspace",
   "home.title": "Vector",
-  "home.projects": "Repositories",
+  "home.projects": "Agents",
   "home.project.add": "Open repository",
   "home.server.collapse": "Collapse server repositories",
   "home.server.expand": "Expand server repositories",
@@ -835,7 +835,7 @@ export const dict = {
   "common.time.daysAgo.short": "{{count}}d ago",
 
   "sidebar.menu.toggle": "Toggle menu",
-  "sidebar.nav.projectsAndSessions": "Repositories and sessions",
+  "sidebar.nav.projectsAndSessions": "Agents and sessions",
   "sidebar.settings": "Settings",
   "sidebar.help": "Help",
   "sidebar.workspaces.enable": "Enable workspaces",

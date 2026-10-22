@@ -568,7 +568,7 @@ export const dict = {
 
   "common.key.esc": "ESC",
   "sidebar.menu.toggle": "Skift menu",
-  "sidebar.nav.projectsAndSessions": "Repositories og sessioner",
+  "sidebar.nav.projectsAndSessions": "Agenter og sessioner",
   "sidebar.settings": "Indstillinger",
   "sidebar.help": "Hjælp",
   "sidebar.workspaces.enable": "Aktiver arbejdsområder",
