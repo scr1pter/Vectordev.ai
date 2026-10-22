@@ -31,6 +31,7 @@ import { SpendGuard } from "../../spend-guard"
 import { NEXT_STEP_SLACK } from "../../review/plan"
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { ModelSlots } from "../../local-mode/model-slots"
+import { LocalPolicy } from "../../local-mode/policy"
 
 export class ModelNotSelectedError extends Schema.TaggedErrorClass<ModelNotSelectedError>()(
   "SessionRunnerModel.ModelNotSelectedError",
@@ -251,7 +252,7 @@ const withDefaults = (
   const trained = sendsToOpenRouter({ providerID: model.providerID, destinations: destinations(model) })
     ? withoutUnconsentedTraining(route, model.api.id, mayTrain)
     : route
-  const routed = withSlots(trained, slots, model.api.url)
+  const routed = withSlots(trained, slots, model)
   return routed.with({
     provider: model.providerID,
     endpoint: model.api.url === undefined ? undefined : { baseURL: model.api.url },
@@ -288,17 +289,22 @@ const withoutUnconsentedTraining = (route: AnyRoute, modelID: string, mayTrain: 
   })
 
 // A request to a server on this computer or the user's network holds its place in the server's line until its reply
-// ends, fails or is interrupted, so helpers on that server wait for it. V2 reads no configured concurrency yet, so its
-// own requests never wait.
-const withSlots = (route: AnyRoute, slots: Slots | undefined, url: string | undefined) => {
-  const origin = ModelSlots.server(url)
+// ends, fails or is interrupted, so helpers on that server wait for it. It waits for a permit when the provider's
+// `concurrency` setting, or a V1 provider pointing at the same server, says how many requests the server takes. A
+// cloud API gets a line only when its provider sets `concurrency`, as in V1.
+const withSlots = (route: AnyRoute, slots: Slots | undefined, model: ModelV2.Info) => {
+  const configured = model.api.settings?.["concurrency"]
+  const permits = typeof configured === "number" && configured > 0 ? configured : undefined
+  const origin =
+    ModelSlots.server(model.api.url) ??
+    (permits !== undefined && model.api.url !== undefined ? LocalPolicy.origin(model.api.url) : undefined)
   if (!slots || !origin) return route
   return route.with({
     transport: {
       ...route.transport,
       frames: (...input: Parameters<AnyRoute["transport"]["frames"]>) =>
         Stream.unwrap(
-          slots.slots.take({ origin, permits: ModelSlots.DEFAULT_PERMITS, priority: slots.priority }).pipe(
+          slots.slots.take({ origin, permits, priority: slots.priority }).pipe(
             // Only helpers are dropped for a new prompt, and a session's turn is never one.
             Effect.orDie,
             Effect.as(route.transport.frames(...input)),

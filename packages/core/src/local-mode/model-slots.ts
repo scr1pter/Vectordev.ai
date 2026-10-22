@@ -26,8 +26,13 @@ export const DEFAULT_PERMITS = Number.POSITIVE_INFINITY
 export type Request = {
   /** The server's origin, such as http://127.0.0.1:11434. */
   readonly origin: string
-  /** How many requests the server takes at once, or DEFAULT_PERMITS. The latest count applies to everyone waiting. */
-  readonly permits: number
+  /**
+   * How many requests the server takes at once, when the caller's config says. The latest count named applies to
+   * everyone waiting and stays for the process; a request that names none waits by it, or by DEFAULT_PERMITS when no
+   * request ever named one. So a caller that does not read the config, such as the V2 runner on a provider configured
+   * another way, never lifts the limit for the rest.
+   */
+  readonly permits?: number
   readonly priority: Priority
   /** Aborting it leaves the line, with the signal's reason. */
   readonly signal?: AbortSignal
@@ -73,7 +78,6 @@ type Waiter = {
 }
 
 type Server = {
-  permits: number
   readonly running: Record<Priority, number>
   readonly waiting: Waiter[]
 }
@@ -81,7 +85,12 @@ type Server = {
 /** A fresh, empty set of lines. The service holds one per process; tests make their own. */
 export function make(): Interface {
   const servers = new Map<string, Server>()
+  // The latest count a request named for each server. It outlives the server's line, which ends whenever the server is
+  // idle, so the next request that names none still waits by it.
+  const counts = new Map<string, number>()
   let order = 0
+
+  const permits = (origin: string) => counts.get(origin) ?? DEFAULT_PERMITS
 
   const pump = (origin: string, server: Server) => {
     while (true) {
@@ -95,7 +104,7 @@ export function make(): Interface {
             : best,
         undefined,
       )
-      if (!next || running >= server.permits) break
+      if (!next || running >= permits(origin)) break
       // A helper runs only on an idle server, so it never takes a permit beside the user's turn or a subagent.
       if (next.priority === "helper" && server.running.user + server.running.subagent > 0) break
       server.waiting.splice(server.waiting.indexOf(next), 1)
@@ -115,13 +124,10 @@ export function make(): Interface {
   const acquire = (request: Request) =>
     new Promise<Release>((resolve, reject) => {
       if (request.signal?.aborted) return reject(request.signal.reason)
-      const server = servers.get(request.origin) ?? {
-        permits: DEFAULT_PERMITS,
-        running: { user: 0, subagent: 0, helper: 0 },
-        waiting: [],
-      }
+      const server = servers.get(request.origin) ?? { running: { user: 0, subagent: 0, helper: 0 }, waiting: [] }
       servers.set(request.origin, server)
-      server.permits = Math.max(1, Math.floor(request.permits))
+      if (request.permits !== undefined && Number.isFinite(request.permits))
+        counts.set(request.origin, Math.max(1, Math.floor(request.permits)))
       const leave = () => {
         const index = server.waiting.indexOf(waiter)
         if (index === -1) return
@@ -178,9 +184,9 @@ export function make(): Interface {
 
   const queue = (origin: string): Queue => {
     const server = servers.get(origin)
-    if (!server) return { permits: DEFAULT_PERMITS, running: 0, waiting: 0 }
+    if (!server) return { permits: permits(origin), running: 0, waiting: 0 }
     return {
-      permits: server.permits,
+      permits: permits(origin),
       running: server.running.user + server.running.subagent + server.running.helper,
       waiting: server.waiting.length,
     }
