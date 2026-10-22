@@ -462,8 +462,11 @@ const layer = Layer.effect(
       const found = yield* current(input.ctx)
       if ("refused" in found) return { type: "refused", message: found.refused } satisfies Brief
       if (!input.resume) {
+        // This run's researchers: a session may hold several runs, one after another.
         const started = (yield* sessions.children(found.lead.id)).filter(
-          (child) => (SubagentLifecycle.read(child)?.agent ?? child.agent) === RESEARCHER,
+          (child) =>
+            (SubagentLifecycle.read(child)?.agent ?? child.agent) === RESEARCHER &&
+            child.time.created >= found.run.created_at,
         ).length
         const cap = (yield* limits(found.plan.depth)).researchers
         if (started >= cap)

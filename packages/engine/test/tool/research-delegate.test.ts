@@ -184,3 +184,35 @@ it.instance(
     }),
   90_000,
 )
+
+it.instance(
+  "a run starts no more researchers than its depth allows",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup(web, { research: { limits: { deep: { researchers: 1 } } } })
+      const sessions = yield* Session.Service
+      const lead = yield* sessions.create({ title: "Research", permission: allow })
+      yield* llm.tool("research_plan", plan({ depth: "deep" }))
+      yield* llm.tool("task", {
+        description: "First",
+        prompt: SUBQUESTION,
+        subagent_type: "researcher",
+        background: false,
+      })
+      yield* llm.textMatch(researcher, "Found it.")
+      yield* llm.tool("task", {
+        description: "Second",
+        prompt: "How long do heat pumps last in cold climates?",
+        subagent_type: "researcher",
+        background: false,
+      })
+      yield* llm.text("Done.")
+      yield* send({ sessionID: lead.id, agent: "research", text: "Research how teams test payments code." })
+      const [first, second] = yield* calls(lead.id, "task")
+      expect(first?.state.status).toBe("completed")
+      expect(second?.state.status).toBe("error")
+      expect(output(second)).toContain("has its 1 researcher")
+      expect(yield* sessions.children(lead.id)).toHaveLength(1)
+    }),
+  90_000,
+)
