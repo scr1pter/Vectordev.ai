@@ -70,8 +70,8 @@ export async function inspect(read: LocalProbe.Read, identified: unknown): Promi
     ]),
   )
   const listed = Option.getOrUndefined(Schema.decodeUnknownOption(Tags)(tags))?.models ?? []
-  const models = await Promise.all(
-    listed.map(async (tag): Promise<LocalProbe.Model> => {
+  const answered = await Promise.all(
+    listed.map(async (tag): Promise<LocalProbe.Model | undefined> => {
       const base = {
         id: tag.name,
         size: tag.size,
@@ -82,6 +82,9 @@ export async function inspect(read: LocalProbe.Read, identified: unknown): Promi
       if (cloud(tag)) return { ...base, cloud: true }
       const show = Option.getOrUndefined(Schema.decodeUnknownOption(Show)(await read("/api/show", { model: tag.name })))
       if (show && cloud(show)) return { ...base, cloud: true }
+      // An embedding model, such as nomic-embed-text, lists no `completion` capability and cannot answer a chat, so it
+      // is left out like LM Studio's embedding models. Older servers that list no capabilities keep every model.
+      if (show?.capabilities && !show.capabilities.includes("completion")) return undefined
       const architecture = show?.model_info?.["general.architecture"]
       const trained =
         typeof architecture === "string" ? show?.model_info?.[`${architecture}.context_length`] : undefined
@@ -97,6 +100,7 @@ export async function inspect(read: LocalProbe.Read, identified: unknown): Promi
       }
     }),
   )
+  const models = answered.filter((model): model is LocalProbe.Model => model !== undefined)
   return {
     version: Option.getOrUndefined(Schema.decodeUnknownOption(Version)(identified))?.version,
     models,

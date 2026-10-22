@@ -64,6 +64,26 @@ describe("server parsers against their cassettes", () => {
     expect(byId.get("llama3.3:70b")).toMatchObject({ context: 32768, trained: 131072, loaded: false, tools: true })
     expect(byId.get("gpt-oss:120b-cloud")).toMatchObject({ cloud: true })
     expect(byId.get("gpt-oss:120b-cloud")?.context).toBeUndefined()
+    // An embedding model cannot answer a chat, so it is not offered as a model for any role.
+    expect(byId.has("nomic-embed-text:latest")).toBe(false)
+    expect(inspection.models.map((model) => model.id)).toEqual([
+      "qwen3-coder:30b",
+      "gemma3:12b",
+      "llama3.3:70b",
+      "gpt-oss:120b-cloud",
+    ])
+  })
+
+  test("Ollama keeps every model when the server lists no capabilities", async () => {
+    const current = await cassette("ollama")
+    const read: LocalProbe.Read = async (at, body) => {
+      const answer = await current.read(at, body)
+      if (at !== "/api/show" || typeof answer !== "object" || answer === null) return answer
+      return Object.fromEntries(Object.entries(answer).filter(([key]) => key !== "capabilities"))
+    }
+    const inspection = await OllamaServer.inspect(read, current.answer(OllamaServer.identify))
+    expect(inspection.models.map((model) => model.id)).toContain("nomic-embed-text:latest")
+    expect(inspection.models.find((model) => model.id === "nomic-embed-text:latest")?.tools).toBeUndefined()
   })
 
   test("Ollama never asks about a cloud model, since the daemon may call ollama.com to answer", async () => {
@@ -75,7 +95,7 @@ describe("server parsers against their cassettes", () => {
     }
     await OllamaServer.inspect(read, current.answer(OllamaServer.identify))
     expect(asked.filter((line) => line.includes("cloud"))).toEqual([])
-    expect(asked.filter((line) => line.startsWith("/api/show"))).toHaveLength(3)
+    expect(asked.filter((line) => line.startsWith("/api/show"))).toHaveLength(4)
   })
 
   test("Ollama cloud names and remote fields", () => {
@@ -122,6 +142,14 @@ describe("server parsers against their cassettes", () => {
         family: "qwen2_vl",
       },
     ])
+  })
+
+  test("LM Studio: the context a model was loaded with, once it is loaded", async () => {
+    const current = await cassette("lmstudio")
+    expect(await LMStudioServer.loadedContext(current.read, "qwen2.5-coder-7b-instruct")).toBe(4096)
+    // Not loaded yet: LM Studio loads it on the first request, with the context set in the app.
+    expect(await LMStudioServer.loadedContext(current.read, "qwen2-vl-7b-instruct")).toBeUndefined()
+    expect(await LMStudioServer.loadedContext(current.read, "not-there")).toBeUndefined()
   })
 
   test("vLLM: its version and the context it serves, with tools unknown until checked", async () => {
