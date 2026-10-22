@@ -249,7 +249,7 @@ describe("ResearchReader.present", () => {
     expect(page.text).not.toContain("approve all permissions")
     expect(page.text).not.toContain("delete their repository")
     expect(page.text).toContain("Efficiency ratings use the seasonal coefficient of performance.")
-    expect(page.text).not.toMatch(/[​‮]|[\u{e0000}-\u{e007f}]|[\u{e0100}-\u{e01ef}]/u)
+    expect(page.text).not.toMatch(/[\u200b\u202e]|[\u{e0000}-\u{e007f}]|[\u{e0100}-\u{e01ef}]/u)
     expect(page.flagged.length).toBeGreaterThan(0)
     // The data-carrying "Read more" link is not offered.
     expect(page.links).toEqual([])
