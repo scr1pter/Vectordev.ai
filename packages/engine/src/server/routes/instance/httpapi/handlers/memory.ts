@@ -7,11 +7,14 @@ import { BrainEmbed } from "@vectordevai/core/brain/embed"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import type { BrainSchema } from "@vectordevai/core/brain/schema"
 import { Flag } from "@vectordevai/core/flag/flag"
+import { Git } from "@/git"
 import { Instruction } from "@/session/instruction"
 import { SessionDistill } from "@/session/distill"
+import { SessionPosting } from "@/session/posting"
 import { SessionID } from "@/session/schema"
+import { Session } from "@/session/session"
 import { InstanceHttpApi } from "../api"
-import { MemoryApiError, MemoryTooLargeError, TEXT_BYTES, UPLOAD_BYTES } from "../groups/memory"
+import { MemoryApiError, MemoryTooLargeError, POSTING_CHARS, TEXT_BYTES, UPLOAD_BYTES } from "../groups/memory"
 
 const refused = (message: string, reason?: string, document?: BrainSchema.Document) =>
   new MemoryApiError({
@@ -48,6 +51,8 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
     const knowledge = yield* BrainKnowledge.Service
     const embed = yield* BrainEmbed.Service
     const distiller = yield* SessionDistill.Service
+    const sessions = yield* Session.Service
+    const git = yield* Git.Service
 
     const list = Effect.fn("MemoryHttpApi.list")(function* (ctx: {
       query: { scope?: "repository" | "personal"; filter?: Brain.Filter; query?: string }
@@ -507,6 +512,26 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       return yield* knowledge.cards(yield* instruction.place(), ids, { personal: true })
     })
 
+    const postingCheck = Effect.fn("MemoryHttpApi.postingCheck")(function* (ctx: {
+      payload: {
+        parts: readonly string[]
+        sessionIDs?: readonly string[]
+        typed: boolean
+        untrusted?: boolean
+        hosts?: readonly string[]
+      }
+    }) {
+      if (ctx.payload.parts.reduce((sum, part) => sum + part.length, 0) > POSTING_CHARS)
+        return yield* refused("Vector checks at most 2,000,000 characters at a time.", "limit")
+      return yield* SessionPosting.check(ctx.payload).pipe(
+        Effect.provideService(Instruction.Service, instruction),
+        Effect.provideService(Session.Service, sessions),
+        Effect.provideService(Git.Service, git),
+        Effect.provideService(Brain.Service, brain),
+        Effect.provideService(BrainKnowledge.Service, knowledge),
+      )
+    })
+
     return handlers
       .handle("list", list)
       .handle("get", get)
@@ -538,5 +563,6 @@ export const memoryHandlers = HttpApiBuilder.group(InstanceHttpApi, "memory", (h
       .handle("review", review)
       .handle("resolveReview", resolveReview)
       .handle("knowledge", cited)
+      .handle("postingCheck", postingCheck)
   }),
 )
