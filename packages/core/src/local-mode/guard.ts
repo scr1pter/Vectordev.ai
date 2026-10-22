@@ -527,28 +527,9 @@ function wrap(input: Wrap): Handle {
     }
   globalThis.fetch = fetch
 
-  const OriginalWebSocket = globalThis.WebSocket
-  const GuardedWebSocket = class extends OriginalWebSocket {
-    constructor(url: string | URL, protocols?: unknown) {
-      // An address WebSocket cannot parse fails in its own constructor, with its own error.
-      if (input.active() && URL.canParse(String(url))) {
-        const target = new URL(String(url))
-        const judged = input.judge({
-          kind: "websocket",
-          host: target.hostname,
-          port: portOf(target),
-          url: target.origin,
-        })
-        if (judged.blocked) throw judged.blocked
-        // Bun's WebSocket takes a `proxy` of its own in its options; the proxy environment it does not read.
-        const proxy = proxyOption(protocols)
-        const blocked = proxy === undefined ? undefined : input.proxied(target, { proxy })
-        if (blocked) throw blocked
-      }
-      super(url, protocols as never)
-    }
-  }
-  globalThis.WebSocket = GuardedWebSocket as typeof globalThis.WebSocket
+  // A runtime without a global WebSocket (Node before 22) has none to wrap.
+  const OriginalWebSocket = globalThis.WebSocket as typeof globalThis.WebSocket | undefined
+  if (OriginalWebSocket) globalThis.WebSocket = guardedWebSocket(OriginalWebSocket, input)
 
   // Read from globalThis, so this module also type-checks and runs where there is no Bun.
   const sockets = (globalThis as unknown as { Bun?: BunSockets }).Bun
@@ -643,7 +624,7 @@ function wrap(input: Wrap): Handle {
     attempts: () => [...input.attempts],
     uninstall: () => {
       globalThis.fetch = originalFetch
-      globalThis.WebSocket = OriginalWebSocket
+      if (OriginalWebSocket) globalThis.WebSocket = OriginalWebSocket
       if (worker) {
         globalThis.Worker = OriginalWorker
         threads.Worker = OriginalThreadWorker
@@ -661,6 +642,29 @@ function wrap(input: Wrap): Handle {
   }
   state.handle = handle
   return handle
+}
+
+function guardedWebSocket(Original: typeof globalThis.WebSocket, input: Wrap) {
+  return class extends Original {
+    constructor(url: string | URL, protocols?: unknown) {
+      // An address WebSocket cannot parse fails in its own constructor, with its own error.
+      if (input.active() && URL.canParse(String(url))) {
+        const target = new URL(String(url))
+        const judged = input.judge({
+          kind: "websocket",
+          host: target.hostname,
+          port: portOf(target),
+          url: target.origin,
+        })
+        if (judged.blocked) throw judged.blocked
+        // Bun's WebSocket takes a `proxy` of its own in its options; the proxy environment it does not read.
+        const proxy = proxyOption(protocols)
+        const blocked = proxy === undefined ? undefined : input.proxied(target, { proxy })
+        if (blocked) throw blocked
+      }
+      super(url, protocols as never)
+    }
+  } as typeof globalThis.WebSocket
 }
 
 function keep(attempts: Attempt[], attempt: Attempt, judged: Judged): Judged {
