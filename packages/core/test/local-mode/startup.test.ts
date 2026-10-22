@@ -165,6 +165,29 @@ describe("LocalStartup.policy", () => {
     expect(LocalStartup.policy({ ...input, env: {} })).toMatchObject({ enabled: true })
   })
 
+  test("turns it on with Web access None for a company policy file it cannot read, as config does", async () => {
+    await using dir = await tmpdir()
+    const input = folders(dir.path)
+    write(path.join(input.config, "vector.json"), JSON.stringify({ local: { enabled: false } }))
+    // A folder where the company's file belongs: the file system refuses to read it, as it refuses a file without
+    // permission, whoever runs the test.
+    const company = path.join(input.managed[0]!, "vector.json")
+    fs.mkdirSync(company, { recursive: true })
+    expect(LocalStartup.enabled({ ...input, env: {} })).toBe(true)
+    expect(LocalStartup.policy({ ...input, env: {} })).toMatchObject({ enabled: true, web: "none" })
+    fs.rmSync(company, { recursive: true })
+    // A file it may not read, where permissions apply to the user running the test.
+    if (process.platform !== "win32" && process.getuid?.() !== 0) {
+      write(company, JSON.stringify({ local: { enabled: false } }))
+      fs.chmodSync(company, 0o000)
+      expect(LocalStartup.policy({ ...input, env: {} })).toMatchObject({ enabled: true, web: "none" })
+      fs.chmodSync(company, 0o644)
+    }
+    // A missing file says nothing.
+    fs.rmSync(company, { force: true })
+    expect(LocalStartup.policy({ ...input, env: {} })).toMatchObject({ enabled: false })
+  })
+
   test("does not turn it on for a macOS profile, which it cannot read without running a program", async () => {
     await using dir = await tmpdir()
     const input = folders(dir.path)

@@ -8,8 +8,9 @@ import { LocalStartup } from "@vectordevai/core/local-mode/startup"
 // does, so once preferAppEnv has set the desktop's folders, and before app.whenReady, it is resolved here from the
 // sources the desktop's engine reads: the global config folder prepareSidecarEnv (sidecar.ts) points the engine at,
 // the desktop's own folder (VECTOR_AGENT_CONFIG_DIR), and the engine's state folder. A company policy file, whose owner
-// is not checked here yet, can only turn Vector Local on (LocalStartup.policy). It is read once, at start: a change
-// made while the desktop runs applies here at the next start.
+// is not checked here yet, can only turn Vector Local on, and one this process cannot read turns it on with Web access
+// None, as the engine's config does (LocalStartup.policy). It is read once, at start: a change made while the desktop
+// runs applies here at the next start.
 
 /** Resolves this process's Vector Local policy from the desktop's own folders; preferAppEnv must have run. */
 export function resolveDesktopLocal(userData: string) {

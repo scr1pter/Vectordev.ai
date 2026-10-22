@@ -13,8 +13,9 @@ import { LocalPolicy } from "./policy"
 // entry point, synchronously, so that Egress starts pending (only this computer reachable) rather than off whenever a
 // source Vector Local is read from turns it on, and nothing connects before config resolves it. It reads the sources
 // the engine's Config.refreshLocal reads and trusts none of them: here a source can only hold connections until config
-// resolves the policy, never let one through, so a file a standard user could have written counts, and so does a
-// block Vector cannot decode, which config keeps on too. Config decides which of them apply. The Windows policy key
+// resolves the policy, never let one through, so a file a standard user could have written counts, and so do a block
+// Vector cannot decode and a company policy file it cannot read, which config keeps on too. Config decides which of
+// them apply. The Windows policy key
 // is not read here, since reading it runs a program; config reads it as it loads. A process whose config never
 // resolves the policy (the desktop's main process) resolves it from the same sources with `policy` instead.
 
@@ -51,7 +52,8 @@ export function enabled(input: Input = {}) {
   const platform = input.platform ?? process.platform
   const files = locations(input)
   return (
-    [...files.managed, ...files.user, ...files.overrides].some((file) => turnsOn(block(text(file)))) ||
+    files.managed.some((file) => turnsOn(managedBlock(file))) ||
+    [...files.user, ...files.overrides].some((file) => turnsOn(block(text(file)))) ||
     turnsOn(block(env.VECTOR_CONFIG_CONTENT)) ||
     confirmed(files.state).some(turnsOn) ||
     (platform === "darwin" && profile(input.preferences ?? PREFERENCES))
@@ -63,8 +65,9 @@ export function enabled(input: Input = {}) {
  * process, until it reads the company's policy the way the engine does. The user's own config (the global folder
  * `config`, and the desktop's folder when VECTOR_CLIENT is desktop) and the environment resolve it as the engine
  * resolves them. A company policy file, whose owner is not checked here, the overrides and the block the owner last let
- * apply can only turn it on and make Web access stricter, never let more through; a block Vector cannot decode turns
- * it on with Web access None, as config does. The macOS profile is not read, since converting it runs a program.
+ * apply can only turn it on and make Web access stricter, never let more through; a block Vector cannot decode, and a
+ * company policy file it cannot read, turn it on with Web access None, as config does. The macOS profile is not read,
+ * since converting it runs a program.
  */
 export function policy(input: Input = {}): LocalMode.Policy {
   const env = input.env ?? process.env
@@ -77,7 +80,8 @@ export function policy(input: Input = {}): LocalMode.Policy {
       : users.filter(decoded).reduce<ConfigLocalV1.Info | undefined>(merge, undefined),
   })
   const floors = [
-    ...[...files.managed, ...files.overrides].map((file) => block(text(file))),
+    ...files.managed.map(managedBlock),
+    ...files.overrides.map((file) => block(text(file))),
     block(env.VECTOR_CONFIG_CONTENT),
     ...confirmed(files.state),
   ].filter(turnsOn)
@@ -195,7 +199,16 @@ function text(file: string) {
   return readable(() => readFileSync(file, "utf8"))
 }
 
-// A file or folder Vector cannot read says nothing here; config reports it.
+// A company policy file's local block. One that is there but that Vector cannot read (no permission, a folder in its
+// place) might say anything, so it counts as a block Vector cannot decode, as config counts it.
+function managedBlock(file: string) {
+  if (!existsSync(file)) return undefined
+  const content = text(file)
+  return content === undefined ? "undecodable" : block(content)
+}
+
+// A file or folder Vector cannot read says nothing here, but for a company policy file (managedBlock); config reports
+// it.
 function readable<T>(read: () => T) {
   try {
     return read()
