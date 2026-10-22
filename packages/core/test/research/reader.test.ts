@@ -20,18 +20,32 @@ const web = FakeWeb.start({
         headers: { "content-type": "text/html; charset=utf-8" },
         body: `<html><head><title>Long page</title></head><body><main>${Array.from(
           { length: 12 },
-          (_, index) => `<h2>Part ${index + 1}</h2><p>${`Heat pump paragraph ${index + 1} about compressors. `.repeat(40)}</p>`,
+          (_, index) =>
+            `<h2>Part ${index + 1}</h2><p>${`Heat pump paragraph ${index + 1} about compressors. `.repeat(40)}</p>`,
         ).join("")}</main></body></html>`,
       },
     },
     latin: {
       "/": {
         headers: { "content-type": "text/plain; charset=iso-8859-1" },
-        body: new Uint8Array([0x43, 0x61, 0x66, 0xe9, 0x20, 0x63, 0x72, 0xe8, 0x6d, 0x65, 0x20, 0x62, 0x72, 0xfb, 0x6c, 0xe9, 0x65]),
+        body: new Uint8Array([
+          0x43, 0x61, 0x66, 0xe9, 0x20, 0x63, 0x72, 0xe8, 0x6d, 0x65, 0x20, 0x62, 0x72, 0xfb, 0x6c, 0xe9, 0x65,
+        ]),
       },
     },
     image: { "/cat.png": { headers: { "content-type": "image/png" }, body: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) } },
     gone: { "/": { status: 410, headers: { "content-type": "text/plain" }, body: "Gone" } },
+    // The fake web's names count as public in these tests, and its loopback address as the user's own network.
+    inside: { "/": FakeWeb.redirect(302, (context) => context.direct("article", "/")) },
+    outward: { "/": FakeWeb.redirect(302, (context) => context.direct("article", "/")) },
+    meta: { "/": FakeWeb.redirect(302, () => "http://169.254.169.254/latest/meta-data/iam/security-credentials/") },
+    // A malformed escape in a DOI path.
+    doi: {
+      "*": {
+        headers: { "content-type": "text/html; charset=utf-8" },
+        body: "<html><head><title>A paper</title></head><body><main><p>A paper page with enough words in it to read as one.</p></main></body></html>",
+      },
+    },
   },
 })
 afterAll(() => web.close())
@@ -46,11 +60,15 @@ const options = (overrides: Partial<ResearchReader.Options> = {}): ResearchReade
   authorize: () => Effect.void,
   authorizePrivate: web.authorizePrivate,
   resolver: web.resolver,
+  publicNames: [FakeWeb.DOMAIN],
   limiter: ResearchRate.make({ interval: 1 }),
   ...overrides,
 })
-const read = (url: string, overrides: Partial<ResearchReader.Options> = {}, input: Partial<ResearchReader.Input> = {}) =>
-  Effect.runPromise(ResearchReader.read({ url, ...input }, options(overrides)))
+const read = (
+  url: string,
+  overrides: Partial<ResearchReader.Options> = {},
+  input: Partial<ResearchReader.Input> = {},
+) => Effect.runPromise(ResearchReader.read({ url, ...input }, options(overrides)))
 
 describe("ResearchReader.read", () => {
   test("reads an article's main content, its own description of itself and the links in it", async () => {
@@ -73,6 +91,7 @@ describe("ResearchReader.read", () => {
     ])
     expect(page.chunks).toHaveLength(1)
     expect(page.flagged).toEqual([])
+    expect(page.private).toBe(false)
   })
 
   test("keeps a page's content and leaves its navigation, sidebars and footer out", async () => {
@@ -136,6 +155,12 @@ describe("ResearchReader.read", () => {
     expect((await read("ftp://example.com/file")).status).toBe("failed")
   })
 
+  test("reads a DOI address with a malformed escape in it, and never dies on it", async () => {
+    const page = await read(web.url("doi", "/doi/10.1000/%zz"))
+    expect(page.status).toBe("read")
+    expect(page.meta.ids).toEqual({ doi: "10.1000/%zz" })
+  })
+
   test("marks a syndicated copy as a duplicate of the page it copies", async () => {
     const article = await read(web.url("article", "/"))
     const copy = await read(web.url("copy", "/heat-pumps"))
@@ -169,7 +194,9 @@ describe("redirects", () => {
 
   test("follows a 307 to a PDF on another host", async () => {
     const asked: string[] = []
-    const page = await read(web.url("moved", "/temporary"), { authorize: (url) => Effect.sync(() => void asked.push(url)) })
+    const page = await read(web.url("moved", "/temporary"), {
+      authorize: (url) => Effect.sync(() => void asked.push(url)),
+    })
     expect(asked).toEqual([web.url("moved", "/temporary"), web.url("docs", "/report.pdf")])
     expect(page.format).toBe("pdf")
   })
@@ -214,30 +241,72 @@ describe("redirects", () => {
 })
 
 describe("the private network", () => {
+  const asking = () => {
+    const asked: string[] = []
+    return { asked, authorizePrivate: (url: string) => Effect.sync(() => void asked.push(url)) }
+  }
+
   test("never reads an address on this computer or network without the private ask", async () => {
     const before = web.hits().length
-    const page = await read(web.url("article", "/"), { authorizePrivate: undefined })
-    expect(page.status).toBe("failed")
-    expect(page.reason).toContain("your own computer or network")
+    const page = await read(web.direct("article", "/"), { authorizePrivate: undefined }, { typed: true })
+    expect(page).toMatchObject({ status: "failed", reason: ResearchReader.PRIVATE_ASK })
     expect(web.hits().length).toBe(before)
   })
 
-  test("asks for each private hop, and passes a declined ask on as it was", async () => {
-    const asked: string[] = []
-    await read(web.url("moved", "/old"), {
-      authorizePrivate: (url) => Effect.sync(() => void asked.push(url)),
-    })
-    expect(asked).toEqual([web.url("moved", "/old"), web.url("article", "/")])
+  test("asks for an address the user typed and each private hop after it, and marks the page private", async () => {
+    const ask = asking()
+    const page = await read(web.direct("inside", "/"), { authorizePrivate: ask.authorizePrivate }, { typed: true })
+    expect(ask.asked).toEqual([web.direct("inside", "/"), web.direct("article", "/")])
+    expect(page.status).toBe("read")
+    expect(page.private).toBe(true)
 
     const declined = new Error("The user declined")
     const before = web.hits().length
     const error = await Effect.runPromise(
       Effect.flip(
-        ResearchReader.read({ url: web.direct("article", "/") }, options({ authorizePrivate: () => Effect.fail(declined) })),
+        ResearchReader.read(
+          { url: web.direct("article", "/"), typed: true },
+          options({ authorizePrivate: () => Effect.fail(declined) }),
+        ),
       ),
     )
     expect(error).toBe(declined)
     expect(web.hits().length).toBe(before)
+  })
+
+  test("refuses without asking a private address Vector found, or a redirect onto the network from a public page", async () => {
+    const ask = asking()
+    const before = web.count("article", "/")
+    const found = await read(web.direct("article", "/"), { authorizePrivate: ask.authorizePrivate })
+    expect(found).toMatchObject({ status: "failed", reason: ResearchReader.PRIVATE_FOUND, private: false })
+    const redirected = await read(web.url("outward", "/"), { authorizePrivate: ask.authorizePrivate }, { typed: true })
+    expect(redirected).toMatchObject({ status: "failed", reason: ResearchReader.PRIVATE_FOUND })
+    expect(ask.asked).toEqual([])
+    expect(web.count("article", "/")).toBe(before)
+  })
+
+  test("refuses cloud metadata and link-local destinations, whoever asks and however they are written", async () => {
+    const ask = asking()
+    const resolver = (hostname: string) =>
+      hostname === `imds.${FakeWeb.DOMAIN}`
+        ? Promise.resolve([{ address: "169.254.169.254", family: 4 }])
+        : web.resolver(hostname)
+    const addresses = [
+      web.url("meta", "/"),
+      "http://169.254.169.254/latest/meta-data/",
+      "http://metadata.google.internal/computeMetadata/v1/",
+      "http://100.100.100.200/latest/meta-data/",
+      "http://[fd00:ec2::254]/latest/meta-data/",
+      "http://[::ffff:169.254.169.254]/latest/meta-data/",
+      "http://[fe80::1]/",
+      `http://imds.${FakeWeb.DOMAIN}:${web.port}/latest/meta-data/`,
+    ]
+    const pages = await Promise.all(
+      addresses.map((url) => read(url, { authorizePrivate: ask.authorizePrivate, resolver }, { typed: true })),
+    )
+    expect(pages.map((page) => page.reason)).toEqual(addresses.map(() => ResearchReader.METADATA))
+    expect(ask.asked).toEqual([])
+    expect(guard.outside()).toEqual([])
   })
 })
 
@@ -268,7 +337,9 @@ describe("ResearchReader.present", () => {
 
   test("shows the chunk asked for, focus passages or find snippets", async () => {
     const page = await read(web.url("docs", "/report.pdf"))
-    expect(ResearchReader.present({ page, source: "S2", chunk: 2 })).toContain("Delivered heating energy fell by 61 percent.")
+    expect(ResearchReader.present({ page, source: "S2", chunk: 2 })).toContain(
+      "Delivered heating energy fell by 61 percent.",
+    )
     expect(ResearchReader.present({ page, source: "S2", chunk: 99 }).split("\n")[0]).toContain("chunk 3 of 3")
     const passages = ResearchReader.focus(page.chunks, "how often were the smart meters read")
     expect(passages[0]).toMatchObject({ chunk: 3 })

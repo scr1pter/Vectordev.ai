@@ -20,6 +20,16 @@ const web = FakeWeb.start({
       "/": FakeWeb.html("article.html"),
       "/robots.txt": { status: 500, body: "oops" },
     },
+    // No robots.txt of its own, and a redirect to a path docs' robots.txt disallows.
+    hop: { "/": FakeWeb.redirect(302, (context) => context.url("docs", "/private/notes")) },
+    // A pasted address that redirects to a site whose robots.txt turns Vector away.
+    pasted: { "/": FakeWeb.redirect(302, (context) => context.url("closed", "/")) },
+    // A site that turns Vector away and redirects within itself.
+    shut: {
+      "/robots.txt": { headers: { "content-type": "text/plain" }, body: "User-agent: Vector\nDisallow: /\n" },
+      "/old": FakeWeb.redirect(301, (context) => context.url("shut", "/new")),
+      "/new": FakeWeb.html("article.html"),
+    },
   },
 })
 afterAll(() => web.close())
@@ -128,8 +138,9 @@ describe("robots.txt on the fake web", () => {
     authorize: () => Effect.void,
     authorizePrivate: web.authorizePrivate,
     resolver: web.resolver,
+    publicNames: [FakeWeb.DOMAIN],
     limiter: ResearchRate.make({ interval: 1 }),
-    robots: ResearchReader.robots({ http, authorizePrivate: web.authorizePrivate, resolver: web.resolver }),
+    robots: ResearchReader.robots({ http, resolver: web.resolver, publicNames: [FakeWeb.DOMAIN] }),
   })
 
   test("skips a page whose robots.txt asks Vector not to read it", async () => {
@@ -159,11 +170,30 @@ describe("robots.txt on the fake web", () => {
   })
 
   test("applies robots.txt again on every redirect hop", async () => {
-    const page = await Effect.runPromise(ResearchReader.read({ url: web.url("moved", "/temporary") }, options()))
-    // moved has no robots.txt (404, allow all); the hop to docs reads docs' file, which allows the report.
-    expect(page.status).toBe("read")
-    expect(web.count("moved", "/robots.txt")).toBeGreaterThan(0)
-    expect(web.count("docs", "/robots.txt")).toBeGreaterThan(0)
+    // hop has no robots.txt (404, allow all); its redirect goes to a path docs' file disallows, which is not asked for.
+    const page = await Effect.runPromise(ResearchReader.read({ url: web.url("hop", "/") }, options()))
+    expect(page.status).toBe("robots")
+    expect(web.count("hop", "/robots.txt")).toBe(1)
+    expect(web.count("docs", "/private/notes")).toBe(0)
+  })
+
+  test("checks a pasted address's redirect to another host, and not one that stays on its host", async () => {
+    const before = web.count("closed", "/")
+    const away = await Effect.runPromise(ResearchReader.read({ url: web.url("pasted", "/"), typed: true }, options()))
+    expect(away.status).toBe("robots")
+    expect(web.count("closed", "/")).toBe(before)
+    const within = await Effect.runPromise(
+      ResearchReader.read({ url: web.url("shut", "/old"), typed: true }, options()),
+    )
+    expect(within.status).toBe("read")
+    expect(web.count("shut", "/robots.txt")).toBe(0)
+  })
+
+  test("never fetches or asks about robots.txt on the user's own network", async () => {
+    const before = web.count("closed", "/robots.txt")
+    const cache = ResearchReader.robots({ http, resolver: web.resolver })
+    expect(await Effect.runPromise(cache.check(web.url("closed", "/")))).toBe(true)
+    expect(web.count("closed", "/robots.txt")).toBe(before)
   })
 
   test("does not follow robots.txt to another site, and reads nothing from a site whose file errors", async () => {

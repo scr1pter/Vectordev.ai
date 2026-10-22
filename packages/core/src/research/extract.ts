@@ -2,6 +2,7 @@ export * as ResearchExtract from "./extract"
 
 import { DomUtils, parseDocument } from "htmlparser2"
 import { Schema } from "effect"
+import { ResearchCanonical } from "./canonical"
 import { WebFence } from "./fence"
 
 // What research needs from a page's HTML before the brain's reader turns its main content into blocks: which part of
@@ -64,7 +65,9 @@ export function extract(html: string, url: string): Page {
   const metas = DomUtils.findAll((node) => node.name === "meta", nodes)
   const meta = (...names: string[]) =>
     metas
-      .find((node) => names.includes((node.attribs.name ?? node.attribs.property ?? node.attribs.itemprop ?? "").toLowerCase()))
+      .find((node) =>
+        names.includes((node.attribs.name ?? node.attribs.property ?? node.attribs.itemprop ?? "").toLowerCase()),
+      )
       ?.attribs.content?.trim() || undefined
   const structured = DomUtils.findAll(
     (node) => node.name === "script" && (node.attribs.type ?? "").toLowerCase() === "application/ld+json",
@@ -110,7 +113,20 @@ export function extract(html: string, url: string): Page {
     description: meta("description", "og:description"),
     canonical: canonicalLink && URL.canParse(canonicalLink, url) ? new URL(canonicalLink, url).toString() : undefined,
     author: author(meta("author", "citation_author", "dc.creator", "article:author"), graph),
-    published: date(meta("article:published_time", "citation_publication_date", "citation_date", "dc.date", "date", "pubdate", "datepublished", "og:published_time") ?? field(graph, "datePublished") ?? firstTime(content ? [content] : nodes)),
+    published: date(
+      meta(
+        "article:published_time",
+        "citation_publication_date",
+        "citation_date",
+        "dc.date",
+        "date",
+        "pubdate",
+        "datepublished",
+        "og:published_time",
+      ) ??
+        field(graph, "datePublished") ??
+        firstTime(content ? [content] : nodes),
+    ),
     updated: date(meta("article:modified_time", "og:updated_time", "datemodified") ?? field(graph, "dateModified")),
     siteName: meta("og:site_name"),
     structured,
@@ -125,7 +141,9 @@ export function extract(html: string, url: string): Page {
       graph.some((item) => typeOf(item).includes("dataset")),
     scripted:
       visible.length < SCRIPTED_TEXT &&
-      (!!mount || noscript || executable.some((node) => !!node.attribs.src || DomUtils.textContent(node).length > 1_000)),
+      (!!mount ||
+        noscript ||
+        executable.some((node) => !!node.attribs.src || DomUtils.textContent(node).length > 1_000)),
   }
 }
 
@@ -210,8 +228,12 @@ export function addressIds(url: string) {
 
 function ids(url: string, meta: (...names: string[]) => string | undefined, graph: readonly unknown[]): Ids {
   const address = new URL(url)
-  const declared = meta("citation_doi", "dc.identifier", "prism.doi", "bepress_citation_doi") ?? field(graph, "identifier")
-  const doi = (DOI.exec(declared ?? "") ?? (/(?:^|\.)doi\.org$/.test(address.hostname) || /\/doi\//.test(address.pathname) ? DOI.exec(decodeURIComponent(address.pathname)) : null))?.[1]?.replace(/[.,;)]+$/, "")
+  const declared =
+    meta("citation_doi", "dc.identifier", "prism.doi", "bepress_citation_doi") ?? field(graph, "identifier")
+  const doi = (DOI.exec(declared ?? "") ??
+    (/(?:^|\.)doi\.org$/.test(address.hostname) || /\/doi\//.test(address.pathname)
+      ? DOI.exec(ResearchCanonical.decoded(address.pathname))
+      : null))?.[1]?.replace(/[.,;)]+$/, "")
   const arxiv =
     meta("citation_arxiv_id") ??
     (/(?:^|\.)arxiv\.org$/.test(address.hostname)
@@ -253,7 +275,9 @@ function field(graph: readonly unknown[], key: string, raw = false): unknown {
 function typeOf(item: unknown) {
   if (!item || typeof item !== "object") return []
   const type = (item as Record<string, unknown>)["@type"]
-  return (Array.isArray(type) ? type : [type]).filter((value) => typeof value === "string").map((value) => value.toLowerCase())
+  return (Array.isArray(type) ? type : [type])
+    .filter((value) => typeof value === "string")
+    .map((value) => value.toLowerCase())
 }
 
 function firstTime(nodes: Node[]) {

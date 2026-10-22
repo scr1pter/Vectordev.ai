@@ -36,6 +36,7 @@ const reader = (limiter: ResearchRate.Limiter) => ({
   authorize: () => Effect.void,
   authorizePrivate: web.authorizePrivate,
   resolver: web.resolver,
+  publicNames: [FakeWeb.DOMAIN],
   limiter,
 })
 
@@ -80,7 +81,9 @@ describe("ResearchRate.make", () => {
         () => undefined,
       )
     const began = Date.now()
-    await Effect.runPromise(Effect.all([request("a.test"), request("A.test"), request("b.test")], { concurrency: "unbounded" }))
+    await Effect.runPromise(
+      Effect.all([request("a.test"), request("A.test"), request("b.test")], { concurrency: "unbounded" }),
+    )
     const a = starts.filter((item) => item.host !== "b.test").map((item) => item.at - began)
     const b = starts.filter((item) => item.host === "b.test").map((item) => item.at - began)
     expect(a).toHaveLength(2)

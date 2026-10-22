@@ -41,6 +41,7 @@ const read = (url: string) =>
         authorize: () => Effect.void,
         authorizePrivate: web.authorizePrivate,
         resolver: web.resolver,
+        publicNames: [FakeWeb.DOMAIN],
         limiter: ResearchRate.make({ interval: 1 }),
       },
     ),
