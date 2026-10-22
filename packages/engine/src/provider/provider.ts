@@ -213,7 +213,7 @@ function fitted(
   input: {
     readonly slots: ModelSlots.Interface
     readonly origin: string
-    readonly permits: number
+    readonly permits: number | undefined
     readonly priority: ModelSlots.Priority
     readonly context: number
   },
@@ -2539,19 +2539,18 @@ const layer = Layer.effect(
       if (!provider || model.providerID === "vector" || model.providerID === planID || model.freeModel) return language
       const origin = requestOrigin(model, provider.options, s.varsLoaders[model.providerID], envs)
       const hosted = ModelSlots.server(origin)
-      // How many requests the server takes: this provider's concurrency, else the smallest one another provider
-      // pointing at the same server configures, since they share it.
-      const own = provider.options["concurrency"]
-      const shared = Object.values(s.providers).flatMap((item) => {
+      // How many requests the server takes: the smallest concurrency this provider or any other provider pointing at
+      // the same server configures, since they share it. Undefined when none does.
+      const counts = Object.values(s.providers).flatMap((item) => {
         const value = item.options["concurrency"]
+        if (typeof value !== "number") return []
+        if (item === provider) return [value]
         const at = typeof item.options["baseURL"] === "string" ? LocalPolicy.origin(item.options["baseURL"]) : undefined
-        return item !== provider && typeof value === "number" && at && at === LocalPolicy.origin(origin ?? "")
-          ? [value]
-          : []
+        return at && origin && at === LocalPolicy.origin(origin) ? [value] : []
       })
-      const permits = typeof own === "number" ? own : shared.length ? Math.min(...shared) : ModelSlots.DEFAULT_PERMITS
+      const permits = counts.length ? Math.min(...counts) : undefined
       // A cloud API is left as it is unless a provider configures how many requests it takes.
-      if (!origin || (!hosted && permits === ModelSlots.DEFAULT_PERMITS)) return language
+      if (!origin || (!hosted && permits === undefined)) return language
       return fitted(language, {
         slots,
         origin: hosted ?? origin,

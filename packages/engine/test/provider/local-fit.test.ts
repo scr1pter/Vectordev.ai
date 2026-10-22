@@ -1,6 +1,7 @@
 import { afterEach, expect } from "bun:test"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
-import { streamText } from "ai"
+import { streamText, tool } from "ai"
+import z from "zod"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
@@ -191,6 +192,98 @@ it.live("four subagents on a single-slot server run one at a time, in the order 
   ),
 )
 
+it.live("two providers that configure different counts for one server both hold to the smaller one", () =>
+  withServer((server) =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const provider = yield* Provider.Service
+          // The provider that says 3 still waits by the other's 1, so their requests never take turns lifting it.
+          const replies = yield* Effect.all([
+            turn(provider, OTHER, "user", "first"),
+            turn(provider, LOCAL, "user", "second"),
+            turn(provider, OTHER, "user", "third"),
+          ])
+          for (const n of [1, 2, 3]) {
+            yield* until(() => server.seen.length === n)
+            yield* Effect.promise(() => server.idle(30))
+            expect(server.seen).toHaveLength(n)
+            server.release()
+          }
+          yield* Effect.promise(() => Promise.all(replies))
+          expect(server.most).toBe(1)
+        }),
+      { trusted: true, config: config(server.url, { other: true, concurrency: 1, otherConcurrency: 3 }) },
+    ),
+  ),
+)
+
+it.live("a request stopped while it holds the server's permit gives it back, so the next one runs", () =>
+  withServer((server) =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const provider = yield* Provider.Service
+          const stop = new AbortController()
+          const first = yield* turn(provider, LOCAL, "user", "stopped", stop.signal)
+          yield* until(() => server.seen.length === 1)
+          const second = yield* turn(provider, LOCAL, "subagent", "next")
+          yield* Effect.promise(() => server.idle(50))
+          expect(server.seen).toHaveLength(1)
+          stop.abort()
+          const stopped = yield* Effect.promise(() =>
+            first.then(
+              () => undefined,
+              (error: unknown) => error,
+            ),
+          )
+          expect(stopped).toMatchObject({ name: "AbortError" })
+          yield* until(() => server.seen.length === 2)
+          expect(server.seen.map(said)).toEqual(["stopped", "next"])
+          server.release()
+          server.release()
+          expect(yield* Effect.promise(() => second)).toBe("reply 2")
+        }),
+      { trusted: true, config: config(server.url, { concurrency: 1 }) },
+    ),
+  ),
+)
+
+it.live("a tool call that asks the same single-slot server again gets its answer instead of waiting forever", () =>
+  withServer((server) =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          server.auto = true
+          const provider = yield* Provider.Service
+          const model = Provider.withPriority(yield* provider.getModel(LOCAL, MODEL), "user")
+          const inner = Provider.withPriority(model, "subagent")
+          const language = yield* provider.getLanguage(model)
+          const innerLanguage = yield* provider.getLanguage(inner)
+          // The tool runs as soon as its call arrives, while the reply that made the call still holds the server's one
+          // permit. The SDK reads that reply to its end meanwhile, which gives the permit to the tool's own request.
+          const result = streamText({
+            model: language,
+            messages: [{ role: "user", content: "ask the helper" }],
+            tools: {
+              ask: tool({
+                description: "Ask the model server again.",
+                inputSchema: z.object({ question: z.string() }),
+                execute: async (input) =>
+                  streamText({ model: innerLanguage, messages: [{ role: "user", content: input.question }] }).text,
+              }),
+            },
+          })
+          const answers = yield* Effect.promise(() => Promise.resolve(result.toolResults))
+          expect(answers.map((item) => item.output)).toEqual(["reply 2"])
+          expect(server.seen.map(said)).toEqual(["ask the helper", "what is 2 + 2?"])
+          expect(server.most).toBe(1)
+        }),
+      { trusted: true, config: config(server.url, { concurrency: 1 }) },
+    ),
+  ),
+)
+
 it.live("a reply stays inside the context the server has left after the prompt", () =>
   withServer((server) =>
     provideTmpdirInstance(
@@ -251,6 +344,7 @@ function turn(
   providerID: ProviderV2.ID,
   priority: ModelSlots.Priority | undefined,
   text: string,
+  signal?: AbortSignal,
 ) {
   return Effect.gen(function* () {
     const found = yield* provider.getModel(providerID, MODEL)
@@ -258,6 +352,7 @@ function turn(
     const failed: { error?: unknown } = {}
     const result = streamText({
       model: yield* provider.getLanguage(model),
+      abortSignal: signal,
       onError: ({ error }) => {
         failed.error = error
       },
@@ -283,7 +378,14 @@ const until = (check: () => boolean) =>
 
 function config(
   url: string,
-  options: { other?: boolean; cloud?: boolean; concurrency?: number; headerTimeout?: number; output?: number } = {},
+  options: {
+    other?: boolean
+    cloud?: boolean
+    concurrency?: number
+    otherConcurrency?: number
+    headerTimeout?: number
+    output?: number
+  } = {},
 ) {
   const provider = (baseURL: string, output = 0, concurrency?: number) => ({
     name: "Model server",
@@ -309,7 +411,7 @@ function config(
     lsp: false,
     provider: {
       local: provider(url, 0, options.concurrency),
-      ...(options.other ? { other: provider(url, options.output) } : {}),
+      ...(options.other ? { other: provider(url, options.output, options.otherConcurrency) } : {}),
       ...(options.cloud ? { cloud: provider("https://api.cloud.invalid/v1") } : {}),
     },
   }
@@ -357,13 +459,35 @@ async function modelServer() {
       server.seen.push(JSON.parse(Buffer.concat(chunks).toString()))
       state.running += 1
       state.most = Math.max(state.most, state.running)
+      const body = server.seen.at(-1)!
       const reply = `reply ${++state.replies}`
+      // A request that offers tools gets a call to the first one, the way a model asks for more.
+      const call = body.tools?.[0]?.function?.name
+      const chunk = call
+        ? {
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call_1",
+                      type: "function",
+                      function: { name: call, arguments: JSON.stringify({ question: "what is 2 + 2?" }) },
+                    },
+                  ],
+                },
+                finish_reason: "tool_calls",
+              },
+            ],
+          }
+        : { choices: [{ delta: { content: reply } }] }
       // Headers go out at once, as a server does when it starts on a request; the reply comes when released.
       response.writeHead(200, { "content-type": "text/event-stream" })
       response.flushHeaders()
       const finish = () => {
         state.running -= 1
-        response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: reply } }] })}\n\ndata: [DONE]\n\n`)
+        response.end(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`)
       }
       if (server.auto) return finish()
       held.push(finish)
