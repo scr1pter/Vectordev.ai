@@ -1,4 +1,5 @@
 import type { Config, VectorClient } from "@vectordevai/sdk/v2/client"
+import type { LocalProbe } from "@vectordevai/core/local-mode/probe"
 import { providerAllowed } from "@vectordevai/schema/provider-policy"
 import type { validateCustomProvider } from "./dialog-custom-provider-form"
 
@@ -26,6 +27,12 @@ export async function saveCustomProvider(input: {
     throw new Error(input.conflictMessage)
   }
 
+  // The server list lives in the user's global config, and a config update replaces a list, so it is read from there
+  // (never from the merged config, which also holds a company's entries) before this server is added to it.
+  const local = input.result.local
+    ? listed((await input.client.global.config.get({ throwOnError: true })).data.local, input.result.local)
+    : undefined
+
   if (input.result.key) {
     // The server checks again while holding the credential-store filesystem lock.
     const saved = await input.client.auth.set(
@@ -36,5 +43,25 @@ export async function saveCustomProvider(input: {
     if (saved.error) throw new Error("message" in saved.error ? saved.error.message : String(saved.error))
   }
 
-  await input.updateConfig({ provider: { [providerID]: input.result.config } })
+  await input.updateConfig({ provider: { [providerID]: input.result.config }, ...(local ? { local } : {}) })
+}
+
+/** The global `local` block's list and pins with this server added: on the list once, pinned as it answered now. */
+export function listed(
+  current: Config["local"],
+  server: { readonly origin: string; readonly pin: LocalProbe.Pin },
+): NonNullable<Config["local"]> {
+  const endpoints = current?.endpoints ?? []
+  return {
+    endpoints: endpoints.includes(server.origin) ? endpoints : [...endpoints, server.origin],
+    pins: {
+      ...current?.pins,
+      [server.origin]: {
+        kind: server.pin.kind,
+        ...(server.pin.version === undefined ? {} : { version: server.pin.version }),
+        ...(server.pin.models === undefined ? {} : { models: server.pin.models }),
+        ...(server.pin.spki ? { spki: server.pin.spki } : {}),
+      },
+    },
+  }
 }
