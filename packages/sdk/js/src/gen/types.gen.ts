@@ -1981,6 +1981,7 @@ export type ProviderConfig = {
     headerTimeout?: number | false
     chunkTimeout?: number
     concurrency?: number
+    forwards?: boolean
     [key: string]: unknown | string | boolean | number | false | number | false | number | undefined
   }
   models?: {

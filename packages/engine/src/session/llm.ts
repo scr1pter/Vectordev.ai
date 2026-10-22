@@ -2,6 +2,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { llmClient } from "@vectordevai/core/effect/app-node-platform"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Provider } from "@/provider/provider"
+import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
 import { providerCredentialAllowed, providerUsable } from "@vectordevai/core/provider-policy"
@@ -89,6 +90,7 @@ const live: Layer.Layer<
   | EventV2Bridge.Service
   | LLMClientService
   | RuntimeFlags.Service
+  | ModelSlots.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -100,6 +102,7 @@ const live: Layer.Layer<
     const events = yield* EventV2Bridge.Service
     const llmClient = yield* LLMClient.Service
     const flags = yield* RuntimeFlags.Service
+    const slots = yield* ModelSlots.Service
 
     const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
       yield* Effect.logInfo("stream", {
@@ -112,9 +115,11 @@ const live: Layer.Layer<
         mode: input.agent.mode,
       })
 
+      // A small request is a title or a name: on a model server someone hosts, its reply stays short.
+      const laned = input.small ? Provider.brief(input.model) : input.model
       const [language, cfg, item, info] = yield* Effect.all(
         [
-          provider.getLanguage(input.model),
+          provider.getLanguage(laned),
           config.get(),
           provider.getProvider(input.model.providerID),
           auth
@@ -295,9 +300,18 @@ const live: Layer.Layer<
             "llm.provider": input.model.providerID,
             "llm.model": input.model.id,
           })
+          // The native runtime sends its requests itself, so on a server with a line (Provider.line) the stream holds
+          // a permit in it, as getLanguage's requests do, until the reply ends.
+          const line = yield* provider.line(input.model)
           return {
             type: "native" as const,
-            stream: native.stream,
+            stream: line
+              ? Stream.unwrap(
+                  slots
+                    .take({ origin: line.origin, permits: line.permits, priority: Provider.priorityOf(laned) })
+                    .pipe(Effect.as(native.stream)),
+                )
+              : native.stream,
           }
         }
         yield* Effect.logInfo("llm runtime selected", {
@@ -492,6 +506,7 @@ export const node = LayerNode.make({
     EventV2Bridge.node,
     llmClient,
     RuntimeFlags.node,
+    ModelSlots.node,
   ],
 })
 

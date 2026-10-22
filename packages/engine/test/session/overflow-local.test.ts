@@ -12,6 +12,7 @@ import { Provider } from "@/provider/provider"
 import { expect } from "bun:test"
 import { streamText, tool } from "ai"
 import { Effect, Fiber, Layer, Stream } from "effect"
+import { createServer } from "node:net"
 import path from "path"
 import z from "zod"
 import type { Agent } from "../../src/agent/agent"
@@ -26,10 +27,22 @@ import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
+import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
+import { Global } from "@vectordevai/core/global"
+import { Config } from "@/config/config"
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 
 // What a model on a server someone hosts must hold, end to end against the fake model server on 127.0.0.1: the
 // agent's fixed prompt plus headroom, measured for that agent on that model. The strict guard checks nothing leaves.
-const guard = NetworkGuard.use()
+// Two addresses on the user's network that the strict guard keeps on this computer: it sends their requests to the fake
+// server on 127.0.0.1, the way a server on the user's network would answer them.
+const LISTED = "10.1.2.3"
+const UNLISTED = "10.1.2.4"
+// In the range the company's policy lists.
+const RANGED = "10.9.0.7"
+const guard = NetworkGuard.use({ names: [LISTED, UNLISTED, RANGED] })
+const CLOUD_ORIGIN = "https://api.cloud.invalid"
+const COMPANY_ORIGIN = "https://llm.corp.example.com"
 
 const ref = { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("qwen-7b") }
 
@@ -53,6 +66,7 @@ const root = LayerNode.group([
   EventV2Bridge.node,
   SessionStatus.node,
   CrossSpawnSpawner.node,
+  ModelSlots.node,
 ])
 
 const it = testEffect(
@@ -158,6 +172,10 @@ it.live("the same model still runs titles and compaction, which hold no fixed ag
         expect(value).toBe("continue")
         expect(handle.message.error).toBeUndefined()
         expect(yield* llm.calls).toBe(2)
+        // The title's reply is held to a few hundred tokens, so it never holds a single-slot server for long.
+        const sent = (yield* llm.inputs).map((body) => body.max_tokens)
+        expect(sent[0]).toBe(Provider.BRIEF_REPLY)
+        expect(sent[1]).not.toBe(Provider.BRIEF_REPLY)
       }),
     { trusted: true, config: (url) => providerCfg(url, 16_384) },
   ),
@@ -244,6 +262,345 @@ it.live("a root session's new prompt drops a helper waiting for the same server"
     { trusted: true, config: (url) => providerCfg(url, 32_768) },
   ),
 )
+
+it.live("a server on this computer that nothing answers at says how to fix it while Vector retries", () =>
+  Effect.gen(function* () {
+    const port = yield* Effect.promise(closedPort)
+    const origin = `http://127.0.0.1:${port}`
+    return yield* provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const processors = yield* SessionProcessor.Service
+          const session = yield* Session.Service
+          const provider = yield* Provider.Service
+          const status = yield* SessionStatus.Service
+          const model = yield* provider.getModel(ref.providerID, ref.modelID)
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "fix the bug")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model })
+          const running = yield* handle
+            .process(input(chat.id, parent.id, model, agent("build"), ""))
+            .pipe(Effect.forkChild)
+
+          const retrying = yield* Effect.gen(function* () {
+            for (const _ of Array.from({ length: 500 })) {
+              const info = yield* status.get(chat.id)
+              if (info.type === "retry") return info
+              yield* Effect.sleep("20 millis")
+            }
+            return yield* Effect.die(new Error("the session never retried"))
+          })
+          expect(retrying.message).toStartWith(
+            `Nothing answered at ${origin}. Start the model server, or check its address and port. The error was: `,
+          )
+          yield* Fiber.interrupt(running)
+          expect(yield* llm.calls).toBe(0)
+          expect(guard.outside()).toEqual([])
+        }),
+      { trusted: true, config: () => providerCfg(`${origin}/v1`, 32_768) },
+    )
+  }),
+)
+
+it.live(
+  "a private server's steps cost nothing once the user or the company lists it, and are unpriced until then",
+  () =>
+    Effect.gen(function* () {
+      const llm = yield* TestLLMServer
+      const at = (host: string) => llm.url.replace("127.0.0.1", host)
+      // Plain http to the user's network is the user's own config to set, not a repository's. The user lists one server;
+      // the company's policy lists a range of addresses.
+      return yield* serverList(
+        {
+          user: [new URL(at(LISTED)).origin],
+          managed: ["10.9.0.0/16"],
+          provider: servers({ listed: at(LISTED), ranged: at(RANGED), unlisted: at(UNLISTED) }, 32_768).provider,
+        },
+        () =>
+          provideTmpdirServer(
+            ({ dir }) =>
+              Effect.gen(function* () {
+                const processors = yield* SessionProcessor.Service
+                const session = yield* Session.Service
+                const provider = yield* Provider.Service
+                const spend = yield* SpendGuard.Service
+                const kinds: Record<string, unknown> = {}
+                for (const providerID of ["listed", "ranged", "unlisted"]) {
+                  const model = yield* provider.getModel(ProviderV2.ID.make(providerID), ref.modelID)
+                  const chat = yield* session.create({})
+                  yield* spend.begin(chat.id, { usd: 1 })
+                  const parent = yield* user(chat.id, "fix the bug")
+                  yield* llm.push(reply().text("fixed").usage({ input: 100, output: 10 }).stop())
+                  const handle = yield* processors.create({
+                    assistantMessage: yield* assistant(chat.id, parent.id, path.resolve(dir)),
+                    sessionID: chat.id,
+                    model,
+                  })
+                  expect(yield* handle.process(input(chat.id, parent.id, model, agent("build"), ""))).toBe("continue")
+                  kinds[providerID] = (yield* spend.snapshot(chat.id))?.costKind
+                }
+                // A server elsewhere on the network may pass prompts on to a paid service until someone lists it.
+                expect(kinds).toEqual({ listed: "local", ranged: "local", unlisted: "unknown" })
+                expect(yield* llm.calls).toBe(3)
+                expect(guard.outside()).toEqual([])
+              }),
+            { trusted: true },
+          ),
+      )
+    }),
+)
+
+it.live(
+  "a company endpoint on the server list is checked like a server someone hosts, and its steps stay unpriced",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        serverList({ user: [COMPANY_ORIGIN] }, () =>
+          Effect.gen(function* () {
+            const processors = yield* SessionProcessor.Service
+            const session = yield* Session.Service
+            const provider = yield* Provider.Service
+            const spend = yield* SpendGuard.Service
+            const run = (providerID: string) =>
+              Effect.gen(function* () {
+                const model = yield* provider.getModel(ProviderV2.ID.make(providerID), ref.modelID)
+                const chat = yield* session.create({})
+                yield* spend.begin(chat.id, { usd: 1 })
+                const parent = yield* user(chat.id, "fix the bug")
+                const handle = yield* processors.create({
+                  assistantMessage: yield* assistant(chat.id, parent.id, path.resolve(dir)),
+                  sessionID: chat.id,
+                  model,
+                })
+                const value = yield* handle.process(
+                  input(chat.id, parent.id, model, agent("build"), "rule ".repeat(12_000)),
+                )
+                return { value, error: handle.message.error, kind: (yield* spend.snapshot(chat.id))?.costKind }
+              })
+            // Its name looks like any host on the internet, but it is on the list: a 16K model is refused for the agent.
+            const small = yield* run("small")
+            expect(small.value).toBe("stop")
+            expect(small.error).toMatchObject({ data: { message: expect.stringContaining("16,384-token context") } })
+            expect(yield* llm.calls).toBe(0)
+            // A model that fits runs, and its steps count as unpriced: a company endpoint is never local.
+            yield* llm.push(reply().text("fixed").usage({ input: 100, output: 10 }).stop())
+            const large = yield* run("large")
+            expect(large.value).toBe("continue")
+            expect(large.kind).toBe("unknown")
+            expect(guard.outside()).toEqual([])
+          }),
+        ),
+      {
+        trusted: true,
+        // A plugin's `preconnect` names where the provider's requests go; here they reach the fake server instead.
+        config: (url) => ({
+          provider: {
+            ...servers({ small: url }, 16_384, COMPANY_ORIGIN).provider,
+            ...servers({ large: url }, 65_536, COMPANY_ORIGIN).provider,
+          },
+        }),
+      },
+    ),
+)
+
+it.live("a cloud API whose provider sets concurrency keeps the user's turn in its line when a new prompt arrives", () =>
+  provideTmpdirServer(
+    ({ dir }) =>
+      Effect.gen(function* () {
+        const processors = yield* SessionProcessor.Service
+        const session = yield* Session.Service
+        const provider = yield* Provider.Service
+        const slots = yield* ModelSlots.Service
+        const model = yield* provider.getModel(ProviderV2.ID.make("cloud"), ref.modelID)
+        // Another request holds the API's one permit, so the turn waits in line and never reaches the network.
+        const holder = yield* Effect.promise(() =>
+          slots.acquire({ origin: CLOUD_ORIGIN, permits: 1, priority: "user" }),
+        )
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "fix the bug")
+        const turn = yield* processors.create({
+          assistantMessage: yield* assistant(chat.id, parent.id, path.resolve(dir)),
+          sessionID: chat.id,
+          model,
+        })
+        const running = yield* turn.process(input(chat.id, parent.id, model, agent("build"), "")).pipe(Effect.forkChild)
+        yield* waitFor(() => slots.queue(CLOUD_ORIGIN).waiting === 1)
+
+        // Another root session's new prompt drops waiting helpers; the user's turn is not one.
+        const other = yield* session.create({})
+        const next = yield* user(other.id, "add a test")
+        yield* processors.create({
+          assistantMessage: yield* assistant(other.id, next.id, path.resolve(dir)),
+          sessionID: other.id,
+          model,
+        })
+        yield* Effect.sleep("50 millis")
+        expect(slots.queue(CLOUD_ORIGIN)).toEqual({ permits: 1, running: 1, waiting: 1 })
+        expect(turn.message.error).toBeUndefined()
+
+        // Stopping the turn takes it out of the line, and the permit's holder gives it back.
+        yield* Fiber.interrupt(running)
+        yield* waitFor(() => slots.queue(CLOUD_ORIGIN).waiting === 0)
+        expect(slots.queue(CLOUD_ORIGIN)).toEqual({ permits: 1, running: 1, waiting: 0 })
+        holder()
+        expect(guard.outside()).toEqual([])
+      }),
+    {
+      trusted: true,
+      config: () => ({
+        provider: {
+          cloud: {
+            ...servers({ cloud: `${CLOUD_ORIGIN}/v1` }, 32_768).provider.cloud,
+            options: { apiKey: "test-key", baseURL: `${CLOUD_ORIGIN}/v1`, concurrency: 1 },
+          },
+        },
+      }),
+    },
+  ),
+)
+
+it.live("a server on this computer that refuses the connection itself gets the same fix, in the runtime's words", () =>
+  Effect.gen(function* () {
+    const port = yield* Effect.promise(closedPort)
+    const origin = `http://127.0.0.1:${port}`
+    // The request goes straight to the closed port rather than through the strict guard's own proxy, so the error is
+    // the one the runtime gives when nothing listens.
+    return yield* direct(
+      provideTmpdirServer(
+        ({ dir }) =>
+          Effect.gen(function* () {
+            const processors = yield* SessionProcessor.Service
+            const session = yield* Session.Service
+            const provider = yield* Provider.Service
+            const status = yield* SessionStatus.Service
+            const model = yield* provider.getModel(ref.providerID, ref.modelID)
+            const chat = yield* session.create({})
+            const parent = yield* user(chat.id, "fix the bug")
+            const handle = yield* processors.create({
+              assistantMessage: yield* assistant(chat.id, parent.id, path.resolve(dir)),
+              sessionID: chat.id,
+              model,
+            })
+            const running = yield* handle
+              .process(input(chat.id, parent.id, model, agent("build"), ""))
+              .pipe(Effect.forkChild)
+            const retrying = yield* Effect.gen(function* () {
+              for (const _ of Array.from({ length: 500 })) {
+                const info = yield* status.get(chat.id)
+                if (info.type === "retry") return info
+                yield* Effect.sleep("20 millis")
+              }
+              return yield* Effect.die(new Error("the session never retried"))
+            })
+            expect(retrying.message).toStartWith(
+              `Nothing answered at ${origin}. Start the model server, or check its address and port. The error was: `,
+            )
+            expect(retrying.message).not.toContain("Could not reach")
+            yield* Fiber.interrupt(running)
+            expect(guard.outside()).toEqual([])
+          }),
+        { trusted: true, config: () => providerCfg(`${origin}/v1`, 32_768) },
+      ),
+    )
+  }),
+)
+
+// A loopback port nothing listens on: one the system just handed out and took back.
+async function closedPort() {
+  const server = createServer()
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const address = server.address()
+  await new Promise<void>((resolve) => server.close(() => resolve()))
+  if (!address || typeof address === "string") throw new Error("no port was handed out")
+  return address.port
+}
+
+// Waits for a condition the test cannot be told about.
+const waitFor = (check: () => boolean) =>
+  Effect.gen(function* () {
+    for (const _ of Array.from({ length: 500 })) {
+      if (check()) return
+      yield* Effect.sleep("10 millis")
+    }
+    yield* Effect.die(new Error("timed out waiting"))
+  })
+
+// Runs `body` with requests to 127.0.0.1 sent around the proxy environment, as NO_PROXY does for a local model server.
+// Bun reads NO_PROXY at each request; it is emptied again, never deleted, since Bun would not see it set again.
+const direct = <A, E, R>(body: Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const saved = { upper: process.env.NO_PROXY, lower: process.env.no_proxy }
+      process.env.NO_PROXY = "127.0.0.1"
+      process.env.no_proxy = "127.0.0.1"
+      return saved
+    }),
+    () => body,
+    (saved) =>
+      Effect.sync(() => {
+        process.env.NO_PROXY = saved.upper ?? ""
+        process.env.no_proxy = saved.lower ?? ""
+      }),
+  )
+
+// Puts servers on the model server list for `body`: the user's own entries in their config, and the company's in the
+// managed policy. A loosening edit waits for the owner, who says yes here; both are taken off again afterwards.
+const serverList = <A, E, R>(
+  input: {
+    readonly user?: readonly string[]
+    readonly managed?: readonly string[]
+    /** Providers for the user's own config, read when the repository's instance starts. */
+    readonly provider?: Record<string, unknown>
+  },
+  body: () => Effect.Effect<A, E, R>,
+) => {
+  const globalFile = path.join(Global.Path.config, "vector.json")
+  const managedDirectory = process.env.VECTOR_TEST_MANAGED_CONFIG_DIR!
+  const apply = () => {
+    Config.refreshLocal()
+    Config.confirmLocal()
+  }
+  return Effect.acquireUseRelease(
+    Effect.sync(() => {
+      writeFileSync(globalFile, JSON.stringify({ provider: input.provider, local: { endpoints: input.user ?? [] } }))
+      if (input.managed) {
+        mkdirSync(managedDirectory, { recursive: true })
+        writeFileSync(
+          path.join(managedDirectory, "vector.json"),
+          JSON.stringify({ local: { endpoints: input.managed } }),
+        )
+      }
+      apply()
+    }),
+    body,
+    () =>
+      Effect.sync(() => {
+        rmSync(globalFile, { force: true })
+        rmSync(managedDirectory, { recursive: true, force: true })
+        apply()
+        rmSync(Config.localConfirmedFile(), { force: true })
+      }),
+  )
+}
+
+// Providers that each serve qwen-7b with this context from their own address. With `preconnect`, a plugin names where
+// their requests go, which decides where they count as being.
+function servers(urls: Readonly<Record<string, string>>, context: number, preconnect?: string) {
+  return {
+    provider: Object.fromEntries(
+      Object.entries(urls).map(([id, url]) => [
+        id,
+        {
+          ...providerCfg(url, context).provider.lmstudio,
+          name: id,
+          id,
+          options: { apiKey: "test-key", baseURL: url, ...(preconnect ? { preconnect } : {}) },
+        },
+      ]),
+    ),
+  }
+}
 
 function providerCfg(url: string, context: number) {
   return {

@@ -478,8 +478,10 @@ const layer = Layer.effect(
           Effect.ensuring(usage.finish()),
           Effect.orDie,
         )
+      // A thinking block the reply limit cut off before it closed is dropped too, so its first words never become the
+      // title; with nothing after it, the title the user's words gave stays.
       const cleaned = text
-        .replace(/<think>[\s\S]*?<\/think>\s*/g, "")
+        .replace(/<think>[\s\S]*?(?:<\/think>|$)\s*/g, "")
         .split("\n")
         .map((line) => line.trim())
         .find((line) => line.length > 0)

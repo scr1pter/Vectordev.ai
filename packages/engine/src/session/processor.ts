@@ -25,6 +25,7 @@ import { SessionSummary } from "./summary"
 import { Provider } from "@/provider/provider"
 import { Question } from "@/question"
 import { errorMessage } from "@/util/error"
+import { NamedError } from "@vectordevai/core/util/error"
 import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@vectordevai/core/database/database"
@@ -37,7 +38,6 @@ import { providerCredentialAllowed, providerUsable } from "@vectordevai/core/pro
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { Auth } from "@/auth"
 import { ModelSlots } from "@vectordevai/core/local-mode/model-slots"
-import { ModelPlans } from "@vectordevai/core/model-plans"
 import { LocalErrors } from "@vectordevai/core/local-mode/errors"
 import { Token } from "@vectordevai/core/util/token"
 
@@ -168,23 +168,20 @@ const layer = Layer.effect(
       // The opening snapshot is taken while the request is built and sent rather than before it. The AI SDK may run
       // tools before it emits start-step, so tools are held until it lands instead (see `gate` in process).
       const opening = yield* enqueue(input.sessionID, snapshot.track())
-      const url = Provider.serverURL(input.model, yield* provider.getProvider(input.model.providerID))
-      // A model server someone hosts: its requests wait in line for the server's permits, the agent needs its fixed
-      // prompt to fit, and its errors come with their fix. Cloud APIs skip all of it.
-      const hosted =
-        input.model.freeModel ||
-        input.model.providerID === "vector" ||
-        input.model.providerID === ModelPlans.PROVIDER_ID
-          ? undefined
-          : ModelSlots.server(url)
-      const parentID = hosted
+      // The line this model's requests wait in at its server, read the way the provider holds them, so every request
+      // that waits in it is named: the user's turn, or a subagent's in a child session. On a server someone hosts the
+      // agent also needs its fixed prompt to fit, and its errors come with their fix. A cloud API with no configured
+      // `concurrency` has no line and skips all of it.
+      const line = yield* provider.line(input.model)
+      const hosted = line?.hosted ? line.origin : undefined
+      const parentID = line
         ? yield* session.get(input.sessionID).pipe(
             Effect.map((info) => info.parentID),
             Effect.catch(() => Effect.succeed(undefined)),
           )
         : undefined
       // The first step for a new prompt in a root session: helpers still waiting for a server can wait for the next.
-      if (hosted && !parentID && prompts.get(input.sessionID) !== input.assistantMessage.parentID) {
+      if (line && !parentID && prompts.get(input.sessionID) !== input.assistantMessage.parentID) {
         prompts.delete(input.sessionID)
         prompts.set(input.sessionID, input.assistantMessage.parentID)
         if (prompts.size > 500) prompts.delete(prompts.keys().next().value!)
@@ -208,7 +205,7 @@ const layer = Layer.effect(
                 providerUsable(input.model.providerID, { npm: input.model.api.npm, api: input.model.api.url }),
               ),
             listed: input.model.cost.input > 0 || input.model.cost.output > 0,
-            local: ModelSlots.local(url, hosted ? Config.local() : undefined),
+            local: line?.local ?? false,
           }),
         ),
         Effect.forkIn(scope),
@@ -910,22 +907,7 @@ const layer = Layer.effect(
           yield* events.publish(Session.Event.Error, { sessionID: ctx.sessionID, error })
           return
         }
-        // A server someone hosts says what went wrong in its own terms; the common failures get their fix in front.
-        const explained =
-          hosted && SessionV1.APIError.isInstance(error)
-            ? LocalErrors.explain({
-                text: [error.data.message, error.data.responseBody ?? ""].join(" "),
-                model: ctx.model.id,
-                origin: hosted,
-              })
-            : undefined
-        ctx.assistantMessage.error =
-          explained && SessionV1.APIError.isInstance(error)
-            ? new SessionV1.APIError({
-                ...error.data,
-                message: `${explained.fix} The server said: ${LocalErrors.plain(error.data.message)}`,
-              }).toObject()
-            : error
+        ctx.assistantMessage.error = hosted ? explain(error, ctx.model.id, hosted) : error
         yield* events.publish(Session.Event.Error, {
           sessionID: ctx.assistantMessage.sessionID,
           error: ctx.assistantMessage.error,
@@ -984,7 +966,7 @@ const layer = Layer.effect(
           yield* events.publish(Session.Event.Error, { sessionID: ctx.sessionID, error: ctx.assistantMessage.error })
           return "stop" as const
         }
-        const model = hosted
+        const model = line
           ? Provider.withPriority(streamInput.model, parentID ? "subagent" : "user")
           : streamInput.model
 
@@ -1080,7 +1062,8 @@ const layer = Layer.effect(
                   return status.set(ctx.sessionID, {
                     type: "retry",
                     attempt: info.attempt,
-                    message: info.message,
+                    // A server someone hosts that is not running is retried too, with the fix in front meanwhile.
+                    message: hosted ? fixed(info.message, ctx.model.id, hosted) : info.message,
                     action: info.action,
                     next: info.next,
                   })
@@ -1111,6 +1094,27 @@ const layer = Layer.effect(
     return Service.of({ create, settle })
   }),
 )
+
+// A server someone hosts says what went wrong in its own terms; the common failures get their fix in front. When nothing
+// answered at all, the words are the runtime's rather than the server's.
+function fixed(message: string, model: string, origin: string, body = "") {
+  const explained = LocalErrors.explain({ text: `${message} ${body}`, model, origin })
+  if (!explained) return message
+  const said = explained.kind === "connection-refused" ? "The error was" : "The server said"
+  return `${explained.fix} ${said}: ${LocalErrors.plain(message)}`
+}
+
+// The error a step ends with. Besides the server's own refusals, an unknown error is how the runtime's fetch can report
+// that nothing answered.
+function explain(error: ReturnType<typeof MessageV2.fromError>, model: string, origin: string) {
+  if (SessionV1.APIError.isInstance(error)) {
+    const message = fixed(error.data.message, model, origin, error.data.responseBody)
+    return message === error.data.message ? error : new SessionV1.APIError({ ...error.data, message }).toObject()
+  }
+  if (!NamedError.Unknown.isInstance(error)) return error
+  const message = fixed(error.data.message, model, origin)
+  return message === error.data.message ? error : new NamedError.Unknown({ message }).toObject()
+}
 
 // The part of every request an agent makes that does not change from step to step: the system prompt LLMRequestPrep
 // builds (the agent's own prompt or the model's, then the stable and per-session parts) and the tool definitions.

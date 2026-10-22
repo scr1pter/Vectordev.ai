@@ -46,6 +46,10 @@ describe("LocalErrors", () => {
       })?.fix,
     ).toBe("Nothing answered at http://127.0.0.1:11434. Start the model server, or check its address and port.")
     expect(LocalErrors.explain({ text: "connect ECONNREFUSED 127.0.0.1:8080" })?.kind).toBe("connection-refused")
+    // Vector's own egress proxy, which the strict guard sends every request through, answers for the server.
+    expect(LocalErrors.explain({ text: "Bad Gateway: Could not reach 127.0.0.1. Could not reach 127.0.0.1." })?.kind).toBe(
+      "connection-refused",
+    )
   })
 
   test("keeps the server's own words for anything else", () => {

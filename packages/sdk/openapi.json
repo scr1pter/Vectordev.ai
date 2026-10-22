@@ -30122,6 +30122,9 @@
               "concurrency": {
                 "type": "integer",
                 "exclusiveMinimum": 0
+              },
+              "forwards": {
+                "type": "boolean"
               }
             },
             "additionalProperties": {}

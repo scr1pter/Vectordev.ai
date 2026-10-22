@@ -114,7 +114,11 @@ export const Info = Schema.Struct({
         }),
         concurrency: Schema.optional(PositiveInt).annotate({
           description:
-            "In development, not applied by this version yet: how many requests Vector sends to this provider's server at once. Providers that point at one server share its limit.",
+            "How many requests Vector sends to this provider's server at once. Providers that point at one server share its limit. Without it, a server on this computer or your network takes one at a time. Check models sets it for the servers it finds.",
+        }),
+        forwards: Schema.optional(Schema.Boolean).annotate({
+          description:
+            "Whether this provider's server passes prompts on to other services, as a LiteLLM proxy does. Its steps then count as unpriced rather than local, so a dollar cap still stops them. Check models sets it for a LiteLLM proxy.",
         }),
       }),
       [Schema.Record(Schema.String, Schema.Any)],
