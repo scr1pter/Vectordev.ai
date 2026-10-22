@@ -43,6 +43,7 @@ import { registerWslIpcHandlers } from "./wsl/ipc"
 import { spawnWslSidecar } from "./wsl/sidecar"
 import { migrate } from "./migrate"
 import { leakedXdgHomes } from "./xdg-env"
+import { resolveDesktopLocal } from "./local-policy"
 import { cleanupStoreFiles, removeLegacyAccessFiles } from "./store-cleanup"
 import { startBrowserBridge, stopBrowserBridge } from "./browser-bridge"
 import { startCloudBridge, stopCloudBridge } from "./cloud-bridge"
@@ -257,6 +258,7 @@ const main = Effect.gen(function* () {
   }
 
   preferAppEnv(app.getPath("userData"))
+  resolveDesktopLocal(app.getPath("userData"))
 
   app.on("second-instance", (_event: Event, argv: string[]) => {
     const urls = argv.filter((arg: string) => arg.startsWith("vector://"))
