@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "metadata": {
+    "server": "sglang",
+    "recorded": false,
+    "note": "Written by hand from the server's public API documentation, not recorded from a running server. Replace with a recording (packages/http-recorder) before relying on a field this does not show.",
+    "version": "0.5.3",
+    "fallback": {
+      "status": 404,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": "{\"detail\": \"Not Found\"}"
+    }
+  },
+  "interactions": [
+    {
+      "transport": "http",
+      "request": {
+        "method": "GET",
+        "url": "http://127.0.0.1:30000/get_model_info",
+        "headers": {},
+        "body": ""
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"model_path\": \"Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8\", \"tokenizer_path\": \"Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8\", \"is_generation\": true, \"preferred_sampling_params\": null, \"weight_version\": \"default\"}"
+      }
+    },
+    {
+      "transport": "http",
+      "request": {
+        "method": "GET",
+        "url": "http://127.0.0.1:30000/get_server_info",
+        "headers": {},
+        "body": ""
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"model_path\": \"Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8\", \"tp_size\": 8, \"context_length\": null, \"tool_call_parser\": \"qwen3_coder\", \"version\": \"0.5.3\"}"
+      }
+    },
+    {
+      "transport": "http",
+      "request": {
+        "method": "GET",
+        "url": "http://127.0.0.1:30000/v1/models",
+        "headers": {},
+        "body": ""
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"object\": \"list\", \"data\": [{\"id\": \"Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8\", \"object\": \"model\", \"created\": 1760000000, \"owned_by\": \"sglang\", \"root\": \"Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8\", \"max_model_len\": 262144}]}"
+      }
+    }
+  ]
+}
