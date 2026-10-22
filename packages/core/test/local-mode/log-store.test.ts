@@ -56,15 +56,24 @@ describe("EgressLogStore.open", () => {
     expect((await store.read({ since: NOW + 1 })).map((item) => item.id)).toEqual(["event-2"])
   })
 
-  test("tightens a folder that already exists, and skips a line that is not an event", async () => {
+  test("tightens a folder and a file that already exist, and skips a line that is not an event", async () => {
     await using dir = await tmpdir()
     const directory = path.join(dir.path, "local")
+    const file = path.join(directory, "egress-2026-10-21.jsonl")
     fs.mkdirSync(directory, { mode: 0o755 })
-    fs.writeFileSync(path.join(directory, "egress-2026-10-21.jsonl"), 'not json\n{"id":1}\n')
+    fs.writeFileSync(file, 'not json\n{"id":1}\n', { mode: 0o644 })
+    fs.chmodSync(file, 0o644)
     const store = EgressLogStore.open({ directory, now: () => NOW })
     expect(fs.statSync(directory).mode & 0o777).toBe(0o700)
     store.append(event(3))
     expect((await store.read()).map((item) => item.id)).toEqual(["event-3"])
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600)
+    // The next store to write to it, such as the next process's, tightens it again.
+    fs.chmodSync(file, 0o644)
+    const reopened = EgressLogStore.open({ directory, now: () => NOW })
+    reopened.append(event(4))
+    await reopened.flush()
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600)
   })
 
   test("removes files past 30 days when it opens and when a day turns", async () => {

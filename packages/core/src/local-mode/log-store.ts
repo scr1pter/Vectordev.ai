@@ -78,7 +78,8 @@ export function open(options: Options): Store {
   // mkdir's mode is masked by the umask, and a folder that already exists keeps its own, so both are set again.
   fs.mkdirSync(options.directory, { recursive: true, mode: 0o700 })
   fs.chmodSync(options.directory, 0o700)
-  const state = { queue: Promise.resolve(), day: "" }
+  // `tightened`: the files this store has set to 0600 itself.
+  const state = { queue: Promise.resolve(), day: "", tightened: new Set<string>() }
   const files = () =>
     fs
       .readdirSync(options.directory)
@@ -99,9 +100,14 @@ export function open(options: Options): Store {
       cleanup()
     }
     const file = path.join(options.directory, `egress-${today}.jsonl`)
-    const created = !fs.existsSync(file)
-    fs.appendFileSync(file, `${JSON.stringify(event)}\n`, { mode: 0o600 })
-    if (created) fs.chmodSync(file, 0o600)
+    // A file already there keeps its own mode, and a new one's is masked by the umask, so the first time this store
+    // writes to a file it sets it to 0600 before any line goes in.
+    if (!state.tightened.has(file)) {
+      fs.closeSync(fs.openSync(file, "a", 0o600))
+      fs.chmodSync(file, 0o600)
+      state.tightened.add(file)
+    }
+    fs.appendFileSync(file, `${JSON.stringify(event)}\n`)
   }
   return {
     directory: options.directory,
