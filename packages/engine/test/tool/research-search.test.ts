@@ -2,6 +2,7 @@ import { afterAll, expect } from "bun:test"
 import path from "path"
 import { Effect } from "effect"
 import { Brain } from "@vectordevai/core/brain/brain"
+import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { ResearchOutbound } from "@vectordevai/core/research/outbound"
 import { ResearchStore } from "@vectordevai/core/research/store"
 import { FSUtil } from "@vectordevai/core/fs-util"
@@ -25,6 +26,8 @@ afterAll(async () => {
 })
 
 const FACT = "My badge number at Hooli is 44172 and my manager is Dana Whitfield"
+const MEMO =
+  "# Pricing memo\n\nWe will raise the Enterprise heat pump tier to forty dollars per seat in Lisbon next spring.\n"
 const NOTES = "The Falcon migration moves the ledger to the reconcileLedgerEntries service before the March freeze."
 // The user approved reading pages for these runs, and the search server on their own network (the fake web resolves
 // to this computer, so SearXNG on it is a private address, which asks once for its origin).
@@ -139,4 +142,51 @@ it.instance(
       expect(web.hits().length).toBe(before)
     }),
   90_000,
+)
+
+it.instance(
+  "a sentence of a private document the lead was shown stays out of its searches and its researchers' searches",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup(web)
+      const knowledge = yield* BrainKnowledge.Service
+      const place = yield* (yield* Instruction.Service).place()
+      const added = yield* knowledge.add(place, { type: "text", name: "Pricing memo.md", text: MEMO, origin: "upload" })
+      if (added.type === "refused") throw new Error(added.message)
+      yield* knowledge.wait(place, added.document.id, "searchable", 10_000)
+      const sessions = yield* Session.Service
+      const lead = yield* sessions.create({ title: "Research", permission: allow })
+      const copied = "raise the Enterprise heat pump tier"
+      const researcher = (hit: { body: Record<string, unknown> }) =>
+        JSON.stringify(hit.body).includes("research_assignment")
+      yield* llm.tool("research_plan", plan({ depth: "deep" }))
+      // The memory tool shows the memo's passage, word for word.
+      yield* llm.tool("memory", { action: "search", text: "Enterprise heat pump tier pricing" })
+      yield* llm.tool("research_search", { query: copied })
+      yield* llm.tool("task", {
+        description: "Prices",
+        prompt: "What do heat pumps cost in Europe?",
+        subagent_type: "researcher",
+        background: false,
+      })
+      // The researcher never saw the memo, but the run did: its search is checked against the whole run.
+      yield* llm.toolMatch(researcher, "research_search", { query: `${copied} prices` })
+      yield* llm.textMatch(researcher, "Nothing found.")
+      yield* llm.text("Done.")
+      const before = web.hits().filter((hit) => hit.site === "searxng").length
+      yield* send({ sessionID: lead.id, agent: "research", text: "Research what heat pumps cost." })
+
+      const [memory] = yield* calls(lead.id, "memory")
+      expect(
+        memory?.state.status === "completed" ? memory.state.metadata["vector.memory.knowledge"]?.cards : [],
+      ).toHaveLength(1)
+      const [search] = yield* calls(lead.id, "research_search")
+      expect(output(search)).toBe(ResearchOutbound.REFUSAL)
+      const [child] = yield* sessions.children(lead.id)
+      const [inner] = yield* calls(child!.id, "research_search")
+      expect(output(inner)).toBe(ResearchOutbound.REFUSAL)
+      expect(web.hits().filter((hit) => hit.site === "searxng").length).toBe(before)
+      expect(guard.outside()).toEqual([])
+    }),
+  120_000,
 )

@@ -263,33 +263,39 @@ const layer = Layer.effect(
       // The owner's rules and the repository's own rules files, which every digest carries.
       const rules = yield* Effect.forEach([files.rules, ...where.sources.map((source) => source.path)], text)
 
-      // Document cards and passages the run was shown: a private document's are private, the repository's the work.
+      // Document cards and passages the run was shown, rendered again from their ids as each request renders them: a
+      // private document's are private, the repository's the work.
       const cards = [
         ...new Set(
-          parts.flatMap((part) => {
-            const known = SessionMemory.knowledge(part)
-            return [
-              ...(SessionMemory.recall(part)?.cards ?? []),
-              ...(known?.cards ?? []),
-              ...(known?.get.map((item) => item.id) ?? []),
-            ]
-          }),
+          parts.flatMap((part) => [
+            ...(SessionMemory.recall(part)?.cards ?? []),
+            ...(SessionMemory.knowledge(part)?.cards ?? []),
+          ]),
         ),
       ]
-      const shown = cards.length
+      const gets = parts.flatMap((part) => SessionMemory.knowledge(part)?.get ?? [])
+      const lines = cards.length
         ? yield* knowledge.lines(where, cards, { personal: !guest, sessionID: ctx.sessionID })
         : new Map<string, string>()
-      const visible = yield* Effect.forEach(cards, (id) =>
-        knowledge.sources(where, [id]).pipe(
+      const passages = yield* Effect.forEach(gets, (item) =>
+        knowledge
+          .get(where, { ...item, personal: !guest, sessionID: ctx.sessionID })
+          .pipe(Effect.map((got) => ({ id: item.id, text: got?.text }))),
+      )
+      const shown = [
+        ...[...lines].map(([id, line]) => ({ id, text: line })),
+        ...passages.flatMap((item) => (item.text ? [{ id: item.id, text: item.text }] : [])),
+      ]
+      const visible = yield* Effect.forEach(shown, (item) =>
+        knowledge.sources(where, [item.id]).pipe(
           Effect.map((found) => ({
-            id,
+            ...item,
             private:
               found.documents.length === 0 || found.documents.some((document) => document.visibility === "private"),
           })),
         ),
       )
-      const card = (secret: boolean) =>
-        visible.flatMap((item) => (item.private === secret && shown.get(item.id) ? [shown.get(item.id)!] : []))
+      const card = (secret: boolean) => visible.flatMap((item) => (item.private === secret ? [item.text] : []))
 
       const outputs = (tools: readonly string[]) =>
         parts.flatMap((part) =>
@@ -304,8 +310,9 @@ const layer = Layer.effect(
           memory,
           ...entries.filter((entry) => !habit(entry)).map((entry) => entry.text),
           ...card(true),
-          // What the lead read in the user's own browser, signed in, is private like a private document.
-          ...outputs(["browser"]),
+          // What the memory tool showed this step, filled in as the model read it, and what the lead read in the
+          // user's own browser, signed in, are private like a private document.
+          ...outputs(["memory", "browser"]),
           ...sources.closed,
         ].filter(Boolean),
         work: [
