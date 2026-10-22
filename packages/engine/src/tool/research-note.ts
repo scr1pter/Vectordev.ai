@@ -20,7 +20,7 @@ export const Parameters = Schema.Struct({
   }),
   source: Schema.String.annotate({ description: 'The source the quote is from, such as "S3"' }),
   quote: Schema.String.check(Schema.isLengthBetween(1, 600)).annotate({
-    description: "Words copied exactly from the source, at least 12 characters, that state the claim",
+    description: "Words copied word for word from the source, at least 12 characters, that state the claim",
   }),
   page: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))).annotate({
     description: "The PDF page the quote is on",

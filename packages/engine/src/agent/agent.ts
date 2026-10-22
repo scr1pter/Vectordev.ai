@@ -358,8 +358,19 @@ const layer = Layer.effect(
                   }
                 : {}),
             }),
-            rules.flatMap((rule) => narrow(rule, tools, [], { subagents, external: reads })),
-            Permission.fromConfig(Object.fromEntries(RESEARCH_DENIED.map((tool) => [tool, "deny" as const]))),
+            // The run's first read asks however broad an allow is ("*", "research_*"): only a rule for research_read
+            // itself answers it.
+            rules.flatMap((rule) =>
+              narrow(rule, tools, [], { subagents, external: reads }).filter(
+                (item) =>
+                  item.permission !== "research_read" || item.action !== "allow" || rule.permission === "research_read",
+              ),
+            ),
+            Permission.fromConfig({
+              ...Object.fromEntries(RESEARCH_DENIED.map((tool) => [tool, "deny" as const])),
+              // MCP resources are read under `read` with an `mcp:` pattern; the lead, which reads files, reads none.
+              ...(reads ? { read: { "mcp:*": "deny" as const } } : {}),
+            }),
           )
         }
 
@@ -523,7 +534,8 @@ const layer = Layer.effect(
             native: true,
           },
           // Deep research (section 5.3). The lead is a primary agent and a subagent build may hand a research question
-          // to; it makes no code changes. The app's Mode menu picks it, so its agent picker leaves it out.
+          // to; it makes no code changes. The app's agent picker leaves it out by name (context/local.tsx): the Mode
+          // menu will pick it.
           [RESEARCH]: {
             name: RESEARCH,
             description:

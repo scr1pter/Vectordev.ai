@@ -17,7 +17,30 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 // never saved as Always; a saved source reads again with no network call.
 
 const guard = NetworkGuard.use()
-const web = FakeWeb.start({ sites: FakeWeb.sites() })
+const web = FakeWeb.start({
+  sites: {
+    ...FakeWeb.sites(),
+    // A search server whose results point at a cloud metadata address, the user's own network and this computer.
+    lansearch: {
+      "/search": (_request, at) =>
+        Response.json({
+          query: "heat pump",
+          number_of_results: 4,
+          results: [
+            { url: "http://169.254.169.254/latest/meta-data/", title: "Meta", content: "Heat pumps", engine: "fake" },
+            { url: "http://10.1.2.3/wiki", title: "Wiki", content: "Heat pumps", engine: "fake" },
+            { url: at.direct("article", "/"), title: "Loopback", content: "Heat pumps", engine: "fake" },
+            {
+              url: "http://metadata.google.internal/computeMetadata/v1/",
+              title: "Metadata",
+              content: "Heat pumps",
+              engine: "fake",
+            },
+          ],
+        }),
+    },
+  },
+})
 const { it, cleanup } = runtime(web)
 afterAll(async () => {
   await web.close()
@@ -116,7 +139,8 @@ it.instance(
 
       // The pages are held, private web documents of the run, as the store keeps them.
       const store = yield* ResearchStore.Service
-      const place = yield* (yield* Instruction.Service).place()
+      const instruction = yield* Instruction.Service
+      const place = yield* instruction.place()
       const detail = yield* store.get(place, runID as string)
       expect(detail?.sources.map((source) => [source.id, source.status])).toEqual([
         ["S1", "read"],
@@ -217,6 +241,52 @@ it.instance(
       if ("refused" in found) return
       const check = ResearchProvenance.check(yield* research.provenance(ctx, found), web.url("article", "/"))
       expect(check.ok).toBe(true)
+    }),
+  90_000,
+)
+
+it.instance(
+  "a search result at a metadata, private or loopback address is refused without asking and never fetched",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup(web, {
+        research: { search: { provider: "searxng", url: web.url("lansearch", "/") } },
+      })
+      const asked = yield* answer("once")
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Research" })
+      const found = [
+        "http://169.254.169.254/latest/meta-data/",
+        "http://10.1.2.3/wiki",
+        web.direct("article", "/"),
+        "http://metadata.google.internal/computeMetadata/v1/",
+      ]
+      yield* llm.tool("research_plan", plan())
+      yield* llm.tool("research_search", { query: "heat pump field study" })
+      for (const url of found) yield* llm.tool("research_read", { url })
+      yield* llm.text("Done.")
+      const before = web.count("article")
+      yield* send({ sessionID: session.id, agent: "research", text: "Research heat pumps." })
+      const reads = yield* calls(session.id, "research_read")
+      expect(reads).toHaveLength(found.length)
+      for (const read of reads) {
+        expect(read.state.status === "completed" ? read.state.metadata.status : undefined).toBe("failed")
+        expect(output(read)).toContain("was not read: ")
+        expect(output(read)).not.toContain("..")
+        expect(output(read)).not.toContain("untrusted_web_page")
+      }
+      expect(output(reads[0])).toContain("cloud metadata")
+      expect(output(reads[1])).toContain("only from an address you typed")
+      expect(output(reads[2])).toContain("only from an address you typed")
+      expect(output(reads[3])).toContain("cloud metadata")
+      // Research found these addresses, so none of them asks to reach the user's network: each is refused.
+      expect(
+        asked.filter(
+          (request) => request.permission === "private_network" && request.metadata.tool === "research_read",
+        ),
+      ).toEqual([])
+      expect(web.count("article") - before).toBe(0)
+      expect(guard.outside()).toEqual([])
     }),
   90_000,
 )

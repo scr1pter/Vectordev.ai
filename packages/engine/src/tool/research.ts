@@ -51,7 +51,7 @@ export const ResearchTool = Tool.define(
               title: "Not researched",
               output:
                 setting === "off"
-                  ? "Research as a tool is turned off in this repository's settings (research.tool)."
+                  ? "Research as a tool is turned off in the settings for this repository (research.tool)."
                   : "Research as a tool runs on Thorough requests only in these settings (research.tool: thorough). Call escalate if the work needs it.",
               metadata: {},
             }
@@ -62,7 +62,8 @@ export const ResearchTool = Tool.define(
             `Depth: ${deep ? "deep" : "focused"}. Scope: ${params.scope ?? "web+brain"}.`,
             "Plan the run with research_plan, research it, write the report with research_report, and reply with the answer in a few lines and the note IDs it rests on.",
           ].join("\n")
-          const invoked = Array.isArray(ctx.extra?.invokedAgents) ? ctx.extra.invokedAgents : []
+          // The task tool decides whether the lead may start as it does for any subagent the model asks for, so the
+          // user's task rules apply: `task: deny` refuses it, and `task: { research: "ask" }` asks first.
           return yield* task.execute(
             {
               description: `Research: ${params.question.trim().slice(0, 48)}`,
@@ -70,9 +71,7 @@ export const ResearchTool = Tool.define(
               subagent_type: ResearchRun.LEAD,
               ...(params.background === undefined ? {} : { background: params.background }),
             },
-            // This tool is the build agent's own way to hand a question to the lead, so the task tool does not ask
-            // whether it may launch it.
-            { ...ctx, extra: { ...ctx.extra, invokedAgents: [...invoked, ResearchRun.LEAD] } },
+            ctx,
           )
         }),
     }

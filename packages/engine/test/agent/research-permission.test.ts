@@ -86,6 +86,11 @@ it.instance(
       // The judge has nothing at all.
       expect(offered(judge, [...RESEARCH_TOOLS, ...CODING, ...OTHER, "read", "memory", "task", "browser"])).toEqual([])
       expect(judge.hidden).toBe(true)
+
+      // A blanket allow does not answer the run's first read, and no research agent reads an MCP resource.
+      for (const agent of [research, researcher]) expect(action(agent, "research_read", "run_1")).toBe("ask")
+      expect(action(research, "read", "mcp:notes:notes://renewals")).toBe("deny")
+      expect(action(research, "read", "src/app.ts")).toBe("allow")
     }),
   {
     trusted: true,
@@ -179,4 +184,15 @@ it.instance(
       agent: { build: { permission: { research_read: "allow", task: { researcher: "allow" } } } },
     },
   },
+)
+
+it.instance(
+  "a rule for research_read itself answers the run's first read",
+  () =>
+    Effect.gen(function* () {
+      const research = (yield* get("research"))!
+      const researcher = (yield* get("researcher"))!
+      for (const agent of [research, researcher]) expect(action(agent, "research_read", "run_1")).toBe("allow")
+    }),
+  { trusted: true, config: { permission: { "research_*": "allow", research_read: "allow" } } },
 )

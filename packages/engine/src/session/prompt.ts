@@ -275,10 +275,12 @@ const layer = Layer.effect(
         readonly index: boolean
         readonly audience: Brain.Audience
         readonly kinds?: readonly Brain.HabitKind[]
+        /** Whether the instruction files (AGENTS.md and the rest) go too. */
+        readonly files: boolean
       },
     ) {
       const snapshot = instructionSnapshots.get(sessionID)
-      const full = `${key}|${memory.personal ? "personal" : "shared"}|${memory.index ? "index" : "plain"}|${memory.audience}|${memory.kinds?.join(",") ?? "all"}`
+      const full = `${key}|${memory.personal ? "personal" : "shared"}|${memory.index ? "index" : "plain"}|${memory.audience}|${memory.kinds?.join(",") ?? "all"}|${memory.files ? "files" : "brief"}`
       // Re-inserting keeps the most recently used sessions at the end; the oldest go once there are too many.
       instructionSnapshots.delete(sessionID)
       if (snapshot && snapshot.key === full && !cold) {
@@ -293,7 +295,7 @@ const layer = Layer.effect(
         ? yield* knowledge.digest(place, { personal: memory.personal && memory.audience === "owner" })
         : undefined
       const digest = yield* brain.digest(place, { ...memory, ...(documents ? { documents } : {}) })
-      const instructions = [...(yield* instruction.system()), ...(digest.text ? [digest.text] : [])]
+      const instructions = [...(memory.files ? yield* instruction.system() : []), ...(digest.text ? [digest.text] : [])]
       const next = { key: full, instructions, documents: documents !== undefined }
       instructionSnapshots.set(sessionID, next)
       if (instructionSnapshots.size > MAX_INSTRUCTION_SNAPSHOTS)
@@ -2146,6 +2148,9 @@ const layer = Layer.effect(
                     personal,
                     index: offered.includes("memory"),
                     audience,
+                    // A research worker and the judge work from their brief: the repository's instruction files name
+                    // its code, hosts and people, and what a worker sends leaves the machine.
+                    files: !OUTWARD_AGENTS.has(agent.name),
                     // An outward digest pins only the kinds the role hears: preferences alone for a pull request
                     // Vector cannot trust.
                     ...(audience === "outward"

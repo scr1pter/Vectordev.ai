@@ -224,6 +224,11 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     if (ToolRegistry.isBuiltinPatch(item)) NativePatch.mark(tools[item.id])
   }
 
+  // A research agent is offered its own tools alone, whatever a session's rules allow (RC1): no MCP tool or resource
+  // reaches Deep research. What they return would be private text the outbound check does not see, and a resource's
+  // address is the model's to write, so a hostile page could choose what is sent to an MCP server.
+  if (Agent.researchTools(input.agent.name)) return tools
+
   const hasMcpResourceServer = Object.values(yield* mcp.clients()).some(
     (client) => !!client.getServerCapabilities()?.resources,
   )

@@ -4,6 +4,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
+import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { FreeModelGuests } from "@vectordevai/core/free-model-guests"
 import { ResearchOutbound } from "@vectordevai/core/research/outbound"
 import { ResearchProvenance } from "@vectordevai/core/research/provenance"
@@ -16,7 +17,7 @@ import type { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Research } from "@vectordevai/schema/research"
 import type { RunBudget } from "@vectordevai/schema/run-budget"
-import { Context, Effect, Layer, Semaphore } from "effect"
+import { Context, Effect, Layer, Scope, Semaphore } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { Config } from "@/config/config"
 import { Session } from "@/session/session"
@@ -32,10 +33,12 @@ import type { Tool } from "./tool"
 // the same in every research tool:
 // - the run is the newest plan the lead's session approved (research_plan's completed call carries its id);
 // - provenance is the run's search results, the links research_read offered, and addresses the user typed;
-// - the outbound check's private context is everything private any agent of the run was given: the owner's personal
-//   lines recalled or pinned for it (a researcher's how-you-work lines included), MEMORY.md, private document cards,
-//   repository files read, pages read in the user's signed-in browser, and sources read from the user's own network.
-//   Only the root user's typed words are exempt: a sub-question or a task brief is written by an agent.
+// - the outbound check's private context is everything any agent of the run took in that is not known to be public:
+//   the owner's personal lines recalled or pinned for it (a researcher's how-you-work lines included), MEMORY.md,
+//   private document cards, every tool's output but the web's (files read, commands run, a subagent's report, an MCP
+//   server's answer), files attached to a message, pages read in the user's signed-in browser, and sources read from
+//   the user's own network. Only the root user's typed words are exempt: a sub-question or a task brief is written by
+//   an agent.
 
 export const LEAD = "research"
 export const RESEARCHER = "researcher"
@@ -129,7 +132,8 @@ export interface Interface {
   /**
    * A task brief for a research agent, before the child starts: the lead's request or a researcher's sub-question,
    * checked against what the caller may not send, and a researcher's brief cut to the sub-question and the run's
-   * public preferences.
+   * public preferences. A new researcher takes one of the run's researcher slots, held until the scope (the task
+   * call) closes.
    */
   readonly brief: (input: {
     readonly agent: string
@@ -138,7 +142,9 @@ export interface Interface {
     /** The rest of the brief the caller wrote (success criteria, a context pack), checked with the prompt. */
     readonly extra: readonly string[]
     readonly resume?: string
-  }) => Effect.Effect<Brief>
+    /** The entry of a task batch this brief is. */
+    readonly index?: number
+  }) => Effect.Effect<Brief, never, Scope.Scope>
   /** What a researcher returns to the lead: at most 1,500 characters, and the notes it saved. */
   readonly returned: (sessionID: SessionID, text: string) => Effect.Effect<string>
 }
@@ -164,6 +170,11 @@ const layer = Layer.effect(
     const approving = new Map<string, Semaphore.Semaphore>()
     const limiters = new Map<string, ResearchRate.Limiter>()
     const cached: { robots?: ResearchRobots.Cache } = {}
+    // Researchers each run is starting, by the task call and entry that start them, counted with the run's children
+    // until the call ends: the entries of one batch, and task calls made in one step, would otherwise all see the
+    // same count and start past the cap together. One lock covers counting and reserving.
+    const starting = new Map<string, Set<string>>()
+    const slots = Semaphore.makeUnsafe(1)
     // The text of a run's pages, kept while its count of readable sources is the same.
     const pages = new Map<
       string,
@@ -264,8 +275,11 @@ const layer = Layer.effect(
 
     const context = Effect.fn("ResearchRun.context")(function* (ctx: Tool.Context, found?: Found) {
       const where = found?.place ?? (yield* place())
-      const messages = found ? yield* members(ctx, found.lead) : [ctx.messages]
-      const parts = messages.flat().flatMap((message) => message.parts)
+      // Without a run (the build agent's research request) the calling session's whole history counts: what it took
+      // in before a compaction may be in the summary it works from.
+      const messages = found ? (yield* members(ctx, found.lead)).flat() : yield* history(ctx, ctx.sessionID)
+      const parts = messages.flatMap((message) => message.parts)
+      const taken = messages.map(intake)
       const root = yield* top(ctx.sessionID)
       const guest = (yield* guests.marked(root.id)) || (yield* guests.marked(ctx.sessionID))
       const cfg = yield* config.get()
@@ -321,12 +335,6 @@ const layer = Layer.effect(
       )
       const card = (secret: boolean) => visible.flatMap((item) => (item.private === secret ? [item.text] : []))
 
-      const outputs = (tools: readonly string[]) =>
-        parts.flatMap((part) =>
-          part.type === "tool" && tools.includes(part.tool) && part.state.status === "completed"
-            ? [part.state.output]
-            : [],
-        )
       const sources = found ? yield* sourceText(found) : { open: [] as string[], closed: [] as string[] }
       const results = parts.flatMap((part) => resultsOf(part, found?.run.id))
       return {
@@ -334,16 +342,16 @@ const layer = Layer.effect(
           memory,
           ...entries.filter((entry) => !habit(entry)).map((entry) => entry.text),
           ...card(true),
-          // What the memory tool showed this step, filled in as the model read it, and what the lead read in the
-          // user's own browser, signed in, are private like a private document.
-          ...outputs(["memory", "browser"]),
+          ...taken.flatMap((item) => item.private),
           ...sources.closed,
         ].filter(Boolean),
         work: [
           ...rules,
+          // Every agent's system prompt names the working tree, and its path names the user and the repository.
+          where.root,
           ...entries.filter(habit).map((entry) => entry.text),
           ...card(false),
-          ...outputs(["read", "grep", "glob", "list"]),
+          ...taken.flatMap((item) => item.work),
         ].filter(Boolean),
         typed: yield* typedOf(ctx),
         public: [...results.flatMap((result) => [result.title, result.snippet]), ...sources.open],
@@ -432,6 +440,7 @@ const layer = Layer.effect(
       readonly prompt: string
       readonly extra: readonly string[]
       readonly resume?: string
+      readonly index?: number
     }) {
       const text = [input.prompt, ...input.extra].join("\n")
       if (input.agent === LEAD) {
@@ -462,18 +471,42 @@ const layer = Layer.effect(
       const found = yield* current(input.ctx)
       if ("refused" in found) return { type: "refused", message: found.refused } satisfies Brief
       if (!input.resume) {
-        // This run's researchers: a session may hold several runs, one after another.
-        const started = (yield* sessions.children(found.lead.id)).filter(
-          (child) =>
-            (SubagentLifecycle.read(child)?.agent ?? child.agent) === RESEARCHER &&
-            child.time.created >= found.run.created_at,
-        ).length
         const cap = (yield* limits(found.plan.depth)).researchers
-        if (started >= cap)
+        // The task call and entry that start this researcher, as its child's record will name them.
+        const key = `${input.ctx.sessionID}:${input.ctx.callID ?? input.ctx.messageID}:${input.index ?? 0}`
+        const reserved = yield* slots.withPermits(1)(
+          Effect.gen(function* () {
+            // This run's researchers: a session may hold several runs, one after another.
+            const children = (yield* sessions.children(found.lead.id)).filter(
+              (child) =>
+                (SubagentLifecycle.read(child)?.agent ?? child.agent) === RESEARCHER &&
+                child.time.created >= found.run.created_at,
+            )
+            const started = new Set(
+              children.map((child) => {
+                const record = SubagentLifecycle.read(child)
+                return record ? `${record.batchID}:${record.batchIndex ?? 0}` : child.id
+              }),
+            )
+            const pending = starting.get(found.run.id) ?? new Set<string>()
+            if (children.length + [...pending].filter((item) => !started.has(item)).length >= cap) return false
+            starting.set(found.run.id, pending.add(key))
+            return true
+          }),
+        )
+        if (!reserved)
           return {
             type: "refused",
             message: `This ${found.plan.depth} research has its ${cap} researcher${cap === 1 ? "" : "s"}. Research the rest yourself, or resume one with task_id.`,
           } satisfies Brief
+        // Held until the task call ends: by then its child exists and counts itself, or it never started.
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            const pending = starting.get(found.run.id)
+            pending?.delete(key)
+            if (pending?.size === 0) starting.delete(found.run.id)
+          }),
+        )
       }
       const run = yield* context(input.ctx, found)
       const checked = ResearchOutbound.check(text, run)
@@ -581,6 +614,81 @@ export function linksOf(part: SessionV1.Part, runID: string): string[] {
   if (part.state.status !== "completed" || part.state.metadata?.[RUN] !== runID) return []
   const links = part.state.metadata?.links
   return Array.isArray(links) ? links.filter((link: unknown): link is string => typeof link === "string") : []
+}
+
+// Tools whose output is the web's. A public page and a search result are the run's public text, from the store and
+// the search calls; a page read on the user's own network is private. research_plan, research_note and
+// research_report hold what the run already read.
+const WEB_TOOLS = new Set([
+  "webfetch",
+  "websearch",
+  "research_plan",
+  "research_search",
+  "research_read",
+  "research_browser",
+  "research_note",
+  "research_report",
+])
+// Tools whose output the repository or Vector wrote: the work. A subagent's report is the work too, whatever the
+// subagent read, since it may quote any of it.
+const WORK_TOOLS = new Set([
+  "bash",
+  "read",
+  "grep",
+  "glob",
+  "list",
+  "lsp",
+  "edit",
+  "write",
+  "apply_patch",
+  "todowrite",
+  "question",
+  "skill",
+  "escalate",
+  "plan_exit",
+  "invalid",
+  "StructuredOutput",
+  "task",
+  "task_manage",
+  "send_teammate_message",
+  "research",
+])
+
+/**
+ * What a message took in, by kind: everything but what is known to be public. A tool's output is private unless the
+ * repository or Vector wrote it (the work) or the web did; so the memory tool's, the user's own signed-in browser's,
+ * an MCP server's and a plugin's are private. A researcher's or the judge's report is the run's own and adds nothing.
+ * In a user message a file attached and Vector's other notes are the work, and text from outside (an issue, an
+ * imported transcript) is private, but for a local file an editor embedded. The user's typed words are exempt anyway.
+ */
+function intake(message: SessionV1.WithParts) {
+  const found = message.parts.flatMap((part): { readonly kind: "private" | "work"; readonly text: string }[] => {
+    if (part.type === "text" && message.info.role === "user") {
+      if (SessionMemory.outside(part))
+        return [{ kind: part.metadata?.[BrainSchema.OUTSIDE] === "file" ? "work" : "private", text: part.text }]
+      return part.synthetic ? [{ kind: "work", text: part.text }] : []
+    }
+    if (part.type !== "tool" || part.state.status !== "completed") return []
+    const text = part.state.output
+    if (part.tool === "research_read") return part.state.metadata?.private === true ? [{ kind: "private", text }] : []
+    if (WEB_TOOLS.has(part.tool)) return []
+    if (part.tool === "task" && runOwn(part.state.metadata)) return []
+    return [{ kind: WORK_TOOLS.has(part.tool) ? "work" : "private", text }]
+  })
+  return {
+    private: found.flatMap((item) => (item.kind === "private" ? [item.text] : [])),
+    work: found.flatMap((item) => (item.kind === "work" ? [item.text] : [])),
+  }
+}
+
+// Whether a task call launched only the run's own research agents: a researcher or the judge.
+function runOwn(metadata: Record<string, unknown> | undefined) {
+  const agents = Array.isArray(metadata?.tasks)
+    ? metadata.tasks.map((item: unknown) =>
+        item && typeof item === "object" && "agent" in item ? item.agent : undefined,
+      )
+    : [metadata?.agent]
+  return agents.length > 0 && agents.every((agent) => agent === RESEARCHER || agent === JUDGE)
 }
 
 function refuse(message: string): Current {

@@ -746,9 +746,9 @@ export const TaskTool = Tool.define(
       const generalOff = subagentType === GENERAL_SUBAGENT && !known.has(GENERAL_SUBAGENT)
       // Naming one agent lets the user launch that agent without a prompt, not every subagent this turn.
       const invoked = Array.isArray(ctx.extra?.invokedAgents) && ctx.extra.invokedAgents.includes(subagentType)
+      const caller = yield* agent.get(ctx.agent)
       if (generalOff || (!requested && !invoked)) {
         // An omitted type means the general Subagent only where the caller may launch it.
-        const caller = yield* agent.get(ctx.agent)
         const denied = (name: string) =>
           Permission.evaluate(id, name, caller?.permission ?? [], parent.permission ?? []).action === "deny"
         if (generalOff || denied(GENERAL_SUBAGENT)) {
@@ -771,10 +771,23 @@ export const TaskTool = Tool.define(
         }
       }
 
+      // A session's rules come after its agent's, so one that allows task (a client's tools list) would otherwise hand
+      // an agent a subagent its own rules deny: a research lead a general Subagent with a shell, or any agent a
+      // researcher. What the calling agent itself denies stays denied, unless the user named the subagent.
+      if (!invoked && caller && Permission.evaluate(id, subagentType, caller.permission).action === "deny")
+        return yield* Effect.fail(new Error(`The ${ctx.agent} agent may not launch the ${subagentType} subagent.`))
+
       // The research lead starts with only what this brief says, and a researcher's searches leave the machine: both
       // briefs pass the outbound check before the child starts, and a researcher's is cut to its sub-question and the
       // run's public preferences (sections 5.6a and 6.4a). Refused before anything is asked.
       const researching = subagentType === ResearchRun.LEAD || subagentType === ResearchRun.RESEARCHER
+      // A dependency's report would reach the child with its brief, unchecked.
+      if (researching && dependencies.length > 0)
+        return yield* Effect.fail(
+          new Error(
+            `The ${subagentType} agent starts from its brief alone, so it cannot depend on another task. Put what it needs in the brief, in public terms.`,
+          ),
+        )
       const brief = !researching
         ? undefined
         : Option.isNone(research)
@@ -788,6 +801,7 @@ export const TaskTool = Tool.define(
                 ...(params.context_pack ? [JSON.stringify(params.context_pack)] : []),
               ],
               ...(params.task_id ? { resume: params.task_id } : {}),
+              ...(batch ? { index: batch.index } : {}),
             })
       if (brief?.type === "refused") return yield* Effect.fail(new Error(brief.message))
       const briefed =
@@ -796,7 +810,9 @@ export const TaskTool = Tool.define(
           : subagentType === ResearchRun.RESEARCHER
             ? { ...params, prompt: brief.prompt, success_criteria: undefined, context_pack: undefined }
             : { ...params, prompt: brief.prompt }
-      const budget = params.budget ?? (brief?.type === "ok" ? brief.budget : undefined)
+      // Research's default caps are a ceiling: a budget the model writes may only lower them.
+      const budget =
+        brief?.type === "ok" && brief.budget ? SpendGuard.tighter(params.budget, brief.budget) : params.budget
 
       if (!invoked) {
         yield* ctx.ask({
@@ -1112,13 +1128,16 @@ export const TaskTool = Tool.define(
             { concurrency: "unbounded" },
           )
           if (dependencies.length > 0) yield* transition({ status: "running" })
-          // A brief is the parent model's text, so @names in it attach files but never invoke agents in the child.
+          // A brief is the parent model's text, so @names in it attach files but never invoke agents in the child. A
+          // researcher gets no file at all: what it sends leaves the machine.
           const parts = (yield* ops.resolvePromptParts(
             [
               assignmentPrompt(briefed, subagentType === ResearchRun.RESEARCHER ? [] : ownedPaths),
               ...prerequisites,
             ].join("\n\n"),
-          )).filter((part) => part.type !== "agent")
+          )).filter(
+            (part) => part.type !== "agent" && (subagentType !== ResearchRun.RESEARCHER || part.type !== "file"),
+          )
           return yield* ops.prompt({
             messageID: MessageID.ascending(),
             sessionID: nextSession.id,

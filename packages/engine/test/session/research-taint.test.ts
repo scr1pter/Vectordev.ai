@@ -3,10 +3,11 @@ import { Effect } from "effect"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import type { SessionV1 } from "@vectordevai/core/v1/session"
+import { Permission } from "../../src/permission"
 import { Session } from "@/session/session"
 import { SessionMemory } from "../../src/session/memory"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
-import { calls, runtime, send, setup } from "../lib/research"
+import { calls, output, runtime, send, setup } from "../lib/research"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
@@ -164,4 +165,66 @@ it.instance(
       expect(metadata.hold).toBe("web")
     }),
   90_000,
+)
+
+it.instance(
+  "a build request whose general subagent fetched a page is held as web through the task call alone",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup(web)
+      const permission = yield* Permission.Service
+      // The user lets the subagent fetch the page, which the fake web serves on this computer.
+      yield* Effect.gen(function* () {
+        while (true) {
+          for (const request of yield* permission.list())
+            yield* permission.reply({ requestID: request.id, reply: "once" }).pipe(Effect.ignore)
+          yield* Effect.sleep(10)
+        }
+      }).pipe(Effect.forkScoped)
+      const sessions = yield* Session.Service
+      const build = yield* sessions.create({ title: "Build" })
+      const general = (hit: { body: Record<string, unknown> }) =>
+        JSON.stringify(hit.body).includes("orchestration_assignment")
+      yield* llm.tool("task", {
+        description: "Fetch the study",
+        prompt: "Fetch the heat pump study and say what it found.",
+        subagent_type: "general",
+        success_criteria: ["Say what the study measured"],
+        background: false,
+      })
+      yield* llm.toolMatch(general, "webfetch", { url: web.direct("article", "/"), format: "text" })
+      yield* llm.textMatch(general, "The study followed 412 homes.")
+      yield* llm.tool("memory", {
+        action: "add",
+        kind: "preference",
+        text: "Use heat pump data from field studies",
+        scope: "personal",
+      })
+      yield* llm.text("Done.")
+      yield* send({
+        sessionID: build.id,
+        agent: "build",
+        text: "Find out what the heat pump study found.",
+        size: "thorough",
+      })
+
+      const [child] = yield* sessions.children(build.id)
+      const [fetched] = yield* calls(child!.id, "webfetch")
+      expect(fetched?.state.status).toBe("completed")
+      expect(output(fetched)).toContain("412 homes")
+      // Build itself read nothing from the web: its own calls are the task and the memory write.
+      const messages = yield* sessions.messages({ sessionID: build.id })
+      const tools = messages.flatMap((message) =>
+        message.parts.flatMap((part) => (part.type === "tool" ? [part.tool] : [])),
+      )
+      expect(tools).toEqual(["task", "memory"])
+      const [task] = yield* calls(build.id, "task")
+      expect(task?.state.status === "completed" ? task.state.metadata[SessionMemory.HOLD] : undefined).toBe("web")
+      expect(SessionMemory.taint(messages)).toBe("web")
+      const [memory] = yield* calls(build.id, "memory")
+      const metadata = memory?.state.status === "completed" ? memory.state.metadata : {}
+      expect(metadata.hold).toBe("web")
+      expect(guard.outside()).toEqual([])
+    }),
+  120_000,
 )

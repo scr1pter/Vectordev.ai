@@ -232,7 +232,7 @@ export const ResearchReadTool = Tool.define<
           if (page.status !== "read" && page.status !== "paywalled")
             return {
               title: `${source.id}: not read`,
-              output: `${source.id} (${page.site}) was not read: ${page.reason ?? page.status}.`,
+              output: `${source.id} (${page.site}) was not read: ${(page.reason ?? page.status).replace(/\.+$/, "")}.`,
               metadata: { runID, source: source.id, url: page.final, status: page.status },
             }
           const passages = params.focus

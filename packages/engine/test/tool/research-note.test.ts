@@ -86,7 +86,9 @@ it.instance(
       expect(output(reports[1])).toContain("stay private and out of later sessions until you keep them")
 
       const runID = notes[1]!.state.status === "completed" ? (notes[1]!.state.metadata.runID as string) : ""
-      const detail = yield* (yield* ResearchStore.Service).get(yield* (yield* Instruction.Service).place(), runID)
+      const store = yield* ResearchStore.Service
+      const instruction = yield* Instruction.Service
+      const detail = yield* store.get(yield* instruction.place(), runID)
       expect(detail?.notes.map((note) => [note.id, note.support])).toEqual([
         ["N1", false],
         ["N2", true],

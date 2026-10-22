@@ -1,14 +1,17 @@
 import { afterAll, expect } from "bun:test"
 import path from "path"
+import { pathToFileURL } from "url"
 import { Effect } from "effect"
 import { Brain } from "@vectordevai/core/brain/brain"
 import { BrainKnowledge } from "@vectordevai/core/brain/knowledge"
 import { ResearchOutbound } from "@vectordevai/core/research/outbound"
 import { ResearchStore } from "@vectordevai/core/research/store"
+import { BrainSchema } from "@vectordevai/core/brain/schema"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Session } from "@/session/session"
 import { Instruction } from "../../src/session/instruction"
-import { calls, output, plan, runtime, send, setup } from "../lib/research"
+import { SessionPrompt } from "../../src/session/prompt"
+import { calls, output, plan, ref, runtime, send, setup } from "../lib/research"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
@@ -44,7 +47,8 @@ it.instance(
       const fs = yield* FSUtil.Service
       yield* fs.writeWithDirs(path.join(dir, "notes", "plan.md"), `# Plan\n\n${NOTES}\n`)
       const brain = yield* Brain.Service
-      const place = yield* (yield* Instruction.Service).place()
+      const instruction = yield* Instruction.Service
+      const place = yield* instruction.place()
       yield* brain.propose(place, {
         kind: "fact",
         text: FACT,
@@ -80,7 +84,8 @@ it.instance(
       // Only the query that passed reached the search server, and only it counted.
       expect(web.hits().filter((hit) => hit.site === "searxng")).toHaveLength(1)
       const runID = searches[2]!.state.status === "completed" ? (searches[2]!.state.metadata.runID as string) : ""
-      const detail = yield* (yield* ResearchStore.Service).get(place, runID)
+      const store = yield* ResearchStore.Service
+      const detail = yield* store.get(place, runID)
       expect(detail?.queries).toEqual(["heat pump savings near Whitfield cold climate"])
       expect(detail?.run.searches).toBe(1)
       expect(guard.outside()).toEqual([])
@@ -150,7 +155,8 @@ it.instance(
     Effect.gen(function* () {
       const { llm } = yield* setup(web)
       const knowledge = yield* BrainKnowledge.Service
-      const place = yield* (yield* Instruction.Service).place()
+      const instruction = yield* Instruction.Service
+      const place = yield* instruction.place()
       const added = yield* knowledge.add(place, { type: "text", name: "Pricing memo.md", text: MEMO, origin: "upload" })
       if (added.type === "refused") throw new Error(added.message)
       yield* knowledge.wait(place, added.document.id, "searchable", 10_000)
@@ -209,6 +215,72 @@ it.instance(
       yield* llm.text("Done.")
       const before = web.hits().filter((hit) => hit.site === "searxng").length
       yield* send({ sessionID: session.id, agent: "research", text: "Research how often status pages report outages." })
+      const [search] = yield* calls(session.id, "research_search")
+      expect(output(search)).toBe(ResearchOutbound.REFUSAL)
+      expect(web.hits().filter((hit) => hit.site === "searxng").length).toBe(before)
+    }),
+  90_000,
+)
+
+it.instance(
+  "a file the user attached to the question counts as the run's private context",
+  () =>
+    Effect.gen(function* () {
+      const { dir, llm } = yield* setup(web)
+      const fs = yield* FSUtil.Service
+      const file = path.join(dir, "notes", "plan.md")
+      yield* fs.writeWithDirs(file, `# Plan\n\n${NOTES}\n`)
+      const sessions = yield* Session.Service
+      const prompt = yield* SessionPrompt.Service
+      const session = yield* sessions.create({ title: "Research", permission: allow })
+      yield* llm.tool("research_plan", plan())
+      yield* llm.tool("research_search", { query: "reconcileLedgerEntries service migration" })
+      yield* llm.tool("research_search", { query: "ledger service migration without downtime" })
+      yield* llm.text("Done.")
+      const before = web.hits().filter((hit) => hit.site === "searxng").length
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "research",
+        model: ref,
+        parts: [
+          { type: "text", text: "Research how hard this migration is." },
+          { type: "file", url: pathToFileURL(file).href, filename: "notes/plan.md", mime: "text/plain" },
+        ],
+      })
+      const [copied, fair] = yield* calls(session.id, "research_search")
+      expect(output(copied)).toBe(ResearchOutbound.REFUSAL)
+      expect(output(fair)).toContain("result")
+      expect(web.hits().filter((hit) => hit.site === "searxng").length - before).toBe(1)
+      expect(guard.outside()).toEqual([])
+    }),
+  90_000,
+)
+
+it.instance(
+  "text from outside the conversation, such as what was piped in, counts as private, names included",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup(web)
+      const sessions = yield* Session.Service
+      const prompt = yield* SessionPrompt.Service
+      const session = yield* sessions.create({ title: "Research", permission: allow })
+      yield* llm.tool("research_plan", plan())
+      yield* llm.tool("research_search", { query: "Initech heat pump contract renewal" })
+      yield* llm.text("Done.")
+      const before = web.hits().filter((hit) => hit.site === "searxng").length
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "research",
+        model: ref,
+        parts: [
+          { type: "text", text: "Research what heat pump contracts usually cost." },
+          {
+            type: "text",
+            text: "Our biggest customer Initech renews its heat pump contract with us in March.",
+            metadata: { [BrainSchema.OUTSIDE]: "stdin" },
+          },
+        ],
+      })
       const [search] = yield* calls(session.id, "research_search")
       expect(output(search)).toBe(ResearchOutbound.REFUSAL)
       expect(web.hits().filter((hit) => hit.site === "searxng").length).toBe(before)

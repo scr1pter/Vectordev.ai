@@ -72,7 +72,8 @@ it.instance(
       })
       expect(metadataOf(second)).toMatchObject({ approved: true, answer: "status", runID: metadataOf(first).runID })
       const store = yield* ResearchStore.Service
-      const place = yield* (yield* Instruction.Service).place()
+      const instruction = yield* Instruction.Service
+      const place = yield* instruction.place()
       const detail = yield* store.get(place, metadataOf(first).runID)
       expect(detail?.run).toMatchObject({ depth: "deep", status: "running" })
       expect(detail?.run.plan?.status).toEqual(["answered", "open"])
@@ -94,7 +95,8 @@ it.instance(
       const sessions = yield* Session.Service
       const session = yield* sessions.create({ title: "Research" })
       const store = yield* ResearchStore.Service
-      const place = yield* (yield* Instruction.Service).place()
+      const instruction = yield* Instruction.Service
+      const place = yield* instruction.place()
       const before = (yield* store.list(place)).length
       yield* llm.tool("research_plan", plan())
       yield* llm.tool("research_read", { url: web.url("article", "/") })

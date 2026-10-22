@@ -8,7 +8,8 @@ import { Instruction } from "../../src/session/instruction"
 import { SessionMemory } from "../../src/session/memory"
 import { ResearchRun } from "../../src/tool/research-run"
 import { SubagentLifecycle } from "../../src/tool/subagent-lifecycle"
-import { TestLLMServer } from "../lib/llm-server"
+import { reply, TestLLMServer } from "../lib/llm-server"
+import { ResearchOutbound } from "@vectordevai/core/research/outbound"
 import { calls, output, plan, runtime, send, setup } from "../lib/research"
 import { FakeWeb } from "../../../core/test/lib/fake-web"
 import { NetworkGuard } from "../../../core/test/lib/network-guard"
@@ -40,7 +41,8 @@ const researcher = (hit: { body: Record<string, unknown> }) => JSON.stringify(hi
 
 const remember = Effect.fn("test.remember")(function* () {
   const brain = yield* Brain.Service
-  const place = yield* (yield* Instruction.Service).place()
+  const instruction = yield* Instruction.Service
+  const place = yield* instruction.place()
   const own = (kind: "preference" | "decision" | "fact", text: string, extra: Partial<Brain.Proposal> = {}) =>
     brain.propose(place, { kind, text, scope: "personal", origin: "user", evidence: { type: "user" }, ...extra })
   yield* own("preference", HABIT)
@@ -77,7 +79,8 @@ it.instance(
         text: "Research how teams test payments code.",
       })
 
-      const asked = (yield* (yield* TestLLMServer).hits)
+      const server = yield* TestLLMServer
+      const asked = (yield* server.hits)
         .map((hit) => JSON.stringify(hit.body))
         .filter((body) => body.includes("research_assignment"))
       expect(asked.length).toBeGreaterThan(0)
@@ -214,5 +217,172 @@ it.instance(
       expect(output(second)).toContain("has its 1 researcher")
       expect(yield* sessions.children(lead.id)).toHaveLength(1)
     }),
+  90_000,
+)
+
+it.instance(
+  "one batch of researchers cannot start past the run's cap",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup(web, { research: { limits: { deep: { researchers: 2 } } } })
+      const sessions = yield* Session.Service
+      const lead = yield* sessions.create({ title: "Research", permission: allow })
+      const brief = (description: string, prompt: string) => ({ description, prompt, subagent_type: "researcher" })
+      yield* llm.tool("research_plan", plan({ depth: "deep" }))
+      // Three in one batch: the third is past the cap, so the batch starts none of them.
+      yield* llm.tool("task", {
+        background: false,
+        tasks: [
+          brief("A", SUBQUESTION),
+          brief("B", "How long do heat pumps last in cold climates?"),
+          brief("C", "What do heat pumps cost in Europe?"),
+        ],
+      })
+      yield* llm.tool("task", {
+        background: false,
+        tasks: [brief("A", SUBQUESTION), brief("B", "How long do heat pumps last in cold climates?")],
+      })
+      yield* llm.textMatch(researcher, "Found A.")
+      yield* llm.textMatch(researcher, "Found B.")
+      yield* llm.text("Done.")
+      yield* send({ sessionID: lead.id, agent: "research", text: "Research heat pumps." })
+      const [over, within] = yield* calls(lead.id, "task")
+      expect(over?.state.status).toBe("error")
+      expect(output(over)).toContain("has its 2 researchers")
+      expect(within?.state.status).toBe("completed")
+      expect(yield* sessions.children(lead.id)).toHaveLength(2)
+    }),
+  120_000,
+)
+
+it.instance(
+  "task calls made in one step cannot start researchers past the run's cap together",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup(web, { research: { limits: { deep: { researchers: 1 } } } })
+      const sessions = yield* Session.Service
+      const lead = yield* sessions.create({ title: "Research", permission: allow })
+      yield* llm.tool("research_plan", plan({ depth: "deep" }))
+      yield* llm.push(
+        reply()
+          .tool("task", { description: "A", prompt: SUBQUESTION, subagent_type: "researcher", background: false })
+          .tool("task", {
+            description: "B",
+            prompt: "How long do heat pumps last in cold climates?",
+            subagent_type: "researcher",
+            background: false,
+          }),
+      )
+      yield* llm.textMatch(researcher, "Found it.")
+      yield* llm.text("Done.")
+      yield* send({ sessionID: lead.id, agent: "research", text: "Research heat pumps." })
+      const tasks = yield* calls(lead.id, "task")
+      expect(tasks.map((task) => task.state.status).toSorted()).toEqual(["completed", "error"])
+      expect(tasks.map(output).find((text) => text.includes("has its 1 researcher"))).toBeDefined()
+      expect(yield* sessions.children(lead.id)).toHaveLength(1)
+    }),
+  120_000,
+)
+
+it.instance(
+  "a session rule that allows task does not hand the lead a subagent its own rules deny",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* setup(web)
+      const sessions = yield* Session.Service
+      const lead = yield* sessions.create({
+        title: "Research",
+        permission: [...allow, { permission: "task", pattern: "*", action: "allow" as const }],
+      })
+      yield* llm.tool("research_plan", plan({ depth: "deep" }))
+      yield* llm.tool("task", {
+        description: "Shell",
+        prompt: "List the files in the home folder.",
+        subagent_type: "general",
+        background: false,
+      })
+      yield* llm.text("Done.")
+      yield* send({ sessionID: lead.id, agent: "research", text: "Research heat pumps." })
+      const [task] = yield* calls(lead.id, "task")
+      expect(task?.state.status).toBe("error")
+      expect(output(task)).toContain("may not launch the general subagent")
+      expect(yield* sessions.children(lead.id)).toEqual([])
+    }),
+  90_000,
+)
+
+it.instance(
+  "a file the lead names in a sub-question is not attached to the researcher",
+  () =>
+    Effect.gen(function* () {
+      const { dir, llm } = yield* setup(web)
+      const fs = yield* FSUtil.Service
+      yield* fs.writeWithDirs(path.join(dir, "notes", "plan.md"), `# Plan\n\n${NOTES}\n`)
+      const sessions = yield* Session.Service
+      const lead = yield* sessions.create({ title: "Research", permission: allow })
+      yield* llm.tool("research_plan", plan({ depth: "deep" }))
+      yield* llm.tool("task", {
+        description: "Ledger",
+        prompt: "How do teams do what @notes/plan.md describes?",
+        subagent_type: "researcher",
+        background: false,
+      })
+      yield* llm.textMatch(researcher, "Found it.")
+      yield* llm.text("Done.")
+      yield* send({ sessionID: lead.id, agent: "research", text: "Research ledger migrations." })
+      const server = yield* TestLLMServer
+      const asked = (yield* server.hits)
+        .map((hit) => JSON.stringify(hit.body))
+        .filter((body) => body.includes("research_assignment"))
+      expect(asked.length).toBeGreaterThan(0)
+      for (const body of asked) expect(body).not.toContain("reconcileLedgerEntries")
+      const [child] = yield* sessions.children(lead.id)
+      const parts = (yield* sessions.messages({ sessionID: child!.id })).flatMap((message) => message.parts)
+      expect(parts.filter((part) => part.type === "file")).toEqual([])
+    }),
+  // In a git repository, where a brief's @name finds the file.
+  { git: true },
+  90_000,
+)
+
+it.instance(
+  "a researcher's request carries no instruction file of the repository, and its searches cannot name the working tree",
+  () =>
+    Effect.gen(function* () {
+      const { dir, llm } = yield* setup(web)
+      const fs = yield* FSUtil.Service
+      yield* fs.writeWithDirs(
+        path.join(dir, "AGENTS.md"),
+        "# Rules\n\nDeploy to build07.acme-internal.corp with the zephyrDeploy script.\n",
+      )
+      const sessions = yield* Session.Service
+      const lead = yield* sessions.create({ title: "Research", permission: allow })
+      yield* llm.tool("research_plan", plan({ depth: "deep" }))
+      yield* llm.tool("task", {
+        description: "CI",
+        prompt: SUBQUESTION,
+        subagent_type: "researcher",
+        background: false,
+      })
+      yield* llm.toolMatch(researcher, "research_search", { query: `payments tests ${dir}` })
+      yield* llm.textMatch(researcher, "Found it.")
+      yield* llm.text("Done.")
+      const bodies = yield* send({ sessionID: lead.id, agent: "research", text: "Research how teams test payments." })
+      const server = yield* TestLLMServer
+      const asked = (yield* server.hits)
+        .map((hit) => JSON.stringify(hit.body))
+        .filter((body) => body.includes("research_assignment"))
+      expect(asked.length).toBeGreaterThan(0)
+      for (const body of asked) {
+        expect(body).not.toContain("zephyrDeploy")
+        expect(body).not.toContain("acme-internal")
+      }
+      // The lead, which reads the repository, keeps its instructions.
+      expect(bodies[0]).toContain("zephyrDeploy")
+      const [child] = yield* sessions.children(lead.id)
+      const [search] = yield* calls(child!.id, "research_search")
+      expect(output(search)).toBe(ResearchOutbound.REFUSAL)
+    }),
+  { git: true },
   90_000,
 )
