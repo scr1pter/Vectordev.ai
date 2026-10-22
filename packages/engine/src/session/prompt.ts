@@ -1995,7 +1995,8 @@ const layer = Layer.effect(
             invokedAgents,
             messages: msgs,
             promptOps,
-            personal,
+            // A role whose output leaves the machine gets no pointer to a private document when it reads a linked file.
+            personal: personal && audienceOf(session, agent.name) === "owner",
             ...(build
               ? { taskSize: { tier: build.tier, capped: SessionTaskSize.capped(build.result) } }
               : recoverable
