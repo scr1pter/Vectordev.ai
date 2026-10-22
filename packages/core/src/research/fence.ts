@@ -176,7 +176,18 @@ const READ_AS: Readonly<Record<string, string>> = {
   "\u0555": "O",
   "\u054d": "U",
 }
-const LOOK_ALIKE: Readonly<Record<string, string>> = { ...ResearchConfusable.LATIN, ...READ_AS }
+// The confusables data lists Cherokee by its capitals only, since Unicode added its small letters later, so each small
+// letter reads as its capital does, in lower case.
+const CHEROKEE_SMALL = /^[\u13F8-\u13FD\uAB70-\uABBF]$/u
+const LOOK_ALIKE: Readonly<Record<string, string>> = {
+  ...Object.fromEntries(
+    Object.entries(ResearchConfusable.LATIN).flatMap(([char, letter]) =>
+      CHEROKEE_SMALL.test(char.toLowerCase()) ? [[char.toLowerCase(), letter.toLowerCase()]] : [],
+    ),
+  ),
+  ...ResearchConfusable.LATIN,
+  ...READ_AS,
+}
 const LOOKS_LATIN = new RegExp(`[${Object.keys(LOOK_ALIKE).join("")}]`, "gu")
 
 // Characters a reader would not see: every default-ignorable code point (soft hyphen, zero-width space, direction

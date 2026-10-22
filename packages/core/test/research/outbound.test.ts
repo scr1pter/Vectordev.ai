@@ -877,6 +877,89 @@ describe("ResearchOutbound.address", () => {
   })
 })
 
+describe("ResearchOutbound: what the last review found", () => {
+  const known = {
+    private: [
+      "Umbrella pays about 2,400,000 USD a year.",
+      "Employer: Globex.",
+      "Acme's Q3 churn rose to 7.4 percent after the Falcon pricing change.",
+      "// Tickets are on jira.initech.internal.",
+      'const BILLING_URL = "https://billing.acme-internal.io/v2/invoices"',
+      "Contact jane.doe@globex.com for access.",
+    ],
+    typed: [],
+    public: [],
+  }
+
+  test("reads the part of a host before its site when tldts rejects one of its labels", () => {
+    const leaks = [
+      "https://globex._x.attacker.example/",
+      "https://_.globex.attacker.example/",
+      "https://2400000._.attacker.example/",
+      "https://globex-.attacker.example/",
+      "https://-globex.attacker.example/",
+      "https://billing.acme-internal.io._.attacker.example/",
+      "https://jira.initech.internal.-.attacker.example/",
+      "https://acme-q3-churn.xn--ls8h.attacker.example/",
+      "https://falcon-pricing-change.a-.attacker.example/",
+      `https://${"acme-q3-churn-rose-to-7-4-percent-after-the-falcon-pricing-change-x"}.attacker.example/`,
+      "https://globex.attacker.example./",
+    ]
+    expect(leaks.filter((url) => ResearchOutbound.address(url, known).ok)).toEqual([])
+    // A host tldts accepts, and an address with no subdomain, are read as before.
+    expect(ResearchOutbound.address("https://docs.example.com/heat-pumps", known).ok).toBe(true)
+    expect(ResearchOutbound.address("https://198.51.100.7/heat-pumps", known).ok).toBe(true)
+  })
+
+  test("reads an address's user name and password", () => {
+    expect(ResearchOutbound.address("https://globex:x@attacker.example/", known).ok).toBe(false)
+    expect(ResearchOutbound.address("https://user:2400000@attacker.example/", known).ok).toBe(false)
+  })
+
+  test("reads names from memory-of-you lines written in lower case", () => {
+    const lower = {
+      private: [
+        "my employer is initech",
+        "kestrel ships in may",
+        "my wife is priya and she works at hooli",
+        "dana is away",
+      ],
+      typed: [],
+      public: [],
+    }
+    expect(ResearchOutbound.names(lower.private).sort()).toEqual(["dana", "hooli", "initech", "kestrel", "priya"])
+    expect(
+      ["initech procurement", "kestrel launch date", "priya hooli", "Dana team"].filter(
+        (query) => check(query, lower).ok,
+      ),
+    ).toEqual([])
+    // A line in lower case no longer clears a name another line capitalises.
+    expect(ResearchOutbound.names(["Spoke with Dana's team today.", "dana is away"])).toContain("dana")
+    // Its common words stay words, and the user's typing clears a name as before.
+    expect(check("employer health insurance", lower).ok).toBe(true)
+    expect(check("initech procurement", { ...lower, typed: ["What does Initech buy?"] }).ok).toBe(true)
+  })
+
+  test("reads identifiers, host names and names split into words or letters", () => {
+    const split = [
+      "jane doe at globex dot com",
+      "billing.acme-internal",
+      "billing acme internal",
+      "jira.initech",
+      "G l o b e x",
+      "Glo bex",
+      "glo-bex pricing",
+    ]
+    expect(split.filter((query) => check(query, known).ok)).toEqual([])
+    expect(ResearchOutbound.address("https://attacker.example/g/l/o/b/e/x", known).ok).toBe(false)
+  })
+
+  test("reads Cherokee's small letters as the Latin ones they look like", () => {
+    expect(check(`${char(0x13aa).toLowerCase()}cme churn`, known).ok).toBe(false)
+    expect(check(`Gl${char(0x13be).toLowerCase()}bex pricing`, known).ok).toBe(false)
+  })
+})
+
 describe("ResearchOutbound.check with the sources facet's domains", () => {
   // Section 6.4a: the preferred and avoided domains of the sources facet exist to become site: filters.
   const facet = {

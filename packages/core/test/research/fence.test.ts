@@ -144,8 +144,10 @@ describe("WebFence.fenceWebPage", () => {
 
   test("escapes tag names in the look-alike alphabets of Unicode's confusables data", () => {
     const spellings = [
-      // Cherokee and Lisu letters, which look like Latin capitals.
+      // Cherokee and Lisu letters, which look like Latin capitals, and Cherokee's small letters, which the data leaves
+      // out.
       `<${char(0x13da, 0x13bd, 0x13da, 0x13a2, 0x13ac, 0x13b7)}>`,
+      `<${char(0x13da, 0x13bd, 0x13da, 0x13a2, 0x13ac, 0x13b7).toLowerCase()}>`,
       `<${char(0xa4e2, 0xa4ec, 0xa4e2, 0xa4d4, 0xa4f0, 0xa4df)}>`,
       // A Coptic o, a Latin iota and a slashed o.
       `<vect${char(0x2c9f)}r_note>`,
@@ -158,6 +160,7 @@ describe("WebFence.fenceWebPage", () => {
         escaped: true,
       })
     expect(WebFence.latin(`${char(0x13aa)}cme Gl${char(0x2c9f)}bex In${char(0x269)}tech`)).toBe("Acme Globex Initech")
+    expect(WebFence.latin(`${char(0x13aa).toLowerCase()}cme`)).toBe("acme")
   })
 
   test("cannot be closed or reopened from inside", () => {

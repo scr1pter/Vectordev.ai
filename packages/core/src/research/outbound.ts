@@ -32,9 +32,11 @@ import { ResearchWords } from "./words"
 // A name is a word of private-fact prose that the prose never writes in lower case and that is not a common word: a
 // capitalised word inside a sentence ("Acme", "Fremont"); a sentence's, a heading's or a label's first word when it is
 // not a common English word ("Falcon is the codename", "Employer: Globex", but not "Heat pumps are loud"); a word in
-// capitals that is not a common acronym ("GLOBEX", but not "NASA" or "API"). Public tools a README names ("Docker
-// builds the image") are not names. Names cost some fair queries: a private line about Germany keeps "Germany" out of
-// queries until the user types it.
+// capitals that is not a common acronym ("GLOBEX", but not "NASA" or "API"); and, in a line written all in lower case
+// as memory-of-you lines sometimes are ("my employer is initech"), every word that is not a common English word.
+// Public tools a README names ("Docker builds the image") are not names. Names cost some fair queries: a private line
+// about Germany keeps "Germany" out of queries until the user types it. A name still missed: a company named with a
+// common word in a lower-case line ("i work at umbrella corp").
 //
 // Text is compared the way a reader sees it, on both sides:
 // - folded by NFKD, without accents and invisible characters (soft hyphens, zero-width spaces);
@@ -42,7 +44,8 @@ import { ResearchWords } from "./words"
 //   "\u0410cme" with a Cyrillic "\u0410", Cherokee "\u13AAcme", Lisu "\uA4EEcme" and "Ac\u2C98e" with a Coptic
 //   "\u2C98" are all "Acme";
 // - for names and rare tokens, with ASCII's own look-alikes read alike (I, l and 1; 0 and O; rn and m; vv and w), so
-//   "GIobex", "Gl0bex" and "Acrne" are Globex and Acme.
+//   "GIobex", "Gl0bex" and "Acrne" are Globex and Acme, and a name of 6 or more letters with its letters split apart
+//   ("G l o b e x", "glo-bex") is still that name.
 //
 // Numbers are compared by their digits only, every other character ignored, so no separator can hide one. A digit of
 // any script is its ASCII digit (Arabic-Indic \u0662 and Devanagari \u0968 are 2).
@@ -420,8 +423,10 @@ const PUBLIC_NUMBERS = 100
 const SPLIT_CHARS = 12
 const SPLIT_PARTS = 3
 const SPLIT_WORDS = 8
-// A name this long is still found run into other letters ("acmerobotics" for a 6-letter name), and not a shorter one,
-// which other words hold by chance.
+// The words that stand for a separator when an address is spelled out.
+const SPOKEN = new Set(["at", "dot", "dash", "hyphen", "underscore", "slash"])
+// A name this long is still found with its letters split apart or run into other words ("G l o b e x",
+// "acmerobotics" for a 6-letter name), and not a shorter one, which other words hold by chance.
 const SPLIT_NAME = 6
 
 /** Whether a search query may leave, given the run's private context. */
@@ -430,19 +435,20 @@ export function check(query: string, context: Context): Result {
 }
 
 /**
- * Whether an address may be read, by the same check on its path, query and fragment, and on the part of its host
- * before its site, whole and label by label: the site came from provenance, but a name such as
- * acme-q3-churn.attacker.example or jira.initech.internal.attacker.example carries text the way a path does. The
+ * Whether an address may be read, by the same check on its user name and password, its path, query and fragment, and
+ * on the part of its host before its site, whole and label by label: the site came from provenance, but a name such
+ * as acme-q3-churn.attacker.example or jira.initech.internal.attacker.example carries text the way a path does. The
  * sources facet's domains are not exempt here, since they are site: filters, not words of a path or a host's labels.
  */
 export function address(url: string, context: Context): Result {
   if (!URL.canParse(url)) return refused("token", url)
   const parsed = new URL(url)
-  // The host as a reader sees it, not its punycode, so look-alike letters in it are read.
-  const subdomain = domainToUnicode(parse(parsed.hostname, { allowPrivateDomains: true }).subdomain ?? "")
+  const subdomain = subdomainOf(parsed.hostname)
   const text = [
     subdomain,
     ...subdomain.split("."),
+    parsed.username,
+    parsed.password,
     ...parsed.pathname.split("/"),
     ...[...parsed.searchParams].flatMap(([key, value]) => [key, value]),
     parsed.hash.slice(1),
@@ -483,24 +489,25 @@ function inspect(query: string, context: Context, sites: boolean): Result {
       (item) => !DIGITS.test(item) && known.raw.includes(alike(item)) && !known.typedRaw.includes(alike(item)),
     ) ?? known.tokens.find((item) => seen.includes(item.key))?.token
   if (token) return refused("token", token)
-  // An identifier, a host name or an email address with its parts written as words.
-  const parted = wordsOf(sent)
+  // An identifier, a host name or an email address with its parts written as words, and "at" and "dot" read past
+  // ("jane doe at globex dot com").
+  const parted = wordsOf(sent).filter((word) => !SPOKEN.has(word))
   const split = Array.from({ length: SPLIT_WORDS - SPLIT_PARTS + 1 }, (_, index) =>
     grams(parted, index + SPLIT_PARTS).map((gram) => known.split.get(`${gram.length}:${alike(gram.join(""))}`)),
   )
     .flat()
     .find(Boolean)
   if (split) return refused("token", split)
-  // A name as a word of the query, as a plural too ("Acmes"), or, from 6 letters, run into other letters
-  // ("acmerobotics").
+  // A name as a word of the query, as a plural too ("Acmes"), or, from 6 letters, run into other letters or with its
+  // letters split apart ("acmerobotics", "G l o b e x").
   const shown = new Set(words.map(alike))
-  const written = alike(fold(query))
+  const squashed = alike(words.join(""))
   const name = known.names.find(
     (item) =>
       shown.has(item.key) ||
       shown.has(`${item.key}s`) ||
       shown.has(`${item.key}es`) ||
-      (item.key.length >= SPLIT_NAME && written.includes(item.key)),
+      (item.key.length >= SPLIT_NAME && squashed.includes(item.key)),
   )
   if (name) return refused("token", name.name)
   return { ok: true }
@@ -550,7 +557,8 @@ export function rare(text: string) {
  * The names in the prose of some texts: words the prose never writes in lower case, and no common word or acronym. A
  * word inside a sentence counts when it is capitalised. A sentence's first word, the first after a label's colon, and
  * a heading's words are capitalised anyway, so they count only when they are not a common English word, or when they
- * are possessive ("Target's"). A word in capitals counts when it is not an acronym or a common word.
+ * are possessive ("Target's"). A word in capitals counts when it is not an acronym or a common word. In a block written
+ * all in lower case, every word that is not a common English word counts.
  */
 export function names(texts: readonly string[]) {
   const blocks = prose(texts)
@@ -559,12 +567,22 @@ export function names(texts: readonly string[]) {
   const chunks = (text: string) => text.split(/\s+/).map((chunk) => chunk.replace(AROUND, ""))
   const lower = new Set(
     blocks
+      .filter((block) => /\p{Lu}/u.test(block.text))
       .flatMap((block) => chunks(block.text))
       .filter((chunk) => LOWER_WORD.test(chunk))
       .map((chunk) => chunk.replace(/['\u2019]\p{Ll}+$/u, "")),
   )
-  const found = blocks.flatMap((block) =>
-    block.text.split(SENTENCE).flatMap((sentence) =>
+  const plain = (key: string) =>
+    key.length < 3 || COMMON_WORDS.has(key) || COMMON.has(key) || ACRONYMS.has(key) || ResearchWords.common(key)
+  const found = blocks.flatMap((block) => {
+    // A line in lower case, such as a memory-of-you line typed that way ("my employer is initech"), says nothing with
+    // its capitals, so its words that are not common English words are its names.
+    if (!/\p{Lu}/u.test(block.text))
+      return chunks(block.text)
+        .filter((chunk) => LOWER_WORD.test(chunk))
+        .map((chunk) => chunk.replace(/['\u2019]\p{Ll}+$/u, ""))
+        .filter((chunk) => !plain(chunk))
+    return block.text.split(SENTENCE).flatMap((sentence) =>
       [...sentence.matchAll(/([\p{L}\p{N}]+)(['\u2019]s(?![\p{L}\p{N}]))?/gu)].flatMap((match, index) => {
         const word = match[1]!
         const key = (
@@ -576,8 +594,8 @@ export function names(texts: readonly string[]) {
         const placed = block.titled || index === 0
         return placed && !match[2] && ResearchWords.common(key) ? [] : [key]
       }),
-    ),
-  )
+    )
+  })
   return [...new Set(found)]
 }
 
@@ -598,6 +616,35 @@ function host(token: string) {
   if (!parsed.domain) return false
   if (!parsed.isIcann && !parsed.isPrivate && !INTRANET.has(parsed.publicSuffix?.toLowerCase() ?? "")) return false
   return !PUBLIC_SITES.has(parsed.domain.toLowerCase())
+}
+
+// A rare token, and for a host name with a subdomain also its labels without the public suffix, which name the same
+// host: billing.acme-internal.io is billing.acme-internal too, and jira.initech.internal jira.initech.
+function unsuffixed(token: string) {
+  if (/[@/]/.test(token) || !host(token)) return [token]
+  const parsed = parse(token, { allowPrivateDomains: true })
+  if (!parsed.subdomain || !parsed.domainWithoutSuffix) return [token]
+  return [token, `${parsed.subdomain}.${parsed.domainWithoutSuffix}`]
+}
+
+// The part of a host before its site, as a reader sees it: each label's punycode decoded, and a label that does not
+// decode kept as written. tldts finds no site in a host with a label it rejects (an underscore, a dash at either end,
+// a label too long, punycode that does not decode), so then the site is the shortest end of the host that tldts takes
+// for one, and everything before it is read; with no such end, the whole host is.
+function subdomainOf(hostname: string) {
+  const name = hostname.replace(/\.$/, "")
+  if (isIP(name.replace(/^\[|\]$/g, ""))) return ""
+  const parsed = parse(name, { allowPrivateDomains: true })
+  const labels = name.split(".")
+  const site = labels.findLastIndex((_, index) => {
+    const end = labels.slice(index).join(".")
+    return parse(end, { allowPrivateDomains: true }).domain === end
+  })
+  const subdomain = parsed.domain ? (parsed.subdomain ?? "") : site < 0 ? name : labels.slice(0, site).join(".")
+  return subdomain
+    .split(".")
+    .map((label) => (label.startsWith("xn--") ? domainToUnicode(label) || label : label))
+    .join(".")
 }
 
 function refused(reason: Reason, match: string): Result {
@@ -852,7 +899,14 @@ function build(context: Context) {
   const counted = all.flatMap((text) => runs(fold(text))).filter((run) => !dotted(run))
   const found = names(context.private)
   const named = new Set(found)
-  const tokens = [...new Set(all.flatMap(rare).filter((token) => !DIGITS.test(token)))]
+  const tokens = [
+    ...new Set(
+      all
+        .flatMap(rare)
+        .flatMap(unsuffixed)
+        .filter((token) => !DIGITS.test(token)),
+    ),
+  ]
   const open = (token: string) => !typedRaw.includes(alike(token)) && !typedSplit.includes(alike(squash(token)))
   return {
     words: joined(all),
