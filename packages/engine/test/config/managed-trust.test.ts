@@ -20,7 +20,7 @@ import { NetworkGuard } from "../../../core/test/lib/network-guard"
 
 // Company policy counts only when an administrator is the only one who could have written it. These tests check the
 // trust rules on their own (POSIX modes, Windows access rules through a fake reader, the policy key's output) and then
-// that the config loader leaves out a managed file a standard user could change.
+// that the config loader and Vector Local both leave out a managed file a standard user could change.
 
 const guard = NetworkGuard.use()
 
@@ -42,6 +42,7 @@ const it = testEffect(
 
 afterEach(() => {
   rmSync(managedDirectory, { recursive: true, force: true })
+  Config.refreshLocal()
   expect(guard.outside()).toEqual([])
 })
 
@@ -317,14 +318,21 @@ describe("managed config", () => {
   // Windows has no mode bits to loosen; its access rules are checked above.
   const posixInstance = process.platform === "win32" ? it.instance.skip : it.instance
   posixInstance(
-    "a managed file a standard user could change is ignored by the config loader",
+    "a managed file a standard user could change is ignored by the config loader and by Vector Local",
     Effect.gen(function* () {
       mkdirSync(managedDirectory, { recursive: true })
       const file = path.join(managedDirectory, "vector.json")
-      writeFileSync(file, JSON.stringify({ model: "managed/model" }))
+      writeFileSync(file, JSON.stringify({ model: "managed/model", local: { enabled: true, web: "none" } }))
       chmodSync(file, 0o666)
       const config = yield* Config.use.get()
       expect(config.model).toBe("repository/model")
+      const policy = Config.refreshLocal()
+      expect(policy.enabled).toBe(false)
+      expect(policy.warnings).toEqual([
+        `${ConfigManaged.UNTRUSTED} ${realpathSync(file)} can be changed by other users.`,
+      ])
+      chmodSync(file, 0o644)
+      expect(Config.refreshLocal()).toMatchObject({ enabled: true, web: "none", warnings: [] })
     }),
     { trusted: true, config: { model: "repository/model" } },
   )
