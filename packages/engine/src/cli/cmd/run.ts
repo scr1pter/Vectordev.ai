@@ -45,8 +45,13 @@ import { freeModelRunNotice } from "./run/free-model-notice"
 type ModelInput = Parameters<VectorClient["session"]["prompt"]>[0]["model"]
 
 /** @internal Exported for focused permission-policy tests. */
-export function runPermissionReply(auto: boolean, permission: string, always?: readonly string[]): "once" | "reject" {
-  return auto && PermissionPolicy.canAutoApprove(permission, always) ? "once" : "reject"
+export function runPermissionReply(
+  auto: boolean,
+  permission: string,
+  always?: readonly string[],
+  patterns?: readonly string[],
+): "once" | "reject" {
+  return auto && PermissionPolicy.canAutoApprove(permission, always, patterns) ? "once" : "reject"
 }
 
 function pick(value: string | undefined): ModelInput | undefined {
@@ -1131,7 +1136,7 @@ export const RunCommand = effectCmd({
               if (!(await inRun(permission.sessionID))) continue
 
               // Non-interactive auto mode cannot supply the fresh approval required for sensitive actions.
-              if (runPermissionReply(auto, permission.permission, permission.always) === "once") {
+              if (runPermissionReply(auto, permission.permission, permission.always, permission.patterns) === "once") {
                 await client.permission.reply({
                   requestID: permission.id,
                   reply: "once",

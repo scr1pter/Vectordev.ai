@@ -9,6 +9,7 @@ import { realpath } from "node:fs/promises"
 import { reply } from "../../lib/llm-server"
 import { cliIt } from "../../lib/cli-process"
 import { runPermissionReply } from "../../../src/cli/cmd/run"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 
 test("CLI auto mode rejects safety and sensitive permissions", () => {
   expect(runPermissionReply(true, "doom_loop")).toBe("reject")
@@ -16,6 +17,19 @@ test("CLI auto mode rejects safety and sensitive permissions", () => {
   expect(runPermissionReply(true, "computer_sensitive")).toBe("reject")
   expect(runPermissionReply(true, "bash")).toBe("once")
   expect(runPermissionReply(false, "bash")).toBe("reject")
+})
+
+test("CLI auto mode never answers Vector Local's network command or address-after-the-web asks", () => {
+  expect(runPermissionReply(true, PermissionPolicy.NETWORK_COMMAND, [], ["curl https://example.com"])).toBe("reject")
+  expect(runPermissionReply(true, PermissionPolicy.NETWORK_COMMAND)).toBe("reject")
+  expect(runPermissionReply(true, "webfetch", [], [`${PermissionPolicy.AFTER_WEB}https://example.com/?q=1`])).toBe(
+    "reject",
+  )
+  expect(runPermissionReply(true, "browser_external", [], [`${PermissionPolicy.AFTER_WEB}https://example.com/`])).toBe(
+    "reject",
+  )
+  // An ordinary web read is still answered.
+  expect(runPermissionReply(true, "webfetch", ["https://example.com/*"], ["https://example.com/docs"])).toBe("once")
 })
 
 test("CLI auto mode cannot supply fresh Cloud approval", () => {

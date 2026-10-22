@@ -31,6 +31,13 @@ describe("canAutoAcceptPermission", () => {
   test("requires a manual decision for future computer permissions", () => {
     expect(canAutoAcceptPermission("computer_new_action")).toBe(false)
   })
+
+  test("never accepts Vector Local's network command or address-after-the-web asks", () => {
+    expect(canAutoAcceptPermission("network_command", [], ["curl https://example.com"])).toBe(false)
+    expect(canAutoAcceptPermission("webfetch", [], ["after-web https://example.com/?q=1"])).toBe(false)
+    expect(canAutoAcceptPermission("browser_external", [], ["after-web https://example.com/"])).toBe(false)
+    expect(canAutoAcceptPermission("webfetch", ["https://example.com/*"], ["https://example.com/docs"])).toBe(true)
+  })
 })
 
 describe("canAlwaysAllowPermission", () => {

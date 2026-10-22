@@ -23,6 +23,7 @@ import { makeShareTransport } from "@vectordevai/core/share/transport"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { AbsolutePath } from "@vectordevai/core/schema"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { LSP } from "@/lsp/lsp"
 import { MCP } from "../../src/mcp"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -40,7 +41,7 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { SessionSummary } from "../../src/session/summary"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { ShellTool } from "../../src/tool/shell"
-import { AFTER_WEB, WebFetchTool } from "../../src/tool/webfetch"
+import { WebFetchTool } from "../../src/tool/webfetch"
 import { Truncate } from "@/tool/truncate"
 import { Tool } from "@/tool/tool"
 import { provideInstance, testInstanceStoreLayer, tmpdirScoped, TestInstance } from "../fixture/fixture"
@@ -526,7 +527,7 @@ describe("the agent's own actions under Vector Local", () => {
     ask: (input) =>
       Effect.sync(() => asked.push(input)).pipe(
         Effect.andThen(
-          input.permission === "network_command" || input.patterns.some((item) => item.startsWith(AFTER_WEB))
+          input.permission === "network_command" || input.patterns.some((item) => item.startsWith(PermissionPolicy.AFTER_WEB))
             ? Effect.die(new Error("refused"))
             : Effect.void,
         ),
@@ -666,7 +667,7 @@ describe("the agent's own actions under Vector Local", () => {
       const tool = yield* (yield* WebFetchTool).init()
       const read = (url: string, messages: SessionV1.WithParts[]) =>
         tool.execute({ url, format: "text" }, context(messages)).pipe(Effect.exit)
-      const strict = () => asked.filter((item) => item.patterns.some((pattern) => pattern.startsWith(AFTER_WEB)))
+      const strict = () => asked.filter((item) => item.patterns.some((pattern) => pattern.startsWith(PermissionPolicy.AFTER_WEB)))
 
       // The page the earlier result linked, on a host already read: the usual ask, with Always for the site.
       yield* on()
@@ -679,7 +680,7 @@ describe("the agent's own actions under Vector Local", () => {
       const exfil = `${guide}?q=payments`
       expect(Exit.isSuccess(yield* read(exfil, history("Read the setup guide.")))).toBe(false)
       expect(strict()).toEqual([
-        expect.objectContaining({ permission: "webfetch", patterns: [`${AFTER_WEB}${exfil}`], always: [] }),
+        expect.objectContaining({ permission: "webfetch", patterns: [`${PermissionPolicy.AFTER_WEB}${exfil}`], always: [] }),
       ])
 
       // An address the agent printed itself is not a result, so it asks too.

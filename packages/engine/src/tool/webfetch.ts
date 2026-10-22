@@ -14,7 +14,7 @@ import { EgressGuard } from "@vectordevai/core/local-mode/guard"
 import { EgressHttpClient } from "@vectordevai/core/local-mode/http-client"
 import { LocalPolicy } from "@vectordevai/core/local-mode/policy"
 import { SessionMemory } from "../session/memory"
-import type { SessionV1 } from "@vectordevai/core/v1/session"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000 // 30 seconds
@@ -78,7 +78,7 @@ export const WebFetchTool = Tool.define(
           const request = HttpClientRequest.get(params.url).pipe(HttpClientRequest.setHeaders(headers))
           webAccess("webfetch", params.url)
           // The address the model chose is checked once; a redirect's next address is the server's, not the model's.
-          const strict = { first: newAddress(params.url, ctx.messages) }
+          const strict = { first: newAddress(params.url, ctx) }
 
           const { response, body } = yield* Effect.gen(function* () {
             const response = yield* WebFetchRequest.execute(http, request, {
@@ -88,7 +88,7 @@ export const WebFetchTool = Tool.define(
                 strict.first = false
                 return ctx.ask({
                   permission: "webfetch",
-                  patterns: [after ? `${AFTER_WEB}${url}` : url],
+                  patterns: [after ? `${PermissionPolicy.AFTER_WEB}${url}` : url],
                   always: after ? [] : siteAlways(url),
                   metadata: {
                     url,
@@ -170,26 +170,29 @@ export const WebFetchTool = Tool.define(
   }),
 )
 
-// The pattern prefix of an address asked about after the web: no saved "Always allow" for a site matches it, so the
-// person sees each one, and none is saved.
-export const AFTER_WEB = "after-web "
 export const AFTER_WEB_REASON =
   "This conversation read the web, and this address is new: neither you nor an earlier result gave it. A page can steer the agent into putting your data in an address."
 
 /**
  * Whether the agent's own choice of `address` asks again under Vector Local's rule for after the web (section 4.4):
  * once the conversation read the web, an address on a host it has not reached asks, as does one that did not appear
- * in an earlier result or link. An address the person typed never asks again for this. With Vector Local off it never
+ * in an earlier result or link. An address the person typed never asks again for this. The ask's pattern starts with
+ * PermissionPolicy.AFTER_WEB, so no saved approval, rule or auto-accept answers it. With Vector Local off it never
  * applies.
+ *
+ * A subagent works from a brief its launching agent wrote, which carries whatever that agent read: it counts as having
+ * read the web from its first step, and nothing in its brief counts as typed by the person.
  */
-export function newAddress(address: string, messages: readonly SessionV1.WithParts[]) {
+export function newAddress(address: string, ctx: Pick<Tool.Context, "messages" | "parentID">) {
   if (!Egress.policy().enabled || !URL.canParse(address)) return false
-  if (SessionMemory.taint(messages) !== "web") return false
+  const launched = ctx.parentID !== undefined
+  if (!launched && SessionMemory.taint(ctx.messages) !== "web") return false
   const url = new URL(address)
   const forms = [address.trim(), url.href, `${url.host}${url.pathname}${url.search}`]
   const said = (text: string) => forms.some((form) => text.includes(form))
-  if (messages.some((message) => message.info.role === "user" && said(SessionMemory.typed(message)))) return false
-  const tools = messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part] : [])))
+  if (!launched && ctx.messages.some((message) => message.info.role === "user" && said(SessionMemory.typed(message))))
+    return false
+  const tools = ctx.messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part] : [])))
   const reached = tools.some(
     (part) =>
       (part.tool === "webfetch" || part.tool === "browser") &&

@@ -35,6 +35,8 @@ export class InvalidArgumentsError extends Schema.TaggedErrorClass<InvalidArgume
 
 export type Context<M extends Metadata = Metadata> = {
   sessionID: SessionID
+  /** The session that launched this one, when it is a subagent: its user messages are a brief another agent wrote. */
+  parentID?: SessionID
   messageID: MessageID
   agent: string
   abort: AbortSignal
