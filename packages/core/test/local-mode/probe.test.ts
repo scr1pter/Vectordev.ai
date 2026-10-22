@@ -233,6 +233,46 @@ describe("identity pins", () => {
   })
 })
 
+// MCP-style tools whose parameters refer to themselves.
+const FILTER: LocalProbe.Tool = {
+  name: "query",
+  description: "Queries a database with a filter.",
+  parameters: {
+    type: "object",
+    properties: { filter: { $ref: "#/$defs/Filter" } },
+    required: ["filter"],
+    $defs: {
+      Filter: {
+        anyOf: [
+          {
+            type: "object",
+            properties: { and: { type: "array", items: { $ref: "#/$defs/Filter" } } },
+            required: ["and"],
+          },
+          { type: "object", properties: { property: { type: "string" } }, required: ["property"] },
+        ],
+      },
+    },
+  },
+}
+
+const NODE: LocalProbe.Tool = {
+  name: "tree",
+  description: "Writes a tree.",
+  parameters: {
+    type: "object",
+    properties: { root: { $ref: "#/$defs/Node" } },
+    required: ["root"],
+    $defs: {
+      Node: {
+        type: "object",
+        properties: { name: { type: "string" }, child: { $ref: "#/$defs/Node" } },
+        required: ["name", "child"],
+      },
+    },
+  },
+}
+
 describe("Check models", () => {
   test("runs the role's tools over three requests: a simple call, the most nested call and a tool result", async () => {
     const server = await fake("vllm", { "POST /v1/chat/completions": LocalServers.chat() })
@@ -447,6 +487,26 @@ describe("Check models", () => {
     expect(server.hits().filter((hit) => hit.path.startsWith("/v1/chat"))).toEqual([])
   })
 
+  test("sends tools whose parameters refer to themselves, and asks for a call only to tools it can write out", async () => {
+    const server = await fake("vllm", { "POST /v1/chat/completions": LocalServers.chat() })
+    const tools = [...TOOLS, FILTER, NODE]
+    const checked = await LocalProbe.check({
+      server: (await LocalProbe.probe(server.origin))!,
+      model: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+      tools,
+    })
+    expect(checked).toMatchObject({ result: "works", requests: 3 })
+    const bodies = server
+      .hits()
+      .filter((hit) => hit.path === "/v1/chat/completions")
+      .map((hit) => JSON.parse(hit.body) as LocalServers.ChatBody)
+    bodies.forEach((body) =>
+      expect(body.tools?.map((tool) => tool.function.name)).toEqual(tools.map((tool) => tool.name)),
+    )
+    const asked = bodies.map((body) => String(body.messages.findLast((message) => message.role === "user")?.content))
+    expect(asked.some((text) => text.startsWith("Call the tree tool"))).toBe(false)
+  })
+
   test("does not check a typed cloud model that is not on the server's list either", async () => {
     const server = await fake("ollama", { "POST /v1/chat/completions": LocalServers.chat() })
     const found = (await LocalProbe.probe(server.origin))!
@@ -608,6 +668,22 @@ describe("Check models", () => {
 describe("example arguments and their check", () => {
   test("every tool's example fits its own parameters", () => {
     TOOLS.forEach((tool) => expect(LocalProbe.fits(tool.parameters, LocalProbe.example(tool.parameters))).toBe(true))
+  })
+
+  test("a schema that refers to itself still gets an example, and the check never runs forever", () => {
+    // A filter made of filters, as some MCP tools have: the first alternative always needs another filter.
+    const filter = FILTER.parameters
+    const made = LocalProbe.example(filter)
+    expect(LocalProbe.fits(filter, made)).toBe(true)
+    expect(JSON.stringify(made)).toContain('"and":[]')
+    // A node that always needs a child cannot be written out, so its example does not fit.
+    expect(LocalProbe.fits(NODE.parameters, LocalProbe.example(NODE.parameters))).toBe(false)
+    // Refs that only lead back to themselves end too.
+    const loop = { $ref: "#/$defs/A", $defs: { A: { $ref: "#/$defs/B" }, B: { $ref: "#/$defs/A" } } }
+    expect(LocalProbe.example(loop)).toBe("check")
+    const alternatives = { $ref: "#/$defs/A", $defs: { A: { anyOf: [{ $ref: "#/$defs/A" }] } } }
+    expect(LocalProbe.fits(alternatives, "anything")).toBe(false)
+    expect(LocalProbe.depth(NODE.parameters)).toBeGreaterThan(0)
   })
 
   test("missing required fields and wrong types do not fit", () => {

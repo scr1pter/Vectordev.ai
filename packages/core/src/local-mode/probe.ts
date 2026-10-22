@@ -451,9 +451,12 @@ export async function check(input: CheckInput): Promise<Checked> {
   if (ask) return { ...base, result: "ask", message: ask }
   const small = tooSmall(input, info?.context)
   if (small) return { ...base, ...small }
-  if (input.tools.length === 0) return { ...base, result: "failed", message: "There are no tools to check with." }
+  // Every tool goes with each request, as the agent sends them, but the check asks for a call only to tools its own
+  // example fits, which leaves out one whose parameters refer to themselves too deeply to write out.
+  const callable = input.tools.filter((tool) => fits(tool.parameters, example(tool.parameters)))
+  if (callable.length === 0) return { ...base, result: "failed", message: "There are no tools to check with." }
 
-  const simple = simplest(input.tools)
+  const simple = simplest(callable)
   const first = await complete(input, call(simple))
   const done = { ...base, ttft_ms: first.ttft }
   if (first.error !== undefined) return { ...done, requests: 1, ...failure(input, first.error) }
@@ -472,7 +475,7 @@ export async function check(input: CheckInput): Promise<Checked> {
   const wrong = mismatch(input, simple, first)
   if (wrong) return { ...done, requests: 1, context, ...wrong }
 
-  const nested = deepest(input.tools)
+  const nested = deepest(callable)
   const separate = nested.name !== simple.name
   const second = separate ? await complete(input, call(nested)) : first
   const asked = separate ? 2 : 1
@@ -795,14 +798,18 @@ function record(value: unknown): value is JsonSchema {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-// A schema with its $ref followed, against the tool's own $defs.
-function resolve(schema: unknown, root: JsonSchema): JsonSchema {
+const MAX_HOPS = 16
+
+// A schema with its $ref followed, against the tool's own $defs. A chain of refs that comes back to itself resolves to
+// an empty schema.
+function resolve(schema: unknown, root: JsonSchema, hops = 0): JsonSchema {
   if (!record(schema)) return {}
   const ref = schema["$ref"]
   if (typeof ref !== "string") return schema
+  if (hops >= MAX_HOPS) return {}
   const name = ref.replace(/^#\/(?:\$defs|definitions)\//, "")
   const defs = record(root["$defs"]) ? root["$defs"] : record(root["definitions"]) ? root["definitions"] : {}
-  return resolve(defs[name], root)
+  return resolve(defs[name], root, hops + 1)
 }
 
 function choice(schema: JsonSchema, root: JsonSchema) {
@@ -816,24 +823,40 @@ function kindOf(schema: JsonSchema) {
   return type
 }
 
-/** Arguments that satisfy a JSON schema: every required field, the first of each enum, one item of each list. */
-export function example(input: unknown, root: JsonSchema = record(input) ? input : {}): unknown {
+// How far example and fits follow a schema into itself. A tool's parameters can refer back to themselves (a filter
+// made of filters, as some MCP tools have), and with a required field on the way an example would never end. Vector's
+// own tools nest a few levels, far inside these.
+const EXAMPLE_DEPTH = 12
+const FITS_DEPTH = 64
+
+/**
+ * Arguments that satisfy a JSON schema: every required field, the first of each enum, one item of each list. Past
+ * EXAMPLE_DEPTH a list is empty and an object has no fields, so a schema that refers to itself still gets an example,
+ * which may then not fit it.
+ */
+export function example(
+  input: unknown,
+  root: JsonSchema = record(input) ? input : {},
+  budget = EXAMPLE_DEPTH,
+): unknown {
   const schema = resolve(input, root)
-  const alternative = choice(schema, root)
-  if (alternative) return example(alternative, root)
+  const alternative = budget > 0 ? choice(schema, root) : undefined
+  if (alternative) return example(alternative, root, budget - 1)
   if (Array.isArray(schema["enum"]) && schema["enum"].length > 0) return schema["enum"][0]
   if ("const" in schema) return schema["const"]
   const type = kindOf(schema)
   if (type === "object" || record(schema["properties"])) {
+    if (budget <= 0) return {}
     const properties = record(schema["properties"]) ? schema["properties"] : {}
     const required = Array.isArray(schema["required"])
       ? schema["required"].filter((key) => typeof key === "string")
       : []
-    return Object.fromEntries(required.map((key) => [key, example(properties[key], root)]))
+    return Object.fromEntries(required.map((key) => [key, example(properties[key], root, budget - 1)]))
   }
   if (type === "array") {
+    if (budget <= 0) return []
     const count = Math.max(1, typeof schema["minItems"] === "number" ? schema["minItems"] : 1)
-    return Array.from({ length: count }, () => example(schema["items"], root))
+    return Array.from({ length: count }, () => example(schema["items"], root, budget - 1))
   }
   if (type === "integer" || type === "number") return typeof schema["minimum"] === "number" ? schema["minimum"] : 1
   if (type === "boolean") return false
@@ -841,11 +864,21 @@ export function example(input: unknown, root: JsonSchema = record(input) ? input
   return "check"
 }
 
-/** Whether a value has the shape a JSON schema asks for: types and required fields, nested. Formats are not checked. */
-export function fits(input: unknown, value: unknown, root: JsonSchema = record(input) ? input : {}): boolean {
+/**
+ * Whether a value has the shape a JSON schema asks for: types and required fields, nested. Formats are not checked. A
+ * value nested past FITS_DEPTH does not fit, and neither does any value for a schema whose alternatives only lead back
+ * to itself.
+ */
+export function fits(
+  input: unknown,
+  value: unknown,
+  root: JsonSchema = record(input) ? input : {},
+  budget = FITS_DEPTH,
+): boolean {
+  if (budget <= 0) return false
   const schema = resolve(input, root)
   const options = [schema["anyOf"], schema["oneOf"]].find(Array.isArray)
-  if (options) return options.some((item) => fits(item, value, root))
+  if (options) return options.some((item) => fits(item, value, root, budget - 1))
   if (Array.isArray(schema["enum"])) return schema["enum"].some((item) => item === value)
   const types = Array.isArray(schema["type"]) ? schema["type"] : schema["type"] === undefined ? [] : [schema["type"]]
   if (types.length > 0 && !types.some((type) => typed(type, value))) return false
@@ -853,10 +886,12 @@ export function fits(input: unknown, value: unknown, root: JsonSchema = record(i
     const properties = record(schema["properties"]) ? schema["properties"] : {}
     const required = Array.isArray(schema["required"]) ? schema["required"] : []
     if (!required.every((key) => typeof key === "string" && key in value)) return false
-    return Object.entries(value).every(([key, item]) => !(key in properties) || fits(properties[key], item, root))
+    return Object.entries(value).every(
+      ([key, item]) => !(key in properties) || fits(properties[key], item, root, budget - 1),
+    )
   }
   if (Array.isArray(value) && schema["items"] !== undefined)
-    return value.every((item) => fits(schema["items"], item, root))
+    return value.every((item) => fits(schema["items"], item, root, budget - 1))
   return true
 }
 
